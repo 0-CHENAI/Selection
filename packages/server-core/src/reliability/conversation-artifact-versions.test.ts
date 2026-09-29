@@ -1,11 +1,43 @@
 import { test, expect } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
 import { messageToStored, storedToMessage, type Message } from '@craft-agent/core'
 import { ArtifactVersions } from './artifact-versions'
-import { artifactVersionTitle, ConversationArtifactVersions, withDeliveredArtifactReferences, withHistoricalAnswerTitles } from './conversation-artifact-versions'
+import { artifactVersionTitle, ConversationArtifactVersions, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from './conversation-artifact-versions'
+
+test('the same file keeps shared snapshots but each chat sees its own version numbers across a rename', () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-session-versions-'))
+  try {
+    const file = join(root, 'first.txt')
+    writeFileSync(file, 'one')
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const first = store.register(file, 'old/user-1')
+    writeFileSync(file, 'two')
+    const second = store.capture(first.id, 'old/user-2')
+    const renamed = join(root, 'renamed.txt')
+    renameSync(file, renamed)
+    expect(store.register(renamed).id).toBe(first.id)
+    writeFileSync(renamed, 'three')
+    const third = store.capture(first.id, 'new/user-1')
+    const refs = [first.currentVersion, second.currentVersion, third.currentVersion]
+    const oldMessages: Message[] = refs.slice(0, 2).map((versionId, index) => ({
+      id: `old-${index}`, role: 'assistant', content: 'delivered', timestamp: index,
+      artifactVersions: [{ path: index ? renamed : file, artifactId: first.id, versionId, ordinal: index + 1, change: 'modified' }],
+    }))
+    const newMessages: Message[] = [{ id: 'new-1', role: 'assistant', content: 'delivered', timestamp: 3,
+      artifactVersions: [{ path: renamed, artifactId: first.id, versionId: third.currentVersion, ordinal: 3, change: 'created' }] }]
+    expect(sessionArtifactRecord(third, oldMessages).versions.map(version => version.ordinal)).toEqual([1, 2])
+    expect(sessionArtifactRecord(third, newMessages).versions.map(version => version.ordinal)).toEqual([1])
+    expect(withSessionArtifactOrdinals(newMessages)[0]!.artifactVersions?.[0]!.sessionOrdinal).toBe(1)
+    expect(numberSessionArtifactRefs(oldMessages, [{ path: renamed, artifactId: first.id, versionId: third.currentVersion, ordinal: 3 }])[0]!.sessionOrdinal).toBe(3)
+    const legacy = oldMessages.map(message => ({ ...message, artifactVersions: message.artifactVersions?.map(ref => ({ ...ref, artifactId: undefined })) }))
+    const hydrated = withArtifactIdentities(legacy, store.versionArtifactIds(refs.slice(0, 2)))
+    expect(withSessionArtifactOrdinals(hydrated).map(message => message.artifactVersions?.[0]?.sessionOrdinal)).toEqual([1, 2])
+    expect(store.read(first.id).versions).toHaveLength(3)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 
 test('conversation edits retain old bytes, publish stable version identities and deduplicate unchanged content', async () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-versions-'))
@@ -21,7 +53,7 @@ test('conversation edits retain old bytes, publish stable version identities and
     writeFileSync(file, 'revised') // OfficeCLI/Shell can modify the file without a native Write event.
     const answer = `已调整报告配色并保留布局。\n\n${link}`
     const refs = await turn.capture(answer, 'session/user-2')
-    expect(refs).toEqual([{ path: '中文 报告.html', versionId: store.read(first.id).currentVersion, ordinal: 2, change: 'modified' }])
+    expect(refs).toEqual([{ path: '中文 报告.html', artifactId: first.id, versionId: store.read(first.id).currentVersion, ordinal: 2, change: 'modified' }])
     const second = store.read(first.id)
     expect(second.versions[1]).toMatchObject({ sourceRunId: 'session/user-2', summary: '已调整报告配色并保留布局。', summaryOrigin: 'assistant' })
     expect(store.versionBytes(first.id, first.currentVersion).toString()).toBe('original')
@@ -32,6 +64,40 @@ test('conversation edits retain old bytes, publish stable version identities and
     const message = { id: 'answer', role: 'assistant' as const, content: link, timestamp: 1, artifactVersions: refs }
     expect(storedToMessage(JSON.parse(JSON.stringify(messageToStored(message))))).toEqual(message)
     expect(failures).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('renaming and editing a tracked file delivers a modification under the same identity', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-rename-edit-'))
+  try {
+    const original = join(root, 'original.txt'), renamed = join(root, 'renamed.txt')
+    writeFileSync(original, 'before')
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async path => path, () => {})
+    await turn.track('[原文件](original.txt)')
+    const first = store.findByPath(original)!
+    renameSync(original, renamed)
+    writeFileSync(renamed, 'after')
+    const refs = await turn.capture('已修改文件。\n\n[文件](renamed.txt)', 'session/user-1', undefined, [renamed])
+    expect(refs).toEqual([expect.objectContaining({ artifactId: first.id, path: renamed, ordinal: 2, change: 'modified' })])
+    expect(store.read(first.id).versions).toHaveLength(2)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('an atomic save of a file tracked before the turn keeps its history', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-atomic-save-'))
+  try {
+    const file = join(root, 'report.txt'), temporary = join(root, 'temporary.txt')
+    writeFileSync(file, 'before')
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const first = store.register(file, 'session/user-1')
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
+    await turn.track('[报告](report.txt)')
+    writeFileSync(temporary, 'after')
+    renameSync(temporary, file)
+    const refs = await turn.capture('已修改报告。', 'session/user-2', undefined, [file])
+    expect(refs).toMatchObject([{ artifactId: first.id, ordinal: 2, change: 'modified' }])
+    expect(store.findByPath(file)?.id).toBe(first.id)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -228,7 +294,7 @@ test('an older untracked file that is only linked is not registered', async () =
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('deleting a tracked file publishes a restorable deletion, and restoring publishes that recovery', async () => {
+test('deleting a tracked file publishes its deletion while a same-path recreation starts fresh', async () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-delete-restore-'))
   try {
     const file = join(root, 'report.docx')
@@ -237,19 +303,19 @@ test('deleting a tracked file publishes a restorable deletion, and restoring pub
     const created = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, Date.now() - 60_000)
     await created.capture('已交付。\n\n[报告](report.docx)', 'session/user-1')
     const record = store.findByPath(file)!
+    writeFileSync(file, 'revised')
+    const revised = store.capture(record.id, 'session/user-1b')
     const removed = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
     await removed.track('[报告](report.docx)')
     unlinkSync(file)
     const deleted = await removed.capture('旧稿已删除。', 'session/user-2')
-    expect(deleted).toEqual([{ path: record.path, versionId: record.versions[0]!.id, ordinal: 1, change: 'deleted' }])
+    expect(deleted).toEqual([{ path: record.path, artifactId: record.id, versionId: revised.currentVersion, ordinal: 2, change: 'deleted' }])
+    const recreatedTurn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
     writeFileSync(file, 'original')
-    const restoredTurn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
-    await restoredTurn.track('[报告](report.docx)')
-    const current = store.findByPath(file)!
-    store.restore(current.id, current.currentVersion, record.versions[0]!.id, 'session/user-3')
-    const restored = await restoredTurn.capture('已恢复上一版。', 'session/user-3')
-    expect(restored.map(ref => ref.change)).toEqual(['restored'])
-    expect(store.findByPath(file)!.versions.at(-1)?.restoredFrom).toBe(record.versions[0]!.id)
+    const recreated = await recreatedTurn.capture('已重新创建报告。', 'session/user-3', undefined, [file])
+    expect(recreated).toMatchObject([{ ordinal: 1, change: 'created' }])
+    expect(recreated[0]!.artifactId).not.toBe(record.id)
+    expect(store.read(record.id).currentVersion).toBe(revised.currentVersion)
     const shown = withDeliveredArtifactReferences([
       { id: 'user-2', role: 'user', content: 'delete', timestamp: 1 },
       { id: 'answer-2', role: 'assistant', content: '旧稿已删除。', timestamp: 2, artifactVersions: deleted },
@@ -274,19 +340,6 @@ test('explicit result paths normalize Windows drives, backslashes and file URLs'
   expect(localArtifactPath('https://example.com/report.html')).toBeUndefined()
 })
 
-test('featured results resolve only existing authorized files and deduplicate them', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'conversation-featured-'))
-  try {
-    const file = join(root, 'report.html')
-    writeFileSync(file, '<h1>Report</h1>')
-    const turn = new ConversationArtifactVersions(new ArtifactVersions(join(root, 'versions'), 'host', 'workspace'),
-      [root], async path => realpathSync(path), () => {})
-    expect(await turn.featured(['report.html', file])).toEqual([realpathSync(file)])
-    await expect(turn.featured(['missing.html'])).rejects.toThrow('missing or unavailable')
-    await expect(turn.featured(['https://example.com/report.html'])).rejects.toThrow('not a local path')
-  } finally { rmSync(root, { recursive: true, force: true }) }
-})
-
 test('a selected Chinese result is versioned even without a Markdown file link', async () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-featured-version-'))
   try {
@@ -294,8 +347,7 @@ test('a selected Chinese result is versioned even without a Markdown file link',
     const turn = new ConversationArtifactVersions(new ArtifactVersions(join(root, 'versions'), 'host', 'workspace'),
       [root], async path => realpathSync(path), () => {}, Date.now() - 1000)
     writeFileSync(file, '<h1>Report</h1>')
-    const featured = await turn.featured(['中文 报告 (1).html'])
-    expect((await turn.capture('报告已完成。', 'session/user-1', undefined, featured)))
-      .toMatchObject([{ path: realpathSync(file), ordinal: 1, change: 'created' }])
+    expect((await turn.capture('报告已完成。', 'session/user-1', undefined, [file])))
+      .toMatchObject([{ path: file, ordinal: 1, change: 'created' }])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

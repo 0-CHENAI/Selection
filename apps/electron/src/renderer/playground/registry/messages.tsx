@@ -13,7 +13,28 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import { AuthRequestCard } from '@/components/chat/AuthRequestCard'
+import { ArtifactVersionsDialog } from '@/components/app-shell/ArtifactVersionsDialog'
 import type { Message } from '../../../shared/types'
+import type { ManagedArtifact } from '@craft-agent/shared/protocol'
+import { buildArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
+
+function ArtifactVersionsPreview() {
+  const [open, setOpen] = React.useState(false)
+  const [currentVersion, setCurrentVersion] = React.useState('v1')
+  const record = {
+    version: 1, id: 'preview-artifact', hostId: 'preview', workspaceId: 'preview',
+    path: '/documents/hello.docx', currentVersion,
+    versions: [
+      { id: 'v1', ordinal: 1, hash: 'a'.repeat(64), size: 5, createdAt: Date.UTC(2026, 8, 29, 0, 42), summary: '新建只含 hello 的 Word 文档', summaryOrigin: 'assistant' },
+      { id: 'v2', ordinal: 2, hash: 'b'.repeat(64), size: 9, createdAt: Date.UTC(2026, 8, 29, 0, 43), summary: '正文改为 Hi Laufry', summaryOrigin: 'assistant' },
+    ],
+  } as ManagedArtifact
+  return <>
+    <button type="button" className="rounded-md px-3 py-2 text-sm hover:bg-foreground/5" onClick={() => setOpen(true)}>Open restored version history</button>
+    <ArtifactVersionsDialog open={open} path={record.path} record={record} onRetry={async () => {}}
+      onClose={() => setOpen(false)} onPreview={() => {}} onRestore={async (_record, versionId) => { setCurrentVersion(versionId) }} />
+  </>
+}
 
 // ============================================================================
 // Message Components - Demo components for playground preview
@@ -570,7 +591,21 @@ export const messagesComponents: ComponentEntry[] = [
       { name: 'Short', props: { content: 'Hello!' } },
       { name: 'Medium', props: { content: 'How do I authenticate with the API?' } },
       { name: 'Long', props: { content: 'Can you search for all files that contain "handleError" and show me how they work? I need to understand the error handling patterns in this codebase.' } },
+      { name: 'Restore version', props: { content: buildArtifactRestoreResult({
+        id: 'preview-artifact', path: '/documents/hello.docx', currentVersion: 'v2',
+        versions: [{ id: 'v1', ordinal: 1, summary: '生成仅含 hello 的 Word 文档', summaryOrigin: 'assistant' }, { id: 'v2', ordinal: 2 }],
+      } as ManagedArtifact, 'v1') } },
     ],
+    mockData: () => ({}),
+  },
+  {
+    id: 'artifact-versions-dialog',
+    name: 'ArtifactVersionsDialog',
+    category: 'Chat Messages',
+    description: 'Version history after switching the current file back to Version 1',
+    component: ArtifactVersionsPreview,
+    props: [],
+    variants: [],
     mockData: () => ({}),
   },
   {

@@ -26,7 +26,7 @@ describe('answer delivery execution bridge', () => {
   afterEach(() => { agent.destroy(); rmSync(root, { recursive: true, force: true }) })
   it('awaits host acceptance before returning a compact receipt', async () => {
     await (agent as any).handleToolExecuteRequest(request)
-    expect(submitted).toEqual([{ markdown: request.args.markdown, featuredArtifacts: [], toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry' }])
+    expect(submitted).toEqual([{ markdown: request.args.markdown, artifactVersionTitle: undefined, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry' }])
     expect(sent.at(-1).result.isError).toBe(false)
     expect(JSON.stringify(sent.at(-1))).not.toContain(request.args.markdown)
     await (agent as any).handleToolExecuteRequest({ ...request, requestId: 'late', toolName: 'Bash', args: { command: 'echo forbidden' } })

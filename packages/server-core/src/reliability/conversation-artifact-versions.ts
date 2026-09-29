@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { isSessionScratchPath, localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
+import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
 import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
 
@@ -56,11 +56,59 @@ export function withDeliveredArtifactReferences(messages: readonly Message[], so
   })
 }
 
+/** Add stable identities to older message references for display without changing JSONL. */
+export function withArtifactIdentities(messages: readonly Message[], ids: ReadonlyMap<string, string>): Message[] {
+  return messages.map(message => message.artifactVersions?.some(ref => !ref.artifactId && ids.has(ref.versionId))
+    ? { ...message, artifactVersions: message.artifactVersions!.map(ref => ref.artifactId || !ids.has(ref.versionId)
+      ? ref : { ...ref, artifactId: ids.get(ref.versionId)! }) }
+    : message)
+}
+
+/** Keep the persistent file history intact while numbering each chat's deliveries independently. */
+function numberRefs(refs: readonly ArtifactDeliveryRef[], versions: Map<string, Map<string, number>>): ArtifactDeliveryRef[] {
+  return refs.map(ref => {
+    const key = ref.artifactId ?? ref.path
+    let seen = versions.get(key)
+    if (!seen) { seen = new Map(); versions.set(key, seen) }
+    if (!seen.has(ref.versionId)) seen.set(ref.versionId, seen.size + 1)
+    return { ...ref, sessionOrdinal: seen.get(ref.versionId)! }
+  })
+}
+
+export function numberSessionArtifactRefs(prior: readonly Message[], refs: readonly ArtifactDeliveryRef[]): ArtifactDeliveryRef[] {
+  const versions = new Map<string, Map<string, number>>()
+  for (const message of prior) if (message.role === 'assistant') numberRefs(message.artifactVersions ?? [], versions)
+  return numberRefs(refs, versions)
+}
+
+export function withSessionArtifactOrdinals(messages: readonly Message[]): Message[] {
+  const versions = new Map<string, Map<string, number>>()
+  return messages.map(message => message.role === 'assistant' && message.artifactVersions?.length
+    ? { ...message, artifactVersions: numberRefs(message.artifactVersions, versions) }
+    : message)
+}
+
+/** A chat sees only versions it delivered; stable version IDs still address the shared snapshots. */
+export function sessionArtifactRecord(record: ArtifactRecord, messages: readonly Message[]): ArtifactRecord {
+  const byId = new Map(record.versions.map(version => [version.id, version]))
+  const seen = new Set<string>()
+  const versions = messages.flatMap(message => message.role === 'assistant' ? message.artifactVersions ?? [] : [])
+    .flatMap(ref => {
+      if (ref.artifactId && ref.artifactId !== record.id || seen.has(ref.versionId)) return []
+      const version = byId.get(ref.versionId)
+      if (!version) return []
+      seen.add(ref.versionId)
+      return [{ ...version, ordinal: seen.size }]
+    })
+  return { ...record, versions }
+}
+
 /** One settled snapshot per changed file, at the conversation's delivery boundary. */
 export class ConversationArtifactVersions {
   private paths = new Set<string>()
+  private pendingWrites = new Set<string>()
   /** Bytes observed before this turn's edits. Opening a file does not move this snapshot. */
-  private baselines = new Map<string, { versionId: string; ordinal: number }>()
+  private baselines = new Map<string, { artifactId: string; versionId: string; ordinal: number }>()
   constructor(private store: ArtifactVersions, private bases: string[], private authorize: (path: string) => Promise<string>,
     private onFailure: () => void, private turnStartedAt = Date.now()) {}
 
@@ -75,59 +123,48 @@ export class ConversationArtifactVersions {
   async track(markdown: string): Promise<void> {
     for (const path of localArtifactLinks(markdown)) await this.trackPath(path)
   }
-  /** Resolve the model's display choices on the host before they reach the UI. */
-  async featured(paths: readonly string[]): Promise<string[]> {
-    const selected: string[] = []
-    for (const rawPath of paths) {
-      const path = localArtifactPath(rawPath)
-      if (!path) throw new Error(`Featured artifact is not a local path: ${rawPath}`)
-      let resolved: string | undefined
-      for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
-        try {
-          const safe = await this.authorize(candidate)
-          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = safe; break }
-        } catch { /* Another base may contain this relative path. */ }
-      }
-      if (!resolved) throw new Error(`Featured artifact is missing or unavailable: ${path}`)
-      if (!selected.some(path => sameArtifactLocation(path, resolved))) selected.push(resolved)
-    }
-    return selected
-  }
   async trackPath(path: string): Promise<void> {
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
       try {
         const safe = await this.authorize(candidate)
         if (this.paths.has(safe)) return
-        if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
+        if (!existsSync(safe)) { this.pendingWrites.add(safe); continue }
+        if (!lstatSync(safe).isFile()) continue
         // Before work starts, retain any externally edited baseline separately.
         let record = this.store.register(safe)
         if (!this.baselines.has(record.path)) {
           record = this.store.capture(record.id)
           const current = record.versions.find(version => version.id === record.currentVersion)!
-          this.baselines.set(record.path, { versionId: current.id, ordinal: current.ordinal! })
+          this.baselines.set(record.path, { artifactId: record.id, versionId: current.id, ordinal: current.ordinal! })
         }
         this.paths.add(record.path)
         return
       } catch { this.onFailure() }
     }
   }
-  async capture(markdown: string, sourceRunId: string, aiTitle?: string, featured: readonly string[] = []): Promise<ArtifactDeliveryRef[]> {
+  async capture(markdown: string, sourceRunId: string, aiTitle?: string, changedPaths: readonly string[] = [], includeAnswerLinks = true): Promise<ArtifactDeliveryRef[]> {
     const title = suppliedVersionTitle(aiTitle) ?? artifactVersionTitle(markdown)
     const deliveries = new Map<string, string>()
+    const writtenPaths = [...changedPaths, ...this.pendingWrites]
     // A link can cite an unchanged source file. Only add untracked files that
     // appeared during this turn; known files are compared against their baseline.
-    for (const path of [...localArtifactLinks(markdown), ...featured]) {
+    for (const path of [...(includeAnswerLinks ? localArtifactLinks(markdown) : []), ...writtenPaths]) {
       const candidates = isAbsolute(path) ? [path] : this.bases.map(base => join(base, path))
       for (const candidate of candidates) {
         try {
           const safe = await this.authorize(candidate)
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
-          const featuredPath = featured.find(path => sameArtifactLocation(path, safe))
-          if (!existing && !featuredPath && !this.writtenThisTurn(safe)) break
-          const record = existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
+          const changedPath = writtenPaths.find(path => sameArtifactLocation(path, safe))
+          if (!existing && !changedPath && !this.writtenThisTurn(safe)) break
+          // A file tracked before this turn can be atomically replaced by an
+          // editor without becoming a new document. Untracked replacements
+          // instead start their own history at the same path.
+          const baseline = this.baselines.get(safe)
+          const record = baseline ? this.store.read(baseline.artifactId)
+            : existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
           this.paths.add(record.path)
-          deliveries.set(record.path, featuredPath ?? path)
+          deliveries.set(record.path, changedPath ?? path)
           break
         } catch { this.onFailure() }
       }
@@ -135,7 +172,8 @@ export class ConversationArtifactVersions {
     const result: ArtifactDeliveryRef[] = []
     for (const path of this.paths) {
       try {
-        const record = this.store.findByPath(path)
+        const tracked = this.baselines.get(path)
+        const record = tracked ? this.store.read(tracked.artifactId) : this.store.findByPath(path)
         if (!record) continue
         const baseline = this.baselines.get(record.path)
         const published = deliveries.get(record.path) ?? record.path
@@ -143,16 +181,17 @@ export class ConversationArtifactVersions {
         // The path was authorized when it was tracked. A deleted file can no
         // longer be canonicalized by a fresh authorization.
         if (!existsSync(path) || !lstatSync(path).isFile()) {
-          if (baseline) result.push({ path: published, versionId: baseline.versionId, ordinal: baseline.ordinal, change: 'deleted' })
+          if (baseline) result.push({ path: published, artifactId: record.id, versionId: baseline.versionId, ordinal: baseline.ordinal, change: 'deleted' })
           continue
         }
         await this.authorize(path)
         const after = this.store.capture(record.id, sourceRunId, title, title ? 'assistant' : undefined)
         const current = after.versions.find(version => version.id === after.currentVersion)!
-        if (baseline?.versionId === current.id) continue
-        if (!baseline && current.sourceRunId !== sourceRunId) continue
-        const change = current.restoredFrom ? 'restored' : !baseline || current.ordinal === 1 ? 'created' : 'modified'
-        result.push({ path: published, versionId: current.id, ordinal: current.ordinal!, change })
+        const restored = after.lastRestore?.versionId === current.id && after.lastRestore.sourceRunId === sourceRunId
+        if (baseline?.versionId === current.id && !restored) continue
+        if (!baseline && current.sourceRunId !== sourceRunId && !restored) continue
+        const change = restored || current.restoredFrom ? 'restored' : current.ordinal === 1 ? 'created' : 'modified'
+        result.push({ path: published, artifactId: record.id, versionId: current.id, ordinal: current.ordinal!, change })
       } catch { this.onFailure() }
     }
     return result

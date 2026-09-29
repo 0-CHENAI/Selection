@@ -21,11 +21,13 @@ export function useGeneratedFileActions(opts: {
     workingDirectory, sessionFolderPath, workspaceRootPath,
   }), [workingDirectory, sessionFolderPath, workspaceRootPath])
   const baseDir = baseDirs[0]
-  const openArtifact = React.useCallback(async (path: string, action: GeneratedArtifactAction) => {
+  const openArtifact = React.useCallback(async (path: string, action: GeneratedArtifactAction, versionId?: string, artifactId?: string) => {
     try {
       return await openGeneratedFileAction({
         requestedPath: path,
         action,
+        artifactId,
+        versionId,
         baseDir,
         baseDirs,
         statPath: window.electronAPI.isChannelAvailable(RPC_CHANNELS.fs.STAT_PATH)
@@ -33,7 +35,13 @@ export function useGeneratedFileActions(opts: {
           : undefined,
         searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
         openPreview: onOpenFile,
-        manageArtifact: onManageArtifact ? (path, alternativePaths) => onManageArtifact(path, opts.sessionId, alternativePaths) : undefined,
+        previewVersion: window.electronAPI.isChannelAvailable(RPC_CHANNELS.artifacts.PREVIEW)
+          ? (artifactId, versionId) => window.electronAPI.previewArtifactVersion(artifactId, versionId)
+          : undefined,
+        readArtifact: window.electronAPI.isChannelAvailable(RPC_CHANNELS.artifacts.MANAGE)
+          ? artifactId => window.electronAPI.manageArtifact({ type: 'read', artifactId })
+          : undefined,
+        manageArtifact: onManageArtifact ? (path, alternativePaths, versionId) => onManageArtifact(path, opts.sessionId, alternativePaths, versionId) : undefined,
         openExternal: onOpenFileExternal,
         reveal: (resolvedPath) => window.electronAPI.showInFolder(resolvedPath),
       })

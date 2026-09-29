@@ -14,10 +14,9 @@ import { workspaceDeliveryContract } from '../reliability/workspace-delivery-con
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
-import { ConversationArtifactVersions, withDeliveredArtifactReferences } from '../reliability/conversation-artifact-versions'
+import { ConversationArtifactVersions, artifactVersionTitle, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from '../reliability/conversation-artifact-versions'
 import { ArtifactCandidateInventory } from '../reliability/artifact-candidate-inventory'
-import { reviewArtifactDelivery } from '../reliability/artifact-delivery-review'
-import { localArtifactLinks } from '@craft-agent/shared/utils'
+import { isArtifactCardPath, localArtifactLinks } from '@craft-agent/shared/utils/artifact-links'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
 import { hostname as executionHostName } from 'node:os'
@@ -157,6 +156,7 @@ import { type Session, type SessionEvent, type FileAttachment, type SendMessageO
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -188,6 +188,11 @@ import {
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
 import { resizeImageForAPI, resizeIconBuffer } from '@craft-agent/server-core/services'
 export { sanitizeForTitle }
+
+/** Inventory and tool paths are native filesystem names, not URL-encoded links. */
+function validateArtifactFilePath(path: string, workspaceId: string): Promise<string> {
+  return validateWorkspaceFilePath(path.replaceAll('%', '%25'), workspaceId)
+}
 
 // Module-level platform ref — set once during init via setSessionPlatform()
 let _platform: PlatformServices | null = null
@@ -3018,11 +3023,33 @@ export class SessionManager implements ISessionManager {
   }
 
   private deliveredArtifactMessages(managed: ManagedSession): Message[] {
-    const versionIds = managed.messages.flatMap(message => message.artifactVersions?.map(ref => ref.versionId) ?? [])
-    if (!versionIds.length) return managed.messages
+    if (!managed.messages.some(message => message.artifactVersions?.length
+      || message.role === 'assistant' && message.turnId?.startsWith('artifact-restore-'))) return managed.messages
     try {
       const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
-      return withDeliveredArtifactReferences(managed.messages, store.versionSourceRunIds(versionIds))
+      // Restore confirmations saved before they carried file refs still need a
+      // result card. The app-generated turn ID binds the confirmation to its
+      // completed action; only a surviving snapshot is shown.
+      const users = new Map(managed.messages.filter(message => message.role === 'user').map(message => [message.id, message]))
+      const messages = managed.messages.map(message => {
+        if (message.role !== 'assistant' || message.artifactVersions?.length
+          || !message.turnId?.startsWith('artifact-restore-')) return message
+        const user = users.get(message.turnId.slice('artifact-restore-'.length))
+        const result = user && parseArtifactRestoreResult(user.content)
+        if (!result) return message
+        try {
+          const record = store.read(result.artifactId)
+          const version = record.versions.find(item => item.id === result.versionId)
+          if (!version) return message
+          return { ...message, artifactVersions: [{ path: record.path, artifactId: record.id,
+            versionId: version.id, ordinal: version.ordinal!, change: 'restored' as const }] }
+        } catch { return message }
+      })
+      const versionIds = messages.flatMap(message => message.artifactVersions?.map(ref => ref.versionId) ?? [])
+      if (!versionIds.length) return messages
+      const missing = messages.flatMap(message => message.artifactVersions?.filter(ref => !ref.artifactId).map(ref => ref.versionId) ?? [])
+      const delivered = withDeliveredArtifactReferences(messages, store.versionSourceRunIds(versionIds))
+      return withSessionArtifactOrdinals(withArtifactIdentities(delivered, store.versionArtifactIds(missing)))
     } catch (error) {
       sessionLog.warn('Could not verify historical artifact references', { sessionId: managed.id, error })
       return managed.messages.map(message => message.artifactVersions?.length
@@ -7448,7 +7475,7 @@ export class SessionManager implements ISessionManager {
         const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
         const tracker = new ConversationArtifactVersions(store,
           [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
-          path => validateWorkspaceFilePath(path, managed.workspace.id),
+          path => validateArtifactFilePath(path, managed.workspace.id),
           () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
           Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
         managed.conversationArtifactVersions = tracker
@@ -7926,6 +7953,71 @@ export class SessionManager implements ISessionManager {
     return cleaned
   }
 
+  /** A version-dialog click is an app action; it must not depend on an agent echoing JSON. */
+  async restoreArtifactVersionForSession(sessionId: string, artifactId: string, expectedVersion: string, versionId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact> {
+    return this.withSessionExecution(sessionId, async () => {
+      const managed = this.sessions.get(sessionId)
+      if (!managed) throw new Error('Session not found')
+      if (managed.isolatedWorkspace) throw new Error('Managed file restoration is unavailable from an isolated child workspace')
+      if (managed.isProcessing || managed.messageQueue.length) throw new Error('Wait for this chat to finish before restoring a file')
+      await this.ensureMessagesLoaded(managed)
+      const visibleMessages = this.deliveredArtifactMessages(managed)
+      if (!visibleMessages.some(message => message.role === 'assistant' && message.artifactVersions?.some(ref =>
+        ref.versionId === versionId && (!ref.artifactId || ref.artifactId === artifactId)))) {
+        throw new Error('Version is not referenced by this chat')
+      }
+
+      const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+      const record = store.refreshMovedRecord(artifactId)
+      await validateWorkspaceFilePath(record.path, managed.workspace.id)
+      const titled = withHistoricalAnswerTitles(record, (sourceRunId, targetId) => {
+        if (targetId !== versionId) return undefined
+        const separator = sourceRunId.lastIndexOf('/')
+        if (separator < 1) return undefined
+        const sourceSessionId = sourceRunId.slice(0, separator)
+        try { validateSessionId(sourceSessionId) } catch { return undefined }
+        let messages: Message[] | undefined
+        try {
+          messages = sourceSessionId === managed.id
+            ? managed.messages
+            : loadStoredSession(managed.workspace.rootPath, sourceSessionId)?.messages.map(storedToMessage)
+        } catch { return undefined }
+        return messages?.find(message => message.role === 'assistant'
+          && message.artifactVersions?.some(ref => ref.versionId === targetId))?.content
+      })
+      const projected = sessionArtifactRecord(titled, visibleMessages)
+      const targetAnswer = visibleMessages.find(message => message.role === 'assistant'
+        && message.artifactVersions?.some(ref => ref.versionId === versionId && (!ref.artifactId || ref.artifactId === artifactId)))
+      const fallbackTitle = targetAnswer ? artifactVersionTitle(targetAnswer.content) : undefined
+      const displayRecord = fallbackTitle ? { ...projected, versions: projected.versions.map(version => version.id === versionId
+        && version.summaryOrigin !== 'assistant' ? { ...version, summary: fallbackTitle, summaryOrigin: 'assistant' as const } : version) } : projected
+      const content = buildArtifactRestoreResult(displayRecord, versionId)
+      const target = displayRecord.versions.find(version => version.id === versionId)!
+      const userMessage: Message = { id: generateMessageId(), role: 'user', content, timestamp: this.monotonic() }
+      const restored = store.restore(record.id, expectedVersion, versionId, `${sessionId}/${userMessage.id}`)
+      this.notifyArtifactApplied(managed.workspace.id)
+
+      const answer: Message = { id: generateMessageId(), role: 'assistant',
+        content: `已将 ${basename(restored.path)} 恢复到第 ${target.ordinal} 版。文件内容已恢复，版本历史仍保留。`,
+        timestamp: this.monotonic(), isIntermediate: false, phase: 'final', turnId: `artifact-restore-${userMessage.id}`,
+        artifactVersions: [{ path: restored.path, artifactId: restored.id, versionId,
+          ordinal: restored.versions.find(version => version.id === versionId)!.ordinal!,
+          sessionOrdinal: target.ordinal, change: 'restored' }] }
+      managed.messages.push(userMessage, answer)
+      managed.lastMessageRole = 'assistant'
+      managed.lastMessageAt = answer.timestamp
+      managed.lastFinalMessageId = answer.id
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      this.sendEvent({ type: 'user_message', sessionId, message: userMessage, status: 'accepted' }, managed.workspace.id)
+      this.sendEvent({ type: 'text_complete', sessionId, text: answer.content, isIntermediate: false,
+        phase: 'final', turnId: answer.turnId, messageId: answer.id, timestamp: answer.timestamp,
+        artifactVersions: answer.artifactVersions }, managed.workspace.id)
+      this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+      return restored
+    })
+  }
+
   private async manageArtifactVersionFromAgent(managed: ManagedSession, request: {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
@@ -7936,23 +8028,32 @@ export class SessionManager implements ISessionManager {
     const userMessage = request.action === 'restore'
       ? managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
       : undefined
+    let pinnedPath: string | undefined
     if (request.action === 'restore') {
       const pinned = /<artifact_restore_request>\s*(\{[^\n]+\})\s*<\/artifact_restore_request>/.exec(userMessage?.content ?? '')
       if (pinned) {
         let selected: Record<string, unknown>
         try { selected = JSON.parse(pinned[1]!) as Record<string, unknown> }
         catch { throw new Error('Invalid version request in the user message') }
-        if (selected.action !== 'restore' || selected.artifactId !== request.artifactId
+        if (!selected || typeof selected !== 'object' || Array.isArray(selected)
+          || selected.action !== 'restore' || selected.artifactId !== request.artifactId
           || selected.versionId !== request.versionId || selected.expectedVersion !== request.expectedVersion
-          || selected.path !== request.path) throw new Error('Restore request changed; ask the user to select the version again')
+          || typeof selected.path !== 'string' || !selected.path
+          || (request.path !== undefined && selected.path !== request.path)) {
+          throw new Error('Restore request changed; ask the user to select the version again')
+        }
+        // The tool schema allows omitting path for restore. Retain the pinned
+        // path for artifact-location validation even when the model omits it.
+        pinnedPath = selected.path
       }
     }
+    const restorePath = request.path ?? pinnedPath
     const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
     const record = request.artifactId
       ? store.read(request.artifactId)
       : request.path ? store.findByPath(await validateWorkspaceFilePath(request.path, managed.workspace.id)) : undefined
     if (!record) throw new Error('Managed file not found; provide its exact path or artifact ID')
-    if (request.path && !sameArtifactLocation(await validateWorkspaceFilePath(request.path, managed.workspace.id), record.path)) {
+    if (restorePath && !sameArtifactLocation(await validateWorkspaceFilePath(restorePath, managed.workspace.id), record.path)) {
       throw new Error('Artifact path changed; inspect its versions again')
     }
     await validateWorkspaceFilePath(record.path, managed.workspace.id)
@@ -8686,7 +8787,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         answerRunId: answer.answerRunId, answerRoutingVersion: answer.answerRoutingVersion,
         answerCommitted: true, answerSalvaged: answer.answerSalvaged, turnId: answer.turnId,
         artifactVersions: answer.artifactVersions,
-        featuredArtifacts: answer.featuredArtifacts,
         messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
     } catch (error) {
       sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
@@ -8733,8 +8833,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.featuredArtifacts = []
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle)
+      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, submission.artifactVersionTitle, answer.content)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8775,66 +8874,49 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       state.accepting = false
     }
     this.publishCommittedAnswer(managed, answer)
-    void this.reviewCommittedArtifacts(managed, answer, state.userMessageId, submission.featuredArtifacts ?? [], submission.artifactVersionTitle)
   }
 
-  /** Runs after answer publication, so model review can never hold up text delivery. */
-  private async reviewCommittedArtifacts(managed: ManagedSession, answer: Message, userMessageId: string, proposed: readonly string[], title?: string): Promise<void> {
+  /** Finish file discovery before the answer is persisted and published. */
+  private async captureChangedArtifacts(managed: ManagedSession, userMessageId: string, title?: string, answerMarkdown = ''): Promise<Message['artifactVersions']> {
     const inventory = managed.artifactCandidateInventory
     const tracker = managed.conversationArtifactVersions
-    const query = managed.agent?.queryLlm?.bind(managed.agent)
-    if (!tracker) return
+    if (!tracker) return undefined
     try {
       const candidates: string[] = []
+      const editedExistingFiles: string[] = []
       for (const path of inventory?.changed() ?? []) {
+        if (!isArtifactCardPath(path)) continue
         try {
-          const safe = await validateWorkspaceFilePath(path, managed.workspace.id)
-          if (!candidates.some(candidate => sameArtifactLocation(candidate, safe))) candidates.push(safe)
-        } catch { /* Inaccessible files are never offered to the reviewer. */ }
+          const safe = await validateArtifactFilePath(path, managed.workspace.id)
+          if (!isArtifactCardPath(safe) || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
+          candidates.push(safe)
+          if (inventory?.existedAtStart(path)) editedExistingFiles.push(safe)
+        } catch { /* Inaccessible or deleted files cannot be opened from a card. */ }
       }
-      // An answer can link a fresh output outside the scanned working directories.
-      for (const raw of [...localArtifactLinks(answer.content), ...proposed]) {
+      // Explicit destinations outside the scanned roots are discoverable through
+      // answer links; a recent file write is required before adding them.
+      if (inventory) for (const path of localArtifactLinks(answerMarkdown)) {
+        if (!isArtifactCardPath(path)) continue
         try {
-          const [safe] = await tracker.featured([raw])
-          if (safe && !candidates.some(candidate => sameArtifactLocation(candidate, safe))) {
-            const file = statSync(safe)
-            const startedAt = inventory?.startedAt ?? managed.messages.find(message => message.id === userMessageId)?.timestamp ?? Date.now()
-            if (Math.max(file.birthtimeMs, file.mtimeMs) >= startedAt - 2) candidates.push(safe)
+          const safe = await validateArtifactFilePath(path, managed.workspace.id)
+          if (!isArtifactCardPath(safe) || inventory.covers(safe)
+            || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
+          const file = statSync(safe)
+          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - 2) {
+            candidates.push(safe)
+            if (file.birthtimeMs < inventory.startedAt - 2) editedExistingFiles.push(safe)
           }
-        } catch { /* A citation or unavailable link is not a candidate. */ }
+        } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }
-      if (!candidates.length) return
-      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
-        artifactReviewStatus: 'pending' }, managed.workspace.id) }
-      catch { /* A disconnected renderer will read the durable result later. */ }
-      const request = managed.messages.find(message => message.id === userMessageId)?.content ?? ''
-      let proposedFile: string | undefined
-      if (proposed.length === 1) {
-        try { [proposedFile] = await tracker.featured(proposed) }
-        catch { /* An invalid proposal cannot bypass the independent review. */ }
-      }
-      const unambiguous = candidates.length === 1 && proposedFile && sameArtifactLocation(candidates[0]!, proposedFile)
-      if (!unambiguous && !query) throw new Error('Artifact review model is unavailable')
-      const selected = unambiguous ? candidates : await reviewArtifactDelivery({ request, answer: answer.content, candidates, proposed }, query!)
-      const featured = await tracker.featured(selected)
-      if (!managed.messages.some(message => message.id === answer.id)) return
-      answer.featuredArtifacts = featured
-      answer.artifactVersions = await tracker.capture(answer.content, `${managed.id}/${userMessageId}`, title, featured)
-      answer.artifactReviewStatus = 'complete'
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
-        artifactReviewStatus: 'complete', featuredArtifacts: featured, artifactVersions: answer.artifactVersions }, managed.workspace.id) }
-      catch { /* The saved answer remains authoritative. */ }
+      const versions = await tracker.capture(answerMarkdown, `${managed.id}/${userMessageId}`, title, candidates, !inventory)
+      const missing = managed.messages.flatMap(message => message.artifactVersions?.filter(ref => !ref.artifactId).map(ref => ref.versionId) ?? [])
+      const prior = missing.length ? withArtifactIdentities(managed.messages,
+        new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id).versionArtifactIds(missing)) : managed.messages
+      return numberSessionArtifactRefs(prior, versions.map(ref => ref.change === 'created' && editedExistingFiles.some(path => sameArtifactLocation(path, ref.path))
+        ? { ...ref, change: 'modified' as const } : ref))
     } catch (error) {
-      sessionLog.warn('Artifact delivery review failed', { sessionId: managed.id, messageId: answer.id, error })
-      if (!managed.messages.some(message => message.id === answer.id)) return
-      answer.artifactReviewStatus = 'failed'
-      try { this.persistSession(managed); await this.flushSession(managed.id) }
-      catch (persistError) { sessionLog.warn('Artifact review failure state could not be saved', { sessionId: managed.id, error: persistError }) }
-      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
-        artifactReviewStatus: 'failed' }, managed.workspace.id) }
-      catch { /* Persisted status is available on reload. */ }
+      sessionLog.warn('Changed artifact capture failed', { sessionId: managed.id, error })
+      return undefined
     }
   }
 
@@ -8880,8 +8962,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.assertAnswerReady(managed, state, draft.content)
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`)
-      answer.featuredArtifacts = []
+      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, answer.content)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8956,7 +9037,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
       if (salvaged) {
         this.publishCommittedAnswer(managed, salvaged)
-        void this.reviewCommittedArtifacts(managed, salvaged, state.userMessageId, [])
       } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
         && managed.processingGeneration === state.generation) {
         yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
@@ -12379,7 +12459,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           const owner = managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
           if (owner) {
             try {
-              assistantMessage.artifactVersions = await managed.conversationArtifactVersions?.capture(content, `${managed.id}/${owner.id}`)
+              assistantMessage.artifactVersions = await this.captureChangedArtifacts(managed, owner.id, undefined, content)
             } catch (error) {
               sessionLog.warn('Artifact version recording failed for streamed answer', { sessionId, messageId: assistantMessage.id, error })
             }

@@ -1,6 +1,5 @@
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
-import { buildArtifactRestoreRequest } from './lib/artifact-restore-request'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
@@ -11,6 +10,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
 import type { ManagedArtifact } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -2026,20 +2026,24 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
-  const [managedArtifact, setManagedArtifact] = useState<{ path: string; alternativePaths?: string[]; sessionId?: string; record?: ManagedArtifact; error?: string } | null>(null)
+  const [managedArtifact, setManagedArtifact] = useState<{ path: string; alternativePaths?: string[]; sessionId?: string; versionId?: string; record?: ManagedArtifact; missingFile?: boolean; error?: string } | null>(null)
   const [managedArtifactOpen, setManagedArtifactOpen] = useState(false)
   const managedArtifactRequest = useRef(0)
-  const loadManagedArtifact = useCallback(async (path: string, alternativePaths?: string[], sessionId?: string) => {
+  const loadManagedArtifact = useCallback(async (path: string, alternativePaths?: string[], sessionId?: string, versionId?: string) => {
     const request = ++managedArtifactRequest.current
     try {
-      const record = await window.electronAPI.manageArtifact({ type: 'register', path, alternativePaths })
+      const record = await window.electronAPI.manageArtifact({ type: 'register', path, alternativePaths, sessionId, versionId })
+      const missingFile = record.currentFileAvailable === false
+        || (window.electronAPI.isChannelAvailable(RPC_CHANNELS.fs.STAT_PATH)
+          ? await window.electronAPI.statPath(record.path).then(result => result === null).catch(() => false)
+          : false)
       if (request === managedArtifactRequest.current) {
-        setManagedArtifact({ path, alternativePaths, sessionId, record })
+        setManagedArtifact({ path, alternativePaths, sessionId, versionId, record, missingFile })
         setManagedArtifactOpen(true)
       }
     } catch (error) {
       if (request === managedArtifactRequest.current) {
-        setManagedArtifact({ path, alternativePaths, sessionId, error: String(error) })
+        setManagedArtifact({ path, alternativePaths, sessionId, versionId, error: String(error) })
         setManagedArtifactOpen(true)
       }
     }
@@ -2054,7 +2058,7 @@ export default function App() {
       if (value === undefined) draftStorage.remove(draftStorage.KEYS.annotationFeedbackDrafts, key)
       else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
     },
-    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => loadManagedArtifact(path, alternativePaths, sessionId) : undefined,
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[], versionId?: string) => loadManagedArtifact(path, alternativePaths, sessionId, versionId) : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2226,11 +2230,18 @@ export default function App() {
             />
           </div>
 
-          {managedArtifact && <ArtifactVersionsDialog open={managedArtifactOpen} path={managedArtifact.path} record={managedArtifact.record} error={managedArtifact.error}
-            onRetry={() => loadManagedArtifact(managedArtifact.path, managedArtifact.alternativePaths, managedArtifact.sessionId)} onClose={closeManagedArtifact} onPreview={handleOpenFile}
-            onRestore={managedArtifact.sessionId ? async (record, versionId) => {
-              const message = buildArtifactRestoreRequest(record, versionId)
-              if (!await handleSendMessage(managedArtifact.sessionId!, message)) throw new Error('Failed to send restore request')
+          {managedArtifact && <ArtifactVersionsDialog open={managedArtifactOpen} path={managedArtifact.path} record={managedArtifact.record} missingFile={managedArtifact.missingFile} error={managedArtifact.error}
+            onRetry={() => loadManagedArtifact(managedArtifact.path, managedArtifact.alternativePaths, managedArtifact.sessionId, managedArtifact.versionId)} onClose={closeManagedArtifact} onPreview={handleOpenFile}
+            onRelocate={managedArtifact.record && managedArtifact.missingFile ? async newPath => {
+              await window.electronAPI.manageArtifact({ type: 'relocate', artifactId: managedArtifact.record!.id,
+                path: newPath, expectedVersion: managedArtifact.record!.currentVersion })
+              await loadManagedArtifact(managedArtifact.path, managedArtifact.alternativePaths, managedArtifact.sessionId, managedArtifact.versionId)
+            } : undefined}
+            onRestore={managedArtifact.sessionId && !managedArtifact.missingFile ? async (record, versionId) => {
+              const sessionId = managedArtifact.sessionId!
+              await window.electronAPI.manageArtifact({ type: 'restoreForSession', sessionId,
+                artifactId: record.id, expectedVersion: record.currentVersion, versionId })
+              await refreshSessionFromServer(sessionId)
               closeManagedArtifact()
             } : undefined} />}
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}

@@ -1,5 +1,5 @@
 import { ArtifactVersions } from '../../reliability/artifact-versions'
-import { withHistoricalAnswerTitles } from '../../reliability/conversation-artifact-versions'
+import { sessionArtifactRecord, withHistoricalAnswerTitles } from '../../reliability/conversation-artifact-versions'
 import { fileFingerprint } from '../../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { existsSync } from 'node:fs'
 import { hostname } from 'node:os'
@@ -96,6 +96,13 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (!workspaceId) throw new Error('Workspace required')
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
+    if (operation.type === 'restoreForSession') {
+      const session = await deps.sessionManager.getSession(operation.sessionId)
+      if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+      if (!deps.sessionManager.restoreArtifactVersionForSession) throw new Error('Artifact restoration is unavailable')
+      return deps.sessionManager.restoreArtifactVersionForSession(operation.sessionId, operation.artifactId,
+        operation.expectedVersion, operation.versionId)
+    }
     const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
     const titled = (record: import('../../reliability/artifact-versions').ArtifactRecord) => {
       const sessions = new Map<string, ReturnType<typeof loadStoredSession>>()
@@ -115,9 +122,25 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (operation.type === 'register') {
       if (operation.alternativePaths !== undefined && (!Array.isArray(operation.alternativePaths)
         || operation.alternativePaths.some(path => typeof path !== 'string' || !path))) throw new Error('Invalid artifact paths')
-      const paths = []
-      for (const path of [operation.path, ...(operation.alternativePaths ?? [])]) paths.push(await validateWorkspaceFilePath(path, workspaceId))
-      return titled(store.register(paths[0]!, undefined, paths.slice(1)))
+      const session = operation.sessionId ? await deps.sessionManager.getSession(operation.sessionId) : undefined
+      if (operation.sessionId && (!session || session.workspaceId !== workspaceId)) throw new Error('Session does not belong to this workspace')
+      if (operation.versionId && (!session || !session.messages.some(message =>
+        message.artifactVersions?.some(ref => ref.versionId === operation.versionId)))) throw new Error('Version is not referenced by this session')
+      let record: import('../../reliability/artifact-versions').ArtifactRecord
+      if (operation.versionId) {
+        const referenced = store.findByVersionId(operation.versionId)
+        if (!referenced) throw new Error('Artifact version not found')
+        await validateWorkspaceFilePath(referenced.path, workspaceId)
+        record = store.refreshMovedRecord(referenced.id)
+        await validateWorkspaceFilePath(record.path, workspaceId)
+      } else {
+        const paths = []
+        for (const path of [operation.path, ...(operation.alternativePaths ?? [])]) paths.push(await validateWorkspaceFilePath(path, workspaceId))
+        record = store.register(paths[0]!, undefined, paths.slice(1))
+      }
+      const titledRecord = titled(record)
+      const shown = session ? sessionArtifactRecord(titledRecord, session.messages) : titledRecord
+      return { ...shown, currentFileAvailable: store.hasCurrentFile(record.id) }
     }
     const record = store.read(operation.artifactId)
     if (operation.type === 'relocate') {
@@ -126,8 +149,13 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       if (relocated.path !== record.path || relocated.currentVersion !== record.currentVersion) deps.sessionManager.notifyArtifactApplied?.(workspaceId)
       return relocated
     }
+    if (operation.type === 'read') {
+      await validateWorkspaceFilePath(record.path, workspaceId)
+      const current = store.refreshMovedRecord(record.id)
+      await validateWorkspaceFilePath(current.path, workspaceId)
+      return { ...titled(store.reconcile(current.id)), currentFileAvailable: store.hasCurrentFile(current.id) }
+    }
     await validateWorkspaceFilePath(record.path, workspaceId)
-    if (operation.type === 'read') return titled(store.reconcile(record.id))
     if (operation.type === 'restore') {
       const restored = store.restore(record.id, operation.expectedVersion, operation.versionId)
       deps.sessionManager.notifyArtifactApplied?.(workspaceId)
@@ -151,7 +179,10 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         const workspace = workspaceId ? getWorkspaceByNameOrId(workspaceId) : undefined
         const storage = workspace && join(workspace.rootPath, 'artifacts', 'versions')
         if (!workspace || !storage || !existsSync(storage)) return null
-        const record = new ArtifactVersions(storage, hostname(), workspace.id).findByPath(safePath)
+        const store = new ArtifactVersions(storage, hostname(), workspace.id)
+        const registered = store.findByPath(safePath)
+        if (registered) await validateWorkspaceFilePath(registered.path, workspaceId)
+        const record = registered && store.refreshMovedRecord(registered.id)
         if (!record || record.path === safePath) return null
         const currentPath = await validateWorkspaceFilePath(record.path, workspaceId)
         const currentVersion = record.versions.find(version => version.id === record.currentVersion)!

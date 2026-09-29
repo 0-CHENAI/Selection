@@ -27,7 +27,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
   artifacts: ResponseArtifact[]
   versions?: import('@craft-agent/core').Message['artifactVersions']
   onOpenFile?: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void | boolean | Promise<void | boolean>
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void | boolean | Promise<void | boolean>
 }) {
   const { t } = useTranslation()
   const { onManageArtifact, onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
@@ -39,14 +39,14 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
   const listId = React.useId()
   const sectionRef = React.useRef<HTMLElement>(null)
   const wasExpanded = React.useRef(false)
-  const open = async (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => {
+  const open = async (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => {
     const request = (openRequests.current.get(path) ?? 0) + 1
     const versionRequestId = action === 'versions' ? ++versionRequest.current : 0
     if (action === 'versions') setOpeningVersion(path)
     else openRequests.current.set(path, request)
     let succeeded = false
     try {
-      const result = onOpenArtifact ? await onOpenArtifact(path, action)
+      const result = onOpenArtifact ? await onOpenArtifact(path, action, versionId, artifactId)
         : action === 'external' ? await onOpenFileExternal?.(path)
           : action === 'reveal' ? await onRevealInFinder?.(path) : await onOpenFile?.(path)
       succeeded = result !== false
@@ -92,7 +92,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
                     <button
                       type="button"
                       disabled={!onOpenArtifact && !onOpenFile}
-                      onClick={() => { void open(artifact.path, openAction) }}
+                      onClick={() => { void open(artifact.path, openAction, version?.versionId, version?.artifactId) }}
                       aria-describedby={unavailable.has(artifact.path) ? `${listId}-error-${index}` : undefined}
                       aria-label={`${change ? t(`chat.artifactChange.${change}`) : t('common.open')} ${artifact.name}`}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
@@ -103,7 +103,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
                         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                           <span>{artifact.extension.toUpperCase()}</span>
                           {change && <span className={cn('inline-flex items-center rounded px-1 py-px text-[10px] font-medium', CHANGE_CHIP[change])}>{t(`chat.artifactChange.${change}`)}</span>}
-                          {version && <span className="inline-flex items-center gap-1"><Layers3 aria-hidden="true" className="size-3" />{t('chat.artifactVersions.version', { number: version.ordinal })}</span>}
+                          {version && <span className="inline-flex items-center gap-1"><Layers3 aria-hidden="true" className="size-3" />{t('chat.artifactVersions.version', { number: version.sessionOrdinal ?? version.ordinal })}</span>}
                         </span>
                       </span>
                     </button>
@@ -120,15 +120,15 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
                       </button>
                     </DropdownMenuTrigger>
                     <StyledDropdownMenuContent align="end">
-                      {version && onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}><Layers3 />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
+                      {version && onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions', version.versionId) }}><Layers3 />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
                       {(onOpenArtifact || onOpenFileExternal) && (
-                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external') }}>
+                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external', version?.versionId, version?.artifactId) }}>
                           <ExternalLink />
                           {officeAppName(artifact.extension) ? t('chat.artifactOfficeApp', { app: officeAppName(artifact.extension) }) : t('chat.artifactDefaultApp')}
                         </StyledDropdownMenuItem>
                       )}
                       {(onOpenArtifact || onRevealInFinder) && (
-                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'reveal') }}>
+                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'reveal', version?.versionId, version?.artifactId) }}>
                           <FolderOpen />{t('chat.showInFileManager', { fileManager: fileManagerName || t('chat.artifactFileManager') })}
                         </StyledDropdownMenuItem>
                       )}
@@ -139,7 +139,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
               {unavailable.has(artifact.path) && <div id={`${listId}-error-${index}`} role="status" className="mt-1 flex flex-wrap items-center gap-1.5 px-2 text-xs text-foreground">
                 <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0 text-info" />
                 <span>{t('toast.failedToOpenFile')}</span>
-                {version && onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</button>}
+                {version && onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions', version.versionId) }}>{t('chat.artifactVersions.title')}</button>}
               </div>}
             </li>
             )})}

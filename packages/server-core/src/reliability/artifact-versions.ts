@@ -4,10 +4,25 @@ import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readF
 import { basename, dirname, join, resolve } from 'node:path'
 
 export interface ArtifactVersion { ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string; summaryOrigin?: 'assistant' }
-export interface ArtifactRecord { version: 1; id: string; hostId: string; workspaceId: string; path: string; currentVersion: string; versions: ArtifactVersion[]; previousPaths?: string[]; cleanupRequests?: Record<string, { expectedVersion: string; versionIds: string[] }> }
+export interface ArtifactRecord { version: 1; id: string; hostId: string; workspaceId: string; path: string; currentVersion: string; versions: ArtifactVersion[]; previousPaths?: string[]; fileIdentity?: string; cleanupRequests?: Record<string, { expectedVersion: string; versionIds: string[] }>; lastRestore?: { versionId: string; sourceRunId?: string } }
 export class ArtifactConflict extends Error { constructor() { super('Artifact changed outside this operation; candidate retained.'); this.name = 'ArtifactConflict' } }
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 const validId = (id: string) => { if (!/^[a-f0-9-]+$/.test(id)) throw new Error('Invalid artifact identifier'); return id }
+function fileIdentity(path: string): string | undefined {
+  try {
+    const stat = statSync(path, { bigint: true })
+    // Birth time makes a reused inode distinct while surviving rename and edits.
+    return stat.ino === 0n || stat.birthtimeNs <= 0n ? undefined : `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`
+  } catch { return undefined }
+}
+function withFileIdentity(record: ArtifactRecord): ArtifactRecord {
+  if (!existsSync(record.path)) return record
+  const identity = fileIdentity(record.path)
+  return identity ? { ...record, fileIdentity: identity } : record
+}
+function isCurrentFile(record: ArtifactRecord): boolean {
+  return !record.fileIdentity || fileIdentity(record.path) === record.fileIdentity
+}
 export function canonicalLocation(path: string): string {
   try { return realpathSync(path) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -61,12 +76,39 @@ export class ArtifactVersions {
     // A live primary path is authoritative. Alternatives only recover missing links.
     const candidates = existsSync(canonical) ? [canonical] : [canonical, ...alternativePaths.map(canonicalLocation)]
     const existing = this.findRegistered(candidates)
-    if (existing) return this.reconcileLocked(existing.id, true)
+    if (existing) {
+      this.reconcileLocked(existing.id, true)
+      return this.locked(existing.id, () => {
+        const record = this.read(existing.id)
+        if (existsSync(record.path) && !isCurrentFile(record)) throw new ArtifactConflict()
+        const refreshed = withFileIdentity(record)
+        if (record.fileIdentity !== refreshed.fileIdentity) atomicWrite(this.recordPath(record.id), JSON.stringify(refreshed))
+        return refreshed
+      }, true)
+    }
+    const identity = fileIdentity(canonical)
+    if (identity) {
+      const moved = readdirSync(this.root).filter(name => /^[a-f0-9-]+\.json$/.test(name))
+        .map(name => this.read(name.slice(0, -5)))
+        .filter(record => !isCurrentFile(record) && record.fileIdentity === identity)
+      if (moved.length > 1) throw new Error('Artifact move is ambiguous')
+      if (moved.length === 1) {
+        const record = moved[0]!
+        const relocated = this.locked(record.id, () => {
+          if (fileIdentity(canonical) !== record.fileIdentity || isCurrentFile(record)) return undefined
+          const relocated = withFileIdentity({ ...record, path: canonical,
+            previousPaths: [...new Set([...(record.previousPaths ?? []), record.path])] })
+          atomicWrite(this.recordPath(record.id), JSON.stringify(relocated))
+          return relocated
+        }, true)
+        if (relocated) return relocated
+      }
+    }
     const id = randomUUID()
     const { bytes } = this.snapshot(canonical)
     const first: ArtifactVersion = { ordinal: 1, id: randomUUID(), hash: this.put(bytes), size: bytes.length, createdAt: Date.now(), sourceRunId, summary,
       ...(summaryOrigin ? { summaryOrigin } : {}) }
-    const record: ArtifactRecord = { version: 1, id, hostId: this.hostId, workspaceId: this.workspaceId, path: canonical, currentVersion: first.id, versions: [first] }
+    const record: ArtifactRecord = withFileIdentity({ version: 1, id, hostId: this.hostId, workspaceId: this.workspaceId, path: canonical, currentVersion: first.id, versions: [first] })
     atomicWrite(this.recordPath(id), JSON.stringify(record)); return record
   }
   /** Exact recorded paths and missing historical aliases only, never filenames. */
@@ -75,22 +117,49 @@ export class ArtifactVersions {
     if (record && existsSync(`${this.recordPath(record.id)}.pending`)) throw new Error('Artifact update requires recovery before opening')
     return record
   }
+  findByVersionId(versionId: string): ArtifactRecord | undefined {
+    validId(versionId)
+    for (const entry of readdirSync(this.root)) {
+      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
+      const record = this.read(entry.slice(0, -5))
+      if (record.versions.some(version => version.id === versionId)) return record
+    }
+    return undefined
+  }
+  /** Follow a plain rename in the recorded directory without equating identical copies. */
+  refreshMovedRecord(id: string): ArtifactRecord {
+    const record = this.read(id)
+    if (isCurrentFile(record)) return record
+    const directory = dirname(record.path)
+    if (!existsSync(directory)) return record
+    const matches = readdirSync(directory, { withFileTypes: true })
+      .filter(entry => entry.isFile())
+      .map(entry => join(directory, entry.name))
+      .filter(path => fileIdentity(path) === record.fileIdentity)
+    if (matches.length > 1) throw new Error('Artifact move is ambiguous')
+    return matches.length ? this.register(matches[0]!) : record
+  }
   private findRegistered(candidates: string[]): ArtifactRecord | undefined {
     const matches: ArtifactRecord[] = []
     for (const entry of readdirSync(this.root)) {
       if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
       const existing = this.read(entry.slice(0, -5))
-      if (candidates.some(canonical => sameArtifactLocation(existing.path, canonical)
-        || !existsSync(canonical) && existing.previousPaths?.includes(canonical))) matches.push(existing)
+      if (candidates.some(canonical => (sameArtifactLocation(existing.path, canonical)
+        && (!existsSync(canonical) || !existing.fileIdentity || fileIdentity(canonical) === existing.fileIdentity))
+        || (!existsSync(canonical) && existing.previousPaths?.includes(canonical)))) matches.push(existing)
     }
     if (matches.length > 1) throw new Error('Artifact path is ambiguous; choose its exact original location')
     return matches[0]
   }
   private validateRecord(record: ArtifactRecord, id: string): void {
     if (!record || record.version !== 1 || record.id !== id || record.hostId !== this.hostId || record.workspaceId !== this.workspaceId
-      || typeof record.path !== 'string' || record.previousPaths !== undefined && (!Array.isArray(record.previousPaths) || record.previousPaths.some(path => typeof path !== 'string')) || !Array.isArray(record.versions) || record.versions.length === 0
+      || typeof record.path !== 'string' || record.previousPaths !== undefined && (!Array.isArray(record.previousPaths) || record.previousPaths.some(path => typeof path !== 'string'))
+      || record.fileIdentity !== undefined && (typeof record.fileIdentity !== 'string' || !/^\d+:\d+:\d+$/.test(record.fileIdentity))
+      || !Array.isArray(record.versions) || record.versions.length === 0
       || !record.versions.some(v => v.id === record.currentVersion)
       || new Set(record.versions.map(v => v.id)).size !== record.versions.length
+      || record.lastRestore !== undefined && (!record.lastRestore || !record.versions.some(v => v.id === record.lastRestore!.versionId)
+        || record.lastRestore.sourceRunId !== undefined && typeof record.lastRestore.sourceRunId !== 'string')
       || record.versions.some(v => !v || typeof v.id !== 'string' || !/^[a-f0-9]{64}$/.test(v.hash)
         || v.summary !== undefined && typeof v.summary !== 'string'
         || v.summaryOrigin !== undefined && v.summaryOrigin !== 'assistant'
@@ -121,6 +190,10 @@ export class ArtifactVersions {
     })
     return record
   }
+  hasCurrentFile(id: string): boolean {
+    const record = this.read(id)
+    return existsSync(record.path) && isCurrentFile(record)
+  }
   /** Resolve historical message references without trusting the link text or current path. */
   versionSourceRunIds(versionIds: readonly string[]): Map<string, string | undefined> {
     const wanted = new Set(versionIds)
@@ -135,17 +208,34 @@ export class ArtifactVersions {
     }
     return found
   }
+  versionArtifactIds(versionIds: readonly string[]): Map<string, string> {
+    const wanted = new Set(versionIds)
+    const found = new Map<string, string>()
+    if (!wanted.size) return found
+    for (const entry of readdirSync(this.root)) {
+      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
+      const record = this.read(entry.slice(0, -5))
+      for (const version of record.versions) if (wanted.has(version.id)) found.set(version.id, record.id)
+      if (found.size === wanted.size) break
+    }
+    return found
+  }
   /** Record settled file bytes without modifying the file or creating duplicate versions. */
   capture(id: string, sourceRunId?: string, summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
     return this.locked(id, () => {
       if (existsSync(`${this.recordPath(id)}.pending`)) throw new Error('Reconcile interrupted applications before recording versions')
       const record = this.read(id)
       const snapshot = this.snapshot(record.path)
-      if (snapshot.digest === record.versions.find(version => version.id === record.currentVersion)!.hash) return record
+      if (snapshot.digest === record.versions.find(version => version.id === record.currentVersion)!.hash) {
+        const refreshed = withFileIdentity(record)
+        if (refreshed.fileIdentity !== record.fileIdentity) atomicWrite(this.recordPath(id), JSON.stringify(refreshed))
+        return refreshed
+      }
       const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(),
         hash: this.put(snapshot.bytes), size: snapshot.bytes.length, createdAt: Date.now(), sourceRunId, summary,
         ...(summaryOrigin ? { summaryOrigin } : {}) }
-      const after = { ...record, currentVersion: next.id, versions: [...record.versions, next] }
+      const after = withFileIdentity({ ...record, currentVersion: next.id, versions: [...record.versions, next] })
+      delete after.lastRestore
       atomicWrite(this.recordPath(id), JSON.stringify(after))
       return after
     })
@@ -295,11 +385,13 @@ export class ArtifactVersions {
       const pendingPath = `${this.recordPath(id)}.pending`
       if (existsSync(pendingPath)) throw new Error('An interrupted apply must be reconciled first')
       const base = record.versions.find(v => v.id === expectedVersion)
-      if (!base || record.currentVersion !== expectedVersion || this.snapshot(record.path).digest !== base.hash) throw new ArtifactConflict()
+      if (!base || record.currentVersion !== expectedVersion || !isCurrentFile(record)
+        || this.snapshot(record.path).digest !== base.hash) throw new ArtifactConflict()
       const candidate = this.snapshot(candidatePath)
       if (expectedCandidateHash !== undefined && candidate.digest !== expectedCandidateHash) throw new ArtifactConflict()
       const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(), hash: this.put(candidate.bytes), size: candidate.bytes.length, createdAt: Date.now(), sourceRunId, restoredFrom }
       const after = { ...record, currentVersion: next.id, versions: [...record.versions, next] }
+      delete after.lastRestore
       if (referenceOwner !== undefined) {
         if (!referenceOwner) throw new Error('Version reference requires an owner')
         const references = this.references(id)
@@ -311,11 +403,12 @@ export class ArtifactVersions {
       }
       atomicWrite(pendingPath, JSON.stringify({ version: 1, before: record, after }))
       // Revalidate immediately before the atomic replacement; preserve external edits on conflict.
-      if (this.snapshot(record.path).digest !== base.hash) { unlinkSync(pendingPath); throw new ArtifactConflict() }
+      if (!isCurrentFile(record) || this.snapshot(record.path).digest !== base.hash) { unlinkSync(pendingPath); throw new ArtifactConflict() }
       atomicWrite(record.path, candidate.bytes, statSync(record.path).mode & 0o777)
-      atomicWrite(this.recordPath(id), JSON.stringify(after))
+      const published = withFileIdentity(after)
+      atomicWrite(this.recordPath(id), JSON.stringify(published))
       unlinkSync(pendingPath)
-      return after
+      return published
     })
   }
   reconcile(id: string): ArtifactRecord { return this.reconcileLocked(id, false) }
@@ -323,28 +416,52 @@ export class ArtifactVersions {
     return this.locked(id, () => {
     const path = `${this.recordPath(id)}.pending`
     if (!existsSync(path)) return this.read(id)
-    const journal = JSON.parse(readFileSync(path, 'utf8')) as { version: number; before: ArtifactRecord; after: ArtifactRecord }
+    const journal = JSON.parse(readFileSync(path, 'utf8')) as { version: number; operation?: 'restore'; before: ArtifactRecord; after: ArtifactRecord }
     if (journal.version !== 1) throw new Error('Invalid apply journal')
     this.validateRecord(journal.before, id)
     this.validateRecord(journal.after, id)
     const registered = this.read(id)
+    const sameHistory = JSON.stringify(journal.after.versions) === JSON.stringify(journal.before.versions)
+    const validTransition = journal.operation === 'restore'
+      ? sameHistory && journal.after.currentVersion !== journal.before.currentVersion
+        && journal.after.lastRestore?.versionId === journal.after.currentVersion
+      : journal.operation === undefined && journal.after.versions.length === journal.before.versions.length + 1
+        && JSON.stringify(journal.after.versions.slice(0, -1)) === JSON.stringify(journal.before.versions)
     if (journal.before.path !== registered.path || journal.after.path !== registered.path
-      || journal.after.versions.length !== journal.before.versions.length + 1
-      || JSON.stringify(journal.after.versions.slice(0, -1)) !== JSON.stringify(journal.before.versions)
+      || !validTransition
       || ![journal.before.currentVersion, journal.after.currentVersion].includes(registered.currentVersion)) throw new Error('Apply journal identity or version mismatch')
     const actual = this.snapshot(journal.before.path).digest
     const beforeHash = journal.before.versions.find(v => v.id === journal.before.currentVersion)?.hash
     const afterHash = journal.after.versions.find(v => v.id === journal.after.currentVersion)?.hash
     const recovered = actual === afterHash ? journal.after : actual === beforeHash ? journal.before : undefined
     if (!recovered) throw new ArtifactConflict()
-    atomicWrite(this.recordPath(id), JSON.stringify(recovered)); unlinkSync(path)
-    return recovered
+    const refreshed = withFileIdentity(recovered)
+    atomicWrite(this.recordPath(id), JSON.stringify(refreshed)); unlinkSync(path)
+    return refreshed
     }, registryHeld)
   }
   restore(id: string, expectedVersion: string, versionId: string, sourceRunId?: string): ArtifactRecord {
-    const temp = join(this.root, `${randomUUID()}.restore`)
-    try { atomicWrite(temp, this.versionBytes(id, versionId)); return this.apply(id, expectedVersion, temp, sourceRunId, versionId) }
-    finally { if (existsSync(temp)) unlinkSync(temp) }
+    return this.locked(id, () => {
+      const record = this.read(id)
+      const pendingPath = `${this.recordPath(id)}.pending`
+      if (existsSync(pendingPath)) throw new Error('An interrupted restore must be reconciled first')
+      const current = record.versions.find(version => version.id === expectedVersion)
+      const target = record.versions.find(version => version.id === versionId)
+      if (!target) throw new Error('Artifact version not found')
+      if (!current || record.currentVersion !== expectedVersion || !isCurrentFile(record)
+        || this.snapshot(record.path).digest !== current.hash) throw new ArtifactConflict()
+      if (versionId === expectedVersion) throw new Error('Select a previous version to restore')
+      const bytes = this.versionBytes(id, versionId)
+      const after: ArtifactRecord = { ...record, currentVersion: versionId,
+        lastRestore: { versionId, ...(sourceRunId ? { sourceRunId } : {}) } }
+      atomicWrite(pendingPath, JSON.stringify({ version: 1, operation: 'restore', before: record, after }))
+      if (!isCurrentFile(record) || this.snapshot(record.path).digest !== current.hash) { unlinkSync(pendingPath); throw new ArtifactConflict() }
+      atomicWrite(record.path, bytes, statSync(record.path).mode & 0o777)
+      const published = withFileIdentity(after)
+      atomicWrite(this.recordPath(id), JSON.stringify(published))
+      unlinkSync(pendingPath)
+      return published
+    })
   }
   relocate(id: string, path: string, expectedVersion: string): ArtifactRecord {
     const release = acquireProjectLock(join(this.root, 'locks', 'registry'))
@@ -359,8 +476,9 @@ export class ArtifactVersions {
     const current = record.versions.find(v => v.id === record.currentVersion)!
     const snapshot = this.snapshot(canonical)
     const next = snapshot.digest === current.hash ? undefined : { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(), hash: this.put(snapshot.bytes), size: snapshot.bytes.length, createdAt: Date.now() }
-    const relocated: ArtifactRecord = { ...record, path: canonical, previousPaths: [...new Set([...(record.previousPaths ?? []), record.path])], currentVersion: next?.id ?? record.currentVersion,
-      versions: next ? [...record.versions, next] : record.versions }
+    const relocated: ArtifactRecord = withFileIdentity({ ...record, path: canonical, previousPaths: [...new Set([...(record.previousPaths ?? []), record.path])], currentVersion: next?.id ?? record.currentVersion,
+      versions: next ? [...record.versions, next] : record.versions })
+    delete relocated.lastRestore
     atomicWrite(this.recordPath(id), JSON.stringify(relocated)); return relocated
     }, true) } finally { release() }
   }

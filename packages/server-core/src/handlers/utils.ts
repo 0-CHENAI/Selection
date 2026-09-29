@@ -130,7 +130,9 @@ export function listLocalFolderPaths(workspaceRootPath: string): string[] {
 export function normalizeAccessibleFilePath(filePath: string, platform = process.platform): string {
   let value = filePath.trim()
   if (!value) return value
-  if (value.includes('%')) {
+  // A native filename may literally contain "%20". Keep an existing path
+  // before interpreting percent escapes from a Markdown or file URL.
+  if (value.includes('%') && !existsSync(value)) {
     try {
       value = decodeURIComponent(value)
     } catch {

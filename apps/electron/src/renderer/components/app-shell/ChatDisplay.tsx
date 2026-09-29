@@ -161,7 +161,7 @@ interface ChatDisplayProps {
   session: Session | null
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => void
   onOpenFile: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   onOpenUrl: (url: string) => void
   // Model selection
   currentModel: string

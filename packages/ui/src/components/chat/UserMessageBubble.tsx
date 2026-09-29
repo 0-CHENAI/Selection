@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, Clock, Copy } from 'lucide-react'
+import { ArrowRight, Check, Clock, Copy } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
 // Lightweight path — do NOT import @craft-agent/shared/agent (pulls bash-parser into Vite)
@@ -24,6 +24,7 @@ import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../tooltip'
 import { useTranslation } from 'react-i18next'
 import { getUserMessageCopyText } from './visible-user-message-text'
+import { parseArtifactRestoreDisplay } from './artifact-restore-display'
 
 // Fallback text icons for badges without iconDataUrl
 // Using simple characters since SVG rendering may not work in all contexts
@@ -358,6 +359,10 @@ export function UserMessageBubble({
   const { t, i18n } = useTranslation()
   const { onCopyToClipboard } = usePlatform()
   const hasAttachments = attachments && attachments.length > 0
+  const restoreDisplay = useMemo(
+    () => !badges?.length ? parseArtifactRestoreDisplay(content) : null,
+    [content, badges],
+  )
   const copyText = useMemo(() => getUserMessageCopyText(content, badges ?? []), [content, badges])
   const canCopy = copyText.length > 0
   const timeLabel = timestamp != null && !compactMode
@@ -547,7 +552,22 @@ export function UserMessageBubble({
             <span className="text-[11px] italic">{t('chat.queuedBadge')}</span>
           </div>
         )}
-        {hasInlineBadges
+        {restoreDisplay ? (
+          <div className="flex min-w-[168px] max-w-full flex-col items-center gap-2">
+            <FileTypeIcon fileName={restoreDisplay.fileName} className="h-10 w-10" />
+            <div className="max-w-full self-stretch truncate text-center text-sm font-medium leading-5" title={restoreDisplay.path}>{restoreDisplay.fileName}</div>
+            <div className="flex items-center gap-2 whitespace-nowrap text-xs leading-4">
+              <span className="text-muted-foreground">
+                {restoreDisplay.fromOrdinal === undefined
+                  ? t('chat.artifactVersions.previousVersion')
+                  : t('chat.artifactVersions.version', { number: restoreDisplay.fromOrdinal })}
+              </span>
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="font-medium text-success">{t('chat.artifactVersions.version', { number: restoreDisplay.ordinal })}</span>
+            </div>
+            {restoreDisplay.summary && <p className="max-w-[260px] text-center text-xs leading-relaxed text-muted-foreground">{restoreDisplay.summary}</p>}
+          </div>
+        ) : hasInlineBadges
           ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick)
           : (
             <Markdown

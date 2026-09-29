@@ -75,6 +75,9 @@ function sameFolderName(a: string, b: string, windows: boolean): boolean {
  */
 export function listGeneratedFilePathCandidates(path: string, baseDir?: string | null): string[] {
   const normalized = normalizeGeneratedFilePath(path, hasWindowsBase(baseDir) || isWindowsRuntime())
+  if (path.includes('%') && !/^file:/i.test(path) && isAbsolutePath(path) && path !== normalized) {
+    return [path, ...listGeneratedFilePathCandidates(normalized, baseDir)]
+  }
   if (isAbsolutePath(normalized) || normalized.startsWith('~/') || normalized.startsWith('\\\\')) {
     return [normalized]
   }

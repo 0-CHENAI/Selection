@@ -78,6 +78,7 @@ export interface ISessionManager {
 
   setProgressSupervision?(sessionId: string, enabled: boolean): void
   cleanupArtifactVersions?(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  restoreArtifactVersionForSession?(sessionId: string, artifactId: string, expectedVersion: string, versionId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
   getBodyFeedbackDetails?(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]>
   getArtifactFeedbackContext?(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }>
   listArtifactFeedback?(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>

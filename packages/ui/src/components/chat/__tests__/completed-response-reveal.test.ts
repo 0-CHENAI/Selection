@@ -32,17 +32,13 @@ describe('completed response semantic reveal boundary', () => {
     }
   })
 
-  it('renders the artifact placeholder only while review is pending', () => {
-    const base = { text: '完成', isStreaming: false, isTurnComplete: true, featuredArtifacts: [] }
+  it('renders recorded file changes with the completed answer', () => {
+    const base = { text: '完成', isStreaming: false, isTurnComplete: true }
     const empty = renderToStaticMarkup(React.createElement(ResponseCard, base))
-    const pending = renderToStaticMarkup(React.createElement(ResponseCard, { ...base, artifactReviewStatus: 'pending' }))
     const complete = renderToStaticMarkup(React.createElement(ResponseCard, {
-      ...base, artifactReviewStatus: 'complete', featuredArtifacts: ['/tmp/中文 报告.html'],
+      ...base, artifactVersions: [{ path: '/tmp/中文 报告.html', ordinal: 1, change: 'created' }],
     }))
-    expect(empty).not.toContain('chat.artifactReview.pending')
-    expect(pending).toContain('chat.artifactReview.pending')
-    expect(pending).not.toContain('中文 报告.html')
+    expect(empty).not.toContain('中文 报告.html')
     expect(complete).toContain('中文 报告.html')
-    expect(complete).not.toContain('chat.artifactReview.pending')
   })
 })

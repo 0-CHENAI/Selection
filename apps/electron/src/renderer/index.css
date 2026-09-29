@@ -951,7 +951,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   animation: artifact-versions-dialog-out 180ms ease-in both !important;
 }
 
-/* Pointer clicks should not leave a selected-looking box; keyboard focus stays visible. */
+/* Keep version actions frameless even when focused; text/icon emphasis marks keyboard focus. */
 .artifact-versions-dialog [data-slot="dialog-close"][data-state="open"],
 .artifact-versions-dialog [data-slot="dialog-close"]:focus:not(:focus-visible) {
   background: transparent;
@@ -963,9 +963,17 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 }
 
 .artifact-versions-dialog button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  outline: none;
   box-shadow: none;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.artifact-versions-dialog [data-slot="dialog-close"]:focus-visible {
+  background: transparent;
+  opacity: 1;
+  text-decoration: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

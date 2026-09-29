@@ -35,6 +35,28 @@ test('loading an older answer shows only files versioned by that answer', async 
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('a new chat displays its first delivery as version 1 while shared file snapshots remain intact', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'session-artifact-local-'))
+  try {
+    const workspace = { id: 'workspace', name: 'Workspace', rootPath: root }
+    const file = join(root, 'report.docx')
+    writeFileSync(file, 'old content')
+    const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), workspace.id)
+    const old = store.register(file, 'old/user-1')
+    writeFileSync(file, 'new content')
+    const current = store.capture(old.id, 'new/user-1')
+    const manager = new SessionManager()
+    const newer = createManagedSession({ id: 'new' }, workspace as never, { messagesLoaded: true })
+    newer.messages.push({ id: 'user-1', role: 'user', content: '创建文档', timestamp: 1 },
+      { id: 'answer-1', role: 'assistant', content: '[文件](report.docx)', timestamp: 2,
+        artifactVersions: [{ path: file, versionId: current.currentVersion, ordinal: 2, change: 'created' }] })
+    ;(manager as any).sessions.set(newer.id, newer)
+    const shown = await manager.getSession(newer.id)
+    expect(shown?.messages[1]?.artifactVersions?.[0]).toMatchObject({ ordinal: 2, sessionOrdinal: 1 })
+    expect(store.read(old.id).versions).toHaveLength(2)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('streamed final answers publish file versions in the live event and saved session', async () => {
   const root = mkdtempSync(join(tmpdir(), 'streaming-artifact-display-'))
   try {
@@ -104,13 +126,15 @@ test('streamed file versions retain bytes and can be restored through the versio
       versionId: first.currentVersion, expectedVersion: second.currentVersion,
     })
     expect(readFileSync(file, 'utf8')).toBe('first version')
-    expect(restored.versions).toHaveLength(3)
-    expect(restored.versions.at(-1)).toMatchObject({ restoredFrom: first.currentVersion, sourceRunId: 'session/user-3' })
+    expect(restored.versions).toHaveLength(2)
+    expect(restored.currentVersion).toBe(first.currentVersion)
+    expect(restored.lastRestore).toMatchObject({ versionId: first.currentVersion, sourceRunId: 'session/user-3' })
     await (manager as any).processEvent(managed, { type: 'text_complete', text: '已恢复第 1 版。' })
     const restoreAnswer = managed.messages.at(-1)!
-    expect(restoreAnswer.artifactVersions).toMatchObject([{ versionId: restored.currentVersion, ordinal: 3, change: 'restored' }])
+    expect(restoreAnswer.artifactVersions).toMatchObject([{ versionId: restored.currentVersion, ordinal: 1, change: 'restored' }])
     await manager.flushSession(managed.id)
     expect(loadStoredSession(root, managed.id)?.messages.at(-1)?.artifactVersions).toEqual(restoreAnswer.artifactVersions)
+    expect((await manager.getSession(managed.id))?.messages.at(-1)?.artifactVersions).toEqual(restoreAnswer.artifactVersions)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -128,7 +152,6 @@ test('Windows backslash links into .selection capture created and modified docum
       () => { throw new Error('Artifact recording failed') }, Date.now() - 1000)
 
     writeFileSync(file, 'hello')
-    expect(await tracker().featured([file, `file:///${file.replace(/\\/g, '/').replaceAll(' ', '%20')}`])).toEqual([realpathSync(file)])
     const created = await tracker().capture(answer, 'session/user-1')
     expect(created).toMatchObject([{ path: file.replace(/\\/g, '/'), ordinal: 1, change: 'created' }])
 

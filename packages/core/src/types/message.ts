@@ -281,8 +281,13 @@ export type ArtifactDeliveryChange = 'created' | 'modified' | 'deleted' | 'resto
 
 export interface ArtifactDeliveryRef {
   path: string;
+  /** Stable file identity; absent from messages written before managed artifacts carried it. */
+  artifactId?: string;
   versionId: string;
+  /** Workspace history ordinal. */
   ordinal: number;
+  /** Ordinal of this file's distinct versions shown in the owning session. */
+  sessionOrdinal?: number;
   /** Absent on references saved before change kinds were recorded. */
   change?: ArtifactDeliveryChange;
 }
@@ -360,10 +365,6 @@ export interface Message {
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
   artifactVersions?: ArtifactDeliveryRef[];
-  /** Host-validated primary result files selected for this answer's card. */
-  featuredArtifacts?: string[];
-  /** Delivery review state; pending is transient, complete/failed are durable. */
-  artifactReviewStatus?: 'pending' | 'complete' | 'failed';
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -471,9 +472,6 @@ export interface StoredMessage {
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
   artifactVersions?: ArtifactDeliveryRef[];
-  /** Host-validated primary result files selected for this answer's card. */
-  featuredArtifacts?: string[];
-  artifactReviewStatus?: 'pending' | 'complete' | 'failed';
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

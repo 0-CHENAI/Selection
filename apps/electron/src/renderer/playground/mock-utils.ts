@@ -41,6 +41,8 @@ function emitBindingChanged() {
 
 export const mockElectronAPI = {
   isDebugMode: async () => true,
+  isChannelAvailable: (channel: string) => channel === 'artifacts:preview',
+  previewArtifactVersion: async () => '/documents/hello.docx',
 
   // Called at module-load time by SessionFilesSection.tsx (and others) to
   // branch between Electron and web-UI rendering. Must be synchronous.

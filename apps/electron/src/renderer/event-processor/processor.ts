@@ -217,15 +217,6 @@ export function processEvent(
     case 'message_annotations_updated':
       return handleMessageAnnotationsUpdated(state, event)
 
-    case 'artifact_selection_updated':
-      return {
-        state: { ...state, session: { ...state.session, messages: state.session.messages.map(message =>
-          message.id === event.messageId ? { ...message, artifactReviewStatus: event.artifactReviewStatus,
-            featuredArtifacts: event.featuredArtifacts ?? message.featuredArtifacts,
-            artifactVersions: event.artifactVersions ?? message.artifactVersions } : message) } },
-        effects: [],
-      }
-
     case 'session_shared':
       return handleSessionShared(state, event)
 

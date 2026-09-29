@@ -61,7 +61,7 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               expect(loadSession(root, managed.id)?.messages.some(m => m.content === answer.slice(0, 30))).toBe(false)
               yield { type: 'answer_preview', toolCallId: 'delivery', text: answer }
               yield { type: 'tool_start', toolName: 'submit_answer', toolUseId: 'delivery', input: { markdown: answer } }
-              await control!.submit({ markdown: answer, featuredArtifacts: featured, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
+              await control!.submit({ markdown: answer, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
               yield { type: 'tool_result', toolName: 'submit_answer', toolUseId: 'delivery', result: 'Answer delivered.', isError: false }
               yield { type: 'text_complete', text: '迟到短句不能覆盖正文。', phase, turnId: 'provider-3' }
             }
@@ -85,10 +85,6 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
         manager.setEventSink((_channel, _target, event) => events.push(event as RendererEvent))
         try {
           await manager.sendMessage(managed.id, request)
-          if (featured.length) {
-            for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
-            expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')).toBe(true)
-          }
           await manager.flushSession(managed.id)
           let state: SessionState = {
             session: { id: managed.id, workspaceId: 'workspace', workspaceName: 'Test', messages: [], isProcessing: true, lastMessageAt: 0 },
@@ -127,9 +123,9 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response!, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
           if (delivery !== 'salvaged') {
-            expect(liveTurns[0]!.response?.featuredArtifacts).toHaveLength(featured.length)
-            if (featured.length) expect(readFileSync(liveTurns[0]!.response!.featuredArtifacts![0]!, 'utf8')).toBe('<h1>Simulation</h1>')
-            expect(loadedTurns[0]!.response?.featuredArtifacts).toEqual(liveTurns[0]!.response?.featuredArtifacts)
+            expect(liveTurns[0]!.response?.artifactVersions).toHaveLength(featured.length)
+            if (featured.length) expect(readFileSync(liveTurns[0]!.response!.artifactVersions![0]!.path, 'utf8')).toBe('<h1>Simulation</h1>')
+            expect(loadedTurns[0]!.response?.artifactVersions).toEqual(liveTurns[0]!.response?.artifactVersions)
           }
           // Drafts folded by the UI must still survive in the durable execution record.
           expect(reloaded.some(m => m.isIntermediate && m.content === explanation)).toBe(true)

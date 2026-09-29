@@ -41,6 +41,7 @@
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/artifact-links": "./src/utils/artifact-links.ts",
+    "./utils/artifact-restore-message": "./src/utils/artifact-restore-message.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
     "./utils/logo": "./src/utils/logo.ts",
     "./utils/service-url": "./src/utils/service-url.ts",

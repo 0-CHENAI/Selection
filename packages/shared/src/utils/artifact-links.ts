@@ -81,3 +81,9 @@ export function isSessionScratchPath(path: string): boolean {
   return /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans)(?:\/|$)/.test(normalized)
     || /(?:^|\/)sessions\/[^/]+\/(?:data|plans)(?:\/|$)/.test(normalized)
 }
+
+/** Formats shown on the conversation's changed-file shelf. */
+export function isArtifactCardPath(path: string): boolean {
+  return /\.(?:docx?|docm|dotx?|dotm|rtf|pptx?|pptm|potx?|potm|ppsx?|ppsm|xlsx?|xlsm|xlsb|xltx?|xltm|html?|txt|tex|latex|md|markdown|pdf)$/i.test(path)
+    && !isSessionScratchPath(path)
+}

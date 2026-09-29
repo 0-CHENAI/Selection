@@ -38,12 +38,10 @@ it('still rejects missing or empty markdown without invoking delivery', async ()
   }
   expect(calls).toBe(0)
 })
-it('requires a deliberate result selection and passes it separately from the answer', async () => {
-  let featured: string[] | undefined
-  const ctx = { submitAnswer: async (_markdown: string, _title: string | undefined, paths: string[] | undefined) => { featured = paths } } as SessionToolContext
-  expect((await handleSubmitAnswer(ctx, { markdown: '[数据](data.json)' })).isError).toBe(true)
-  expect((await handleSubmitAnswer(ctx, { markdown: '[数据](data.json)', featuredArtifacts: [] })).isError).not.toBe(true)
-  expect(featured).toEqual([])
+it('accepts old selection metadata without forwarding it to delivery', async () => {
+  const delivered: string[] = []
+  const ctx = { submitAnswer: async (markdown: string) => { delivered.push(markdown) } } as SessionToolContext
+  expect((await handleSubmitAnswer(ctx, { markdown: '[数据](data.json)' })).isError).not.toBe(true)
   expect((await handleSubmitAnswer(ctx, { markdown: '[报告](report.html)', featuredArtifacts: ['report.html'] })).isError).not.toBe(true)
-  expect(featured).toEqual(['report.html'])
+  expect(delivered).toEqual(['[数据](data.json)', '[报告](report.html)'])
 })

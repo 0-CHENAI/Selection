@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, sep } from 'path'
 import { normalizePathForComparison, resolveFsPath } from '@craft-agent/shared/utils'
@@ -169,5 +169,16 @@ describe('validateWorkspaceFilePath', () => {
       '/c/Users/fairy/.selection/sessions/报告 (1)_批注.docx',
       'win32',
     )).toBe('C:/Users/fairy/.selection/sessions/报告 (1)_批注.docx')
+  })
+
+  it('preserves a literal percent sequence in an existing filename', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-percent-file-'))
+    tempRoots.push(root)
+    const literal = join(root, 'Q3%20报告.pdf')
+    const spaced = join(root, 'Q4 报告.pdf')
+    writeFileSync(literal, 'literal')
+    writeFileSync(spaced, 'spaced')
+    expect(await validateFilePath(literal)).toBe(realpathSync(literal))
+    expect(await validateFilePath(spaced.replace(' ', '%20'))).toBe(realpathSync(spaced))
   })
 })

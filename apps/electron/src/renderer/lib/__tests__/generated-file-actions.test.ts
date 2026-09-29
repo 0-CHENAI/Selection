@@ -95,4 +95,65 @@ describe('generated artifact actions', () => {
     expect(await opening).toBe(true)
     expect(settled).toBe(true)
   })
+
+  test('a card with a literal percent filename opens that exact version record', async () => {
+    const literal = '/reports/Q3%20报告.pdf'
+    const opened: string[] = []
+    await openGeneratedFileAction({
+      requestedPath: literal,
+      action: 'versions',
+      statPath: async path => path === literal ? { path, type: 'file' } : null,
+      searchFiles: async () => [],
+      manageArtifact: path => { opened.push(path) },
+      openPreview: () => {},
+      reveal: () => {},
+    })
+    expect(opened).toEqual([literal])
+  })
+
+  test('a saved version identity opens history after the original filename disappears', async () => {
+    const calls: string[] = []
+    await openGeneratedFileAction({
+      requestedPath: '/reports/old.docx', action: 'versions', versionId: 'version-id',
+      statPath: async () => { throw new Error('The old path is missing') },
+      searchFiles: async () => [],
+      manageArtifact: (path, alternatives, versionId) => { calls.push(`${path}:${versionId}:${alternatives?.length ?? 0}`) },
+      openPreview: () => {}, reveal: () => {},
+    })
+    expect(calls).toEqual(['/reports/old.docx:version-id:0'])
+  })
+
+  test('a historical card previews its saved bytes after the path is reused', async () => {
+    const opened: string[] = []
+    await openGeneratedFileAction({
+      requestedPath: '/reports/report.docx', action: 'preview', artifactId: 'old-artifact', versionId: 'old-version',
+      statPath: async () => { throw new Error('The original path now belongs to another file') },
+      searchFiles: async () => [],
+      previewVersion: async (artifactId, versionId) => `/snapshots/${artifactId}/${versionId}.docx`,
+      openPreview: path => { opened.push(path) }, reveal: () => {},
+    })
+    expect(opened).toEqual(['/snapshots/old-artifact/old-version.docx'])
+    await expect(openGeneratedFileAction({
+      requestedPath: '/reports/report.docx', action: 'preview', versionId: 'old-version',
+      statPath: async () => ({ path: '/reports/report.docx', type: 'file' }),
+      searchFiles: async () => [], openPreview: path => { opened.push(path) }, reveal: () => {},
+    })).rejects.toThrow('preview is unavailable')
+    expect(opened).toHaveLength(1)
+  })
+
+  test('external open follows the saved identity and refuses a reused path', async () => {
+    const opened: string[] = []
+    const options = {
+      requestedPath: '/reports/old.docx', action: 'external' as const, artifactId: 'artifact',
+      statPath: async (path: string) => ({ path, type: 'file' as const }),
+      searchFiles: async () => [], openPreview: () => {},
+      openExternal: (path: string) => { opened.push(path) }, reveal: () => {},
+      readArtifact: async () => ({ path: '/reports/renamed.docx', currentFileAvailable: true }),
+    }
+    await openGeneratedFileAction(options)
+    expect(opened).toEqual(['/reports/renamed.docx'])
+    await expect(openGeneratedFileAction({ ...options,
+      readArtifact: async () => ({ path: '/reports/old.docx', currentFileAvailable: false }) })).rejects.toThrow('no longer available')
+    expect(opened).toHaveLength(1)
+  })
 })

@@ -8,11 +8,13 @@ export interface BodyFeedbackRevision {
 }
 export interface ManagedArtifact {
   version: 1; id: string; hostId: string; workspaceId: string; path: string; currentVersion: string; versions: ArtifactVersion[]
+  currentFileAvailable?: boolean
 }
 export type ArtifactOperation =
-  | { type: 'register'; path: string; alternativePaths?: string[] }
+  | { type: 'register'; path: string; alternativePaths?: string[]; sessionId?: string; versionId?: string }
   | { type: 'read'; artifactId: string }
   | { type: 'restore'; artifactId: string; expectedVersion: string; versionId: string }
+  | { type: 'restoreForSession'; sessionId: string; artifactId: string; expectedVersion: string; versionId: string }
   | { type: 'relocate'; artifactId: string; path: string; expectedVersion: string }
 export interface ArtifactFeedback {
   revision?: number

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ArtifactVersions } from './artifact-versions'
@@ -23,6 +23,42 @@ test('an existing primary file never borrows an alternative file identity, inclu
     expect(replacement.id).not.toBe(primary.id)
     expect(store.versionBytes(replacement.id, replacement.currentVersion).toString()).toBe('new file at the old location')
     expect(store.read(primary.id).versions).toHaveLength(1)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('deleting and recreating a file at the same path starts a separate history', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-recreated-path-'))
+  try {
+    const file = join(root, 'report.txt'), candidate = join(root, 'candidate.txt')
+    writeFileSync(file, 'first'); writeFileSync(candidate, 'second')
+    const store = new ArtifactVersions(join(root, 'store'), 'host', 'workspace')
+    const first = store.register(file)
+    const revised = store.apply(first.id, first.currentVersion, candidate)
+    rmSync(file)
+    writeFileSync(file, 'second') // Same bytes as the current version, but a different file.
+    expect(() => store.restore(first.id, revised.currentVersion, first.currentVersion)).toThrow('changed outside')
+    const replacement = store.register(file)
+    expect(replacement.id).not.toBe(first.id)
+    expect(replacement.versions).toHaveLength(1)
+    expect(store.findByPath(file)?.id).toBe(replacement.id)
+    expect(store.read(first.id).currentVersion).toBe(revised.currentVersion)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a renamed file remains discoverable after its old path is reused', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-reused-rename-'))
+  try {
+    const original = join(root, 'report.txt'), moved = join(root, 'renamed.txt')
+    writeFileSync(original, 'same')
+    const store = new ArtifactVersions(join(root, 'store'), 'host', 'workspace')
+    const first = store.register(original)
+    renameSync(original, moved)
+    writeFileSync(original, 'same')
+    const replacement = store.register(original)
+    expect(replacement.id).not.toBe(first.id)
+    expect(store.refreshMovedRecord(first.id).path).toBe(realpathSync(moved))
+    expect(store.findByPath(original)?.id).toBe(replacement.id)
+    expect(store.findByPath(moved)?.id).toBe(first.id)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -63,7 +99,8 @@ test('same-name, same-type and mixed-type files keep independent histories and p
     const beforeOtherFiles = paths.slice(1).map(path => readFileSync(path))
     const beforeOtherHistories = first.slice(1).map(record => reloaded.read(record.id))
     const restored = reloaded.restore(first[0]!.id, reloaded.read(first[0]!.id).currentVersion, first[0]!.currentVersion)
-    expect(restored.versions).toHaveLength(4)
+    expect(restored.versions).toHaveLength(3)
+    expect(restored.currentVersion).toBe(first[0]!.currentVersion)
     expect(readFileSync(paths[0]!)).toEqual(originals[0]!)
     expect(paths.slice(1).map(path => readFileSync(path))).toEqual(beforeOtherFiles)
     expect(first.slice(1).map(record => reloaded.read(record.id))).toEqual(beforeOtherHistories)
@@ -105,7 +142,7 @@ test('missing recovery candidates find only exact stored identities and reject a
     expect(() => store.register(join(root, 'unregistered.txt'))).toThrow()
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
-test('versions preserve content, reject external edits and restore as a new version', () => {
+test('versions preserve content, reject external edits and switch to an existing version', () => {
   const root = mkdtempSync(join(tmpdir(), 'artifacts-'))
   try {
     const file = join(root, '报告.txt'), candidate = join(root, 'candidate.txt')
@@ -119,10 +156,20 @@ test('versions preserve content, reject external edits and restore as a new vers
     expect(() => store.restore(first.id, second.currentVersion, first.currentVersion)).toThrow('changed outside')
     expect(readFileSync(file, 'utf8')).toBe('external')
     writeFileSync(file, 'changed')
-    const third = store.restore(first.id, second.currentVersion, first.currentVersion)
-    expect(third.versions).toHaveLength(3)
+    const restored = store.restore(first.id, second.currentVersion, first.currentVersion, 'session/restore-1')
+    expect(restored.versions).toHaveLength(2)
     expect(readFileSync(file, 'utf8')).toBe('original')
-    expect(third.currentVersion).not.toBe(first.currentVersion)
+    expect(restored.currentVersion).toBe(first.currentVersion)
+    expect(restored.lastRestore).toEqual({ versionId: first.currentVersion, sourceRunId: 'session/restore-1' })
+    const switchedBack = store.restore(first.id, restored.currentVersion, second.currentVersion)
+    expect(switchedBack.versions).toHaveLength(2)
+    expect(switchedBack.currentVersion).toBe(second.currentVersion)
+    expect(readFileSync(file, 'utf8')).toBe('changed')
+    writeFileSync(file, 'edited after restore')
+    const edited = store.capture(first.id, 'session/edit-2')
+    expect(edited.versions).toHaveLength(3)
+    expect(edited.versions.at(-1)?.ordinal).toBe(3)
+    expect(edited.lastRestore).toBeUndefined()
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -145,6 +192,30 @@ test('reconcile recovers a crash after target replacement without writing over a
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('reconcile recovers a direct version switch without creating another version', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-restore-crash-'))
+  try {
+    const file = join(root, 'file.txt'), candidate = join(root, 'next.txt'), storage = join(root, 'store')
+    writeFileSync(file, 'first'); writeFileSync(candidate, 'second')
+    const store = new ArtifactVersions(storage, 'host', 'workspace')
+    const first = store.register(file)
+    const before = store.apply(first.id, first.currentVersion, candidate)
+    const after = store.restore(first.id, before.currentVersion, first.currentVersion, 'session/restore')
+    writeFileSync(join(storage, `${first.id}.json`), JSON.stringify(before))
+    writeFileSync(join(storage, `${first.id}.json.pending`), JSON.stringify({ version: 1, operation: 'restore', before, after }))
+    const recovered = new ArtifactVersions(storage, 'host', 'workspace').reconcile(first.id)
+    expect(recovered.currentVersion).toBe(first.currentVersion)
+    expect(recovered.versions).toHaveLength(2)
+    expect(recovered.lastRestore?.sourceRunId).toBe('session/restore')
+    expect(readFileSync(file, 'utf8')).toBe('first')
+
+    writeFileSync(join(storage, `${first.id}.json.pending`), JSON.stringify({ version: 1, operation: 'restore', before, after }))
+    writeFileSync(file, 'external edit')
+    expect(() => store.reconcile(first.id)).toThrow('changed outside')
+    expect(readFileSync(file, 'utf8')).toBe('external edit')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('relocation preserves identity when the file is opened at its new location', () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-relocate-'))
   try {
@@ -154,6 +225,42 @@ test('relocation preserves identity when the file is opened at its new location'
     const first = store.register(original)
     store.relocate(first.id, moved, first.currentVersion)
     expect(store.register(moved).id).toBe(first.id)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a verified rename retains its artifact identity while an identical copy stays separate', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-rename-'))
+  try {
+    const original = join(root, 'original.txt'), renamed = join(root, 'renamed.txt'), copy = join(root, 'copy.txt')
+    writeFileSync(original, 'body')
+    const store = new ArtifactVersions(join(root, 'store'), 'host', 'workspace')
+    const first = store.register(original)
+    writeFileSync(copy, 'body')
+    expect(store.register(copy).id).not.toBe(first.id)
+    renameSync(original, renamed)
+    const moved = store.register(renamed)
+    expect(moved.id).toBe(first.id)
+    expect(moved.versions).toHaveLength(1)
+    expect(moved.previousPaths).toContain(first.path)
+    expect(store.findByVersionId(first.currentVersion)?.path).toBe(moved.path)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a renamed and edited file retains its identity and captures the edit as another version', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-rename-edit-'))
+  try {
+    const original = join(root, 'original.txt'), renamed = join(root, 'renamed.txt')
+    writeFileSync(original, 'before')
+    const store = new ArtifactVersions(join(root, 'store'), 'host', 'workspace')
+    const first = store.register(original)
+    renameSync(original, renamed)
+    writeFileSync(renamed, 'after')
+    const moved = store.register(renamed)
+    expect(moved.id).toBe(first.id)
+    const updated = store.capture(moved.id)
+    expect(updated.versions).toHaveLength(2)
+    expect(store.versionBytes(updated.id, first.currentVersion).toString()).toBe('before')
+    expect(store.versionBytes(updated.id, updated.currentVersion).toString()).toBe('after')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -343,9 +450,9 @@ test('explicit history removal enforces references, expected version and restore
     store.releaseVersions(base.id, 'feedback')
     expect(() => store.removeVersions(base.id, base.currentVersion, [base.currentVersion])).toThrow('changed')
     const restored = store.restore(base.id, second.currentVersion, base.currentVersion)
-    expect(() => store.removeVersions(base.id, restored.currentVersion, [base.currentVersion])).toThrow('referenced')
+    expect(() => store.removeVersions(base.id, restored.currentVersion, [base.currentVersion])).toThrow('current')
     const result = store.removeVersions(base.id, restored.currentVersion, [second.currentVersion])
-    expect(result.versions.map(version => version.id)).toEqual([base.currentVersion, restored.currentVersion])
+    expect(result.versions.map(version => version.id)).toEqual([base.currentVersion])
     expect(readFileSync(file, 'utf8')).toBe('base')
     expect(store.cleanUnreferencedBlobs().removed).toBe(1)
     expect(store.versionBytes(base.id, base.currentVersion).toString()).toBe('base')

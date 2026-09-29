@@ -616,7 +616,7 @@ export type SessionEvent =
   | { type: 'progress_supervision'; sessionId: string; state: ProgressSupervisionView }
   | { type: 'answer_preview'; sessionId: string; answerRunId: string; answerRoutingVersion?: 1; userMessageId: string; text: string; toolCallId: string }
   | { type: 'text_delta'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; delta: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string }
-  | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; artifactVersions?: Message['artifactVersions']; featuredArtifacts?: string[]; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
+  | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; artifactVersions?: Message['artifactVersions']; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
   | { type: 'tool_result'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolUseId: string; toolName: string; result: string; content?: AgentToolResultContent[]; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
   | { type: 'error'; sessionId: string; error: string; timestamp?: number }
@@ -662,7 +662,6 @@ export type SessionEvent =
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   | { type: 'usage_update'; sessionId: string; tokenUsage: SessionTokenUsage }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
-  | { type: 'artifact_selection_updated'; sessionId: string; messageId: string; artifactReviewStatus: 'pending' | 'complete' | 'failed'; featuredArtifacts?: string[]; artifactVersions?: Message['artifactVersions'] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
   | { type: 'regenerate_started'; sessionId: string; runId: string }
   | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string; runId?: string }

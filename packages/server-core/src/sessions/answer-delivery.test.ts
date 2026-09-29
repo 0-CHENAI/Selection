@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
@@ -52,61 +52,104 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
 
-  it('publishes text before an independent file review adds only the report card', async () => {
-    const report = join(getSessionPath(root, managed.id), '中文 报告.html')
-    const helper = join(getSessionPath(root, managed.id), 'build.js')
-    let releaseReview!: () => void
-    const reviewGate = new Promise<void>(resolve => { releaseReview = resolve })
+  it('publishes every supported changed file without links, proposals, or a review model', async () => {
+    const dir = getSessionPath(root, managed.id)
+    const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',
+      '页面.html', '页面.htm', '笔记.txt', '论文.tex', '草稿.md', '草稿.markdown', '文档.pdf', 'Q3%20报告.pdf']
+    let modelCalls = 0
     const agent = install(async function* () {
-      writeFileSync(report, '<html><body>hello</body></html>')
-      writeFileSync(helper, 'console.log("build")')
-      await control!.submit({ ...submission, markdown: '报告完成。', featuredArtifacts: [report, helper] })
+      for (const name of [...names, 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), 'output')
+      await control!.submit({ ...submission, markdown: '文件已更新。' })
       yield { type: 'complete' }
     })
-    ;(agent as any).queryLlm = async (request: { prompt: string }) => {
-      await reviewGate
-      const files = (JSON.parse(request.prompt) as { files: Array<{ id: number; path: string }> }).files
-      expect(files.some(file => file.path.endsWith('中文 报告.html'))).toBe(true)
-      return { text: JSON.stringify({ decisions: files.map(file => ({ id: file.id,
-        role: file.path.endsWith('中文 报告.html') ? 'primary' : 'supporting', reason: file.path.endsWith('中文 报告.html') ? 'Finished report' : 'Build helper',
-      })) }) }
-    }
+    ;(agent as any).queryLlm = () => { modelCalls++; throw new Error('No review model needed') }
     managed.agent = agent as never
-    await manager.sendMessage(managed.id, '生成一份 HTML 报告')
-    expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(true)
-    expect(events.find(event => event.type === 'text_complete' && event.answerCommitted)?.featuredArtifacts).toEqual([])
-    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'pending'); i++) await Bun.sleep(10)
-    expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'pending')).toBe(true)
-    expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')).toBe(false)
-    releaseReview()
-    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
-    const update = events.find(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')
-    expect(update?.featuredArtifacts?.[0]?.endsWith('中文 报告.html')).toBe(true)
-    expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).at(-1)?.featuredArtifacts?.[0]?.endsWith('中文 报告.html')).toBe(true)
+    await manager.sendMessage(managed.id, '更新文件')
+    const update = events.find(event => event.type === 'text_complete' && event.answerCommitted)
+    expect(update?.artifactVersions?.map((ref: { path: string }) => ref.path.split('/').pop()).sort()).toEqual(names.sort())
+    expect(update?.artifactVersions).toHaveLength(names.length)
+    expect(modelCalls).toBe(0)
+    expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).at(-1)?.artifactVersions).toEqual(update.artifactVersions)
   })
 
-  it('confirms one matching new file without a second model call', async () => {
+  it('shows an unlinked edit but never an unchanged linked input', async () => {
+    const file = join(root, 'report.txt')
+    const input = join(root, 'input.pdf')
+    writeFileSync(file, 'before')
+    writeFileSync(input, 'source')
+    await Bun.sleep(5)
+    install(async function* () {
+      writeFileSync(file, 'after editing')
+      await control!.submit({ ...submission, markdown: `已修改。[参考资料](${input})` })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '修改文档')
+    const update = events.find(event => event.type === 'text_complete' && event.answerCommitted)
+    expect(update?.artifactVersions?.map((ref: { path: string }) => ref.path)).toEqual([realpathSync(file)])
+    expect(update?.artifactVersions?.[0]?.change).toBe('modified')
+  })
+
+  it('includes a newly written file at an explicit destination outside the working directory', async () => {
+    const destination = mkdtempSync(join(tmpdir(), 'selection-external-output-'))
+    const file = join(destination, 'final report.docx')
+    try {
+      install(async function* () {
+        yield { type: 'tool_start', toolName: 'Write', toolUseId: 'external-write', input: { file_path: file } }
+        writeFileSync(file, 'document')
+        yield { type: 'tool_result', toolName: 'Write', toolUseId: 'external-write', result: 'done', isError: false }
+        await control!.submit({ ...submission, markdown: '文档已生成。' })
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, '将文档保存到指定目录')
+      const answer = events.find(event => event.type === 'text_complete' && event.answerCommitted)
+      expect(answer?.artifactVersions).toMatchObject([{ path: realpathSync(file), change: 'created' }])
+    } finally { rmSync(destination, { recursive: true, force: true }) }
+  })
+
+  it('finds linked OfficeCLI outputs outside the scanned roots without adding an unchanged source', async () => {
+    const destination = mkdtempSync(join(tmpdir(), 'selection-office-output-'))
+    const created = join(destination, 'Q3%20报告.pdf')
+    const edited = join(destination, 'existing.docx')
+    const source = join(destination, 'source.pdf')
+    try {
+      writeFileSync(edited, 'before')
+      writeFileSync(source, 'input')
+      await Bun.sleep(5)
+      install(async function* () {
+        writeFileSync(created, 'new')
+        writeFileSync(edited, 'after')
+        await control!.submit({ ...submission,
+          markdown: `已完成。[新文件](${created.replaceAll('%', '%25')}) [修改稿](${edited}) [源文件](${source})` })
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, '生成并修改指定目录中的文件')
+      const refs = events.find(event => event.type === 'text_complete' && event.answerCommitted)?.artifactVersions
+      expect(refs?.map((ref: { path: string; change: string }) => [ref.path, ref.change]))
+        .toEqual([[realpathSync(created), 'created'], [realpathSync(edited), 'modified']])
+    } finally { rmSync(destination, { recursive: true, force: true }) }
+  })
+
+  it('includes a new HTML file in the committed answer without a review call', async () => {
     const report = join(getSessionPath(root, managed.id), '中文 报告.html')
     const agent = install(async function* () {
       writeFileSync(report, '<html>hello</html>')
-      await control!.submit({ ...submission, markdown: '报告完成。', featuredArtifacts: [report] })
+      await control!.submit({ ...submission, markdown: '报告完成。' })
       yield { type: 'complete' }
     })
     ;(agent as any).queryLlm = () => { throw new Error('The fast path should not query a model') }
     managed.agent = agent as never
     await manager.sendMessage(managed.id, '生成一份 HTML 报告')
-    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
-    expect(events.find(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')?.featuredArtifacts?.map((path: string) => path.endsWith('中文 报告.html'))).toEqual([true])
+    expect(events.find(event => event.type === 'text_complete' && event.answerCommitted)?.artifactVersions?.map((ref: { path: string }) => ref.path.endsWith('中文 报告.html'))).toEqual([true])
   })
 
   it('does not show artifact progress for a reply that produced no files', async () => {
     install(async function* () {
-      await control!.submit({ ...submission, markdown: '你好。', featuredArtifacts: [] })
+      await control!.submit({ ...submission, markdown: '你好。' })
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '打个招呼')
     expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(true)
-    expect(events.some(event => event.type === 'artifact_selection_updated')).toBe(false)
+    expect(events.find(event => event.type === 'text_complete' && event.answerCommitted)?.artifactVersions).toEqual([])
   })
 
   it('keeps marker-mode model prose private until the durable answer is committed', async () => {
@@ -208,7 +251,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
     expect(event.artifactVersions).toEqual(answer.artifactVersions)
     expect(answer.artifactVersions).toHaveLength(1)
-    expect(answer.artifactVersions![0]).toMatchObject({ path: 'report.html', ordinal: 2, change: 'modified' })
+    expect(answer.artifactVersions![0]).toMatchObject({ path: realpathSync(file), ordinal: 2, change: 'modified' })
     const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
     const record = versions.findByPath(file)!
     expect(record.versions).toHaveLength(2)

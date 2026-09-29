@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { isSessionScratchPath } from '@craft-agent/shared/utils'
+import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 
 type Fingerprint = { size: bigint; mtimeNs: bigint; ctimeNs: bigint }
 
@@ -8,7 +8,6 @@ type Fingerprint = { size: bigint; mtimeNs: bigint; ctimeNs: bigint }
 export class ArtifactCandidateInventory {
   private before = new Map<string, Fingerprint>()
   readonly startedAt = Date.now()
-
   constructor(private roots: readonly string[], private workspaceRoot?: string) {
     this.before = this.scan()
   }
@@ -19,6 +18,20 @@ export class ArtifactCandidateInventory {
       const old = this.before.get(path)
       return !old || old.size !== file.size || old.mtimeNs !== file.mtimeNs || old.ctimeNs !== file.ctimeNs
     }).map(([path]) => path)
+  }
+
+  existedAtStart(path: string): boolean {
+    return this.before.has(path)
+  }
+
+  covers(path: string): boolean {
+    return this.roots.some(root => {
+      let base: string
+      try { base = realpathSync(root) }
+      catch { base = resolve(root) }
+      const location = relative(base, path)
+      return location === '' || (location !== '..' && !location.startsWith(`..${sep}`) && !isAbsolute(location))
+    })
   }
 
   private scan(): Map<string, Fingerprint> {
@@ -32,7 +45,7 @@ export class ArtifactCandidateInventory {
       let entries: Dirent[]
       try { entries = readdirSync(directory, { withFileTypes: true }) }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+        if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) return
         throw error
       }
       for (const entry of entries) {
@@ -43,12 +56,12 @@ export class ArtifactCandidateInventory {
         const path = join(directory, entry.name)
         if (isSessionScratchPath(path) || entry.isSymbolicLink()) continue
         if (entry.isDirectory()) { walk(path); continue }
-        if (!entry.isFile()) continue
+        if (!entry.isFile() || !isArtifactCardPath(path)) continue
         try {
           const file = statSync(path, { bigint: true })
           files.set(path, { size: file.size, mtimeNs: file.mtimeNs, ctimeNs: file.ctimeNs })
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          if (!['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
         }
       }
     }

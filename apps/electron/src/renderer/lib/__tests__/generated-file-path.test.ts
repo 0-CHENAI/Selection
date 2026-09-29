@@ -117,6 +117,12 @@ describe('resolveGeneratedFilePath', () => {
       '/Users/me/project',
     )).toBe('/Users/me/project/docs/guide.md')
   })
+
+  test('tries a literal percent filename before a decoded absolute path', () => {
+    expect(listGeneratedFilePathCandidates('/reports/Q3%20报告.pdf')).toEqual([
+      '/reports/Q3%20报告.pdf', '/reports/Q3 报告.pdf',
+    ])
+  })
 })
 
 describe('joinBaseAndRel / pathsLikelySame', () => {

@@ -1130,8 +1130,6 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         isAnswerPreview: message.answerPreview,
         answerSalvaged: message.answerSalvaged,
         artifactVersions: message.artifactVersions,
-        featuredArtifacts: message.featuredArtifacts,
-        artifactReviewStatus: message.artifactReviewStatus,
         isStreaming: !!message.isStreaming,
         isCommentary: pendingCardStream,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
