@@ -27,7 +27,6 @@ import {
   Ban,
   Copy,
   Check,
-  Maximize2,
   CircleCheck,
   ListTodo,
   Pencil,
@@ -116,7 +115,6 @@ import { useAnnotationInteractionController } from '../annotations/use-annotatio
 import { useAnnotationIslandPresentation } from '../annotations/use-annotation-island-presentation'
 import { useAnnotationIslandEvents } from '../annotations/use-annotation-island-events'
 import { useAnnotationCancelRestore } from '../annotations/use-annotation-cancel-restore'
-import { DocumentFormattedMarkdownOverlay } from '../overlay'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
 import { parseSkillUsedMarkers } from './skill-used-markers'
@@ -1915,7 +1913,6 @@ export function ResponseCard({
   // Keep the model's answer verbatim. Source-section detection may enrich the
   // source panel, but it must never erase text from the visible reply.
   const responseText = parsedSkillUsage.content
-  const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
     () => showArtifacts ? extractDeliveredResponseArtifacts(artifactVersions) : [],
     [showArtifacts, artifactVersions],
@@ -1924,8 +1921,6 @@ export function ResponseCard({
   const presentationStreaming = isStreaming || paced.revealing
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
-  // Fullscreen state
-  const [isFullscreen, setIsFullscreen] = useState(false)
   // Pending text selection waiting for explicit follow-up action
   const interaction = useAnnotationInteractionController(JSON.stringify([sessionId, messageId]))
   const {
@@ -2738,23 +2733,6 @@ export function ResponseCard({
     return (
       <>
         <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
-          {/* Fullscreen button - desktop only; compact mode keeps message chrome minimal */}
-          {showCompletedChrome && !compactMode && !startsWithHtmlPreview && (
-          <button
-            onClick={() => setIsFullscreen(true)}
-            className={cn(
-              "absolute top-2 right-2 p-1 rounded-[6px] transition-all z-10 select-none",
-              "opacity-0 group-hover:opacity-100",
-              "bg-background shadow-minimal",
-              "text-muted-foreground/50 hover:text-foreground",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
-            )}
-            title={t('common.viewFullscreen')}
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
-          )}
-
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
@@ -2940,24 +2918,6 @@ export function ResponseCard({
           )}
         </div>
 
-        {/* Fullscreen overlay for reading/annotating response and plan content. */}
-        <DocumentFormattedMarkdownOverlay
-          content={parsedSkillUsage.content}
-          isOpen={isFullscreen}
-          onClose={() => setIsFullscreen(false)}
-          variant={isPlan ? 'plan' : undefined}
-          onOpenUrl={onOpenUrl}
-          onOpenFile={onOpenFile}
-          sessionId={sessionId}
-          messageId={messageId}
-          annotations={annotations}
-          onAddAnnotation={onAddAnnotation}
-          onRemoveAnnotation={onRemoveAnnotation}
-          onUpdateAnnotation={onUpdateAnnotation}
-          sendMessageKey={sendMessageKey}
-          openAnnotationRequest={openAnnotationRequest}
-          isStreaming={isStreaming}
-        />
         {selectionMenu}
       </>
     )
