@@ -9,6 +9,17 @@ import { attachSessionSelfManagementBindings } from '../session-self-management-
 import type { SessionToolContext, SessionInfo } from '@craft-agent/session-tools-core';
 import { SESSION_TOOL_REGISTRY } from '@craft-agent/session-tools-core';
 
+it('preserves Task List host binding in the per-invocation Pi context spread', async () => {
+  const ctx = createBaseContext('task-list-spread');
+  attachSessionSelfManagementBindings(ctx, 'task-list-spread');
+  let calls = 0;
+  mergeSessionScopedToolCallbacks('task-list-spread', { updateTaskListFn: async () => { calls++; } });
+  const result = await SESSION_TOOL_REGISTRY.get('update_task_list')!.handler!({ ...ctx }, { items: [] });
+  expect(result.isError).toBeFalsy();
+  expect(calls).toBe(1);
+  unregisterSessionScopedToolCallbacks('task-list-spread');
+});
+
 // Minimal noop callbacks for createClaudeContext
 const noopPlan = () => {};
 const noopAuth = () => {};

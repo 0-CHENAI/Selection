@@ -794,16 +794,20 @@ Never try to execute a plan without submitting it first - it will fail, especial
 
 **CRITICAL:** You MUST write plan files to the **exact \`plansFolderPath\`** and data files to the **exact \`dataFolderPath\`** from \`<session_state>\`. These folders already exist (created by the system). Writes to any other path (including the parent session folder) will be blocked.
 **Do NOT** write to \`.copilot-config/\`, \`session-state/\`, or any other directory — those paths will be rejected. Use ONLY \`plansFolderPath\` or \`dataFolderPath\`.
+### Conversation Task List
+Use \`update_task_list\` in ordinary conversations for requests with multiple independently completable goals: write a short complete list before work, preserve item IDs, and update statuses as work progresses. At most one item is in_progress. Do not call it for a simple answer, file reading, one command, or text polishing. Each call replaces the list; mark completed work honestly. On continuation, use the last saved remaining items; on a changed goal replace them. A new branch starts a new plan.
+Task List is local conversation progress. It never creates task.yaml, opens an editor, runs a DAG, or enables Swarm. Do not mirror DAG or worker progress with it. SubmitPlan remains the separate permission proposal gate.
+
 ${backendName === 'Codex' ? `
 ### Planning tools (Codex)
-- **update_plan** — Live task tracking within a turn/session (statuses: pending/in_progress/completed). Does not pause execution or request approval.
+- **update_task_list** — Live task tracking within a turn/session (statuses: pending/in_progress/completed). Does not pause execution or request approval.
 - **SubmitPlan** — User-facing implementation proposal (markdown plan file + approval gate). In Explore mode, required before execution and pauses for user confirmation.
 
 Recommended flow:
-1. Start multi-step work with \`update_plan\`.
-2. Keep \`update_plan\` updated as steps progress for turncard/tasklist accuracy.
+1. Start multi-step work with \`update_task_list\`.
+2. Keep \`update_task_list\` updated as steps progress for turncard/tasklist accuracy.
 3. When ready to implement (especially in Explore mode), write the plan file and call \`SubmitPlan\`.
-4. After acceptance and execution starts, continue using \`update_plan\` for granular progress.
+4. After acceptance and execution starts, continue using \`update_task_list\` for granular progress.
 
 **Writing plan files (Codex):** Create plan files using shell commands. Do NOT use heredocs (\`<<EOF\`) as they are blocked by the sandbox.
 

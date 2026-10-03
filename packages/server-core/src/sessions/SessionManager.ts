@@ -1,4 +1,6 @@
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
+import { taskListAllowed } from '@craft-agent/session-tools-core'
+import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
@@ -3532,7 +3534,7 @@ export class SessionManager implements ISessionManager {
         throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
       }
 
-      const sourceMessages = validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1)
+      const sourceMessages = withoutInheritedTaskLists(validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1))
 
       // Re-map embedded paths: source messages were loaded with expandSessionPath(sourceDir),
       // so they contain absolute paths to the *source* session directory. When saved to the
@@ -4957,6 +4959,11 @@ export class SessionManager implements ISessionManager {
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
+        updateTaskListFn: async () => {
+          if (!taskListAllowed(managed)) throw new Error('Task List is only available in ordinary conversations.')
+          // Tool results are persisted by the normal activity pipeline. No task
+          // directory, session status, worker or runtime is created here.
+        },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
@@ -7501,7 +7508,11 @@ export class SessionManager implements ISessionManager {
         continueUserTask: isUserTaskContinuation,
         userTaskMessage: checkpointOwner?.content ?? message,
       }
-      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
+      const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
+      const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
+        ? `${message}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : message
+      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false

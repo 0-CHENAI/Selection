@@ -8,6 +8,9 @@
  */
 
 // Types
+export { UpdateTaskListSchema, TaskListItemSchema, taskListAllowed } from './handlers/update-task-list.ts';
+export type { TaskListItem } from './handlers/update-task-list.ts';
+
 export type {
   // Credential types
   CredentialInputMode,

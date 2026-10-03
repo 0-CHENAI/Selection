@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod';
+import { UpdateTaskListSchema, handleUpdateTaskList } from './handlers/update-task-list.ts';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
@@ -758,6 +759,7 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'update_task_list', description: 'Update the flat Task List for the current user request in an ordinary conversation. For work with multiple independently completable goals, write a short list before starting and update it as you progress. Each call replaces the entire list; preserve IDs. At most one item is in_progress. Simple questions, reading a file, a single command and text polishing do not need a list. This tool only records conversation progress; it never creates a workflow, starts a run or delegates. Proposal, orchestration and worker sessions cannot use it.', inputSchema: UpdateTaskListSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleUpdateTaskList },
   { name: 'artifact_versions', description: 'List complete saved versions of a managed file, or switch the current file back to a selected saved version without creating another version. For restore, first inspect the versions and pass artifactId, versionId and expectedVersion. Never copy snapshot files by shell command; this tool checks concurrent edits and preserves the other versions.', inputSchema: ArtifactVersionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleArtifactVersions },
   { name: 'submit_answer', description: 'Deliver the complete final Markdown answer to the user. Include all explanation and verification results; correct superseded claims. File cards are generated automatically from changed files in supported formats. When a delivered file changes, include artifactVersionTitle: a specific short change description. Call alone, after all work, and stop after success. For a large HTML/SVG file already written to disk, submit a short Markdown link and checks instead of inlining the whole file. Never just refer to an earlier explanation.', inputSchema: SubmitAnswerSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleSubmitAnswer },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },

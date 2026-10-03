@@ -149,6 +149,7 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  updateTaskList?: (items: import('./handlers/update-task-list.ts').TaskListItem[]) => Promise<void>;
   /** Host-validated terminal answer delivery; never trust a subprocess-only callback. */
   submitAnswer?: (markdown: string, artifactVersionTitle?: string) => Promise<void>;
   /** Inspect or restore a managed file version in this session's workspace. */

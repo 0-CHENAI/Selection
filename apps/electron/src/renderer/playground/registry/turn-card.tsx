@@ -777,11 +777,11 @@ export const turnCardComponents: ComponentEntry[] = [
           defaultExpanded: true,
         },
       },
-      // ========== TodoWrite Variants ==========
+      // ========== Conversation Task List Variants ==========
       // Todo: Just started (all pending)
       {
         name: 'Todo: Just Started',
-        description: 'TodoWrite with all items pending - just created the plan',
+        description: 'Task List with all items pending - just created the plan',
         props: {
           activities: [completedGrepActivity],
           response: undefined,
@@ -793,21 +793,21 @@ export const turnCardComponents: ComponentEntry[] = [
       },
       // Todo: In progress
       {
-        name: 'Todo: In Progress',
-        description: 'TodoWrite with one item in progress',
+        name: 'Task List: In Progress',
+        description: 'Task List with one item in progress',
         props: {
           activities: [completedGrepActivity, completedReadActivity1],
           response: undefined,
           isStreaming: true,
           isComplete: false,
-          defaultExpanded: true,
+          defaultExpanded: false,
           todos: todosInProgress,
         },
       },
       // Todo: Mixed progress
       {
         name: 'Todo: Mixed Progress',
-        description: 'TodoWrite with mixed completed/in_progress/pending items',
+        description: 'Task List with mixed completed/in_progress/pending items',
         props: {
           activities: [completedGrepActivity, completedReadActivity1, completedBashActivity],
           response: shortResponse,
@@ -820,7 +820,7 @@ export const turnCardComponents: ComponentEntry[] = [
       // Todo: Almost done
       {
         name: 'Todo: Almost Done',
-        description: 'TodoWrite with most items completed, one in progress',
+        description: 'Task List with most items completed, one in progress',
         props: {
           activities: [completedGrepActivity, completedReadActivity1],
           response: undefined,
@@ -832,8 +832,8 @@ export const turnCardComponents: ComponentEntry[] = [
       },
       // Todo: All completed
       {
-        name: 'Todo: All Completed',
-        description: 'TodoWrite with all items done - task complete',
+        name: 'Task List: All Completed',
+        description: 'Task List with all items done - task complete',
         props: {
           activities: [completedGrepActivity, completedReadActivity1, completedBashActivity],
           response: longResponse,
@@ -859,7 +859,7 @@ export const turnCardComponents: ComponentEntry[] = [
       // Todo: Only (no activities/response)
       {
         name: 'Todo: Standalone',
-        description: 'TodoWrite without activities or response - planning phase only',
+        description: 'Task List without activities or response - planning phase only',
         props: {
           activities: [],
           response: undefined,
