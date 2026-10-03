@@ -265,6 +265,7 @@ export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'interrupted'
 
 export interface TodoItem {
+  id?: string
   /** Task content/description */
   content: string
   /** Current status */
@@ -2955,14 +2956,13 @@ function TodoRow({ todo }: { todo: TodoItem }) {
 
   return (
     <div className={cn(
-      "flex items-center gap-2 py-0.5 text-muted-foreground",
+      "flex items-start gap-2 py-1 text-muted-foreground",
       SIZE_CONFIG.fontSize,
-      todo.status === 'completed' && "opacity-50"
+      todo.status === 'completed' && "opacity-80"
     )}>
-      <TodoStatusIcon status={todo.status} />
+      <span aria-label={i18n.t(`taskList.status.${todo.status}`)} role="img" className="mt-0.5 shrink-0"><TodoStatusIcon status={todo.status} /></span>
       <span className={cn(
-        "truncate flex-1",
-        todo.status === 'completed' && "line-through"
+        "whitespace-pre-wrap break-words flex-1 min-w-0"
       )}>
         {displayText}
       </span>
@@ -2975,30 +2975,36 @@ interface TodoListProps {
 }
 
 /**
- * TodoList - Displays the current state of TodoWrite tool
- * Styled to blend with TurnCard activities
+ * Task List - independent conversation progress card.
+ * Legacy todo snapshots share this renderer.
  */
-function TodoList({ todos }: TodoListProps) {
+export function TodoList({ todos }: TodoListProps) {
+  const { t } = useTranslation()
+  const reduceMotion = !!useReducedMotion()
+  const allDone = todos.length > 0 && todos.every(todo => todo.status === 'completed')
+  const [expanded, setExpanded] = useState(!allDone)
+  const wasDone = useRef(allDone)
+  const panelId = React.useId()
+  useEffect(() => {
+    if (wasDone.current !== allDone) setExpanded(!allDone)
+    wasDone.current = allDone
+  }, [allDone])
+  const summary = allDone ? t('taskList.allCompleted') : (['in_progress', 'pending', 'completed', 'interrupted'] as const)
+    .filter(status => todos.some(todo => todo.status === status))
+    .map(status => t(`taskList.count.${status}`, { count: todos.filter(todo => todo.status === status).length })).join(' · ')
   if (todos.length === 0) return null
-
   return (
-    <div className="pl-4 pr-2 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[13px]">
-      {/* Header */}
-      <div className={cn("text-muted-foreground pb-1", SIZE_CONFIG.fontSize)}>
-        Todo List
+    <section className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-1" aria-label={t('taskList.title')}>
+      <button type="button" className="flex w-full items-center gap-2 py-2 text-left text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(value => !value)}>
+        <motion.span animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}><ChevronRight className="size-3.5" /></motion.span>
+        <span className="min-w-0 break-words">{t('taskList.title')} {summary}</span>
+      </button>
+      <div id={panelId}>
+        <ExpandableHeightPanel open={expanded} reduceMotion={reduceMotion}>
+          <div className="pb-2 pl-5">{todos.map((todo, index) => <TodoRow key={todo.id ?? `${todo.content}-${index}`} todo={todo} />)}</div>
+        </ExpandableHeightPanel>
       </div>
-      {/* Todo items */}
-      {todos.map((todo, index) => (
-        <motion.div
-          key={`${todo.content}-${index}`}
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: index * 0.03 }}
-        >
-          <TodoRow todo={todo} />
-        </motion.div>
-      ))}
-    </div>
+    </section>
   )
 }
 
@@ -3445,15 +3451,13 @@ export const TurnCard = React.memo(function TurnCard({
                   )}
                   </AnimatePresence>
                 </div>
-                {/* TodoList - inside expanded section */}
-                {todos && todos.length > 0 && (
-                  <TodoList todos={todos} />
-                )}
           </ExpandableHeightPanel>
           )}
         </WorkChrome>
       )}
       </AnimatePresence>
+
+      {todos && todos.length > 0 && <TodoList todos={todos} />}
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (

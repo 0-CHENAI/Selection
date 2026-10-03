@@ -9,6 +9,7 @@ import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
+import { parseTaskListResult } from '@craft-agent/shared/utils/task-list'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -534,33 +535,18 @@ function calculateActivityDepths(activities: ActivityItem[]): void {
  * Extract todos from TodoWrite tool results in activities.
  * Returns the latest todo state (from the most recent TodoWrite call).
  */
-function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
-  // Find all TodoWrite tool results, get the latest one
-  const todoWriteActivities = activities
-    .filter(a => a.toolName === 'TodoWrite' && a.status === 'completed' && a.content)
-    .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
-
-  const latestActivity = todoWriteActivities[0]
-  if (!latestActivity) return undefined
-
-  const latestResult = latestActivity.content
-  if (!latestResult) return undefined
-
-  try {
-    // TodoWrite result is typically a success message, but the input contains the todos
-    // We need to get the toolInput which has the todos array
-    const input = latestActivity.toolInput
-    if (input && Array.isArray(input.todos)) {
-      return input.todos.map((todo: { content: string; status: string; activeForm?: string }) => ({
-        content: todo.content,
-        status: todo.status as 'pending' | 'in_progress' | 'completed',
-        activeForm: todo.activeForm,
-      }))
+export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
+  for (const activity of [...activities].sort((a, b) => b.timestamp - a.timestamp)) {
+    if (activity.status !== 'completed' || !activity.content) continue
+    const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+    if (name === 'update_task_list') {
+      const items = parseTaskListResult(activity.content)
+      if (items) return items
+    } else if (name === 'TodoWrite' && Array.isArray(activity.toolInput?.todos)) {
+      // Read old transcripts only; TodoWrite is not the public tool contract.
+      return activity.toolInput.todos as TodoItem[]
     }
-  } catch {
-    // Failed to parse, return undefined
   }
-
   return undefined
 }
 

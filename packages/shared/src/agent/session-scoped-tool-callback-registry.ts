@@ -20,6 +20,7 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  updateTaskListFn?: (items: import('@craft-agent/session-tools-core').TaskListItem[]) => Promise<void>;
   artifactVersionsFn?: (request: {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;

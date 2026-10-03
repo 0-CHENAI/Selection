@@ -43,6 +43,7 @@
     "./utils/artifact-links": "./src/utils/artifact-links.ts",
     "./utils/artifact-restore-message": "./src/utils/artifact-restore-message.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
+    "./utils/task-list": "./src/utils/task-list.ts",
     "./utils/logo": "./src/utils/logo.ts",
     "./utils/service-url": "./src/utils/service-url.ts",
     "./utils/icon": "./src/utils/icon.ts",
