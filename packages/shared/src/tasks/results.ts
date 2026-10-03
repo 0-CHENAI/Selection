@@ -12,11 +12,13 @@ import {
   listRunIds,
   readNodeOutput,
   readRunLog,
-  readRunSpecSnapshot,
+  readRunState,
 } from './storage.ts'
-import { readLatestSpecRevision } from './revisions.ts'
+import { readSpecRevision } from './revisions.ts'
 
 export interface LoadedTaskResults {
+  taskId?: string
+  orchestratorSessionId?: string
   slug: string
   runId: string | null
   runIds: string[]
@@ -33,6 +35,7 @@ export interface LoadedTaskResults {
     sessionId?: string
     output?: string
     attempt?: number
+    revision?: number
     failureReason?: string
     outputs?: Record<string, unknown>
     artifacts?: unknown[]
@@ -46,11 +49,16 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   if (!chosen) return { slug, runId: null, runIds, nodes: [] }
 
   const log = readRunLog(root, slug, chosen)
-  const snapshot = readRunSpecSnapshot(root, slug, chosen)
+  // A revision file can precede its commit event during a crash. Use the same
+  // durable revision as TaskRunner recovery, never the newest file on disk.
+  const revision = readRunState(root, slug, chosen)?.revision
+    ?? log.reduce((latest, entry) => Math.max(latest, entry.revision ?? 0), 0)
+  const snapshot = readSpecRevision(root, slug, chosen, revision)
+  const started = log.find(entry => entry.kind === 'run-started')
   const titleById = new Map<string, string>()
   if (snapshot) for (const n of snapshot.nodes) titleById.set(n.id, nodeTitle(n))
 
-  const byId = new Map<string, { id: string; state: string; sessionId?: string; attempt: number; failureReason?: string }>()
+  const byId = new Map<string, { id: string; state: string; sessionId?: string; attempt: number; revision?: number; failureReason?: string }>()
   const ensure = (id: string) => {
     let e = byId.get(id)
     if (!e) {
@@ -64,9 +72,13 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   let tokensUsed: number | undefined
   for (const entry of log) {
     if (entry.kind === 'node-scheduled') {
-      ensure(entry.nodeId).attempt += 1
+      const node = ensure(entry.nodeId)
+      node.attempt += 1
+      node.revision = entry.revision ?? 0
     } else if (entry.kind === 'node-spawned') {
-      ensure(entry.nodeId).sessionId = entry.sessionId
+      const node = ensure(entry.nodeId)
+      node.sessionId = entry.sessionId
+      node.revision ??= entry.revision ?? 0
     } else if (entry.kind === 'artifact-results-invalidated') {
       for (const nodeId of entry.nodeIds) {
         const node = ensure(nodeId)
@@ -102,6 +114,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
       title: titleById.get(e.id) ?? e.id,
       state: e.state,
       attempt: e.attempt,
+      ...(e.revision !== undefined ? { revision: e.revision } : {}),
       ...(e.sessionId ? { sessionId: e.sessionId } : {}),
       ...(e.failureReason ? { failureReason: e.failureReason } : {}),
       ...(out?.text ? { output: out.text } : {}),
@@ -116,6 +129,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const repairMax = Math.min(snapshot?.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP)
 
   return {
+    ...(started?.kind === 'run-started' ? { taskId: started.taskId, orchestratorSessionId: started.orchestratorSessionId } : {}),
     slug,
     runId: chosen,
     runIds,
@@ -126,6 +140,6 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     ...(tokensUsed !== undefined ? { tokensUsed } : {}),
     ...(snapshot?.acceptance_criteria ? { acceptanceCriteria: snapshot.acceptance_criteria } : {}),
     nodes,
-    revision: readLatestSpecRevision(root, slug, chosen)?.revision,
+    revision: snapshot ? revision : undefined,
   }
 }

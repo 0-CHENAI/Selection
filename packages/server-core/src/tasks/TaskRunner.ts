@@ -196,7 +196,7 @@ export class TaskControlError extends Error {
 
 export interface NodeRunStatus {
   title?: string;
-  attempts?: { attempt: number; sessionId: string; state: string }[];
+  attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[];
   approvalFeedback?: string;
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
   id: string;
@@ -218,6 +218,7 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  workspaceId: string;
   slug: string;
   runId: string;
   taskId: string;
@@ -327,8 +328,9 @@ interface NodeStateEntry {
 class ActiveRun {
   private progressParentResume?: 'coordinator' | 'verifying';
   private historicalMetrics?: TaskRunMetrics;
-  private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string }[]>();
+  private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string; revision?: number }[]>();
   private readonly attemptNumbers = new Map<string, number>();
+  private readonly attemptRevisions = new Map<string, number>();
   private readonly state = new Map<string, NodeStateEntry>();
   private readonly controlArtifactInputs = new Map<string, Record<string, NodeOutput>>();
   private readonly artifactInputs = new Map<string, Record<string, NodeOutput>>();
@@ -1069,6 +1071,7 @@ class ActiveRun {
       };
     };
     return {
+      workspaceId: this.deps.workspaceId,
       slug: this.slug,
       runId: this.runId,
       taskId: this.spec.id,
@@ -3371,12 +3374,13 @@ class ActiveRun {
     return ['## Inputs by dependency', ...sections].join('\n\n');
   }
 
-  private recordAttempt(entry: RunLogEntryInput): void {
+  private recordAttempt(entry: RunLogEntryInput & { revision?: number }): void {
     if (entry.kind === 'node-scheduled') {
       this.attemptNumbers.set(entry.nodeId, (this.attemptNumbers.get(entry.nodeId) ?? 0) + 1);
+      this.attemptRevisions.set(entry.nodeId, entry.revision ?? 0);
     } else if (entry.kind === 'node-spawned') {
       const attempts = this.attemptHistory.get(entry.nodeId) ?? [];
-      attempts.push({ attempt: this.attemptNumbers.get(entry.nodeId) ?? 1, sessionId: entry.sessionId, state: 'running' });
+      attempts.push({ attempt: this.attemptNumbers.get(entry.nodeId) ?? 1, sessionId: entry.sessionId, state: 'running', revision: this.attemptRevisions.get(entry.nodeId) ?? entry.revision ?? 0 });
       this.attemptHistory.set(entry.nodeId, attempts);
     } else if (entry.kind === 'node-finished' || entry.kind === 'node-retry') {
       const attempts = this.attemptHistory.get(entry.nodeId);
@@ -3396,7 +3400,7 @@ class ActiveRun {
       seq,
       revision: this.revision,
     });
-    this.recordAttempt(entry);
+    this.recordAttempt({ ...entry, revision: this.revision });
     this.writeCheckpoint(seq);
     if (
       entry.kind === 'run-started' ||

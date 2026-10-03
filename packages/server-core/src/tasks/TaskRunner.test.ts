@@ -195,7 +195,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     expect(host.sent).toHaveLength(0);
     expect(runner.getRunState('late', 'r1')).toMatchObject({ status: 'stopped', nodes: [{ state: 'cancelled', sessionId: 'late-child' }] });
-    expect(runner.getRunHistory('late', 'owner')[0]?.nodes[0]?.attempts).toEqual([{ attempt: 1, sessionId: 'late-child', state: 'cancelled' }]);
+    expect(runner.getRunHistory('late', 'owner')[0]?.nodes[0]?.attempts).toEqual([{ attempt: 1, sessionId: 'late-child', state: 'cancelled', revision: 0 }]);
   });
 
   it.each([false, true])('retries failed nodes while preserving completed dependencies (restart=%s)', async restart => {

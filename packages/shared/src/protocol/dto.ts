@@ -433,7 +433,7 @@ export interface SwarmRunDetailsDto {
 
 export interface TaskNodeRunStateDto {
   title?: string
-  attempts?: { attempt: number; sessionId: string; state: string }[]
+  attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
   approvalFeedback?: string
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }
   id: string
@@ -457,6 +457,8 @@ export interface TaskNodeRunStateDto {
 }
 
 export interface TaskRunSnapshotDto {
+  /** Owning workspace; optional for compatibility with older hosts. */
+  workspaceId?: string
   slug: string
   runId: string
   taskId: string
@@ -568,6 +570,8 @@ export interface TaskResultNodeDto {
   /** The node's recorded final output text (from nodes/<id>.json), when present. */
   output?: string
   attempt?: number
+  /** Frozen plan revision which dispatched this node's latest execution. */
+  revision?: number
   failureReason?: string
 }
 
@@ -577,6 +581,8 @@ export interface TaskResultNodeDto {
  * `TaskRunSnapshotDto` this survives restart and does not require an active in-memory run.
  */
 export interface TaskResultsDto {
+  taskId?: string
+  orchestratorSessionId?: string
   slug: string
   /** The run inspected; null when the task has never been run. */
   runId: string | null
