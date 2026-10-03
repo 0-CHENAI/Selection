@@ -49,6 +49,7 @@ export const CHANNEL_MAP = {
   deleteTaskTemplate: invoke(RPC_CHANNELS.tasks.DELETE_TEMPLATE),
   createTaskFromTemplate: invoke(RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE),
   listTaskRuns: invoke(RPC_CHANNELS.tasks.LIST_RUNS),
+  patchTaskRun: invoke(RPC_CHANNELS.tasks.PATCH_RUN),
   applyTaskRunRevision: invoke(RPC_CHANNELS.tasks.APPLY_RUN_REVISION),
   getTaskResults: invoke(RPC_CHANNELS.tasks.GET_RESULTS),
   onTaskGenerated: listener(RPC_CHANNELS.tasks.GENERATED),

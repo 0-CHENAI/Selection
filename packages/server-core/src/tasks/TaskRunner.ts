@@ -20,6 +20,8 @@ import { dependencyImpact, dependencyAncestors } from './dependency-impact';
  * The runner depends on a minimal `ConductorSessionHost` interface (which
  * SessionManager structurally satisfies) so it is unit-testable with a mock.
  */
+import { statSync, truncateSync } from 'node:fs';
+import { join } from 'node:path';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import {
@@ -82,6 +84,8 @@ import {
   isWorkspaceCacheKindAllowed,
   COORDINATOR_TIMEOUT_BLOCKER,
   type OrchestrationPatch,
+  type PatchOk,
+  runDir,
   type OrchestrationDecision,
   type CoordinatorGateState,
   type CoordinatorGateReason,
@@ -2098,7 +2102,15 @@ class ActiveRun {
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
       text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. Chat text is not a verdict.`;
     }
-    return text;
+    const planContext = this.planContext();
+    return planContext ? `${planContext}\n\n${text}` : text;
+  }
+
+  private planContext(): string {
+    return [
+      ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
+      ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
+    ].join('\n');
   }
 
   // --- completion ---
@@ -2469,15 +2481,20 @@ class ActiveRun {
     if (this.sourceVersion === 1) this.attachVerdictListener(orchestrator);
     const sections = this.spec.nodes.map((n) => {
       const out = this.outputs[n.id];
-      return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}`;
+      const structured = this.sourceVersion >= 2 && out
+        ? `\nDeclared outputs: ${JSON.stringify(n.outputs ?? [])}\nRuntime-validated values: ${JSON.stringify(out.params ?? {})}\nRun: ${this.runId}; revision: ${this.revision}` : '';
+      return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}${structured}`;
     });
     const rubric = this.spec.acceptance_criteria
       ? `Acceptance criteria:\n${this.spec.acceptance_criteria}`
       : `Goal: ${this.spec.goal}`;
     const message = [
       `The task "${this.spec.title}" has finished running.`,
+      `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
+      `Frozen plan: ${JSON.stringify(this.spec)}`,
       '',
       rubric,
+      this.planContext(),
       '',
       'Node outputs:',
       ...sections,
@@ -2743,30 +2760,7 @@ class ActiveRun {
       }
       throw new TaskControlError(this.runStatus, result.error);
     }
-    this.spec = result.spec;
-    this.revision = result.revision;
-    this.seenDecisionIds.add(patch.decisionId);
-    this.invalidPatchCount = 0;
-    this.edges = materializeDeps(this.spec);
-    this.dependents = undefined;
-    for (const n of this.spec.nodes) {
-      if (!this.state.has(n.id)) this.state.set(n.id, { state: 'pending', attempt: 0 });
-    }
-    for (const id of result.cancelled) {
-      const st = this.state.get(id);
-      if (st) st.state = 'cancelled';
-    }
-    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, this.revision, this.spec);
-    // The patch is not acknowledged until both its revision and decision id are
-    // durable. `log` appends the decision and atomically checkpoints revision +
-    // seenDecisionIds; a crash before this point leaves only an ignored orphan revision.
-    this.log({
-      kind: 'orchestration-patch',
-      decisionId: patch.decisionId,
-      baseRevision: patch.baseRevision,
-      rationale: patch.rationale,
-      cancelled: result.cancelled.length ? result.cancelled : undefined,
-    });
+    this.commitPlanPatch(result, patch);
     if (result.action === 'pause') {
       this.pause();
     } else if (wasVerifying) {
@@ -2785,6 +2779,39 @@ class ActiveRun {
     }
     this.emitChanged();
     return this.snapshot();
+  }
+
+  private commitPlanPatch(result: PatchOk, patch: OrchestrationPatch, decision?: OrchestrationDecision): void {
+    // Stage immutable revision first. No in-memory plan changes on write failure.
+    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, result.revision, result.spec);
+    const logPath = join(runDir(this.deps.workspaceRoot, this.slug, this.runId), 'run-log.jsonl');
+    const logLength = statSync(logPath).size;
+    const previous = { spec: this.spec, revision: this.revision, state: new Map([...this.state].map(([id, state]) => [id, { ...state }])),
+      edges: this.edges, dependents: this.dependents, seen: new Set(this.seenDecisionIds), completed: new Set(this.completedCheckpointIds), invalid: this.invalidPatchCount, seq: this.nextSeq };
+    try {
+      this.spec = result.spec; this.revision = result.revision; this.invalidPatchCount = 0;
+      this.seenDecisionIds.add(patch.decisionId);
+      if (decision) this.completedCheckpointIds.add(decision.checkpointId);
+      this.edges = materializeDeps(this.spec); this.dependents = undefined;
+      for (const node of this.spec.nodes) if (!this.state.has(node.id)) this.state.set(node.id, { state: 'pending', attempt: 0 });
+      for (const id of result.cancelled) { const state = this.state.get(id); if (state) state.state = 'cancelled'; }
+      // Append both facts, then atomically checkpoint revision + decision identity once.
+      const t = this.deps.now ? this.deps.now() : new Date().toISOString();
+      if (decision) appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+        kind: 'coordinator-decision', checkpointId: decision.checkpointId, decisionId: decision.decisionId, action: decision.action, baseRevision: decision.baseRevision });
+      appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+        kind: 'orchestration-patch', decisionId: patch.decisionId, baseRevision: patch.baseRevision, rationale: patch.rationale,
+        cancelled: result.cancelled.length ? result.cancelled : undefined });
+      this.writeCheckpoint(this.nextSeq - 1);
+    } catch (error) {
+      this.spec = previous.spec; this.revision = previous.revision; this.state.clear(); for (const [id, state] of previous.state) this.state.set(id, state);
+      this.edges = previous.edges; this.dependents = previous.dependents;
+      this.seenDecisionIds.clear(); for (const id of previous.seen) this.seenDecisionIds.add(id);
+      this.completedCheckpointIds.clear(); for (const id of previous.completed) this.completedCheckpointIds.add(id);
+      this.invalidPatchCount = previous.invalid; this.nextSeq = previous.seq;
+      truncateSync(logPath, logLength);
+      throw error;
+    }
   }
 
   currentSpec(): TaskSpec {
@@ -2881,6 +2908,7 @@ class ActiveRun {
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, or pause.',
           'Parent chat messages are not decisions.',
+          this.planContext(),
           ...(advisory ? [`Progress advisory (untrusted evidence): ${advisory}`] : []),
         ].join(' '),
       );
@@ -2923,43 +2951,25 @@ class ActiveRun {
       throw new TaskControlError(this.runStatus, result.error);
     }
     const reason = this.coordinatorGate?.reason;
-    this.seenDecisionIds.add(decision.decisionId);
-    this.completedCheckpointIds.add(decision.checkpointId);
-    this.log({
-      kind: 'coordinator-decision',
-      checkpointId: decision.checkpointId,
-      decisionId: decision.decisionId,
-      action: decision.action,
-      baseRevision: decision.baseRevision,
-    });
+    if (result.action === 'patch' && result.patch) {
+      this.commitPlanPatch(result.patch, { ...decision, action: 'continue', rationale: decision.rationale ?? '' }, decision);
+    } else {
+      this.seenDecisionIds.add(decision.decisionId);
+      this.completedCheckpointIds.add(decision.checkpointId);
+      this.log({
+        kind: 'coordinator-decision',
+        checkpointId: decision.checkpointId,
+        decisionId: decision.decisionId,
+        action: decision.action,
+        baseRevision: decision.baseRevision,
+      });
+    }
     this.clearCoordinatorGate();
     if (result.action === 'pause') {
       this.runStatus = 'paused';
       this.log({ kind: 'run-paused' });
       this.emitChanged();
       return this.snapshot();
-    }
-    if (result.action === 'patch' && result.patch) {
-      this.spec = result.patch.spec;
-      this.revision = result.patch.revision;
-      this.invalidPatchCount = 0;
-      this.edges = materializeDeps(this.spec);
-      this.dependents = undefined;
-      for (const n of this.spec.nodes) {
-        if (!this.state.has(n.id)) this.state.set(n.id, { state: 'pending', attempt: 0 });
-      }
-      for (const id of result.patch.cancelled) {
-        const st = this.state.get(id);
-        if (st) st.state = 'cancelled';
-      }
-      writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, this.revision, this.spec);
-      this.log({
-        kind: 'orchestration-patch',
-        decisionId: decision.decisionId,
-        baseRevision: decision.baseRevision,
-        rationale: decision.rationale ?? '',
-        cancelled: result.patch.cancelled.length ? result.patch.cancelled : undefined,
-      });
     }
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
@@ -3671,6 +3681,18 @@ export class TaskRunner {
     return this.requireRun(slug, runId).applyPatch(patch);
   }
 
+  /** Manual UI uses exactly the coordinator validator and durable commit path. */
+  applyManualPlanPatch(slug: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    const run = this.requireRun(slug, runId);
+    const snapshot = run.snapshot();
+    if (snapshot.status === 'waiting-coordinator') {
+      const gate = readRunState(this.deps.workspaceRoot, slug, runId)?.coordinatorGate;
+      if (!gate) throw new TaskControlError(snapshot.status, 'Coordinator checkpoint is missing');
+      return run.applyOrchestrationDecision({ ...patch, checkpointId: gate.checkpointId, action: 'patch' });
+    }
+    return run.applyPatch(patch);
+  }
+
   applyOrchestrationDecisionByRunId(sessionId: string, decision: OrchestrationDecision): RunSnapshot {
     for (const run of this.runs.values()) {
       const snapshot = run.snapshot();
@@ -3771,7 +3793,8 @@ export class TaskRunner {
       this.deps,
     );
     run.restoreCheckpoint(checkpoint, durableRevision);
-    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode, checkpoint?.metrics);
+    const committedLog = log.filter(entry => (entry.revision ?? 0) <= durableRevision);
+    run.hydrate(committedLog, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode, checkpoint?.metrics);
     if (mode !== 'view') this.runs.set(this.key(slug, runId), run);
     return run;
   }

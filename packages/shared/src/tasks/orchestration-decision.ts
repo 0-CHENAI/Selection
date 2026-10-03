@@ -15,6 +15,8 @@ export interface OrchestrationDecision {
   add?: OrchestrationPatch['add'];
   update?: OrchestrationPatch['update'];
   cancel?: OrchestrationPatch['cancel'];
+  constraints?: OrchestrationPatch['constraints'];
+  decisions?: OrchestrationPatch['decisions'];
 }
 
 export interface CoordinatorGateState {
@@ -83,6 +85,8 @@ export function validateOrchestrationDecision(
       add: decision.add,
       update: decision.update,
       cancel: decision.cancel,
+      constraints: decision.constraints,
+      decisions: decision.decisions,
       action: 'continue',
     },
     patchCtx,

@@ -101,3 +101,13 @@ AI 提案在本次编辑器打开期间保留对话轮次和应用/放弃状态�
 ## #321：编排编辑器与子界面布局
 
 按实际面板宽度适配定义、节点、图和 YAML；顶部操作固定，长内容滚动。模板、导入、迁移、运行修订与未保存确认统一固定底部返回/取消及操作顺序。实际组件逐项验收、前后截图和明确创建/保存不自动运行的记录见 `docs/qa/selection-3.0-editor-layout.md`。
+
+## #453：统一规范计划与原子修订
+
+TaskSpec 是表单、YAML、生成提案、图和执行的共同定义。`tasks/plan.ts` 提供显式 depends_on 与 prompt/inputs 引用并集；materializeDeps、图拓扑和关键路径复用该结果，保持用户显式字段不被重写。新增节点 `locked`、根 `constraints` / `decisions` 与 `locked_fields`；生成、应用、运行修订均校验保护值，手工解锁是修改保护内容的入口。
+
+每轮生成携带 baseDraftVersion，应用前后同时检查草稿版本和身份；变化只应用到草稿。无效 YAML/引用/环显示诊断并保持旧有效规范计划。保存 task.yaml 仅影响未来运行，保存并启动携带 expectedEtag 后冻结 revision。
+
+`tasks:patchRun` 的 `{slug, runId, baseRevision, yaml, rationale}` 由宿主验证所属 PRO 根与工作区，再通过 definitionToPatch 与 TaskRunner.applyManualPlanPatch 进入既有协调器/patch 校验和提交。仅 pending/ready 可改，运行中或已执行节点、锁、模型连接及权限范围继续受控。新 revision 和日志完成一次 durable checkpoint 后才确认成功；失败回滚内存和追加日志，恢复忽略孤立 revision。冻结计划的约束与决策传给 worker 和评审；评审复用运行已校验的 typed outputs。
+
+F3 的真实两轮生成、模型锁定、A/B 独立运行及 C 等待两份输入、保存不改当前 run，另含客户端冲突与实际 RPC 同 revision 竞争/落盘故障验收，见 `docs/qa/selection-3.0-canonical-plan.md`。#454 应直接复用此规范变更入口、版本和 checkpoint，追加动态调度与运行替换，不另建计划或调度解释。

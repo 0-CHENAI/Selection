@@ -261,6 +261,9 @@ const TaskNodeObject = z.object({
   labels: z.array(z.string()).optional(),
   status: z.string().optional(),
 
+  /** Explicit user protection against generated and runtime edits. */
+  locked: z.boolean().optional(),
+
   // Edges + data flow.
   depends_on: z.array(slug('depends_on entry')).optional(),
   inputs: z.record(z.string(), InputRefSchema).optional(),
@@ -311,6 +314,9 @@ export const TaskSpecSchema = z
     goal: z.string().min(1),
     /** Freeform rubric the orchestrator grades the final result against (verification gate). Falls back to `goal`. */
     acceptance_criteria: z.string().min(1).optional(),
+    constraints: z.array(z.string().min(1)).optional(),
+    decisions: z.array(z.string().min(1)).optional(),
+    locked_fields: z.array(z.enum(['goal', 'acceptance_criteria', 'constraints', 'decisions'])).optional(),
     project: z.string().min(1).optional(),
     /** Working directory for the orchestrator and every child session. Absolute path; when
      *  omitted the orchestrator's own working directory (project/workspace default) is used and
@@ -440,7 +446,7 @@ export type CacheMode = (typeof CACHE_MODES)[number];
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A node's materialized dependency list (never undefined). */
+/** Explicit authored edges. Use effectiveNodeDeps/planDependencies for graph or scheduling. */
 export function nodeDeps(node: TaskNode): string[] {
   return node.depends_on ?? [];
 }

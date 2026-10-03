@@ -50,7 +50,7 @@ it('keeps the UI proposal timeout slightly above the server generate timeout', (
 
 it('renders an AI proposal surface that is not an import-only form', () => {
   const html = renderZh(
-    <TaskProposal workspaceId="ws" draftIdentity="{}" onApply={() => {}} />,
+    <TaskProposal workspaceId="ws" draftVersion={0} draftIdentity="{}" onApply={() => {}} />,
   )
   expect(html).toContain('AI 辅助编排')
   expect(html).toContain('生成提案')

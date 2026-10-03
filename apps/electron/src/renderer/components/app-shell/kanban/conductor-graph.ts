@@ -2,6 +2,7 @@
  * Spec ↔ canvas graph helpers. Pure: no React, no fs.
  * Edges are depends_on (source = dependency, target = dependent).
  */
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import dagre from '@dagrejs/dagre'
 
 export type CanvasKind =
@@ -46,6 +47,7 @@ export type SpecLike = {
     title?: string
     kind?: string
     prompt?: string
+    inputs?: Record<string, string | { from: string }>
     depends_on?: string[]
   }>
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
@@ -70,7 +72,7 @@ export function specTopologyKey(spec: SpecLike): string {
   return `${dir}\x1e${spec.nodes
     .map((n) => {
       const p = layout[n.id]
-      return [n.id, n.kind ?? '', n.title ?? '', p?.x ?? '', p?.y ?? '', ...(n.depends_on ?? [])].join('\x1f')
+      return [n.id, n.kind ?? '', n.title ?? '', p?.x ?? '', p?.y ?? '', ...effectiveNodeDeps(n)].join('\x1f')
     })
     .join('|')}`
 }
@@ -111,7 +113,7 @@ export function specToGraph(spec: SpecLike): CanvasGraph {
   }))
   const edges: CanvasEdge[] = []
   for (const n of spec.nodes) {
-    for (const dep of n.depends_on ?? []) {
+    for (const dep of effectiveNodeDeps(n)) {
       if (spec.nodes.some((x) => x.id === dep)) edges.push({ source: dep, target: n.id })
     }
   }

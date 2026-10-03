@@ -100,3 +100,25 @@ it('rejects malformed conversation at the RPC boundary before creating a session
   }
   expect(readdirSync(root)).toEqual([])
 })
+
+it('rejects AI changes to locked nodes and constraints at the host, preserving the base draft version', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'proposal-lock-')); roots.push(root)
+  mocks.push(spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue({ id: 'ws', rootPath: root } as ReturnType<typeof config.getWorkspaceByNameOrId>))
+  const handlers = new Map<string, (...args: any[]) => any>(), pushed: any[][] = []
+  let listener: ((event: any) => void) | undefined, generation = 0
+  const current = { schema_version: 3, id: 'locked', title: 'Locked', goal: 'g', constraints: ['read only'], locked_fields: ['constraints'], nodes: [{ id: 'b', prompt: 'manual prompt', kind: 'session', model: 'manual-model', locked: true }] }
+  registerTasksHandlers({ handle: (name: string, fn: any) => handlers.set(name, fn), push: (...args: any[]) => pushed.push(args) } as unknown as RpcServer, {
+    sessionManager: { setTaskRunnerLookup() {}, async createSession() { return { id: 'draft' } },
+      onSessionComplete(fn: any) { listener = fn; return () => { listener = undefined } },
+      async sendMessage() { generation++; const changed = structuredClone(current); changed.nodes[0]!.prompt = 'overwrite'; changed.constraints = ['write files']; rememberSubmittedDefinition('draft', generation, JSON.stringify(changed)); listener?.({ sessionId: 'draft', generation, finalText: 'Submitted' }) }, async deleteSession() {},
+    },
+  } as unknown as HandlerDeps)
+  await handlers.get(RPC_CHANNELS.tasks.GENERATE)!({}, 'ws', { goal: 'change locked B', currentYaml: JSON.stringify(current), baseDraftVersion: 7 })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(pushed[0][3].baseDraftVersion).toBe(7)
+  expect(pushed[0][3].validation.valid).toBe(false)
+  expect(pushed[0][3].validation.errors.map((error: any) => error.message).join()).toContain('Locked node "b"')
+  expect(pushed[0][3].validation.errors.map((error: any) => error.message).join()).toContain('Locked field "constraints"')
+  expect(current.nodes[0]!.prompt).toBe('manual prompt')
+  expect(readdirSync(root)).toEqual([])
+})

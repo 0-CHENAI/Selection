@@ -2,6 +2,7 @@
  * Read-only topology + live-run overlay.
  * Authoring stays on the definition tab and YAML — this surface never writes spec.nodes.
  */
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import * as React from 'react'
 import {
   ReactFlow,
@@ -36,6 +37,7 @@ export type WorkbenchNode = {
   title?: string
   kind?: EditorNodeKind
   prompt?: string
+  inputs?: Record<string, string | { from: string }>
   depends_on?: string[]
   permissionMode?: string
   model?: string
@@ -58,7 +60,7 @@ export interface WorkbenchSpec {
 export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; labelKey: string; value: string }> {
   const rows: Array<{ key: string; labelKey: string; value: string }> = []
   if (node.title && node.title !== node.id) rows.push({ key: 'title', labelKey: 'tasks.title', value: node.title })
-  if (node.depends_on?.length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: node.depends_on.join(', ') })
+  if (effectiveNodeDeps(node).length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: effectiveNodeDeps(node).join(', ') })
   if (node.permissionMode) rows.push({ key: 'permission', labelKey: 'tasks.nodePermission', value: node.permissionMode })
   if (node.model) rows.push({ key: 'model', labelKey: 'tasks.nodeModel', value: node.model })
   const outputs = node.outputs?.map((output) => output.name).filter(Boolean)

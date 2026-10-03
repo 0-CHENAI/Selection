@@ -12,6 +12,7 @@
  */
 import type { ValidationIssue, ValidationResult } from '../config/validators.ts';
 import { getModelById } from '../config/models.ts';
+import { planDependencies } from './plan.ts';
 import { extractRefs } from './refs.ts';
 import {
   MAX_DAG_MAX_PARALLEL,
@@ -325,23 +326,7 @@ export function validateTaskInput(raw: unknown): ValidationResult & { spec?: Tas
  * and the Conductor (scheduling), so an input reference always implies an edge.
  */
 export function materializeDeps(spec: TaskSpec): Map<string, Set<string>> {
-  const ids = new Set(spec.nodes.map((n) => n.id));
-  const edges = new Map<string, Set<string>>();
-  for (const node of spec.nodes) {
-    const set = new Set<string>();
-    const add = (dep: string) => {
-      if (dep !== node.id && ids.has(dep)) set.add(dep);
-    };
-    for (const dep of nodeDeps(node)) add(dep);
-    const refTexts: string[] = [];
-    if (node.prompt) refTexts.push(node.prompt);
-    for (const ref of Object.values(node.inputs ?? {})) refTexts.push(typeof ref === 'string' ? ref : ref.from);
-    for (const text of refTexts) {
-      for (const r of extractRefs(text)) if (r.kind === 'node') add(r.nodeId);
-    }
-    edges.set(node.id, set);
-  }
-  return edges;
+  return planDependencies(spec);
 }
 
 /** Detect a cycle in the dependency graph; returns the cycle path or null. */

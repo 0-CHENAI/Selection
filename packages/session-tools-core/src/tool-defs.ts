@@ -311,6 +311,8 @@ export const SubmitOrchestrationPatchSchema = z.object({
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
+  decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
   action: z.enum(['continue', 'pause']).optional(),
 });
 
@@ -331,6 +333,8 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
+  decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
 }).superRefine((value, ctx) => {
   if (value.action === 'patch' && !value.rationale?.trim()) {
     ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });

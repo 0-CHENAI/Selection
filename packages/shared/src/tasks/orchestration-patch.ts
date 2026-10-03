@@ -1,5 +1,6 @@
+import { planProtectionErrors, planValueKey } from './plan.ts';
 import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
-import { TaskNodeSchema, type TaskNode, type TaskSpec } from './schema.ts';
+import { TaskNodeSchema, TaskSpecSchema, type TaskNode, type TaskSpec } from './schema.ts';
 import { TASK_CAPS, validateTaskSpec } from './validate.ts';
 import type { NodeRunState } from './storage.ts';
 import { v2UnknownFields } from './document.ts';
@@ -19,6 +20,8 @@ export interface OrchestrationPatch {
   add?: TaskNode[];
   update?: TaskNodePatch[];
   cancel?: string[];
+  constraints?: string[];
+  decisions?: string[];
   /**
    * Legacy terminal values remain decodable so the validator can reject an old
    * payload deterministically. New typed callers use the narrower session-tool
@@ -155,8 +158,18 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     nextNodes.push(node);
   }
 
+  const touched = [...(patch.add ?? []).map(n => n.id), ...(patch.update ?? []).map(n => n.id), ...cancelled];
+  if (new Set(touched).size !== touched.length) return fail(ctx, 'A patch must change each node only once');
+
   const remaining = nextNodes.filter((n) => !cancelled.includes(n.id));
-  const next: TaskSpec = { ...ctx.spec, nodes: remaining };
+  const next: TaskSpec = { ...ctx.spec, nodes: remaining,
+    ...(patch.constraints !== undefined ? { constraints: patch.constraints } : {}),
+    ...(patch.decisions !== undefined ? { decisions: patch.decisions } : {}),
+  };
+  const protection = planProtectionErrors(ctx.spec, next);
+  if (protection.length) return fail(ctx, protection.join('; '));
+  const parsedPlan = TaskSpecSchema.safeParse(next.schema_version === 3 ? next : { ...next, execution: undefined });
+  if (!parsedPlan.success) return fail(ctx, parsedPlan.error.issues.map(issue => issue.message).join("; "));
   const graph = validateTaskSpec(next);
   if (!graph.valid) return fail(ctx, graph.errors.map((e) => e.message).join('; '));
   if (remaining.length > TASK_CAPS.maxNodes) return fail(ctx, 'node cap exceeded');
@@ -219,4 +232,27 @@ export function mergeRunDefinition(from: TaskSpec, run: TaskSpec): TaskSpec {
 
 function stripUi(node: TaskNode): TaskNode {
   return node;
+}
+
+/** Convert a confirmed editor definition into the same patch used by the coordinator. */
+export function definitionToPatch(from: TaskSpec, to: TaskSpec, identity: Pick<OrchestrationPatch, 'runId' | 'decisionId' | 'baseRevision' | 'rationale'>): OrchestrationPatch {
+  const editable = new Set(['nodes', 'ui', 'constraints', 'decisions']);
+  for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    if (!editable.has(key) && planValueKey(from[key as keyof TaskSpec]) !== planValueKey(to[key as keyof TaskSpec])) {
+      throw new Error(`Runtime editing cannot change "${key}". Save a definition for a later run instead.`);
+    }
+  }
+  const previous = new Map(from.nodes.map(node => [node.id, node]));
+  const updates: TaskNodePatch[] = [];
+  for (const node of to.nodes) {
+    const old = previous.get(node.id);
+    if (!old || planValueKey(old) === planValueKey(node)) continue;
+    // Explicit undefined values remove optional fields before the merged schema is parsed.
+    updates.push(Object.assign(Object.fromEntries(Object.keys(old).map(key => [key, undefined])), node) as TaskNodePatch);
+  }
+  return { ...identity, add: to.nodes.filter(node => !previous.has(node.id)), update: updates,
+    cancel: from.nodes.filter(node => !to.nodes.some(next => next.id === node.id)).map(node => node.id),
+    ...(planValueKey(from.constraints) !== planValueKey(to.constraints) ? { constraints: to.constraints ?? [] } : {}),
+    ...(planValueKey(from.decisions) !== planValueKey(to.decisions) ? { decisions: to.decisions ?? [] } : {}),
+  };
 }

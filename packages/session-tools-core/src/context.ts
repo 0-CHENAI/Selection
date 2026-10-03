@@ -578,6 +578,8 @@ export interface OrchestrationPatchInput {
   add?: unknown[];
   update?: unknown[];
   cancel?: string[];
+  constraints?: string[];
+  decisions?: string[];
   action?: 'continue' | 'pause';
 }
 
@@ -591,6 +593,8 @@ export interface OrchestrationDecisionInput {
   add?: unknown[];
   update?: unknown[];
   cancel?: string[];
+  constraints?: string[];
+  decisions?: string[];
 }
 
 export interface SubmitTaskNodeVerdictInput {

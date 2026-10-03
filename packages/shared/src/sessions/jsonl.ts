@@ -156,11 +156,13 @@ export function writeSessionJsonl(sessionFile: string, session: StoredSession): 
     ...session.messages.map(m => makeSessionPathPortable(JSON.stringify(m), sessionDir)),
   ];
 
-  const tmpFile = sessionFile + '.tmp';
-  writeFileSync(tmpFile, lines.join('\n') + '\n');
-  // On Windows, rename fails if target exists. Delete first for cross-platform compatibility.
-  try { unlinkSync(sessionFile); } catch { /* ignore if doesn't exist */ }
-  renameSync(tmpFile, sessionFile);
+  const tmpFile = `${sessionFile}.${crypto.randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmpFile, lines.join('\n') + '\n');
+    renameSync(tmpFile, sessionFile);
+  } finally {
+    try { unlinkSync(tmpFile); } catch { /* removed by rename, or failed before creation */ }
+  }
 }
 
 /**

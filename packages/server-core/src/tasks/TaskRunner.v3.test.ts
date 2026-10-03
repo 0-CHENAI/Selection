@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, mkdirSync, readFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -8,6 +8,9 @@ import {
   parseTaskSpec,
   saveTaskSpec,
   readRunLog,
+  runDir,
+  readRunState,
+  readLatestSpecRevision,
   type TaskSpec,
   COORDINATOR_TIMEOUT_BLOCKER,
 } from '@craft-agent/shared/tasks';
@@ -132,6 +135,71 @@ describe('TaskRunner v3 quality/efficiency', () => {
     rmSync(root, { recursive: true, force: true });
     if (prevFlag === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
     else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prevFlag;
+  });
+
+  it('F3 waits for both explicit and input-derived dependencies and keeps a later YAML save out of the frozen run', async () => {
+    const frozen = v3Spec({ runner: 'conduct', constraints: ['read only'], decisions: ['unknown risk stays unknown'], execution: { verification: { required: false } }, nodes: [
+      { id: 'a', prompt: 'A' }, { id: 'b', prompt: 'B' },
+      { id: 'c', prompt: 'Report from ${inputs.second}', depends_on: ['a'], inputs: { second: '${nodes.b.output}' } },
+    ] });
+    saveTaskSpec(root, frozen); const r = runner(); r.run('v3demo', { runId: 'f3', verifyOnComplete: false }); await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+    expect(host.sent.find(item => item.sessionId === 'sess-b')!.message).toContain('User constraints for every node: ["read only"]');
+    expect(host.sent.find(item => item.sessionId === 'sess-b')!.message).toContain('Confirmed plan decisions: ["unknown risk stays unknown"]');
+    const changed = structuredClone(frozen); changed.nodes[1]!.prompt = 'saved replacement'; saveTaskSpec(root, changed);
+    expect(r.currentRunSpec('v3demo', 'f3')!.nodes[1]!.prompt).toBe('B');
+    host.complete('a', { finalText: 'A cost 1000000' }); await tick(); expect(host.dispatchedNames()).not.toContain('c');
+    host.complete('b', { finalText: 'B basis unknown' }); await tick(); expect(host.dispatchedNames()).toContain('c');
+    expect(host.sent.find(item => item.sessionId === 'sess-c')!.message).toContain('B basis unknown');
+    host.complete('c', { finalText: 'Both inputs' }); await tick();
+    expect(r.getRunState('v3demo', 'f3')!.status).toBe('completed');
+  });
+
+  it('verifies typed values from the frozen plan rather than prose alone', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', constraints: ['read only'], nodes: [{ id: 'a', prompt: 'A', outputs: [
+      { name: 'cost', kind: 'param', type: 'number', required: true }, { name: 'unresolved', kind: 'param', type: 'boolean', required: true },
+    ] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'typed', orchestratorSessionId: 'orch' }); await tick();
+    expect(r.submitNodeOutput('sess-a', { text: 'cost is known; risk remains unknown', values: { cost: 1000000, unresolved: true } }).ok).toBe(true);
+    host.complete('a', { finalText: 'Submitted' }); await tick();
+    const review = host.sent.find(item => item.sessionId === 'orch')!.message;
+    expect(review).toContain('Runtime-validated values: {"cost":1000000,"unresolved":true}');
+    expect(review).toContain('User constraints for every node: ["read only"]');
+    expect(review).toContain('Task slug: v3demo; runId: typed; revision: 0.');
+    expect(review).toContain('Frozen plan: {');
+    expect(review).toContain('"type":"number"'); expect(review).toContain('Run: typed; revision: 0');
+    expect(r.submitVerdict('orch', { runId: 'typed', result: 'pass' }).status).toBe('completed');
+  });
+
+  it('accepts only one same-revision manual/planner commit and refuses to overwrite running nodes', async () => {
+    saveTaskSpec(root, v3Spec({ execution: { coordinator_gate: { mode: 'off' } }, nodes: [{ id: 'a', prompt: 'A' }, { id: 'c', prompt: 'C', depends_on: ['a'] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'race', verifyOnComplete: false, orchestrateAllowed: true }); await tick();
+    const first = { runId: 'race', decisionId: 'manual', baseRevision: 0, rationale: 'confirmed', update: [{ id: 'c', prompt: 'manual C' }] };
+    expect(r.applyManualPlanPatch('v3demo', 'race', first).revision).toBe(1);
+    expect(() => r.applyOrchestrationPatch('v3demo', 'race', { ...first, decisionId: 'planner', update: [{ id: 'c', prompt: 'stale C' }] })).toThrow('stale revision');
+    expect(r.currentRunSpec('v3demo', 'race')!.nodes[1]!.prompt).toBe('manual C');
+    expect(() => r.applyManualPlanPatch('v3demo', 'race', { ...first, decisionId: 'running', baseRevision: 1, update: [{ id: 'a', prompt: 'overwrite' }] })).toThrow('running');
+    expect(readRunState(root, 'v3demo', 'race')!.revision).toBe(1);
+    expect(readRunLog(root, 'v3demo', 'race').filter(entry => entry.kind === 'orchestration-patch')).toHaveLength(1);
+  });
+
+  it('rolls back memory and log on checkpoint failure and ignores the orphan revision after reload', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A' }] }));
+    const r = runner(); r.run('v3demo', { runId: 'disk', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const statePath = join(runDir(root, 'v3demo', 'disk'), 'run-state.json');
+    const beforeState = readFileSync(statePath, 'utf8'), beforeLog = JSON.stringify(readRunLog(root, 'v3demo', 'disk'));
+    const beforeSpec = structuredClone(r.currentRunSpec('v3demo', 'disk'));
+    unlinkSync(statePath); mkdirSync(statePath);
+    const patch = { runId: 'disk', decisionId: 'manual-disk', baseRevision: 0, rationale: 'add', add: [{ id: 'c', kind: 'session' as const, prompt: 'C' }] };
+    expect(() => r.applyManualPlanPatch('v3demo', 'disk', patch)).toThrow();
+    expect(r.currentRunSpec('v3demo', 'disk')).toEqual(beforeSpec);
+    expect(r.getRunState('v3demo', 'disk')!.revision).toBe(0);
+    expect(JSON.stringify(readRunLog(root, 'v3demo', 'disk'))).toBe(beforeLog);
+    rmSync(statePath, { recursive: true }); writeFileSync(statePath, beforeState);
+    expect(readLatestSpecRevision(root, 'v3demo', 'disk')!.revision).toBe(0);
+    const restored = runner(); restored.scanUnfinished(); expect(restored.getRunState('v3demo', 'disk')!.revision).toBe(0);
+    expect(r.applyManualPlanPatch('v3demo', 'disk', patch).revision).toBe(1);
+    expect(readRunLog(root, 'v3demo', 'disk').filter(entry => entry.kind === 'coordinator-decision')).toHaveLength(1);
   });
 
   it.each([false, true])('requires a fresh reviewer verdict after transport failure (restart=%s)', async restart => {
