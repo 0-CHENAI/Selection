@@ -91,3 +91,9 @@ F1 使用 `bun scripts/selection-3.0-f1.ts`，真实单 agent 读取固定资料
 未知操作及损坏的执行检查点阻塞目标写入、委派和编排，直到用户在目标记录检查依据和结果；读取和答案交付可继续。已完成请求以原始调用的规范 hash 防重放；缺失请求身份的已完成操作继续禁止重放该工具。约束也覆盖目标 worker。每个模型回合检查目标快照及文件完整性并注入来源背景，权限仍走原有校验。
 
 宿主入口：`SessionManager.handoverSession`、`handover-snapshot.ts`、`reliability/handover-store.ts`；UI 为实际 ChatPage 中的 `HandoverPanel`。F2 命令 `bun scripts/selection-3.0-f2.ts`，阶段记录见 `docs/qa/selection-3.0-handover.md`。交给 #453 的是新 PRO 根与可追溯背景，任务编辑与执行继续复用当前 TaskEditor/TaskRunner。
+
+## #320：多轮编排编辑
+
+AI 提案在本次编辑器打开期间保留对话轮次和应用/放弃状态，携带最新人工草稿；用户可在未应用提案上继续修改。稳定节点 id 的字段差异、图和 YAML 供确认。应用前宿主校验和草稿身份检查均通过后才整体更新未保存草稿，仍不保存或启动运行。可信结构化提交、安全临时生成会话和已有任务 id 保留规则继续生效。
+
+真实四轮模型修改、人工模型/连接/超时配置保留及固定传输 UI 验收见 `docs/qa/selection-3.0-conversation.md`。

@@ -304,7 +304,16 @@ export interface TaskCreateResult {
   taskLabelId?: string
 }
 
+/** Editor-local conversation; historical proposals are context, never saved definitions. */
+export interface TaskProposalTurn {
+  goal: string
+  yaml?: string
+  status: 'proposed' | 'applied' | 'discarded' | 'superseded' | 'failed'
+}
+
 export interface TaskGenerateRequest {
+  /** Previous rounds, including whether the user applied or discarded each proposal. */
+  conversation?: TaskProposalTurn[]
   /** Existing definition to revise; never saved without user confirmation. */
   currentYaml?: string
   /** Natural-language goal the orchestrator turns into a task.yaml DAG. */

@@ -26,6 +26,7 @@ import { mobileWebUIComponents } from './mobile-webui'
 import { handoverComponents } from './handover'
 import { workModeComponents } from './work-mode'
 import { taskEditorComponents } from './task-editor'
+import { taskEditorLiveComponents } from './task-editor-live'
 
 export * from './types'
 
@@ -48,6 +49,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...workModeComponents,
   ...handoverComponents,
   ...taskEditorComponents,
+  ...taskEditorLiveComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,
   ...automationComponents,

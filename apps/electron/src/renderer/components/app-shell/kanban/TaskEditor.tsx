@@ -1414,10 +1414,10 @@ function ExistingTaskEditor({
         </div>
       )}
 
-      {tab === 'definition' && <TaskProposal
+      <div hidden={tab !== 'definition'} className="max-h-[50%] shrink-0 overflow-y-auto"><TaskProposal
         workspaceId={workspaceId}
         draftIdentity={JSON.stringify(currentSpec())}
-        currentYaml={title.trim() && subtasks.length ? taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>) : undefined}
+        currentYaml={taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)}
         projectId={projectId}
         model={orchModel}
         llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
@@ -1427,7 +1427,7 @@ function ExistingTaskEditor({
           applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
             defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
         }}
-      />}
+      /></div>
       {tab === 'definition' && (
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
