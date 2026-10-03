@@ -18,6 +18,7 @@ export function ConfirmationHost() {
 
   return <AlertDialog open={!!request} onOpenChange={open => { if (!open) confirmationController.settle(false) }}>
     <AlertDialogContent
+      className="flex max-h-[82dvh] flex-col overflow-hidden"
       overlayClassName="bg-black/15 dark:bg-black/35"
       onEscapeKeyDown={event => event.stopPropagation()}
       onOpenAutoFocus={event => {
@@ -27,11 +28,11 @@ export function ConfirmationHost() {
       }}
       onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus() }}
     >
-      <AlertDialogHeader>
+      <AlertDialogHeader className="shrink-0 text-left">
         <AlertDialogTitle>{displayed?.title}</AlertDialogTitle>
-        <AlertDialogDescription className="break-words">{displayed?.message}{displayed?.detail && <><br />{displayed.detail}</>}</AlertDialogDescription>
       </AlertDialogHeader>
-      <AlertDialogFooter>
+      <AlertDialogDescription className="min-h-0 overflow-y-auto break-words">{displayed?.message}{displayed?.detail && <><br />{displayed.detail}</>}</AlertDialogDescription>
+      <AlertDialogFooter className="shrink-0 flex-row flex-wrap justify-end border-t border-border pt-4">
         <Button ref={cancelRef} variant="outline" onClick={() => confirmationController.settle(false)}>{displayed?.cancelLabel}</Button>
         <Button variant={displayed?.destructive ? 'destructive' : 'default'} onClick={() => confirmationController.settle(true)}>{displayed?.confirmLabel}</Button>
       </AlertDialogFooter>

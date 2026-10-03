@@ -155,8 +155,9 @@ export function TaskYamlImport({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4 p-6" aria-label={t('tasks.yamlImportTitle')} aria-busy={busy}>
-      <h2 className="text-lg font-semibold">{t('tasks.yamlImportTitle')}</h2>
+    <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4" aria-label={t('tasks.yamlImportTitle')} aria-busy={busy}>
+      <h2 className="shrink-0 border-b border-border pb-3 text-base font-semibold">{t('tasks.yamlImportTitle')}</h2>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
       <p id="yaml-import-hint" className="text-sm text-muted-foreground">{t('tasks.yamlImportHint')}</p>
       <input ref={input} type="file" accept=".yaml,.yml" className="hidden" disabled={busy}
         aria-label={t('tasks.yamlImportChoose')}
@@ -169,8 +170,9 @@ export function TaskYamlImport({
       {errors.length > 0 && <ul role="alert" className="max-h-40 overflow-auto break-words text-sm text-destructive">
         {errors.map((error, index) => <li key={index}>{error}</li>)}
       </ul>}
-      <div className="flex justify-end gap-3">
-        <button type="button" disabled={busy} onClick={closeEditor}>{t('common.cancel')}</button>
+      </div>
+      <div className="task-editor-subview-footer">
+        <button type="button" className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-50" disabled={busy} onClick={closeEditor}>{t('common.cancel')}</button>
         <button type="button" disabled={busy || !yaml.trim()} onClick={() => void openTemplateSave()}
           className="rounded-md border px-4 py-2 text-sm disabled:opacity-50">
           {t('tasks.templateSaveToLibrary')}

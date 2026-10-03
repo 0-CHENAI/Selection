@@ -127,6 +127,7 @@ function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun
 function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   const { t } = useTranslation()
   const { fitView } = useReactFlow()
+  const graphContainer = React.useRef<HTMLDivElement>(null)
   const orchestrateOn = isTasksOrchestrateEnabled()
   const initial = displayFlow(spec, liveRun, t)
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
@@ -155,8 +156,12 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   }, [liveKey])
 
   React.useEffect(() => {
-    const id = requestAnimationFrame(() => fitView({ padding: 0.2 }))
-    return () => cancelAnimationFrame(id)
+    let frame: number
+    const fit = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => fitView({ padding: 0.2 })) }
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(fit)
+    if (graphContainer.current) observer?.observe(graphContainer.current)
+    fit()
+    return () => { observer?.disconnect(); cancelAnimationFrame(frame) }
   }, [topologyKey, fitView])
 
   React.useEffect(() => {
@@ -172,7 +177,7 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   const runStatusKey = runStatusLabelKey(liveRun?.status)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="task-workbench flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <div className="flex items-center gap-2 text-[12.5px] text-foreground/55">
         <span>{t(runnerLabelKey(spec.runner, orchestrateOn))}</span>
         <span className="text-foreground/40">{t('tasks.canvasReadOnlyHint')}</span>
@@ -192,8 +197,8 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
           </span>
         )}
       </div>
-      <div className={`grid flex-1 grid-cols-[minmax(0,1fr)_220px] gap-2 ${compact ? 'min-h-0' : 'min-h-[420px]'}`}>
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="task-workbench-grid grid min-h-0 min-w-0 flex-1 gap-3">
+        <div ref={graphContainer} className="overflow-hidden rounded-lg border border-border bg-card">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -212,10 +217,10 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
           >
             <Background />
             <Controls />
-            <MiniMap />
+            {!compact && <MiniMap />}
           </ReactFlow>
         </div>
-        <aside className="overflow-auto rounded-lg border border-border bg-card p-2 text-[12.5px]">
+        <aside className="min-h-0 min-w-0 overflow-auto rounded-lg border border-border bg-card p-3 text-[12.5px]">
           {selectedSpec ? (
             <div className="flex flex-col gap-2">
               <div className="font-semibold">{selectedSpec.id}</div>
@@ -231,7 +236,7 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
                   <span className="break-words text-foreground/80">{row.value}</span>
                 </div>
               ))}
-              {selectedSpec.prompt && <p className="whitespace-pre-wrap text-foreground/80">{selectedSpec.prompt}</p>}
+              {selectedSpec.prompt && <p className="whitespace-pre-wrap break-words text-foreground/80">{selectedSpec.prompt}</p>}
               {selectedInstances.length > 0 && (
                 <section className="mt-1 border-t border-border/70 pt-2">
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground/45">
