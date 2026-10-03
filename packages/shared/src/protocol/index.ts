@@ -5,3 +5,5 @@ export * from './events'
 export * from './routing'
 
 export * from './artifacts'
+
+export * from './handover'

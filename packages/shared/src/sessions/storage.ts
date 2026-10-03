@@ -177,6 +177,9 @@ export function generateSessionId(workspaceRootPath: string): string {
 export async function createSession(
   workspaceRootPath: string,
   options?: {
+    /** Reserved by the host's durable handover receipt, never supplied by RPC options. */
+    reservedSessionId?: string;
+    handover?: SessionConfig['handover'];
     workMode?: SessionConfig['workMode'];
     executionRootSessionId?: string;
     name?: string;
@@ -212,7 +215,9 @@ export async function createSession(
   ensureSessionsDir(workspaceRootPath);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath);
+  const sessionId = options?.reservedSessionId ?? generateSessionId(workspaceRootPath);
+  if (sanitizeSessionId(sessionId) !== sessionId || !sessionId) throw new Error('Invalid reserved session identity');
+  if (options?.reservedSessionId && existsSync(getSessionFilePath(workspaceRootPath, sessionId))) throw new Error('Reserved session already exists');
 
   // Create session directory with all subdirectories (plans, attachments)
   ensureSessionDir(workspaceRootPath, sessionId);
@@ -224,6 +229,7 @@ export async function createSession(
 
   const session: SessionConfig = {
     id: sessionId,
+    handover: options?.handover,
     workMode: options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
     workModeNeedsReview: false,
     executionRootSessionId: options?.executionRootSessionId ?? sessionId,

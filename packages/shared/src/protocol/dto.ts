@@ -1,3 +1,4 @@
+import type { HandoverLink, HandoverOperation } from './handover'
 /**
  * Server DTO types — data shapes used by RPC handlers and SessionManager.
  *
@@ -67,6 +68,7 @@ export interface RuntimeRecoveryView {
 }
 
 export interface Session extends WorkModeMetadata {
+  handover?: HandoverLink
   runtimeRecovery?: RuntimeRecoveryView
   progressSupervision?: ProgressSupervisionView
   id: string
@@ -660,7 +662,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -702,6 +704,7 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'handover'; operation: HandoverOperation }
   | { type: 'setWorkMode'; mode: WorkMode }
   | { type: 'setProgressSupervision'; enabled: boolean }
   | { type: 'continueProgress' }

@@ -28,6 +28,8 @@ import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
+  handoverSession?(sessionId: string, operation: import('@craft-agent/shared/protocol').HandoverOperation): Promise<import('@craft-agent/shared/protocol').HandoverResult>
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

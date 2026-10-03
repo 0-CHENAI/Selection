@@ -1,3 +1,6 @@
+import { HandoverStore, handoverHash } from '../reliability/handover-store'
+import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverWebHash, handoverBackground, handoverOperationHash, redactHandoverText } from './handover-snapshot'
+import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
 import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
@@ -39,7 +42,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
-import { basename, dirname, join, relative, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { existsSync, statSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
@@ -123,7 +126,7 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { loadTaskResults, resolveArtifact } from '@craft-agent/shared/tasks'
+import { loadTaskResults, resolveArtifact, readSpecRevision, specRevisionPath } from '@craft-agent/shared/tasks'
 import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
@@ -158,7 +161,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -901,6 +904,7 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession extends WorkModeMetadata {
+  handover?: HandoverLink
   conversationArtifactVersions?: ConversationArtifactVersions
   artifactCandidateInventory?: ArtifactCandidateInventory
   progressAdvisories?: Array<{ id: string; text: string }>
@@ -1655,6 +1659,7 @@ export class SessionManager implements ISessionManager {
   private browserHostByCanvas = new Map<string, string>()
   private activeArtifactFeedback = new Set<string>()
   private inlineFeedbackSessions = new Set<string>()
+  private handoverCapturing = new Set<string>()
   private projectValidationControllers = new Map<string, AbortController>()
   private eventSink: EventSink | null = null
 
@@ -3193,11 +3198,24 @@ export class SessionManager implements ISessionManager {
     // announced to the renderer (see notifySessionCreated). Callers that register the session
     // themselves — the `sessions:create` RPC adds it from the return value — pass
     // `{ emitCreatedEvent: false }` to avoid a redundant hydrate.
-    internal?: { emitCreatedEvent?: boolean },
+    internal?: { emitCreatedEvent?: boolean; reservedSessionId?: string; handover?: HandoverLink },
   ): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
+    }
+
+    if (internal?.reservedSessionId) {
+      validateSessionId(internal.reservedSessionId)
+      const existing = loadStoredSession(workspace.rootPath, internal.reservedSessionId)
+      if (existing) {
+        if (existing.handover?.handoverId !== internal.handover?.handoverId || existing.workMode !== options?.workMode) throw new Error('Reserved handover target identity conflict')
+        if (!this.sessions.has(existing.id)) {
+          const { messages: _storedMessages, ...metadata } = existing
+          this.sessions.set(existing.id, createManagedSession(metadata, workspace, { messagesLoaded: false }))
+        }
+        return (await this.getSession(existing.id))!
+      }
     }
 
     // Get new session defaults from workspace config (with global fallback)
@@ -3516,12 +3534,17 @@ export class SessionManager implements ISessionManager {
       ?? (validatedBranch?.sourceSession.workMode)
       ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM')
     if (options?.parentSessionId && !parentMode) throw new Error('Parent execution session is unavailable')
-    if (parentMode) assertComplexCapability(parentMode, 'delegate')
+    if (parentMode) {
+      if (this.handoverCapturing.has(parentMode.id)) throw new Error('Source is committing a handover snapshot')
+      assertComplexCapability(parentMode, 'delegate')
+    }
     if (workMode === 'NORM' && (options?.taskSlug || options?.taskDraft || options?.parentSessionId)) throw new Error('NORM cannot create a workflow or worker session')
     if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Create a PRO conversation before enabling Swarm')
 
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
+      reservedSessionId: internal?.reservedSessionId,
+      handover: internal?.handover,
       name: options?.name,
       workMode,
       executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
@@ -4738,6 +4761,7 @@ export class SessionManager implements ISessionManager {
 
       // Set up permission handler to forward requests to renderer
       managed.agent.onBeforeToolExecution = (toolName, input, toolCallId, recoveryClass, confinedShellDirectory) => {
+        this.assertHandoverOperationAllowed(managed, toolName, input)
         const capability = complexToolCapability(toolName)
         if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
@@ -6767,6 +6791,9 @@ export class SessionManager implements ISessionManager {
   }
 
   async sendMessage(...args: Parameters<SessionManager['executeMessage']>): Promise<void> {
+    if (this.handoverCapturing.has(args[0])) throw new Error('This conversation is committing a handover snapshot; retry after it finishes.')
+    const target = this.sessions.get(args[0])
+    if (target?.handover && this.handoverStore(target).read(target.handover.handoverId)?.status !== 'applied') throw new Error('Handover background is not applied yet; retry the same handover first.')
     if (this.inlineFeedbackSessions.has(args[0]) && !args[11]) throw new Error('This conversation is revising a file. Send the next message after the revision finishes.')
     return this.withSessionExecution(args[0], () => this.executeMessage(...args))
   }
@@ -7574,9 +7601,11 @@ export class SessionManager implements ISessionManager {
         userTaskMessage: checkpointOwner?.content ?? message,
       }
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
+      const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
+      const currentInput = handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${message}` : message
       const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
-        ? `${message}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
-        : message
+        ? `${currentInput}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : currentInput
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -10330,7 +10359,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private async processNextQueuedMessage(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed || this.inlineFeedbackSessions.has(sessionId) || managed.messageQueue.length === 0) return
+    if (!managed || this.inlineFeedbackSessions.has(sessionId) || this.handoverCapturing.has(sessionId) || managed.messageQueue.length === 0) return
 
     const next = managed.messageQueue[0]!
     try {
@@ -10714,9 +10743,283 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     this.taskRunnerLookup = lookup
   }
 
-  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string): void {
+  private handoverStore(managed: ManagedSession): HandoverStore {
+    return new HandoverStore(join(managed.workspace.rootPath, 'handovers'), managed.workspace.id)
+  }
+
+  private handoverMembers(source: ManagedSession): ManagedSession[] {
+    return [...this.sessions.values()].filter(session => session.id === source.id
+      || session.workspace.id === source.workspace.id && (session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId) === source.id)
+  }
+
+  private handoverRuns(source: ManagedSession): HandoverSnapshot['runs'] {
+    const slugs = [...new Set(this.handoverMembers(source).flatMap(session => session.taskSlug ? [session.taskSlug] : []))]
+    return slugs.flatMap(slug => {
+      const runner = this.taskRunnerLookup?.(source.workspace.id)
+      if (!runner) throw new Error('Source workflow state is unavailable; wait for its host to recover')
+      return runner.getRunHistory(slug, source.id).map(run => ({ slug, runId: run.runId, revision: run.revision ?? 0, status: run.status, retainedBy: source.id }))
+    })
+  }
+
+  private handoverWaitReason(source: ManagedSession): string | undefined {
+    if (this.handoverMembers(source).some(session => session.isProcessing || this.inlineFeedbackSessions.has(session.id)
+      || this.handoverCapturing.has(session.id) || session.orchestrationStatus === 'running'
+      || [...session.backgroundTaskRegistry.values()].some(task => task.status === 'running'))) return 'Waiting for source work to reach a handover checkpoint'
+    if (this.handoverRuns(source).some(run => ['running','pausing','verifying','repairing','waiting-coordinator'].includes(run.status))) return 'Waiting for the source workflow and workers to settle'
+    return undefined
+  }
+
+  private assertHandoverOperationAllowed(managed: ManagedSession, toolName: string, input?: Record<string, unknown>): void {
+    const root = managed.handover ? managed : this.sessions.get(managed.executionRootSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? '')
+    if (!root?.handover) return
+    if (root.workspace.id !== managed.workspace.id) throw new Error('Invalid handover execution root')
+    const record = this.handoverStore(root).read(root.handover.handoverId)
+    if (!record || record.targetSessionId !== root.id || record.status !== 'applied') throw new Error('Handover input must be applied before execution')
+    if (record.snapshot!.runs.some(run => run.slug === input?.slug) && complexToolCapability(toolName) === 'run-workflow') throw new Error('Source workflow ownership stays with its original root; create a separate plan for new work')
+    const requestHash = handoverOperationHash(toolName, input)
+    if (record.snapshot!.actions.some(action => action.requestHash === requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed'))) throw new Error('This operation already completed in the handover source; use its recorded result instead of replaying it')
+    if (record.snapshot!.actions.some(action => !action.requestHash && record.reviews[action.ref]?.outcome === 'completed'
+      && (action.tool === toolName || action.tool === 'unknown-execution') && toolRecoveryClass(toolName) !== 'read-only'
+      && !['submit_answer','update_task_list','mcp__session__submit_answer','mcp__session__update_task_list','session_history','task_context','WebFetch','WebSearch','web_fetch','web_search'].includes(toolName))) throw new Error('The source operation completed but its request identity is unavailable; do not replay this tool')
+    const unknown = record.snapshot!.actions.filter(action => action.outcome === 'unknown' && !record.reviews[action.ref])
+    if (unknown.length && toolRecoveryClass(toolName) !== 'read-only' && !['WebFetch','WebSearch','web_fetch','web_search'].includes(toolName)
+      && !['submit_answer','update_task_list','mcp__session__submit_answer','mcp__session__update_task_list','session_history','task_context'].includes(toolName)) {
+      throw new Error('Handover contains operations with unknown outcomes. Review them before writes, delegation or workflows; completed operations must not be replayed.')
+    }
+  }
+
+  private handoverInput(managed: ManagedSession): string {
+    const record = this.handoverStore(managed).read(managed.handover!.handoverId)
+    if (!record?.snapshot || record.targetSessionId !== managed.id || record.status !== 'applied') throw new Error('Handover input is not ready')
+    const directory = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'handover', record.handoverId)
+    const copied = loadIsolationFile(join(directory, 'snapshot.json'), 'utf8')
+    if (handoverHash(copied) !== handoverHash(JSON.stringify(record.snapshot))) throw new Error('Handover background integrity check failed')
+    for (const file of record.snapshot.files) {
+      if (handoverHash(loadIsolationFile(join(directory, file.snapshotPath))) !== file.hash) throw new Error('Handover input file integrity check failed')
+    }
+    return `${handoverBackground(record.snapshot, directory)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.`
+  }
+
+  async handoverSession(sessionId: string, operation: HandoverOperation): Promise<HandoverResult> {
+    const current = this.sessions.get(sessionId)
+    if (!current) throw new Error('Session not found')
+    const store = this.handoverStore(current)
+    if (operation.type === 'list') return { records: store.list(sessionId) }
+    const release = store.tryClaim(operation.handoverId)
+    if (!release) {
+      const existing = store.read(operation.handoverId)
+      if ((operation.type === 'create' || operation.type === 'get') && existing
+        && (existing.sourceSessionId === sessionId || operation.type === 'get' && existing.targetSessionId === sessionId)
+        && (operation.type !== 'create' || existing.targetMode === operation.targetMode)) return { records: [existing] }
+      throw new Error('This handover is being updated; retry after it settles')
+    }
+    try {
+      let record = store.read(operation.handoverId)
+      if (operation.type === 'create') {
+        if (current.parentSessionId || current.taskNodeId || current.executionRootSessionId && current.executionRootSessionId !== current.id || current.workModeNeedsReview) throw new Error('Handover requires a verified root conversation')
+        if (!['NORM','PRO'].includes(operation.targetMode) || operation.targetMode === current.workMode) throw new Error('Choose the opposite mode for a new handover conversation')
+        if (record && (record.sourceSessionId !== sessionId || record.targetMode !== operation.targetMode)) throw new Error('Handover identity was already used for a different request')
+        if (!record) {
+          record = { version: 1, handoverId: operation.handoverId, sourceSessionId: sessionId, workspaceId: current.workspace.id,
+            targetMode: operation.targetMode, snapshotVersion: 1, status: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), reviews: {} }
+          store.save(record)
+        }
+      }
+      if (!record || record.sourceSessionId !== sessionId && record.targetSessionId !== sessionId) throw new Error('Handover belongs to another conversation')
+      if (operation.type === 'cancel') {
+        if (record.status !== 'waiting' && record.status !== 'cancelled') throw new Error('Handover snapshot is already committed; open its target instead')
+        record.status = 'cancelled'; record.error = undefined; store.save(record)
+      } else if (operation.type === 'review') {
+        const action = record.snapshot?.actions.find(action => action.ref === operation.actionRef)
+        if (record.targetSessionId !== sessionId || record.status !== 'applied' || action?.outcome !== 'unknown'
+          || !['completed','not-performed'].includes(operation.outcome) || !operation.note.trim()) throw new Error('Review an unknown operation in its target and record your verification')
+        const previous = record.reviews[operation.actionRef]
+        if (previous && (previous.outcome !== operation.outcome || previous.note !== redactHandoverText(operation.note.trim()))) throw new Error('Operation review is already recorded')
+        record.reviews[operation.actionRef] = { outcome: operation.outcome, note: redactHandoverText(operation.note.trim()) }
+        store.save(record)
+      } else if (record.status !== 'cancelled' && record.status !== 'applied') {
+        const source = this.sessions.get(record.sourceSessionId)
+        if (record.status === 'waiting') {
+          if (!source) throw new Error('Source was removed before a snapshot was committed')
+          const reason = this.handoverWaitReason(source)
+          if (reason) { record.error = reason; store.save(record); return { records: [record] } }
+          const members = this.handoverMembers(source)
+          members.forEach(member => this.handoverCapturing.add(member.id))
+          const capture = async (index: number): Promise<void> => {
+            if (index < members.length) return this.withSessionExecution(members[index]!.id, () => capture(index + 1))
+            for (const member of members) { await this.ensureMessagesLoaded(member); await this.flushSession(member.id) }
+            const runs = this.handoverRuns(source)
+            if (members.some(member => member.isProcessing) || runs.some(run => ['running','pausing','verifying','repairing','waiting-coordinator'].includes(run.status))) throw new Error('Source became active; wait for the next checkpoint')
+            const pendingOperations = members.flatMap(member => {
+              const saved = readExecutionCheckpoint(getSessionStoragePath(member.workspace.rootPath, member.id))
+              if (saved.kind === 'unsupported' || saved.kind === 'corrupt') return [{ ref: `${member.id}:checkpoint`, tool: 'unknown-execution', sessionId: member.id }]
+              return saved.kind === 'ok' ? Object.entries(saved.checkpoint.pendingTools).filter(([, tool]) => tool.recovery !== 'read-only')
+                .map(([call, tool]) => ({ ref: `${member.id}:${call}`, tool: tool.name, sessionId: member.id })) : []
+            })
+            const sdk = sdkStateSnapshot(getSessionStoragePath(source.workspace.rootPath, source.id), source.sdkSessionId)
+            const checkpoint = handoverHash(JSON.stringify({ messages: members.map(member => member.messages), runs, sdk: sdk?.hash }))
+            const inheritedRecord = source.handover ? store.read(source.handover.handoverId) : undefined
+            const inherited = inheritedRecord?.snapshot ? { ...inheritedRecord.snapshot, actions: inheritedRecord.snapshot.actions.map(action => inheritedRecord.reviews[action.ref] ? { ...action, outcome: inheritedRecord.reviews[action.ref]!.outcome } : action) } : undefined
+            const snapshot = buildHandoverSnapshot({ workspaceId: source.workspace.id, sessionId: source.id, targetMode: record!.targetMode,
+              checkpoint, messages: source.messages, children: members.filter(member => member !== source).map(member => ({ id: member.id, messages: member.messages, branch: handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes) })),
+              branch: handoverBranch(sdk?.bytes), pendingOperations, runs, inherited })
+            const runFiles: Array<{ path: string; expectedHash: string; versionId?: string; artifactId?: string }> = []
+            for (const run of runs) {
+              if (run.revision > 0 && !existsSync(specRevisionPath(source.workspace.rootPath, run.slug, run.runId, run.revision))) throw new Error('The committed source revision is unavailable')
+              const plan = readSpecRevision(source.workspace.rootPath, run.slug, run.runId, run.revision)
+              if (!plan) throw new Error('The committed source plan is unavailable')
+              snapshot.goal.push(redactHandoverText(plan.goal))
+              snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
+              const results = loadTaskResults(source.workspace.rootPath, run.slug, run.runId)
+              snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: 'task-result', text: redactHandoverText(JSON.stringify(results)) })
+              for (const artifact of results.nodes.flatMap(node => node.artifacts ?? [])) {
+                if (artifact && typeof artifact === 'object' && 'path' in artifact && typeof artifact.path === 'string' && 'hash' in artifact && typeof artifact.hash === 'string') runFiles.push({ path: resolve(source.workspace.rootPath, artifact.path), expectedHash: artifact.hash })
+              }
+              snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
+            }
+            await this.captureHandoverFiles(source, members, store, record!, snapshot, runFiles)
+            record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)
+            record!.status = 'prepared'; record!.error = undefined; store.save(record!)
+          }
+          try { await capture(0) }
+          finally { members.forEach(member => this.handoverCapturing.delete(member.id)) }
+        }
+        const sourceModel = record.creationConfig?.model ?? source?.model, sourceConnection = record.creationConfig?.llmConnection ?? source?.llmConnection
+        const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: 'safe', model: sourceModel,
+          llmConnection: sourceConnection, name: `${record.targetMode} · ${source?.name ?? record.sourceSessionId}` },
+          { emitCreatedEvent: false, reservedSessionId: record.targetSessionId!, handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId,
+            sourceMessageId: record.snapshot!.source.messageId, snapshotVersion: record.snapshotVersion } })
+        record.status = 'created'; store.save(record)
+        await this.applyHandoverInput(target.id, record, store)
+        record.status = 'applied'; record.error = undefined; store.save(record)
+        this.notifySessionCreated(current.workspace.id, record.targetSessionId!)
+      }
+      const changes: HandoverResult['changes'] = record.snapshot ? await Promise.all(record.snapshot.files.map(async file => {
+        try {
+          if (file.sourceUrl) {
+            if (operation.type !== 'get' || !operation.checkSources) return { ref: file.ref, state: 'unavailable' as const }
+            const { createWebFetchTool } = await import('../../../pi-agent-server/src/tools/web-fetch')
+            const result = await createWebFetchTool(() => null).execute('handover-source-check', { url: file.sourceUrl, prompt: file.urlPrompt }, undefined, undefined, undefined as never)
+            if (result.details && typeof result.details === 'object' && 'isError' in result.details && result.details.isError) return { ref: file.ref, state: 'unavailable' as const }
+            const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('')
+            return { ref: file.ref, state: handoverWebHash(text) === file.originalHash ? 'unchanged' as const : 'changed' as const }
+          }
+          return { ref: file.ref, state: existsSync(file.originalPath) ? handoverHash(loadIsolationFile(file.originalPath)) === file.originalHash ? 'unchanged' as const : 'changed' as const : 'missing' as const }
+        } catch { return { ref: file.ref, state: 'unavailable' as const } }
+      })) : undefined
+      return { records: [record], changes }
+    } catch (error) {
+      const record = store.read(operation.handoverId)
+      if (record && record.status !== 'applied' && record.status !== 'cancelled') { record.error = error instanceof Error ? error.message : 'Handover failed'; store.save(record) }
+      throw error
+    } finally { release() }
+  }
+
+  private async captureHandoverFiles(source: ManagedSession, members: ManagedSession[], store: HandoverStore, record: HandoverRecord, snapshot: HandoverSnapshot, runFiles: Array<{ path: string; expectedHash?: string; versionId?: string; artifactId?: string }> = []): Promise<void> {
+    const versions = new ArtifactVersions(join(source.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), source.workspace.id)
+    const candidates: Array<{ path: string; expectedHash?: string; versionId?: string; artifactId?: string }> = members.flatMap(member => {
+      const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
+      const toolInputs = handoverToolInputs(branch)
+      return member.messages.flatMap(message => {
+        const originalInput = message.toolUseId ? toolInputs.get(message.toolUseId) : undefined
+        const inputPath = originalInput?.file_path ?? originalInput?.path ?? message.toolInput?.file_path ?? message.toolInput?.path
+        const webResult = ['WebFetch','web_fetch'].includes(message.toolName ?? '') && !message.isError
+          ? branch.find(entry => entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === message.toolUseId) : undefined
+        const webText = webResult?.type === 'message' && webResult.message.role === 'toolResult' ? webResult.message.content.filter(part => part.type === 'text').map(part => part.text).join('') : ''
+        const downloads = [...webText.matchAll(/\(saved to ([^)]+)\)|Saved to: ([^\n]+)/g)].map(match => match[1] ?? match[2]!).filter(path => isAbsolute(path))
+        const isRead = ['Read','read','read_file'].includes(message.toolName ?? '')
+        const canResolveRead = typeof inputPath === 'string' && (originalInput !== undefined || isAbsolute(inputPath))
+        if (isRead && typeof inputPath === 'string' && !canResolveRead) snapshot.warnings.push(`Input snapshot unavailable: ${inputPath} (original tool arguments unavailable; display-relative paths cannot identify file bytes)`)
+        return [
+          ...downloads.map(path => ({ path, versionId: undefined, artifactId: undefined })),
+          ...(message.attachments ?? []).map(attachment => ({ path: attachment.storedPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined })),
+          ...(message.artifactVersions ?? []).map(ref => ({ path: ref.path, versionId: ref.versionId, artifactId: ref.artifactId })),
+          ...(isRead && canResolveRead && typeof inputPath === 'string'
+            ? [{ path: expandPath(inputPath, expandPath(member.sdkCwd ?? member.workingDirectory ?? member.workspace.rootPath)), versionId: undefined, artifactId: undefined }] : []),
+        ]
+      })
+    })
+    candidates.push(...runFiles)
+    const seen = new Set<string>()
+    for (const candidate of candidates) {
+      const identity = JSON.stringify(candidate)
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      try {
+        if (/(?:^|[\/\\])(?:\.env(?:\..*)?|credentials?[^\/\\]*|secrets?[^\/\\]*|[^\/\\]*\.(?:pem|key))$/i.test(candidate.path)) { snapshot.warnings.push(`Credential material omitted: ${feedbackBasename(candidate.path)}`); continue }
+        await validateWorkspaceFilePath(candidate.path, source.workspace.id)
+        if (candidate.expectedHash && !candidate.versionId) {
+          const registered = versions.findByPath(candidate.path)
+          const retainedVersion = registered?.versions.find(version => version.hash === candidate.expectedHash)
+          if (retainedVersion) { candidate.versionId = retainedVersion.id; candidate.artifactId = registered!.id }
+        }
+        const artifact = candidate.versionId ? candidate.artifactId ? versions.read(candidate.artifactId) : versions.findByVersionId(candidate.versionId) : undefined
+        if (candidate.versionId && !artifact) throw new Error('The cited artifact version is unavailable; current content cannot replace it')
+        const bytes = candidate.versionId && artifact ? versions.versionBytes(artifact.id, candidate.versionId) : loadIsolationFile(candidate.path)
+        if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(new TextDecoder().decode(bytes))) { snapshot.warnings.push('Private key material omitted'); continue }
+        const originalHash = handoverHash(bytes)
+        if (candidate.expectedHash && originalHash !== candidate.expectedHash) throw new Error('The original run artifact changed; current bytes cannot replace its recorded result')
+        const extension = /^\.[a-zA-Z0-9]{1,12}$/.test(feedbackExtension(candidate.path)) ? feedbackExtension(candidate.path) : ''
+        const isText = !bytes.includes(0) && new TextDecoder('utf-8', { fatal: false }).decode(bytes).indexOf('\uFFFD') === -1
+        const safeBytes = isText ? Buffer.from(redactHandoverText(new TextDecoder().decode(bytes))) : bytes
+        const hash = handoverHash(safeBytes), path = `files/${hash}${extension}`
+        atomicWrite(join(store.directory(record.handoverId), path), safeBytes)
+        snapshot.files.push({ ref: handoverHash(identity), originalPath: candidate.path, snapshotPath: path, hash, originalHash,
+          versionId: candidate.versionId, artifactId: artifact?.id, ...(originalHash !== hash ? { redacted: true } : {}) })
+        if (!candidate.versionId) snapshot.warnings.push(`Unversioned input captured at the handover checkpoint: ${candidate.path}. Earlier read excerpts remain preserved separately.`)
+      } catch (error) { snapshot.warnings.push(`Input snapshot unavailable: ${candidate.path} (${error instanceof Error ? error.message : 'unknown'}). Preserved original excerpts are not a substitute for verified file bytes.`) }
+    }
+    // Preserve the fetched response, never refresh a URL while committing the source snapshot.
+    for (const member of members) {
+      const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
+      const calls = handoverToolInputs(branch)
+      for (const message of member.messages) {
+        if (!['WebFetch','web_fetch'].includes(message.toolName ?? '') || message.toolStatus !== 'completed' || message.isError) continue
+        const input = message.toolUseId && calls.get(message.toolUseId) || message.toolInput
+        if (typeof input?.url !== 'string') continue
+        const url = new URL(input.url)
+        if (url.username || url.password || [...url.searchParams.keys()].some(key => /token|key|secret|password|auth/i.test(key))) { snapshot.warnings.push('Credential-bearing URL omitted'); continue }
+        const sdkResult = branch.find(entry => entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === message.toolUseId)
+        const text = sdkResult?.type === 'message' && sdkResult.message.role === 'toolResult' ? sdkResult.message.content.filter(part => part.type === 'text').map(part => part.text).join('') : message.toolResult ?? message.content
+        const safeBytes = Buffer.from(redactHandoverText(text)), hash = handoverHash(safeBytes), path = `files/${hash}.txt`
+        atomicWrite(join(store.directory(record.handoverId), path), safeBytes)
+        snapshot.files.push({ ref: `${member.id}:${message.toolUseId ?? message.id}`, originalPath: input.url, sourceUrl: input.url, urlPrompt: typeof input.prompt === 'string' ? redactHandoverText(input.prompt) : undefined, snapshotPath: path, hash, originalHash: handoverWebHash(text) })
+      }
+    }
+    if (source.handover) {
+      const inherited = store.read(source.handover.handoverId)
+      for (const file of inherited?.snapshot?.files ?? []) {
+        const bytes = store.snapshotBytes(source.handover.handoverId, file.snapshotPath, file.hash)
+        atomicWrite(join(store.directory(record.handoverId), file.snapshotPath), bytes)
+        if (!snapshot.files.some(candidate => candidate.ref === file.ref)) snapshot.files.push(file)
+      }
+    }
+  }
+
+  private async applyHandoverInput(targetId: string, record: HandoverRecord, store: HandoverStore): Promise<void> {
+    const managed = this.sessions.get(targetId)!
+    await this.ensureMessagesLoaded(managed)
+    const directory = join(getSessionStoragePath(managed.workspace.rootPath, targetId), 'data', 'handover', record.handoverId)
+    atomicWrite(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot))
+    for (const file of record.snapshot!.files) atomicWrite(join(directory, file.snapshotPath), store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash))
+    const messageId = `handover-${record.handoverId}`
+    if (!managed.messages.some(message => message.id === messageId)) {
+      managed.messages.push({ id: messageId, role: 'info', hidden: true, content: `Handover from ${record.sourceSessionId}, snapshot ${record.snapshotVersion}. Source history and run ownership are preserved. Background: ${directory}/snapshot.json`, timestamp: Date.now() })
+      this.persistSession(managed)
+    }
+    await this.flushSession(targetId)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: targetId, changes: { handover: managed.handover } }, managed.workspace.id)
+  }
+
+  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void {
     const root = orchestratorSessionId ? this.sessions.get(orchestratorSessionId) : undefined
     if (root?.workspace.id !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    if (this.handoverCapturing.has(root.id)) throw new Error('Source is committing a handover snapshot')
+    this.assertHandoverOperationAllowed(root, 'run_task', task)
+    if (!this.executionOwners.has(root.id)) {
+      const release = acquireProjectLock(join(getSessionStoragePath(root.workspace.rootPath, root.id), 'data', 'execution-owner'))
+      release()
+    }
     assertComplexCapability(root, 'run-workflow')
   }
 
@@ -11692,7 +11995,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!getDagOrchestrationEnabled()) {
       throw new Error('DAG orchestration is disabled in Advanced settings')
     }
-    this.assertTaskRunAllowed(workspaceId, orchestratorSessionId)
+    this.assertTaskRunAllowed(workspaceId, orchestratorSessionId, { slug })
     const snapshot = runner.run(slug, {
       orchestratorSessionId,
       params: input.params,
