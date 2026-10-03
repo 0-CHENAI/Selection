@@ -1,3 +1,4 @@
+/// <reference path="../ambient.d.ts" />
 import { Type } from '@sinclair/typebox';
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -171,7 +172,7 @@ function truncate(text: string, maxLen: number = MAX_TEXT_LENGTH): string {
 function ensurePdfjsPolyfills(): void {
   // pdfjs-dist uses browser-only APIs at module scope (e.g. `const SCALE_MATRIX = new DOMMatrix()`).
   // Provide minimal stubs so it can load in Node.js — only text extraction is used, not rendering.
-  if (typeof globalThis.DOMMatrix === 'undefined') {
+  if (typeof (globalThis as any).DOMMatrix === 'undefined') {
     (globalThis as any).DOMMatrix = class DOMMatrix {
       a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
       m11 = 1; m12 = 0; m13 = 0; m14 = 0;
@@ -194,7 +195,7 @@ function ensurePdfjsPolyfills(): void {
       static fromMatrix() { return new (globalThis as any).DOMMatrix(); }
     };
   }
-  if (typeof globalThis.Path2D === 'undefined') {
+  if (typeof (globalThis as any).Path2D === 'undefined') {
     (globalThis as any).Path2D = class Path2D {
       addPath() {}
     };

@@ -18,6 +18,8 @@ import type { Session, Message } from '../../shared/types'
  * Used by SessionList to avoid re-rendering on message changes
  */
 export interface SessionMeta {
+  handover?: import('@craft-agent/shared/protocol').HandoverLink
+
   workMode?: 'NORM' | 'PRO'
   workModeNeedsReview?: boolean
   executionRootSessionId?: string

@@ -302,6 +302,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'handover':
+        if (!sessionManager.handoverSession) throw new Error('Handover is unavailable')
+        return sessionManager.handoverSession(sessionId, command.operation)
       case 'flag':
         return sessionManager.flagSession(sessionId)
       case 'unflag':
