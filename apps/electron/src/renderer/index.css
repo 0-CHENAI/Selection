@@ -1603,3 +1603,57 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   min-height: 31px;
   padding: 6px 8px;
 }
+
+/* Task authoring follows its panel width, including side-by-side app panes. */
+.task-editor { container: task-editor / inline-size; }
+.task-editor [hidden] { display: none !important; }
+.task-editor-authoring { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); }
+.task-editor-tabs { order: 3; flex-basis: 100%; }
+.task-editor-dialog > [data-slot="dialog-header"] { flex-shrink: 0; text-align: left; padding-right: 1.5rem; }
+.task-editor-dialog .task-editor-dialog-footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+@container task-editor (min-width: 960px) {
+  .task-editor-tabs { order: 0; flex-basis: auto; margin-left: 1rem; }
+}
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-template-columns: minmax(0, 1fr); overflow-y: auto; align-content: start; }
+  .task-editor-definition, .task-editor-nodes { overflow: visible; }
+  .task-editor-node-list { overflow: visible; flex: auto; }
+  .task-editor-actions { gap: 0.5rem; }
+  .task-editor-divider { display: none; }
+}
+@container task-editor (max-width: 440px) {
+  .task-editor-actions { flex-basis: 100%; margin-left: 0; }
+  .task-editor-tabs { width: 100%; }
+  .task-editor-tabs > button { flex: 1; padding-inline: 0.5rem; }
+}
+.task-workbench { container: task-workbench / inline-size; }
+.task-workbench-grid { grid-template-columns: minmax(0, 1fr) 220px; }
+.task-workbench .react-flow {
+  --xy-background-color: var(--card);
+  --xy-controls-button-border-color: var(--border);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  --xy-node-background-color: var(--card);
+  --xy-node-color: var(--foreground);
+  --xy-node-border: 1px solid var(--border);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-color: var(--foreground);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-node-background-color: var(--muted);
+}
+@container task-workbench (max-width: 560px) {
+  .task-workbench-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
+}
+.task-editor-subview-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-auto-rows: max-content; }
+}
+@container task-workbench (max-width: 560px) {
+  .task-workbench .react-flow__minimap { display: none; }
+}

@@ -55,16 +55,16 @@ import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run
 import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 
 
-function v3MigrationLines(spec: Record<string, unknown>): string[] {
+function v3MigrationLines(spec: Record<string, unknown>, translate: (key: string, values?: Record<string, string>) => string): string[] {
   const nodes = Array.isArray(spec.nodes) ? spec.nodes as Array<{ id?: string; cache?: string }> : []
   const cachePure = nodes.filter((node) => node.cache === 'pure').map((node) => node.id).filter(Boolean)
   const lines = [
-    'schema_version becomes 3. v1/v2 run logs are not rewritten.',
-    'Coordinator checkpoints wait for submit_orchestration_decision; timeout pauses with coordinator-timeout.',
-    'verify/judge nodes must call submit_task_node_verdict. Parent chat is never a run verdict.',
+    translate('tasks.migrationVersionEffect'),
+    translate('tasks.migrationCoordinatorEffect'),
+    translate('tasks.migrationVerificationEffect'),
   ]
   if (cachePure.length) {
-    lines.push(`cache: pure on ${cachePure.join(', ')} becomes run-pure (same-run only). workspace-pure is never implied.`)
+    lines.push(translate('tasks.migrationCacheEffect', { nodes: cachePure.join(', ') }))
   }
   return lines
 }
@@ -198,7 +198,7 @@ function ModelSelect({
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="task-editor-field flex flex-wrap items-center justify-between gap-3">
       <span className="text-[12.5px] font-medium text-foreground/55">{label}</span>
       <div className="shrink-0">{children}</div>
     </div>
@@ -478,7 +478,7 @@ function SubtaskCard({
                   type="button"
                   onClick={() => removeDep(depUid)}
                   aria-label={t('tasks.removeDependency')}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-foreground/40 hover:bg-foreground/10 hover:text-red-500"
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-foreground/40 transition-colors hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-none"
                 >
                   <X className="h-3 w-3" strokeWidth={2.5} />
                 </button>
@@ -509,7 +509,7 @@ function SubtaskCard({
           type="button"
           onClick={onRemove}
           aria-label={t('tasks.removeSubtask')}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded text-foreground/40 opacity-0 transition-all hover:bg-foreground/10 hover:text-red-500 group-hover:opacity-100"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded text-foreground/40 transition-opacity hover:text-red-500 focus-visible:text-red-500 focus-visible:opacity-100 focus-visible:outline-none opacity-60 group-hover:opacity-100"
         >
           <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
@@ -1279,20 +1279,22 @@ function ExistingTaskEditor({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 bg-background p-3 text-foreground">
+    <div className="task-editor flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden bg-background p-3 text-foreground">
       {/* Header */}
-      <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
+      <div className="task-editor-header flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-1 pb-3">
         <Btn variant="ghost" className="px-2" onClick={requestClose}>
           <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
         </Btn>
-        <span className="text-foreground/25">/</span>
-        <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
+        <span className="task-editor-divider text-foreground/25">/</span>
+        <span className="min-w-0 truncate text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
 
         {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
-        <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
+        <div className="task-editor-tabs inline-flex gap-1 rounded-lg bg-muted/60 p-1" role="tablist" aria-label={t('tasks.definition')}>
           {(isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
             <button
               key={tb}
+              role="tab"
+              aria-selected={tab === tb}
               onClick={() => {
                 if (tb === 'yaml' && shouldRefreshYamlDraft(yamlHasLocalSource, formChangedSinceYaml)) {
                   setYamlDraft(JSON.stringify(currentSpec(), null, 2))
@@ -1314,7 +1316,7 @@ function ExistingTaskEditor({
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="task-editor-actions ml-auto flex flex-wrap items-center justify-end gap-2">
           {isEdit && onOpenSession && (
             <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
               <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
@@ -1386,7 +1388,7 @@ function ExistingTaskEditor({
               <Btn variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('common.cancel')}
               </Btn>
-              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
+              <Btn variant={isEdit ? "secondary" : "primary"} onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
                 {isEdit ? t('common.save') : t('common.create')}
               </Btn>
               {isEdit && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun}>
@@ -1414,27 +1416,6 @@ function ExistingTaskEditor({
         </div>
       )}
 
-      <div hidden={tab !== 'definition'} className="max-h-[50%] shrink-0 overflow-y-auto"><TaskProposal
-        workspaceId={workspaceId}
-        draftIdentity={JSON.stringify(currentSpec())}
-        currentYaml={taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)}
-        projectId={projectId}
-        model={orchModel}
-        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
-        disabled={busy || !!taskLoadError}
-        onApply={(spec) => {
-          const next = spec as EditableTaskSpec
-          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
-            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
-        }}
-      /></div>
-      {tab === 'definition' && (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
-          {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
-          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
-        </div>
-      )}
 
       {liveRun && ((liveRun.blockers?.length ?? 0) > 0 || liveRun.nodes.some((node) => node.blocker)) && (
         <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
@@ -1461,7 +1442,7 @@ function ExistingTaskEditor({
         </div>
       )}
 
-      {tab === 'results' ? (
+      {tab === 'results' && (
         <ResultsPanel
           results={results}
           loading={resultsLoading}
@@ -1474,10 +1455,11 @@ function ExistingTaskEditor({
           onApplyRunRevision={() => void previewRunRevision()}
           canApplyRunRevision={Boolean(editSlug && etag && (selectedRunId ?? results?.runId ?? liveRun?.runId))}
         />
-      ) : tab === 'yaml' ? (
+      )}
+      {tab === 'yaml' && (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           <textarea
-            className="min-h-[280px] flex-1 rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
+            className="min-h-0 flex-1 resize-none rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
             value={yamlDraft}
             onChange={(e) => {
               setDirty(true)
@@ -1497,14 +1479,35 @@ function ExistingTaskEditor({
             </ul>
           )}
         </div>
-      ) : tab === 'canvas' ? (
+      )}
+      {tab === 'canvas' && (
         <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} />
-      ) : (
-      /* Body */
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
+      )}
+      {/* Keep authoring mounted so tabs retain the conversation and form focus state. */}
+      <div hidden={tab !== 'definition'} className="task-editor-authoring grid min-h-0 min-w-0 flex-1 gap-4">
         {/* Left — definition */}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
-          <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
+        <div className="task-editor-definition flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4">
+          <div className="border-b border-border pb-4"><TaskProposal
+            workspaceId={workspaceId}
+            draftIdentity={JSON.stringify(currentSpec())}
+            currentYaml={taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)}
+            projectId={projectId}
+            model={orchModel}
+            llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+            disabled={busy || !!taskLoadError}
+            onApply={(spec) => {
+              const next = spec as EditableTaskSpec
+              applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
+                defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
+            }}
+          /></div>
+          <div className="flex flex-wrap gap-1 border-b border-border pb-4">
+              <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
+              {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+              <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
+            </div>
+
+          <div className="text-[15px] font-semibold">{t('tasks.definition')}</div>
 
 
           <div>
@@ -1672,7 +1675,7 @@ function ExistingTaskEditor({
         </div>
 
         {/* Right — editable nodes of the existing task */}
-        <div className="flex min-h-0 flex-col rounded-xl border border-border bg-card shadow-minimal">
+        <div className="task-editor-nodes flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-card">
             <>
               <div className="flex shrink-0 items-center gap-2 px-4 pt-4">
                 <span className="text-[15px] font-bold">{t('kanban.subtasks')}</span>
@@ -1684,7 +1687,7 @@ function ExistingTaskEditor({
                 </Btn>
               </div>
 
-              <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-4">
+              <div className="task-editor-node-list flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
                 {subtasks.map((st, i) => (
                   <SubtaskCard
                     key={st.uid}
@@ -1714,7 +1717,6 @@ function ExistingTaskEditor({
             </>
         </div>
       </div>
-      )}
       <ApplyRunRevisionDialog
         open={revisionDialogOpen}
         preview={revisionPreview}
@@ -1741,19 +1743,19 @@ function ExistingTaskEditor({
         onSubmit={(input) => void confirmTemplateSave(input)}
       />
       <Dialog open={v3Confirm !== null} onOpenChange={(open) => { if (!open) setV3Confirm(null) }}>
-        <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogContent className="task-editor-dialog flex max-h-[82dvh] flex-col overflow-hidden sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>{t('tasks.confirmV3Title')}</DialogTitle>
             <DialogDescription>{t('tasks.confirmV3Description')}</DialogDescription>
           </DialogHeader>
           {v3Confirm && (
-            <ul className="list-disc space-y-1 pl-5 text-[12.5px] text-foreground/75">
-              {v3MigrationLines(v3Confirm.spec).map((line) => (
+            <ul className="min-h-0 overflow-y-auto list-disc space-y-2 pl-5 text-sm text-foreground/75">
+              {v3MigrationLines(v3Confirm.spec, t).map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
           )}
-          <DialogFooter>
+          <DialogFooter className="task-editor-dialog-footer">
             <Button variant="outline" size="sm" onClick={() => setV3Confirm(null)}>
               {t('common.cancel')}
             </Button>

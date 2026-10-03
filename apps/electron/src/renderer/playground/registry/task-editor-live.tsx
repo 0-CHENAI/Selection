@@ -1,8 +1,9 @@
 import * as React from 'react'
 import { parse as parseYaml } from 'yaml'
 import { TaskEditor } from '@/components/app-shell/kanban/TaskEditor'
+import { ConfirmationHost } from '@/components/ConfirmationHost'
 import { ModalProvider } from '@/context/ModalContext'
-import { parseTaskSpec } from '../../../../../../packages/shared/src/tasks/schema'
+import { parseTaskSpec, TaskSpecSchema } from '../../../../../../packages/shared/src/tasks/schema'
 import { validateTaskSpec } from '../../../../../../packages/shared/src/tasks/validate'
 import type { TaskGenerateRequest, TaskGenerateResult } from '@craft-agent/shared/protocol'
 import type { ComponentEntry } from './types'
@@ -19,7 +20,7 @@ const initial = {
 }
 
 /** Actual editor and validators, with fixed transport; the real model is tested by the host script. */
-function TaskEditorLive({ mode = 'edit', response = 'normal' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' }) {
+function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed'; scenario?: 'current' | 'legacy' | 'long' }) {
   const [ready, setReady] = React.useState(false)
   const [requests, setRequests] = React.useState<TaskGenerateRequest[]>([])
   const [writes, setWrites] = React.useState({ saves: 0, creates: 0, runs: 0 })
@@ -34,10 +35,14 @@ function TaskEditorLive({ mode = 'edit', response = 'normal' }: { mode?: 'create
         return { ...validateTaskSpec(parsed.data), spec: parsed.data }
       } catch (error) { return { valid: false, errors: [{ path: 'yaml', message: String(error), severity: 'error' as const }], warnings: [] } }
     }
+    const definition = TaskSpecSchema.parse(initial)
+    if (scenario === 'long') { definition.goal = '核对资料和限制。'.repeat(150); definition.nodes = Array.from({ length: 12 }, (_, index) => ({ id: `node-${index}`, kind: 'session', title: `步骤 ${index + 1}：资料与风险核对`, prompt: '只读资料、说明来源和限制。'.repeat(80), ...(index ? { depends_on: [`node-${index - 1}`] } : {}) })) }
+    const template = { id: 'research-template', name: '资料研究模板', description: '只读资料、分析和报告。'.repeat(10), nodeCount: 3, createdAt: '2026-10-04T00:00:00Z', updatedAt: '2026-10-04T00:00:00Z' }
     Object.assign(window.electronAPI, {
       getProjects: async () => [], onProjectsChanged: () => () => {}, onTaskRunChanged: () => () => {},
-      getTask: async () => ({ slug: initial.id, spec: structuredClone(initial), yaml: JSON.stringify(initial), etag: 'preview-v1', sourceVersion: 3 }),
-      getTaskResults: async () => ({ slug: initial.id, runs: [], nodes: [] }),
+      getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3 }),
+      getTaskResults: async () => ({ slug: initial.id, runId: 'preview-run', runIds: ['preview-run'], runStatus: 'completed', nodes: initial.nodes.map(node => ({ id: node.id, title: node.title, state: 'done', output: '成果已核对。'.repeat(20) })) }),
+      applyTaskRunRevision: async () => ({ diff: { added: Array.from({ length: 30 }, (_, i) => `revision-node-${i}`), removed: [], changed: ['analyze'] }, validation: { valid: true, errors: [], warnings: [] }, runRevision: 2, runSpecHash: 'preview-hash', yaml: JSON.stringify(initial), sourceVersion: 3 }),
       validateTask: async (_ws: string, yaml: string) => validate(yaml),
       onTaskGenerated: (listener: (ws: string, result: TaskGenerateResult) => void) => { listeners.add(listener); return () => listeners.delete(listener) },
       generateTask: async (_ws: string, req: TaskGenerateRequest) => {
@@ -68,15 +73,16 @@ function TaskEditorLive({ mode = 'edit', response = 'normal' }: { mode?: 'create
       saveTask: async (_ws: string, req: { yaml: string }) => { setWrites(previous => ({ ...previous, saves: previous.saves + 1 })); return { slug: initial.id, validation: validate(req.yaml), etag: 'preview-v2', yaml: req.yaml, spec: parseYaml(req.yaml), sourceVersion: 3 } },
       createTask: async (_ws: string, req: { yaml: string }) => { setWrites(previous => ({ ...previous, creates: previous.creates + 1 })); return { slug: initial.id, orchestratorSessionId: 'preview-root', validation: validate(req.yaml) } },
       runTask: async () => { setWrites(previous => ({ ...previous, runs: previous.runs + 1 })); throw new Error('This transport preview does not execute workflows') },
-      listTaskTemplates: async () => [],
+      listTaskTemplates: async () => Array.from({ length: 15 }, (_, i) => ({ ...template, id: `template-${i}`, name: `资料研究模板 ${i + 1}` })),
+      getTaskTemplate: async () => ({ ...template, spec: initial, yaml: JSON.stringify(initial) }),
       saveTaskTemplate: async () => ({ id: 'preview-template' }),
     })
     setReady(true); setRequests([]); setWrites({ saves: 0, creates: 0, runs: 0 }); setClosed(false)
     return () => { listeners.clear(); Object.assign(window.electronAPI, mockElectronAPI) }
-  }, [mode, response])
-  return <ModalProvider><div className="flex h-[760px] w-full min-w-0 flex-col" data-live-task-editor>
+  }, [mode, response, scenario])
+  return <ModalProvider><ConfirmationHost /><div className="flex h-full w-full min-h-0 min-w-0 flex-col" data-live-task-editor>
     <div data-editor-writes className="shrink-0 px-3 py-1 text-xs text-muted-foreground">固定传输验收 · 保存 {writes.saves} / 创建 {writes.creates} / 运行 {writes.runs}</div>
-    {ready && !closed && <div className="min-h-0 flex-1"><TaskEditor key={`${mode}:${response}`} workspaceId="preview" target={mode === 'edit' ? { mode: 'edit', sessionId: 'preview-root', taskSlug: initial.id } : { mode: 'create' }} onClose={() => setClosed(true)}
+    {ready && !closed && <div className="min-h-0 flex-1"><TaskEditor key={`${mode}:${response}:${scenario}`} workspaceId="preview" target={mode === 'edit' ? { mode: 'edit', sessionId: 'preview-root', taskSlug: initial.id } : { mode: 'create' }} onClose={() => setClosed(true)}
       modelGroups={[{ provider: 'openai', label: 'OpenAI', models: [{ id: 'gpt-6-luna', name: 'GPT 6 Luna' }, { id: 'gpt-6-sol', name: 'GPT 6 Sol' }] }]}
       modelToConnection={new Map([['gpt-6-luna', 'preview'], ['gpt-6-sol', 'preview']])} defaultModel="gpt-6-luna" /></div>}
     <details className="shrink-0 px-3 text-xs"><summary>传输请求证据</summary><pre data-editor-requests className="max-h-32 overflow-auto whitespace-pre-wrap">{JSON.stringify(requests, null, 2)}</pre></details>
@@ -84,5 +90,6 @@ function TaskEditorLive({ mode = 'edit', response = 'normal' }: { mode?: 'create
 }
 export const taskEditorLiveComponents: ComponentEntry[] = [{ id: 'task-editor-live', name: '实际编排编辑器', category: 'Kanban', description: '实际 TaskEditor、对话提案和图组件，固定传输记录保存/创建/运行及请求。', component: TaskEditorLive, props: [
   { name: 'mode', control: { type: 'select', options: ['create', 'edit'].map(value => ({ label: value, value })) }, defaultValue: 'edit' },
+  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
   { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
 ], layout: 'top' }]
