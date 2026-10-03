@@ -23,6 +23,7 @@ export function buildGeneratorPrompt(goal: string, title?: string, context?: { c
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
     '- When revising, change only what the latest user request requires. Preserve every untouched node id, kind, prompt, model, connection, configuration, dependency and task field. Do not redesign or simplify an existing graph.',
     '- The current definition below is authoritative and includes the latest manual edits. Earlier proposals (especially discarded ones) are conversation context, not instructions to restore old values. Preserve the existing task id.',
+    '- Never change or remove a node with locked: true, or change fields listed in locked_fields. Preserve constraints, decisions and every lock. If the requested change conflicts, explain the lock and leave it intact.',
     '- Make nodes parallel (no `depends_on` between them) ONLY when the steps are genuinely independent.',
     '- Reference an upstream result inside a prompt with ${nodes.<id>.output}.',
     '- Every ${nodes.<id>.output} reference MUST point to an `id` that you actually declare under `nodes`. Never reference a node you did not create. Verify each reference resolves before emitting the YAML.',

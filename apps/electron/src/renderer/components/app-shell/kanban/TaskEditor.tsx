@@ -29,6 +29,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
@@ -409,6 +410,7 @@ function SubtaskCard({
   groups,
   fallbackModel,
   modelToConnection,
+  inferredDeps,
   onChange,
   onRemove,
 }: {
@@ -421,6 +423,7 @@ function SubtaskCard({
   fallbackModel: string
   /** model id → connection slug, so picking a model pins the connection that serves it. */
   modelToConnection: Map<string, string>
+  inferredDeps: string[]
   onChange: (patch: Partial<EditorSubtask>) => void
   onRemove: () => void
 }) {
@@ -461,6 +464,7 @@ function SubtaskCard({
               <option value="approval">{t('tasks.nodeKindApproval')}</option>
               {subtask.kind && !['session', 'approval'].includes(subtask.kind) && <option value={subtask.kind}>{subtask.kind}</option>}
             </select>
+            <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={subtask.extras?.locked === true} onChange={event => onChange({ extras: { ...subtask.extras, locked: event.target.checked } })} />{t('tasks.nodeLocked')}</label>
             <ModelSelect
               value={subtask.model ?? fallbackModel}
               onChange={(id) => onChange({ model: id, llmConnection: modelToConnection.get(id) })}
@@ -468,6 +472,7 @@ function SubtaskCard({
               width={128}
               size="sm"
             />
+            {inferredDeps.map(id => <span key={id} className="text-xs text-muted-foreground">{t('tasks.inferredDependency', { id })}</span>)}
             {subtask.dependsOn.map((depUid) => (
               <span
                 key={depUid}
@@ -610,11 +615,14 @@ function ExistingTaskEditor({
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
   const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
   const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
+  const draftVersion = React.useRef(0)
   const [dirty, setDirty] = useAtom(kanbanEditorDirtyAtom)
 
   React.useEffect(() => {
     return () => setDirty(false)
   }, [setDirty])
+  const [constraintsText, setConstraintsText] = React.useState('')
+  const [decisionsText, setDecisionsText] = React.useState('')
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
@@ -684,6 +692,7 @@ function ExistingTaskEditor({
   const [revisionError, setRevisionError] = React.useState<string | null>(null)
 
   const markFormChanged = React.useCallback(() => {
+    draftVersion.current++
     setDirty(true)
     setFormChangedSinceYaml(true)
   }, [setDirty])
@@ -728,6 +737,7 @@ function ExistingTaskEditor({
   React.useEffect(() => {
     setTaskLoadError(null)
     setPreservedSpec(undefined)
+    setConstraintsText(''); setDecisionsText('')
     setEtag(null)
     setYamlHasLocalSource(false)
     setFormChangedSinceYaml(false)
@@ -756,6 +766,8 @@ function ExistingTaskEditor({
             return
           }
           setPreservedSpec(spec)
+          setConstraintsText((spec.constraints as string[] | undefined)?.join('\n') ?? '')
+          setDecisionsText((spec.decisions as string[] | undefined)?.join('\n') ?? '')
           setEtag(res.etag)
           if (res.latestRun) setLiveRun(res.latestRun)
           setSourceVersion(res.sourceVersion)
@@ -1035,13 +1047,13 @@ function ExistingTaskEditor({
         fixedId: editSlug,
         runner,
         layout,
-        preservedSpec,
+        preservedSpec: { ...preservedSpec, constraints: constraintsText.split('\n').filter(line => line.trim()), decisions: decisionsText.split('\n').filter(line => line.trim()) },
       },
       modelToConnection,
     ) as unknown as WorkbenchSpec
   }, [
     title, goal, acceptanceCriteria, maxRepairs, projectId, orchModel, orchConnection, permissionMode,
-    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, modelToConnection,
+    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, constraintsText, decisionsText, modelToConnection,
   ])
 
   const requestClose = React.useCallback(async () => {
@@ -1050,7 +1062,10 @@ function ExistingTaskEditor({
   }, [dirty, onClose, t])
 
   const applyWorkbenchSpec = React.useCallback((next: EditableTaskSpec, source: 'form' | 'yaml' = 'form') => {
+    draftVersion.current++
     setPreservedSpec(next)
+    setConstraintsText((next.constraints as string[] | undefined)?.join('\n') ?? '')
+    setDecisionsText((next.decisions as string[] | undefined)?.join('\n') ?? '')
     setDirty(true)
     setFormChangedSinceYaml(source === 'form')
     if (source === 'yaml') setYamlHasLocalSource(true)
@@ -1070,11 +1085,21 @@ function ExistingTaskEditor({
     setSubtasks(specToSubtasks(next.nodes ?? []))
   }, [setDirty])
 
+  const currentSpecRef = React.useRef(currentSpec)
+  currentSpecRef.current = currentSpec
   const validateYamlDraft = React.useCallback(async () => {
+    const version = draftVersion.current
     try {
       const res = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+      if (version !== draftVersion.current) return
       if (!res.valid) {
         setYamlDiagnostics(res.errors.map((e) => `${e.path}: ${e.message}`))
+        setYamlDraft(JSON.stringify(currentSpecRef.current(), null, 2))
+        return
+      }
+      if (editSlug && (res.spec as EditableTaskSpec | undefined)?.id !== editSlug) {
+        setYamlDiagnostics([t('tasks.taskIdImmutable', { id: editSlug })])
+        setYamlDraft(JSON.stringify(currentSpecRef.current(), null, 2))
         return
       }
       setYamlDiagnostics([])
@@ -1082,7 +1107,7 @@ function ExistingTaskEditor({
     } catch (err) {
       setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
     }
-  }, [workspaceId, yamlDraft, applyWorkbenchSpec])
+  }, [workspaceId, yamlDraft, applyWorkbenchSpec, editSlug, t])
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1116,6 +1141,7 @@ function ExistingTaskEditor({
         return
       }
     }
+    const submittedVersion = draftVersion.current
     submitLock.current = true
     setBusy(true)
     try {
@@ -1129,6 +1155,7 @@ function ExistingTaskEditor({
           toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
           return
         }
+        if (submittedVersion !== draftVersion.current) throw new Error(t('tasks.proposalStale'))
         spec = validation.spec as Record<string, unknown>
         if (isEdit && editSlug && spec.id !== editSlug) {
           const message = t('tasks.taskIdImmutable', { id: editSlug })
@@ -1162,7 +1189,7 @@ function ExistingTaskEditor({
             fixedId: editSlug,
             runner,
             layout,
-            preservedSpec,
+            preservedSpec: { ...preservedSpec, constraints: constraintsText.split('\n').filter(line => line.trim()), decisions: decisionsText.split('\n').filter(line => line.trim()) },
           },
           modelToConnection,
         )
@@ -1188,6 +1215,8 @@ function ExistingTaskEditor({
           return
         }
         setEtag(saved.etag ?? null)
+        if (submittedVersion !== draftVersion.current) { toast.success(t('tasks.savedEarlierDraft')); return }
+        draftVersion.current++
         setSourceVersion(saved.sourceVersion)
         setMigrationWarnings(saved.migrationWarnings ?? [])
         if (!run) {
@@ -1197,6 +1226,7 @@ function ExistingTaskEditor({
         }
         const runResult = await window.electronAPI.runTask(workspaceId, {
           slug: saved.slug,
+          expectedEtag: saved.etag,
           orchestratorSessionId: editSessionId,
         })
         toast.success(t('tasks.toastStarted'), {
@@ -1385,6 +1415,18 @@ function ExistingTaskEditor({
           )}
           {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
             <>
+              {hasActiveRun && liveRun && editSlug && <Btn variant="secondary" disabled={busy} onClick={async () => {
+                if (!await confirmAction(t('tasks.patchRunConfirm', { version: liveRun.revision ?? 0 }))) return
+                setBusy(true)
+                try {
+                  const result = await window.electronAPI.patchTaskRun(workspaceId, { slug: editSlug, runId: liveRun.runId, baseRevision: liveRun.revision ?? 0,
+                    yaml: tab === 'yaml' ? yamlDraft : JSON.stringify(currentSpec()), rationale: t('tasks.patchRunRationale') })
+                  if (result.conflict) throw new Error(result.conflict.message)
+                  if (result.snapshot) setLiveRun(result.snapshot)
+                  toast.success(t('tasks.patchRunApplied', { version: result.snapshot?.revision ?? 0 }))
+                } catch (error) { toast.error(t('tasks.patchRunFailed'), { description: error instanceof Error ? error.message : String(error) }) }
+                finally { setBusy(false) }
+              }}>{t('tasks.patchRun')}</Btn>}
               <Btn variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('common.cancel')}
               </Btn>
@@ -1462,6 +1504,7 @@ function ExistingTaskEditor({
             className="min-h-0 flex-1 resize-none rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
             value={yamlDraft}
             onChange={(e) => {
+              draftVersion.current++
               setDirty(true)
               setYamlHasLocalSource(true)
               setFormChangedSinceYaml(false)
@@ -1489,6 +1532,7 @@ function ExistingTaskEditor({
         <div className="task-editor-definition flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4">
           <div className="border-b border-border pb-4"><TaskProposal
             workspaceId={workspaceId}
+            draftVersion={draftVersion.current}
             draftIdentity={JSON.stringify(currentSpec())}
             currentYaml={taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)}
             projectId={projectId}
@@ -1507,6 +1551,15 @@ function ExistingTaskEditor({
               <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
             </div>
 
+          <p className="text-xs text-muted-foreground" role="status">{t('tasks.draftVersion', { version: draftVersion.current })}{hasActiveRun && ` · ${t('tasks.savedDefinitionBoundary')}`}</p>
+          {(['constraints', 'decisions'] as const).map(field => <div key={field} className="space-y-1">
+            <label className="text-xs font-medium">{t(`tasks.plan${field === 'constraints' ? 'Constraints' : 'Decisions'}`)}</label>
+            <textarea aria-label={t(`tasks.plan${field === 'constraints' ? 'Constraints' : 'Decisions'}`)} rows={2} className="w-full rounded-md border bg-background p-2 text-xs"
+              value={field === 'constraints' ? constraintsText : decisionsText}
+              onChange={event => { (field === 'constraints' ? setConstraintsText : setDecisionsText)(event.target.value); markFormChanged() }} />
+            <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={(preservedSpec?.locked_fields as string[] | undefined)?.includes(field) ?? false}
+              onChange={event => { setPreservedSpec(previous => ({ ...previous, locked_fields: [...((previous?.locked_fields as string[] | undefined) ?? []).filter(key => key !== field), ...(event.target.checked ? [field] : [])] })); markFormChanged() }} />{t('tasks.lockField')}</label>
+          </div>)}
           <div className="text-[15px] font-semibold">{t('tasks.definition')}</div>
 
 
@@ -1693,6 +1746,7 @@ function ExistingTaskEditor({
                     key={st.uid}
                     index={i}
                     subtask={st}
+                    inferredDeps={effectiveNodeDeps(currentSpec().nodes[i]!).filter(id => !(currentSpec().nodes[i]?.depends_on ?? []).includes(id))}
                     allSubtasks={subtasks}
                     groups={groups}
                     fallbackModel={orchModel || fallbackModel}

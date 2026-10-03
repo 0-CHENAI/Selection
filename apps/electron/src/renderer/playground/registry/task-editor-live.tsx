@@ -20,7 +20,7 @@ const initial = {
 }
 
 /** Actual editor and validators, with fixed transport; the real model is tested by the host script. */
-function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed'; scenario?: 'current' | 'legacy' | 'long' }) {
+function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' }) {
   const [ready, setReady] = React.useState(false)
   const [requests, setRequests] = React.useState<TaskGenerateRequest[]>([])
   const [writes, setWrites] = React.useState({ saves: 0, creates: 0, runs: 0 })
@@ -36,13 +36,17 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
       } catch (error) { return { valid: false, errors: [{ path: 'yaml', message: String(error), severity: 'error' as const }], warnings: [] } }
     }
     const definition = TaskSpecSchema.parse(initial)
+    if (scenario === 'f3' || scenario === 'active') { definition.nodes[0]!.title = 'A：成本资料'; definition.nodes[1]!.title = 'B：口径核对'; definition.nodes[1]!.prompt = '独立核对 B 的成本口径'; definition.nodes[1]!.depends_on = []; definition.nodes[2]!.title = 'C：综合报告'; definition.nodes[2]!.prompt = 'A 与 B 的报告：${inputs.second}'; definition.nodes[2]!.depends_on = ['collect']; definition.nodes[2]!.inputs = { second: '${nodes.analyze.output}' } }
     if (scenario === 'long') { definition.goal = '核对资料和限制。'.repeat(150); definition.nodes = Array.from({ length: 12 }, (_, index) => ({ id: `node-${index}`, kind: 'session', title: `步骤 ${index + 1}：资料与风险核对`, prompt: '只读资料、说明来源和限制。'.repeat(80), ...(index ? { depends_on: [`node-${index - 1}`] } : {}) })) }
+    if (scenario === 'active') { definition.runner = 'orchestrate'; definition.execution = { coordinator_gate: { mode: 'off' } } }
+    let live = { workspaceId: 'preview', taskId: initial.id, slug: initial.id, runId: 'preview-active', revision: 0, status: 'running', orchestratorSessionId: 'preview-root', tokensUsed: 0, nodes: definition.nodes.map(node => ({ id: node.id, state: node.id === 'report' ? 'pending' : 'running', attempt: node.id === 'report' ? 0 : 1 })) }
     const template = { id: 'research-template', name: '资料研究模板', description: '只读资料、分析和报告。'.repeat(10), nodeCount: 3, createdAt: '2026-10-04T00:00:00Z', updatedAt: '2026-10-04T00:00:00Z' }
     Object.assign(window.electronAPI, {
       getProjects: async () => [], onProjectsChanged: () => () => {}, onTaskRunChanged: () => () => {},
-      getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3 }),
+      getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3, ...(scenario === 'active' ? { latestRun: live } : {}) }),
       getTaskResults: async () => ({ slug: initial.id, runId: 'preview-run', runIds: ['preview-run'], runStatus: 'completed', nodes: initial.nodes.map(node => ({ id: node.id, title: node.title, state: 'done', output: '成果已核对。'.repeat(20) })) }),
       applyTaskRunRevision: async () => ({ diff: { added: Array.from({ length: 30 }, (_, i) => `revision-node-${i}`), removed: [], changed: ['analyze'] }, validation: { valid: true, errors: [], warnings: [] }, runRevision: 2, runSpecHash: 'preview-hash', yaml: JSON.stringify(initial), sourceVersion: 3 }),
+      patchTaskRun: async (_ws: string, req: { baseRevision: number }) => { if (req.baseRevision !== live.revision) return { snapshot: live, conflict: { code: 'conflict', message: 'stale revision' } }; await new Promise(resolve => setTimeout(resolve, 500)); live = { ...live, revision: live.revision + 1 }; return { snapshot: live } },
       validateTask: async (_ws: string, yaml: string) => validate(yaml),
       onTaskGenerated: (listener: (ws: string, result: TaskGenerateResult) => void) => { listeners.add(listener); return () => listeners.delete(listener) },
       generateTask: async (_ws: string, req: TaskGenerateRequest) => {
@@ -62,9 +66,10 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
           const analyze = spec.nodes.find((node: { id: string }) => node.id === 'analyze')
           analyze.prompt = '分析资料 ${nodes.collect.output}'; analyze.depends_on = ['collect']
         }
+        if (response === 'locked' || req.goal.includes('覆盖 B')) { spec.nodes.find((node: { id: string }) => node.id === 'analyze').model = 'gpt-6-luna'; spec.nodes.find((node: { id: string }) => node.id === 'analyze').prompt = 'AI 请求覆盖 B' }
         if (response === 'invalid') spec.nodes[1].depends_on = ['missing']
         const yaml = JSON.stringify(spec)
-        const result = { orchestratorSessionId: id, slug: spec.id, spec, yaml, validation: validate(yaml) }
+        const result = { baseDraftVersion: req.baseDraftVersion, orchestratorSessionId: id, slug: spec.id, spec, yaml, validation: validate(yaml) }
         if (response === 'delayed') setTimeout(() => listeners.forEach(listener => listener('preview', result)), 2500)
         else listeners.forEach(listener => listener('preview', result)) // Exercise event-before-ack handling.
         return { orchestratorSessionId: id }
@@ -90,6 +95,6 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
 }
 export const taskEditorLiveComponents: ComponentEntry[] = [{ id: 'task-editor-live', name: '实际编排编辑器', category: 'Kanban', description: '实际 TaskEditor、对话提案和图组件，固定传输记录保存/创建/运行及请求。', component: TaskEditorLive, props: [
   { name: 'mode', control: { type: 'select', options: ['create', 'edit'].map(value => ({ label: value, value })) }, defaultValue: 'edit' },
-  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
-  { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
+  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
+  { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed', 'locked'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
 ], layout: 'top' }]

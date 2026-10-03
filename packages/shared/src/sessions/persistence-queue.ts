@@ -1,4 +1,5 @@
-import { writeFile, rename } from 'fs/promises'
+import { randomUUID } from 'node:crypto'
+import { writeFile, rename, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import type { StoredSession, SessionHeader } from './types.js'
 import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
@@ -154,11 +155,12 @@ class SessionPersistenceQueue {
       const finalSignature = getHeaderMetadataSignature(header)
       this.lastWrittenHeaderSignature.set(sessionId, finalSignature)
 
-      const tmpFile = filePath + '.tmp'
-      await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
-      // Replace directly: deleting first loses the last committed transcript if
-      // rename fails or the process exits between the two operations.
-      await rename(tmpFile, filePath)
+      const tmpFile = `${filePath}.${randomUUID()}.tmp`
+      try {
+        await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
+        // Replace directly so the last committed transcript always remains readable.
+        await rename(tmpFile, filePath)
+      } finally { await unlink(tmpFile).catch(() => {}) }
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {
       console.error(`[PersistenceQueue] Failed to write session ${sessionId}:`, error)
@@ -168,13 +170,13 @@ class SessionPersistenceQueue {
   /**
    * Immediately flush a specific session if pending.
    * Waits for any in-progress write to complete before starting a new one
-   * to prevent race conditions on the shared .tmp file.
+   * so concurrent callers acknowledge the latest queued transcript.
    */
   async flush(sessionId: string): Promise<void> {
-    // Re-read pending work after the previous writer settles: concurrent flushes
-    // must not start another write using the same temporary file.
-    const inProgress = this.writeInProgress.get(sessionId)
-    if (inProgress) await inProgress
+    // Another waiter may publish the next writer first. Drain it too before returning
+    // so immediate saves never acknowledge a transcript that has not reached disk.
+    let inProgress: Promise<void> | undefined
+    while ((inProgress = this.writeInProgress.get(sessionId))) await inProgress
     const entry = this.pending.get(sessionId)
     if (entry) {
       clearTimeout(entry.timer)

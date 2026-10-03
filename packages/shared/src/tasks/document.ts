@@ -48,6 +48,9 @@ const TASK_KEYS = new Set([
   'title',
   'goal',
   'acceptance_criteria',
+  'constraints',
+  'decisions',
+  'locked_fields',
   'project',
   'cwd',
   'runner',
@@ -66,6 +69,7 @@ const TASK_KEYS = new Set([
 
 const NODE_KEYS = new Set([
   'workspace_inputs',
+  'locked',
   'id',
   'title',
   'prompt',

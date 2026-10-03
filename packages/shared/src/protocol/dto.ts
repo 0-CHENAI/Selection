@@ -312,6 +312,8 @@ export interface TaskProposalTurn {
 }
 
 export interface TaskGenerateRequest {
+  /** Monotonic editor version captured before generation. */
+  baseDraftVersion?: number
   /** Previous rounds, including whether the user applied or discarded each proposal. */
   conversation?: TaskProposalTurn[]
   /** Existing definition to revise; never saved without user confirmation. */
@@ -350,6 +352,7 @@ export interface TaskGenerateAck {
 }
 
 export interface TaskGenerateResult {
+  baseDraftVersion?: number
   /** Temporary proposal session that authored the spec; not a saved task binding. */
   orchestratorSessionId: string
   /** Slug of the authored spec; empty when generation produced an invalid spec. */
@@ -364,6 +367,8 @@ export interface TaskGenerateResult {
 }
 
 export interface TaskRunRequest {
+  /** Save-and-run identity: reject if another editor saved after confirmation. */
+  expectedEtag?: string
   slug: string
   runId?: string
   orchestratorSessionId?: string
@@ -1134,4 +1139,13 @@ export interface DeepLinkNavigation {
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
+}
+
+/** Explicitly apply the reviewed draft to pending/ready work; never writes task.yaml. */
+export interface TaskPatchRunRequest {
+  slug: string
+  runId: string
+  baseRevision: number
+  yaml: string
+  rationale: string
 }

@@ -1,3 +1,5 @@
+import { planProtectionErrors } from '@craft-agent/shared/tasks/plan'
+import type { TaskSpec } from '@craft-agent/shared/tasks'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -11,7 +13,7 @@ export const PROPOSAL_UI_TIMEOUT_MS = 195_000
 
 /** A conversation survives editor tabs. Applying changes only the unsaved draft. */
 export function TaskProposal(props: {
-  workspaceId: string; currentYaml?: string; draftIdentity: string; projectId?: string; model?: string;
+  workspaceId: string; currentYaml?: string; draftIdentity: string; draftVersion: number; projectId?: string; model?: string;
   llmConnection?: string; disabled?: boolean; onApply: (spec: unknown) => void;
 }) {
   const { t } = useTranslation()
@@ -22,6 +24,7 @@ export function TaskProposal(props: {
   const [proposal, setProposal] = React.useState<TaskGenerateResult | null>(null)
   const [conversation, setConversation] = React.useState<TaskProposalTurn[]>([])
   const proposalBase = React.useRef<string | undefined>(undefined)
+  const proposalVersion = React.useRef<number | undefined>(undefined)
   const latest = React.useRef(props)
   latest.current = props
   const pending = React.useRef<PendingProposal | null>(null)
@@ -42,12 +45,13 @@ export function TaskProposal(props: {
     setBusy(true)
     setError('')
     // Continue an unapplied proposal only while the actual editor has not changed underneath it.
-    const currentYaml = proposal && proposalBase.current === props.draftIdentity ? proposal.yaml : props.currentYaml
+    const currentYaml = proposal && proposalBase.current === props.draftIdentity && proposalVersion.current === props.draftVersion ? proposal.yaml : props.currentYaml
     const history = conversation.map(turn => turn.status === 'proposed' ? { ...turn, status: 'superseded' as const } : turn)
     const round = history.length
     setConversation([...history, { goal: goal.trim(), status: 'proposed' }])
     setProposal(null)
     proposalBase.current = props.draftIdentity
+    proposalVersion.current = props.draftVersion
     const request: PendingProposal = { cancelled: false }
     pending.current = request
     const early = new Map<string, TaskGenerateResult>()
@@ -75,7 +79,7 @@ export function TaskProposal(props: {
     }, PROPOSAL_UI_TIMEOUT_MS)
     try {
       const ack = await window.electronAPI.generateTask(props.workspaceId, {
-        goal: goal.trim(), currentYaml, conversation: history, projectId: props.projectId,
+        goal: goal.trim(), currentYaml, baseDraftVersion: props.draftVersion, conversation: history, projectId: props.projectId,
         model: props.model, llmConnection: props.llmConnection,
       })
       request.sessionId = ack.orchestratorSessionId
@@ -97,7 +101,7 @@ export function TaskProposal(props: {
 
   async function apply() {
     if (!proposal || applying) return
-    if (proposalBase.current !== latest.current.draftIdentity) { setError(t('tasks.proposalStale')); return }
+    if (proposalBase.current !== latest.current.draftIdentity || proposalVersion.current !== latest.current.draftVersion) { setError(t('tasks.proposalStale')); return }
     setApplying(true)
     setError('')
     try {
@@ -105,7 +109,9 @@ export function TaskProposal(props: {
       const result = await window.electronAPI.validateTask(props.workspaceId, proposal.yaml)
       if (!mounted.current) return
       if (!result.valid || !result.spec) throw new Error(result.errors.map(e => `${e.path}: ${e.message}`).join('\n') || t('tasks.proposalFailed'))
-      if (proposalBase.current !== latest.current.draftIdentity) { setError(t('tasks.proposalStale')); return }
+      if (proposalBase.current !== latest.current.draftIdentity || proposalVersion.current !== latest.current.draftVersion) { setError(t('tasks.proposalStale')); return }
+      const protectedFields = planProtectionErrors(JSON.parse(latest.current.draftIdentity) as TaskSpec, result.spec as TaskSpec)
+      if (protectedFields.length) throw new Error(protectedFields.join('\n'))
       latest.current.onApply(result.spec)
       setConversation(turns => turns.map(turn => turn.status === 'proposed' ? { ...turn, status: 'applied' } : turn))
       setProposal(null)
@@ -136,7 +142,7 @@ export function TaskProposal(props: {
       </div>
       {error && <p role="alert" className="mt-2 whitespace-pre-wrap break-words text-sm text-destructive">{t('tasks.proposalFailed')} {error}</p>}
       {proposal && <div className="space-y-3 pt-3">
-        <p role="status" className="text-sm font-medium">{t('tasks.proposalReview')}</p>
+        <p role="status" className="text-sm font-medium">{t('tasks.proposalReview')} · {t('tasks.draftVersion', { version: proposalVersion.current })}</p>
         <div aria-label={t('tasks.proposalChanges')} className="max-h-64 space-y-3 overflow-y-auto rounded-md border p-3">
           {changes.length === 0 && <p className="text-sm text-muted-foreground">{t('tasks.proposalNoChanges')}</p>}
           {changes.map(change => <div key={change.path} className="space-y-1 text-xs">
