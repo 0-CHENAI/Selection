@@ -1,9 +1,9 @@
 {
-  "version": "1.0.152",
-  "schemaCrc": "7a7d408f",
+  "version": "1.0.153",
+  "schemaCrc": "28c1ccfb",
   "generatedFrom": "reviewed-release-binary",
   "rootHelpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
-  "helpAllSha256": "043f1ede834eb58d83360a1fcfbd5db5ba07724abfb8a807da3d32d5d3d7fe85",
+  "helpAllSha256": "8c5680f4bc487195f6d80f7209eb6b9b31d0daf6f7616e76f6768383b1e1de5c",
   "helpAllEntries": 2466,
   "rootCommands": [
     "add",
