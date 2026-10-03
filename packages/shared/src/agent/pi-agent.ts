@@ -83,6 +83,7 @@ import {
   getSessionScopedToolCallbacks,
 } from './session-scoped-tools.ts';
 import { attachSessionSelfManagementBindings } from './session-self-management-bindings.ts';
+import { complexCapabilityError } from '../sessions/work-mode.ts';
 
 // Session tool proxy definitions (for registering with subprocess)
 import {
@@ -144,7 +145,7 @@ export function buildPiSwarmInitConfig(session: SessionConfig | undefined): {
   swarmAgentTokenBudget?: number;
 } {
   return {
-    swarmEnabled: session?.swarmEnabled === true,
+    swarmEnabled: !complexCapabilityError(session, 'delegate') && session?.swarmEnabled === true,
     swarmAgentTokenBudget: session && isSpawnedSwarmAgent(session)
       ? session.orchestrationTokenBudget
       : undefined,
@@ -737,7 +738,7 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
-    let sessionToolDefs = getSessionToolProxyDefs();
+    let sessionToolDefs = getSessionToolProxyDefs({ executionSession: this.config.session });
     if (!this.config.explicitAnswerDelivery) {
       sessionToolDefs = sessionToolDefs.filter(def => !isSubmitAnswer(def.name));
     }
@@ -1504,6 +1505,7 @@ export class PiAgent extends BaseAgent {
       toolName,
       input,
       sessionId,
+      executionSession: this.config.session,
       permissionMode: this.permissionManager.getPermissionMode(),
       workspaceRootPath: rootPath,
       workspaceId: workspaceSlug,
@@ -1728,6 +1730,7 @@ export class PiAgent extends BaseAgent {
           toolName,
           input,
           sessionId,
+          executionSession: this.config.session,
           permissionMode: this.permissionManager.getPermissionMode(),
           workspaceRootPath: rootPath,
           workspaceId: workspaceSlug,
@@ -2558,7 +2561,7 @@ export class PiAgent extends BaseAgent {
         // their registered tool schemas. Keep the prompt aligned with the strict,
         // provider-neutral schemas registered by pi-agent-server.
         false,
-        this.config.session?.swarmEnabled === true,
+        this.config.session?.swarmEnabled === true && !complexCapabilityError(this.config.session, 'delegate'),
       );
 
       // Build context from sources
@@ -2578,6 +2581,7 @@ export class PiAgent extends BaseAgent {
       // consumes the one-shot mode-change signal, so it is called exactly once.
       const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
       const stableParts = this.promptBuilder.buildStableContextParts();
+      stableParts.push(`<execution_scope>\nworkMode: ${this.config.session?.workMode ?? 'NORM'}\nrootSessionId: ${this.config.session?.executionRootSessionId ?? this._sessionId}\nrole: ${this.config.session?.orchestrationRole ?? (this.config.session?.parentSessionId ? 'worker' : 'coordinator')}\nownershipNeedsReview: ${!!this.config.session?.workModeNeedsReview}\nNORM performs work in this conversation with its existing tools, Sources, Skills and Task List. Delegation and workflow creation/execution require a new PRO root. PRO does not change the model or write permissions, or automatically start Swarm. Workers and reviewers only perform assigned work.\n</execution_scope>`);
       const volatileParts = this.promptBuilder.buildVolatileContextParts(
         { plansFolderPath },
         sourceContext

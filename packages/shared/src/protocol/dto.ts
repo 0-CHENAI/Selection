@@ -21,6 +21,7 @@ import type {
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
 import type { SessionTokenUsage, SwarmAggregationContract } from '../sessions/types'
+import type { WorkMode, WorkModeMetadata } from '../sessions/work-mode'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type {
   AuthRequest as SharedAuthRequest,
@@ -65,7 +66,7 @@ export interface RuntimeRecoveryView {
   canResume: boolean
 }
 
-export interface Session {
+export interface Session extends WorkModeMetadata {
   runtimeRecovery?: RuntimeRecoveryView
   progressSupervision?: ProgressSupervisionView
   id: string
@@ -156,6 +157,7 @@ export interface Session {
 }
 
 export interface CreateSessionOptions {
+  workMode?: WorkMode
   name?: string
   permissionMode?: PermissionMode
   /**
@@ -658,7 +660,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -700,6 +702,7 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'setWorkMode'; mode: WorkMode }
   | { type: 'setProgressSupervision'; enabled: boolean }
   | { type: 'continueProgress' }
   | { type: 'resumeExecution' }

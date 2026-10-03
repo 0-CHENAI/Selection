@@ -1,5 +1,6 @@
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
+import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { isDeepStrictEqual } from 'node:util'
@@ -899,7 +900,7 @@ interface RunningBackgroundTask {
   blocker?: string
 }
 
-interface ManagedSession {
+interface ManagedSession extends WorkModeMetadata {
   conversationArtifactVersions?: ConversationArtifactVersions
   artifactCandidateInventory?: ArtifactCandidateInventory
   progressAdvisories?: Array<{ id: string; text: string }>
@@ -1333,6 +1334,9 @@ export function createManagedSession(
 export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig {
   return {
     id: managed.id,
+    workMode: managed.workMode,
+    workModeNeedsReview: managed.workModeNeedsReview,
+    executionRootSessionId: managed.executionRootSessionId,
     workspaceRootPath: managed.workspace.rootPath,
     sdkSessionId: managed.sdkSessionId,
     branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
@@ -1650,6 +1654,7 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private activeArtifactFeedback = new Set<string>()
+  private inlineFeedbackSessions = new Set<string>()
   private projectValidationControllers = new Map<string, AbortController>()
   private eventSink: EventSink | null = null
 
@@ -2385,6 +2390,26 @@ export class SessionManager implements ISessionManager {
             }
           }
           this.sessions.set(meta.id, managed)
+          const feedbackOriginPath = join(getSessionStoragePath(workspaceRootPath, meta.id), 'data', 'feedback-origin.json')
+          if (existsSync(feedbackOriginPath)) {
+            try {
+              const origin = JSON.parse(loadIsolationFile(feedbackOriginPath, 'utf8'))
+              if (origin.version !== 1 || (origin.workingDirectory !== undefined && typeof origin.workingDirectory !== 'string')
+                || (origin.isolatedWorkspace !== undefined && (origin.isolatedWorkspace?.version !== 1 || typeof origin.isolatedWorkspace?.directory !== 'string' || typeof origin.isolatedWorkspace?.sourceRoot !== 'string'))) throw new Error('Invalid feedback origin')
+              managed.workingDirectory = origin.workingDirectory
+              managed.isolatedWorkspace = origin.isolatedWorkspace
+              if (origin.isolatedWorkspace) atomicWrite(isolationPath, JSON.stringify(origin.isolatedWorkspace))
+              else if (existsSync(isolationPath)) unlinkSync(isolationPath)
+              const interrupted = readExecutionCheckpoint(getSessionStoragePath(workspaceRootPath, meta.id))
+              if (interrupted.kind === 'ok') {
+                writeExecutionCheckpoint(getSessionStoragePath(workspaceRootPath, meta.id), { ...interrupted.checkpoint, status: 'blocked', reason: 'feedback-interrupted', updatedAt: Date.now() })
+              }
+              this.persistSession(managed)
+              void this.flushSession(meta.id).then(() => { if (existsSync(feedbackOriginPath)) unlinkSync(feedbackOriginPath) })
+                .catch(() => sessionLog.warn('Interrupted feedback origin retained', { sessionId: meta.id }))
+            } catch { /* Preserve the origin and stop recovery when it cannot be trusted. */ }
+            managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: 'unsupported', completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
+          }
 
           // Initialize session metadata in AutomationSystem for diffing
           const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -2402,6 +2427,16 @@ export class SessionManager implements ISessionManager {
         }
       }
 
+      for (const workspace of getWorkspaces()) {
+        const sessions = [...this.sessions.values()].filter(session => session.workspace.id === workspace.id)
+        for (const [id, mode] of migrateWorkModes(sessions)) {
+          const managed = this.sessions.get(id)!
+          if (managed.workMode === mode.workMode && managed.workModeNeedsReview === mode.workModeNeedsReview && managed.executionRootSessionId === mode.executionRootSessionId) continue
+          Object.assign(managed, mode)
+          this.setMetadataWriteGuard(managed)
+          this.persistSession(managed)
+        }
+      }
       this.recoverPersistedSwarmSessions()
       for (const managed of this.sessions.values()) {
         // An invalid isolation contract must never be replaced by a runnable checkpoint.
@@ -3475,9 +3510,21 @@ export class SessionManager implements ISessionManager {
       }
     }
 
+    const parentMode = options?.parentSessionId ? this.sessions.get(options.parentSessionId) : undefined
+    if (options?.workMode !== undefined && options.workMode !== 'NORM' && options.workMode !== 'PRO') throw new Error('Invalid work mode')
+    const workMode = options?.workMode ?? parentMode?.workMode
+      ?? (validatedBranch?.sourceSession.workMode)
+      ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM')
+    if (options?.parentSessionId && !parentMode) throw new Error('Parent execution session is unavailable')
+    if (parentMode) assertComplexCapability(parentMode, 'delegate')
+    if (workMode === 'NORM' && (options?.taskSlug || options?.taskDraft || options?.parentSessionId)) throw new Error('NORM cannot create a workflow or worker session')
+    if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Create a PRO conversation before enabling Swarm')
+
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
       name: options?.name,
+      workMode,
+      executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
@@ -3609,6 +3656,9 @@ export class SessionManager implements ISessionManager {
     const isBranch = !!validatedBranch
 
     const managed = createManagedSession(storedSession, workspace, {
+      workMode,
+      workModeNeedsReview: false,
+      executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id ?? storedSession.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
@@ -4688,6 +4738,8 @@ export class SessionManager implements ISessionManager {
 
       // Set up permission handler to forward requests to renderer
       managed.agent.onBeforeToolExecution = (toolName, input, toolCallId, recoveryClass, confinedShellDirectory) => {
+        const capability = complexToolCapability(toolName)
+        if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
         if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
         const checkpoint = managed.executionCheckpoint
@@ -4993,7 +5045,10 @@ export class SessionManager implements ISessionManager {
         createTaskFn: async () => {
           throw new Error('Agent task creation is disabled. Import a V3 YAML definition in the application.')
         },
-        runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
+        runTaskFn: async (input) => {
+          assertComplexCapability(managed, 'run-workflow')
+          return this.runTaskFromTool(managed.workspace.id, input)
+        },
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
         submitTaskOutputFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
@@ -5007,6 +5062,7 @@ export class SessionManager implements ISessionManager {
           return { status: snap.status }
         },
         submitOrchestrationPatchFn: async (input) => {
+          assertComplexCapability(managed, 'change-plan')
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
           const snap = runner.applyOrchestrationPatchByRunId(managed.id, input.runId, {
@@ -5022,6 +5078,7 @@ export class SessionManager implements ISessionManager {
           return { status: snap.status, revision: snap.revision }
         },
         submitOrchestrationDecisionFn: async (input) => {
+          assertComplexCapability(managed, 'change-plan')
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
           const snap = runner.applyOrchestrationDecisionByRunId(managed.id, {
@@ -5043,6 +5100,7 @@ export class SessionManager implements ISessionManager {
           return runner.submitNodeVerdict(managed.id, input)
         },
         submitTaskDefinitionFn: async (input) => {
+          assertComplexCapability(managed, 'create-workflow')
           if (!managed.taskDraft) return { valid: false, errors: ['Only an editor proposal session may submit a definition. Open the workflow editor.'] }
           const submitted = validateSubmittedDefinition(input.spec)
           if (!submitted.valid) return submitted
@@ -5194,6 +5252,11 @@ export class SessionManager implements ISessionManager {
           return { resolved: null, available }
         },
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+          assertComplexCapability(managed, 'delegate')
+          const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+          if (!getSwarmAgentsEnabled()) throw new Error('Swarm agents are disabled in Advanced settings')
+          const target = this.sessions.get(sessionId)
+          if (!target || target.workspace.id !== managed.workspace.id || target.executionRootSessionId !== (managed.executionRootSessionId ?? managed.id)) throw new Error('Messages must stay within this execution root')
           // Build FileAttachment[] from paths (same pattern as spawn_session)
           let fileAttachments: FileAttachment[] | undefined
           if (attachments?.length) {
@@ -6704,6 +6767,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async sendMessage(...args: Parameters<SessionManager['executeMessage']>): Promise<void> {
+    if (this.inlineFeedbackSessions.has(args[0]) && !args[11]) throw new Error('This conversation is revising a file. Send the next message after the revision finishes.')
     return this.withSessionExecution(args[0], () => this.executeMessage(...args))
   }
 
@@ -6733,6 +6797,7 @@ export class SessionManager implements ISessionManager {
     /** Internal queue replay marker; never supplied by RPC callers. */
     _isSourceContinuationReplay = false,
     _isProgressContinuation = false,
+    _isInlineFeedback = false,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -8137,7 +8202,7 @@ export class SessionManager implements ISessionManager {
         store.save(record, () => {
           if (record.childSessionId) {
             const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
-            const applied = versions.reconcile(record.artifactId).versions.find(version => version.sourceRunId === record.childSessionId)
+            const applied = versions.reconcile(record.artifactId).versions.find(version => version.sourceRunId === (record.executionId ?? record.childSessionId))
             if (applied) {
               record.status = 'applied'; record.appliedVersion = applied.id; record.error = undefined
               applicationRecovered = true
@@ -8159,7 +8224,7 @@ export class SessionManager implements ISessionManager {
         try {
           const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
           const artifact = versions.reconcile(record.artifactId)
-          const applied = artifact.versions.find(v => record.childSessionId && v.sourceRunId === record.childSessionId)
+          const applied = artifact.versions.find(v => record.childSessionId && v.sourceRunId === (record.executionId ?? record.childSessionId))
           if (applied) { record.status = 'applied'; record.appliedVersion = applied.id }
           else { record.status = 'failed'; record.error = 'Revision was interrupted. The candidate and original versions are preserved; review before retrying.' }
           store.save(record)
@@ -8203,27 +8268,44 @@ export class SessionManager implements ISessionManager {
     } catch (error) { releaseFeedbackRun(); throw error }
     if (!result.created) { releaseFeedbackRun(); return result.record }
     const feedback = result.record
+    const inline = parent.workMode === 'NORM'
+    if (inline && (parent.isProcessing || this.inlineFeedbackSessions.has(parent.id))) {
+      feedback.status = 'failed'; feedback.error = 'Finish the current conversation work before revising a file.'; store.save(feedback)
+      releaseFeedbackRun(); return feedback
+    }
+    if (inline) this.inlineFeedbackSessions.add(parent.id)
     this.activeArtifactFeedback.add(feedback.id)
     // Run through the existing session host. No new scheduler or quality-model call.
     void (async () => {
       let cancellationWatch: ReturnType<typeof setInterval> | undefined
+      const originalDirectory = parent.workingDirectory
+      const originalIsolation = parent.isolatedWorkspace
+      const parentPath = getSessionStoragePath(parent.workspace.rootPath, parent.id)
+      const originPath = join(parentPath, 'data', 'feedback-origin.json')
+      let inlineStarted = false
       try {
         const feedbackCancelled = () => store.read(feedback.id).status === 'cancelled'
         if (feedbackCancelled()) return
-        const child = await this.createSession(parent.workspace.id, { parentSessionId: parent.id, hidden: true,
+        const child = inline ? { id: parent.id } : await this.createSession(parent.workspace.id, { parentSessionId: parent.id, hidden: true,
           name: feedbackBasename(artifact.path), permissionMode: parent.permissionMode ?? 'ask',
           model: parent.model, llmConnection: parent.llmConnection })
         const managed = this.sessions.get(child.id)!
         if (feedbackCancelled()) return
-        const directory = join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'candidate')
+        const directory = join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'candidate', feedback.id)
         makeFeedbackDirectory(directory, { recursive: true })
         const candidate = join(directory, feedbackBasename(artifact.path))
         saveFeedbackCandidate(candidate, bytes)
+        if (inline) {
+          if (existsSync(originPath)) throw new Error('An interrupted file revision needs review before starting another.')
+          atomicWrite(originPath, JSON.stringify({ version: 1, workingDirectory: originalDirectory, isolatedWorkspace: originalIsolation }))
+          inlineStarted = true
+          await this.disposeManagedAgentRuntime(parent, 'Preparing single-agent file revision')
+        }
         managed.workingDirectory = directory
         managed.isolatedWorkspace = { version: 1, id: feedback.id, sourceRoot: dirname(artifact.path), directory,
           kind: 'files', inputs: { [feedbackBasename(artifact.path)]: artifact.versions.find(v => v.id === artifact.currentVersion)!.hash }, status: 'ready' }
         atomicWrite(join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'data', 'isolated-workspace.json'), JSON.stringify(managed.isolatedWorkspace))
-        feedback.childSessionId = child.id; feedback.status = 'running'; store.save(feedback)
+        feedback.childSessionId = child.id; feedback.executionId = inline ? feedback.id : child.id; feedback.status = 'running'; store.save(feedback)
         this.persistSession(managed); await this.flushSession(child.id)
         // Another process can persist cancellation without owning this runtime.
         cancellationWatch = setInterval(() => {
@@ -8242,7 +8324,7 @@ export class SessionManager implements ISessionManager {
         await this.sendMessage(child.id, `Revise the file ${JSON.stringify(candidate)} according to this user feedback:
 ${feedback.instruction}
 ${feedback.anchor ? `Selected text: ${JSON.stringify(feedback.anchor.text)}` : ''}
-Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined)
+Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined, undefined, undefined, false, undefined, undefined, false, false, inline)
         const revisionCancelled = () => feedbackCancelled() || managed.stopRequested || managed.executionCheckpoint?.status === 'cancelled'
           || managed.runtimeRecovery?.phase === 'cancelled'
         const requireWriteAuthorization = () => {
@@ -8280,7 +8362,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Recheck after asynchronous validation: cancellation may have arrived while reading.
         requireWriteAuthorization()
         store.save(feedback, () => {
-          const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
+          const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, feedback.executionId ?? child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
           feedback.appliedVersion = applied.currentVersion; feedback.status = 'applied'
         })
         this.notifyArtifactApplied(parent.workspace.id)
@@ -8289,7 +8371,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Artifact publication may have succeeded before feedback persistence failed.
         // Reconcile its journal before deciding whether this revision failed.
         const reconciled = versions.reconcile(artifact.id)
-        const applied = reconciled.versions.find(version => current.childSessionId && version.sourceRunId === current.childSessionId)
+        const applied = reconciled.versions.find(version => current.childSessionId && version.sourceRunId === (current.executionId ?? current.childSessionId))
         if (applied) {
           current.status = 'applied'; current.appliedVersion = applied.id; current.error = undefined
           current.validation = feedback.validation ?? current.validation
@@ -8303,7 +8385,24 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         feedback.status = error instanceof Error && error.name === 'ArtifactConflict' ? 'conflict' : 'failed'
         feedback.error = error instanceof Error ? error.message : 'Revision failed'
         store.save(feedback)
-      } finally { clearInterval(cancellationWatch); this.activeArtifactFeedback.delete(feedback.id); releaseFeedbackRun() }
+      } finally {
+        clearInterval(cancellationWatch)
+        try {
+          if (inlineStarted) {
+            await this.disposeManagedAgentRuntime(parent, 'Restoring conversation after file revision')
+            parent.workingDirectory = originalDirectory; parent.isolatedWorkspace = originalIsolation
+            const isolationPath = join(parentPath, 'data', 'isolated-workspace.json')
+            if (originalIsolation) atomicWrite(isolationPath, JSON.stringify(originalIsolation))
+            else if (existsSync(isolationPath)) unlinkSync(isolationPath)
+            this.persistSession(parent); await this.flushSession(parent.id)
+            unlinkSync(originPath)
+          }
+        } finally {
+          if (inline) this.inlineFeedbackSessions.delete(parent.id)
+          this.activeArtifactFeedback.delete(feedback.id); releaseFeedbackRun()
+        }
+        if (inline) void this.processNextQueuedMessage(parent.id)
+      }
     })().catch(error => sessionLog.error('Feedback persistence failed', { feedbackId: feedback.id, reason: error instanceof Error ? error.name : 'unknown' }))
     return feedback
   }
@@ -10231,7 +10330,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private async processNextQueuedMessage(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.messageQueue.length === 0) return
+    if (!managed || this.inlineFeedbackSessions.has(sessionId) || managed.messageQueue.length === 0) return
 
     const next = managed.messageQueue[0]!
     try {
@@ -10615,6 +10714,27 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     this.taskRunnerLookup = lookup
   }
 
+  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string): void {
+    const root = orchestratorSessionId ? this.sessions.get(orchestratorSessionId) : undefined
+    if (root?.workspace.id !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    assertComplexCapability(root, 'run-workflow')
+  }
+
+  async setSessionWorkMode(sessionId: string, workMode: 'NORM' | 'PRO'): Promise<void> {
+    if (workMode !== 'NORM' && workMode !== 'PRO') throw new Error('Invalid work mode')
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+    if (managed.messages.length || managed.isProcessing || managed.parentSessionId || managed.taskSlug || managed.taskDraft || managed.taskRunId || managed.orchestrationId || managed.workModeNeedsReview) throw new Error('Work mode is fixed after work starts; create a new conversation')
+    if (managed.workMode === workMode) return
+    managed.workMode = workMode
+    managed.swarmEnabled = false
+    await this.disposeManagedAgentRuntime(managed, 'Work mode changed before first message')
+    this.persistSession(managed)
+    await this.flushSession(sessionId)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: false } }, managed.workspace.id)
+  }
+
   private updateOrchestrationMetadata(
     managed: ManagedSession,
     changes: Partial<Pick<ManagedSession,
@@ -10662,6 +10782,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     userAuthorizedSpawn: boolean,
   ): void {
     this.spawnQualificationCredentials.delete(managed.id)
+    if (complexCapabilityError(managed, 'delegate')) return
     if (managed.swarmEnabled) {
       this.issueSpawnQualificationCredentials(managed, 'automatic')
     }
@@ -11005,6 +11126,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    assertComplexCapability(managed, 'delegate')
     this.assertSpawnPermissionAndProject(managed, request)
     const delivery = request.artifactDelivery
       ? workspaceDeliveryContract(request.artifactDelivery.inputs, request.artifactDelivery.outputs)
@@ -11570,6 +11692,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!getDagOrchestrationEnabled()) {
       throw new Error('DAG orchestration is disabled in Advanced settings')
     }
+    this.assertTaskRunAllowed(workspaceId, orchestratorSessionId)
     const snapshot = runner.run(slug, {
       orchestratorSessionId,
       params: input.params,
@@ -11929,6 +12052,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   async updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (enabled) assertComplexCapability(managed, 'delegate')
     if (enabled) {
       const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
       if (!getSwarmAgentsEnabled()) {
@@ -12060,6 +12184,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     // Idempotency: already bound to this slug → no-op success. Bound to a different slug → refuse,
     // so a stale draft ref can't hijack an unrelated orchestrator.
+    assertComplexCapability(managed, 'create-workflow')
     if (managed.taskSlug) {
       if (managed.taskSlug === taskSlug) return true
       sessionLog.warn('adoptGeneratedTaskOrchestrator: slug mismatch, refusing to rebind', {
@@ -12153,6 +12278,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       sessionLog.warn('bindExistingSessionToTask: session not found', { sessionId, taskSlug })
       return false
     }
+    assertComplexCapability(managed, 'create-workflow')
     if (managed.taskSlug) {
       if (managed.taskSlug === taskSlug) return true
       sessionLog.warn('bindExistingSessionToTask: slug mismatch, refusing to rebind', {

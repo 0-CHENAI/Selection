@@ -1,8 +1,8 @@
-import { List, PenLine } from 'lucide-react'
+import { MessageSquare, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-export type BoardListValue = 'list' | 'board'
+export type BoardListValue = 'NORM' | 'PRO'
 
 interface BoardListToggleProps {
   value: BoardListValue
@@ -11,24 +11,25 @@ interface BoardListToggleProps {
 }
 
 /**
- * List ⇄ New-orchestration switch. Desktop layouts keep one persistent TopBar
+ * NORM / PRO root conversation navigation. Desktop layouts keep one persistent TopBar
  * instance so changing views only updates the selected state and main content.
  */
 export function BoardListToggle({ value, onChange, className }: BoardListToggleProps) {
   const { t } = useTranslation()
   return (
     <div
+      aria-label={t('session.workMode')}
       className={cn(
         'inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-0.5',
         className
       )}
     >
-      <ToggleButton active={value === 'list'} icon={List} label={t('kanban.list')} onClick={() => onChange('list')} />
+      <ToggleButton active={value === 'NORM'} icon={MessageSquare} label="NORM" onClick={() => onChange('NORM')} />
       <ToggleButton
-        active={value === 'board'}
-        icon={PenLine}
-        label={t('kanban.board')}
-        onClick={() => onChange('board')}
+        active={value === 'PRO'}
+        icon={Workflow}
+        label="PRO"
+        onClick={() => onChange('PRO')}
       />
     </div>
   )
@@ -41,7 +42,7 @@ function ToggleButton({
   onClick,
 }: {
   active: boolean
-  icon: typeof List
+  icon: typeof MessageSquare
   label: string
   onClick: () => void
 }) {

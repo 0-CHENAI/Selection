@@ -1,0 +1,263 @@
+{
+  "issue": 451,
+  "f1": {
+    "sessionId": "261004-open-gorge",
+    "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+    "mode": "NORM",
+    "model": "gpt-6-luna",
+    "permissionMode": "safe",
+    "list": [
+      {
+        "id": "read-source",
+        "content": "读取并梳理 costs.txt 中与成本有关的资料",
+        "status": "completed"
+      },
+      {
+        "id": "confirm-a-cost",
+        "content": "依据文件内容确认 A 的两年成本，并标明计算依据",
+        "status": "completed"
+      },
+      {
+        "id": "unverified-gaps",
+        "content": "列出当前资料无法核实的缺口",
+        "status": "completed"
+      }
+    ],
+    "refusals": {
+      "automatic": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "user-requested": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "Task": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "Agent": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "mcp__session__spawn_session": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "send_agent_message": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "create_task": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "run_task": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.",
+      "mcp__session__submit_task_definition": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows."
+    },
+    "workerCount": 0,
+    "unchangedTasks": true,
+    "output": "### 验收结果\n\n1. **读取资料 — 完成**：已读取 [costs.txt](/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt)。文件注明此资料仅用于测试、不代表市场事实；方案 B 的成本口径待核对；有一个风险资料缺口未补齐；已确认的外部操作为无。\n2. **确认 A 两年成本 — 完成**：方案 A 两年总成本为 **100 万元（1,000,000 元）**。这是文件直接给出的金额，没有提供进一步的拆分或计算过程。\n3. **列出未核实缺口 — 完成**：目前无法核实方案 B 的成本口径及其与 A 的可比性；风险缺口的具体内容；A 的成本构成、假设和计算明细。文件也未确认任何外部操作。\n\n任务清单中的三项均已完成。未委派，本次在当前会话完成；未修改文件。"
+  },
+  "f0": {
+    "fixtureHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+    "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+    "model": "gpt-6-luna",
+    "connection": "pi-api-key-2",
+    "runDirectory": "/Users/chenai/.selection/workspaces/my-workspace/tasks/f0-1791048837698/runs/run-1791048837720",
+    "terminal": {
+      "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+      "slug": "f0-1791048837698",
+      "runId": "run-1791048837720",
+      "taskId": "f0-1791048837698",
+      "status": "completed",
+      "canRetryFailedNodes": false,
+      "orchestratorSessionId": "261004-sharp-delta",
+      "tokensUsed": 21105,
+      "revision": 0,
+      "metrics": {
+        "elapsedMs": 25349,
+        "queueMs": 7,
+        "modelMs": 25337,
+        "tokensUsed": 21105,
+        "retries": 0,
+        "repairs": 0,
+        "coordinatorWaitMs": 0,
+        "coordinatorWaits": 0,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "cacheBypasses": 0,
+        "criticalPathNodeIds": []
+      },
+      "nodes": [
+        {
+          "id": "a",
+          "title": "a",
+          "attempts": [
+            {
+              "attempt": 1,
+              "sessionId": "261004-apt-glen",
+              "state": "done",
+              "revision": 0
+            }
+          ],
+          "definitionId": "a",
+          "state": "done",
+          "sessionId": "261004-apt-glen",
+          "attempt": 1,
+          "retryCount": 0,
+          "role": "worker",
+          "model": "gpt-6-luna",
+          "tokensUsed": 21105,
+          "elapsedMs": 25337,
+          "queueMs": 7
+        }
+      ]
+    },
+    "result": {
+      "taskId": "f0-1791048837698",
+      "orchestratorSessionId": "261004-sharp-delta",
+      "slug": "f0-1791048837698",
+      "runId": "run-1791048837720",
+      "runIds": [
+        "run-1791048837720"
+      ],
+      "verdicts": [],
+      "repair": {
+        "used": 0,
+        "max": 3
+      },
+      "runStatus": "completed",
+      "tokensUsed": 21105,
+      "nodes": [
+        {
+          "id": "a",
+          "title": "a",
+          "state": "done",
+          "attempt": 1,
+          "revision": 0,
+          "sessionId": "261004-apt-glen",
+          "output": "方案 A 两年总成本为 1,000,000 元。仍有未核实事项：方案 B 的成本口径尚待核对，且风险资料存在未补齐的缺口。",
+          "outputs": {
+            "total_cost": 1000000,
+            "unresolved": true
+          }
+        }
+      ],
+      "revision": 0
+    },
+    "regressions": {
+      "ordinarySessionId": "261004-nimble-torrent",
+      "ordinaryOutput": "A 的两年总成本：**1000000 元**。\n\n仍未核实的问题：\n- 方案 B 的成本口径是什么？核对后能否与方案 A 直接比较？\n- 风险资料中尚未补齐的缺口是什么？",
+      "legacyResult": {
+        "taskId": "f0-1791048837698-legacy",
+        "orchestratorSessionId": "261004-broad-orchid",
+        "slug": "f0-1791048837698-legacy",
+        "runId": "run-1791048876929",
+        "runIds": [
+          "run-1791048876929"
+        ],
+        "verdicts": [],
+        "repair": {
+          "used": 0,
+          "max": 3
+        },
+        "runStatus": "completed",
+        "tokensUsed": 41178,
+        "nodes": [
+          {
+            "id": "read",
+            "title": "read",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-open-tulip",
+            "output": "1000000"
+          },
+          {
+            "id": "summarize",
+            "title": "summarize",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-fair-fox",
+            "output": "1000000"
+          }
+        ],
+        "revision": 0
+      }
+    },
+    "reload": "same run, output, revision and attempt; no additional execution"
+  },
+  "validation": {
+    "focusedPolicy": {
+      "passed": 27,
+      "failed": 0,
+      "files": 8
+    },
+    "feedbackAndRecovery": {
+      "passed": 19,
+      "failed": 0,
+      "files": 2
+    },
+    "fullFirstRun": {
+      "passed": 7253,
+      "skipped": 11,
+      "failed": 37,
+      "errors": 1,
+      "files": 693,
+      "exitCode": 1
+    },
+    "isolatedRetries": [
+      {
+        "file": "apps/electron/src/main/handlers/__tests__/registration-profiles.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/main/handlers/__tests__/registration.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/main/handlers/__tests__/resources.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/renderer/components/app-shell/__tests__/task-status-icon.test.tsx",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/renderer/pages/__tests__/draft-chat-composer-width.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/renderer/pages/__tests__/draft-to-session-composer.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/renderer/utils/__tests__/session-time.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "packages/server-core/src/sessions/swarm-delivery.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "packages/shared/src/config/__tests__/unsupported-llm-connection.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "packages/ui/src/components/chat/__tests__/turn-thinking-indicator.test.tsx",
+        "exitCode": 0
+      },
+      {
+        "file": "packages/ui/src/components/chat/__tests__/work-header-status.test.ts",
+        "exitCode": 0
+      },
+      {
+        "file": "apps/electron/src/main/__tests__/browser-pane-manager.test.ts",
+        "exitCode": 0,
+        "passed": 80
+      }
+    ],
+    "typecheckAll": "passed",
+    "lint": "0 errors, 86 electron warnings and 8 shared warnings",
+    "i18nParity": "passed, 2252 keys",
+    "i18nSorted": "passed",
+    "electronBuild": "passed",
+    "diffCheck": "passed",
+    "feedbackStore": {
+      "passed": 9,
+      "failed": 0
+    }
+  },
+  "browser": {
+    "draftTextAndAttachments": "independent NORM/PRO retained through switching",
+    "childDeepLink": "PRO highlighted, worker Swarm disabled",
+    "keyboard": "execution group Enter toggles aria-expanded",
+    "compactTopBar": {
+      "width": 375,
+      "overflow": false,
+      "bothModesVisible": true
+    },
+    "transport": "fixed preview data; actual TopBar, composer and execution rows"
+  }
+}

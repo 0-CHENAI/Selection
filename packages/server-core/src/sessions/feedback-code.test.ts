@@ -16,7 +16,7 @@ for (const revoked of ['parent', 'child'] as const) test(`text feedback cannot a
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   try {
     const manager = new SessionManager(), internal = manager as any
-    const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: workspace.rootPath }, workspace as never, { messagesLoaded: true })
+    const parent = createManagedSession({ id: 'parent', workMode: 'PRO', permissionMode: 'allow-all', workingDirectory: workspace.rootPath }, workspace as never, { messagesLoaded: true })
     const child = createManagedSession({ id: 'revision', permissionMode: 'allow-all' }, workspace as never, { messagesLoaded: true })
     internal.sessions.set(parent.id, parent); internal.sessions.set(child.id, child)
     internal.persistSession = () => {}; internal.flushSession = async () => {}
@@ -63,7 +63,7 @@ for (const gitProject of [true, false]) for (const mode of (gitProject ? ['pass'
     const manager = new SessionManager(), internal = manager as any
     const appliedWorkspaces: string[] = []
     manager.onArtifactApplied(workspaceId => { appliedWorkspaces.push(workspaceId) })
-    const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
+    const parent = createManagedSession({ id: 'parent', workMode: 'PRO', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
     internal.sessions.set(parent.id, parent)
     internal.persistSession = () => {}; internal.flushSession = async () => {}
     internal.createSession = async () => {
@@ -130,4 +130,45 @@ for (const gitProject of [true, false]) for (const mode of (gitProject ? ['pass'
     if (!mode.endsWith('cancel')) expect(current.validation?.some(check => check.includes((mode === 'fail' || mode === 'missing') ? 'failed' : 'passed'))).toBe(true)
     if (mode === 'receipt-failure') expect(receiptFailed).toBe(true)
   } finally { receiptFault.mockRestore(); lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('NORM file feedback edits inline and restores the composer without creating a worker', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'feedback-norm-'))
+  const workspace = { id: 'norm-workspace', name: 'NORM', rootPath: root }
+  const file = join(root, 'report.txt'); writeFileSync(file, 'original')
+  const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
+  const manager = new SessionManager(), internal = manager as any
+  try {
+    const parent = createManagedSession({ id: 'norm', workMode: 'NORM', permissionMode: 'allow-all', workingDirectory: root }, workspace as never, { messagesLoaded: true })
+    internal.sessions.set(parent.id, parent)
+    internal.persistSession = () => {}; internal.flushSession = async () => {}
+    internal.createSession = async () => { throw new Error('NORM must not create a worker') }
+    manager.sendMessage = async (id) => {
+      expect(id).toBe(parent.id)
+      expect(parent.isolatedWorkspace?.directory).toBe(parent.workingDirectory)
+      writeFileSync(join(parent.workingDirectory!, 'report.txt'), 'revised')
+    }
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), workspace.id)
+    const original = versions.register(file)
+    const feedback = await manager.artifactFeedback({ type: 'create', sessionId: parent.id, requestId: 'inline-edit', artifactId: original.id, baseVersion: original.currentVersion, instruction: 'revise text' })
+    const store = new FeedbackStore(join(root, 'artifacts', 'feedback'))
+    for (let i = 0; i < 200 && internal.activeArtifactFeedback.has(feedback.id); i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(store.read(feedback.id)).toMatchObject({ status: 'applied', childSessionId: parent.id, executionId: feedback.id })
+    expect(versions.read(original.id).versions.at(-1)?.sourceRunId).toBe(feedback.id)
+    expect(readFileSync(file, 'utf8')).toBe('revised')
+    expect(parent.workingDirectory).toBe(root)
+    expect(parent.isolatedWorkspace).toBeUndefined()
+    expect(parent.workMode).toBe('NORM')
+    expect(internal.sessions.size).toBe(1)
+    expect(existsSync(join(root, 'sessions', parent.id, 'data', 'feedback-origin.json'))).toBe(false)
+    // A second request in the same single-agent session must not reuse the first receipt.
+    manager.sendMessage = async () => { throw new Error('second revision failed') }
+    const second = await manager.artifactFeedback({ type: 'create', sessionId: parent.id, requestId: 'inline-edit-again', artifactId: original.id, baseVersion: versions.read(original.id).currentVersion, instruction: 'revise again' })
+    for (let i = 0; i < 200 && internal.activeArtifactFeedback.has(second.id); i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(store.read(second.id).status).toBe('failed')
+    expect(store.read(second.id).appliedVersion).toBeUndefined()
+    expect(store.read(feedback.id).status).toBe('applied')
+    expect(versions.read(original.id).versions).toHaveLength(2)
+    expect(parent.workingDirectory).toBe(root)
+  } finally { manager.cleanup(); lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
 })

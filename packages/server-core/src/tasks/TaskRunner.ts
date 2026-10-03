@@ -106,6 +106,7 @@ export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 // ---------------------------------------------------------------------------
 
 export interface ConductorSessionHost {
+  assertTaskRunAllowed?(workspaceId: string, orchestratorSessionId?: string): void;
   /** Creates the child session. DAG workers are persisted but hidden from the
    * ordinary session list; run details address them by task/run/node metadata. */
   createSession(workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }>;
@@ -3583,6 +3584,7 @@ export class TaskRunner {
 
   /** Load + validate a task's yaml and start a run. Throws if the task is missing or invalid. */
   run(slug: string, opts: RunOptions = {}): RunSnapshot {
+    this.deps.host.assertTaskRunAllowed?.(this.deps.workspaceId, opts.orchestratorSessionId);
     const loaded = loadTaskDocument(this.deps.workspaceRoot, slug);
     if (!loaded?.spec) throw new Error(`Task "${slug}" not found or has no valid task.yaml`);
     if (!loaded.valid) {

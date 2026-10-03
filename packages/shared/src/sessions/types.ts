@@ -10,6 +10,7 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { WorkModeMetadata } from './work-mode.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
 
@@ -34,6 +35,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'workMode', 'workModeNeedsReview', 'executionRootSessionId',
   'sharedProjectMemoryEnabled',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
@@ -208,7 +210,7 @@ export type { StoredMessage } from '@craft-agent/core/types';
 /**
  * Session configuration (persisted metadata)
  */
-export interface SessionConfig extends SwarmSessionMetadata {
+export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -349,7 +351,7 @@ export interface StoredSession extends SessionConfig {
  * Contains all metadata needed for list views (pre-computed at save time).
  * This enables fast session listing without parsing message content.
  */
-export interface SessionHeader extends SwarmSessionMetadata {
+export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -462,7 +464,7 @@ export interface SessionHeader extends SwarmSessionMetadata {
 /**
  * Session metadata (lightweight, for lists)
  */
-export interface SessionMetadata extends SwarmSessionMetadata {
+export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata {
   id: string;
   workspaceRootPath: string;
   name?: string;
