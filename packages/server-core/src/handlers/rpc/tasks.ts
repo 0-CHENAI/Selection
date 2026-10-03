@@ -281,6 +281,11 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     workspaceOrThrow(workspaceId)
     if (!req.goal?.trim() || req.goal.length > 50_000) throw new Error('A goal of 1–50000 characters is required')
     if (req.currentYaml !== undefined && (typeof req.currentYaml !== 'string' || req.currentYaml.length > 1_000_000)) throw new Error('Invalid proposal input')
+    if (req.conversation !== undefined && (!Array.isArray(req.conversation) || req.conversation.some(turn =>
+      !turn || typeof turn.goal !== 'string' || turn.goal.length > 50_000 ||
+      !['proposed', 'applied', 'discarded', 'superseded', 'failed'].includes(turn.status) ||
+      (turn.yaml !== undefined && (typeof turn.yaml !== 'string' || turn.yaml.length > 1_000_000))
+    ))) throw new Error('Invalid proposal conversation')
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
       // Hidden and never adopted into a persistent task.
@@ -352,8 +357,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         // authored spec fails validation (commonly a ${nodes.X.output} ref to an undeclared
         // node) hand the concrete errors back and re-validate. Bounded so a model that can't
         // self-correct can't loop forever — the last attempt's validation is returned as-is.
-        let prompt = buildGeneratorPrompt(req.goal, req.title)
-        if (req.currentYaml) prompt += '\nRevise this existing definition according to the user goal. Preserve its id and untouched fields:\n' + req.currentYaml
+        let prompt = buildGeneratorPrompt(req.goal, req.title, req)
+        const baseId = req.currentYaml ? parseTaskYaml(req.currentYaml).spec?.id : undefined
         let yaml = ''
         let parsed = parseTaskYaml(yaml)
         let attempts = 0
@@ -368,6 +373,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
             continue
           }
           parsed = parseTaskYaml(yaml)
+          if (baseId && parsed.spec && parsed.spec.id !== baseId) {
+            parsed = { ...parsed, valid: false, errors: [...parsed.errors, { file: 'task.yaml', path: 'id', message: `Preserve the existing task id: ${baseId}`, severity: 'error' }] }
+          }
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)
         }
