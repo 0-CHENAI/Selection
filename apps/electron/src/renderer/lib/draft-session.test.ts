@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID, isDraftSessionOptionsId } from './draft-session'
+import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID, draftSessionOptionsId, isDraftSessionOptionsId } from './draft-session'
 
 test('draft option ids are not real sessions', () => {
   expect(isDraftSessionOptionsId(DRAFT_SESSION_OPTIONS_ID)).toBe(true)
@@ -70,4 +70,15 @@ test('switching project defaults and missing defaults resolve without stale proj
   expect(resolveDraftWorkingDirectory(undefined, undefined, '/workspace')).toBe('/workspace')
   expect(resolveDraftWorkingDirectory(undefined, '', '/workspace')).toBe('/workspace')
   expect(resolveDraftWorkingDirectory(undefined, undefined, undefined)).toBeUndefined()
+})
+
+
+test('mode and project drafts have separate in-memory option identities', () => {
+  const norm = draftSessionOptionsId('workspace', 'project', 'NORM')
+  const pro = draftSessionOptionsId('workspace', 'project', 'PRO')
+  expect(norm).not.toBe(pro)
+  expect(norm).not.toBe(draftSessionOptionsId('workspace', undefined, 'NORM'))
+  expect(isDraftSessionOptionsId(norm)).toBe(true)
+  expect(isDraftSessionOptionsId(pro)).toBe(true)
+  expect(createDraftDisplaySession({ id: pro, workspaceId: 'workspace', workMode: 'PRO' })).toMatchObject({ id: pro, workMode: 'PRO' })
 })

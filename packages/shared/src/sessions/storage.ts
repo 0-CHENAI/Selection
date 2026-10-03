@@ -177,6 +177,8 @@ export function generateSessionId(workspaceRootPath: string): string {
 export async function createSession(
   workspaceRootPath: string,
   options?: {
+    workMode?: SessionConfig['workMode'];
+    executionRootSessionId?: string;
     name?: string;
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
@@ -222,6 +224,9 @@ export async function createSession(
 
   const session: SessionConfig = {
     id: sessionId,
+    workMode: options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
+    workModeNeedsReview: false,
+    executionRootSessionId: options?.executionRootSessionId ?? sessionId,
     workspaceRootPath,
     name: options?.name,
     createdAt: now,

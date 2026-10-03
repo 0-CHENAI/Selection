@@ -40,6 +40,11 @@ function emitBindingChanged() {
 // ============================================================================
 
 export const mockElectronAPI = {
+  getWindowFocusState: async () => true,
+  onWindowFocusChange: () => () => {},
+  getDefaultThinkingLevel: async () => 'medium' as const,
+  getWorkspaceSettings: async () => ({ permissionMode: 'safe' as const }),
+  getAdvancedSettings: async () => ({ dagOrchestrationEnabled: false, swarmAgentsEnabled: false, anySearchApiKeyConfigured: false }),
   isDebugMode: async () => true,
   isChannelAvailable: (channel: string) => channel === 'artifacts:preview',
   previewArtifactVersion: async () => '/documents/hello.docx',

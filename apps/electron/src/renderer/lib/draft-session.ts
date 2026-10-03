@@ -1,10 +1,15 @@
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import type { Session } from '../../shared/types'
 
 /** In-memory key for draft composer options. Never persisted as a real session. */
 export const DRAFT_SESSION_OPTIONS_ID = '__draft__'
 
 export function isDraftSessionOptionsId(sessionId?: string | null): boolean {
-  return sessionId === DRAFT_SESSION_OPTIONS_ID
+  return sessionId === DRAFT_SESSION_OPTIONS_ID || !!sessionId?.startsWith(`${DRAFT_SESSION_OPTIONS_ID}:`)
+}
+
+export function draftSessionOptionsId(workspaceId: string, projectId: string | undefined, mode: WorkMode): string {
+  return `${DRAFT_SESSION_OPTIONS_ID}:${JSON.stringify([workspaceId, projectId ?? null, mode])}`
 }
 
 /** Display inherited defaults without turning them into explicit creation overrides. */
@@ -19,6 +24,8 @@ export function resolveDraftWorkingDirectory(
 }
 
 export function createDraftDisplaySession(input: {
+  id?: string
+  workMode?: WorkMode
   workspaceId: string
   model?: string
   llmConnection?: string
@@ -28,7 +35,8 @@ export function createDraftDisplaySession(input: {
   projectId?: string
 }): Session {
   return {
-    id: DRAFT_SESSION_OPTIONS_ID,
+    id: input.id ?? DRAFT_SESSION_OPTIONS_ID,
+    workMode: input.workMode ?? 'NORM',
     workspaceId: input.workspaceId,
     workspaceName: '',
     lastMessageAt: 0,

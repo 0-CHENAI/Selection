@@ -85,6 +85,7 @@ export interface ISessionManager {
   artifactFeedback?(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
   resumeExecution?(sessionId: string): Promise<void>
   continueProgress?(sessionId: string): Promise<void>
+  setSessionWorkMode?(sessionId: string, mode: 'NORM' | 'PRO'): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void

@@ -75,11 +75,10 @@ describe('session list and orchestration view controls (#264, #283)', () => {
 
     expect(searchIdx).toBe(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
-    expect(controls).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
-    expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
-    expect(controls).toContain("view === 'list' && isBoardView")
-    expect(controls).toContain("view === 'board' && !isBoardView")
-    expect(controls).toContain('leaveOrchestrationView()')
+    expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(controls).toContain("value={isBoardView ? 'PRO' : workModeView}")
+    expect(controls).toContain('switchWorkModeView(mode)')
+    expect(controls).toContain("workModeView === 'PRO' && dagOrchestrationEnabled")
     expect(controls).toContain('flex items-center gap-1.5')
   })
 
@@ -142,8 +141,8 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(topBar).toContain('afterWorkspace')
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
     expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
-    expect(topBarCall).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
-    expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
+    expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(topBarCall).toContain("value={isBoardView ? 'PRO' : workModeView}")
   })
 
   it('keeps compact search clear of the start-aligned list title', () => {
@@ -162,18 +161,18 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
   })
 
-  it('labels the switcher 列表 / 新建编排 in Chinese', () => {
+  it('labels the persistent work-mode switcher NORM / PRO', () => {
     const zh = LOCALE_REGISTRY['zh-Hans'].messages
     expect(zh['kanban.list']).toBe('列表')
     expect(zh['kanban.board']).toBe('新建编排')
 
     const html = renderWithI18n(
       'zh-Hans',
-      <BoardListToggle value="list" onChange={() => {}} />,
+      <BoardListToggle value="NORM" onChange={() => {}} />,
     )
-    expect(html).toContain('列表')
-    expect(html).toContain('新建编排')
-    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
+    expect(html).toContain('NORM')
+    expect(html).toContain('PRO')
+    expect(html.indexOf('NORM')).toBeLessThan(html.indexOf('PRO'))
     expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
     expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })

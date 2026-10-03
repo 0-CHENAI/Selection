@@ -150,6 +150,7 @@ function createInput(overrides?: Partial<PreToolUseInput>): PreToolUseInput {
     toolName: 'Read',
     input: { file_path: '/test/file.ts' },
     sessionId: 'test-session',
+    executionSession: { id: 'test-session', workMode: 'PRO' },
     permissionMode: 'allow-all',
     workspaceRootPath: '/test/workspace',
     workspaceId: 'test-ws',

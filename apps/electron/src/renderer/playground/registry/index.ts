@@ -23,6 +23,7 @@ import { containerTransitionsComponents } from './container-transitions'
 import { apiKeyInputComponents } from './api-key-input'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
+import { workModeComponents } from './work-mode'
 import { taskEditorComponents } from './task-editor'
 
 export * from './types'
@@ -43,6 +44,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...iconComponents,
   ...oauthComponents,
   ...sessionListComponents,
+  ...workModeComponents,
   ...taskEditorComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,

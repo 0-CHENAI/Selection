@@ -101,7 +101,7 @@ describe('SessionManager spawn_session wait/background', () => {
   function buildParent(id = 'parent') {
     const workspace = { id: 'ws_test', name: 'Test Workspace', rootPath: tmpRoot, createdAt: Date.now() }
     const managed = createManagedSession(
-      { id, name: 'parent', llmConnection: 'openai', model: 'gpt-4.1' },
+      { id, workMode: 'PRO', name: 'parent', llmConnection: 'openai', model: 'gpt-4.1' },
       workspace as never,
       { messagesLoaded: true },
     )
@@ -125,6 +125,7 @@ describe('SessionManager spawn_session wait/background', () => {
       const child = createManagedSession(
         {
           id,
+          workMode: 'PRO',
           name: options?.name ?? 'Research auth',
           hidden: options?.hidden,
           projectId: options?.projectId,
@@ -1021,29 +1022,17 @@ describe('SessionManager spawn_session wait/background', () => {
     })
   })
 
-  it('does not apply a child-agent budget to a Conductor worker acting as the Swarm root', async () => {
+  it('does not let a Conductor worker promote itself to a root coordinator', async () => {
     const parent = buildParent()
     parent.parentSessionId = 'board-session'
-    parent.orchestrationId = 'dag-worker-swarm'
+    parent.taskNodeId = 'node'
     parent.orchestrationRootSessionId = parent.id
-    parent.orchestrationDepth = 0
     parent.orchestrationRole = 'coordinator'
-    parent.orchestrationStatus = 'running'
-    parent.orchestrationTokensUsed = FIXED_SWARM_TOKEN_BUDGET
-    parent.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
     stubCreateChild()
-
     await expect(internals(sm).spawnSessionFromTool(parent, {
-      prompt: 'Independent worker from a DAG node',
-      mode: 'background',
-      spawnReason: 'user-requested',
-    })).resolves.toMatchObject({ sessionId: 'child' })
-
-    expect(internals(sm).sessions.get('child')).toMatchObject({
-      orchestrationRootSessionId: parent.id,
-      orchestrationTokensUsed: 0,
-      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
-    })
+      prompt: 'Independent worker from a DAG node', mode: 'background', spawnReason: 'user-requested',
+    })).rejects.toThrow('PRO root coordinator')
+    expect(internals(sm).sessions.has('child')).toBe(false)
   })
 
   it('stops a spawned agent at the first model-call boundary that reaches its budget', async () => {
@@ -1083,7 +1072,7 @@ describe('SessionManager spawn_session wait/background', () => {
       prompt: 'Must not spawn after the live budget boundary',
       mode: 'background',
       spawnReason: 'user-requested',
-    })).rejects.toThrow('263000/262144')
+    })).rejects.toThrow('PRO root coordinator')
     expect(child.orchestrationStatus).toBe('need-to-check')
     // The live turn is included in the gate but remains unsettled until the
     // interrupted turn completes, so it must not be written twice here.
@@ -1785,9 +1774,9 @@ describe('SessionManager spawn_session wait/background', () => {
 
   it('prevents a child from enabling Swarm while its parent is disabled', async () => {
     const parent = buildParent()
-    const child = createManagedSession({ id: 'child', parentSessionId: parent.id }, parent.workspace, { messagesLoaded: true })
+    const child = createManagedSession({ id: 'child', workMode: 'PRO', parentSessionId: parent.id }, parent.workspace, { messagesLoaded: true })
     internals(sm).sessions.set(child.id, child)
-    await expect(internals(sm).updateSessionSwarmEnabled(child.id, true)).rejects.toThrow('parent has Swarm disabled')
+    await expect(internals(sm).updateSessionSwarmEnabled(child.id, true)).rejects.toThrow('PRO root coordinator')
   })
 
   it('refreshes a runtime after an in-flight Swarm toggle before the next turn', async () => {

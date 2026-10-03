@@ -26,7 +26,7 @@ for (const { conflict, mode, declared } of [
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   const enabled = spyOn(configStorage, 'getSwarmAgentsEnabled').mockReturnValue(true)
   const manager = new SessionManager(), internal = manager as any
-  const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
+  const parent = createManagedSession({ id: 'parent', workMode: 'PRO', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
   parent.isProcessing = true
   internal.sessions.set(parent.id, parent)
   internal.persistSession = () => {}

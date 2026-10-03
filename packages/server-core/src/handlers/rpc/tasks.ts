@@ -36,6 +36,7 @@ import type {
   TaskTemplateDetailDto,
   TaskCreateFromTemplateRequest,
 } from '@craft-agent/shared/protocol'
+import { assertComplexCapability } from '@craft-agent/shared/sessions/work-mode'
 import { createHash } from 'node:crypto'
 import { unlinkSync } from 'node:fs'
 import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
@@ -417,6 +418,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
       : null
+    if (orchestrator?.workspaceId !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    assertComplexCapability(orchestrator, 'run-workflow')
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
       orchestratorSessionId: req.orchestratorSessionId,
