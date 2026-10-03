@@ -55,6 +55,27 @@ describe('loadTaskResults', () => {
       { path: 'out/a.txt', hash: 'abc', mime: 'text/plain', size: 2 },
     ]);
   });
+
+  it('links output to its root, attempt and dispatch revision, ignoring uncommitted plan files', () => {
+    writeSpecRevision(root, 'demo', 'r1', 0, spec());
+    const t = '2026-10-04T00:00:00.000Z';
+    for (const entry of [
+      { t, kind: 'run-started', taskId: 'demo', runId: 'r1', orchestratorSessionId: 'root', revision: 0 },
+      { t, kind: 'node-scheduled', nodeId: 'audit', revision: 0 },
+      // A different pending node can be patched during async session creation.
+      { t, kind: 'node-spawned', nodeId: 'audit', sessionId: 'worker', revision: 1 },
+      { t, kind: 'node-finished', nodeId: 'audit', sessionId: 'worker', state: 'done', revision: 1 },
+      { t, kind: 'run-completed', revision: 1 },
+    ] as RunLogEntry[]) appendRunLog(root, 'demo', 'r1', entry);
+    writeSpecRevision(root, 'demo', 'r1', 1, spec());
+    writeNodeOutput(root, 'demo', 'r1', 'audit', { text: 'verified output' });
+    const result = loadTaskResults(root, 'demo', 'r1');
+    writeSpecRevision(root, 'demo', 'r1', 2, { ...spec(), title: 'Uncommitted plan' });
+    expect(loadTaskResults(root, 'demo', 'r1')).toEqual(result);
+    expect(result).toMatchObject({ taskId: 'demo', orchestratorSessionId: 'root', revision: 1,
+      runStatus: 'completed', nodes: [{ sessionId: 'worker', revision: 0, attempt: 1, output: 'verified output' }] });
+    expect(loadTaskResults(mkdtempSync(join(root, 'other-workspace-')), 'demo', 'r1').nodes).toEqual([]);
+  });
   it('shows durable invalidation without erasing historical output or retaining a stale verdict', () => {
     writeSpecRevision(root, 'demo', 'r1', 0, spec());
     const t = '2026-06-07T00:00:00.000Z';

@@ -14051,6 +14051,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.progressSupervisor?.stop()
       managed.progressReviewer?.destroy()
       managed.progressReviewer = undefined
+      managed.agent?.destroy()
+      managed.agent = null
     }
     this.progressArbiters.clear()
     this.progressBudgets.clear()
