@@ -848,6 +848,7 @@
   "handover.constraints": "Constraints and original requests",
   "handover.decisions": "Recorded decisions",
   "handover.description": "Create a new root with the original goals, constraints and frozen results. Source runs keep their ownership; target permissions are checked independently.",
+  "handover.dragRequired": "Ziehe den Schieberegler zur Übergabe an {{mode}}",
   "handover.empty": "The new conversation will retain background and file snapshots at a consistent checkpoint. Further work starts when you choose.",
   "handover.evidenceNotice": "Assistant claims still need review. Reuse completed operations; review unknown outcomes first. Create a new handover to refresh background; existing snapshots remain unchanged.",
   "handover.fileState.changed": "Source file changed",

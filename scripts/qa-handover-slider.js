@@ -43,15 +43,12 @@ async function dismiss(start) {
   assert.equal((await state()).value, start, 'closing review must reset the source position')
 }
 async function capture(name, hint = false) {
-  // Capture settled styling, or the actual demonstration's held midpoint.
+  // Settle styling; the tap instruction remains visible after the brief shake.
   await page.evaluate(async showHint => {
     await new Promise(requestAnimationFrame)
     const root = document.querySelector('[data-handover-control]')
     if (showHint) {
-      for (const animation of root.getAnimations({ subtree: true }).filter(a => a.effect.getComputedTiming().duration === 1100)) {
-        animation.pause(); animation.currentTime = 600
-      }
-      await new Promise(requestAnimationFrame)
+      await Promise.all(root.getAnimations().map(a => a.finished.catch(() => {})))
       return
     }
     const animations = root.getAnimations({ subtree: true })
@@ -59,11 +56,13 @@ async function capture(name, hint = false) {
     await Promise.all(animations.map(animation => animation.finished.catch(() => {})))
   }, hint)
   const clip = await page.evaluate(() => {
-    const r = document.querySelector('[data-handover-control]').getBoundingClientRect()
-    return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 }
+    const rects = [document.querySelector('[data-handover-control]').getBoundingClientRect()]
+    const tooltip = document.querySelector('[data-slot=tooltip-content]')
+    if (tooltip) rects.push(tooltip.getBoundingClientRect())
+    const x = Math.min(...rects.map(r => r.x)) - 12, y = Math.min(...rects.map(r => r.y)) - 12
+    return { x, y, width: Math.max(...rects.map(r => r.right)) + 12 - x, height: Math.max(...rects.map(r => r.bottom)) + 12 - y }
   })
   const screenshot = await page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-slider'}/${name}.png`, clip })
-  if (hint) await page.evaluate(() => document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).filter(a => a.playState === 'paused').forEach(a => a.play()))
   return screenshot
 }
 assert.equal((await state()).records, '交接记录：0')
@@ -91,15 +90,23 @@ const points = () => page.evaluate(() => {
 })
 const clickPoint = await points()
 await page.mouse.click(clickPoint.target, clickPoint.y)
-await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
+await page.waitForFunction(() => document.querySelector('[data-handover-control]').getAnimations().some(a => a.effect.getComputedTiming().duration === 320))
+assert.ok(await page.evaluate(() => {
+  const root = document.querySelector('[data-handover-control]')
+  const shake = root.getAnimations().find(a => a.effect.getComputedTiming().duration === 320)
+  const frames = shake.effect.getKeyframes().map(f => new DOMMatrix(f.transform).m41)
+  return frames.some(x => x < 0) && frames.some(x => x > 0) && frames.every(x => Math.abs(x) <= 2)
+}), 'tap feedback must be a slight shake in place')
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' })
-assert.equal(await page.evaluate(() => !!document.querySelector('[data-slot=tooltip-content]')), false, 'the hint must stay inside the capsule')
-assert.ok(await page.evaluate(() => document.querySelector('[data-handover-control] [role=status]').textContent.includes('滑动交接至 PRO')))
-await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x > restX + 30, clickPoint.restX)
-assert.ok(await page.evaluate(() => document.querySelector('[data-handover-trail]').getBoundingClientRect().width > 50), 'the trail must demonstrate the direction with the thumb')
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.equal(await page.evaluate(() => !!document.querySelector('[data-handover-cue], [data-handover-control] svg')), false, 'tap feedback must have no arrow')
+assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content] [role=status]').textContent.includes('请拖动滑块以交接至 PRO')))
+assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').getBoundingClientRect().top >= document.querySelector('[data-handover-control]').getBoundingClientRect().bottom), 'the native app tooltip must appear below the control')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-trail]').getBoundingClientRect().width), 0, 'tapping must never demonstrate progress')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().length), 0, 'the thumb must remain at the source during the hint')
 const hint = await capture('handover-slider-click-hint', true)
 await page.waitForFunction(() => !document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
-assert.ok(await page.evaluate(restX => Math.abs(document.querySelector('[data-handover-thumb]').getBoundingClientRect().x - restX) < 1, clickPoint.restX), 'the demonstration must return to the source')
+assert.ok(await page.evaluate(restX => Math.abs(document.querySelector('[data-handover-thumb]').getBoundingClientRect().x - restX) < 1, clickPoint.restX), 'the shake must return to rest')
 await page.mouse.move(clickPoint.source, clickPoint.y)
 await page.mouse.down()
 await page.mouse.move(clickPoint.source + 2, clickPoint.y)
@@ -107,9 +114,10 @@ await page.mouse.up()
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' }, 'tap jitter must not count as a drag')
 for (let i = 0; i < 3; i++) await page.mouse.click(clickPoint.source, clickPoint.y)
 assert.equal((await state()).dialog, false)
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().duration === 1100).length), 1, 'repeated taps must replace the hint animation')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').getAnimations().filter(a => a.effect.getComputedTiming().duration === 320).length), 1, 'repeated taps must replace the shake')
 await drag('NORM', 0.5, false)
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().duration === 1100).length), 0, 'grabbing must interrupt the hint immediately')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint')), false, 'grabbing must interrupt the hint immediately')
+assert.equal(await page.evaluate(() => !!document.querySelector('[data-slot=tooltip-content]')), false, 'grabbing must dismiss the tooltip')
 assert.ok((await state()).value > 0 && (await state()).value < 100, 'native drag must move the thumb')
 assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').dataset.mode), 'NORM')
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-thumb]')).transitionProperty), 'none', 'dragging must follow the pointer without animation lag')
@@ -154,8 +162,9 @@ await page.mouse.click(reversePoint.target, reversePoint.y)
 await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
 assert.equal((await state()).value, 100)
 assert.equal((await state()).dialog, false)
-await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x < restX - 30, reversePoint.restX)
-assert.ok(await page.evaluate(() => document.querySelector('[data-handover-control] [role=status]').textContent.includes('NORM')))
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-trail]').getBoundingClientRect().width), 0)
+assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content] [role=status]').textContent.includes('NORM')))
 await drag('PRO', 0.5)
 await page.mouse.up()
 assert.equal((await state()).value, 100)
@@ -217,7 +226,7 @@ assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.quer
 await page.mouse.up()
 await page.mouse.click(tapTarget.target, tapTarget.y)
 await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().length), 0, 'reduced motion should keep the color feedback without directional animation')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').getAnimations({subtree:true}).length), 0, 'reduced motion must preserve the instruction without shaking')
 assert.ok(await page.evaluate(() => document.querySelector('[data-handover-grip]').classList.contains('ring-1')), 'reduced motion must retain visible feedback')
 assert.equal((await state()).dialog, false)
 await page.waitForFunction(() => !document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
@@ -232,11 +241,12 @@ await page.evaluate(async () => {
     const label = document.querySelector('[data-handover-label]')
     const range = document.createRange(); range.selectNodeContents(label)
     if (range.getBoundingClientRect().width > label.getBoundingClientRect().width - 4) throw new Error(`Handover label overflows in ${locale}`)
+    if (!i18n.t('handover.dragRequired', { mode: 'NORM' }).includes('NORM')) throw new Error(`Drag instruction missing in ${locale}`)
   }
   await i18n.changeLanguage('zh-Hans')
 })
 console.log(await page.snapshot())
 console.log({ passed: true, bidirectionalDrag: true, partialReset: true, confirmationRequired: true,
   keyboard: ['ArrowRight', 'Escape', 'End', 'Enter', 'Home', 'Space'], reducedMotion: true,
-  unified: true, width, touch: true, tapHint: true, interruption: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, hint, moving, armed, dark] })
+  unified: true, width, touch: true, tapHint: true, slightShake: true, noHintProgress: true, interruption: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, hint, moving, armed, dark] })
 if (!config.spaceId) await task.finish({ keep: [] })
