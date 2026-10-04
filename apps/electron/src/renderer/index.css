@@ -92,6 +92,8 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.62 0.13 293);           /* purple - brand, Auto mode */
   --accent-rgb: 104, 78, 133;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.50178870 0.09392988 58.44502375); /* Binchael copper #8B5527 */
+  --pro-accent-rgb: 97, 60, 27;
   --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
@@ -261,6 +263,8 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.65 0.22 293);            /* brighter purple in dark */
   --accent-rgb: 130, 75, 185;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.76808414 0.08380584 76.89195147); /* Binchael champagne #D2AD76 */
+  --pro-accent-rgb: 147, 121, 83;
   --info: oklch(0.78 0.14 70);               /* amber */
   --info-rgb: 210, 155, 55;                  /* RGB for shadow-tinted */
   --success: oklch(0.60 0.17 145);           /* green */
@@ -310,6 +314,14 @@
   /* Markdown list markers */
   --md-bullets: var(--foreground-50);
   --md-counters: var(--foreground-50);
+}
+
+/* PRO accent: Binchael's light copper (#8B5527) and dark champagne (#D2AD76).
+   Higher specificity than preset :root overrides; NORM keeps the selected theme.
+   Shadow RGB follows the existing 70% brightness convention. */
+:root[data-work-mode="PRO"] {
+  --accent: var(--pro-accent);
+  --accent-rgb: var(--pro-accent-rgb);
 }
 
 /* Theme Override - Semi-transparent background to allow macOS vibrancy through.

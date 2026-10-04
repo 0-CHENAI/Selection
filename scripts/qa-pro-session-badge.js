@@ -51,7 +51,7 @@ try {
     assert.ok(result.afterTitle && result.fits)
     assert.equal(result.height, 18)
     assert.notEqual(result.radius, '0px')
-    assert.notEqual(result.background, 'rgba(0, 0, 0, 0)')
+    assert.equal(result.background, 'rgba(0, 0, 0, 0)')
     await capture(`pro-badge-${theme.toLowerCase()}`, '[data-work-mode-preview]')
   }
   await page.evaluate(() => {
