@@ -1136,6 +1136,12 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   }
 }
 
+/* Keep success feedback visible immediately, then fade before its two-second expiry. */
+@keyframes handover-success {
+  0%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Toast animation - scale and fade in */
 @keyframes toast-in {
   from {

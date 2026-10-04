@@ -4,7 +4,7 @@
 const { strict: assert } = await import('node:assert')
 const config = globalThis.handoverQA ?? {}
 const task = await taskSpace(config.spaceId ?? 'Handover button QA')
-const page = task.page('p1')
+const page = task.page(config.page ?? 'p1')
 await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
 const storageKey = 'craft-skip-handover-confirmation'
 const previous = await page.evaluate(key => localStorage.getItem(key), storageKey)

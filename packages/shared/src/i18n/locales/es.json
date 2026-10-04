@@ -880,6 +880,7 @@
   "handover.status.created": "Target created; input pending",
   "handover.status.prepared": "Snapshot prepared",
   "handover.status.waiting": "Waiting for a source checkpoint",
+  "handover.success": "Transferido a {{mode}}",
   "handover.title": "Hand over background and results",
   "handover.toNorm": "Continue from results",
   "handover.toPro": "Hand over to PRO",

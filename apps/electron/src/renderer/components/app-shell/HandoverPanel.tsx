@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowRightLeft, ArrowUpRight, Check, LoaderCircle, Redo2 } from 'lucide-react'
+import { ArrowUpRight, Check, LoaderCircle, Redo2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtom, useAtomValue, useStore } from 'jotai'
-import { skipHandoverConfirmationAtom } from '@/atoms/handover'
+import { handoverReviewSessionAtom, handoverSuccessAtom, skipHandoverConfirmationAtom } from '@/atoms/handover'
 import { addSessionAtom, ensureSessionMessagesLoadedAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import type { HandoverOperation, HandoverRecord, HandoverResult } from '@craft-agent/shared/protocol'
@@ -26,6 +26,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const metadata = useAtomValue(sessionMetaMapAtom)
   const store = useStore()
   const [skipConfirmation, setSkipConfirmation] = useAtom(skipHandoverConfirmationAtom)
+  const [reviewSession, setReviewSession] = useAtom(handoverReviewSessionAtom)
   const [dontShowAgain, setDontShowAgain] = useState(false)
   const [open, setOpen] = useState(false)
   const [inspecting, setInspecting] = useState(!headerOnly)
@@ -67,12 +68,20 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
       // Register the target before navigation; session_created also loads it asynchronously.
       if (!store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
       setOpen(false)
+      store.set(handoverSuccessAtom, { sessionId: target.id, mode: record.targetMode, expiresAt: Date.now() + 2000 })
       navigate(routes.view.allSessions(target.id))
     } catch (reason) {
       if (alive.current) { setInspecting(false); setOpen(true) }
       throw reason
     }
   }, [store, setSkipConfirmation, t])
+  useEffect(() => {
+    if (reviewSession !== sessionId) return
+    setInspecting(true)
+    setDontShowAgain(skipConfirmation === true)
+    setOpen(true)
+    setReviewSession(null)
+  }, [reviewSession, sessionId, skipConfirmation, setReviewSession])
   useEffect(() => {
     alive.current = true
     const refresh = () => void call({ type: 'list' }).then(async result => {
@@ -146,13 +155,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
         aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup={skipConfirmation === true ? undefined : 'dialog'} disabled={busy || open} onClick={() => { if (skipConfirmation === true) void startHandover(); else showDialog(false) }}>
         {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Redo2 aria-hidden="true" />}<span className="tracking-[0.04em]">{targetMode}</span>
       </Button>
-    </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip>
-      : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
-        <ArrowRightLeft className="size-3.5 text-muted-foreground" /><span>{t('handover.backgroundReady')}</span>
-        <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" disabled={!metadata.has(sourceLink.sourceSessionId)} onClick={() => navigate(routes.view.allSessions(sourceLink.sourceSessionId))}>{metadata.has(sourceLink.sourceSessionId) ? t('handover.openSource') : t('handover.sourceRemoved')}</button>
-        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground transition-colors" onClick={() => showDialog()}>{t('handover.viewBackground')}</button>
-        {unknown.length > 0 && <span role="status" className="w-full text-warning">{t('handover.unknownBlocked', { count: unknown.length })}</span>}
-      </div>}
+    </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip> : null}
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className={`flex max-h-[80dvh] flex-col overflow-hidden ${selected ? 'sm:max-w-[560px]' : 'sm:max-w-[420px]'}`}
         showCloseButton={!!selected} overlayClassName="bg-black/15 dark:bg-black/35">
