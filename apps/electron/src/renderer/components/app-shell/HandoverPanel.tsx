@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowRightLeft, ArrowUpRight, LoaderCircle } from 'lucide-react'
+import { ArrowRightLeft, ArrowUpRight, LoaderCircle, Repeat2 } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
-import { HandoverSlider } from './HandoverSlider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtomValue } from 'jotai'
@@ -83,7 +83,12 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const unknown = selected?.snapshot?.actions.filter(action => action.outcome === 'unknown' && !selected.reviews[action.ref]) ?? []
   const sourceExists = selected ? metadata.has(selected.sourceSessionId) : sourceLink ? metadata.has(sourceLink.sourceSessionId) : false
   return <>
-    {headerOnly ? canCreate && <HandoverSlider key={`${sessionId}:${mode}`} mode={mode} disabled={busy || open} onActivate={() => setOpen(true)} />
+    {headerOnly ? canCreate && <Tooltip><TooltipTrigger asChild>
+      <Button type="button" data-handover-trigger variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1 px-2 text-foreground/70 hover:text-foreground"
+        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup="dialog" disabled={busy || open} onClick={() => setOpen(true)}>
+        <Repeat2 aria-hidden="true" /><span className="tracking-[0.04em]">{targetMode}</span>
+      </Button>
+    </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip>
       : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
         <ArrowRightLeft className="size-3.5 text-muted-foreground" /><span>{t('handover.backgroundReady')}</span>
         <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" disabled={!metadata.has(sourceLink.sourceSessionId)} onClick={() => navigate(routes.view.allSessions(sourceLink.sourceSessionId))}>{metadata.has(sourceLink.sourceSessionId) ? t('handover.openSource') : t('handover.sourceRemoved')}</button>
