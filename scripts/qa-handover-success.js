@@ -7,7 +7,7 @@ const task = await taskSpace(config.spaceId ?? 'Persistent handover chat bubble 
 const page = task.page(config.page ?? 'p1')
 await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
 const key = 'craft-skip-handover-confirmation'
-const previous = await page.evaluate(key => localStorage.getItem(key), key)
+const previous = await page.evaluate(key => ({ confirmation: localStorage.getItem(key), component: localStorage.getItem('playground-selected-component') }), key)
 const bubble = '[data-handover-message]'
 async function reset() {
   await page.reload()
@@ -19,25 +19,27 @@ async function reset() {
     window.addEventListener('craft-agent-navigate', event => { window.lastHandoverRoute = event.detail.route })
   })
 }
-async function check(mode, screenshot) {
+async function check(mode, screenshot, compact = false) {
   await page.waitForSelector(bubble)
   const result = await page.evaluate(selector => {
-    const wrapper = document.querySelector(selector), body = wrapper.querySelector('.bg-user-message-bubble')
-    const r = body.getBoundingClientRect(), parent = wrapper.getBoundingClientRect()
+    const wrapper = document.querySelector(selector), body = wrapper.querySelector('[data-search-root=response]')
+    const card = body.closest('.group'), r = card.getBoundingClientRect(), parent = wrapper.getBoundingClientRect()
     return { count: document.querySelectorAll(selector).length, text: body.textContent,
       mode: document.querySelector('[data-handover-session]').dataset.handoverMode,
-      right: Math.abs(r.right - parent.right) < 1,
+      left: Math.abs(r.left - parent.left) < 1, fullWidth: Math.abs(r.width - parent.width) < 1,
       fits: r.left >= parent.left && r.right <= parent.right,
-      position: getComputedStyle(wrapper).position, time: !!wrapper.querySelector('time'),
-      copy: !!wrapper.querySelector('button[aria-label="复制"]'),
+      position: getComputedStyle(wrapper).position, userBubble: !!wrapper.querySelector('.bg-user-message-bubble'),
+      copy: [...wrapper.querySelectorAll('button')].some(button => button.textContent === '复制'),
+      regenerate: [...wrapper.querySelectorAll('button')].some(button => button.textContent === '重新生成'),
       toast: !!document.querySelector('[data-sonner-toast][data-type="success"]'),
       dialog: !!document.querySelector('[role=dialog]') }
   }, bubble)
   assert.equal(result.count, 1, 'exactly one handover message belongs to each target')
   assert.equal(result.text, `已成功交接工作至${mode}`)
   assert.ok(result.mode === mode && !result.dialog)
-  assert.ok(result.right && result.fits && result.position === 'static', 'use the user message bubble in the chat flow')
-  assert.ok(result.time && result.copy && !result.toast, 'reuse timestamp and copy affordances without a success notification')
+  assert.ok(result.left && result.fullWidth && result.fits && result.position === 'static' && !result.userBubble, 'use the Agent response card in the chat flow')
+  assert.equal(result.copy, !compact, 'reuse the standard Agent copy action and compact footer behavior')
+  assert.ok(!result.regenerate && !result.toast, 'a handover receipt must not offer regeneration or a success notification')
   if (screenshot) {
     const directory = config.outputDir ?? '/tmp/selection-handover-chat-bubble'
     await mkdir(directory, { recursive: true })
@@ -87,6 +89,9 @@ try {
   await page.click('loc=role:button[name="Light"]')
   await page.click('[data-handover-trigger]')
   await check('PRO', 'handover-chat-bubble-light')
+  await page.selectOption('select', 'compact')
+  await page.click('[data-handover-trigger]')
+  await page.waitForSelector(bubble)
   await page.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false })
   await page.evaluate(() => {
     const style = document.createElement('style')
@@ -94,9 +99,10 @@ try {
     style.textContent = '[data-handover-session] { position: fixed; inset: 16px; height: calc(100dvh - 32px); z-index: 40; }'
     document.head.append(style)
   })
-  await check('PRO', 'handover-chat-bubble-narrow')
+  await check('PRO', 'handover-chat-bubble-narrow', true)
   await page.evaluate(() => document.getElementById('handover-qa-viewport').remove())
   await page.cdp('Emulation.clearDeviceMetricsOverride')
+  await page.selectOption('select', 'ready')
   await reset()
   await page.click('[data-handover-trigger]')
   await check('PRO')
@@ -119,8 +125,8 @@ try {
   await page.click('[data-handover-trigger]')
   await page.waitForSelector('[role=dialog] [role=alert]')
   assert.equal(await page.evaluate(selector => !!document.querySelector(selector), bubble), false, 'failed loading must not announce success')
-  console.log({ passed: true, permanentUserBubble: true, exactCopy: true, targetLoadedBeforeSuccess: true,
-    returningAndHistoricalSessions: true, noDuplicate: true, timestampAndCopy: true,
+  console.log({ passed: true, permanentAgentMessage: true, exactCopy: true, targetLoadedBeforeSuccess: true,
+    returningAndHistoricalSessions: true, noDuplicate: true, standardAgentCardAndCopy: true,
     darkLightNarrow: true, reverseHandover: true, waitingAndFailures: true })
 } catch (error) {
   console.error(await page.snapshot())
@@ -128,7 +134,11 @@ try {
 } finally {
   await page.evaluate(() => document.getElementById('handover-qa-viewport')?.remove())
   await page.cdp('Emulation.clearDeviceMetricsOverride')
-  await page.evaluate(({ key, previous }) => { if (previous === null) localStorage.removeItem(key); else localStorage.setItem(key, previous) }, { key, previous })
+  await page.evaluate(({ key, previous }) => {
+    for (const [name, value] of [[key, previous.confirmation], ['playground-selected-component', previous.component]]) {
+      if (value === null) localStorage.removeItem(name); else localStorage.setItem(name, value)
+    }
+  }, { key, previous })
   await page.reload()
 }
 if (!config.spaceId) await task.finish({ keep: [] })
