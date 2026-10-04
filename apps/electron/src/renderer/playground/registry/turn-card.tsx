@@ -1,5 +1,6 @@
 import type { ComponentEntry } from './types'
 import { useState, useEffect, type ReactNode } from 'react'
+import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 import {
   TurnCard,
   DocumentFormattedMarkdownOverlay,
@@ -18,6 +19,34 @@ import {
 /** Wrapper with padding for playground preview */
 function PaddedWrapper({ children }: { children: ReactNode }) {
   return <div className="p-8">{children}</div>
+}
+
+/** Same source UI for live research and PRO reading immutable handover pages. */
+function ResearchSourcesTurnCard({ workMode = 'PRO' }: { workMode?: 'PRO' | 'NORM' }) {
+  const pages = [
+    { url: 'https://docs.example.com/release', text: '# Release notes\n\nThe release is available for review.' },
+    { url: 'https://research.example.com/overview', text: '# Research overview\n\nThe research compares the documented capabilities.' },
+    { url: 'https://status.example.com/updates', text: '# Status updates\n\nCurrent availability is recorded in the status log.' },
+  ]
+  const activities: ActivityItem[] = pages.map((page, index) => ({
+    id: `research-${index}`, type: 'tool', status: 'completed', timestamp: index + 1,
+    toolName: workMode === 'PRO' ? 'Read' : 'WebFetch',
+    toolInput: workMode === 'PRO'
+      ? { file_path: `{{SESSION_PATH}}/data/handover/preview/files/${String(index + 1).repeat(64)}.txt` }
+      : { url: page.url },
+    content: `Content from ${page.url} (asked: "overview"):\n\n${page.text}`,
+  }))
+  return (
+    <div data-research-sources-preview className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-6 py-4 text-center text-sm font-medium">{workMode} · 资料调研</div>
+      <ResponseSourcesLayout messages={activities.map(activity => ({ role: 'tool', toolName: activity.toolName, toolInput: activity.toolInput, content: activity.content ?? '' }))}>
+        <div className="h-full overflow-y-auto p-6">
+          <TurnCard turnId="research-sources-preview" activities={activities} isComplete isStreaming={false} animateResponse={false}
+            response={{ text: '## 调研结论\n\n已核对发布记录、研究概览和服务状态。以下结论基于本轮读取的三份网页资料。\n\n- 发布记录可用于确认版本。\n- 研究概览说明了能力比较。\n- 服务状态记录了可用性。', isStreaming: false }} />
+        </div>
+      </ResponseSourcesLayout>
+    </div>
+  )
 }
 
 // ============================================================================
@@ -466,6 +495,15 @@ const todosLong: TodoItem[] = [
 // ============================================================================
 
 export const turnCardComponents: ComponentEntry[] = [
+  {
+    id: 'pro-reference-sources',
+    name: 'PRO Reference Sources',
+    category: 'Turn Cards',
+    description: 'Reference shelf and source panel for live web research or frozen handover pages',
+    component: ResearchSourcesTurnCard,
+    layout: 'full',
+    props: [{ name: 'workMode', control: { type: 'select', options: [{ label: 'PRO snapshots', value: 'PRO' }, { label: 'NORM WebFetch', value: 'NORM' }] }, defaultValue: 'PRO' }],
+  },
   {
     id: 'turn-card',
     name: 'TurnCard',
