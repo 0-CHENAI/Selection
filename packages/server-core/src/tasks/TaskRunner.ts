@@ -86,6 +86,8 @@ import {
   workspaceCacheBypassReason,
   isWorkspaceCacheKindAllowed,
   COORDINATOR_TIMEOUT_BLOCKER,
+  ResearchPayloadSchema, validateResearchRecord, summarizeResearch, renderResearchReport, freezeResearchSources, loadResearchResults,
+  type ResearchRecord, type ResearchSummary,
   type OrchestrationPatch,
   type PatchOk,
   runDir,
@@ -239,6 +241,7 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  research?: ResearchSummary;
   artifactAvailability?: { nodeIds: string[]; reason: string };
   resumedFrom?: string;
   supersededBy?: string;
@@ -319,6 +322,7 @@ function orchestrationDisplayStatus(snapshot: RunSnapshot): {
 }
 
 function nodeCacheMode(node: TaskNode, sourceVersion: 1 | 2 | 3): 'none' | 'run-pure' | 'workspace-pure' {
+  if (node.researchRole) return 'none';
   if (sourceVersion < 3) return node.cache === 'pure' ? 'run-pure' : 'none';
   if (node.cache === 'workspace-pure') return 'workspace-pure';
   if (node.cache === 'run-pure') return 'run-pure';
@@ -472,8 +476,10 @@ class ActiveRun {
     // convenience. Refuse to dispatch anything if revision 0 cannot be durably
     // written; otherwise a restart could only consult the mutable task.yaml.
     writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, 0, this.spec);
+    const sources = this.spec.research ? freezeResearchSources(this.deps.workspaceRoot, this.slug, this.runId, this.spec.research,
+      this.opts.orchestratorSessionId ? this.deps.host.getSessionWorkingDirectory(this.opts.orchestratorSessionId) ?? this.spec.cwd ?? this.deps.workspaceRoot : this.spec.cwd ?? this.deps.workspaceRoot) : undefined;
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom });
+    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
     beforeDispatch?.();
     this.runStatus = 'running';
     // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
@@ -1209,6 +1215,7 @@ class ActiveRun {
       tokenBudget: this.tokenBudget,
       blockers: blockers.length ? blockers : undefined,
       revision: this.revision,
+      ...(this.spec.research ? { research: loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) } : {}),
       artifactAvailability: this.artifactAvailability ? structuredClone(this.artifactAvailability) : undefined,
       resumedFrom: this.resumedFrom,
       supersededBy: this.supersededBy,
@@ -1926,6 +1933,26 @@ class ActiveRun {
     return this.snapshot();
   }
 
+  private researchRecord(nodeId: string, state: NodeStateEntry, sessionId: string, output: NodeOutput): ResearchRecord {
+    const config = this.spec.research, node = this.spec.nodes.find(node => node.id === definitionId(nodeId));
+    if (!config || !node?.researchRole) throw new Error('Research requires an explicitly configured task and role');
+    const payload = ResearchPayloadSchema.parse(output.params?.research);
+    const previous = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    if (!previous) throw new Error('Frozen research state is unavailable; inspect before submitting or delivering');
+    const record: ResearchRecord = { role: node.researchRole, payload, producedBy: { runId: this.runId, nodeId,
+      attempt: state.attempt, revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId,
+      artifactVersion: createHash('sha256').update(JSON.stringify(output)).digest('hex') } };
+    const errors = validateResearchRecord(config, previous?.sources ?? [], previous?.records ?? [], record, new Set(this.spec.nodes.map(node => node.id)));
+    if (errors.length) throw new Error(errors.join('; '));
+    if (record.payload.report) {
+      const candidate = summarizeResearch(config, previous?.sources ?? [], [...(previous?.records ?? []), record]);
+      if (candidate.blockers.length) throw new Error(candidate.blockers.join('; '));
+      output.text = renderResearchReport(candidate);
+      record.producedBy.artifactVersion = createHash('sha256').update(JSON.stringify(output)).digest('hex');
+    }
+    return record;
+  }
+
   acceptOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }): { ok: true } | { ok: false; error: string } {
     const nodeId = this.sessionToNode.get(sessionId);
     if (!nodeId) return { ok: false, error: 'Session is not a node in this run' };
@@ -1968,6 +1995,10 @@ class ActiveRun {
       }
     }
     const output = { text: payload.text ?? '', params: values };
+    if (node.researchRole) {
+      try { this.researchRecord(nodeId, active, sessionId, output); }
+      catch (error) { return { ok: false, error: `Research output: ${error instanceof Error ? error.message : error}` }; }
+    }
     if (this.spec.execution?.artifact_delivery === 1) {
       try { writeNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, sessionId, active.attempt, output); }
       catch { return { ok: false, error: 'Could not persist task output; retry submission' }; }
@@ -2184,7 +2215,10 @@ class ActiveRun {
       }
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
-      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance, promptOutputs));
+      const research = this.spec.research && node.researchRole ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      const prompt = skillsPreamble(research ? [...new Set([...(this.spec.skills ?? []), 'deep-research'])] : this.spec.skills)
+        + (research ? `Research role: ${node.researchRole}. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify(research)}\nSubmit values.research using the native Skill contract. Submit only this node's new records or explicit issue updates; reference existing evidence ids without resubmitting old evidence, claims or reviews. Each correction requires a new claim version; old reviews cannot approve it.\n` : '')
+        + (await this.buildPrompt(node, instance, promptOutputs));
       if (!canDispatch()) return;
       if (state.sessionId && state.lastFailure && state.lastFailure !== 'progress-paused') {
         await this.deps.host.settleTaskSessionStop?.(state.sessionId);
@@ -2230,7 +2264,7 @@ class ActiveRun {
       const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
       const prefix = node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => candidate.id) : [];
       const signature = planValueKey({ actor: node.actor, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
-      const actor = node.actor ? this.actors.get(node.actor.id) : undefined;
+      const actor = node.actor && node.researchRole !== 'reviewer' ? this.actors.get(node.actor.id) : undefined;
       const reuse = !!node.actor && !instance && requested === 'safe' && !!this.deps.host.bindTaskSession && actor?.signature === signature
         && (!this.deps.host.canReuseTaskSession || this.deps.host.canReuseTaskSession(actor.sessionId))
         && (!this.deps.host.getSessionPermissionModeState || this.deps.host.getSessionPermissionModeState(actor.sessionId)?.permissionMode === requested)
@@ -2346,6 +2380,7 @@ class ActiveRun {
 
   private planContext(): string {
     return [
+      ...(this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify(loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId))}`] : []),
       ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
       ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
       ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
@@ -2478,6 +2513,11 @@ class ActiveRun {
       }
       if (this.requeueFailedNodeVerdict(nodeId, evt.sessionId, defId, st)) return;
       const output: NodeOutput = submitted ?? { text };
+      let researchRecord: ResearchRecord | undefined;
+      if (node?.researchRole) {
+        try { researchRecord = this.researchRecord(nodeId, st, evt.sessionId, output); }
+        catch (error) { this.failNode(nodeId, `Research output: ${String(error)}`, evt.sessionId, 'invalid'); return; }
+      }
       for (const declaration of node?.outputs ?? []) {
         if (this.integratedSessions.has(evt.sessionId)) break;
         if (declaration.kind !== 'artifact') continue;
@@ -2513,7 +2553,7 @@ class ActiveRun {
         }
       }
       st.state = 'done';
-      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done' });
+      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done', ...(researchRecord ? { researchRecord } : {}) });
       this.applyCard(evt.sessionId, DONE_STATUS);
       this.settleSessionSlot(nodeId, evt.sessionId);
       if (node && this.replicaCounts.has(defId)) {
@@ -2662,6 +2702,10 @@ class ActiveRun {
       this.finish('failed');
       return;
     }
+    if (this.spec.research && !this.qualityGateEnabled()) {
+      const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+      if (!research || research.blockers.length) { this.finish('failed'); return; }
+    }
     if (this.sourceVersion === 3 && this.qualityGateEnabled()) {
       if (!this.opts.orchestratorSessionId) {
         this.finish('failed');
@@ -2805,6 +2849,8 @@ class ActiveRun {
     if (this.runStatus !== 'verifying') return;
     if (this.verdictLocked) return;
     if (verdict.result === 'pass') {
+      const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      if (this.spec.research && (!research || research.blockers.length)) throw new TaskControlError(this.runStatus, `Research delivery is unsettled: ${research?.blockers.join('; ') ?? 'frozen state unavailable'}`);
       this.revalidateCompletedArtifacts();
       if ([...this.state.values(), ...this.instances.values()].some(state => !['done', 'skipped'].includes(state.state))
         || [...this.workers.values()].some(worker => ['reserved', 'running'].includes(worker.state))

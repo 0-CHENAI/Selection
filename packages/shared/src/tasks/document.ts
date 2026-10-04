@@ -43,6 +43,7 @@ function unknownKeys(raw: unknown, allowed: Set<string>, path: string): Validati
 }
 
 const TASK_KEYS = new Set([
+  'research',
   'schema_version',
   'id',
   'title',
@@ -68,6 +69,7 @@ const TASK_KEYS = new Set([
 ]);
 
 const NODE_KEYS = new Set([
+  'researchRole',
   'actor',
   'workspace_inputs',
   'locked',

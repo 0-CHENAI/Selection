@@ -29,3 +29,7 @@ export * from './critical-path.ts';
 export * from './workspace-cache.ts';
 export * from './plan.ts';
 export * from './planner.ts';
+
+export * from './research.ts';
+export * from './research-storage.ts';
+export { addResearchTemplate } from './research-template.ts';

@@ -2,12 +2,15 @@ import { expect, test, spyOn } from 'bun:test'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir, hostname } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import * as config from '@craft-agent/shared/config'
 import { getSessionPath, getSessionFilePath, loadSession } from '@craft-agent/shared/sessions'
 import { SessionManager, createManagedSession } from './SessionManager'
 import { ArtifactVersions } from '../reliability/artifact-versions'
 import { HandoverStore } from '../reliability/handover-store'
 import { writeExecutionCheckpoint } from '../reliability/execution-checkpoint'
+import { parseTaskSpec, saveTaskSpec, writeSpecRevision, freezeResearchSources, ResearchPayloadSchema, appendRunLog, writeNodeAttempt, writeNodeOutput, runDir, type ResearchRecord } from '@craft-agent/shared/tasks'
+import { TaskRunner } from '../tasks/TaskRunner'
 
 async function fixture(mode: 'NORM' | 'PRO' = 'NORM') {
   const root = mkdtempSync(join(tmpdir(), 'selection-handover-'))
@@ -30,6 +33,47 @@ async function fixture(mode: 'NORM' | 'PRO' = 'NORM') {
     await manager.flushAllSessions(); manager.cleanup(); lookup.mockRestore(); workspaces.mockRestore(); rmSync(root, { recursive: true, force: true })
   } }
 }
+
+test('F5-d research handover preserves current reviewed versions, uncovered questions and independent source bytes', async () => {
+  const f = await fixture('PRO')
+  try {
+    const parsed = parseTaskSpec({ schema_version: 3, id: 'research', title: 'Research', goal: 'cost and risk', research: {
+      line: { id: 'main', question: 'cost and risk' }, dimensions: [{ id: 'cost', requirement: 'cost evidence' }, { id: 'risk', requirement: 'risk evidence' }], sources: [{ id: 'source', path: 'costs.txt' }],
+    }, nodes: ['researcher', 'reviewer', 'reporter'].map(role => ({ id: role, researchRole: role, prompt: role, outputs: [{ name: 'research', kind: 'param', type: 'json', required: true }] })) })
+    expect(parsed.success).toBe(true); if (!parsed.success) return
+    saveTaskSpec(f.root, parsed.data); writeSpecRevision(f.root, 'research', 'r', 0, parsed.data)
+    const sources = freezeResearchSources(f.root, 'research', 'r', parsed.data.research!, f.root)
+    appendRunLog(f.root, 'research', 'r', { t: new Date().toISOString(), kind: 'run-started', taskId: 'research', runId: 'r', orchestratorSessionId: f.source.id, researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') })
+    const payloads = [
+      { evidence: [{ id: 'e', sourceId: 'source', sourceVersion: sources[0]!.version, locator: { startLine: 1, endLine: 1 }, excerpt: readFileSync(f.file, 'utf8') }], claims: [{ id: 'cost', version: 2, type: 'fact', text: 'A two-year cost is 1000000 yuan.', dimensionIds: ['cost'], evidenceIds: ['e'], critical: true, keyNumber: true }] },
+      { reviews: [{ claimRef: { id: 'cost', version: 2 }, citationExists: true, support: 'supported', finding: 'Original supports this version' }] },
+      { report: { claimRefs: [{ id: 'cost', version: 2 }], limitations: ['Risk unavailable'], unresolved: ['Need risk evidence'] } },
+    ]
+    parsed.data.nodes.forEach((node, index) => {
+      const payload = ResearchPayloadSchema.parse(payloads[index]), output = { text: node.id, params: { research: payload } }
+      writeNodeAttempt(f.root, 'research', 'r', node.id, 1, output); writeNodeOutput(f.root, 'research', 'r', node.id, output)
+      const researchRecord: ResearchRecord = { role: node.researchRole!, payload, producedBy: { runId: 'r', nodeId: node.id, revision: 0, attempt: 1, sessionId: `child-${node.id}`, artifactVersion: createHash('sha256').update(JSON.stringify(output)).digest('hex') } }
+      appendRunLog(f.root, 'research', 'r', { t: new Date().toISOString(), kind: 'node-finished', nodeId: node.id, sessionId: `child-${node.id}`, state: 'done', researchRecord })
+    })
+    appendRunLog(f.root, 'research', 'r', { t: new Date().toISOString(), kind: 'run-completed' })
+    f.source.taskSlug = 'research'; f.internal.persistSession(f.source)
+    f.manager.setTaskRunnerLookup(() => new TaskRunner({ host: f.manager, workspaceId: f.workspace.id, workspaceRoot: f.root }))
+    const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'research-handover', targetMode: 'NORM' })).records[0]!
+    expect(record.status).toBe('applied')
+    const result = JSON.parse(record.snapshot!.originals.find(original => original.role === 'task-result')!.text)
+    expect(result.research.report.claimRefs).toEqual([{ id: 'cost', version: 2 }])
+    expect(result.research.claims[0].review.claimRef.version).toBe(2)
+    expect(result.research.coverage).toEqual({ covered: 1, limited: 0, uncovered: 1, total: 2 })
+    expect(record.snapshot!.openQuestions.join(' ')).toContain('main/risk: uncovered')
+    const copy = record.snapshot!.files.find(file => file.originalPath === sources[0]!.snapshotPath)!
+    expect(copy.hash).toBe(sources[0]!.hash!)
+    rmSync(join(runDir(f.root, 'research', 'r'), 'research'), { recursive: true })
+    const target = await f.manager.getSession(record.targetSessionId!)
+    expect(target?.workMode).toBe('NORM'); expect(target?.parentSessionId).toBeUndefined()
+    expect(readFileSync(join(getSessionPath(f.root, target!.id), 'data', 'handover', record.handoverId, copy.snapshotPath), 'utf8')).toContain('1000000')
+    expect(f.internal.handoverInput(f.internal.sessions.get(target!.id))).toContain('cost')
+  } finally { await f.cleanup() }
+})
 
 test('F2 handover preserves source, constraints, file versions and independent target permissions', async () => {
   const f = await fixture()

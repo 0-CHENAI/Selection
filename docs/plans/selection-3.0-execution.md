@@ -122,3 +122,11 @@ TaskNode.actor 为 id/persona，同 actor 的定义顺序进入 effective depend
 停止意图与实际确认写入 execution-shutdown；未知外部结果、执行锁、pending worker 或交付物阻止后继重叠执行。新 run 的 resumedFrom 为规范后继回执，旧 supersededBy 可由其恢复。纯任务缓存 v2 核对原成果 hash/版本和完整条件；已完成历史不原地改写，文件版本变化以 artifact-availability 警告披露，按新输入执行创建后继 run。
 
 F4-a/c/b 三步真实记录及 F4-d/e/f 故障边界见 docs/qa/selection-3.0-dynamic-execution.md/json。#455 在这些身份与独立执行上下文上附研究记录，不能另设执行完成状态或调度器。
+
+### #455 原生深度研究与独立审查
+
+- 原生 deep-research Skill、显式 PRO 模板与配置、严格研究输出契约，复用既有 session-tools、Sources/文件读取与规范执行器。
+- node-finished 业务凭证关联真实 run/node/attempt/revision/session/成果 hash；冻结原文、定位与语义支持分开，claim 修订必须独立复核；异议与覆盖从具体凭证派生。
+- 同版本校验与渲染保持机器状态和报告一致，普通 PRO/NORM 没有新增研究工作；结果查询、界面与 Handover 保留当前版本和资料限制。
+- 真实 F5 运行在审查后重建实例、实际动态追加修订/复核，最终 cost@2/独立支持、成本 covered 1/2、风险 uncovered 1/2、structured PASS；实际交接到新 NORM。驱动失败与恢复核验分别记录。
+- 入口、范围与验收见 `docs/qa/selection-3.0-deep-research.md/json`；后续 #456 继续扩展语义关系、多前提与共享规范任务。3.1 自动阅读凭据和自动来源包仍在 #449。

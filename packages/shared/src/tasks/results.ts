@@ -15,9 +15,11 @@ import {
   committedRunLog,
   readRunState,
 } from './storage.ts'
+import { loadResearchResults } from './research-storage.ts'
 import { readSpecRevision } from './revisions.ts'
 
 export interface LoadedTaskResults {
+  research?: import('./research.ts').ResearchSummary
   artifactAvailability?: { nodeIds: string[]; reason: string }
   workers?: import('./planner').TaskWorkerRecord[]
   resumedFrom?: string
@@ -143,6 +145,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     slug,
     resumedFrom: started?.kind === 'run-started' ? started.resumedFrom : undefined,
     supersededBy: successor,
+    ...(snapshot?.research ? { research: loadResearchResults(root, slug, chosen) } : {}),
     artifactAvailability: (() => {
       const event = log.findLast(entry => entry.kind === 'artifact-availability');
       return event?.kind === 'artifact-availability' && event.nodeIds.length ? { nodeIds: event.nodeIds, reason: event.reason } : undefined;

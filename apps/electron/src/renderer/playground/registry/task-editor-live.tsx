@@ -8,6 +8,8 @@ import { validateTaskSpec } from '../../../../../../packages/shared/src/tasks/va
 import type { TaskGenerateRequest, TaskGenerateResult, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import type { ComponentEntry } from './types'
 import { mockElectronAPI } from '../mock-utils'
+import { researchPreview } from './research-preview'
+import { renderResearchReport } from '../../../../../../packages/shared/src/tasks/research'
 
 const initial = {
   schema_version: 3, id: 'research-report', title: '资料研究与报告', goal: '收集、分析并输出报告', acceptance_criteria: '报告引用收集资料，并说明资料限制。', runner: 'conduct',
@@ -20,7 +22,7 @@ const initial = {
 }
 
 /** Actual editor and validators, with fixed transport; the real model is tested by the host script. */
-function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' }) {
+function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' | 'research' }) {
   const [ready, setReady] = React.useState(false)
   const [requests, setRequests] = React.useState<Array<TaskGenerateRequest | { openSession: string }>>([])
   const [writes, setWrites] = React.useState({ saves: 0, creates: 0, runs: 0 })
@@ -36,11 +38,19 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
       } catch (error) { return { valid: false, errors: [{ path: 'yaml', message: String(error), severity: 'error' as const }], warnings: [] } }
     }
     const definition = TaskSpecSchema.parse(initial)
+    const research = scenario === 'research' ? researchPreview() : undefined
+    if (research) {
+      definition.research = research.config; definition.runner = 'orchestrate'
+      definition.nodes.splice(2, 0, { id: 'correct-cost', kind: 'session', title: '修订成本', prompt: '读取原文，修订 cost@2。', depends_on: ['analyze'] }, { id: 'review-cost', kind: 'session', title: '独立复核新版本', prompt: '独立读取原文审查 cost@2。', depends_on: ['correct-cost'] })
+      definition.nodes.forEach(node => { node.researchRole = node.id === 'analyze' || node.id === 'review-cost' ? 'reviewer' : node.id === 'report' ? 'reporter' : 'researcher'; node.outputs = [{ name: 'research', kind: 'param', type: 'json', required: true }] })
+      definition.nodes.find(node => node.id === 'report')!.depends_on = ['review-cost']
+    }
     if (scenario === 'f3' || scenario === 'active' || scenario === 'dynamic') { definition.nodes[0]!.title = 'A：成本资料'; definition.nodes[1]!.title = 'B：口径核对'; definition.nodes[1]!.prompt = '独立核对 B 的成本口径'; definition.nodes[1]!.depends_on = []; definition.nodes[2]!.title = 'C：综合报告'; definition.nodes[2]!.prompt = 'A 与 B 的报告：${inputs.second}'; definition.nodes[2]!.depends_on = ['collect']; definition.nodes[2]!.inputs = { second: '${nodes.analyze.output}' } }
     if (scenario === 'long') { definition.goal = '核对资料和限制。'.repeat(150); definition.nodes = Array.from({ length: 12 }, (_, index) => ({ id: `node-${index}`, kind: 'session', title: `步骤 ${index + 1}：资料与风险核对`, prompt: '只读资料、说明来源和限制。'.repeat(80), ...(index ? { depends_on: [`node-${index - 1}`] } : {}) })) }
     if (scenario === 'active' || scenario === 'dynamic') { definition.runner = 'orchestrate'; definition.execution = { coordinator_gate: { mode: 'off' } } }
     if (scenario === 'dynamic') { definition.nodes.push({ id: 'tax', kind: 'session', title: 'D：补查税口径', prompt: '核对 A 资料的税口径 ${nodes.collect.output}' }); definition.nodes[2]!.depends_on!.push('tax') }
     let live: TaskRunSnapshotDto = { workspaceId: 'preview', taskId: initial.id, slug: initial.id, runId: 'preview-active', revision: scenario === 'dynamic' ? 1 : 0, status: scenario === 'dynamic' ? 'waiting-coordinator' : 'running', orchestratorSessionId: 'preview-root', tokensUsed: 0, nodes: definition.nodes.map(node => ({ id: node.id, state: node.id === 'report' || node.id === 'tax' ? 'pending' : scenario === 'dynamic' && node.id === 'collect' ? 'done' : 'running', attempt: node.id === 'report' || node.id === 'tax' ? 0 : 1 })) }
+    if (research) live = { ...live, status: 'completed', revision: 1, research: research.summary, nodes: definition.nodes.map(node => ({ id: node.id, state: 'done', attempt: 1 })), planner: { phase: 'exhausted', pendingResults: [], consumedResults: 5 } }
     if (scenario === 'dynamic') {
       definition.nodes[0]!.actor = { id: 'cost-analyst', persona: '核对成本及来源限制' }
       definition.nodes[2]!.actor = { id: 'cost-analyst', persona: '核对成本及来源限制' }
@@ -54,8 +64,8 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
     const template = { id: 'research-template', name: '资料研究模板', description: '只读资料、分析和报告。'.repeat(10), nodeCount: 3, createdAt: '2026-10-04T00:00:00Z', updatedAt: '2026-10-04T00:00:00Z' }
     Object.assign(window.electronAPI, {
       getProjects: async () => [], onProjectsChanged: () => () => {}, onTaskRunChanged: () => () => {},
-      getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3, ...(scenario === 'active' || scenario === 'dynamic' ? { latestRun: live } : {}) }),
-      getTaskResults: async () => ({ slug: initial.id, runId: 'preview-run', runIds: ['preview-run'], runStatus: 'completed', nodes: initial.nodes.map(node => ({ id: node.id, title: node.title, state: 'done', output: '成果已核对。'.repeat(20) })) }),
+      getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3, ...(scenario === 'active' || scenario === 'dynamic' || research ? { latestRun: live } : {}) }),
+      getTaskResults: async () => ({ slug: initial.id, runId: research ? 'preview-active' : 'preview-run', runIds: [research ? 'preview-active' : 'preview-run'], runStatus: 'completed', research: research?.summary, nodes: definition.nodes.map(node => ({ id: node.id, title: node.title, state: 'done', output: research && node.id === 'report' ? renderResearchReport(research.summary) : '成果已核对。'.repeat(20) })) }),
       applyTaskRunRevision: async () => ({ diff: { added: Array.from({ length: 30 }, (_, i) => `revision-node-${i}`), removed: [], changed: ['analyze'] }, validation: { valid: true, errors: [], warnings: [] }, runRevision: 2, runSpecHash: 'preview-hash', yaml: JSON.stringify(initial), sourceVersion: 3 }),
       patchTaskRun: async (_ws: string, req: { baseRevision: number }) => { if (req.baseRevision !== live.revision) return { snapshot: live, conflict: { code: 'conflict', message: 'stale revision' } }; await new Promise(resolve => setTimeout(resolve, 500)); live = { ...live, revision: live.revision + 1 }; return { snapshot: live } },
       validateTask: async (_ws: string, yaml: string) => validate(yaml),
@@ -106,6 +116,6 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
 }
 export const taskEditorLiveComponents: ComponentEntry[] = [{ id: 'task-editor-live', name: '实际编排编辑器', category: 'Kanban', description: '实际 TaskEditor、对话提案和图组件，固定传输记录保存/创建/运行及请求。', component: TaskEditorLive, props: [
   { name: 'mode', control: { type: 'select', options: ['create', 'edit'].map(value => ({ label: value, value })) }, defaultValue: 'edit' },
-  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
+  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic', 'research'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
   { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed', 'locked'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
 ], layout: 'top' }]

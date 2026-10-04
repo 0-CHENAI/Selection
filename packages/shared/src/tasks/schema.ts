@@ -19,6 +19,7 @@
  * deprecated alias normalized onto `kind`.
  */
 import { z } from 'zod';
+import { ResearchConfigSchema } from './research.ts';
 import type { PermissionMode } from '../agent/mode-types.ts';
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,7 @@ const TaskNodeObject = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional(),
   labels: z.array(z.string()).optional(),
   status: z.string().optional(),
+  researchRole: z.enum(['researcher', 'reviewer', 'reporter']).optional(),
   /** Logical actor, independent of a task node; definition order is its serial execution order. */
   actor: z.object({ id: ident('actor id'), persona: z.string().min(1).optional() }).strict().optional(),
 
@@ -316,6 +318,7 @@ export const TaskSpecSchema = z
     goal: z.string().min(1),
     /** Freeform rubric the orchestrator grades the final result against (verification gate). Falls back to `goal`. */
     acceptance_criteria: z.string().min(1).optional(),
+    research: ResearchConfigSchema.optional(),
     constraints: z.array(z.string().min(1)).optional(),
     decisions: z.array(z.string().min(1)).optional(),
     locked_fields: z.array(z.enum(['goal', 'acceptance_criteria', 'constraints', 'decisions'])).optional(),
@@ -347,6 +350,7 @@ export const TaskSpecSchema = z
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
     const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
+    const researchKinds = new Set(['session', 'orchestrator', 'synthesize', 'verify', 'judge', 'finally']);
     const structured = isStructuredSchemaVersion(spec.schema_version);
     if (spec.schema_version !== 3 && spec.execution) {
       ctx.addIssue({
@@ -355,7 +359,10 @@ export const TaskSpecSchema = z
         path: ['execution'],
       });
     }
+    if (spec.research && spec.schema_version !== 3) ctx.addIssue({ code: 'custom', path: ['research'], message: 'Research requires schema_version: 3' });
     spec.nodes.forEach((node, i) => {
+      if (node.researchRole && (!spec.research || spec.schema_version !== 3 || !researchKinds.has(node.kind) || (node.replicas ?? 1) > 1)) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'researchRole'], message: 'Research roles require an individual configured V3 model-backed task; add canonical nodes for additional research work' });
+      if (node.researchRole && !node.outputs?.some(output => output.name === 'research' && output.type === 'json' && output.required && output.kind !== 'artifact')) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'outputs'], message: 'Research role requires a required JSON param output named research' });
       if (seen.has(node.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
