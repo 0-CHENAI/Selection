@@ -33,6 +33,7 @@ async function probe(mode, reduced = false) {
           chromeName: getComputedStyle(document.querySelector('[data-work-mode-topbar]')).viewTransitionName,
           animations: animations.map(a => ({ name: a.animationName, pseudo: a.effect.pseudoElement, duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes() })),
           opacities: ['list', 'chat'].map(role => ['old', 'new'].map(state => Number(getComputedStyle(root, `::view-transition-${state}(work-mode-${role})`).opacity))),
+          filters: ['list', 'chat'].map(role => ['old', 'new'].map(state => getComputedStyle(root, `::view-transition-${state}(work-mode-${role})`).filter)),
           surfaces: document.querySelectorAll('[data-work-mode-transition]').length, editors: document.querySelectorAll('[data-work-mode-chat] [contenteditable=true]').length }
       }).catch(error => { window.motionQAProbe = { error: error.message } })
       return transition
@@ -50,11 +51,15 @@ async function probe(mode, reduced = false) {
   assert.equal(result.editors, 1, 'the transition does not mount an extra composer')
   for (const pair of result.opacities) {
     assert.ok(pair.every(value => value > 0 && value < 1), 'both pictures are visible at the midpoint')
-    assert.ok(Math.abs(pair[0] + pair[1] - 1) < .01, 'matching fades preserve brightness without a blank gap')
+    assert.ok(Math.abs(pair[0] + pair[1] - 1) < .01, 'matching fades overlap without a blank gap')
   }
+  assert.ok(result.filters.flat().every(filter => reduced ? filter === 'none' : /^blur\([\d.]+px\)$/.test(filter) && Number(filter.match(/[\d.]+/)[0]) > 0 && Number(filter.match(/[\d.]+/)[0]) < 2), 'normal motion has bounded soft focus; reduced motion has no blur')
   for (const animation of result.animations) {
     assert.equal(animation.duration, reduced ? 150 : 240)
     assert.ok(animation.frames.every(frame => !frame.transform || frame.transform === 'none'), 'content dissolves without moving or scaling the frame')
+    assert.ok(reduced
+      ? animation.frames.every(frame => !frame.filter || frame.filter === 'none')
+      : animation.frames.some(frame => frame.filter === 'blur(2px)') && animation.frames.some(frame => frame.filter === 'blur(0px)'), 'soft focus has explicit 0–2px endpoints and is omitted for reduced motion')
   }
   await capture(`${reduced ? 'reduced' : 'midpoint'}-${mode.toLowerCase()}`)
   await page.evaluate(() => { window.motionQAAnimations.forEach(a => a.play()); document.startViewTransition = window.motionQAOriginal })
@@ -95,11 +100,38 @@ try {
   assert.equal(await readDraft(), 'PRO 独立草稿')
   await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await switchMode('NORM')
-  // An older web runtime still navigates and restores its styles.
-  await page.evaluate(() => { window.motionQAFallback = document.startViewTransition; document.startViewTransition = undefined })
-  await switchMode('PRO')
-  assert.equal(await readDraft(), 'PRO 独立草稿')
-  await page.evaluate(() => { document.startViewTransition = window.motionQAFallback })
+  // Older runtimes use the same bounded focus change, with opacity-only reduced motion.
+  for (const reduce of [false, true]) {
+    await page.cdp('Emulation.setEmulatedMedia', { features: reduce ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [] })
+    await switchMode('NORM')
+    await page.evaluate(() => {
+      window.motionQAFallback = document.startViewTransition
+      document.startViewTransition = undefined
+      window.motionQAAnimate = Element.prototype.animate
+      window.motionQAFallbackAnimations = []
+      Element.prototype.animate = function (...args) {
+        const animation = window.motionQAAnimate.apply(this, args)
+        if (this.matches('[data-work-mode-transition]')) {
+          animation.pause(); animation.currentTime = 60
+          window.motionQAFallbackAnimations.push(animation)
+        }
+        return animation
+      }
+    })
+    await page.click('loc=role:button[name="PRO"]')
+    await page.waitForFunction(() => window.motionQAFallbackAnimations.length === 2)
+    const fallback = await page.evaluate(() => window.motionQAFallbackAnimations.map(a => ({ duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes() })))
+    assert.ok(fallback.every(a => a.duration === (reduce ? 150 : 240) && (reduce ? a.frames.every(f => !f.filter) : a.frames[0].filter === 'blur(2px)' && a.frames[1].filter === 'blur(0px)')))
+    await page.evaluate(() => {
+      window.motionQAFallbackAnimations.forEach(a => a.play())
+      Element.prototype.animate = window.motionQAAnimate
+      document.startViewTransition = window.motionQAFallback
+    })
+    await settled('PRO')
+    assert.equal(await readDraft(), 'PRO 独立草稿')
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll('[data-work-mode-transition]')].every(e => getComputedStyle(e).filter === 'none')), true)
+  }
+  await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await page.click('xpath=//label[text()="compactTopBar"]/../following-sibling::button')
   await page.click('xpath=//label[text()="compactInput"]/../following-sibling::button')
   await page.focus('loc=role:button[name="NORM"]')
@@ -114,12 +146,22 @@ try {
   await capture('compact-pro')
   await page.click('xpath=//label[text()="compactTopBar"]/../following-sibling::button')
   await page.click('xpath=//label[text()="compactInput"]/../following-sibling::button')
-  for (const theme of ['Dark', 'Light']) { await page.click(`loc=role:button[name="${theme}"]`); await capture(`pro-${theme.toLowerCase()}`) }
-  assert.equal(await page.evaluate(() => [...document.querySelectorAll('[data-work-mode-transition]')].every(e => getComputedStyle(e).opacity === '1' && getComputedStyle(e).pointerEvents !== 'none' && getComputedStyle(e).viewTransitionName === 'none')), true)
-  console.log({ passed: true, overlappingSnapshots: [forward.opacities, back.opacities], draftPreserved: true, cancelledNavigation: true, reducedMotion: reduced.animations.map(a => a.duration), fallback: true, compactKeyboard: true, outputDir: directory })
+  for (const theme of ['Dark', 'Light']) {
+    await page.click(`loc=role:button[name="${theme}"]`)
+    await page.waitForFunction(dark => document.documentElement.classList.contains('dark') === dark, theme === 'Dark')
+    await page.evaluate(async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await Promise.allSettled(document.getAnimations().filter(a => a instanceof CSSTransition).map(a => a.finished))
+    })
+    await capture(`pro-${theme.toLowerCase()}`)
+  }
+  assert.equal(await page.evaluate(() => [...document.querySelectorAll('[data-work-mode-transition]')].every(e => getComputedStyle(e).opacity === '1' && getComputedStyle(e).filter === 'none' && getComputedStyle(e).pointerEvents !== 'none' && getComputedStyle(e).viewTransitionName === 'none')), true)
+  console.log({ passed: true, overlappingSnapshots: [forward.opacities, back.opacities], boundedBlur: [forward.filters, back.filters], draftPreserved: true, cancelledNavigation: true, reducedMotion: reduced.animations.map(a => a.duration), fallback: true, compactKeyboard: true, outputDir: directory })
 } finally {
   await page.evaluate(previous => {
     window.motionQAAnimations?.forEach(a => a.play())
+    window.motionQAFallbackAnimations?.forEach(a => a.play())
+    if (window.motionQAAnimate) Element.prototype.animate = window.motionQAAnimate
     if (window.motionQAOriginal) document.startViewTransition = window.motionQAOriginal
     for (const [key, value] of [['playground-selected-component', previous.component], ['craft-theme', previous.theme]]) {
       if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value)

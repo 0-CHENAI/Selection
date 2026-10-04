@@ -48,10 +48,10 @@ export async function transitionWorkMode(update: () => void): Promise<void> {
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       animations = Array.from(document.querySelectorAll<HTMLElement>('[data-work-mode-transition]'))
         .filter(element => typeof element.animate === 'function')
-        .map(element => element.animate([
-          { opacity: 0 },
-          { opacity: 1 },
-        ], { duration: reduced ? 150 : 240, easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)' }))
+        .map(element => element.animate(reduced
+          ? [{ opacity: 0 }, { opacity: 1 }]
+          : [{ opacity: 0, filter: 'blur(2px)' }, { opacity: 1, filter: 'blur(0px)' }],
+        { duration: reduced ? 150 : 240, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }))
       await Promise.allSettled(animations.map(animation => animation.finished))
     }
   } finally {
