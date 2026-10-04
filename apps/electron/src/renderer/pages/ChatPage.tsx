@@ -1,5 +1,4 @@
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
-import { HandoverSuccessAlert } from '@/components/app-shell/HandoverSuccessAlert'
 import { PanelResizeHandle } from '@/components/app-shell/PanelResizeHandle'
 import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 /**
@@ -959,7 +958,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="relative flex-1 flex flex-col min-h-0">
           {orchestrationProgress}
-          {sessionId && <HandoverSuccessAlert key={`handover-success-${sessionId}`} sessionId={sessionId} active={isFocusedPanel} />}
           {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
             <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
               {t('session.workModeNeedsReview')}
