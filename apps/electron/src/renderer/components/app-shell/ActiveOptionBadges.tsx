@@ -401,16 +401,16 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
 
   // Mode-specific styling using CSS variables (theme-aware)
   // - safe (Explore): foreground at 60% opacity - subtle, read-only feel
-  // - ask (Ask to Edit): info color - amber, prompts for edits
-  // - allow-all (Auto): accent color - purple, full autonomy
+  // - ask (Ask to Edit): amber in NORM, blue in PRO, prompts for edits
+  // - allow-all (Auto): mode accent, full autonomy
   const modeStyles: Record<PermissionMode, { className: string; shadowVar: string }> = {
     'safe': {
       className: 'bg-foreground/5 text-foreground/60',
       shadowVar: 'var(--foreground-rgb)',
     },
     'ask': {
-      className: 'bg-info/10 text-info',
-      shadowVar: 'var(--info-rgb)',
+      className: 'bg-permission-ask/10 text-permission-ask',
+      shadowVar: 'var(--permission-ask-rgb)',
     },
     'allow-all': {
       className: 'bg-accent/5 text-accent',

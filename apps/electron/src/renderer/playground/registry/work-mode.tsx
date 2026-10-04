@@ -25,7 +25,7 @@ import type { SessionOptions } from '@/hooks/useSessionOptions'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 
 // Real composer and rows with deterministic transport; never starts model work.
-function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean }) {
+function WorkModePreview({ compactTopBar = false, compactInput = false }: { compactTopBar?: boolean; compactInput?: boolean }) {
   const { t } = useTranslation()
   const base = useAppShellContext()
   const [mode, setMode] = useAtom(workModeViewAtom)
@@ -39,7 +39,7 @@ function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean })
   const setWorker = useSetAtom(sessionAtomFamily('pro-worker'))
   const sessions = React.useMemo(() => [
     { id: 'pro-root', name: 'PRO · 成本核对', handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
-    { id: 'pro-worker', name: 'A 成本资料读取', workMode: 'PRO', executionRootSessionId: 'pro-root', parentSessionId: 'pro-root', taskNodeId: 'a', hidden: true, workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [{ id: 'a', role: 'assistant', content: 'A 两年成本为 1000000 元，B 的成本口径仍待核实。', timestamp: Date.now() }], lastMessageAt: Date.now(), isProcessing: false, hasUnread: true, permissionMode: 'safe' },
+    { id: 'pro-worker', name: 'A 成本资料读取', workMode: 'PRO', executionRootSessionId: 'pro-root', parentSessionId: 'pro-root', taskNodeId: 'a', hidden: true, workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [{ id: 'a', role: 'assistant', content: 'A 两年成本为 1000000 元，B 的成本口径仍待核实。[参考来源](https://example.com/costs)', timestamp: Date.now() }], lastMessageAt: Date.now(), isProcessing: false, hasUnread: true, permissionMode: 'safe' },
   ] as Session[], [base.activeWorkspaceId])
   React.useEffect(() => {
     setMetadata(new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
@@ -58,7 +58,7 @@ function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean })
   const onSessionOptionsChange = React.useCallback((id: string, updates: Partial<SessionOptions>) => {
     setOptions(previous => new Map(previous).set(id, { ...defaultSessionOptions, ...previous.get(id), ...updates }))
   }, [])
-  const context = { ...base, isCompactMode: false, sessionOptions: options, onSessionOptionsChange,
+  const context = { ...base, isCompactMode: compactInput, sessionOptions: options, onSessionOptionsChange,
     llmConnections: [{ slug: 'preview', name: '原有模型', providerType: 'pi', authType: 'api_key', defaultModel: 'original-model', isDefault: true, models: ['original-model'] }] as typeof base.llmConnections,
     getDraft: (id: string) => drafts.current.get(id) ?? '',
     onInputChange: (id: string, text: string) => { drafts.current.set(id, text) },
@@ -96,5 +96,5 @@ function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean })
 export const workModeComponents: ComponentEntry[] = [{
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',
   description: '实际模式切换、聊天草稿及执行子会话组件；传输使用固定数据。', component: WorkModePreview,
-  props: [{ name: 'compactTopBar', control: { type: 'boolean' }, defaultValue: false }], layout: 'top',
+  props: [{ name: 'compactTopBar', control: { type: 'boolean' }, defaultValue: false }, { name: 'compactInput', control: { type: 'boolean' }, defaultValue: false }], layout: 'top',
 }]
