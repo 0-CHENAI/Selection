@@ -10917,14 +10917,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
               if (!run.supersededBy) snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
             }
             await this.captureHandoverFiles(source, members, store, record!, snapshot, runFiles)
-            record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)
+            record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection, permissionMode: source.permissionMode ?? 'ask' }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)
             record!.status = 'prepared'; record!.error = undefined; store.save(record!)
           }
           try { await capture(0) }
           finally { members.forEach(member => this.handoverCapturing.delete(member.id)) }
         }
         const sourceModel = record.creationConfig?.model ?? source?.model, sourceConnection = record.creationConfig?.llmConnection ?? source?.llmConnection
-        const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: 'safe', model: sourceModel,
+        // Legacy prepared receipts retain their original safe default; retries never infer a newer source grant.
+        const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: record.creationConfig?.permissionMode ?? 'safe', model: sourceModel,
           llmConnection: sourceConnection, name: `${record.targetMode} · ${source?.name ?? record.sourceSessionId}` },
           { emitCreatedEvent: false, reservedSessionId: record.targetSessionId!, handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId,
             sourceMessageId: record.snapshot!.source.messageId, snapshotVersion: record.snapshotVersion } })

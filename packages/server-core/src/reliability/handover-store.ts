@@ -1,4 +1,5 @@
 import type { HandoverRecord, HandoverSnapshot } from '@craft-agent/shared/protocol'
+import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/mode-types'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,8 +30,9 @@ export class HandoverStore {
       || !record.reviews || typeof record.reviews !== 'object' || Array.isArray(record.reviews)
       || Object.values(record.reviews).some(review => !['completed', 'not-performed'].includes(review?.outcome) || typeof review.note !== 'string')) throw new Error('Invalid handover record')
     if (record.creationConfig && (typeof record.creationConfig !== 'object' || Array.isArray(record.creationConfig)
-      || Object.keys(record.creationConfig).some(key => !['model', 'llmConnection'].includes(key))
-      || Object.values(record.creationConfig).some(value => typeof value !== 'string'))) throw new Error('Invalid handover creation configuration')
+      || Object.keys(record.creationConfig).some(key => !['model', 'llmConnection', 'permissionMode'].includes(key))
+      || Object.values(record.creationConfig).some(value => typeof value !== 'string')
+      || record.creationConfig.permissionMode !== undefined && !PERMISSION_MODE_ORDER.includes(record.creationConfig.permissionMode))) throw new Error('Invalid handover creation configuration')
     if (record.snapshot) {
       this.validateSnapshot(record.snapshot)
       if (record.snapshot.source.sessionId !== record.sourceSessionId || record.snapshot.targetMode !== record.targetMode) throw new Error('Handover snapshot owner mismatch')
