@@ -27,9 +27,11 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { handoverReviewSessionAtom } from '@/atoms/handover'
 import { navigate, routes } from '@/lib/navigate'
 import { extractLabelId, toggleLabelInList } from '@craft-agent/shared/labels'
-import type { SessionMeta } from '@/atoms/sessions'
+import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 
 export interface UseSessionMenuActionsOptions {
   item: SessionMeta
@@ -45,6 +47,9 @@ export interface SessionMenuActions {
   copyPath: () => Promise<void>
   refreshTitle: () => Promise<void>
   openInNewPanel: () => void
+  viewHandover: () => void
+  openHandoverSource: () => void
+  canOpenHandoverSource: boolean
 }
 
 // SOH (U+0001) — non-printable so it can't collide with label IDs (which
@@ -60,6 +65,8 @@ export function useSessionMenuActions({
   onLabelsChange,
 }: UseSessionMenuActionsOptions): SessionMenuActions {
   const { t } = useTranslation()
+  const setHandoverReview = useSetAtom(handoverReviewSessionAtom)
+  const metadata = useAtomValue(sessionMetaMapAtom)
   const sessionId = item.id
   const propLabels = item.labels
 
@@ -142,6 +149,15 @@ export function useSessionMenuActions({
     navigate(routes.view.allSessions(sessionId), { newPanel: true })
   }, [sessionId])
 
+  const viewHandover = () => {
+    navigate(routes.view.allSessions(sessionId))
+    setHandoverReview(sessionId)
+  }
+  const canOpenHandoverSource = !!item.handover && metadata.has(item.handover.sourceSessionId)
+  const openHandoverSource = () => {
+    if (item.handover && canOpenHandoverSource) navigate(routes.view.allSessions(item.handover.sourceSessionId))
+  }
+
   return {
     appliedLabelIds,
     toggleLabel,
@@ -149,5 +165,8 @@ export function useSessionMenuActions({
     copyPath,
     refreshTitle,
     openInNewPanel,
+    viewHandover,
+    openHandoverSource,
+    canOpenHandoverSource,
   }
 }

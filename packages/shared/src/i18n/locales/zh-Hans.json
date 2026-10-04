@@ -880,6 +880,7 @@
   "handover.status.created": "目标已创建，等待应用背景",
   "handover.status.prepared": "快照已准备",
   "handover.status.waiting": "等待源任务到达交接点",
+  "handover.success": "已交接至 {{mode}}",
   "handover.title": "交接背景与成果",
   "handover.toNorm": "基于成果继续聊",
   "handover.toPro": "交接到 PRO",

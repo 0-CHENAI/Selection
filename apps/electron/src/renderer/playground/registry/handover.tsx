@@ -2,8 +2,13 @@ import * as React from 'react'
 import { useSetAtom, useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, ChevronDown } from 'lucide-react'
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
+import { HandoverSuccessAlert } from '@/components/app-shell/HandoverSuccessAlert'
+import { SessionMenu } from '@/components/app-shell/SessionMenu'
+import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
+import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { StyledDropdownMenuContent } from '@/components/ui/styled-dropdown'
 import { extractSessionMeta, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { NAVIGATE_EVENT, routes, type NavigateEventDetail } from '@/lib/navigate'
 import type { HandoverRecord, HandoverOperation, HandoverSnapshot } from '@craft-agent/shared/protocol'
@@ -12,7 +17,7 @@ import type { ComponentEntry } from './types'
 import { mockElectronAPI } from '../mock-utils'
 
 // Actual handover UI with fixed transport states; host/model acceptance is recorded separately.
-function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'unknown' | 'changed' | 'source-removed' }) {
+function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'unknown' | 'changed' | 'source-removed' | 'compact' }) {
   const setMetadata = useSetAtom(sessionMetaMapAtom)
   const setLoaded = useSetAtom(loadedSessionsAtom)
   const store = useStore()
@@ -39,7 +44,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     }
     const apply = (record: HandoverRecord) => {
       const targetSessionId = `${record.targetMode.toLowerCase()}-${record.handoverId}`
-      sessions.set(targetSessionId, makeSession(targetSessionId, record.targetMode))
+      sessions.set(targetSessionId, { ...makeSession(targetSessionId, record.targetMode), handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId, snapshotVersion: 1 } })
       Object.assign(record, { status: 'applied', targetSessionId, snapshot: { ...snapshot, targetMode: record.targetMode, source: { ...snapshot.source, sessionId: record.sourceSessionId } } })
     }
     const create = (id: string, sourceSessionId: string, targetMode: 'NORM' | 'PRO'): HandoverRecord => {
@@ -84,11 +89,18 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     return () => { window.removeEventListener(NAVIGATE_EVENT, onNavigate); Object.assign(window.electronAPI, mockElectronAPI) }
   }, [state, setMetadata, setLoaded, store])
   if (!session) return null
-  const source = records.find(record => record.status === 'applied' && record.targetSessionId === session.id)
-  const sourceLink = source ? { handoverId: source.handoverId, sourceSessionId: source.sourceSessionId } : undefined
+  const sourceLink = session.handover
+  const titleTrigger = <button data-handover-title-menu type="button" className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium hover:bg-foreground/5"><span>{session.workMode} · {session.name}</span><ChevronDown className="size-3.5 text-muted-foreground" /></button>
   return <div data-handover-session={session.id} className="flex h-[520px] flex-col rounded-xl border border-border bg-background">
-    <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4"><span className="text-sm font-medium">{session.workMode} · {session.name}</span><HandoverPanel key={`header-${state}-${session.id}`} sessionId={session.id} mode={session.workMode!} canCreate headerOnly /></div>
-    <div className="mt-4">{sourceLink && <HandoverPanel key={`banner-${state}-${session.id}`} sessionId={session.id} mode={session.workMode!} canCreate={false} sourceLink={sourceLink} />}</div>
+    <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+      {state === 'compact' ? <CompactSessionMenu title={session.name} item={extractSessionMeta(session)} trigger={titleTrigger} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /> :
+      <DropdownMenu><DropdownMenuTrigger asChild>{titleTrigger}</DropdownMenuTrigger>
+        <StyledDropdownMenuContent><SessionMenu item={extractSessionMeta(session)} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /></StyledDropdownMenuContent>
+      </DropdownMenu>}
+      <HandoverPanel key={`header-${state}-${session.id}`} sessionId={session.id} mode={session.workMode!} canCreate sourceLink={sourceLink} headerOnly />
+    </div>
+    <div data-handover-chat className="relative flex min-h-0 flex-1 flex-col">
+    <HandoverSuccessAlert key={`handover-success-${session.id}`} sessionId={session.id} />
     <motion.div key={session.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} className="flex min-h-0 flex-1 flex-col px-6 py-4 text-sm">
       <div className="space-y-3"><p>A 两年总成本为 1000000 元；B 的成本口径未知，风险资料存在缺口。</p><p className="text-muted-foreground">本次仅分析约定资料，不部署、不执行外部操作。</p></div>
       <div className="mt-auto rounded-xl border border-border p-3">
@@ -98,6 +110,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     </motion.div>
     {state === 'waiting' && records.some(record => record.status === 'waiting') && <button type="button" className="mx-6 self-start text-xs text-muted-foreground hover:text-foreground" onClick={() => completeWaiting.current()}>完成源任务（预览）</button>}
     <span data-handover-record-count className="px-6 py-2 text-xs text-muted-foreground">交接记录：{records.length}</span>
+    </div>
   </div>
 }
-export const handoverComponents: ComponentEntry[] = [{ id: 'session-handover', name: '会话交接与来源', category: 'Session List', description: '真实交接面板，固定传输覆盖等待、来源变化和未知操作复核。', component: HandoverPreview, props: [{ name: 'state', control: { type: 'select', options: ['ready','waiting','unknown','changed','source-removed'].map(value => ({ label: value, value })) }, defaultValue: 'ready' }], layout: 'top' }]
+export const handoverComponents: ComponentEntry[] = [{ id: 'session-handover', name: '会话交接与来源', category: 'Session List', description: '真实交接面板，固定传输覆盖等待、来源变化和未知操作复核。', component: HandoverPreview, props: [{ name: 'state', control: { type: 'select', options: ['ready','waiting','unknown','changed','source-removed','compact'].map(value => ({ label: value, value })) }, defaultValue: 'ready' }], layout: 'top' }]

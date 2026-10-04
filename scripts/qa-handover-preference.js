@@ -3,7 +3,7 @@
 const { strict: assert } = await import('node:assert')
 const config = globalThis.handoverQA ?? {}
 const task = await taskSpace(config.spaceId ?? 'Handover preference QA')
-const page = task.page('p1')
+const page = task.page(config.page ?? 'p1')
 const storageKey = 'craft-skip-handover-confirmation'
 await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
 const previous = await page.evaluate(key => localStorage.getItem(key), storageKey)
@@ -80,10 +80,12 @@ try {
     return { x: r.x, y: r.y, width: r.width, height: r.height }
   })
   const results = await page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-preference'}/handover-chat-pro.png`, clip: chatClip })
+  await page.click('[data-handover-title-menu]')
   await page.click('text="查看交接"')
   await page.waitForSelector('[role=dialog]')
   assert.equal((await state()).sessionId, proSession, 'explicit detail inspection must not navigate away')
   await close()
+  await page.click('[data-handover-title-menu]')
   await page.click('text="打开源会话"')
   await waitForChat('NORM')
   assert.equal((await state()).sessionId, 'norm-analysis', 'the source chat must retain its NORM mode')

@@ -1,4 +1,5 @@
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
+import { HandoverSuccessAlert } from '@/components/app-shell/HandoverSuccessAlert'
 import { PanelResizeHandle } from '@/components/app-shell/PanelResizeHandle'
 import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 /**
@@ -721,7 +722,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       </span>}
       {sessionHeaderActions}
       {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
-        canCreate={canHandover} headerOnly />}
+        canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
     </div>
   )
 
@@ -956,9 +957,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="relative flex-1 flex flex-col min-h-0">
           {orchestrationProgress}
-          {sessionId && (session?.handover ?? sessionMeta?.handover) && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode} canCreate={false} sourceLink={session?.handover ?? sessionMeta?.handover} />}
+          {sessionId && <HandoverSuccessAlert key={`handover-success-${sessionId}`} sessionId={sessionId} active={isFocusedPanel} />}
           {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
             <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
               {t('session.workModeNeedsReview')}
