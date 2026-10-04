@@ -565,9 +565,9 @@ export function NavigationProvider({
 
   // Keep the global session selection in sync with the focused panel
   useEffect(() => {
-    if (isSessionsNavigation(navigationState) && navigationState.details) {
-      setSession({ selected: navigationState.details.sessionId })
-      if (workspaceId) {
+    if (isSessionsNavigation(navigationState)) {
+      setSession({ selected: navigationState.details?.sessionId ?? null })
+      if (workspaceId && navigationState.details) {
         // Only persist if the session belongs to this workspace (prevents cross-workspace
         // pollution during workspace switch, when workspaceId changed but navigationState
         // still reflects the old workspace's focused panel)

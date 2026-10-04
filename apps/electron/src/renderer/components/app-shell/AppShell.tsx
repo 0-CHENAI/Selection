@@ -2371,7 +2371,7 @@ function AppShellContent({
                   statusFilter={listFilter}
                   labelFilterMap={labelFilter}
                   projectFilter={projectFilter}
-                  focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
+                  focusedSessionId={focusedSessionId}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
                   activeChatMatchInfo={chatMatchInfo}
