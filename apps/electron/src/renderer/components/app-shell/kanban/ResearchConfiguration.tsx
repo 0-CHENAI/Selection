@@ -10,8 +10,19 @@ export function ResearchConfiguration({ value, disabled, onChange }: { value: Re
     <summary className="cursor-pointer text-sm font-medium">{t('tasks.research.title')}</summary>
     <fieldset disabled={disabled} className="mt-3 min-w-0 space-y-3 disabled:opacity-60">
       <p className="text-xs text-muted-foreground">{t('tasks.research.configHint')}</p>
+      {!!value.lines?.length && <p className="text-xs font-medium">{t('tasks.research.lines')}: {value.line.id}</p>}
       <label className="block space-y-1 text-xs">{t('tasks.research.question')}<textarea className={fieldClass} rows={2} value={value.line.question} onChange={event => onChange({ ...value, line: { ...value.line, question: event.target.value } })} /></label>
       <label className="block space-y-1 text-xs">{t('tasks.research.premises')}<textarea className={fieldClass} rows={2} value={value.line.premises.join('\n')} onChange={event => onChange({ ...value, line: { ...value.line, premises: event.target.value.split('\n').filter(line => line.trim()) } })} /></label>
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t('tasks.research.lines')}</p>
+        {(value.lines ?? []).map((line,index) => <div key={line.id} className="space-y-2 rounded-md border border-border p-2">
+          <p className="text-xs font-medium">{line.id}</p>
+          <label className="block space-y-1 text-xs">{t('tasks.research.question')}<textarea className={fieldClass} value={line.question} onChange={event => onChange({...value,lines:value.lines!.map((item,position) => position===index ? {...item,question:event.target.value} : item)})} /></label>
+          <label className="block space-y-1 text-xs">{t('tasks.research.premises')}<textarea className={fieldClass} value={line.premises.join('\n')} onChange={event => onChange({...value,lines:value.lines!.map((item,position) => position===index ? {...item,premises:event.target.value.split('\n').filter(line => line.trim())} : item)})} /></label>
+          <Button type="button" size="sm" variant="ghost" onClick={() => onChange({...value,lines:value.lines!.filter((_,position) => position!==index)})}>{t('tasks.research.remove')}</Button>
+        </div>)}
+        <Button type="button" size="sm" variant="outline" onClick={() => { const ids=new Set([value.line.id,...(value.lines ?? []).map(line => line.id)]);let index=2;while(ids.has(`line-${index}`))index++;onChange({...value,lines:[...(value.lines ?? []),{id:`line-${index}`,question:value.line.question,premises:[],parentLineIds:[value.line.id]}]}) }}>{t('tasks.research.addLine')}</Button>
+      </div>
       <div className="space-y-2">
         <p className="text-xs font-medium">{t('tasks.research.dimensions')}</p>
         {value.dimensions.map((dimension, index) => <div key={index} className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-2">

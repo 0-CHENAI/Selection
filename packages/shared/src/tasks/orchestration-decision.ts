@@ -20,6 +20,7 @@ export interface OrchestrationDecision {
   consumedResults?: string[];
   plannerPhase?: 'active' | 'draining';
   changeKind?: OrchestrationPatch['changeKind'];
+  researchExpansion?: OrchestrationPatch['researchExpansion'];
 }
 
 export interface CoordinatorGateState {
@@ -98,6 +99,7 @@ export function validateOrchestrationDecision(
       consumedResults: consumed,
       plannerPhase: decision.plannerPhase,
       changeKind: decision.changeKind,
+      researchExpansion: decision.researchExpansion,
       action: 'continue',
     },
     patchCtx,

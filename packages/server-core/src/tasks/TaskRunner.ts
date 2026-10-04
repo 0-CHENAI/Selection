@@ -86,7 +86,7 @@ import {
   workspaceCacheBypassReason,
   isWorkspaceCacheKindAllowed,
   COORDINATOR_TIMEOUT_BLOCKER,
-  ResearchPayloadSchema, validateResearchRecord, summarizeResearch, renderResearchReport, freezeResearchSources, loadResearchResults,
+  ResearchPayloadSchema, researchTaskContext, validateResearchRecord, summarizeResearch, renderResearchReport, freezeResearchSources, loadResearchResults, researchInheritanceCompatible,
   type ResearchRecord, type ResearchSummary,
   type OrchestrationPatch,
   type PatchOk,
@@ -210,6 +210,7 @@ export class TaskControlError extends Error {
   constructor(
     readonly status: RunStatus,
     message: string,
+    readonly currentRun?: {runId:string;revision:number;status:RunStatus;coordinatorGate?:CoordinatorGateState},
   ) {
     super(message);
     this.name = 'TaskControlError';
@@ -241,6 +242,7 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  coordinatorGate?: CoordinatorGateState;
   research?: ResearchSummary;
   artifactAvailability?: { nodeIds: string[]; reason: string };
   resumedFrom?: string;
@@ -478,8 +480,14 @@ class ActiveRun {
     writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, 0, this.spec);
     const sources = this.spec.research ? freezeResearchSources(this.deps.workspaceRoot, this.slug, this.runId, this.spec.research,
       this.opts.orchestratorSessionId ? this.deps.host.getSessionWorkingDirectory(this.opts.orchestratorSessionId) ?? this.spec.cwd ?? this.deps.workspaceRoot : this.spec.cwd ?? this.deps.workspaceRoot) : undefined;
+    const predecessorState = this.spec.research && this.resumedFrom ? readRunState(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
+    const predecessorSpec = this.spec.research && this.resumedFrom ? readSpecRevision(this.deps.workspaceRoot,this.slug,this.resumedFrom,predecessorState?.revision ?? 0) : undefined;
+    const predecessor = this.spec.research && this.resumedFrom && researchInheritanceCompatible(predecessorSpec?.research,this.spec.research)
+      ? loadResearchResults(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
+    for (const question of this.spec.research?.questions ?? []) if (!this.spec.nodes.some(node => node.id === question.sharedTaskRef && node.researchRole === 'researcher') && !predecessor?.records.some(record => record.role === 'researcher' && record.producedBy.nodeId === question.sharedTaskRef)) throw new Error(`Unknown canonical shared research task ${question.sharedTaskRef}`);
+    const researchPredecessor = predecessor ? {runId:this.resumedFrom!,recordsHash:createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex')} : undefined;
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
+    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(researchPredecessor ? {researchPredecessor} : {}), ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
     beforeDispatch?.();
     this.runStatus = 'running';
     // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
@@ -776,6 +784,10 @@ class ActiveRun {
         }
       } else if (e.kind === 'run-resumed' && e.retryNodeIds) {
         this.applyRetryReset(e.retryNodeIds, e.discardInstanceIds);
+      } else if (e.kind === 'node-retry') {
+        this.applyRetryReset([e.nodeId]);
+        const st = this.state.get(e.nodeId) ?? this.instances.get(e.nodeId);
+        if (st) st.lastFailure = e.reason;
       } else if (e.kind === 'node-scheduled') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
@@ -1187,7 +1199,7 @@ class ActiveRun {
         approvalFeedback: st.approvalFeedback,
         approvalDefinition: node?.kind === 'approval' ? { title: node.title || node.id, prompt: node.prompt ?? '', dependsOn: [...(this.edges.get(node.id) ?? [])] } : undefined,
         retryCount: Math.max(0, st.attempt - 1),
-        role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
+        role: node?.kind === 'verify' || node?.kind === 'judge' || node?.researchRole === 'reviewer' ? 'reviewer' as const : 'worker' as const,
         model: this.resolveNodeModel(node),
         actor: node?.actor,
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
@@ -1215,6 +1227,7 @@ class ActiveRun {
       tokenBudget: this.tokenBudget,
       blockers: blockers.length ? blockers : undefined,
       revision: this.revision,
+      coordinatorGate: this.runStatus === 'waiting-coordinator' && this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined,
       ...(this.spec.research ? { research: loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) } : {}),
       artifactAvailability: this.artifactAvailability ? structuredClone(this.artifactAvailability) : undefined,
       resumedFrom: this.resumedFrom,
@@ -1943,6 +1956,7 @@ class ActiveRun {
       attempt: state.attempt, revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId,
       artifactVersion: createHash('sha256').update(JSON.stringify(output)).digest('hex') } };
     const errors = validateResearchRecord(config, previous?.sources ?? [], previous?.records ?? [], record, new Set(this.spec.nodes.map(node => node.id)));
+    if (node.researchLineIds && payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))) errors.push('Claim exceeds the task research line binding');
     if (errors.length) throw new Error(errors.join('; '));
     if (record.payload.report) {
       const candidate = summarizeResearch(config, previous?.sources ?? [], [...(previous?.records ?? []), record]);
@@ -2217,7 +2231,7 @@ class ActiveRun {
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
       const research = this.spec.research && node.researchRole ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
       const prompt = skillsPreamble(research ? [...new Set([...(this.spec.skills ?? []), 'deep-research'])] : this.spec.skills)
-        + (research ? `Research role: ${node.researchRole}. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify(research)}\nSubmit values.research using the native Skill contract. Submit only this node's new records or explicit issue updates; reference existing evidence ids without resubmitting old evidence, claims or reviews. Each correction requires a new claim version; old reviews cannot approve it.\n` : '')
+        + (research ? `Research role: ${node.researchRole}. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify(researchTaskContext(research,node.researchRole === 'reporter' ? undefined : node.id,node.researchLineIds))}\nSubmit values.research using the native Skill contract. Submit only this node's new records or explicit issue updates; reference existing evidence ids without resubmitting old evidence, claims or reviews. Each correction requires a new claim version; old reviews cannot approve it.\n` : '')
         + (await this.buildPrompt(node, instance, promptOutputs));
       if (!canDispatch()) return;
       if (state.sessionId && state.lastFailure && state.lastFailure !== 'progress-paused') {
@@ -2241,6 +2255,7 @@ class ActiveRun {
         taskAttempt: attempt,
         taskRevision: this.attemptRevisions.get(key) ?? this.revision,
         taskActor: node.actor,
+        ...(node.researchRole === 'reviewer' || node.kind === 'verify' || node.kind === 'judge' ? {orchestrationRole:'reviewer' as const} : {}),
         hidden: true,
         name: instance?.id ?? nodeTitle(node),
         model: this.resolveNodeModel(node),
@@ -2263,7 +2278,7 @@ class ActiveRun {
       // but do not appear as ordinary project sessions.
       const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
       const prefix = node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => candidate.id) : [];
-      const signature = planValueKey({ actor: node.actor, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
+      const signature = planValueKey({ actor: node.actor, researchRole: node.researchRole, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
       const actor = node.actor && node.researchRole !== 'reviewer' ? this.actors.get(node.actor.id) : undefined;
       const reuse = !!node.actor && !instance && requested === 'safe' && !!this.deps.host.bindTaskSession && actor?.signature === signature
         && (!this.deps.host.canReuseTaskSession || this.deps.host.canReuseTaskSession(actor.sessionId))
@@ -2380,7 +2395,7 @@ class ActiveRun {
 
   private planContext(): string {
     return [
-      ...(this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify(loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId))}`] : []),
+      ...(this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify((() => { const research = loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId); return research ? researchTaskContext(research) : undefined; })())}`] : []),
       ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
       ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
       ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
@@ -3051,6 +3066,7 @@ class ActiveRun {
       seenDecisionIds: this.seenDecisionIds,
       nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
       allowedModels: this.deps.allowedModels,
+      researchRecords: loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId)?.records,
       invalidPatchCount: this.invalidPatchCount,
       pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
     });
@@ -3233,7 +3249,7 @@ class ActiveRun {
           `revision=${this.revision}`,
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, or pause.',
-          'Parent chat messages are not decisions.',
+          'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
           this.planContext(),
           `Task slug=${this.slug}; runId=${this.runId}. Frozen plan: ${JSON.stringify(this.spec)}`,
           `New results for this checkpoint: ${JSON.stringify(this.pendingPlannerResults().filter(event => this.coordinatorGate?.resultEventIds?.includes(event.id)))}`,
@@ -3265,12 +3281,14 @@ class ActiveRun {
         seenDecisionIds: this.seenDecisionIds,
         nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
         allowedModels: this.deps.allowedModels,
+        researchRecords: loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId)?.records,
         invalidPatchCount: this.invalidPatchCount,
         pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
       },
     );
     if (!result.ok) {
-      if (decision.action === 'patch') {
+      const race = decision.baseRevision !== this.revision || decision.checkpointId !== this.coordinatorGate?.checkpointId || this.seenDecisionIds.has(decision.decisionId);
+      if (decision.action === 'patch' && !race) {
         this.invalidPatchCount += 1;
         this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
         if (result.pauseForReview) {
@@ -3280,7 +3298,7 @@ class ActiveRun {
           this.emitChanged();
         }
       }
-      throw new TaskControlError(this.runStatus, result.error);
+      throw new TaskControlError(this.runStatus, result.error, {runId:this.runId,revision:this.revision,status:this.runStatus,coordinatorGate:this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined});
     }
     const reason = this.coordinatorGate?.reason;
     const consumedResults = decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [];

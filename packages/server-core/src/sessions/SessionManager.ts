@@ -5112,9 +5112,10 @@ export class SessionManager implements ISessionManager {
             consumedResults: input.consumedResults,
             plannerPhase: input.plannerPhase,
             changeKind: input.changeKind,
+            researchExpansion: input.researchExpansion as never,
             action: input.action,
           })
-          return { status: snap.status, revision: snap.revision }
+          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner }
         },
         submitOrchestrationDecisionFn: async (input) => {
           assertComplexCapability(managed, 'change-plan')
@@ -5135,8 +5136,9 @@ export class SessionManager implements ISessionManager {
             consumedResults: input.consumedResults,
             plannerPhase: input.plannerPhase,
             changeKind: input.changeKind,
+            researchExpansion: input.researchExpansion as never,
           })
-          return { status: snap.status, revision: snap.revision }
+          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner }
         },
         submitTaskNodeVerdictFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
@@ -10783,7 +10785,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return slugs.flatMap(slug => {
       const runner = this.taskRunnerLookup?.(source.workspace.id)
       if (!runner) throw new Error('Source workflow state is unavailable; wait for its host to recover')
-      return runner.getRunHistory(slug, source.id).map(run => ({ slug, runId: run.runId, revision: run.revision ?? 0, status: run.status, retainedBy: source.id }))
+      return runner.getRunHistory(slug, source.id).map(run => ({ slug, runId: run.runId, revision: run.revision ?? 0, status: run.status, retainedBy: source.id,
+        resumedFrom: run.resumedFrom, supersededBy: run.supersededBy }))
     })
   }
 
@@ -10894,21 +10897,25 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
               if (run.revision > 0 && !existsSync(specRevisionPath(source.workspace.rootPath, run.slug, run.runId, run.revision))) throw new Error('The committed source revision is unavailable')
               const plan = readSpecRevision(source.workspace.rootPath, run.slug, run.runId, run.revision)
               if (!plan) throw new Error('The committed source plan is unavailable')
-              snapshot.goal.push(redactHandoverText(plan.goal))
-              snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
+              if (!run.supersededBy) {
+                snapshot.goal.push(redactHandoverText(plan.goal))
+                snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
+              }
               const results = loadTaskResults(source.workspace.rootPath, run.slug, run.runId)
-              snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: 'task-result', text: redactHandoverText(JSON.stringify(results)) })
+              snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: run.supersededBy ? 'task-history' : 'task-result', text: redactHandoverText(JSON.stringify(results)) })
               if (results.research) {
                 for (const researchSource of results.research.sources) {
                   if (researchSource.snapshotPath && researchSource.hash && !researchSource.unavailableReason) runFiles.push({ path: researchSource.snapshotPath, expectedHash: researchSource.hash })
                 }
-                snapshot.openQuestions.push(...results.research.dimensions.filter(dimension => dimension.state !== 'covered').map(dimension => `Research ${results.research!.line.id}/${dimension.id}: ${dimension.state}; ${dimension.requirement}`))
-                snapshot.openQuestions.push(...results.research.issues.filter(issue => issue.state !== 'resolved').map(issue => `Research issue ${issue.id} on ${issue.claimRef.id}@${issue.claimRef.version}: ${issue.state}; ${issue.reason}`))
+                if (!run.supersededBy) {
+                  snapshot.openQuestions.push(...results.research.dimensions.filter(dimension => dimension.state !== 'covered').map(dimension => `Research ${dimension.lineId}/${dimension.id}: ${dimension.state}; ${dimension.requirement}`))
+                  snapshot.openQuestions.push(...results.research.issues.filter(issue => issue.state !== 'resolved').map(issue => `Research issue ${issue.id} on ${issue.claimRef.id}@${issue.claimRef.version}: ${issue.state}; ${issue.reason}`))
+                }
               }
               for (const artifact of results.nodes.flatMap(node => node.artifacts ?? [])) {
                 if (artifact && typeof artifact === 'object' && 'path' in artifact && typeof artifact.path === 'string' && 'hash' in artifact && typeof artifact.hash === 'string') runFiles.push({ path: resolve(source.workspace.rootPath, artifact.path), expectedHash: artifact.hash })
               }
-              snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
+              if (!run.supersededBy) snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
             }
             await this.captureHandoverFiles(source, members, store, record!, snapshot, runFiles)
             record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)

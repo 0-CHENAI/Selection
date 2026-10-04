@@ -20,6 +20,7 @@ import { readSpecRevision } from './revisions.ts'
 
 export interface LoadedTaskResults {
   research?: import('./research.ts').ResearchSummary
+  coordinatorGate?: import('./orchestration-decision.ts').CoordinatorGateState
   artifactAvailability?: { nodeIds: string[]; reason: string }
   workers?: import('./planner').TaskWorkerRecord[]
   resumedFrom?: string
@@ -80,8 +81,17 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   for (const entry of log) {
     if (entry.kind === 'node-scheduled') {
       const node = ensure(entry.nodeId)
+      node.state = 'running'
       node.attempt += 1
       node.revision = entry.revision ?? 0
+    } else if (entry.kind === 'node-retry' || entry.kind === 'run-resumed' && entry.retryNodeIds) {
+      const ids = entry.kind === 'node-retry' ? [entry.nodeId] : [...entry.retryNodeIds!, ...(entry.discardInstanceIds ?? [])]
+      for (const id of ids) {
+        const node = ensure(id)
+        node.state = 'pending'
+        if (entry.kind === 'node-retry') node.failureReason = entry.reason
+      }
+      currentVerdict = undefined
     } else if (entry.kind === 'node-spawned') {
       const node = ensure(entry.nodeId)
       node.sessionId = entry.sessionId
@@ -115,7 +125,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const runStatus = log.length > 0 ? deriveRunStatusFromLog(log) : undefined
 
   const nodes = [...byId.values()].map((e) => {
-    const out = readNodeOutput(root, slug, chosen, e.id)
+    const out = ['pending', 'running', 'retry-wait'].includes(e.state) ? null : readNodeOutput(root, slug, chosen, e.id)
     return {
       id: e.id,
       title: titleById.get(e.id) ?? e.id,
@@ -161,5 +171,6 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     nodes,
     workers: [...new Map(log.filter(event => event.kind === 'task-worker').map(event => [event.worker.workerId, event.worker])).values()],
     revision: snapshot ? revision : undefined,
+    coordinatorGate: runStatus === 'waiting-coordinator' ? readRunState(root,slug,chosen)?.coordinatorGate ?? undefined : undefined,
   }
 }

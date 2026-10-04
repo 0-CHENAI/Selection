@@ -114,7 +114,7 @@ type RunLogPayload =
   | { t: string; kind: 'node-awaiting-workers'; nodeId: string; sessionId: string; generation: number;
       reason: 'complete' | 'interrupted' | 'error' | 'timeout'; finalText?: string; errorCode?: string; output?: import('./refs').NodeOutput;
       artifacts?: Record<string, unknown>; inputTokens?: number; outputTokens?: number }
-  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string; resumedFrom?: string; researchSourcesHash?: string }
+  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string; resumedFrom?: string; researchSourcesHash?: string; researchPredecessor?: { runId: string; recordsHash: string } }
   | { t: string; kind: 'run-superseded'; supersededBy: string }
   | { t: string; kind: 'execution-shutdown'; sessionId: string; confirmed: boolean; reason?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }

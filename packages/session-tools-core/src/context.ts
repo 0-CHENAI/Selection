@@ -574,6 +574,7 @@ export interface OrchestrationPatchInput {
   consumedResults?: string[];
   plannerPhase?: 'active' | 'draining';
   changeKind?: 'structure' | 'repair' | 'research';
+  researchExpansion?: unknown;
   runId: string;
   decisionId: string;
   baseRevision: number;
@@ -590,6 +591,7 @@ export interface OrchestrationDecisionInput {
   consumedResults?: string[];
   plannerPhase?: 'active' | 'draining';
   changeKind?: 'structure' | 'repair' | 'research';
+  researchExpansion?: unknown;
   runId: string;
   checkpointId: string;
   decisionId: string;
@@ -627,6 +629,7 @@ export interface GetTaskResultsInput {
 }
 
 export interface TaskResultsPayload {
+  coordinatorGate?: { checkpointId: string; revision: number; deadline: string; reason: string; resultEventIds?: string[] };
   slug: string;
   runId: string | null;
   runIds: string[];

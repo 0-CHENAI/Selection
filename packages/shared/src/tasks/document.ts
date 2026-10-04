@@ -69,7 +69,7 @@ const TASK_KEYS = new Set([
 ]);
 
 const NODE_KEYS = new Set([
-  'researchRole',
+  'researchRole', 'researchLineIds',
   'actor',
   'workspace_inputs',
   'locked',

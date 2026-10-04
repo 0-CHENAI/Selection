@@ -8,7 +8,7 @@ import { validateTaskSpec } from '../../../../../../packages/shared/src/tasks/va
 import type { TaskGenerateRequest, TaskGenerateResult, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import type { ComponentEntry } from './types'
 import { mockElectronAPI } from '../mock-utils'
-import { researchPreview } from './research-preview'
+import { researchPreview, researchLinesPreview } from './research-preview'
 import { renderResearchReport } from '../../../../../../packages/shared/src/tasks/research'
 
 const initial = {
@@ -22,7 +22,7 @@ const initial = {
 }
 
 /** Actual editor and validators, with fixed transport; the real model is tested by the host script. */
-function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' | 'research' }) {
+function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' | 'research' | 'research-lines' }) {
   const [ready, setReady] = React.useState(false)
   const [requests, setRequests] = React.useState<Array<TaskGenerateRequest | { openSession: string }>>([])
   const [writes, setWrites] = React.useState({ saves: 0, creates: 0, runs: 0 })
@@ -38,12 +38,13 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
       } catch (error) { return { valid: false, errors: [{ path: 'yaml', message: String(error), severity: 'error' as const }], warnings: [] } }
     }
     const definition = TaskSpecSchema.parse(initial)
-    const research = scenario === 'research' ? researchPreview() : undefined
+    const research = scenario === 'research' ? researchPreview() : scenario === 'research-lines' ? researchLinesPreview() : undefined
     if (research) {
       definition.research = research.config; definition.runner = 'orchestrate'
       definition.nodes.splice(2, 0, { id: 'correct-cost', kind: 'session', title: '修订成本', prompt: '读取原文，修订 cost@2。', depends_on: ['analyze'] }, { id: 'review-cost', kind: 'session', title: '独立复核新版本', prompt: '独立读取原文审查 cost@2。', depends_on: ['correct-cost'] })
       definition.nodes.forEach(node => { node.researchRole = node.id === 'analyze' || node.id === 'review-cost' ? 'reviewer' : node.id === 'report' ? 'reporter' : 'researcher'; node.outputs = [{ name: 'research', kind: 'param', type: 'json', required: true }] })
       definition.nodes.find(node => node.id === 'report')!.depends_on = ['review-cost']
+      if (scenario === 'research-lines') definition.nodes.push({id:'price',kind:'session',researchRole:'researcher',prompt:'共享电价事实',outputs:[{name:'research',kind:'param',type:'json',required:true}]})
     }
     if (scenario === 'f3' || scenario === 'active' || scenario === 'dynamic') { definition.nodes[0]!.title = 'A：成本资料'; definition.nodes[1]!.title = 'B：口径核对'; definition.nodes[1]!.prompt = '独立核对 B 的成本口径'; definition.nodes[1]!.depends_on = []; definition.nodes[2]!.title = 'C：综合报告'; definition.nodes[2]!.prompt = 'A 与 B 的报告：${inputs.second}'; definition.nodes[2]!.depends_on = ['collect']; definition.nodes[2]!.inputs = { second: '${nodes.analyze.output}' } }
     if (scenario === 'long') { definition.goal = '核对资料和限制。'.repeat(150); definition.nodes = Array.from({ length: 12 }, (_, index) => ({ id: `node-${index}`, kind: 'session', title: `步骤 ${index + 1}：资料与风险核对`, prompt: '只读资料、说明来源和限制。'.repeat(80), ...(index ? { depends_on: [`node-${index - 1}`] } : {}) })) }
@@ -116,6 +117,6 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
 }
 export const taskEditorLiveComponents: ComponentEntry[] = [{ id: 'task-editor-live', name: '实际编排编辑器', category: 'Kanban', description: '实际 TaskEditor、对话提案和图组件，固定传输记录保存/创建/运行及请求。', component: TaskEditorLive, props: [
   { name: 'mode', control: { type: 'select', options: ['create', 'edit'].map(value => ({ label: value, value })) }, defaultValue: 'edit' },
-  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic', 'research'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
+  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic', 'research', 'research-lines'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
   { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed', 'locked'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
 ], layout: 'top' }]

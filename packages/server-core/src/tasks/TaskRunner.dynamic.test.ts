@@ -59,6 +59,25 @@ it('F4-a consumes A and adds D atomically while B is live, without duplicate wor
   runner.submitVerdict('orch', { runId: 'r', result: 'pass' }); expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
 });
 
+it('concurrent results expose the next canonical checkpoint after accepting the previous one',async()=>{
+  await start();host.complete('a','A');await tick();
+  const first=readRunState(root,'dynamic','r')!.coordinatorGate!;
+  host.complete('b','B');await tick();
+  const next=decide({consumedResults:first.resultEventIds});
+  expect(next.status).toBe('waiting-coordinator');
+  expect(next.coordinatorGate!.checkpointId).not.toBe(first.checkpointId);
+  expect(next.coordinatorGate!.resultEventIds).toEqual(['r:b:1:0:done']);
+  expect(loadTaskResults(root,'dynamic','r').coordinatorGate).toEqual(next.coordinatorGate);
+  expect(host.sent.at(-1)!.message).toContain('end this assistant turn immediately');
+  expect(()=>runner.applyOrchestrationDecisionByRunId('orch',{runId:'r',checkpointId:first.checkpointId,decisionId:'stale-followup',baseRevision:0,action:'continue'})).toThrow('checkpointId does not match');
+  for(let i=0;i<3;i++) {
+    try {runner.applyOrchestrationDecisionByRunId('orch',{runId:'r',checkpointId:first.checkpointId,decisionId:`concurrent-stale-${i}`,baseRevision:0,action:'patch',rationale:'same logical task',add:[]});throw new Error('Expected conflict');}
+    catch(error) {expect((error as {currentRun?:unknown}).currentRun).toMatchObject({coordinatorGate:next.coordinatorGate});}
+  }
+  expect(runner.getRunState('dynamic','r')!.status).toBe('waiting-coordinator');
+  expect(loadTaskResults(root,'dynamic','r').coordinatorGate).toEqual(next.coordinatorGate);
+});
+
 it('a stale or failed durable plan decision never swallows the result; recovery keeps the exact pending event', async () => {
   await start(); host.complete('a', 'frozen A'); await tick();
   const before = runner.getRunState('dynamic', 'r')!.planner!.pendingResults;

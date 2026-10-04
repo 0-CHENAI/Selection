@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseTaskSpec, saveTaskSpec, loadTaskResults, readRunState, readRunLog, runDir, specRevisionPath, type OrchestrationDecision, type TaskNode } from '@craft-agent/shared/tasks';
@@ -48,6 +48,7 @@ test('F5-a/d durable business records survive restart, dynamic correction and ex
   await firstReview();
   const before=loadTaskResults(root,'research','r').research!;
   expect(before.claims[0]!.review?.support).toBe('contradicted');
+  expect(runner.getRunState('research','r')!.nodes.find(node=>node.id==='review')!.role).toBe('reviewer');
   listeners.clear();runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});runner.scanUnfinished();
   expect(loadTaskResults(root,'research','r').research!.records).toEqual(before.records);
   decide({action:'patch',rationale:'Correction from independent source review',add:[node('fix','researcher',['review']),node('review2','reviewer',['fix'])],update:[{id:'report',depends_on:['review2']}]});await tick();
@@ -106,4 +107,74 @@ test('final PASS refuses an unavailable frozen research definition rather than d
   writeFileSync(specRevisionPath(root,'research','r',0),'corrupt definition');
   expect(()=>runner.submitVerdict('orch',{runId:'r',result:'pass'})).toThrow('frozen state unavailable');
   expect(runner.getRunState('research','r')!.status).toBe('verifying');
+});
+
+test('F6-d successor preserves unaffected independent review and immutable old report, source revision needs new review',async()=>{
+  writeFileSync(join(root,'risk.txt'),'Verified risk fact');
+  const sharedScope={region:'X',year:'2025',currency:'CNY',tax:'included',basis:'cost',requirements:'same inputs'};
+  const research={line:{id:'main',question:'Cost and risk',premises:['two years']},dimensions:[{id:'cost',requirement:'cost evidence'},{id:'risk',requirement:'risk evidence'}],sources:[{id:'s',path:'source.txt'},{id:'risk-source',path:'risk.txt'}],questions:[{id:'Q-cost',question:'Canonical cost fact',sharedTaskRef:'initial',scope:sharedScope,commonBackground:['frozen original cost'],compatibilityReason:'same scope',parents:[{lineId:'main',premises:['two years'],inputScope:sharedScope,claimRefs:[],evidenceRefs:[],issueRefs:[],path:[]}]}]};
+  function save(nodes:TaskNode[]) {
+    const spec=parseTaskSpec({schema_version:3,id:'research',title:'Research',goal:'cost and risk',cwd:root,execution:{coordinator_gate:{mode:'off'},verification:{required:false}},research,nodes});
+    if(!spec.success)throw new Error(JSON.stringify(spec));saveTaskSpec(root,spec.data);
+  }
+  save([node('initial','researcher'),node('initial-review','reviewer',['initial']),node('initial-report','reporter',['initial-review'])]);
+  runner.run('research',{runId:'run-1',orchestratorSessionId:'orch',verifyOnComplete:false});await tick();
+  const initial=loadTaskResults(root,'research','run-1').research!, source=initial.sources[0]!,risk=initial.sources[1]!;
+  await complete('initial',{evidence:[{id:'cost-old',sourceId:'s',sourceVersion:source.version,locator:{startLine:2,endLine:2},excerpt:'A two-year cost is 1,000,000 yuan.'},{id:'risk-e',sourceId:risk.id,sourceVersion:risk.version,locator:{startLine:1,endLine:1},excerpt:'Verified risk fact'}],claims:[{id:'cost',version:1,type:'fact',text:'Cost 1,000,000 yuan',dimensionIds:['cost'],evidenceIds:['cost-old'],critical:true},{id:'risk',version:1,type:'fact',text:'Verified risk',dimensionIds:['risk'],evidenceIds:['risk-e'],critical:true}]});
+  await complete('initial-review',{reviews:['cost','risk'].map(id=>({claimRef:{id,version:1},citationExists:true,support:'supported',finding:'Independent original support'}))});
+  await complete('initial-report',{report:{claimRefs:[{id:'cost',version:1},{id:'risk',version:1}],limitations:[],unresolved:[]}});
+  const old=loadTaskResults(root,'research','run-1');expect(old.runStatus).toBe('completed');
+  writeFileSync(join(root,'source.txt'),'Title\nA two-year cost is 1,200,000 yuan.');
+  save([node('fix','researcher'),node('new-review','reviewer',['fix']),node('new-report','reporter',['new-review'])]);
+  runner.run('research',{runId:'run-2',orchestratorSessionId:'orch',resumedFrom:'run-1',verifyOnComplete:false});await tick();
+  const inherited=loadTaskResults(root,'research','run-2').research!;
+  expect(inherited.records).toEqual(old.research!.records);expect(inherited.claims.find(claim=>claim.id==='cost')!.review!.support).toBe('unverified');
+  expect(inherited.questions).toEqual(old.research!.questions);
+  expect(inherited.claims.find(claim=>claim.id==='risk')!.reviewer).toEqual(old.research!.claims.find(claim=>claim.id==='risk')!.reviewer);
+  const currentSource=inherited.sources[0]!;
+  await complete('fix',{evidence:[{id:'cost-new',sourceId:'s',sourceVersion:currentSource.version,locator:{startLine:2,endLine:2},excerpt:'A two-year cost is 1,200,000 yuan.'}],claims:[{id:'cost',version:2,type:'fact',text:'Cost 1,200,000 yuan',dimensionIds:['cost'],evidenceIds:['cost-new'],critical:true}]});
+  expect(loadTaskResults(root,'research','run-2').research!.claims.find(claim=>claim.id==='cost')!.review).toBeUndefined();
+  await complete('new-review',{reviews:[{claimRef:{id:'cost',version:2},citationExists:true,support:'supported',finding:'New original supports revised cost'}]});
+  await complete('new-report',{report:{claimRefs:[{id:'cost',version:2},{id:'risk',version:1}],limitations:[],unresolved:[]}});
+  const latest=loadTaskResults(root,'research');expect(latest.runStatus).toBe('completed');expect(latest.research!.blockers).toEqual([]);
+  expect(latest.research!.claims.find(claim=>claim.id==='risk')!.reviewer!.runId).toBe('run-1');
+  expect(latest.research!.report!.claimRefs).toEqual([{id:'cost',version:2},{id:'risk',version:1}]);
+  expect(loadTaskResults(root,'research','run-1').research).toEqual(old.research);
+  listeners.clear();runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});
+  expect(runner.getLatestRun('research')!.research).toEqual(latest.research);
+});
+
+test('F6-b shared question and its task commit once, with rollback and exact restart identity',async()=>{
+  await firstReview();
+  const before=loadTaskResults(root,'research','r').research!;
+  const scope={region:'X',year:'2025',currency:'CNY',tax:'included',basis:'yuan/kWh',requirements:'same tariff'};
+  const expansion={questions:[{id:'Q-price',question:'price',sharedTaskRef:'price',scope,commonBackground:['same factual gap'],compatibilityReason:'Scope and actual inputs explicitly checked',parents:[{lineId:'main',premises:['two years'],inputScope:scope,claimRefs:[{id:'cost',version:1}],evidenceRefs:['e1'],issueRefs:['wrong-cost'],path:['a','review']}]}]};
+  const patch={action:'patch' as const,rationale:'Register one shared task with its business context',researchExpansion:expansion,add:[node('price','researcher',['review'])],update:[{id:'report',depends_on:['price']}]};
+  const checkpoint=readRunState(root,'research','r')!,path=join(runDir(root,'research','r'),'run-state.json'),old=readFileSync(path,'utf8');
+  unlinkSync(path);mkdirSync(path);expect(()=>decide(patch)).toThrow();rmSync(path,{recursive:true});writeFileSync(path,old);
+  expect(loadTaskResults(root,'research','r').research!.questions).toEqual([]);
+  expect(runner.getRunState('research','r')!.revision).toBe(checkpoint.revision);
+  decide(patch);await tick();expect(loadTaskResults(root,'research','r').research!.questions).toEqual(expansion.questions);
+  expect(sent.filter(send=>send.id==='session-price')).toHaveLength(1);
+  expect(sent.find(send=>send.id==='session-price')!.message).toContain('Q-price');
+  expect(sent.find(send=>send.id==='session-price')!.message).toContain('wrong-cost');
+  listeners.clear();runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});runner.scanUnfinished();
+  expect(loadTaskResults(root,'research','r').research!.records).toEqual(before.records);
+  expect(loadTaskResults(root,'research','r').research!.questions).toEqual(expansion.questions);
+  expect(readRunLog(root,'research','r').filter(event=>event.kind==='node-spawned'&&event.nodeId==='price')).toHaveLength(1);
+});
+
+test('verification repair recovery never restores the rejected frontier as completed',async()=>{
+  const spec=parseTaskSpec({schema_version:3,id:'research',title:'Repair recovery',goal:'current outcome',execution:{coordinator_gate:{mode:'off'}},nodes:[{id:'a',prompt:'a'},{id:'b',prompt:'b',depends_on:['a']}]});
+  if(!spec.success)throw new Error(JSON.stringify(spec));saveTaskSpec(root,spec.data);
+  runner.run('research',{runId:'r',orchestratorSessionId:'orch'});await tick();
+  for(const id of ['a','b']){for(const listener of [...listeners])listener({workspaceId:'ws',sessionId:`session-${id}`,generation:0,reason:'complete',finalText:`old ${id}`});await tick();}
+  expect(runner.getRunState('research','r')!.status).toBe('verifying');
+  runner.submitVerdict('orch',{runId:'r',result:'fail',nodes:['a'],reason:'Need corrected current result'});
+  const result=loadTaskResults(root,'research','r');
+  expect(result.nodes.find(node=>node.id==='b')!).toMatchObject({state:'pending'});
+  expect(result.nodes.every(node=>node.output===undefined)).toBe(true);
+  expect(result.verdict).toBeUndefined();expect(result.verdicts![0]!.result).toBe('fail');
+  listeners.clear();runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});
+  expect(runner.getLatestRun('research')!.nodes.find(node=>node.id==='b')!.state).toBe('pending');
 });

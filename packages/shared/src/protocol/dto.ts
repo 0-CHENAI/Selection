@@ -485,6 +485,7 @@ export interface TaskNodeRunStateDto {
 }
 
 export interface TaskRunSnapshotDto {
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
   research?: import('../tasks/research.ts').ResearchSummary
   artifactAvailability?: { nodeIds: string[]; reason: string }
   resumedFrom?: string
@@ -616,6 +617,7 @@ export interface TaskResultNodeDto {
  * `TaskRunSnapshotDto` this survives restart and does not require an active in-memory run.
  */
 export interface TaskResultsDto {
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
   research?: import('../tasks/research.ts').ResearchSummary
   artifactAvailability?: { nodeIds: string[]; reason: string }
   workers?: import('../tasks/planner').TaskWorkerRecord[]

@@ -1,3 +1,5 @@
+import { expandResearch } from './research-expansion.ts';
+import type { ResearchExpansion, ResearchRecord } from './research.ts';
 import { planProtectionErrors, planValueKey } from './plan.ts';
 import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
 import { TaskNodeSchema, TaskSpecSchema, type TaskNode, type TaskSpec } from './schema.ts';
@@ -25,6 +27,7 @@ export interface OrchestrationPatch {
   consumedResults?: string[];
   plannerPhase?: 'active' | 'draining';
   changeKind?: 'structure' | 'repair' | 'research';
+  researchExpansion?: ResearchExpansion;
   /**
    * Legacy terminal values remain decodable so the validator can reject an old
    * payload deterministically. New typed callers use the narrower session-tool
@@ -42,6 +45,7 @@ export interface PatchContext {
   allowedModels?: ReadonlySet<string>;
   invalidPatchCount?: number;
   pendingResultIds?: ReadonlySet<string>;
+  researchRecords?: ResearchRecord[];
 }
 
 export interface PatchOk {
@@ -173,7 +177,11 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     ...(patch.constraints !== undefined ? { constraints: patch.constraints } : {}),
     ...(patch.decisions !== undefined ? { decisions: patch.decisions } : {}),
   };
-  const protection = planProtectionErrors(ctx.spec, next);
+  if (patch.researchExpansion) {
+    try { next.research = expandResearch(ctx.spec.research, patch.researchExpansion, new Map(remaining.map(node => [node.id,node])), ctx.researchRecords); }
+    catch (error) { return fail(ctx, error instanceof Error ? error.message : String(error)); }
+  }
+  const protection = planProtectionErrors(ctx.spec, next, !!patch.researchExpansion);
   if (protection.length) return fail(ctx, protection.join('; '));
   const parsedPlan = TaskSpecSchema.safeParse(next.schema_version === 3 ? next : { ...next, execution: undefined });
   if (!parsedPlan.success) return fail(ctx, parsedPlan.error.issues.map(issue => issue.message).join("; "));
@@ -228,6 +236,9 @@ export function mergeRunDefinition(from: TaskSpec, run: TaskSpec): TaskSpec {
     ...from,
     schema_version,
     nodes: run.nodes,
+    ...(from.research && run.research && planValueKey({ ...from.research,lines:undefined,questions:undefined }) === planValueKey({ ...run.research,lines:undefined,questions:undefined })
+      && (from.research.lines ?? []).every(line => run.research!.lines?.some(next => planValueKey(next) === planValueKey(line)))
+      && (from.research.questions ?? []).every(question => run.research!.questions?.some(next => planValueKey({...next,parents:undefined,compatibilityReason:undefined}) === planValueKey({...question,parents:undefined,compatibilityReason:undefined}) && question.parents.every(parent => next.parents.some(value => planValueKey(value) === planValueKey(parent))))) ? { research: run.research } : {}),
     ...(schema_version === 3
       ? {
           execution: from.execution ?? run.execution,

@@ -5,6 +5,16 @@ import { atomicWriteFileSync } from '../utils/files.ts';
 import { committedRunLog, readRunLog, readRunState, readNodeAttempt, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
 import { summarizeResearch, ResearchRecordSchema, type ResearchConfig, type ResearchSource, type ResearchSummary } from './research.ts';
+import { planValueKey } from './plan.ts';
+
+/** A successor may preserve reviewed history only under the same research criteria. */
+export function researchInheritanceCompatible(previous: ResearchConfig | undefined, next: ResearchConfig): boolean {
+  return !!previous && planValueKey(previous.line) === planValueKey(next.line)
+    && planValueKey(previous.dimensions) === planValueKey(next.dimensions)
+    && previous.sources.every(source => next.sources.some(item => item.id === source.id && item.ref === source.ref))
+    && (previous.lines ?? []).every(line => next.lines?.some(item => planValueKey(item) === planValueKey(line)))
+    && (previous.questions ?? []).every(question => next.questions?.some(item => planValueKey({...item,parents:undefined,compatibilityReason:undefined}) === planValueKey({...question,parents:undefined,compatibilityReason:undefined}) && question.parents.every(parent => item.parents.some(next => planValueKey(next) === planValueKey(parent)))));
+}
 
 export function freezeResearchSources(root: string, slug: string, runId: string, config: ResearchConfig, directory: string): ResearchSource[] {
   const target = join(runDir(root, slug, runId), 'research'); mkdirSync(target, { recursive: true });
@@ -43,7 +53,9 @@ export function readResearchSources(root: string, slug: string, runId: string, e
   });
 }
 
-export function loadResearchResults(root: string, slug: string, runId: string): ResearchSummary | undefined {
+export function loadResearchResults(root: string, slug: string, runId: string, visited = new Set<string>()): ResearchSummary | undefined {
+  if (visited.has(runId)) throw new Error('Cyclic research predecessor receipt');
+  visited.add(runId);
   const state = readRunState(root, slug, runId), log = committedRunLog(readRunLog(root, slug, runId), state);
   const revision = state?.revision ?? log.reduce((latest, entry) => Math.max(latest, entry.revision ?? 0), 0);
   const currentSpec = readSpecRevision(root, slug, runId, revision);
@@ -66,6 +78,16 @@ export function loadResearchResults(root: string, slug: string, runId: string): 
   const started = log.find(entry => entry.kind === 'run-started');
   try {
     if (started?.kind !== 'run-started' || !started.researchSourcesHash) throw new Error('Research source version receipt is unavailable');
+    if (started.researchPredecessor) {
+      if (started.resumedFrom !== started.researchPredecessor.runId) throw new Error('Research predecessor is not the canonical successor lineage');
+      const predecessorState = readRunState(root,slug,started.researchPredecessor.runId);
+      const predecessorSpec = readSpecRevision(root,slug,started.researchPredecessor.runId,predecessorState?.revision ?? 0);
+      if (!researchInheritanceCompatible(predecessorSpec?.research,config)) throw new Error('Research predecessor criteria changed');
+      const predecessor = loadResearchResults(root,slug,started.researchPredecessor.runId,visited);
+      if (!predecessor || predecessor.blockers.some(blocker => blocker.includes('Corrupt') || blocker.includes('Frozen'))
+        || createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex') !== started.researchPredecessor.recordsHash) throw new Error('Research predecessor records changed or unavailable');
+      records.unshift(...predecessor.records);
+    }
     return summarizeResearch(config, readResearchSources(root, slug, runId, started.researchSourcesHash), records);
   }
   catch { const summary = summarizeResearch(config, [], records); summary.blockers.push('Frozen research sources are unavailable; restore and inspect before delivery'); return summary; }

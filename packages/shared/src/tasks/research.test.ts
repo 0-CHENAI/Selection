@@ -8,7 +8,7 @@ const sources = [{ id: 's', ref: 'original', version: 'v1', acquiredAt: 'now', t
 function record(role: ResearchRecord['role'], payload: unknown, sessionId: string = role): ResearchRecord { return { role, payload: ResearchPayloadSchema.parse(payload), producedBy: { runId: 'r', nodeId: sessionId, attempt: 1, revision: 0, artifactVersion: 'hash', sessionId } }; }
 const researcher = record('researcher', { evidence: [{ id: 'e1', sourceId: 's', sourceVersion: 'v1', locator: { startLine: 2, endLine: 2 }, excerpt: 'A two-year cost is 1,000,000 yuan.' }], claims: [{ id: 'cost', version: 1, type: 'fact', text: 'Cost 100,000 yuan', critical: true, keyNumber: true, dimensionIds: ['cost'], evidenceIds: ['e1'] }] });
 const reviewer = record('reviewer', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'contradicted', finding: 'Source says 1,000,000' }], issues: [{ id: 'i1', claimRef: { id: 'cost', version: 1 }, finding: 'Wrong number', disposition: 'followup-task', reason: 'Correct and review again', followupTaskRef: 'correct-cost' }] });
-const corrected = record('researcher', { claims: [{ ...researcher.payload.claims[0], version: 2, text: 'Cost 1,000,000 yuan' }] },'correction');
+const corrected = record('researcher', { claims: [{ ...researcher.payload.claims[0], version: 2, text: 'Cost 1,000,000 yuan' }], issues:[{...reviewer.payload.issues[0],disposition:'correct',revisedClaimRef:{id:'cost',version:2}}] },'correction');
 const reviewed = record('reviewer', { reviews: [{ claimRef: { id: 'cost', version: 2 }, citationExists: true, support: 'supported', finding: 'Original number supports this value', limitations: ['Tax unverified'] }] },'review2');
 const report = record('reporter', { report: { claimRefs: [{ id: 'cost', version: 2 }], limitations: ['Risk evidence is missing'], unresolved: ['Risk requires more original material'] } });
 
@@ -76,4 +76,15 @@ test('review must be independent and importance or fact type cannot be removed t
   const errors = validateResearchRecord(config,sources,[researcher],evade);
   expect(errors).toContain('Cannot remove importance from cost');
   expect(errors).toContain('Cannot evade fact review by reclassifying cost');
+});
+
+test('source locators reject literal newline escapes and intervals extending beyond the original',()=>{
+  const bad=structuredClone(researcher);
+  bad.payload.evidence[0]!.locator={startLine:1,endLine:2};
+  bad.payload.evidence[0]!.excerpt='Title\\nA two-year cost is 1,000,000 yuan.';
+  expect(validateResearchRecord(config,sources,[],bad).join(' ')).toContain('copy the exact original text');
+  bad.payload.evidence[0]!.excerpt='Title\nA two-year cost is 1,000,000 yuan.';
+  expect(validateResearchRecord(config,sources,[],bad)).toEqual([]);
+  bad.payload.evidence[0]!.locator.endLine=100;
+  expect(validateResearchRecord(config,sources,[],bad).join(' ')).toContain('frozen source locator');
 });
