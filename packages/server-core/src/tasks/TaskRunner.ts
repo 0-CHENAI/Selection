@@ -1203,7 +1203,8 @@ class ActiveRun {
         model: this.resolveNodeModel(node),
         actor: node?.actor,
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
-        blocker: st.lastFailure,
+        // Keep failure history for retry prompts, but expose only a current blocker.
+        blocker: ['pending', 'ready', 'running', 'done', 'skipped'].includes(st.state) ? undefined : st.lastFailure,
         elapsedMs: timing?.elapsedMs,
         queueMs: timing?.queueMs,
         cacheStatus: timing?.cacheStatus,

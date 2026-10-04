@@ -8,6 +8,7 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import { parseDeepLink } from './deep-link'
 import {
   getWindowsBackgroundMaterial,
   isWindowsWindowDark,
@@ -363,6 +364,11 @@ export class WindowManager {
     } else {
       // Build URL from options
       const query: Record<string, string> = { workspaceId }
+      const initialTarget = initialDeepLink ? parseDeepLink(initialDeepLink) : undefined
+      // Restore the explicit route after session metadata is ready. An early
+      // IPC push can be lost or overwritten by the renderer's initial restore.
+      if (initialTarget?.view) query.route = initialTarget.view
+      if (initialTarget?.rightSidebar) query.sidebar = initialTarget.rightSidebar
       if (focused) {
         query.focused = 'true' // Open in focused mode (no sidebars)
       }
@@ -395,7 +401,7 @@ export class WindowManager {
     })
 
     // If an initial deep link was provided, navigate to it after the window is ready
-    if (initialDeepLink) {
+    if (initialDeepLink && !parseDeepLink(initialDeepLink)?.view) {
       window.once('ready-to-show', () => {
         // Import parseDeepLink dynamically to avoid circular dependency
         import('./deep-link').then(({ parseDeepLink }) => {

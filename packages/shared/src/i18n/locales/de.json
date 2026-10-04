@@ -917,6 +917,7 @@
   "kanban.column.remove": "Spalte entfernen",
   "kanban.column.setDropStatus": "Status beim Verschieben hierher festlegen",
   "kanban.column.todo": "Aufgabe",
+  "kanban.createOrchestrationDescription": "Erstelle einen Plan in diesem PRO-Gespräch und behalte Übergabehintergrund und Verlauf. Das Erstellen startet keine Ausführung und ändert weder Modell noch Berechtigungen.",
   "kanban.describeSubtask": "Unteraufgabe beschreiben…",
   "kanban.editOrchestration": "Aufgabenablauf bearbeiten",
   "kanban.editOrchestrationDescription": "Ziele, Abnahmekriterien, Teilaufgaben, Abhängigkeiten und Ausführungseinstellungen der Definition anpassen und die neue Definition ausführen. Der Sitzungsname, vorhandene Antworten und der Ausführungsverlauf bleiben unverändert.",

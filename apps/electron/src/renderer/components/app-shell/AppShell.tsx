@@ -324,6 +324,9 @@ function AppShellContent({
   // so the navigator (and its resize handle) collapse to zero width while it's active.
   const { dagOrchestrationEnabled } = useAdvancedSettings()
   const isBoardView = dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board'
+  useEffect(() => {
+    if (isBoardView) setWorkModeView('PRO')
+  }, [isBoardView, setWorkModeView])
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
@@ -1883,7 +1886,11 @@ function AppShellContent({
             <div className="flex items-center gap-1.5">
               <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={isBoardView ? 'PRO' : workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
               {workModeView === 'PRO' && dagOrchestrationEnabled && (
-                <button type="button" aria-label={t('tasks.newOrchestration')} onClick={() => navigate(routes.view.board())}
+                <button type="button" aria-label={t('tasks.newOrchestration')} onClick={async () => {
+                  if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return
+                  setKanbanEditorTarget(null)
+                  navigate(routes.view.board())
+                }}
                   className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
                   {isAutoCompact ? <Plus className="size-4" /> : t('tasks.newOrchestration')}
                 </button>

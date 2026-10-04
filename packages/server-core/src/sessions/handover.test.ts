@@ -34,6 +34,31 @@ async function fixture(mode: 'NORM' | 'PRO' = 'NORM') {
   } }
 }
 
+test('F7 source-owned run records do not create unknown external effects; real writes still require review', async () => {
+  const { buildHandoverSnapshot } = await import('./handover-snapshot')
+  const names = ['submit_task_output', 'submit_task_verdict', 'submit_task_node_verdict', 'submit_orchestration_decision', 'submit_orchestration_patch']
+  const tools = names.flatMap(name => [name, `mcp__session__${name}`, `session__${name}`])
+  const snapshot = buildHandoverSnapshot({
+    workspaceId: 'ws', sessionId: 'root', targetMode: 'NORM', checkpoint: 'settled', branch: [], runs: [],
+    messages: [],
+    children: [{ id: 'worker', messages: tools.map((toolName, index) => ({
+      id: `record-${index}`, role: 'tool', toolName, toolUseId: `call-${index}`,
+      toolInput: { runId: 'source-run' }, toolStatus: 'error', isError: true,
+      content: 'Rejected by source run validation', timestamp: 1,
+    })) }],
+    pendingOperations: [
+      ...tools.map(tool => ({ ref: `worker:${tool}`, tool, sessionId: 'worker' })),
+      { ref: 'worker:write', tool: 'Write', sessionId: 'worker' },
+      { ref: 'worker:external', tool: 'external_publish', sessionId: 'worker' },
+      { ref: 'worker:lookalike', tool: 'submit_task_output_external', sessionId: 'worker' },
+    ],
+  })
+  expect(snapshot.actions.map(action => [action.tool, action.outcome])).toEqual([
+    ['Write', 'unknown'], ['external_publish', 'unknown'], ['submit_task_output_external', 'unknown'],
+  ])
+  expect(snapshot.originals.filter(record => record.role === 'tool')).toHaveLength(tools.length)
+})
+
 test('F5-d research handover preserves current reviewed versions, uncovered questions and independent source bytes', async () => {
   const f = await fixture('PRO')
   try {

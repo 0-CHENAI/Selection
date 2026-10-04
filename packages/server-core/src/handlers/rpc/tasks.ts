@@ -44,6 +44,7 @@ import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/c
 import {
   definitionToPatch,
   planProtectionErrors,
+  planValueKey,
   buildGeneratorPrompt,
   buildRepairPrompt,
   parseTaskYaml,
@@ -70,7 +71,7 @@ import {
 } from '@craft-agent/shared/tasks'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, createTaskFromSpec, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
+import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
 
 import { createLogger } from '@craft-agent/shared/utils'
 const tasksLog = createLogger('tasks-generate')
@@ -208,7 +209,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return toValidationDto(parseTaskDocument(yaml))
   })
 
-  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean): Promise<TaskCreateResult> {
+  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean, rootSessionId?: string): Promise<TaskCreateResult> {
     const ws = workspaceOrThrow(workspaceId)
     const parsed = parseTaskImport(yaml)
     const validation = toValidationDto(parsed)
@@ -216,18 +217,38 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
+    const root = rootSessionId ? await deps.sessionManager.getSession(rootSessionId) : undefined
+    if (rootSessionId) {
+      if (!root || root.workspaceId !== workspaceId || root.hidden) throw new Error('Choose a visible PRO root in this workspace')
+      assertComplexCapability(root, 'create-workflow')
+      deps.sessionManager.assertTaskRunAllowed(workspaceId, rootSessionId, { slug: spec.id })
+      if (root.taskSlug && root.taskSlug !== spec.id) throw new Error('This root already owns a different plan')
+      if (root.isProcessing || deps.sessionManager.getSessions(workspaceId).some(session => session.id !== root.id
+        && (session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId) === root.id
+        && (session.isProcessing || session.orchestrationStatus === 'running'))) throw new Error('Wait for this root and its workers to settle before creating a plan')
+    }
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    if (existing) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
-    const saved = saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
+    if (existing && (!rootSessionId || !existing.valid || planValueKey(existing.spec) !== planValueKey(spec)
+      || deps.sessionManager.getSessions(workspaceId).some(session => session.taskSlug === spec.id && session.id !== rootSessionId)
+      || root?.taskSlug !== spec.id && listRunIds(ws.rootPath, spec.id).length)) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
+    // An identical unowned file may be the committed first half of an interrupted explicit creation.
+    const saved = existing ?? saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
 
     // YAML imports create a fresh orchestrator without adopting generation drafts.
     try {
+      if (rootSessionId) {
+        if (!await deps.sessionManager.bindExistingSessionToTask(rootSessionId, spec.id)) throw new Error('The chosen PRO root can no longer own this plan')
+        const setup = await finishTaskOrchestrator(deps.sessionManager, rootSessionId, spec)
+        validation.warnings.push(...setup.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+        return { slug: spec.id, orchestratorSessionId: rootSessionId, validation, taskLabelId: setup.taskLabelId }
+      }
       const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, saved.spec!, { save: false })
       validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
       return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
     } catch (error) {
       // Remove only this import's unchanged file, allowing retry after session creation fails.
-      if (loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag) {
+      if (!existing && loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag
+        && (!rootSessionId || (await deps.sessionManager.getSession(rootSessionId))?.taskSlug !== spec.id)) {
         unlinkSync(taskYamlPath(ws.rootPath, spec.id))
       }
       throw error
@@ -239,7 +260,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (req.attachToExistingSession || req.orchestratorSessionId) {
       throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
     }
-    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration)
+    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration, req.rootSessionId)
   })
 
   // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.

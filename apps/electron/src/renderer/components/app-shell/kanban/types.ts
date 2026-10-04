@@ -29,9 +29,10 @@ export type SubtaskRunState = 'done' | 'running' | 'pending' | 'failed'
  * Lives here (not in TaskEditor) so the editor-target atom can reference it
  * without importing a component module.
  */
-export type TaskEditorTarget =
-  | { mode: 'create'; initialProjectId?: string }
+export type TaskEditorTarget = (
+  | { mode: 'create'; initialProjectId?: string; rootSessionId?: string; initialTitle?: string }
   | { mode: 'edit'; sessionId: string; taskSlug?: string; initialTitle?: string }
+) & { workspaceId?: string }
 
 export interface KanbanSubtask {
   /** Row key. A child session id, or `node:<nodeId>` for an authored-but-never-run spec node. */

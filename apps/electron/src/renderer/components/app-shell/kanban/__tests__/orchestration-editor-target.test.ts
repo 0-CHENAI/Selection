@@ -20,6 +20,13 @@ describe('resolveOrchestrationEditorTarget (#261)', () => {
     expect(resolveOrchestrationEditorTarget(null, null)).toEqual({ mode: 'create' })
     expect(resolveOrchestrationEditorTarget(null, undefined)).toEqual({ mode: 'create' })
   })
+
+  it('restores an editor identity only within its workspace', () => {
+    const edit = { mode: 'edit' as const, workspaceId: 'ws-a', sessionId: 'root', taskSlug: 'research' }
+    expect(resolveOrchestrationEditorTarget(edit, null, 'ws-a')).toEqual(edit)
+    expect(resolveOrchestrationEditorTarget(edit, 'project-b', 'ws-b')).toEqual({ mode: 'create', initialProjectId: 'project-b' })
+    expect(resolveOrchestrationEditorTarget({ mode: 'edit', sessionId: 'root', taskSlug: 'research' }, null, 'ws-a')).toEqual({ mode: 'create' })
+  })
 })
 
 describe('kanban board UI is removed (#261)', () => {

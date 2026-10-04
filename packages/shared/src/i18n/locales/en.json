@@ -917,6 +917,7 @@
   "kanban.column.remove": "Remove column",
   "kanban.column.setDropStatus": "Set status when moved here",
   "kanban.column.todo": "ToDo",
+  "kanban.createOrchestrationDescription": "Create a plan in this PRO conversation, keeping its handover background and history. Creation does not start execution or change its model or permissions.",
   "kanban.describeSubtask": "Describe a subtask…",
   "kanban.editOrchestration": "Edit task orchestration",
   "kanban.editOrchestrationDescription": "Adjust the definition’s goals, acceptance criteria, subtasks, dependencies, and execution settings, then run the new definition. This does not rename the session or change existing replies or run history.",

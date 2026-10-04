@@ -917,6 +917,7 @@
   "kanban.column.remove": "Eliminar columna",
   "kanban.column.setDropStatus": "Definir estado al mover aquí",
   "kanban.column.todo": "Por hacer",
+  "kanban.createOrchestrationDescription": "Crea un plan en esta conversación PRO y conserva el contexto transferido y el historial. Crear no inicia la ejecución ni cambia el modelo o los permisos.",
   "kanban.describeSubtask": "Describe una subtarea…",
   "kanban.editOrchestration": "Editar flujo de tareas",
   "kanban.editOrchestrationDescription": "Ajusta los objetivos, criterios de aceptación, subtareas, dependencias y configuración de ejecución de la definición, y ejecuta la nueva definición. No cambia el nombre de la sesión, las respuestas existentes ni el historial de ejecuciones.",

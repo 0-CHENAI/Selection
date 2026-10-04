@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { getSessionFilePath } from '@craft-agent/shared/sessions/storage'
@@ -276,7 +276,11 @@ describe('sendMessage durability', () => {
     ;(sm as any).persistSession(managed)
     await sm.flushSession(managed.id)
     const path = getSessionFilePath(tmpRoot, managed.id)
-    mkdirSync(path + '.tmp')
+    // Atomic writes use unique temp names. Block their final rename with a
+    // directory, preserving the last acknowledged file for the retry.
+    const savedFile = `${path}.before-fault`
+    renameSync(path, savedFile)
+    mkdirSync(path)
     const events: any[] = []
     let persistedBeforePublish = false
     sm.setEventSink((_channel, _target, event: any) => {
@@ -287,13 +291,17 @@ describe('sendMessage durability', () => {
         persistedBeforePublish = disk.includes(requestId) && readPersistedMessageIds(managed.id).includes(requestId)
       }
     })
-    await expect(sm.sendMessage(managed.id, 'feedback', undefined, undefined, options))
-      .rejects.toThrow('persistence could not be verified')
+    try {
+      await expect(sm.sendMessage(managed.id, 'feedback', undefined, undefined, options))
+        .rejects.toThrow('persistence could not be verified')
+    } finally {
+      rmSync(path, { recursive: true })
+      renameSync(savedFile, path)
+    }
     expect(events).toHaveLength(0)
     expect(readPersistedMessageIds(managed.id)).toEqual(['source'])
     expect(managed.messages[0]?.annotations?.[0]?.meta).toEqual({ keep: true })
     expect(managed.messageQueue).toHaveLength(0)
-    rmSync(path + '.tmp', { recursive: true })
     await sm.sendMessage(managed.id, 'feedback', undefined, undefined, options)
     expect(persistedBeforePublish).toBe(true)
     expect(managed.messageQueue).toHaveLength(1)
