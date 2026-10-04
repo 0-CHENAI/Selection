@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowRightLeft, ArrowUpRight, LoaderCircle, Repeat2 } from 'lucide-react'
+import { ArrowRightLeft, ArrowUpRight, LoaderCircle, Redo2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -86,7 +86,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
     {headerOnly ? canCreate && <Tooltip><TooltipTrigger asChild>
       <Button type="button" data-handover-trigger variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1 px-2 text-foreground/70 hover:text-foreground"
         aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup="dialog" disabled={busy || open} onClick={() => setOpen(true)}>
-        <Repeat2 aria-hidden="true" /><span className="tracking-[0.04em]">{targetMode}</span>
+        <Redo2 aria-hidden="true" /><span className="tracking-[0.04em]">{targetMode}</span>
       </Button>
     </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip>
       : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
