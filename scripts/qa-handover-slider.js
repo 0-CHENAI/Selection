@@ -22,7 +22,9 @@ const state = () => page.evaluate(() => {
     records: document.querySelector('[data-handover-record-count]').textContent }
 })
 async function drag(mode, progress) {
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
+    await Promise.all(document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
     const input = document.querySelector('input[type=range]')
     const bounds = input.getBoundingClientRect()
     const thumb = input.parentElement.querySelector('span[style]').getBoundingClientRect()
@@ -43,13 +45,13 @@ async function capture(name) {
   // Capture the settled theme/hover state rather than a transition's first frame.
   await page.evaluate(async () => {
     await new Promise(requestAnimationFrame)
-    const root = document.querySelector('input[type=range]').parentElement.parentElement
+    const root = document.querySelector('[data-handover-control]')
     const animations = root.getAnimations({ subtree: true })
     for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) animations.push(...ancestor.getAnimations())
     await Promise.all(animations.map(animation => animation.finished.catch(() => {})))
   })
   const clip = await page.evaluate(() => {
-    const r = document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect()
+    const r = document.querySelector('[data-handover-control]').getBoundingClientRect()
     return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 }
   })
   return page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-slider'}/${name}.png`, clip })
@@ -57,26 +59,30 @@ async function capture(name) {
 assert.equal((await state()).records, '交接记录：0')
 await page.click('loc=role:button[name="Light"]')
 const light = await capture('handover-slider-norm-light')
-const width = await page.evaluate(() => document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect().width)
-assert.ok(width < 210, 'the icon control must keep the header compact')
+const width = await page.evaluate(() => document.querySelector('[data-handover-control]').getBoundingClientRect().width)
+assert.ok(width <= 116, 'both modes and the slider must fit one compact capsule')
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity), '0')
 const hoverPoint = await page.evaluate(() => {
-  const r = document.querySelector('[data-handover-icon]').getBoundingClientRect()
+  const r = document.querySelector('[data-handover-thumb]').getBoundingClientRect()
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
 })
 await page.mouse.move(hoverPoint.x, hoverPoint.y)
 await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '1')
-assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-icon]')).opacity), '0')
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-mode]')).opacity), '0')
 const hover = await capture('handover-slider-norm-hover')
-assert.equal(await page.evaluate(() => document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect().width), width, 'hover must not shift the header layout')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').getBoundingClientRect().width), width, 'hover must not shift the header layout')
 await page.mouse.move(0, 0)
 await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '0')
 await drag('NORM', 0.5)
 assert.ok((await state()).value > 0 && (await state()).value < 100, 'native drag must move the thumb')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').dataset.mode), 'NORM')
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-thumb]')).transitionProperty), 'none', 'dragging must follow the pointer without animation lag')
+const moving = await capture('handover-slider-norm-drag')
 await page.mouse.up()
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' })
 await drag('NORM', 1)
 assert.equal((await state()).value, 100)
+const armed = await capture('handover-slider-norm-armed')
 await page.mouse.up()
 await page.waitForSelector('[role=dialog]')
 assert.deepEqual(await state(), { value: 0, disabled: true, dialog: true, records: '交接记录：0' })
@@ -97,7 +103,7 @@ await dismiss(0)
 await page.focus('input[type=range]')
 await page.press('input[type=range]', 'Enter')
 await page.waitForSelector('[role=dialog]')
-await page.click('loc=role:button[name="交接到 PRO"]')
+await page.click('[role=dialog] button:text-is("交接到 PRO")')
 await page.waitForFunction(() => document.querySelector('[data-handover-record-count]').textContent === '交接记录：1')
 assert.equal((await state()).alert, undefined, 'confirmation must reach the existing handover transport')
 await dismiss(0)
@@ -123,9 +129,37 @@ await page.focus('input[type=range]')
 await page.press('input[type=range]', 'Space')
 await page.waitForSelector('[role=dialog]')
 await dismiss(100)
+await page.mouse.move(0, 0)
+await page.evaluate(() => document.activeElement.blur())
+await page.evaluate(async () => {
+  await new Promise(requestAnimationFrame)
+  await Promise.all(document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
+})
+const touchPoint = () => page.evaluate(() => {
+  const thumb = document.querySelector('[data-handover-thumb]').getBoundingClientRect()
+  const track = document.querySelector('input[type=range]').getBoundingClientRect()
+  return { x: thumb.x + thumb.width / 2, y: thumb.y + thumb.height / 2, travel: track.width - thumb.width }
+})
+const touch = (type, point) => page.cdp('Input.dispatchTouchEvent', {
+  type, touchPoints: point ? [{ x: point.x, y: point.y, id: 1 }] : [],
+})
+const point = await touchPoint()
+await touch('touchStart', point)
+await touch('touchMove', { x: point.x - point.travel / 2, y: point.y })
+assert.ok((await state()).value > 0 && (await state()).value < 100)
+await touch('touchCancel')
+assert.equal((await state()).value, 100)
+assert.equal((await state()).dialog, false)
+await touch('touchStart', point)
+await touch('touchMove', { x: point.x - point.travel, y: point.y })
+assert.equal((await state()).value, 0)
+await touch('touchEnd')
+await page.waitForSelector('[role=dialog]')
+assert.equal((await state()).records, '交接记录：1')
+await dismiss(100)
 await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('input[type=range]').parentElement.querySelector('span[style]')).transitionProperty), 'none')
-assert.ok(await page.evaluate(() => ['[data-handover-icon]', '[data-handover-label]'].every(selector => getComputedStyle(document.querySelector(selector)).transitionProperty === 'none')))
+assert.ok(await page.evaluate(() => ['[data-handover-mode]', '[data-handover-label]'].every(selector => getComputedStyle(document.querySelector(selector)).transitionProperty === 'none')))
 await page.cdp('Emulation.setEmulatedMedia', { features: [] })
 await page.evaluate(async () => {
   const entry = await (await fetch('/playground.tsx')).text()
@@ -140,7 +174,8 @@ await page.evaluate(async () => {
   }
   await i18n.changeLanguage('zh-Hans')
 })
+console.log(await page.snapshot())
 console.log({ passed: true, bidirectionalDrag: true, partialReset: true, confirmationRequired: true,
   keyboard: ['ArrowRight', 'Escape', 'End', 'Enter', 'Home', 'Space'], reducedMotion: true,
-  compactIcon: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, dark] })
+  unified: true, width, touch: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, moving, armed, dark] })
 if (!config.spaceId) await task.finish({ keep: [] })
