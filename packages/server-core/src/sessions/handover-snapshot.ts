@@ -58,6 +58,31 @@ export function handoverToolInputs(branch: SessionEntry[]): Map<string, Record<s
   return calls
 }
 
+/** Use execution receipts, not display status or arbitrary words in tool output. */
+function handoverToolOutcomes(branch: SessionEntry[]): Map<string, Pick<HandoverSnapshot['actions'][number], 'tool' | 'outcome' | 'evidence'>> {
+  const results = new Map<string, Pick<HandoverSnapshot['actions'][number], 'tool' | 'outcome' | 'evidence'>>()
+  for (const entry of branch) {
+    if (entry.type === 'message' && entry.message.role === 'assistant') {
+      for (const part of entry.message.content) if (part.type === 'toolCall') results.delete(part.id)
+    }
+    if (entry.type !== 'message' || entry.message.role !== 'toolResult') continue
+    const result = entry.message
+    const details = result.details as { isError?: boolean; selectionExecutionOutcome?: string } | undefined
+    const error = result.isError || details?.isError === true
+    let outcome: HandoverSnapshot['actions'][number]['outcome'] = error ? 'unknown' : 'completed'
+    if (details?.selectionExecutionOutcome === 'not-performed') outcome = 'not-performed'
+    // Older native Edit receipts predate execution metadata. These exact SDK
+    // validation errors are raised before its single write callback is invoked.
+    const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('')
+    if (error && details?.selectionExecutionOutcome === undefined && result.toolName === 'edit' && (
+      /^Could not find edits\[\d+\] in [\s\S]+\. The oldText must match exactly including all whitespace and newlines\.$/.test(text)
+      || /^Could not find the exact text in [\s\S]+\. The old text must match exactly including all whitespace and newlines\.$/.test(text)
+    )) outcome = 'not-performed'
+    results.set(result.toolCallId, { tool: handoverToolName(result.toolName), outcome, evidence: text })
+  }
+  return results
+}
+
 /** Auth requests, tool arguments and credentials are not transferable authority. */
 export function redactHandoverText(text: string): string {
   return text.replace(/(https?:\/\/)[^\s\/@]+@/gi, '$1[redacted]@').replace(/\b(Bearer\s+)[^\s"']+/gi, '$1[redacted]')
@@ -96,6 +121,7 @@ export function buildHandoverSnapshot(input: {
   })
   const sourceMessages = [{ id: input.sessionId, messages: input.messages, branch: input.branch }, ...input.children]
   const toolInputs = new Map(sourceMessages.map(source => [source.id, handoverToolInputs(source.branch ?? [])]))
+  const toolOutcomes = new Map(sourceMessages.map(source => [source.id, handoverToolOutcomes(source.branch ?? [])]))
   const originals: HandoverSnapshot['originals'] = sourceMessages.flatMap(source => source.messages.filter(message => !message.hidden && !message.isQueued
     && ['user','assistant','tool','info'].includes(message.role)).map(message => ({ id: message.id, sessionId: source.id, role: message.role,
       text: redactHandoverText(message.toolResult ?? message.content) })))
@@ -109,17 +135,27 @@ export function buildHandoverSnapshot(input: {
     && message.toolName && !isHandoverReadOrLocalTool(message.toolName)
     && !isRunRecordTool(message.toolName)).map(message => {
       const args = message.toolUseId && toolInputs.get(source.id)?.get(message.toolUseId) || message.toolInput
+      const receipt = message.toolUseId ? toolOutcomes.get(source.id)?.get(message.toolUseId) : undefined
       return {
         ref: `${source.id}:${message.toolUseId ?? message.id}`, tool: message.toolName!, sourceSessionId: source.id,
-        outcome: message.toolStatus === 'completed' && message.toolInput !== undefined && !message.isError && !/结果未知|无法确认|outcome unknown|result unknown/i.test(message.toolResult ?? message.content) ? 'completed' as const : 'unknown' as const,
+        outcome: receipt?.tool === handoverToolName(message.toolName!) ? receipt.outcome
+          : message.toolStatus === 'completed' && args !== undefined && !message.isError ? 'completed' as const : 'unknown' as const,
         requestHash: args === undefined ? undefined : handoverOperationHash(message.toolName!, args),
         evidence: redactHandoverText(message.toolResult ?? message.content),
       }
     }))
-  for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !isHandoverReadOrLocalTool(operation.tool) && !actions.some(action => action.ref === operation.ref)) {
+  for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !isHandoverReadOrLocalTool(operation.tool)) {
     const callId = operation.ref.slice(operation.sessionId.length + 1)
+    const receipt = toolOutcomes.get(operation.sessionId)?.get(callId)
+    const matched = receipt?.tool === handoverToolName(operation.tool)
+    const action = actions.find(action => action.ref === operation.ref)
+    if (action) {
+      action.outcome = matched ? receipt.outcome : 'unknown'
+      continue
+    }
     const args = toolInputs.get(operation.sessionId)?.get(callId)
-    actions.push({ ref: operation.ref, tool: operation.tool, outcome: 'unknown', requestHash: args ? handoverOperationHash(operation.tool, args) : undefined, evidence: 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
+    actions.push({ ref: operation.ref, tool: operation.tool, outcome: matched ? receipt.outcome : 'unknown', requestHash: args ? handoverOperationHash(operation.tool, args) : undefined,
+      evidence: matched ? redactHandoverText(receipt.evidence) : 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
   }
   const inherited = input.inherited
   const pending = [...noteTexts('pending'), ...list.filter(item => item.status !== 'completed').map(item => item.content)]
@@ -155,5 +191,5 @@ export function handoverBackground(snapshot: HandoverSnapshot, directory: string
       return index
     })]))
   const actions = snapshot.actions.map(({ evidence: _evidence, ...action }) => ({ ...action, evidenceRef: action.ref }))
-  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nContext fields contain indices into verbatimTexts; resolve each index, in field order, to its exact text: ${JSON.stringify({ verbatimTexts, ...fields })}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nCompleted and unknown actions (evidenceRef identifies the full snapshot action): ${JSON.stringify(actions)}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nRead the immutable package before continuing. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Ask the user to resolve unknown operations before writes or workflows. New target permissions are checked independently.`
+  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nReadable operation evidence: ${directory}/operations.json\nContext fields contain indices into verbatimTexts; resolve each index, in field order, to its exact text: ${JSON.stringify({ verbatimTexts, ...fields })}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nOperation outcomes (evidenceRef identifies an action in operations.json): ${JSON.stringify(actions)}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nUse the preserved context above and native Read with offset/limit for relevant operation evidence, original excerpts and frozen files. Do not parse the whole package with Bash, Python, script_sandbox or call_llm while outcomes remain unknown; these tools are also blocked. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Unreviewed unknown operations block writes, delegation and workflows even in Allow All. Ask the user to open View handover from the conversation title menu, verify each unknown operation and save its outcome with evidence; a chat acknowledgement alone does not record a review. New target permissions are checked independently.`
 }

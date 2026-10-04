@@ -10808,12 +10808,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (record.snapshot!.runs.some(run => run.slug === input?.slug) && complexToolCapability(toolName) === 'run-workflow') throw new Error('Source workflow ownership stays with its original root; create a separate plan for new work')
     const requestHash = handoverOperationHash(toolName, input)
     if (record.snapshot!.actions.some(action => action.requestHash === requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed'))) throw new Error('This operation already completed in the handover source; use its recorded result instead of replaying it')
-    if (record.snapshot!.actions.some(action => !action.requestHash && record.reviews[action.ref]?.outcome === 'completed'
+    if (record.snapshot!.actions.some(action => !action.requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed')
       && (handoverToolName(action.tool) === handoverToolName(toolName) || action.tool === 'unknown-execution')
       && !isHandoverReadOrLocalTool(toolName))) throw new Error('The source operation completed but its request identity is unavailable; do not replay this tool')
     const unknown = record.snapshot!.actions.filter(action => action.outcome === 'unknown' && !record.reviews[action.ref])
     if (unknown.length && !isHandoverReadOrLocalTool(toolName)) {
-      throw new Error('Handover contains operations with unknown outcomes. Review them before writes, delegation or workflows; completed operations must not be replayed.')
+      throw new Error(`Handover contains ${unknown.length} operations with unknown outcomes. This tool was not executed. Use native Read on data/handover/${record.handoverId}/operations.json to inspect the evidence. Ask the user to open View handover from the conversation title menu and save each operation review. Allow All or a chat acknowledgement does not resolve this check; do not keep trying Bash, Python or delegation. Completed operations must not be replayed.`)
     }
   }
 
@@ -10822,7 +10822,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!record?.snapshot || record.targetSessionId !== managed.id || record.status !== 'applied') throw new Error('Handover input is not ready')
     const directory = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'handover', record.handoverId)
     const copied = loadIsolationFile(join(directory, 'snapshot.json'), 'utf8')
-    if (handoverHash(copied) !== handoverHash(JSON.stringify(record.snapshot))) throw new Error('Handover background integrity check failed')
+    if (![JSON.stringify(record.snapshot), JSON.stringify(record.snapshot, null, 2)].some(expected => handoverHash(copied) === handoverHash(expected))) throw new Error('Handover background integrity check failed')
+    // Small, readable evidence index also repairs older one-line packages. The
+    // committed snapshot is unchanged; a modified index is rejected, not trusted.
+    const operationPath = join(directory, 'operations.json'), operationBytes = JSON.stringify(record.snapshot.actions, null, 2)
+    if (!existsSync(operationPath)) atomicWrite(operationPath, operationBytes)
+    else if (handoverHash(loadIsolationFile(operationPath, 'utf8')) !== handoverHash(operationBytes)) throw new Error('Handover operation evidence integrity check failed')
     for (const file of record.snapshot.files) {
       if (handoverHash(loadIsolationFile(join(directory, file.snapshotPath))) !== file.hash) throw new Error('Handover input file integrity check failed')
     }
@@ -11041,7 +11046,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const managed = this.sessions.get(targetId)!
     await this.ensureMessagesLoaded(managed)
     const directory = join(getSessionStoragePath(managed.workspace.rootPath, targetId), 'data', 'handover', record.handoverId)
-    atomicWrite(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot))
+    atomicWrite(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot, null, 2))
+    atomicWrite(join(directory, 'operations.json'), JSON.stringify(record.snapshot!.actions, null, 2))
     for (const file of record.snapshot!.files) atomicWrite(join(directory, file.snapshotPath), store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash))
     const messageId = `handover-${record.handoverId}`
     if (!managed.messages.some(message => message.id === messageId)) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
-import { registerRecoveryClass, registeredRecoveryClass } from './tool-recovery';
+import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
 import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
@@ -989,6 +989,7 @@ function wrapSingleTool(
     onUpdate,
     ctx,
   ) => {
+    let executionStarted = false;
     try {
       let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
       // Extract intent before main process strips metadata (used for summarization)
@@ -1015,10 +1016,10 @@ function wrapSingleTool(
       // Send to main process for permission checking + transforms
       const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool), tool === confinedBashTool ? confinedBashDirectory : undefined);
       if (approval.action === 'prepare_source_guide') {
-        return {
+        return withExecutionOutcome({
           content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
           details: { isError: false },
-        };
+        }, 'not-performed');
       }
       inputObj = approval.input;
 
@@ -1034,12 +1035,14 @@ function wrapSingleTool(
         && (sdkToolName === 'Write' || sdkToolName === 'Edit');
       if (fileOperation && (!initConfig || !piSession?.sessionId)) throw new Error('Native file operation session identity is unavailable');
       const execute = () => originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
-      const result = fileOperation
+      executionStarted = true;
+      const executed = fileOperation
         ? await withToolFileOperation(getSessionPath(initConfig!.workspaceRootPath, initConfig!.sessionId), {
           sessionId: initConfig!.sessionId, sdkSessionId: piSession!.sessionId, answerRunId: executingRunId,
           toolCallId, toolName: sdkToolName,
         }, execute)
         : await execute();
+      const result = withExecutionOutcome(executed, executed.details?.isError === true ? 'unknown' : 'completed');
 
       // --- Post-execute: large response summarization ---
 
@@ -1090,6 +1093,9 @@ function wrapSingleTool(
       }
 
       return result;
+    } catch (error) {
+      return withExecutionOutcome({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], details: { isError: true } },
+        !executionStarted || error instanceof ToolNotPerformedError ? 'not-performed' : 'unknown');
     } finally {
       answerBatchGate.markDone(toolCallId, sdkToolName);
     }

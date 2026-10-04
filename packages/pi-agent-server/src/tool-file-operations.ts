@@ -4,17 +4,31 @@ import { closeSync, constants, fsyncSync, openSync, readFileSync } from 'node:fs
 import { isNativeReadOnlyTool, PI_TOOL_NAME_MAP } from '../../shared/src/agent/backend/pi/constants';
 import { access, mkdir, readFile } from 'node:fs/promises';
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation, writeFileWithReceipt, type ToolFileOperationIdentity } from '../../shared/src/agent/backend/pi/file-operation-receipts';
+import { ToolNotPerformedError } from './tool-recovery';
 
-const operations = new AsyncLocalStorage<{ sessionPath: string; identity: ToolFileOperationIdentity }>();
-export function withToolFileOperation<T>(sessionPath: string, identity: ToolFileOperationIdentity, execute: () => Promise<T>): Promise<T> {
-  return operations.run({ sessionPath, identity }, execute);
+const operations = new AsyncLocalStorage<{ sessionPath: string; identity: ToolFileOperationIdentity; mutationStarted: boolean }>();
+export async function withToolFileOperation<T>(sessionPath: string, identity: ToolFileOperationIdentity, execute: () => Promise<T>): Promise<T> {
+  const operation = { sessionPath, identity, mutationStarted: false };
+  try { return await operations.run(operation, execute); }
+  catch (error) {
+    if (!operation.mutationStarted && !readToolFileOperation(sessionPath, identity)) {
+      throw new ToolNotPerformedError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
+    throw error;
+  }
 }
 const writeFile = async (path: string, content: string) => {
   const operation = operations.getStore();
   if (!operation) throw new Error('Native file operation has no execution identity');
+  operation.mutationStarted = true;
   await writeFileWithReceipt(operation.sessionPath, operation.identity, path, content);
 };
-export const nativeWriteOperations = { writeFile, mkdir: async (path: string) => { await mkdir(path, { recursive: true }); } };
+export const nativeWriteOperations = { writeFile, mkdir: async (path: string) => {
+  const operation = operations.getStore();
+  if (!operation) throw new Error('Native file operation has no execution identity');
+  operation.mutationStarted = true;
+  await mkdir(path, { recursive: true });
+} };
 export const nativeEditOperations = { writeFile, readFile, access: async (path: string) => { await access(path, constants.R_OK | constants.W_OK); } };
 
 /** Close saved call/result pairs using trusted receipts before the SDK sends a prompt. */

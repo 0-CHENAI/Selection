@@ -73,6 +73,79 @@ test('handover utility exemptions use exact identities and preserve external loo
   expect(snapshot.actions.every(action => action.outcome === 'unknown')).toBe(true)
 })
 
+test('handover distinguishes pre-execution rejection and atomic Edit validation from uncertain effects', async () => {
+  const { buildHandoverSnapshot } = await import('./handover-snapshot')
+  const results = [
+    { tool: 'write', error: true, details: { isError: true, selectionExecutionOutcome: 'not-performed' }, text: 'Handover check rejected this call' },
+    { tool: 'edit', error: true, text: 'Could not find edits[0] in /report.py. The oldText must match exactly including all whitespace and newlines.' },
+    { tool: 'edit', error: true, text: 'Could not find the exact text in /report.py. The old text must match exactly including all whitespace and newlines.' },
+    { tool: 'bash', error: true, text: 'Traceback: ValueError: substring not found' },
+    { tool: 'external_publish', error: true, text: 'Could not find the exact text in /report.py. The old text must match exactly including all whitespace and newlines.' },
+    { tool: 'write', error: false, text: 'Saved report about outcome unknown terminology' },
+    { tool: 'edit', error: true, details: { isError: true, selectionExecutionOutcome: 'unknown' },
+      text: 'Could not find edits[0] in /report.py. The oldText must match exactly including all whitespace and newlines.' },
+  ]
+  const branch = results.flatMap((result, index) => [
+    { type: 'message', id: `call-${index}`, message: { role: 'assistant', content: [{ type: 'toolCall', id: `${index}`, name: result.tool, arguments: { path: '/report.py' } }] } },
+    { type: 'message', id: `result-${index}`, message: { role: 'toolResult', toolCallId: `${index}`, toolName: result.tool,
+      isError: result.error, details: result.details, content: [{ type: 'text', text: result.text }] } },
+  ]) as Parameters<typeof buildHandoverSnapshot>[0]['branch']
+  const snapshot = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp', branch,
+    children: [], pendingOperations: [{ ref: 's:0', tool: 'Write', sessionId: 's' }], runs: [],
+    // No UI input: SDK calls and results must still determine identity and outcome.
+    messages: results.map((result, index) => ({ id: `ui-${index}`, role: 'tool', toolName: result.tool,
+      toolUseId: `${index}`, timestamp: index, toolStatus: result.error ? 'error' : 'completed', content: result.text })) })
+  expect(snapshot.actions.map(action => action.outcome)).toEqual(['not-performed', 'not-performed', 'not-performed', 'unknown', 'unknown', 'completed', 'unknown'])
+  expect(snapshot.actions.every(action => action.requestHash)).toBe(true)
+  // A display-only error string cannot establish that a native write did not run.
+  const withoutSdk = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp', branch: [],
+    children: [], pendingOperations: [], runs: [], messages: [{ id: 'edit', role: 'tool', toolName: 'Edit',
+      toolStatus: 'error', content: results[1]!.text, timestamp: 1 }] })
+  expect(withoutSdk.actions[0]!.outcome).toBe('unknown')
+  const interrupted = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp',
+    branch: [...branch, { type: 'message', id: 'reused-call', message: { role: 'assistant', content: [
+      { type: 'toolCall', id: '5', name: 'write', arguments: { path: '/new-report.py' } },
+    ] } }] as Parameters<typeof buildHandoverSnapshot>[0]['branch'], children: [],
+    pendingOperations: [{ ref: 's:5', tool: 'Write', sessionId: 's' }], runs: [],
+    messages: [{ id: 'reused', role: 'tool', toolUseId: '5', toolName: 'Write', toolStatus: 'completed', content: 'Earlier result still displayed', timestamp: 1 }] })
+  expect(interrupted.actions[0]!.outcome).toBe('unknown')
+  const prepared = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp',
+    branch: [{ type: 'message', id: 'prep', parentId: null, timestamp: '1970-01-01T00:00:00.001Z', message: { role: 'toolResult', timestamp: 1, toolCallId: 'guide', toolName: 'mcp__external__publish',
+      isError: false, details: { isError: false, selectionExecutionOutcome: 'not-performed' }, content: [{ type: 'text', text: 'Guide prepared; tool not executed' }] } }] as Parameters<typeof buildHandoverSnapshot>[0]['branch'],
+    children: [], messages: [], pendingOperations: [{ ref: 's:guide', tool: 'mcp__external__publish', sessionId: 's' }], runs: [] })
+  expect(prepared.actions[0]!.outcome).toBe('not-performed')
+  expect(prepared.actions[0]!.evidence).toContain('tool not executed')
+})
+
+test('large and legacy handovers expose readable operation evidence without changing their immutable receipt', async () => {
+  const f = await fixture()
+  try {
+    f.source.messages.push({ id: 'large', role: 'assistant', content: 'x'.repeat(260_000), timestamp: 4 },
+      { id: 'uncertain', role: 'tool', toolName: 'Bash', toolUseId: 'uncertain', toolInput: { command: 'publish' },
+        toolStatus: 'error', content: 'Outcome unknown; check publication receipt', timestamp: 5 })
+    const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'large-input', targetMode: 'PRO' })).records[0]!
+    const target = f.internal.sessions.get(record.targetSessionId!)
+    const directory = join(getSessionPath(f.root, target.id), 'data', 'handover', record.handoverId)
+    const operationPath = join(directory, 'operations.json')
+    const immutable = readFileSync(join(f.store.directory(record.handoverId), 'record.json'), 'utf8')
+    const { createReadToolDefinition } = await import('@earendil-works/pi-coding-agent')
+    const read = createReadToolDefinition(f.root)
+    const result = await read.execute('inspect', { path: operationPath }, undefined, undefined, {} as never)
+    expect(JSON.stringify(result.content)).toContain('check publication receipt')
+    expect(JSON.stringify(result.content)).not.toContain('exceeds')
+    // Existing minified snapshots get the same derived index on the next turn.
+    writeFileSync(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot))
+    rmSync(operationPath)
+    expect(f.internal.handoverInput(target)).toContain('operations.json')
+    expect(JSON.parse(readFileSync(operationPath, 'utf8'))).toEqual(record.snapshot!.actions)
+    expect(readFileSync(join(f.store.directory(record.handoverId), 'record.json'), 'utf8')).toBe(immutable)
+    writeFileSync(operationPath, '[]')
+    expect(() => f.internal.handoverInput(target)).toThrow('operation evidence integrity')
+    writeFileSync(join(directory, 'snapshot.json'), '{}')
+    expect(() => f.internal.handoverInput(target)).toThrow('background integrity')
+  } finally { await f.cleanup() }
+})
+
 test('coordinator checkpoints are hidden system input, never user handover constraints', async () => {
   const f = await fixture('PRO')
   const send = spyOn(f.manager,'sendMessage').mockResolvedValue(undefined)
