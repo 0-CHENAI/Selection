@@ -848,6 +848,7 @@
   "handover.constraints": "约束与原始要求",
   "handover.decisions": "已定决策",
   "handover.description": "创建新的根会话，保留原目标、约束与成果。源任务的运行归属仍留在源会话，目标会重新校验权限。",
+  "handover.dragRequired": "请拖动滑块以交接至 {{mode}}",
   "handover.empty": "确认交接后，新会话会保存当前一致点的背景和文件快照。不会自动执行后续工作。",
   "handover.evidenceNotice": "助手结论仍需审查。已完成操作应复用其结果；结果未知时需先复核。新建交接才会刷新背景，已有快照保持不变。",
   "handover.fileState.changed": "源文件已变化",
