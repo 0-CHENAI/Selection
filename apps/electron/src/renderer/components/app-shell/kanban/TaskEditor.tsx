@@ -8,6 +8,11 @@ import { Spinner, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
 import { TaskYamlImport } from './TaskYamlImport'
 import { TaskProposal } from './TaskProposal'
+import { ResearchConfiguration } from './ResearchConfiguration'
+import { ResearchResults } from './ResearchResults'
+import type { ResearchConfig } from '@craft-agent/shared/tasks/research'
+import { addResearchTemplate } from '@craft-agent/shared/tasks/research-template'
+import type { TaskSpec } from '@craft-agent/shared/tasks'
 import { TaskApproval } from './TaskApproval'
 import { TaskTemplateLibrary } from './TaskTemplateLibrary'
 import { TaskTemplateSaveDialog } from './TaskTemplateSave'
@@ -1549,7 +1554,13 @@ function ExistingTaskEditor({
               <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
               {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
               <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
+              {isTasksOrchestrateEnabled() && !preservedSpec?.research && <Button variant="ghost" disabled={busy} onClick={() => {
+                const question = goal.trim() || t('tasks.research.question')
+                applyWorkbenchSpec(addResearchTemplate(currentSpec() as unknown as TaskSpec, { line: { id: 'main', question, premises: [] }, dimensions: [{ id: 'core', requirement: question, required: true }], sources: [] }) as unknown as EditableTaskSpec)
+              }}>{t('tasks.research.addTemplate')}</Button>}
             </div>
+
+          {!!preservedSpec?.research && <ResearchConfiguration value={preservedSpec.research as ResearchConfig} disabled={busy} onChange={research => { setPreservedSpec(previous => ({ ...previous, research })); markFormChanged() }} />}
 
           <p className="text-xs text-muted-foreground" role="status">{t('tasks.draftVersion', { version: draftVersion.current })}{hasActiveRun && ` · ${t('tasks.savedDefinitionBoundary')}`}</p>
           {(['constraints', 'decisions'] as const).map(field => <div key={field} className="space-y-1">
@@ -1901,6 +1912,7 @@ function ResultsPanel({
       {results.resumedFrom && <p className="break-words text-[12px] text-foreground/70">{t('tasks.resumedFrom')}: {results.resumedFrom}</p>}
       {results.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {results.supersededBy}</p>}
       <ManagedTaskWorkers workers={results.workers} runId={results.runId} onOpenSession={onOpenChildSession} />
+      <ResearchResults research={results.research} onOpenSession={onOpenChildSession} />
       <div className="flex justify-end">
         <Btn variant="secondary" onClick={onApplyRunRevision} disabled={!canApplyRunRevision}>
           {t('tasks.applyRunRevision')}

@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import { resolveNodeStatePill } from './node-state-pill'
+import { ResearchResults } from './ResearchResults'
 import { nodeKindLabelKey, runStatusLabelKey, runnerLabelKey } from './task-labels'
 import type { EditorNodeKind } from './task-spec-form'
 import {
@@ -235,6 +236,7 @@ function WorkbenchInner({ spec, liveRun, onOpenChildSession, compact }: Conducto
         </ol>
       </details> : null}
       {liveRun && <ManagedTaskWorkers workers={liveRun.workers} runId={liveRun.runId} onOpenSession={onOpenChildSession} />}
+      <ResearchResults research={liveRun?.research} onOpenSession={onOpenChildSession} />
       {liveRun?.artifactAvailability && <p role="status" className="break-words text-[12px] text-warning">{t('tasks.artifactAvailability')}: {liveRun.artifactAvailability.nodeIds.join(', ')} — {liveRun.artifactAvailability.reason}</p>}
       {liveRun?.resumedFrom && <p className="break-words text-[12px] text-foreground/70">{t('tasks.resumedFrom')}: {liveRun.resumedFrom}</p>}
       {liveRun?.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {liveRun.supersededBy}</p>}

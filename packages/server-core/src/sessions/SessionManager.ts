@@ -10898,6 +10898,13 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
               snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
               const results = loadTaskResults(source.workspace.rootPath, run.slug, run.runId)
               snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: 'task-result', text: redactHandoverText(JSON.stringify(results)) })
+              if (results.research) {
+                for (const researchSource of results.research.sources) {
+                  if (researchSource.snapshotPath && researchSource.hash && !researchSource.unavailableReason) runFiles.push({ path: researchSource.snapshotPath, expectedHash: researchSource.hash })
+                }
+                snapshot.openQuestions.push(...results.research.dimensions.filter(dimension => dimension.state !== 'covered').map(dimension => `Research ${results.research!.line.id}/${dimension.id}: ${dimension.state}; ${dimension.requirement}`))
+                snapshot.openQuestions.push(...results.research.issues.filter(issue => issue.state !== 'resolved').map(issue => `Research issue ${issue.id} on ${issue.claimRef.id}@${issue.claimRef.version}: ${issue.state}; ${issue.reason}`))
+              }
               for (const artifact of results.nodes.flatMap(node => node.artifacts ?? [])) {
                 if (artifact && typeof artifact === 'object' && 'path' in artifact && typeof artifact.path === 'string' && 'hash' in artifact && typeof artifact.hash === 'string') runFiles.push({ path: resolve(source.workspace.rootPath, artifact.path), expectedHash: artifact.hash })
               }
