@@ -165,3 +165,22 @@ test('only exact runtime recovery tool rows may reconcile a saved transcript tai
   expect(recoveryTranscriptMatches('/unused', c, [user, recovered, { ...recovered, id: 'duplicate' }])).toBe(false)
   expect(recoveryTranscriptMatches('/unused', c, [recovered])).toBe(false)
 })
+
+test('actor/worker attempt identity reloads and fences old task bindings', () => {
+  const root = mkdtempSync(join(tmpdir(), 'checkpoint-task-identity-'))
+  try {
+    const taskIdentity = executionTaskIdentity({ taskSlug: 'task', taskRunId: 'run', taskNodeId: 'a1', taskAttempt: 1, taskRevision: 0, taskActor: { id: 'analyst', persona: 'careful' }, taskWorkerId: 'worker' })
+    const saved = { ...checkpoint, taskIdentity }
+    writeExecutionCheckpoint(root, saved)
+    expect(readExecutionCheckpoint(root)).toEqual({ kind: 'ok', checkpoint: saved })
+    writeExecutionCheckpoint(root, { ...saved, status: 'completed' })
+    const next = { ...saved, generation: 2, userMessageId: 'a2-message', taskIdentity: { ...taskIdentity, taskNodeId: 'a2' } }
+    writeExecutionCheckpoint(root, next)
+    expect(readExecutionCheckpoint(root)).toEqual({ kind: 'ok', checkpoint: next })
+    expect(() => writeExecutionCheckpoint(root, saved)).toThrow('Stale')
+    for (const taskIdentity of [{ taskAttempt: -1 }, { taskRevision: 0.5 }, { taskActor: { id: '' } }, { taskActor: { id: 'actor', extra: 'untrusted' } }, { taskWorkerId: 3 }]) {
+      writeFileSync(join(root, 'data', 'execution-checkpoint.json'), JSON.stringify({ ...checkpoint, taskIdentity }))
+      expect(readExecutionCheckpoint(root).kind).toBe('corrupt')
+    }
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

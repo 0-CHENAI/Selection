@@ -121,6 +121,8 @@ export interface SpawnSessionQualification {
 
 export interface SpawnSessionRequest {
   prompt: string;
+  /** Bind delegated work to an active canonical task; the host validates ownership. */
+  taskBinding?: { runId: string; nodeId: string };
   /** Declared file work uses runtime-owned isolation and verified integration. */
   artifactDelivery?: { inputs: string[]; outputs: Record<string, string> };
   name?: string;
@@ -1344,6 +1346,7 @@ ${formattedMessages}
     const request: SpawnSessionRequest = {
       prompt,
       artifactDelivery: input.artifactDelivery as SpawnSessionRequest['artifactDelivery'],
+      taskBinding: input.taskBinding as SpawnSessionRequest['taskBinding'],
       name: input.name as string | undefined,
       llmConnection: input.llmConnection as string | undefined,
       model: input.model as string | undefined,

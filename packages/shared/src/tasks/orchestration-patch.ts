@@ -22,6 +22,9 @@ export interface OrchestrationPatch {
   cancel?: string[];
   constraints?: string[];
   decisions?: string[];
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: 'structure' | 'repair' | 'research';
   /**
    * Legacy terminal values remain decodable so the validator can reject an old
    * payload deterministically. New typed callers use the narrower session-tool
@@ -38,6 +41,7 @@ export interface PatchContext {
   nodeStates: Record<string, NodeRunState>;
   allowedModels?: ReadonlySet<string>;
   invalidPatchCount?: number;
+  pendingResultIds?: ReadonlySet<string>;
 }
 
 export interface PatchOk {
@@ -81,6 +85,9 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
   if (!patch.rationale?.trim()) return fail(ctx, 'rationale is required');
   if (ctx.seenDecisionIds.has(patch.decisionId)) return fail(ctx, 'decisionId replayed');
   if (patch.baseRevision !== ctx.revision) return fail(ctx, 'stale revision');
+  if (patch.consumedResults?.some(id => !ctx.pendingResultIds?.has(id))) return fail(ctx, 'Unknown or already consumed result event');
+  if (patch.consumedResults && new Set(patch.consumedResults).size !== patch.consumedResults.length) return fail(ctx, 'Duplicate result event');
+  if (patch.plannerPhase !== undefined && !['active', 'draining'].includes(patch.plannerPhase)) return fail(ctx, 'Invalid planner phase');
   if (ctx.revision + 1 >= MAX_SPEC_REVISIONS) return fail(ctx, 'revision cap exceeded');
   // Keep a runtime guard for older/untyped callers even though the public type
   // and tool schema expose scheduling controls only.

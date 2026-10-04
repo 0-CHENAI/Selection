@@ -41,6 +41,7 @@ export type WorkbenchNode = {
   depends_on?: string[]
   permissionMode?: string
   model?: string
+  actor?: { id: string; persona?: string }
   outputs?: Array<{ name?: string; kind?: string; type?: string }>
   loop?: unknown
   for_each?: string
@@ -57,12 +58,13 @@ export interface WorkbenchSpec {
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
 }
 
-export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; labelKey: string; value: string }> {
+export function nodeDefinitionRows(node: WorkbenchNode, nodes?: WorkbenchNode[]): Array<{ key: string; labelKey: string; value: string }> {
   const rows: Array<{ key: string; labelKey: string; value: string }> = []
   if (node.title && node.title !== node.id) rows.push({ key: 'title', labelKey: 'tasks.title', value: node.title })
-  if (effectiveNodeDeps(node).length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: effectiveNodeDeps(node).join(', ') })
+  if (effectiveNodeDeps(node, nodes).length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: effectiveNodeDeps(node, nodes).join(', ') })
   if (node.permissionMode) rows.push({ key: 'permission', labelKey: 'tasks.nodePermission', value: node.permissionMode })
   if (node.model) rows.push({ key: 'model', labelKey: 'tasks.nodeModel', value: node.model })
+  if (node.actor) rows.push({ key: 'actor', labelKey: 'tasks.nodeActor', value: `${node.actor.id}${node.actor.persona ? ` · ${node.actor.persona}` : ''}` })
   const outputs = node.outputs?.map((output) => output.name).filter(Boolean)
   if (outputs?.length) rows.push({ key: 'outputs', labelKey: 'tasks.nodeOutputs', value: outputs.join(', ') })
   if (node.for_each) rows.push({ key: 'for_each', labelKey: 'tasks.nodeControlFlow', value: `for_each: ${node.for_each}` })
@@ -73,9 +75,27 @@ export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; la
 }
 
 interface ConductorWorkbenchProps {
+  onOpenChildSession?: (sessionId: string) => void
   spec: WorkbenchSpec
   liveRun?: TaskRunSnapshotDto | null
   compact?: boolean
+}
+
+export function ManagedTaskWorkers({ workers, runId, onOpenSession }: { workers?: TaskRunSnapshotDto['workers']; runId: string; onOpenSession?: (id: string) => void }) {
+  const { t } = useTranslation()
+  if (!workers?.length) return null
+  return <details className="min-w-0 text-[12.5px]">
+    <summary className="cursor-pointer rounded-sm text-foreground/80 outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('tasks.managedWorkers')} ({workers.length})</summary>
+    <ul className="mt-2 max-h-40 space-y-2 overflow-auto text-foreground/80">
+      {workers.map(worker => <li key={worker.workerId} className="break-words [overflow-wrap:anywhere]">
+        <p>{worker.nodeId} · r{worker.revision} · {t('tasks.nodeAttempt')} {worker.attempt} · {t(`tasks.workerRole.${worker.role}`)} · {t(`tasks.workerState.${worker.state}`)}</p>
+        <p className="font-mono text-[11px] text-foreground/70">{worker.sessionId ?? worker.workerId} · {runId}</p>
+        {worker.sessionId && onOpenSession ? <button type="button" className="rounded-sm text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onOpenSession(worker.sessionId!)}>{t('tasks.openChildSession')}</button> : null}
+        {worker.output?.text ? <p className="whitespace-pre-wrap">{worker.output.text}</p> : null}
+        {worker.reason ? <p>{worker.reason}</p> : null}
+      </li>)}
+    </ul>
+  </details>
 }
 
 export function runtimeNodesForDefinition(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
@@ -126,7 +146,7 @@ function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun
   return toFlow(laid, spec, live, translate)
 }
 
-function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
+function WorkbenchInner({ spec, liveRun, onOpenChildSession, compact }: ConductorWorkbenchProps) {
   const { t } = useTranslation()
   const { fitView } = useReactFlow()
   const graphContainer = React.useRef<HTMLDivElement>(null)
@@ -179,13 +199,14 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   const runStatusKey = runStatusLabelKey(liveRun?.status)
 
   return (
-    <div className="task-workbench flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-      <div className="flex items-center gap-2 text-[12.5px] text-foreground/55">
+    <div className="task-workbench flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-foreground/70" aria-live="polite">
         <span>{t(runnerLabelKey(spec.runner, orchestrateOn))}</span>
         <span className="text-foreground/40">{t('tasks.canvasReadOnlyHint')}</span>
         {liveRun && (
           <span className="ml-auto flex flex-wrap items-center gap-2">
             <span>{t('tasks.tabLiveRun')}: {runStatusKey ? t(runStatusKey) : liveRun.status}</span>
+            {liveRun.planner && <span>{t(`tasks.planner.${liveRun.planner.phase}`)} · {t('tasks.planner.pending', { count: liveRun.planner.pendingResults.length })}</span>}
             {liveRun.status === 'waiting-coordinator' && (
               <span>{t('tasks.coordinatorWaiting')}: {liveRun.blockers?.join(', ')}</span>
             )}
@@ -199,7 +220,25 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
           </span>
         )}
       </div>
-      <div className="task-workbench-grid grid min-h-0 min-w-0 flex-1 gap-3">
+      {liveRun?.planChanges?.length ? <details className="min-w-0 text-[12.5px]">
+        <summary className="cursor-pointer rounded-sm text-foreground/80 outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('tasks.planChanges')}</summary>
+        <ol className="mt-2 max-h-32 space-y-2 overflow-auto text-foreground/80">
+          {liveRun.planChanges.map(change => <li key={change.decisionId} className="break-words [overflow-wrap:anywhere]">
+            <span className="font-medium">r{change.revision} · {t(`tasks.planChange.${change.kind}`)}</span>
+            <p>{change.reason}</p>
+            <p className="text-foreground/70">
+              {change.added.length ? `${t('tasks.planChange.added')}: ${change.added.join(', ')}. ` : ''}
+              {change.updated.length ? `${t('tasks.planChange.updated')}: ${change.updated.join(', ')}. ` : ''}
+              {change.cancelled.length ? `${t('tasks.planChange.cancelled')}: ${change.cancelled.join(', ')}` : ''}
+            </p>
+          </li>)}
+        </ol>
+      </details> : null}
+      {liveRun && <ManagedTaskWorkers workers={liveRun.workers} runId={liveRun.runId} onOpenSession={onOpenChildSession} />}
+      {liveRun?.artifactAvailability && <p role="status" className="break-words text-[12px] text-warning">{t('tasks.artifactAvailability')}: {liveRun.artifactAvailability.nodeIds.join(', ')} — {liveRun.artifactAvailability.reason}</p>}
+      {liveRun?.resumedFrom && <p className="break-words text-[12px] text-foreground/70">{t('tasks.resumedFrom')}: {liveRun.resumedFrom}</p>}
+      {liveRun?.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {liveRun.supersededBy}</p>}
+      <div className="task-workbench-grid grid min-h-[320px] min-w-0 flex-1 shrink-0 gap-3">
         <div ref={graphContainer} className="overflow-hidden rounded-lg border border-border bg-card">
           <ReactFlow
             nodes={nodes}
@@ -232,7 +271,7 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
                   {selectedPill.labelKey ? t(selectedPill.labelKey) : selectedLive}
                 </div>
               )}
-              {nodeDefinitionRows(selectedSpec).map((row) => (
+              {nodeDefinitionRows(selectedSpec, spec.nodes).map((row) => (
                 <div key={row.key} className="text-foreground/55">
                   <span className="font-medium text-foreground/70">{t(row.labelKey)}: </span>
                   <span className="break-words text-foreground/80">{row.value}</span>

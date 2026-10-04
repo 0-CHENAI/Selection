@@ -1,0 +1,1797 @@
+{
+  "issue": 454,
+  "orderedSteps": [
+    "dynamic-plan",
+    "actor-worker-cooperation",
+    "recovery-successor-reuse"
+  ],
+  "realExecutionRecords": [
+    {
+      "case": "F4-a",
+      "slug": "f4-a-1791078012437",
+      "runId": "run-1791078012461",
+      "rootSessionId": "261004-prime-laurel",
+      "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+      "model": "gpt-6-luna",
+      "connection": "pi-api-key-2",
+      "permissionMode": "safe",
+      "timingControl": "B real-model send held until D settles; planner and every output use production model interfaces",
+      "fixtureSha256": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+      "terminal": {
+        "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+        "slug": "f4-a-1791078012437",
+        "runId": "run-1791078012461",
+        "taskId": "f4-a-1791078012437",
+        "status": "completed",
+        "canRetryFailedNodes": false,
+        "orchestratorSessionId": "261004-prime-laurel",
+        "tokensUsed": 75427,
+        "revision": 1,
+        "planChanges": [
+          {
+            "revision": 1,
+            "decisionId": "decision-add-d-on-a-result-20261004",
+            "kind": "structure",
+            "reason": "A's completed result has arrived and D does not yet exist. The frozen decision explicitly requires this one patch to verify tax basis before C reports; no locked scope or permissions are changed.",
+            "added": [
+              "d"
+            ],
+            "updated": [
+              "c"
+            ],
+            "cancelled": []
+          }
+        ],
+        "planner": {
+          "phase": "exhausted",
+          "pendingResults": [],
+          "consumedResults": 4
+        },
+        "metrics": {
+          "elapsedMs": 148692,
+          "queueMs": 32,
+          "modelMs": 155792,
+          "tokensUsed": 75427,
+          "retries": 0,
+          "repairs": 0,
+          "coordinatorWaitMs": 49389,
+          "coordinatorWaits": 5,
+          "cacheHits": 0,
+          "cacheMisses": 0,
+          "cacheBypasses": 0,
+          "criticalPathNodeIds": []
+        },
+        "nodes": [
+          {
+            "id": "a",
+            "title": "a",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-active-steel",
+                "state": "done",
+                "revision": 0
+              }
+            ],
+            "definitionId": "a",
+            "state": "done",
+            "sessionId": "261004-active-steel",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "tokensUsed": 18708,
+            "elapsedMs": 19666,
+            "queueMs": 14
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-golden-forest",
+                "state": "done",
+                "revision": 0
+              }
+            ],
+            "definitionId": "b",
+            "state": "done",
+            "sessionId": "261004-golden-forest",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "tokensUsed": 18864,
+            "elapsedMs": 71801,
+            "queueMs": 10
+          },
+          {
+            "id": "c",
+            "title": "c",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-wide-aspen",
+                "state": "done",
+                "revision": 1
+              }
+            ],
+            "definitionId": "c",
+            "state": "done",
+            "sessionId": "261004-wide-aspen",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "tokensUsed": 18839,
+            "elapsedMs": 37545,
+            "queueMs": 5
+          },
+          {
+            "id": "d",
+            "title": "d",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-deft-seal",
+                "state": "done",
+                "revision": 1
+              }
+            ],
+            "definitionId": "d",
+            "state": "done",
+            "sessionId": "261004-deft-seal",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "tokensUsed": 19016,
+            "elapsedMs": 26780,
+            "queueMs": 3
+          }
+        ]
+      },
+      "results": {
+        "taskId": "f4-a-1791078012437",
+        "orchestratorSessionId": "261004-prime-laurel",
+        "slug": "f4-a-1791078012437",
+        "runId": "run-1791078012461",
+        "runIds": [
+          "run-1791078012461"
+        ],
+        "verdict": {
+          "result": "pass",
+          "reason": "All acceptance criteria are satisfied by completed node outputs A, B, C, and D."
+        },
+        "verdicts": [
+          {
+            "result": "pass",
+            "reason": "All acceptance criteria are satisfied by completed node outputs A, B, C, and D."
+          }
+        ],
+        "repair": {
+          "used": 0,
+          "max": 3
+        },
+        "runStatus": "completed",
+        "tokensUsed": 75427,
+        "acceptanceCriteria": "报告必须包含 A 两年成本 1000000 元，B 口径未核验、税口径未核验，不编造税额或风险，并引用 A/B/D 输入。",
+        "nodes": [
+          {
+            "id": "a",
+            "title": "a",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-active-steel",
+            "output": "方案 A 两年总成本为 1,000,000 元。",
+            "outputs": {
+              "cost": 1000000
+            }
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-golden-forest",
+            "output": "方案 B 的成本口径在固定资料中标为“待核对”，且注明暂不能与 A 直接比较，因此未核实。",
+            "outputs": {
+              "verified": false
+            }
+          },
+          {
+            "id": "d",
+            "title": "d",
+            "state": "done",
+            "attempt": 1,
+            "revision": 1,
+            "sessionId": "261004-deft-seal",
+            "output": "该固定资料只给出方案 A 的两年总成本，方案 B 成本口径待核对；未说明任何税口径，因此无法证实税口径。",
+            "outputs": {
+              "tax_verified": false
+            }
+          },
+          {
+            "id": "c",
+            "title": "c",
+            "state": "done",
+            "attempt": 1,
+            "revision": 1,
+            "sessionId": "261004-wide-aspen",
+            "output": "A cost=1000000；B verified=false；tax_verified=false。风险资料限制：只能只读指定固定资料；当前证据不足以证实税口径，因此 tax_verified 为 false，不作额外推断。",
+            "outputs": {
+              "a_cost": 1000000,
+              "b_verified": false
+            }
+          }
+        ],
+        "revision": 1
+      },
+      "log": [
+        {
+          "kind": "run-started",
+          "taskId": "f4-a-1791078012437",
+          "runId": "run-1791078012461",
+          "orchestratorSessionId": "261004-prime-laurel",
+          "t": "2026-10-04T01:40:12.462Z",
+          "seq": 1,
+          "revision": 0
+        },
+        {
+          "kind": "run-waiting-coordinator",
+          "t": "2026-10-04T01:40:12.464Z",
+          "seq": 2,
+          "revision": 0
+        },
+        {
+          "kind": "coordinator-request",
+          "checkpointId": "cp-run-1791078012461-0-first-schedule-2",
+          "reason": "first-schedule",
+          "revision": 0,
+          "deadline": "2026-10-04T01:42:12.464Z",
+          "resultEventIds": [],
+          "t": "2026-10-04T01:40:12.464Z",
+          "seq": 3
+        },
+        {
+          "t": "2026-10-04T01:40:32.617Z",
+          "seq": 4,
+          "revision": 0,
+          "kind": "coordinator-decision",
+          "checkpointId": "cp-run-1791078012461-0-first-schedule-2",
+          "decisionId": "decision-first-schedule-continue-20261004",
+          "action": "continue",
+          "baseRevision": 0,
+          "consumedResults": [],
+          "plannerPhase": "active"
+        },
+        {
+          "kind": "run-resumed",
+          "t": "2026-10-04T01:40:32.617Z",
+          "seq": 5,
+          "revision": 0
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "a",
+          "t": "2026-10-04T01:40:32.619Z",
+          "seq": 6,
+          "revision": 0
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "b",
+          "t": "2026-10-04T01:40:32.621Z",
+          "seq": 7,
+          "revision": 0
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "b",
+          "sessionId": "261004-golden-forest",
+          "t": "2026-10-04T01:40:32.630Z",
+          "seq": 8,
+          "revision": 0
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "b",
+          "sessionId": "261004-golden-forest",
+          "inputs": {},
+          "t": "2026-10-04T01:40:32.631Z",
+          "seq": 9,
+          "revision": 0
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "a",
+          "sessionId": "261004-active-steel",
+          "t": "2026-10-04T01:40:32.632Z",
+          "seq": 10,
+          "revision": 0
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "a",
+          "sessionId": "261004-active-steel",
+          "inputs": {},
+          "t": "2026-10-04T01:40:32.633Z",
+          "seq": 11,
+          "revision": 0
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "a",
+          "sessionId": "261004-active-steel",
+          "state": "done",
+          "resultEvent": {
+            "id": "run-1791078012461:a:1:0:done",
+            "nodeId": "a",
+            "attempt": 1,
+            "revision": 0,
+            "state": "done",
+            "output": {
+              "text": "方案 A 两年总成本为 1,000,000 元。",
+              "params": {
+                "cost": 1000000
+              }
+            },
+            "outputHash": "ba8b7869450c0baa9fe3a1f5220a9c9fcb655d46e9d2deaa3548bacd9a3bc639"
+          },
+          "t": "2026-10-04T01:40:52.299Z",
+          "seq": 12,
+          "revision": 0
+        },
+        {
+          "kind": "run-waiting-coordinator",
+          "t": "2026-10-04T01:40:52.300Z",
+          "seq": 13,
+          "revision": 0
+        },
+        {
+          "kind": "coordinator-request",
+          "checkpointId": "cp-run-1791078012461-0-new-result-13",
+          "reason": "new-result",
+          "revision": 0,
+          "deadline": "2026-10-04T01:42:52.300Z",
+          "resultEventIds": [
+            "run-1791078012461:a:1:0:done"
+          ],
+          "t": "2026-10-04T01:40:52.300Z",
+          "seq": 14
+        },
+        {
+          "t": "2026-10-04T01:41:02.086Z",
+          "seq": 15,
+          "revision": 1,
+          "kind": "coordinator-decision",
+          "checkpointId": "cp-run-1791078012461-0-new-result-13",
+          "decisionId": "decision-add-d-on-a-result-20261004",
+          "action": "patch",
+          "baseRevision": 0,
+          "consumedResults": [
+            "run-1791078012461:a:1:0:done"
+          ],
+          "plannerPhase": "active"
+        },
+        {
+          "t": "2026-10-04T01:41:02.086Z",
+          "seq": 16,
+          "revision": 1,
+          "kind": "orchestration-patch",
+          "decisionId": "decision-add-d-on-a-result-20261004",
+          "baseRevision": 0,
+          "rationale": "A's completed result has arrived and D does not yet exist. The frozen decision explicitly requires this one patch to verify tax basis before C reports; no locked scope or permissions are changed.",
+          "added": [
+            "d"
+          ],
+          "updated": [
+            "c"
+          ],
+          "consumedResults": [
+            "run-1791078012461:a:1:0:done"
+          ],
+          "plannerPhase": "active",
+          "changeKind": "structure"
+        },
+        {
+          "kind": "run-resumed",
+          "t": "2026-10-04T01:41:02.087Z",
+          "seq": 17,
+          "revision": 1
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "d",
+          "t": "2026-10-04T01:41:02.087Z",
+          "seq": 18,
+          "revision": 1
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "d",
+          "sessionId": "261004-deft-seal",
+          "t": "2026-10-04T01:41:02.091Z",
+          "seq": 19,
+          "revision": 1
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "d",
+          "sessionId": "261004-deft-seal",
+          "inputs": {},
+          "t": "2026-10-04T01:41:02.091Z",
+          "seq": 20,
+          "revision": 1
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "d",
+          "sessionId": "261004-deft-seal",
+          "state": "done",
+          "resultEvent": {
+            "id": "run-1791078012461:d:1:1:done",
+            "nodeId": "d",
+            "attempt": 1,
+            "revision": 1,
+            "state": "done",
+            "output": {
+              "text": "该固定资料只给出方案 A 的两年总成本，方案 B 成本口径待核对；未说明任何税口径，因此无法证实税口径。",
+              "params": {
+                "tax_verified": false
+              }
+            },
+            "outputHash": "cef887764bd1804d99987012a42d6b883603f8dc65475160b8a61aa6660a28e6"
+          },
+          "t": "2026-10-04T01:41:28.871Z",
+          "seq": 21,
+          "revision": 1
+        },
+        {
+          "kind": "run-waiting-coordinator",
+          "t": "2026-10-04T01:41:28.872Z",
+          "seq": 22,
+          "revision": 1
+        },
+        {
+          "kind": "coordinator-request",
+          "checkpointId": "cp-run-1791078012461-1-new-result-22",
+          "reason": "new-result",
+          "revision": 1,
+          "deadline": "2026-10-04T01:43:28.872Z",
+          "resultEventIds": [
+            "run-1791078012461:d:1:1:done"
+          ],
+          "t": "2026-10-04T01:41:28.872Z",
+          "seq": 23
+        },
+        {
+          "t": "2026-10-04T01:41:36.231Z",
+          "seq": 24,
+          "revision": 1,
+          "kind": "coordinator-decision",
+          "checkpointId": "cp-run-1791078012461-1-new-result-22",
+          "decisionId": "decision-consume-d-continue-20261004",
+          "action": "continue",
+          "baseRevision": 1,
+          "consumedResults": [
+            "run-1791078012461:d:1:1:done"
+          ],
+          "plannerPhase": "active"
+        },
+        {
+          "kind": "run-resumed",
+          "t": "2026-10-04T01:41:36.231Z",
+          "seq": 25,
+          "revision": 1
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "b",
+          "sessionId": "261004-golden-forest",
+          "state": "done",
+          "resultEvent": {
+            "id": "run-1791078012461:b:1:0:done",
+            "nodeId": "b",
+            "attempt": 1,
+            "revision": 0,
+            "state": "done",
+            "output": {
+              "text": "方案 B 的成本口径在固定资料中标为“待核对”，且注明暂不能与 A 直接比较，因此未核实。",
+              "params": {
+                "verified": false
+              }
+            },
+            "outputHash": "9f3b88cb37263b238e04a47732b4824bbcf8102dc8ce747789c659879d89ee78"
+          },
+          "t": "2026-10-04T01:41:44.431Z",
+          "seq": 26,
+          "revision": 1
+        },
+        {
+          "kind": "run-waiting-coordinator",
+          "t": "2026-10-04T01:41:44.432Z",
+          "seq": 27,
+          "revision": 1
+        },
+        {
+          "kind": "coordinator-request",
+          "checkpointId": "cp-run-1791078012461-1-new-result-27",
+          "reason": "new-result",
+          "revision": 1,
+          "deadline": "2026-10-04T01:43:44.432Z",
+          "resultEventIds": [
+            "run-1791078012461:b:1:0:done"
+          ],
+          "t": "2026-10-04T01:41:44.432Z",
+          "seq": 28
+        },
+        {
+          "t": "2026-10-04T01:41:52.200Z",
+          "seq": 29,
+          "revision": 1,
+          "kind": "coordinator-decision",
+          "checkpointId": "cp-run-1791078012461-1-new-result-27",
+          "decisionId": "decision-consume-b-continue-20261004",
+          "action": "continue",
+          "baseRevision": 1,
+          "consumedResults": [
+            "run-1791078012461:b:1:0:done"
+          ],
+          "plannerPhase": "active"
+        },
+        {
+          "kind": "run-resumed",
+          "t": "2026-10-04T01:41:52.200Z",
+          "seq": 30,
+          "revision": 1
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "c",
+          "t": "2026-10-04T01:41:52.201Z",
+          "seq": 31,
+          "revision": 1
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "c",
+          "sessionId": "261004-wide-aspen",
+          "t": "2026-10-04T01:41:52.205Z",
+          "seq": 32,
+          "revision": 1
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "c",
+          "sessionId": "261004-wide-aspen",
+          "inputs": {},
+          "t": "2026-10-04T01:41:52.205Z",
+          "seq": 33,
+          "revision": 1
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "c",
+          "sessionId": "261004-wide-aspen",
+          "state": "done",
+          "resultEvent": {
+            "id": "run-1791078012461:c:1:1:done",
+            "nodeId": "c",
+            "attempt": 1,
+            "revision": 1,
+            "state": "done",
+            "output": {
+              "text": "A cost=1000000；B verified=false；tax_verified=false。风险资料限制：只能只读指定固定资料；当前证据不足以证实税口径，因此 tax_verified 为 false，不作额外推断。",
+              "params": {
+                "a_cost": 1000000,
+                "b_verified": false
+              }
+            },
+            "outputHash": "08e7338ccc2d01e4c25cc288d3ca2726e6f6a6e99a5f1c9b90de3e2308b867c6"
+          },
+          "t": "2026-10-04T01:42:29.750Z",
+          "seq": 34,
+          "revision": 1
+        },
+        {
+          "kind": "run-waiting-coordinator",
+          "t": "2026-10-04T01:42:29.751Z",
+          "seq": 35,
+          "revision": 1
+        },
+        {
+          "kind": "coordinator-request",
+          "checkpointId": "cp-run-1791078012461-1-before-verify-35",
+          "reason": "before-verify",
+          "revision": 1,
+          "deadline": "2026-10-04T01:44:29.751Z",
+          "resultEventIds": [
+            "run-1791078012461:c:1:1:done"
+          ],
+          "t": "2026-10-04T01:42:29.752Z",
+          "seq": 36
+        },
+        {
+          "t": "2026-10-04T01:42:34.072Z",
+          "seq": 37,
+          "revision": 1,
+          "kind": "coordinator-decision",
+          "checkpointId": "cp-run-1791078012461-1-before-verify-35",
+          "decisionId": "decision-drain-after-c-20261004",
+          "action": "continue",
+          "baseRevision": 1,
+          "consumedResults": [
+            "run-1791078012461:c:1:1:done"
+          ],
+          "plannerPhase": "exhausted"
+        },
+        {
+          "kind": "run-resumed",
+          "t": "2026-10-04T01:42:34.073Z",
+          "seq": 38,
+          "revision": 1
+        },
+        {
+          "kind": "run-verifying",
+          "t": "2026-10-04T01:42:34.073Z",
+          "seq": 39,
+          "revision": 1
+        },
+        {
+          "kind": "verdict",
+          "result": "pass",
+          "reason": "All acceptance criteria are satisfied by completed node outputs A, B, C, and D.",
+          "t": "2026-10-04T01:42:41.152Z",
+          "seq": 40,
+          "revision": 1
+        },
+        {
+          "kind": "run-completed",
+          "tokensUsed": 75427,
+          "t": "2026-10-04T01:42:41.153Z",
+          "seq": 41,
+          "revision": 1
+        },
+        {
+          "kind": "metrics",
+          "metrics": {
+            "elapsedMs": 148691,
+            "queueMs": 32,
+            "modelMs": 155792,
+            "tokensUsed": 75427,
+            "retries": 0,
+            "repairs": 0,
+            "coordinatorWaitMs": 49389,
+            "coordinatorWaits": 5,
+            "cacheHits": 0,
+            "cacheMisses": 0,
+            "cacheBypasses": 0,
+            "criticalPathNodeIds": []
+          },
+          "t": "2026-10-04T01:42:41.153Z",
+          "seq": 42,
+          "revision": 1
+        }
+      ]
+    },
+    {
+      "case": "F4-c",
+      "slug": "f4-c-1791079613512",
+      "runId": "run-1791079613543",
+      "rootSessionId": "261004-fresh-coral",
+      "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+      "model": "gpt-6-luna",
+      "connection": "pi-api-key-2",
+      "permissionMode": "safe",
+      "timingControl": "B and owned reviewer real-model sends held until the A2 primary turn completes; all outputs use real model interfaces",
+      "nonce": "ececd9e0-74c8-4a13-b9a6-a97fac8a8957",
+      "primaryWaitObserved": true,
+      "fixtureSha256": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+      "terminal": {
+        "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+        "slug": "f4-c-1791079613512",
+        "runId": "run-1791079613543",
+        "taskId": "f4-c-1791079613512",
+        "status": "completed",
+        "canRetryFailedNodes": false,
+        "orchestratorSessionId": "261004-fresh-coral",
+        "tokensUsed": 55723,
+        "revision": 0,
+        "workers": [
+          {
+            "workerId": "633dfc8c-32e4-4a16-9fa1-3aef4d587b1c",
+            "rootSessionId": "261004-fresh-coral",
+            "parentSessionId": "261004-fresh-coral",
+            "nodeId": "a2",
+            "attempt": 1,
+            "revision": 0,
+            "role": "reviewer",
+            "state": "done",
+            "sessionId": "261004-brave-eclipse",
+            "output": {
+              "text": "- **方案 A：**两年总成本为 **100 万元（1,000,000 元）**。\n- **方案 B 限制：**成本口径待核对，因此目前不能与 A 直接比较。\n- **其他限制：**风险资料有一项缺口尚未补齐。文件说明这些是固定验收资料，不代表市场事实。"
+            },
+            "tokensUsed": 18068
+          }
+        ],
+        "metrics": {
+          "elapsedMs": 55464,
+          "queueMs": 28,
+          "modelMs": 104038,
+          "tokensUsed": 55723,
+          "retries": 0,
+          "repairs": 0,
+          "coordinatorWaitMs": 0,
+          "coordinatorWaits": 0,
+          "cacheHits": 0,
+          "cacheMisses": 0,
+          "cacheBypasses": 0,
+          "criticalPathNodeIds": []
+        },
+        "nodes": [
+          {
+            "id": "a1",
+            "title": "a1",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-fit-ocean",
+                "state": "done",
+                "revision": 0
+              }
+            ],
+            "definitionId": "a1",
+            "state": "done",
+            "sessionId": "261004-fit-ocean",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "actor": {
+              "id": "analyst",
+              "persona": "careful cost analyst"
+            },
+            "tokensUsed": 19293,
+            "elapsedMs": 24913,
+            "queueMs": 17
+          },
+          {
+            "id": "a2",
+            "title": "a2",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-fit-ocean",
+                "state": "done",
+                "revision": 0
+              }
+            ],
+            "definitionId": "a2",
+            "state": "done",
+            "sessionId": "261004-fit-ocean",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "actor": {
+              "id": "analyst",
+              "persona": "careful cost analyst"
+            },
+            "tokensUsed": 19293,
+            "elapsedMs": 23675,
+            "queueMs": 3
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "attempts": [
+              {
+                "attempt": 1,
+                "sessionId": "261004-wise-sparrow",
+                "state": "done",
+                "revision": 0
+              }
+            ],
+            "definitionId": "b",
+            "state": "done",
+            "sessionId": "261004-wise-sparrow",
+            "attempt": 1,
+            "retryCount": 0,
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "actor": {
+              "id": "independent"
+            },
+            "tokensUsed": 18362,
+            "elapsedMs": 55450,
+            "queueMs": 8
+          }
+        ]
+      },
+      "results": {
+        "taskId": "f4-c-1791079613512",
+        "orchestratorSessionId": "261004-fresh-coral",
+        "slug": "f4-c-1791079613512",
+        "runId": "run-1791079613543",
+        "runIds": [
+          "run-1791079613543"
+        ],
+        "verdicts": [],
+        "repair": {
+          "used": 0,
+          "max": 3
+        },
+        "runStatus": "completed",
+        "tokensUsed": 55723,
+        "nodes": [
+          {
+            "id": "a1",
+            "title": "a1",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-fit-ocean",
+            "output": "方案 A 两年总成本为 1,000,000 元。",
+            "outputs": {
+              "cost": 1000000
+            }
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-wise-sparrow",
+            "output": "方案 B 成本口径待核对，尚未验证。",
+            "outputs": {
+              "verified": false
+            }
+          },
+          {
+            "id": "a2",
+            "title": "a2",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-fit-ocean",
+            "output": "The marker is recalled from the prior task’s instruction, and A’s cost is from the fixed fixture read there.",
+            "outputs": {
+              "marker": "ececd9e0-74c8-4a13-b9a6-a97fac8a8957",
+              "cost": 1000000
+            }
+          }
+        ],
+        "revision": 0
+      },
+      "log": [
+        {
+          "kind": "run-started",
+          "taskId": "f4-c-1791079613512",
+          "runId": "run-1791079613543",
+          "orchestratorSessionId": "261004-fresh-coral",
+          "t": "2026-10-04T02:06:53.545Z",
+          "seq": 1,
+          "revision": 0
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "a1",
+          "t": "2026-10-04T02:06:53.546Z",
+          "seq": 2,
+          "revision": 0
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "b",
+          "t": "2026-10-04T02:06:53.548Z",
+          "seq": 3,
+          "revision": 0
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "b",
+          "sessionId": "261004-wise-sparrow",
+          "generation": 1,
+          "actor": {
+            "id": "independent"
+          },
+          "reused": false,
+          "t": "2026-10-04T02:06:53.556Z",
+          "seq": 4,
+          "revision": 0
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "b",
+          "sessionId": "261004-wise-sparrow",
+          "inputs": {},
+          "t": "2026-10-04T02:06:53.556Z",
+          "seq": 5,
+          "revision": 0
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "a1",
+          "sessionId": "261004-fit-ocean",
+          "generation": 1,
+          "actor": {
+            "id": "analyst",
+            "persona": "careful cost analyst"
+          },
+          "reused": false,
+          "t": "2026-10-04T02:06:53.557Z",
+          "seq": 6,
+          "revision": 0
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "a1",
+          "sessionId": "261004-fit-ocean",
+          "inputs": {},
+          "t": "2026-10-04T02:06:53.558Z",
+          "seq": 7,
+          "revision": 0
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "a1",
+          "sessionId": "261004-fit-ocean",
+          "state": "done",
+          "t": "2026-10-04T02:07:18.476Z",
+          "seq": 8,
+          "revision": 0
+        },
+        {
+          "kind": "node-scheduled",
+          "nodeId": "a2",
+          "t": "2026-10-04T02:07:18.477Z",
+          "seq": 9,
+          "revision": 0
+        },
+        {
+          "kind": "node-spawned",
+          "nodeId": "a2",
+          "sessionId": "261004-fit-ocean",
+          "generation": 2,
+          "actor": {
+            "id": "analyst",
+            "persona": "careful cost analyst"
+          },
+          "reused": true,
+          "t": "2026-10-04T02:07:18.479Z",
+          "seq": 10,
+          "revision": 0
+        },
+        {
+          "kind": "node-artifact-inputs",
+          "nodeId": "a2",
+          "sessionId": "261004-fit-ocean",
+          "inputs": {},
+          "t": "2026-10-04T02:07:18.480Z",
+          "seq": 11,
+          "revision": 0
+        },
+        {
+          "kind": "task-worker",
+          "worker": {
+            "workerId": "633dfc8c-32e4-4a16-9fa1-3aef4d587b1c",
+            "rootSessionId": "261004-fresh-coral",
+            "parentSessionId": "261004-fresh-coral",
+            "nodeId": "a2",
+            "attempt": 1,
+            "revision": 0,
+            "role": "reviewer",
+            "state": "reserved"
+          },
+          "t": "2026-10-04T02:07:18.482Z",
+          "seq": 12,
+          "revision": 0
+        },
+        {
+          "kind": "task-worker",
+          "worker": {
+            "workerId": "633dfc8c-32e4-4a16-9fa1-3aef4d587b1c",
+            "rootSessionId": "261004-fresh-coral",
+            "parentSessionId": "261004-fresh-coral",
+            "nodeId": "a2",
+            "attempt": 1,
+            "revision": 0,
+            "role": "reviewer",
+            "state": "running",
+            "sessionId": "261004-brave-eclipse"
+          },
+          "t": "2026-10-04T02:07:18.484Z",
+          "seq": 13,
+          "revision": 0
+        },
+        {
+          "kind": "node-awaiting-workers",
+          "nodeId": "a2",
+          "sessionId": "261004-fit-ocean",
+          "generation": 2,
+          "reason": "complete",
+          "finalText": "已提交：我记得的上下文标记来自前一任务的指令；方案 A 两年成本为 1,000,000 元。",
+          "output": {
+            "text": "The marker is recalled from the prior task’s instruction, and A’s cost is from the fixed fixture read there.",
+            "params": {
+              "marker": "ececd9e0-74c8-4a13-b9a6-a97fac8a8957",
+              "cost": 1000000
+            }
+          },
+          "inputTokens": 19212,
+          "outputTokens": 81,
+          "t": "2026-10-04T02:07:33.696Z",
+          "seq": 14,
+          "revision": 0
+        },
+        {
+          "kind": "task-worker",
+          "worker": {
+            "workerId": "633dfc8c-32e4-4a16-9fa1-3aef4d587b1c",
+            "rootSessionId": "261004-fresh-coral",
+            "parentSessionId": "261004-fresh-coral",
+            "nodeId": "a2",
+            "attempt": 1,
+            "revision": 0,
+            "role": "reviewer",
+            "state": "done",
+            "sessionId": "261004-brave-eclipse",
+            "output": {
+              "text": "- **方案 A：**两年总成本为 **100 万元（1,000,000 元）**。\n- **方案 B 限制：**成本口径待核对，因此目前不能与 A 直接比较。\n- **其他限制：**风险资料有一项缺口尚未补齐。文件说明这些是固定验收资料，不代表市场事实。"
+            },
+            "tokensUsed": 18068
+          },
+          "t": "2026-10-04T02:07:42.153Z",
+          "seq": 15,
+          "revision": 0
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "a2",
+          "sessionId": "261004-fit-ocean",
+          "state": "done",
+          "t": "2026-10-04T02:07:42.154Z",
+          "seq": 16,
+          "revision": 0
+        },
+        {
+          "kind": "node-finished",
+          "nodeId": "b",
+          "sessionId": "261004-wise-sparrow",
+          "state": "done",
+          "t": "2026-10-04T02:07:49.005Z",
+          "seq": 17,
+          "revision": 0
+        },
+        {
+          "kind": "run-completed",
+          "tokensUsed": 55723,
+          "t": "2026-10-04T02:07:49.007Z",
+          "seq": 18,
+          "revision": 0
+        },
+        {
+          "kind": "metrics",
+          "metrics": {
+            "elapsedMs": 55463,
+            "queueMs": 28,
+            "modelMs": 104038,
+            "tokensUsed": 55723,
+            "retries": 0,
+            "repairs": 0,
+            "coordinatorWaitMs": 0,
+            "coordinatorWaits": 0,
+            "cacheHits": 0,
+            "cacheMisses": 0,
+            "cacheBypasses": 0,
+            "criticalPathNodeIds": []
+          },
+          "t": "2026-10-04T02:07:49.007Z",
+          "seq": 19,
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "case": "F4-b",
+      "slug": "f4-b-1791079747396",
+      "rootSessionId": "261004-bold-tulip",
+      "model": "gpt-6-luna",
+      "connection": "pi-api-key-2",
+      "permissionMode": "safe",
+      "fixtureSha256": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+      "changedInput": {
+        "budget": [
+          1000000,
+          1100000
+        ]
+      },
+      "records": [
+        {
+          "snapshot": {
+            "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+            "slug": "f4-b-1791079747396",
+            "runId": "run-1791079747421",
+            "taskId": "f4-b-1791079747396",
+            "status": "completed",
+            "canRetryFailedNodes": false,
+            "orchestratorSessionId": "261004-bold-tulip",
+            "tokensUsed": 55704,
+            "revision": 0,
+            "metrics": {
+              "elapsedMs": 45464,
+              "queueMs": 28,
+              "modelMs": 57238,
+              "tokensUsed": 55704,
+              "retries": 0,
+              "repairs": 0,
+              "coordinatorWaitMs": 0,
+              "coordinatorWaits": 0,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheBypasses": 0,
+              "criticalPathNodeIds": []
+            },
+            "nodes": [
+              {
+                "id": "a",
+                "title": "a",
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "sessionId": "261004-mild-island",
+                    "state": "done",
+                    "revision": 0
+                  }
+                ],
+                "definitionId": "a",
+                "state": "done",
+                "sessionId": "261004-mild-island",
+                "attempt": 1,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "tokensUsed": 18508,
+                "elapsedMs": 15984,
+                "queueMs": 19
+              },
+              {
+                "id": "b",
+                "title": "b",
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "sessionId": "261004-golden-wolf",
+                    "state": "done",
+                    "revision": 0
+                  }
+                ],
+                "definitionId": "b",
+                "state": "done",
+                "sessionId": "261004-golden-wolf",
+                "attempt": 1,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "tokensUsed": 18193,
+                "elapsedMs": 11805,
+                "queueMs": 6,
+                "cacheStatus": "miss"
+              },
+              {
+                "id": "c",
+                "title": "c",
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "sessionId": "261004-silver-amber",
+                    "state": "done",
+                    "revision": 0
+                  }
+                ],
+                "definitionId": "c",
+                "state": "done",
+                "sessionId": "261004-silver-amber",
+                "attempt": 1,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "tokensUsed": 19003,
+                "elapsedMs": 29449,
+                "queueMs": 3
+              }
+            ]
+          },
+          "results": {
+            "taskId": "f4-b-1791079747396",
+            "orchestratorSessionId": "261004-bold-tulip",
+            "slug": "f4-b-1791079747396",
+            "runId": "run-1791079747421",
+            "runIds": [
+              "run-1791079747421"
+            ],
+            "verdicts": [],
+            "repair": {
+              "used": 0,
+              "max": 3
+            },
+            "runStatus": "completed",
+            "tokensUsed": 55704,
+            "nodes": [
+              {
+                "id": "a",
+                "title": "a",
+                "state": "done",
+                "attempt": 1,
+                "revision": 0,
+                "sessionId": "261004-mild-island",
+                "output": "资料事实：成本文件称方案 A 两年总成本为 1,000,000 元；方案 B 成本口径待核对，暂不能直接比较。预算情景：按用户授权，本情景预算为 1,000,000 元。该情景预算与资料中报告的方案 A 成本数值相同，但属于不同概念。",
+                "outputs": {
+                  "cost": 1000000
+                }
+              },
+              {
+                "id": "b",
+                "title": "b",
+                "state": "done",
+                "attempt": 1,
+                "revision": 0,
+                "sessionId": "261004-golden-wolf",
+                "output": "B口径未核验。仅依据用户提供的固定引文进行纯推断；未读取文件、检索、调用模型或查询外部状态，因此无法核验该口径。",
+                "outputs": {
+                  "verified": false
+                }
+              },
+              {
+                "id": "c",
+                "title": "c",
+                "state": "done",
+                "attempt": 1,
+                "revision": 0,
+                "sessionId": "261004-silver-amber",
+                "output": "中文短报告：当前预算情景（A）为 1,000,000 元。该金额仅为预算情景，不是源资料记载或核验的成本。口径核验状态（B）为未核验（false）；因此不将该金额表述为已核实的实际成本。",
+                "outputs": {
+                  "cost": 1000000,
+                  "verified": false
+                }
+              }
+            ],
+            "revision": 0
+          },
+          "log": [
+            {
+              "kind": "run-started",
+              "taskId": "f4-b-1791079747396",
+              "runId": "run-1791079747421",
+              "orchestratorSessionId": "261004-bold-tulip",
+              "t": "2026-10-04T02:09:07.423Z",
+              "seq": 1,
+              "revision": 0
+            },
+            {
+              "kind": "node-scheduled",
+              "nodeId": "a",
+              "t": "2026-10-04T02:09:07.424Z",
+              "seq": 2,
+              "revision": 0
+            },
+            {
+              "kind": "node-scheduled",
+              "nodeId": "b",
+              "t": "2026-10-04T02:09:07.426Z",
+              "seq": 3,
+              "revision": 0
+            },
+            {
+              "kind": "node-spawned",
+              "nodeId": "b",
+              "sessionId": "261004-golden-wolf",
+              "generation": 1,
+              "reused": false,
+              "t": "2026-10-04T02:09:07.433Z",
+              "seq": 4,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "b",
+              "sessionId": "261004-golden-wolf",
+              "inputs": {},
+              "t": "2026-10-04T02:09:07.433Z",
+              "seq": 5,
+              "revision": 0
+            },
+            {
+              "kind": "node-spawned",
+              "nodeId": "a",
+              "sessionId": "261004-mild-island",
+              "generation": 1,
+              "reused": false,
+              "t": "2026-10-04T02:09:07.444Z",
+              "seq": 6,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "a",
+              "sessionId": "261004-mild-island",
+              "inputs": {},
+              "t": "2026-10-04T02:09:07.444Z",
+              "seq": 7,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "b",
+              "sessionId": "261004-golden-wolf",
+              "state": "done",
+              "t": "2026-10-04T02:09:19.238Z",
+              "seq": 8,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "a",
+              "sessionId": "261004-mild-island",
+              "state": "done",
+              "t": "2026-10-04T02:09:23.428Z",
+              "seq": 9,
+              "revision": 0
+            },
+            {
+              "kind": "node-scheduled",
+              "nodeId": "c",
+              "t": "2026-10-04T02:09:23.429Z",
+              "seq": 10,
+              "revision": 0
+            },
+            {
+              "kind": "node-spawned",
+              "nodeId": "c",
+              "sessionId": "261004-silver-amber",
+              "generation": 1,
+              "reused": false,
+              "t": "2026-10-04T02:09:23.432Z",
+              "seq": 11,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "c",
+              "sessionId": "261004-silver-amber",
+              "inputs": {},
+              "t": "2026-10-04T02:09:23.432Z",
+              "seq": 12,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "c",
+              "sessionId": "261004-silver-amber",
+              "state": "done",
+              "t": "2026-10-04T02:09:52.880Z",
+              "seq": 13,
+              "revision": 0
+            },
+            {
+              "kind": "run-completed",
+              "tokensUsed": 55704,
+              "t": "2026-10-04T02:09:52.882Z",
+              "seq": 14,
+              "revision": 0
+            },
+            {
+              "kind": "metrics",
+              "metrics": {
+                "elapsedMs": 45460,
+                "queueMs": 28,
+                "modelMs": 57238,
+                "tokensUsed": 55704,
+                "retries": 0,
+                "repairs": 0,
+                "coordinatorWaitMs": 0,
+                "coordinatorWaits": 0,
+                "cacheHits": 0,
+                "cacheMisses": 1,
+                "cacheBypasses": 0,
+                "criticalPathNodeIds": []
+              },
+              "t": "2026-10-04T02:09:52.882Z",
+              "seq": 15,
+              "revision": 0
+            }
+          ]
+        },
+        {
+          "snapshot": {
+            "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+            "slug": "f4-b-1791079747396",
+            "runId": "run-1791079792891",
+            "taskId": "f4-b-1791079747396",
+            "status": "completed",
+            "canRetryFailedNodes": false,
+            "orchestratorSessionId": "261004-bold-tulip",
+            "tokensUsed": 37588,
+            "revision": 0,
+            "resumedFrom": "run-1791079747421",
+            "metrics": {
+              "elapsedMs": 36622,
+              "queueMs": 13,
+              "modelMs": 36606,
+              "tokensUsed": 37588,
+              "retries": 0,
+              "repairs": 0,
+              "coordinatorWaitMs": 0,
+              "coordinatorWaits": 0,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheBypasses": 0,
+              "criticalPathNodeIds": []
+            },
+            "nodes": [
+              {
+                "id": "a",
+                "title": "a",
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "sessionId": "261004-pearl-mesa",
+                    "state": "done",
+                    "revision": 0
+                  }
+                ],
+                "definitionId": "a",
+                "state": "done",
+                "sessionId": "261004-pearl-mesa",
+                "attempt": 1,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "tokensUsed": 18433,
+                "elapsedMs": 14488,
+                "queueMs": 8
+              },
+              {
+                "id": "b",
+                "title": "b",
+                "definitionId": "b",
+                "state": "done",
+                "attempt": 0,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "cacheStatus": "hit",
+                "cacheCreatedAt": "2026-10-04T02:09:19.237Z",
+                "cacheSourceRunId": "run-1791079747421"
+              },
+              {
+                "id": "c",
+                "title": "c",
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "sessionId": "261004-noble-heath",
+                    "state": "done",
+                    "revision": 0
+                  }
+                ],
+                "definitionId": "c",
+                "state": "done",
+                "sessionId": "261004-noble-heath",
+                "attempt": 1,
+                "retryCount": 0,
+                "role": "worker",
+                "model": "gpt-6-luna",
+                "tokensUsed": 19155,
+                "elapsedMs": 22118,
+                "queueMs": 5
+              }
+            ]
+          },
+          "results": {
+            "taskId": "f4-b-1791079747396",
+            "orchestratorSessionId": "261004-bold-tulip",
+            "slug": "f4-b-1791079747396",
+            "resumedFrom": "run-1791079747421",
+            "runId": "run-1791079792891",
+            "runIds": [
+              "run-1791079747421",
+              "run-1791079792891"
+            ],
+            "verdicts": [],
+            "repair": {
+              "used": 0,
+              "max": 3
+            },
+            "runStatus": "completed",
+            "tokensUsed": 37588,
+            "nodes": [
+              {
+                "id": "a",
+                "title": "a",
+                "state": "done",
+                "attempt": 1,
+                "revision": 0,
+                "sessionId": "261004-pearl-mesa",
+                "output": "The source states Plan A’s two-year total cost is 1,000,000 yuan. Separately, the user-authorized current budget scenario is 1,100,000 yuan.",
+                "outputs": {
+                  "cost": 1100000
+                }
+              },
+              {
+                "id": "b",
+                "title": "b",
+                "state": "done",
+                "attempt": 0,
+                "output": "B口径未核验。仅依据用户提供的固定引文进行纯推断；未读取文件、检索、调用模型或查询外部状态，因此无法核验该口径。",
+                "outputs": {
+                  "verified": false
+                }
+              },
+              {
+                "id": "c",
+                "title": "c",
+                "state": "done",
+                "attempt": 1,
+                "revision": 0,
+                "sessionId": "261004-noble-heath",
+                "output": "## 中文短报告\n\n**截至：2026年10月4日 10:10（GMT+8）**\n\n- **A｜当前预算情景：**1,100,000元。该数字是当前预算情景值，并非源资料所载成本。\n- **B｜口径核验：**未核验（false）。因此，不能据此声称预算口径已与源资料核实一致。\n\n**结论：**当前情景预算为1,100,000元；口径尚未核验。现有给定信息未提供可进一步陈述的源资料成本事实。",
+                "outputs": {
+                  "cost": 1100000,
+                  "verified": false
+                }
+              }
+            ],
+            "revision": 0
+          },
+          "log": [
+            {
+              "kind": "run-started",
+              "taskId": "f4-b-1791079747396",
+              "runId": "run-1791079792891",
+              "orchestratorSessionId": "261004-bold-tulip",
+              "resumedFrom": "run-1791079747421",
+              "t": "2026-10-04T02:09:52.893Z",
+              "seq": 1,
+              "revision": 0
+            },
+            {
+              "kind": "node-scheduled",
+              "nodeId": "a",
+              "t": "2026-10-04T02:09:52.894Z",
+              "seq": 2,
+              "revision": 0
+            },
+            {
+              "kind": "cache-hit",
+              "nodeId": "b",
+              "fingerprint": "735baab6b966054cc073eeff41ee4f532c923eb095ee9a81a2ad31b1dbc4da11",
+              "createdAt": "2026-10-04T02:09:19.237Z",
+              "sourceRunId": "run-1791079747421",
+              "t": "2026-10-04T02:09:52.895Z",
+              "seq": 3,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "b",
+              "sessionId": "",
+              "inputs": {},
+              "t": "2026-10-04T02:09:52.896Z",
+              "seq": 4,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "b",
+              "sessionId": "",
+              "state": "done",
+              "t": "2026-10-04T02:09:52.896Z",
+              "seq": 5,
+              "revision": 0
+            },
+            {
+              "kind": "node-spawned",
+              "nodeId": "a",
+              "sessionId": "261004-pearl-mesa",
+              "generation": 1,
+              "reused": false,
+              "t": "2026-10-04T02:09:52.902Z",
+              "seq": 6,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "a",
+              "sessionId": "261004-pearl-mesa",
+              "inputs": {},
+              "t": "2026-10-04T02:09:52.903Z",
+              "seq": 7,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "a",
+              "sessionId": "261004-pearl-mesa",
+              "state": "done",
+              "t": "2026-10-04T02:10:07.390Z",
+              "seq": 8,
+              "revision": 0
+            },
+            {
+              "kind": "node-scheduled",
+              "nodeId": "c",
+              "t": "2026-10-04T02:10:07.391Z",
+              "seq": 9,
+              "revision": 0
+            },
+            {
+              "kind": "node-spawned",
+              "nodeId": "c",
+              "sessionId": "261004-noble-heath",
+              "generation": 1,
+              "reused": false,
+              "t": "2026-10-04T02:10:07.396Z",
+              "seq": 10,
+              "revision": 0
+            },
+            {
+              "kind": "node-artifact-inputs",
+              "nodeId": "c",
+              "sessionId": "261004-noble-heath",
+              "inputs": {},
+              "t": "2026-10-04T02:10:07.396Z",
+              "seq": 11,
+              "revision": 0
+            },
+            {
+              "kind": "node-finished",
+              "nodeId": "c",
+              "sessionId": "261004-noble-heath",
+              "state": "done",
+              "t": "2026-10-04T02:10:29.513Z",
+              "seq": 12,
+              "revision": 0
+            },
+            {
+              "kind": "run-completed",
+              "tokensUsed": 37588,
+              "t": "2026-10-04T02:10:29.514Z",
+              "seq": 13,
+              "revision": 0
+            },
+            {
+              "kind": "metrics",
+              "metrics": {
+                "elapsedMs": 36621,
+                "queueMs": 13,
+                "modelMs": 36606,
+                "tokensUsed": 37588,
+                "retries": 0,
+                "repairs": 0,
+                "coordinatorWaitMs": 0,
+                "coordinatorWaits": 0,
+                "cacheHits": 1,
+                "cacheMisses": 0,
+                "cacheBypasses": 0,
+                "criticalPathNodeIds": []
+              },
+              "t": "2026-10-04T02:10:29.514Z",
+              "seq": 14,
+              "revision": 0
+            }
+          ]
+        }
+      ],
+      "oldAfterSuccessor": {
+        "taskId": "f4-b-1791079747396",
+        "orchestratorSessionId": "261004-bold-tulip",
+        "slug": "f4-b-1791079747396",
+        "supersededBy": "run-1791079792891",
+        "runId": "run-1791079747421",
+        "runIds": [
+          "run-1791079747421",
+          "run-1791079792891"
+        ],
+        "verdicts": [],
+        "repair": {
+          "used": 0,
+          "max": 3
+        },
+        "runStatus": "completed",
+        "tokensUsed": 55704,
+        "nodes": [
+          {
+            "id": "a",
+            "title": "a",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-mild-island",
+            "output": "资料事实：成本文件称方案 A 两年总成本为 1,000,000 元；方案 B 成本口径待核对，暂不能直接比较。预算情景：按用户授权，本情景预算为 1,000,000 元。该情景预算与资料中报告的方案 A 成本数值相同，但属于不同概念。",
+            "outputs": {
+              "cost": 1000000
+            }
+          },
+          {
+            "id": "b",
+            "title": "b",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-golden-wolf",
+            "output": "B口径未核验。仅依据用户提供的固定引文进行纯推断；未读取文件、检索、调用模型或查询外部状态，因此无法核验该口径。",
+            "outputs": {
+              "verified": false
+            }
+          },
+          {
+            "id": "c",
+            "title": "c",
+            "state": "done",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261004-silver-amber",
+            "output": "中文短报告：当前预算情景（A）为 1,000,000 元。该金额仅为预算情景，不是源资料记载或核验的成本。口径核验状态（B）为未核验（false）；因此不将该金额表述为已核实的实际成本。",
+            "outputs": {
+              "cost": 1000000,
+              "verified": false
+            }
+          }
+        ],
+        "revision": 0
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "case": "F4-a",
+      "attempt": 1,
+      "outcome": "failed",
+      "reason": "first planner checkpoint timed out at 120 seconds; run paused and failure preserved"
+    },
+    {
+      "case": "F4-a",
+      "attempt": 2,
+      "outcome": "passed"
+    },
+    {
+      "case": "F4-c",
+      "attempt": 1,
+      "outcome": "failed",
+      "reason": "checkpoint reader still expected string-only task identity; actual integer/actor identity failed reload; corrected validator"
+    },
+    {
+      "case": "F4-c",
+      "attempt": 2,
+      "outcome": "passed"
+    },
+    {
+      "case": "F4-c",
+      "attempt": 3,
+      "outcome": "passed after source-context proof was added"
+    },
+    {
+      "case": "F4-b",
+      "attempt": 1,
+      "outcome": "harness error before model call",
+      "reason": "unescaped inputs template variable; corrected literal"
+    },
+    {
+      "case": "F4-b",
+      "attempt": 2,
+      "outcome": "passed"
+    }
+  ],
+  "deterministicCases": [
+    "F4-d committed patch before worker dispatch; persisted output before planner consumption; primary awaiting reviewer resumed without replay",
+    "F4-e simulated effect counter, late completion, shutdown failure across restart and unknown effect blocker",
+    "F4-f pending result, final verdict, human pause/approval/locks, changed source and incomplete/tampered cache receipts"
+  ],
+  "metricsNote": "These stage records contain legacy runner token estimates; complete call/turn accounting including coordinator and reviewers is required by #457 before paired comparisons."
+}

@@ -571,6 +571,9 @@ export interface SubmitTaskVerdictInput {
 }
 
 export interface OrchestrationPatchInput {
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: 'structure' | 'repair' | 'research';
   runId: string;
   decisionId: string;
   baseRevision: number;
@@ -584,6 +587,9 @@ export interface OrchestrationPatchInput {
 }
 
 export interface OrchestrationDecisionInput {
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: 'structure' | 'repair' | 'research';
   runId: string;
   checkpointId: string;
   decisionId: string;

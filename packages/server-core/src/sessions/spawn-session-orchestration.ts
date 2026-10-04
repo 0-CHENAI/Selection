@@ -95,6 +95,7 @@ export function assessSpawnQualification(
 }
 
 export interface SwarmSessionSnapshot {
+  taskWorkerId?: string
   id: string
   parentSessionId?: string
   taskNodeId?: string
@@ -117,7 +118,7 @@ export function countLiveSwarmChildren(
   for (const session of sessions) {
     if (
       session.parentSessionId === parentSessionId
-      && !session.taskNodeId
+      && (!session.taskNodeId || !!session.taskWorkerId)
       && isLiveSwarmSession(session)
     ) count++
   }

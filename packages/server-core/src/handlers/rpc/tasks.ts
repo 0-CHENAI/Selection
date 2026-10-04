@@ -444,6 +444,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (req.expectedEtag && loadTaskDocument(workspaceOrThrow(workspaceId).rootPath, req.slug)?.etag !== req.expectedEtag) throw new Error('Saved task changed before run; review and save again')
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
+      resumedFrom: req.resumedFrom,
       orchestratorSessionId: req.orchestratorSessionId,
       params: req.params,
       orchestrateAllowed: orchestrator?.swarmEnabled === true,

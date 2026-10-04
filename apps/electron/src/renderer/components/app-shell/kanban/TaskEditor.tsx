@@ -32,7 +32,7 @@ import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
 import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
-import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
+import { ConductorWorkbench, ManagedTaskWorkers, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -1524,7 +1524,7 @@ function ExistingTaskEditor({
         </div>
       )}
       {tab === 'canvas' && (
-        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} />
+        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} onOpenChildSession={onOpenChildSession} />
       )}
       {/* Keep authoring mounted so tabs retain the conversation and form focus state. */}
       <div hidden={tab !== 'definition'} className="task-editor-authoring grid min-h-0 min-w-0 flex-1 gap-4">
@@ -1897,6 +1897,10 @@ function ResultsPanel({
           )}
         </label>
       )}
+      {results.artifactAvailability && <p role="status" className="break-words text-[12px] text-warning">{t('tasks.artifactAvailability')}: {results.artifactAvailability.nodeIds.join(', ')} — {results.artifactAvailability.reason}</p>}
+      {results.resumedFrom && <p className="break-words text-[12px] text-foreground/70">{t('tasks.resumedFrom')}: {results.resumedFrom}</p>}
+      {results.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {results.supersededBy}</p>}
+      <ManagedTaskWorkers workers={results.workers} runId={results.runId} onOpenSession={onOpenChildSession} />
       <div className="flex justify-end">
         <Btn variant="secondary" onClick={onApplyRunRevision} disabled={!canApplyRunRevision}>
           {t('tasks.applyRunRevision')}

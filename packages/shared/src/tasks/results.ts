@@ -12,11 +12,16 @@ import {
   listRunIds,
   readNodeOutput,
   readRunLog,
+  committedRunLog,
   readRunState,
 } from './storage.ts'
 import { readSpecRevision } from './revisions.ts'
 
 export interface LoadedTaskResults {
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  workers?: import('./planner').TaskWorkerRecord[]
+  resumedFrom?: string
+  supersededBy?: string
   taskId?: string
   orchestratorSessionId?: string
   slug: string
@@ -48,7 +53,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const chosen = runId ?? runIds.at(-1) ?? null
   if (!chosen) return { slug, runId: null, runIds, nodes: [] }
 
-  const log = readRunLog(root, slug, chosen)
+  const log = committedRunLog(readRunLog(root, slug, chosen), readRunState(root, slug, chosen))
   // A revision file can precede its commit event during a crash. Use the same
   // durable revision as TaskRunner recovery, never the newest file on disk.
   const revision = readRunState(root, slug, chosen)?.revision
@@ -127,10 +132,21 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
 
   const repairUsed = verdicts.filter((v) => v.result === 'fail').length
   const repairMax = Math.min(snapshot?.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP)
+  const superseded = log.findLast(event => event.kind === 'run-superseded')
+  // The new run's start is the canonical lineage receipt. Reconstruct the old
+  // side if publication was interrupted between the two history notifications.
+  const successor = superseded?.kind === 'run-superseded' ? superseded.supersededBy : runIds.find(id => id !== chosen
+    && readRunLog(root, slug, id).some(event => event.kind === 'run-started' && event.resumedFrom === chosen))
 
   return {
     ...(started?.kind === 'run-started' ? { taskId: started.taskId, orchestratorSessionId: started.orchestratorSessionId } : {}),
     slug,
+    resumedFrom: started?.kind === 'run-started' ? started.resumedFrom : undefined,
+    supersededBy: successor,
+    artifactAvailability: (() => {
+      const event = log.findLast(entry => entry.kind === 'artifact-availability');
+      return event?.kind === 'artifact-availability' && event.nodeIds.length ? { nodeIds: event.nodeIds, reason: event.reason } : undefined;
+    })(),
     runId: chosen,
     runIds,
     verdict: currentVerdict,
@@ -140,6 +156,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     ...(tokensUsed !== undefined ? { tokensUsed } : {}),
     ...(snapshot?.acceptance_criteria ? { acceptanceCriteria: snapshot.acceptance_criteria } : {}),
     nodes,
+    workers: [...new Map(log.filter(event => event.kind === 'task-worker').map(event => [event.worker.workerId, event.worker])).values()],
     revision: snapshot ? revision : undefined,
   }
 }

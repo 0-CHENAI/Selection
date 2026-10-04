@@ -68,6 +68,7 @@ const TASK_KEYS = new Set([
 ]);
 
 const NODE_KEYS = new Set([
+  'actor',
   'workspace_inputs',
   'locked',
   'id',

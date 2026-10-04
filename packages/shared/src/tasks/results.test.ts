@@ -76,6 +76,18 @@ describe('loadTaskResults', () => {
       runStatus: 'completed', nodes: [{ sessionId: 'worker', revision: 0, attempt: 1, output: 'verified output' }] });
     expect(loadTaskResults(mkdtempSync(join(root, 'other-workspace-')), 'demo', 'r1').nodes).toEqual([]);
   });
+  it('preserves the historical verdict while separately showing artifact version changes', () => {
+    writeSpecRevision(root,'demo','r1',0,spec());
+    const t = '2026-10-04T00:00:00.000Z';
+    for (const entry of [ { t, kind: 'run-started', taskId: 'demo', runId: 'r1' },
+      { t, kind: 'node-finished', nodeId: 'audit', sessionId: 'actor', state: 'done' },
+      { t, kind: 'verdict', result: 'pass' }, { t, kind: 'run-completed' },
+      { t, kind: 'artifact-availability', nodeIds: ['audit'], reason: 'Source bytes changed' } ] as RunLogEntry[]) appendRunLog(root,'demo','r1',entry);
+    writeNodeOutput(root,'demo','r1','audit',{ text: 'Original report' });
+    expect(loadTaskResults(root,'demo','r1')).toMatchObject({ runStatus: 'completed', verdict: { result: 'pass' },
+      artifactAvailability: { nodeIds: ['audit'], reason: 'Source bytes changed' }, nodes: [{ state: 'done', output: 'Original report' }] });
+  });
+
   it('shows durable invalidation without erasing historical output or retaining a stale verdict', () => {
     writeSpecRevision(root, 'demo', 'r1', 0, spec());
     const t = '2026-06-07T00:00:00.000Z';

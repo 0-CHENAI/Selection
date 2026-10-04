@@ -7,19 +7,25 @@ export interface DependencyNode {
   depends_on?: string[];
   prompt?: string;
   inputs?: Record<string, string | { from: string }>;
+  actor?: { id: string; persona?: string };
 }
 
 /** Authored edges remain untouched; a data reference always also imposes ordering. */
-export function effectiveNodeDeps(node: DependencyNode): string[] {
+export function effectiveNodeDeps(node: DependencyNode, nodes?: readonly DependencyNode[]): string[] {
   const deps = new Set(node.depends_on ?? []);
   const texts = [node.prompt ?? '', ...Object.values(node.inputs ?? {}).map(input => typeof input === 'string' ? input : input.from)];
   for (const text of texts) for (const ref of extractRefs(text)) if (ref.kind === 'node') deps.add(ref.nodeId);
+  if (node.actor && nodes) {
+    const index = nodes.findIndex(candidate => candidate.id === node.id);
+    const previous = nodes.slice(0, index).findLast(candidate => candidate.actor?.id === node.actor!.id);
+    if (previous) deps.add(previous.id);
+  }
   return [...deps];
 }
 
 export function planDependencies(spec: { nodes: DependencyNode[] }): Map<string, Set<string>> {
   const ids = new Set(spec.nodes.map(node => node.id));
-  return new Map(spec.nodes.map(node => [node.id, new Set(effectiveNodeDeps(node).filter(id => id !== node.id && ids.has(id)))]));
+  return new Map(spec.nodes.map(node => [node.id, new Set(effectiveNodeDeps(node, spec.nodes).filter(id => id !== node.id && ids.has(id)))]));
 }
 
 /** Order-independent object comparison; array order remains part of the authored contract. */
