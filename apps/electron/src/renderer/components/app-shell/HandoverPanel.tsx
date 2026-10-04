@@ -6,9 +6,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useStore } from 'jotai'
 import { skipHandoverConfirmationAtom } from '@/atoms/handover'
-import { sessionMetaMapAtom } from '@/atoms/sessions'
+import { addSessionAtom, ensureSessionMessagesLoadedAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import type { HandoverOperation, HandoverRecord, HandoverResult } from '@craft-agent/shared/protocol'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -24,9 +24,11 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const { t } = useTranslation()
   const { onOpenFile } = useAppShellContext()
   const metadata = useAtomValue(sessionMetaMapAtom)
+  const store = useStore()
   const [skipConfirmation, setSkipConfirmation] = useAtom(skipHandoverConfirmationAtom)
   const [dontShowAgain, setDontShowAgain] = useState(false)
   const [open, setOpen] = useState(false)
+  const [inspecting, setInspecting] = useState(!headerOnly)
   const [records, setRecords] = useState<HandoverRecord[]>([])
   const [selectedId, setSelectedId] = useState(sourceLink?.handoverId)
   const [changes, setChanges] = useState<HandoverResult['changes']>()
@@ -35,25 +37,54 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
   const requestId = useRef<string | undefined>(undefined)
+  const pendingNavigation = useRef<{ handoverId: string; preference?: boolean } | undefined>(undefined)
   const alive = useRef(true)
   const activeCall = useRef(false)
-  const selected = records.find(record => record.handoverId === selectedId) ?? records[0]
+  const current = records.find(record => record.handoverId === selectedId) ?? records[0]
+  const selected = inspecting ? current : undefined
   const targetMode = mode === 'NORM' ? 'PRO' : 'NORM'
   const actionLabel = mode === 'NORM' ? t('handover.toPro') : t('handover.toNorm')
   const call = useCallback(async (operation: HandoverOperation) => resultRecords(await window.electronAPI.sessionCommand(sessionId, { type: 'handover', operation })), [sessionId])
-  const accept = useCallback((result: HandoverResult) => {
+  const accept = useCallback(async (result: HandoverResult) => {
     if (!alive.current) return
     setRecords(previous => operationMerge(previous, result.records))
     if (result.records[0]) setSelectedId(result.records[0].handoverId)
     setChanges(result.changes)
-  }, [])
+    const pending = pendingNavigation.current
+    const record = result.records.find(record => record.handoverId === pending?.handoverId)
+    if (!pending || !record) return
+    if (pending.preference !== undefined) {
+      setSkipConfirmation(pending.preference)
+      pending.preference = undefined
+    }
+    if (record.status === 'cancelled') pendingNavigation.current = undefined
+    if (record.status !== 'applied' || !record.targetSessionId) return
+    pendingNavigation.current = undefined
+    try {
+      const target = await store.set(ensureSessionMessagesLoadedAtom, record.targetSessionId)
+      if (!alive.current) return
+      if (!target) throw new Error(t('errors.failedToLoadSession'))
+      // Register the target before navigation; session_created also loads it asynchronously.
+      if (!store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
+      setOpen(false)
+      navigate(routes.view.allSessions(target.id))
+    } catch (reason) {
+      if (alive.current) { setInspecting(false); setOpen(true) }
+      throw reason
+    }
+  }, [store, setSkipConfirmation, t])
   useEffect(() => {
     alive.current = true
-    const refresh = () => void call({ type: 'list' }).then(result => {
+    const refresh = () => void call({ type: 'list' }).then(async result => {
       if (alive.current) {
         setRecords(result.records)
         const id = selectedRef.current ?? sourceLink?.handoverId ?? result.records[0]?.handoverId
         setSelectedId(id)
+        if (pendingNavigation.current && !activeCall.current) {
+          activeCall.current = true; setBusy(true)
+          try { await accept(result) }
+          finally { activeCall.current = false; if (alive.current) setBusy(false) }
+        }
       }
     }).catch(reason => { if (alive.current) setError(reason instanceof Error ? reason.message : String(reason)) })
     refresh()
@@ -61,49 +92,50 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
     window.addEventListener('selection-handover-updated', refresh)
     return () => { alive.current = false; window.removeEventListener('selection-handover-updated', refresh) }
   }, [call, sourceLink?.handoverId, open, accept])
-  const waitingId = selected?.status === 'waiting' ? selected.handoverId : undefined
+  const waitingId = pendingNavigation.current?.handoverId ?? (current?.status === 'waiting' ? current.handoverId : undefined)
   useEffect(() => {
     if (!waitingId) return
     const timer = setInterval(() => {
       if (activeCall.current) return
-      activeCall.current = true
-      void call({ type: 'get', handoverId: waitingId }).then(accept).catch(reason => { if (alive.current) setError(String(reason.message ?? reason)) }).finally(() => { activeCall.current = false })
+      activeCall.current = true; setBusy(true)
+      void call({ type: 'get', handoverId: waitingId }).then(accept).catch(reason => {
+        if (alive.current) {
+          setError(String(reason.message ?? reason))
+          if (pendingNavigation.current?.handoverId === waitingId) { setInspecting(false); setOpen(true) }
+        }
+      }).finally(() => { activeCall.current = false; if (alive.current) setBusy(false) })
     }, 2000)
     return () => clearInterval(timer)
   }, [waitingId, call, accept])
   const run = async (operation: HandoverOperation) => {
     if (activeCall.current) return
     activeCall.current = true; setBusy(true); setError(undefined)
-    try { const result = await call(operation); accept(result); window.dispatchEvent(new Event('selection-handover-updated')); return result }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
+    try { const result = await call(operation); await accept(result); window.dispatchEvent(new Event('selection-handover-updated')); return result }
+    catch (reason) { if (operation.type === 'create') pendingNavigation.current = undefined; setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { activeCall.current = false; if (alive.current) setBusy(false) }
   }
-  const begin = async () => {
+  const begin = async (preference?: boolean) => {
     if (activeCall.current) return
     const pending = records.find(record => record.sourceSessionId === sessionId && ['waiting','prepared','created'].includes(record.status))
-    if (selected?.status === 'applied' || selected?.status === 'cancelled') requestId.current = undefined
-    requestId.current ??= pending?.handoverId ?? crypto.randomUUID()
+    if (current?.status === 'cancelled') requestId.current = undefined
+    requestId.current = pending?.handoverId ?? requestId.current ?? crypto.randomUUID()
+    pendingNavigation.current = { handoverId: requestId.current, preference }
     return run({ type: 'create', handoverId: requestId.current, targetMode })
   }
-  const showDialog = () => {
+  const showDialog = (inspect = true) => {
+    setInspecting(inspect)
     setDontShowAgain(skipConfirmation === true)
     setOpen(true)
   }
-  const confirm = async () => {
-    const result = await begin()
-    if (result?.records.length) setSkipConfirmation(dontShowAgain)
-  }
-  const handover = async () => {
-    if (skipConfirmation !== true) { showDialog(); return }
+  const startHandover = async (preference?: boolean) => {
     if (activeCall.current) return
-    const result = await begin()
+    const result = await begin(preference)
     if (!alive.current) return
     const record = result?.records[0]
-    if (record?.status === 'applied' && record.targetSessionId) {
-      toast.success(t('handover.backgroundReady'), { action: { label: t('handover.openTarget'), onClick: () => navigate(routes.view.allSessions(record.targetSessionId!)) } })
-    } else if (record?.status === 'waiting') {
-      toast(t('handover.status.waiting'), { description: t('handover.waiting'), action: { label: t('handover.viewBackground'), onClick: showDialog } })
-    } else showDialog()
+    if (record?.status === 'waiting') {
+      setOpen(false)
+      toast(t('handover.status.waiting'), { description: t('handover.waiting'), action: { label: t('handover.viewBackground'), onClick: () => showDialog() } })
+    } else if (record?.status !== 'applied' || !record.targetSessionId) showDialog(false)
   }
   const targetOwned = selected?.targetSessionId === sessionId
   const unknown = selected?.snapshot?.actions.filter(action => action.outcome === 'unknown' && !selected.reviews[action.ref]) ?? []
@@ -111,14 +143,14 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   return <>
     {headerOnly ? canCreate && <Tooltip><TooltipTrigger asChild>
       <Button type="button" data-handover-trigger variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1 px-2 text-foreground/70 hover:text-foreground"
-        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup={skipConfirmation === true ? undefined : 'dialog'} disabled={busy || open} onClick={() => void handover()}>
+        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup={skipConfirmation === true ? undefined : 'dialog'} disabled={busy || open} onClick={() => { if (skipConfirmation === true) void startHandover(); else showDialog(false) }}>
         {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Redo2 aria-hidden="true" />}<span className="tracking-[0.04em]">{targetMode}</span>
       </Button>
     </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip>
       : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
         <ArrowRightLeft className="size-3.5 text-muted-foreground" /><span>{t('handover.backgroundReady')}</span>
         <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" disabled={!metadata.has(sourceLink.sourceSessionId)} onClick={() => navigate(routes.view.allSessions(sourceLink.sourceSessionId))}>{metadata.has(sourceLink.sourceSessionId) ? t('handover.openSource') : t('handover.sourceRemoved')}</button>
-        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground transition-colors" onClick={showDialog}>{t('handover.viewBackground')}</button>
+        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground transition-colors" onClick={() => showDialog()}>{t('handover.viewBackground')}</button>
         {unknown.length > 0 && <span role="status" className="w-full text-warning">{t('handover.unknownBlocked', { count: unknown.length })}</span>}
       </div>}
     <Dialog open={open} onOpenChange={setOpen}>
@@ -127,8 +159,8 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
         <DialogHeader className="shrink-0 text-left"><DialogTitle className={selected ? 'pr-6' : undefined}>{selected ? t('handover.title') : actionLabel}</DialogTitle><DialogDescription className="leading-relaxed">{t('handover.description')}</DialogDescription></DialogHeader>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-          {records.length === 0 && <p className="text-xs leading-relaxed text-muted-foreground">{t('handover.empty')}</p>}
-          {records.length > 1 && <div className="flex flex-wrap gap-2">{records.map(record => <button key={record.handoverId} type="button" className={`rounded-md px-2 py-1 text-xs ${selected?.handoverId === record.handoverId ? 'bg-foreground/10' : 'text-muted-foreground'}`} onClick={() => { setSelectedId(record.handoverId); void run({ type: 'get', handoverId: record.handoverId }) }}>{record.targetMode} · {t(`handover.status.${record.status}`)}</button>)}</div>}
+          {!selected && <p className="text-xs leading-relaxed text-muted-foreground">{t('handover.empty')}</p>}
+          {inspecting && records.length > 1 && <div className="flex flex-wrap gap-2">{records.map(record => <button key={record.handoverId} type="button" className={`rounded-md px-2 py-1 text-xs ${selected?.handoverId === record.handoverId ? 'bg-foreground/10' : 'text-muted-foreground'}`} onClick={() => { setSelectedId(record.handoverId); void run({ type: 'get', handoverId: record.handoverId }) }}>{record.targetMode} · {t(`handover.status.${record.status}`)}</button>)}</div>}
           {selected && <>
             <div className="flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md bg-foreground/5 px-2 py-1">{selected.targetMode}</span><span role="status">{t(`handover.status.${selected.status}`)}</span></div>
             {selected.status === 'waiting' && <p className="rounded-lg bg-foreground/5 px-3 py-2 text-sm text-muted-foreground">{t('handover.waiting')}</p>}
@@ -163,7 +195,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
           <Button variant="outline" onClick={() => setOpen(false)}>{selected ? t('common.close') : t('common.cancel')}</Button>
           {selected?.status === 'waiting' && <Button variant="outline" disabled={busy} onClick={() => void run({ type: 'cancel', handoverId: selected.handoverId })}>{t('handover.cancelWait')}</Button>}
           {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => navigate(routes.view.allSessions(selected.targetSessionId!))}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
-          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => void confirm()}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{selected?.status === 'prepared' || selected?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
+          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => void startHandover(dontShowAgain)}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{current?.status === 'prepared' || current?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
