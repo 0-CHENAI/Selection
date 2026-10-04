@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute } from 'node:path';
+import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { atomicWriteFileSync } from '../utils/files.ts';
 import { committedRunLog, readRunLog, readRunState, readNodeAttempt, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
-import { summarizeResearch, ResearchRecordSchema, type ResearchConfig, type ResearchSource, type ResearchSummary } from './research.ts';
+import { summarizeResearch, ResearchRecordSchema, ResearchPayloadSchema, type ResearchConfig, type ResearchSource, type ResearchSummary } from './research.ts';
 import { planValueKey } from './plan.ts';
 
 /** A successor may preserve reviewed history only under the same research criteria. */
@@ -23,7 +23,7 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
     try {
       const path = realpathSync(resolve(directory, source.path)), base = realpathSync(directory);
       const rel = relative(base, path);
-      if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('Source must be inside the authorized task directory');
+      if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Source must be inside the authorized task directory');
       const bytes = readFileSync(path);
       const hash = createHash('sha256').update(bytes).digest('hex');
       if (bytes.includes(0)) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
@@ -45,7 +45,7 @@ export function readResearchSources(root: string, slug: string, runId: string, e
     try {
       const directory = realpathSync(join(runDir(root, slug, runId), 'research'));
       const path = realpathSync(source.snapshotPath), rel = relative(directory, path);
-      if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('Snapshot leaves its owning research run');
+      if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Snapshot leaves its owning research run');
       const bytes = readFileSync(path);
       if (createHash('sha256').update(bytes).digest('hex') !== source.hash) throw new Error('Source snapshot version changed');
       return { ...source, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
@@ -71,8 +71,10 @@ export function loadResearchResults(root: string, slug: string, runId: string, v
     const node = spec?.nodes.find(node => node.id === producer.nodeId.split('#')[0]);
     if (producer.runId !== runId || producer.nodeId !== entry.nodeId || producer.sessionId !== entry.sessionId || producer.revision > revision || node?.researchRole !== parsed.data.role) return [];
     const output = readNodeAttempt(root, slug, runId, producer.nodeId, producer.attempt);
+    const payload = ResearchPayloadSchema.safeParse(output?.params?.research);
     return output
-      && createHash('sha256').update(JSON.stringify(output)).digest('hex') === producer.artifactVersion ? [parsed.data] : [];
+      && createHash('sha256').update(JSON.stringify(output)).digest('hex') === producer.artifactVersion
+      && payload.success && planValueKey(payload.data) === planValueKey(parsed.data.payload) ? [parsed.data] : [];
   });
   if (records.length !== raw.length) { const summary = summarizeResearch(config, [], records); summary.blockers.push('Corrupt research execution receipt requires inspection'); return summary; }
   const started = log.find(entry => entry.kind === 'run-started');

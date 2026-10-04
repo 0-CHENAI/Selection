@@ -105,6 +105,34 @@ describe('SessionManager progress integration', () => {
     await f.manager.flushSession(f.managed.id);
   });
 
+  it('continues an interrupted hidden coordinator checkpoint within the original user turn', async () => {
+    const f = setup('model_request_timeout');
+    f.managed.messages.push({id:'goal',role:'user',content:'只分析，不部署',timestamp:1});
+    const run=f.manager.sendMessage(f.managed.id,'Conductor verification checkpoint',undefined,undefined,{hidden:true});
+    await f.entered.promise;f.interrupted.resolve();await run;
+    const control=f.managed.messages.findLast(message=>message.role==='user')!;
+    expect(control.hidden).toBe(true);
+    const original=f.managed.messages.find(message=>message.id==='goal')!;
+    expect(readProgressCheckpoint(getSessionPath(f.root,f.managed.id))?.continuation?.userMessageId).toBe(original.id);
+    await f.manager.continueProgress(f.managed.id);
+    expect(f.prompts).toHaveLength(2);
+    expect(f.managed.messages.filter(message=>message.role==='user').map(message=>message.id)).toEqual(['goal',control.id]);
+    expect(f.managed.messages.find(message=>message.answerCommitted)?.answerRunId).toBe(original.answerRunId);
+    await f.manager.flushSession(f.managed.id);
+  });
+
+  it('a later user request cannot resume the earlier coordinator progress checkpoint', async () => {
+    const f=setup('model_request_timeout');
+    f.managed.messages.push({id:'goal',role:'user',content:'只分析，不部署',timestamp:1});
+    const run=f.manager.sendMessage(f.managed.id,'Conductor verification checkpoint',undefined,undefined,{hidden:true});
+    await f.entered.promise;f.interrupted.resolve();await run;
+    f.managed.messages.push({id:'later',role:'user',content:'New request',timestamp:Date.now()});
+    await expect(f.manager.continueProgress(f.managed.id)).rejects.toThrow('older task');
+    expect(readProgressCheckpoint(getSessionPath(f.root,f.managed.id))?.continuation?.consumed).toBe(false);
+    expect(f.prompts).toHaveLength(1);
+    await f.manager.flushSession(f.managed.id);
+  });
+
   it('does not redirect after the user stops during evaluation', async () => {
     const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图'); await f.entered.promise;
     const ready = deferred(); let resolve!: (value: unknown) => void;

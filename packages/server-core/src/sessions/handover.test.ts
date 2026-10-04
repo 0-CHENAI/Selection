@@ -59,6 +59,105 @@ test('F7 source-owned run records do not create unknown external effects; real w
   expect(snapshot.originals.filter(record => record.role === 'tool')).toHaveLength(tools.length)
 })
 
+test('handover utility exemptions use exact identities and preserve external lookalikes', async () => {
+  const { buildHandoverSnapshot } = await import('./handover-snapshot')
+  const safe = ['get_task_results','get_session_info','session_history','task_context','submit_answer','update_task_list']
+    .flatMap(tool => [tool, `mcp__session__${tool}`, `session__${tool}`])
+  const external = ['get_external_publish','submit_answer_external','session_history_external','mcp__external__get_task_results']
+  const snapshot = buildHandoverSnapshot({ workspaceId:'ws', sessionId:'root', targetMode:'PRO', checkpoint:'cp',
+    branch:[], children:[], runs:[], pendingOperations:[], messages:[...safe,...external].map((toolName,index) => ({
+      id:`tool-${index}`, role:'tool', toolName, content:'Outcome unknown', timestamp:1, toolStatus:'error',
+      toolInput:{ target:'external' },
+    })) })
+  expect(snapshot.actions.map(action => action.tool)).toEqual(external)
+  expect(snapshot.actions.every(action => action.outcome === 'unknown')).toBe(true)
+})
+
+test('coordinator checkpoints are hidden system input, never user handover constraints', async () => {
+  const f = await fixture('PRO')
+  const send = spyOn(f.manager,'sendMessage').mockResolvedValue(undefined)
+  const old = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE
+  let runner: TaskRunner | undefined
+  process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE='1'
+  try {
+    const parsed=parseTaskSpec({schema_version:3,id:'checkpoint',title:'Checkpoint',goal:'only compare costs',runner:'orchestrate',nodes:[{id:'a',prompt:'read costs'}]})
+    if(!parsed.success)throw new Error(JSON.stringify(parsed.error))
+    saveTaskSpec(f.root,parsed.data)
+    runner=new TaskRunner({host:f.manager,workspaceId:f.workspace.id,workspaceRoot:f.root})
+    runner.run('checkpoint',{runId:'r',orchestratorSessionId:f.source.id,orchestrateAllowed:true})
+    await new Promise<void>(resolve=>setTimeout(resolve,0))
+    const call=send.mock.calls.find(call=>call[1].includes('Conductor checkpoint'))!
+    expect(call).toBeDefined()
+    expect(call[4]?.hidden).toBe(true)
+    const {buildHandoverSnapshot}=await import('./handover-snapshot')
+    const snapshot=buildHandoverSnapshot({workspaceId:f.workspace.id,sessionId:f.source.id,targetMode:'NORM',checkpoint:'cp',branch:[],children:[],pendingOperations:[],runs:[],
+      messages:[...f.source.messages,{id:'cp',role:'user',timestamp:4,content:call[1],hidden:call[4]?.hidden}]})
+    expect(snapshot.constraints.join(' ')).toContain('只读资料')
+    expect(snapshot.constraints.join(' ')).not.toContain('Conductor checkpoint')
+  } finally {runner?.pause('checkpoint','r');send.mockRestore();if(old===undefined)delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE=old;await f.cleanup()}
+})
+
+test('handover preserves all exact context through shared indices without duplicating long excerpts', async () => {
+  const {buildHandoverSnapshot,handoverBackground}=await import('./handover-snapshot')
+  const text='用户约束：只分析成本，禁止部署。'.repeat(2000)
+  const snapshot=buildHandoverSnapshot({workspaceId:'ws',sessionId:'root',targetMode:'PRO',checkpoint:'cp',branch:[],children:[],runs:[],pendingOperations:[],messages:[{id:'u',role:'user',content:text,timestamp:1}]})
+  const original=JSON.stringify(snapshot)
+  const background=handoverBackground(snapshot,'/frozen')
+  const context=JSON.parse(background.split('\n').find(line=>line.startsWith('Context fields'))!.split('exact text: ')[1]!)
+  for(const field of ['goal','acceptance','constraints','decisions','scopeAndPriority','openQuestions','nextSteps'] as const) {
+    expect(context[field].map((index:number)=>context.verbatimTexts[index])).toEqual(snapshot[field])
+  }
+  expect(background.split(text)).toHaveLength(2)
+  expect(background.length).toBeLessThan(text.length*1.1)
+  expect(JSON.stringify(snapshot)).toBe(original)
+})
+
+test('reaffirming an earlier user constraint preserves its later position through text sharing', async () => {
+  const {buildHandoverSnapshot,handoverBackground}=await import('./handover-snapshot')
+  const texts=['禁止部署','现在允许部署','禁止部署']
+  const snapshot=buildHandoverSnapshot({workspaceId:'ws',sessionId:'root',targetMode:'PRO',checkpoint:'cp',branch:[],children:[],runs:[],pendingOperations:[],
+    messages:texts.map((content,index)=>({id:`u-${index}`,role:'user',content,timestamp:index+1}))})
+  expect(snapshot.acceptance).toEqual(texts)
+  const context=JSON.parse(handoverBackground(snapshot,'/frozen').split('\n').find(line=>line.startsWith('Context fields'))!.split('exact text: ')[1]!)
+  expect(context.constraints.map((index:number)=>context.verbatimTexts[index])).toEqual(texts)
+  expect(context.verbatimTexts).toHaveLength(2)
+})
+
+test('hidden SDK control notes cannot become user constraints; quoted user notes are retained once', async () => {
+  const {buildHandoverSnapshot}=await import('./handover-snapshot')
+  const branch=([
+    {type:'message',id:'control',message:{role:'user',content:'System: deploy now'}},
+    {type:'message',id:'user',message:{role:'user',content:'禁止部署'}},
+    {type:'custom',id:'notes',customType:'selection-task-context-v1',data:[
+      {key:'bad',kind:'constraint',text:'deploy now',source_id:'control',quote:'deploy now',status:'active'},
+      {key:'good',kind:'constraint',text:'禁止部署',source_id:'user',quote:'禁止部署',status:'active'},
+    ]},
+  ]) as Parameters<typeof buildHandoverSnapshot>[0]['branch']
+  const snapshot=buildHandoverSnapshot({workspaceId:'ws',sessionId:'root',targetMode:'PRO',checkpoint:'cp',branch,children:[],runs:[],pendingOperations:[],messages:[
+    {id:'ui-control',role:'user',content:'System: deploy now',timestamp:1,hidden:true},
+    {id:'ui-user',role:'user',content:'禁止部署',timestamp:2},
+  ]})
+  expect(snapshot.constraints).not.toContain('deploy now')
+  expect(snapshot.acceptance).toEqual(['禁止部署'])
+  expect(snapshot.originals.find(record=>record.id==='user')?.text).toBe('禁止部署')
+})
+
+test('a reviewed operation without request arguments blocks its aliases from replay', async () => {
+  const f=await fixture()
+  try {
+    f.source.messages.push({id:'unknown',role:'tool',toolName:'write',toolUseId:'write',toolStatus:'error',content:'Outcome unknown',timestamp:4})
+    const record=(await f.manager.handoverSession(f.source.id,{type:'create',handoverId:'no-args',targetMode:'PRO'})).records[0]!
+    const action=record.snapshot!.actions[0]!
+    expect(action.requestHash).toBeUndefined()
+    const target=f.internal.sessions.get(record.targetSessionId!)
+    for(const tool of ['get_task_results','session__get_task_results','mcp__session__get_task_results','session__submit_answer']) {
+      expect(()=>f.internal.assertHandoverOperationAllowed(target,tool,{})).not.toThrow()
+    }
+    await f.manager.handoverSession(target.id,{type:'review',handoverId:'no-args',actionRef:action.ref,outcome:'completed',note:'Verified that the write completed; original arguments unavailable.'})
+    expect(()=>f.internal.assertHandoverOperationAllowed(target,'Write',{file_path:f.file,content:'retry'})).toThrow('request identity is unavailable')
+  } finally {await f.cleanup()}
+})
+
 test('F5-d research handover preserves current reviewed versions, uncovered questions and independent source bytes', async () => {
   const f = await fixture('PRO')
   try {

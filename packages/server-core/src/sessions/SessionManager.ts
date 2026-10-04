@@ -1,6 +1,6 @@
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { HandoverStore, handoverHash } from '../reliability/handover-store'
-import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverWebHash, handoverBackground, handoverOperationHash, redactHandoverText } from './handover-snapshot'
+import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverWebHash, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
 import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
@@ -10808,11 +10808,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const requestHash = handoverOperationHash(toolName, input)
     if (record.snapshot!.actions.some(action => action.requestHash === requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed'))) throw new Error('This operation already completed in the handover source; use its recorded result instead of replaying it')
     if (record.snapshot!.actions.some(action => !action.requestHash && record.reviews[action.ref]?.outcome === 'completed'
-      && (action.tool === toolName || action.tool === 'unknown-execution') && toolRecoveryClass(toolName) !== 'read-only'
-      && !['submit_answer','update_task_list','mcp__session__submit_answer','mcp__session__update_task_list','session_history','task_context','WebFetch','WebSearch','web_fetch','web_search'].includes(toolName))) throw new Error('The source operation completed but its request identity is unavailable; do not replay this tool')
+      && (handoverToolName(action.tool) === handoverToolName(toolName) || action.tool === 'unknown-execution')
+      && !isHandoverReadOrLocalTool(toolName))) throw new Error('The source operation completed but its request identity is unavailable; do not replay this tool')
     const unknown = record.snapshot!.actions.filter(action => action.outcome === 'unknown' && !record.reviews[action.ref])
-    if (unknown.length && toolRecoveryClass(toolName) !== 'read-only' && !['WebFetch','WebSearch','web_fetch','web_search'].includes(toolName)
-      && !['submit_answer','update_task_list','mcp__session__submit_answer','mcp__session__update_task_list','session_history','task_context'].includes(toolName)) {
+    if (unknown.length && !isHandoverReadOrLocalTool(toolName)) {
       throw new Error('Handover contains operations with unknown outcomes. Review them before writes, delegation or workflows; completed operations must not be replayed.')
     }
   }
