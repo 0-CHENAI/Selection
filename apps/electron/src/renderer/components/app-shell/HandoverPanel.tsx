@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowRightLeft, ArrowUpRight, LoaderCircle, Redo2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtomValue } from 'jotai'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
@@ -96,11 +96,12 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
         {unknown.length > 0 && <span role="status" className="w-full text-warning">{t('handover.unknownBlocked', { count: unknown.length })}</span>}
       </div>}
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="flex w-[calc(100%-2rem)] max-h-[80dvh] sm:max-w-2xl flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="shrink-0 border-b border-border px-5 py-4"><DialogTitle>{t('handover.title')}</DialogTitle><DialogDescription>{t('handover.description')}</DialogDescription></DialogHeader>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <DialogContent className={`flex max-h-[80dvh] flex-col overflow-hidden ${selected ? 'sm:max-w-[560px]' : 'sm:max-w-[420px]'}`}
+        showCloseButton={!!selected} overlayClassName="bg-black/15 dark:bg-black/35">
+        <DialogHeader className="shrink-0 text-left"><DialogTitle className={selected ? 'pr-6' : undefined}>{selected ? t('handover.title') : actionLabel}</DialogTitle><DialogDescription className="leading-relaxed">{t('handover.description')}</DialogDescription></DialogHeader>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-          {records.length === 0 && <p className="text-sm text-muted-foreground">{t('handover.empty')}</p>}
+          {records.length === 0 && <p className="text-xs leading-relaxed text-muted-foreground">{t('handover.empty')}</p>}
           {records.length > 1 && <div className="flex flex-wrap gap-2">{records.map(record => <button key={record.handoverId} type="button" className={`rounded-md px-2 py-1 text-xs ${selected?.handoverId === record.handoverId ? 'bg-foreground/10' : 'text-muted-foreground'}`} onClick={() => { setSelectedId(record.handoverId); void run({ type: 'get', handoverId: record.handoverId }) }}>{record.targetMode} · {t(`handover.status.${record.status}`)}</button>)}</div>}
           {selected && <>
             <div className="flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md bg-foreground/5 px-2 py-1">{selected.targetMode}</span><span role="status">{t(`handover.status.${selected.status}`)}</span></div>
@@ -123,15 +124,13 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
             </>}
           </>}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-5 py-3">
-          <Button variant="ghost" onClick={() => setOpen(false)}>{t('common.close')}</Button>
-          {selected && <Button variant="ghost" disabled={busy || !sourceExists} onClick={() => navigate(routes.view.allSessions(selected.sourceSessionId))}>{sourceExists ? t('handover.openSource') : t('handover.sourceRemoved')}</Button>}
-          <div className="ml-auto flex flex-wrap gap-2">
-            {selected?.status === 'waiting' && <Button variant="outline" disabled={busy} onClick={() => void run({ type: 'cancel', handoverId: selected.handoverId })}>{t('handover.cancelWait')}</Button>}
-            {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => navigate(routes.view.allSessions(selected.targetSessionId!))}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
-            {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => { if (selected?.status === 'applied' || selected?.status === 'cancelled') requestId.current = undefined; begin() }}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{selected?.status === 'prepared' || selected?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
-          </div>
-        </div>
+        <DialogFooter className="shrink-0 flex-row flex-wrap items-center justify-end pt-2">
+          {selected && <Button variant="ghost" className="mr-auto" disabled={busy || !sourceExists} onClick={() => navigate(routes.view.allSessions(selected.sourceSessionId))}>{sourceExists ? t('handover.openSource') : t('handover.sourceRemoved')}</Button>}
+          <Button variant="outline" onClick={() => setOpen(false)}>{selected ? t('common.close') : t('common.cancel')}</Button>
+          {selected?.status === 'waiting' && <Button variant="outline" disabled={busy} onClick={() => void run({ type: 'cancel', handoverId: selected.handoverId })}>{t('handover.cancelWait')}</Button>}
+          {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => navigate(routes.view.allSessions(selected.targetSessionId!))}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
+          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => { if (selected?.status === 'applied' || selected?.status === 'cancelled') requestId.current = undefined; begin() }}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{selected?.status === 'prepared' || selected?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </>
