@@ -871,6 +871,8 @@
   "handover.reviewOperation": "Review {{tool}} outcome",
   "handover.saveReview": "Save review",
   "handover.scope": "Scope and priorities",
+  "handover.slide": "Átadás",
+  "handover.slideTo": "Csúsztasd az átadáshoz: {{mode}}",
   "handover.sourceChanged": "Source file changed",
   "handover.sourceRemoved": "Source conversation removed",
   "handover.status.applied": "Background applied",
