@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtom, useAtomValue, useStore } from 'jotai'
-import { handoverReviewSessionAtom, handoverSuccessAtom, skipHandoverConfirmationAtom } from '@/atoms/handover'
+import { handoverReviewSessionAtom, skipHandoverConfirmationAtom } from '@/atoms/handover'
 import { addSessionAtom, ensureSessionMessagesLoadedAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import type { HandoverOperation, HandoverRecord, HandoverResult } from '@craft-agent/shared/protocol'
@@ -68,8 +68,8 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
       // Register the target before navigation; session_created also loads it asynchronously.
       if (!store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
       setOpen(false)
-      store.set(handoverSuccessAtom, { sessionId: target.id, mode: record.targetMode, expiresAt: Date.now() + 2000 })
       navigate(routes.view.allSessions(target.id))
+      toast.success(t('handover.success', { mode: record.targetMode }), { duration: 2000 })
     } catch (reason) {
       if (alive.current) { setInspecting(false); setOpen(true) }
       throw reason

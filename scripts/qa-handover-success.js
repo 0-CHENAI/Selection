@@ -3,147 +3,125 @@
 const { strict: assert } = await import('node:assert')
 const { mkdir, writeFile } = await import('node:fs/promises')
 const config = globalThis.handoverQA ?? {}
-const task = await taskSpace(config.spaceId ?? 'Handover success alert QA')
+const task = await taskSpace(config.spaceId ?? 'Handover success toast QA')
 const page = task.page(config.page ?? 'p1')
 await page.cdp('Page.bringToFront')
-const key = 'craft-skip-handover-confirmation'
 await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
+const key = 'craft-skip-handover-confirmation'
 const previous = await page.evaluate(key => localStorage.getItem(key), key)
-const success = '[data-handover-success]'
-// Trigger and measure the two-second feedback in the same browser task.
-async function handover() { await page.evaluate(() => { window.handoverAlertCountBefore = window.handoverAlerts.length; document.querySelector('[data-handover-trigger]').click() }) }
-async function reload() {
+const success = '[data-sonner-toast][data-type="success"]'
+const count = () => page.evaluate(() => window.handoverSuccessEvents.length)
+async function reset() {
   await page.reload()
   await page.waitForSelector('[data-handover-trigger]')
   await page.evaluate(async () => {
     const entry = await (await fetch('/playground.tsx')).text()
     const url = [...entry.matchAll(/from "([^"]+)"/g)].map(m => m[1]).find(u => u.includes('/i18n/'))
     await (await import(url)).i18n.changeLanguage('zh-Hans')
-    window.handoverAlerts = []
-    let alert
+    window.handoverSuccessEvents = []
+    const seen = new WeakSet()
     new MutationObserver(() => {
-      const current = document.querySelector('[data-handover-success]')
-      if (current && current !== alert) window.handoverAlerts.push({ start: performance.now(), text: current.textContent })
-      if (!current && alert) window.handoverAlerts.at(-1).duration = performance.now() - window.handoverAlerts.at(-1).start
-      alert = current
+      for (const toast of document.querySelectorAll('[data-sonner-toast][data-type="success"]')) {
+        if (seen.has(toast)) continue
+        seen.add(toast)
+        window.handoverSuccessEvents.push({ text: toast.textContent, route: window.lastHandoverRoute })
+      }
     }).observe(document.body, { childList: true, subtree: true })
     window.addEventListener('craft-agent-navigate', event => { window.lastHandoverRoute = event.detail.route })
   })
 }
-async function notice(name) {
-  const geometry = await page.evaluate(async () => {
-    document.querySelector('[data-handover-trigger]').click()
-    const deadline = performance.now() + 2000
-    let alert
-    while (!(alert = document.querySelector('[data-handover-success]')) || Number(getComputedStyle(alert).opacity) < 0.98) {
-      if (performance.now() > deadline) throw new Error('No visible success alert')
-      await new Promise(requestAnimationFrame)
-    }
-    await new Promise(requestAnimationFrame)
-    await new Promise(requestAnimationFrame)
-    const r = alert.getBoundingClientRect(), chat = document.querySelector('[data-handover-chat]').getBoundingClientRect()
-    const outer = document.querySelector('[data-handover-session]').getBoundingClientRect()
-    return { x: r.x + r.width / 2 - chat.x - chat.width / 2, y: r.y + r.height / 2 - chat.y - chat.height / 2,
-      fits: r.left >= chat.left && r.right <= chat.right, viewportFits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight,
-      icon: !!alert.querySelector('svg circle'),
-      role: alert.querySelector('[role=status]')?.getAttribute('aria-live'), pointerEvents: getComputedStyle(alert).pointerEvents,
-      transform: getComputedStyle(alert).transform, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
-      clip: { x: outer.x, y: outer.y, width: outer.width, height: outer.height, scale: 1 } }
-  })
-  assert.ok(Math.abs(geometry.x) < 1 && Math.abs(geometry.y) < 1 && geometry.fits, 'success must be centered inside the chat')
-  assert.ok(geometry.icon, 'the leading icon must contain a circled check')
-  assert.equal(geometry.role, 'polite')
-  assert.equal(geometry.pointerEvents, 'none', 'the success alert must not block the composer')
-  if (geometry.reduced) { assert.equal(geometry.transform, 'none'); assert.ok(geometry.viewportFits, 'the narrow alert must fit the viewport') }
-  // Capture the timed frame directly rather than waiting for animation stability.
-  const shot = await page.cdp('Page.captureScreenshot', { format: 'png', clip: geometry.clip })
-  const directory = config.outputDir ?? '/tmp/selection-handover-success'
-  await mkdir(directory, { recursive: true })
-  const path = `${directory}/${name}.png`
-  await writeFile(path, Buffer.from(shot.data, 'base64'))
-  return path
-}
-async function dismiss() {
-  await page.waitForFunction(() => !document.querySelector('[data-handover-success]'))
-  const duration = await page.evaluate(() => window.handoverAlerts.at(-1).duration)
-  assert.ok(duration >= 1900 && duration < 2450, `success must last two seconds then fade out: ${duration}ms`)
-  return duration
+async function checkSuccess(mode, screenshot) {
+  await page.waitForSelector(success)
+  await page.waitForFunction(selector => {
+    const toast = document.querySelector(selector), r = toast?.getBoundingClientRect()
+    return toast?.dataset.mounted === 'true' && r.top >= 0 && Number(getComputedStyle(toast).opacity) > 0.98
+  }, success)
+  const data = await page.evaluate(selector => {
+    const toast = document.querySelector(selector), r = toast.getBoundingClientRect()
+    return { text: toast.querySelector('[data-title]').textContent,
+      mode: document.querySelector('[data-handover-title-menu]').textContent,
+      close: !!toast.querySelector('[data-close-button]'),
+      position: [toast.dataset.xPosition, toast.dataset.yPosition],
+      fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight,
+      oldAlert: !!document.querySelector('[data-handover-success]'),
+      event: window.handoverSuccessEvents.at(-1) }
+  }, success)
+  assert.equal(data.text, `已成功交接工作至${mode}`)
+  assert.ok(data.mode.startsWith(mode), 'success follows navigation to the loaded target')
+  assert.ok(data.event.route.includes('/'), 'navigation must precede success')
+  assert.deepEqual(data.position, ['right', 'top'])
+  assert.ok(data.close && data.fits && !data.oldAlert, 'reuse the native notification bubble without the old centered alert')
+  if (screenshot) {
+    const shot = await page.cdp('Page.captureScreenshot', { format: 'png' })
+    const directory = config.outputDir ?? '/tmp/selection-handover-success-toast'
+    await mkdir(directory, { recursive: true })
+    await writeFile(`${directory}/${screenshot}.png`, Buffer.from(shot.data, 'base64'))
+  }
+  // Sonner adds its shared exit transition after the two-second display duration.
+  await page.mouse.move(0, 0)
+  await page.waitForFunction(selector => !document.querySelector(selector), success, { timeout: 3500 })
 }
 try {
-  await page.evaluate(key => { localStorage.setItem(key, 'true'); localStorage.setItem('playground-selected-component', 'session-handover') }, key)
-  await reload()
-  assert.equal(await page.evaluate(() => !!document.querySelector('[data-handover-success]')), false)
+  await page.evaluate(key => {
+    localStorage.setItem(key, 'true')
+    localStorage.setItem('playground-selected-component', 'session-handover')
+  }, key)
+  await reset()
   await page.click('loc=role:button[name="Dark"]')
-  const dark = await notice('handover-success-dark')
-  assert.equal(await page.evaluate(() => window.handoverAlerts.at(-1).text), '已交接至 PRO')
-  const darkDuration = await dismiss()
-  assert.equal(await page.evaluate(() => document.querySelector('[data-handover-chat]').textContent.includes('已接收交接背景')), false, 'no permanent handover banner')
+  await page.evaluate(() => {
+    const original = window.electronAPI.getSessionMessages
+    window.electronAPI.getSessionMessages = async id => {
+      await new Promise(resolve => { window.releaseTargetLoad = resolve })
+      return original(id)
+    }
+  })
+  await page.click('[data-handover-trigger]')
+  await page.waitForFunction(() => typeof window.releaseTargetLoad === 'function')
+  assert.equal(await count(), 0, 'loading a target is not yet success')
+  await page.evaluate(() => window.releaseTargetLoad())
+  await checkSuccess('PRO', 'handover-success-toast-dark')
+  await page.evaluate(() => window.dispatchEvent(new Event('selection-handover-updated')))
   await page.click('[data-handover-title-menu]')
   await page.click('text="查看交接"')
   await page.waitForSelector('[role=dialog]')
-  assert.ok(await page.evaluate(() => document.querySelector('[role=dialog]').textContent.includes('交接背景与成果')))
+  assert.equal(await count(), 1, 'refreshing or inspecting an existing handover must not repeat success')
   await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('[role=dialog]'))
+  await reset()
   await page.click('loc=role:button[name="Light"]')
-  const light = await notice('handover-success-light')
-  await dismiss()
-  const replay = await page.evaluate(async () => {
-    const tick = () => new Promise(resolve => setTimeout(resolve, 10))
-    document.querySelector('[data-handover-trigger]').click()
-    const deadline = performance.now() + 2000
-    while (!document.querySelector('[data-handover-success]')) { if (performance.now() > deadline) throw new Error('No fresh success alert'); await tick() }
-    const start = performance.now(), route = window.lastHandoverRoute
-    const targetId = document.querySelector('[data-handover-session]').dataset.handoverSession
-    document.querySelector('[data-handover-title-menu]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 }))
-    let source
-    while (!(source = [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === '打开源会话'))) { if (performance.now() > deadline) throw new Error('Source menu missing'); await tick() }
-    source.click()
-    while (document.querySelector('[data-handover-session]').dataset.handoverSession === targetId) { if (performance.now() > deadline) throw new Error('Source navigation did not render'); await tick() }
-    const removed = !document.querySelector('[data-handover-success]')
-    window.dispatchEvent(new CustomEvent('craft-agent-navigate', { detail: { route } }))
-    while (document.querySelector('[data-handover-session]').dataset.handoverSession !== targetId) { if (performance.now() > deadline) throw new Error('Target navigation did not render'); await tick() }
-    return { removed, replayed: !!document.querySelector('[data-handover-success]'), elapsed: performance.now() - start }
-  })
-  assert.ok(replay.removed && !replay.replayed && replay.elapsed < 2000, `returning within two seconds must not replay a consumed notice: ${JSON.stringify(replay)}`)
+  await page.click('[data-handover-trigger]')
+  await checkSuccess('PRO', 'handover-success-toast-light')
   await page.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false })
   await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  // Let the chat fill the narrow viewport instead of the Playground's three-column shell.
   await page.evaluate(() => {
     const style = document.createElement('style')
     style.id = 'handover-qa-viewport'
     style.textContent = '[data-handover-session] { position: fixed; inset: 16px; height: calc(100dvh - 32px); z-index: 40; }'
     document.head.append(style)
   })
-  const narrow = await notice('handover-success-narrow')
-  assert.ok(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches))
-  const narrowDuration = await dismiss()
+  await page.click('[data-handover-trigger]')
+  await checkSuccess('NORM', 'handover-success-toast-narrow')
   await page.evaluate(() => document.getElementById('handover-qa-viewport').remove())
   await page.cdp('Emulation.clearDeviceMetricsOverride')
-  await page.selectOption('select', 'unknown')
-  assert.equal(await page.evaluate(() => !!document.querySelector('[data-handover-success]')), false, 'historical handovers must not generate a success alert')
-  await page.selectOption('select', 'compact')
-  await handover()
-  await page.waitForFunction(() => window.handoverAlerts.length > window.handoverAlertCountBefore)
-  await dismiss()
-  await page.click('[data-handover-title-menu]')
-  await page.click('loc=role:button[name="查看交接"]')
-  await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog]')].some(d => d.textContent.includes('交接背景与成果')))
-  assert.ok(await page.evaluate(() => [...document.querySelectorAll('[role=dialog]')].some(d => d.textContent.includes('成本和风险各有依据'))), 'compact menu must keep handover details accessible')
-  await page.keyboard.press('Escape')
+  await reset()
   await page.selectOption('select', 'waiting')
-  await handover()
+  await page.click('[data-handover-trigger]')
   await page.waitForFunction(() => document.querySelector('[data-handover-record-count]').textContent === '交接记录：1')
-  assert.equal(await page.evaluate(() => !!document.querySelector('[data-handover-success]')), false, 'waiting is not success')
-  await page.evaluate(() => { window.handoverAlertCountBefore = window.handoverAlerts.length; [...document.querySelectorAll('button')].find(b => b.textContent === '完成源任务（预览）').click() })
-  await page.waitForFunction(() => window.handoverAlerts.length > window.handoverAlertCountBefore)
-  await dismiss()
-  await page.selectOption('select', 'ready')
+  assert.equal(await count(), 0, 'waiting is not success')
+  await page.click('text="完成源任务（预览）"')
+  await checkSuccess('PRO')
+  await reset()
   await page.evaluate(() => { window.electronAPI.sessionCommand = async () => { throw new Error('QA: 交接失败') } })
-  await handover()
+  await page.click('[data-handover-trigger]')
   await page.waitForSelector('[role=dialog] [role=alert]')
-  assert.equal(await page.evaluate(() => !!document.querySelector('[data-handover-success]')), false, 'failed creation must not announce success')
-  console.log({ passed: true, centered: true, circledCheck: true, noPermanentBanner: true, noReplay: true, pointerTransparent: true,
-    desktopAndCompactMenus: true, reducedMotion: true, waitingAndFailures: true, durations: [darkDuration, narrowDuration], screenshots: [dark, light, narrow] })
+  assert.equal(await count(), 0, 'failed creation must not announce success')
+  await reset()
+  await page.evaluate(() => { window.electronAPI.getSessionMessages = async () => null })
+  await page.click('[data-handover-trigger]')
+  await page.waitForSelector('[role=dialog] [role=alert]')
+  assert.equal(await count(), 0, 'failed target loading must not announce success')
+  console.log({ passed: true, nativeToast: true, exactCopy: true, targetLoadedBeforeSuccess: true,
+    noDuplicateSuccess: true, darkLightNarrow: true, reverseHandover: true, waitingAndFailures: true,
+    screenshots: ['handover-success-toast-dark.png', 'handover-success-toast-light.png', 'handover-success-toast-narrow.png'] })
 } catch (error) {
   console.error(await page.snapshot())
   throw error
