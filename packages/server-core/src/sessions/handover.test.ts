@@ -232,7 +232,7 @@ test('F6 handover keeps predecessor results as history and only successor gaps a
   } finally { await f.cleanup() }
 })
 
-test('F2 handover preserves source, constraints, file versions and independent target permissions', async () => {
+test('F2 handover preserves source, constraints, file versions and the chosen permission mode', async () => {
   const f = await fixture()
   try {
     const original = readFileSync(getSessionFilePath(f.root, f.source.id), 'utf8')
@@ -240,7 +240,7 @@ test('F2 handover preserves source, constraints, file versions and independent t
     const first = (await f.manager.handoverSession(f.source.id, request)).records[0]!
     expect(first.status).toBe('applied')
     const target = await f.manager.getSession(first.targetSessionId!)
-    expect(target).toMatchObject({ workMode: 'PRO', permissionMode: 'safe', model: f.source.model })
+    expect(target).toMatchObject({ workMode: 'PRO', permissionMode: f.source.permissionMode, model: f.source.model })
     expect(target?.parentSessionId).toBeUndefined()
     expect(target?.handover).toMatchObject({ handoverId: 'f2', sourceSessionId: f.source.id, snapshotVersion: 1 })
     expect(first.snapshot?.constraints.join(' ')).toContain('不部署')
@@ -264,9 +264,47 @@ test('F2 handover preserves source, constraints, file versions and independent t
     expect(f.internal.handoverInput(f.internal.sessions.get(first.targetSessionId!))).toBe(before)
     expect(readFileSync(copied, 'utf8')).toContain('1000000')
     const norm = (await f.manager.handoverSession(first.targetSessionId!, { type: 'create', handoverId: 'f2-back', targetMode: 'NORM' })).records[0]!
-    expect((await f.manager.getSession(norm.targetSessionId!))?.workMode).toBe('NORM')
+    expect(await f.manager.getSession(norm.targetSessionId!)).toMatchObject({ workMode: 'NORM', permissionMode: target?.permissionMode })
     expect(norm.snapshot?.constraints.join(' ')).toContain('不部署')
     expect(norm.snapshot?.files.some(file => file.versionId === f.artifact.currentVersion)).toBe(true)
+  } finally { await f.cleanup() }
+})
+
+test('all three permission modes persist through both handover directions and remain session-local', async () => {
+  for (const permissionMode of ['safe', 'ask', 'allow-all'] as const) {
+    const f = await fixture()
+    try {
+      f.manager.setSessionPermissionMode(f.source.id, permissionMode)
+      const pro = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'mode-pro', targetMode: 'PRO' })).records[0]!
+      expect(pro.creationConfig?.permissionMode).toBe(permissionMode)
+      expect(loadSession(f.root, pro.targetSessionId!)?.permissionMode).toBe(permissionMode)
+      expect(f.manager.getSessionPermissionModeState(pro.targetSessionId!)?.permissionMode).toBe(permissionMode)
+      f.manager.setSessionPermissionMode(f.source.id, permissionMode === 'safe' ? 'allow-all' : 'safe')
+      const norm = (await f.manager.handoverSession(pro.targetSessionId!, { type: 'create', handoverId: 'mode-norm', targetMode: 'NORM' })).records[0]!
+      expect(norm.creationConfig?.permissionMode).toBe(permissionMode)
+      expect(loadSession(f.root, norm.targetSessionId!)?.permissionMode).toBe(permissionMode)
+      expect(f.manager.getSessionPermissionModeState(norm.targetSessionId!)?.permissionMode).toBe(permissionMode)
+    } finally { await f.cleanup() }
+  }
+})
+
+test('legacy prepared handovers keep their safe default and invalid permission configurations are rejected', async () => {
+  const f = await fixture()
+  try {
+    const create = f.manager.createSession.bind(f.manager)
+    f.manager.createSession = async () => { throw new Error('crash-before-target') }
+    await expect(f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'legacy', targetMode: 'PRO' })).rejects.toThrow('crash-before-target')
+    const record = f.store.read('legacy')!
+    const path = join(f.store.directory('legacy'), 'record.json')
+    for (const permissionMode of ['execute', 'invalid', 2, null]) {
+      writeFileSync(path, JSON.stringify({ ...record, creationConfig: { ...record.creationConfig, permissionMode } }))
+      expect(() => f.store.read('legacy')).toThrow('creation configuration')
+    }
+    const { permissionMode: _, ...creationConfig } = record.creationConfig!
+    writeFileSync(path, JSON.stringify({ ...record, creationConfig }))
+    f.manager.createSession = create
+    const recovered = (await f.manager.handoverSession(f.source.id, { type: 'get', handoverId: 'legacy' })).records[0]!
+    expect(loadSession(f.root, recovered.targetSessionId!)?.permissionMode).toBe('safe')
   } finally { await f.cleanup() }
 })
 
@@ -332,7 +370,7 @@ test('unknown external operations block side effects until explicit review; comp
     expect(() => f.manager.assertTaskRunAllowed(f.workspace.id, target.id)).toThrow('unknown outcomes')
     await f.manager.handoverSession(target.id, { type: 'review', handoverId: 'effects', actionRef: `${f.source.id}:publish`, outcome: 'not-performed', note: 'Verified the remote system: no publication occurred.' })
     expect(() => f.internal.assertHandoverOperationAllowed(target, 'Write', { file_path: f.file })).not.toThrow()
-    expect(target.permissionMode).toBe('safe')
+    expect(target.permissionMode).toBe('allow-all')
     expect(() => f.internal.assertHandoverOperationAllowed(target, 'external_send', { target: 'example', value: 'sent' })).toThrow('already completed')
     const worker = createManagedSession({ id: 'handover-worker', workMode: 'PRO', parentSessionId: target.id, executionRootSessionId: target.id }, f.workspace, { messagesLoaded: true })
     expect(() => f.internal.assertHandoverOperationAllowed(worker, 'external_send', { target: 'example', value: 'sent' })).toThrow('already completed')
@@ -360,7 +398,9 @@ test('prepared reservation and already-applied input recover across both crash w
     await expect(f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'reservation', targetMode: 'PRO' })).rejects.toThrow('crash-before-target')
     const reserved = f.store.read('reservation')!
     expect(reserved.status).toBe('prepared')
+    expect(reserved.creationConfig?.permissionMode).toBe('allow-all')
     expect(existsSync(getSessionPath(f.root, reserved.targetSessionId!))).toBe(false)
+    f.manager.setSessionPermissionMode(f.source.id, 'safe')
     f.manager.createSession = create
     const apply = f.internal.applyHandoverInput.bind(f.manager)
     f.internal.applyHandoverInput = async (...args: unknown[]) => { await apply(...args); throw new Error('crash-after-input') }
@@ -375,6 +415,11 @@ test('prepared reservation and already-applied input recover across both crash w
     expect(recovered.status).toBe('applied')
     expect(loadSession(f.root, reserved.targetSessionId!)?.messages.filter(message => message.id === 'handover-reservation')).toHaveLength(1)
     const target = (restarted as any).sessions.get(reserved.targetSessionId!)
+    expect(target.permissionMode).toBe('allow-all')
+    expect(loadSession(f.root, reserved.targetSessionId!)?.permissionMode).toBe('allow-all')
+    restarted.setSessionPermissionMode(target.id, 'ask')
+    await restarted.handoverSession(f.source.id, { type: 'get', handoverId: 'reservation' })
+    expect(target.permissionMode).toBe('ask')
     const file = recovered.snapshot!.files[0]!
     writeFileSync(join(getSessionPath(f.root,target.id),'data','handover','reservation',file.snapshotPath),'tampered')
     expect(() => (restarted as any).handoverInput(target)).toThrow('integrity')

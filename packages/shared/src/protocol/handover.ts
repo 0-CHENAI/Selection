@@ -1,4 +1,5 @@
 import type { WorkMode } from '../sessions/work-mode'
+import type { PermissionMode } from '../agent/mode-types'
 
 export interface HandoverLink {
   handoverId: string
@@ -33,7 +34,7 @@ export interface HandoverRecord {
   workspaceId: string
   targetMode: WorkMode
   targetSessionId?: string
-  creationConfig?: { model?: string; llmConnection?: string }
+  creationConfig?: { model?: string; llmConnection?: string; permissionMode?: PermissionMode }
   snapshotVersion: 1
   status: 'waiting' | 'prepared' | 'created' | 'applied' | 'cancelled'
   createdAt: number

@@ -80,7 +80,7 @@ F1 使用 `bun scripts/selection-3.0-f1.ts`，真实单 agent 读取固定资料
 
 ## #452：独立根会话的可靠交接
 
-`SessionConfig.handover` 是独立来源关系，包含 `handoverId`、来源会话/消息和快照版本。NORM→PRO、PRO→NORM 均创建新根；不借用 parent/worker 身份。模型和连接选择作为普通配置保留，目标从 `safe` 权限开始，不复制授权、认证请求、工具参数或凭据。源历史保持原样。
+`SessionConfig.handover` 是独立来源关系，包含 `handoverId`、来源会话/消息和快照版本。NORM→PRO、PRO→NORM 均创建新根；不借用 parent/worker 身份。模型、连接选择和用户选定的权限模式作为普通配置保留，在一致快照提交时冻结到宿主创建配置，重试使用同一配置；单次操作授权、认证请求、工具参数或凭据不复制。目标操作仍通过原有权限校验和交接复核。既有目标保持自己的权限选择，旧 prepared 回执缺少权限配置时沿用原来的 `safe` 默认。源历史保持原样。
 
 现有 `sessions.COMMAND` 的 `handover` 操作支持 create/get/list/cancel/review。客户端同次请求复用 ID；workspace `handovers/<sha256(id)>/record.json` 依次提交 waiting→prepared→created→applied。prepared 已冻结快照、配置并预留目标 ID；每次重试使用相同目标。目标资料另存 `data/handover/<id>/`，隐藏输入回执 `handover-<id>` 只应用一次；创建交接本身不启动模型。新交接使用新 ID，已有快照和回执不能覆盖。
 
