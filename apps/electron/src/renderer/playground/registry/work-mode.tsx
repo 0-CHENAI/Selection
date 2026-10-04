@@ -1,10 +1,13 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAtom, useSetAtom } from 'jotai'
 import type { ComponentEntry } from './types'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { BoardListToggle } from '@/components/app-shell/kanban/BoardListToggle'
 import { ExecutionChildren } from '@/components/app-shell/ExecutionChildren'
 import { SessionItem } from '@/components/app-shell/SessionItem'
+import { PanelHeader } from '@/components/app-shell/PanelHeader'
+import { SessionModeBadge } from '@/components/app-shell/SessionModeBadge'
 import ChatPage from '@/pages/ChatPage'
 import { AppShellProvider, useAppShellContext } from '@/context/AppShellContext'
 import { SessionListProvider } from '@/context/SessionListContext'
@@ -23,6 +26,7 @@ import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 
 // Real composer and rows with deterministic transport; never starts model work.
 function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean }) {
+  const { t } = useTranslation()
   const base = useAppShellContext()
   const [mode, setMode] = useAtom(workModeViewAtom)
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -34,7 +38,7 @@ function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean })
   const setPro = useSetAtom(sessionAtomFamily('pro-root'))
   const setWorker = useSetAtom(sessionAtomFamily('pro-worker'))
   const sessions = React.useMemo(() => [
-    { id: 'pro-root', name: '成本核对', workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
+    { id: 'pro-root', name: 'PRO · 成本核对', handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
     { id: 'pro-worker', name: 'A 成本资料读取', workMode: 'PRO', executionRootSessionId: 'pro-root', parentSessionId: 'pro-root', taskNodeId: 'a', hidden: true, workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [{ id: 'a', role: 'assistant', content: 'A 两年成本为 1000000 元，B 的成本口径仍待核实。', timestamp: Date.now() }], lastMessageAt: Date.now(), isProcessing: false, hasUnread: true, permissionMode: 'safe' },
   ] as Session[], [base.activeWorkspaceId])
   React.useEffect(() => {
@@ -78,12 +82,13 @@ function WorkModePreview({ compactTopBar = false }: { compactTopBar?: boolean })
       </div>
       <button type="button" className="self-end px-4 py-1 text-xs text-muted-foreground" onClick={() => select('pro-worker')}>打开 PRO 子会话深链接</button>
       <div className="flex min-h-0 flex-1">
-        <div className="w-64 shrink-0 border-r border-border">
+        <div className="w-64 shrink-0 border-r border-border" data-work-mode-list>
+          <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" badge={<SessionModeBadge mode={mode} />} />
           <button type="button" className="px-4 py-2 text-xs text-muted-foreground" onClick={() => setSelected(null)}>新建 {mode}</button>
           {mode === 'PRO' && <><SessionItem item={extractSessionMeta(sessions[0]!)} index={0} itemProps={{ onKeyDown: () => {} }} isSelected={!!selected} isFirstInGroup isInMultiSelect={false} onSelect={() => select('pro-root')} />
             <ExecutionChildren children={[extractSessionMeta(sessions[1]!)]} selectedSessionId={selected} onSelect={select} /></>}
         </div>
-        <div className="min-w-0 flex-1"><ChatPage sessionId={selected} /></div>
+        <div className="min-w-0 flex-1" data-work-mode-chat><ChatPage sessionId={selected} /></div>
       </div>
     </div>
   </SessionListProvider></NavigationProvider></ModalProvider></FocusProvider></ActionRegistryProvider></AppShellProvider>

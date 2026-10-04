@@ -190,6 +190,7 @@ export function CompactSessionMenu({
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="!flex flex-row items-center gap-2 !text-left pr-3">
           <DrawerTitle className="flex-1 min-w-0 truncate">{title ?? ''}</DrawerTitle>
+          {badge}
         </DrawerHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-6">

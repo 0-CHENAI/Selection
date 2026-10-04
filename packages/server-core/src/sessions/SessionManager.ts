@@ -1,4 +1,5 @@
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
+import { resolveSessionName } from '@craft-agent/shared/display-titles'
 import { HandoverStore, handoverHash } from '../reliability/handover-store'
 import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverWebHash, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
 import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
@@ -10926,7 +10927,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const sourceModel = record.creationConfig?.model ?? source?.model, sourceConnection = record.creationConfig?.llmConnection ?? source?.llmConnection
         // Legacy prepared receipts retain their original safe default; retries never infer a newer source grant.
         const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: record.creationConfig?.permissionMode ?? 'safe', model: sourceModel,
-          llmConnection: sourceConnection, name: `${record.targetMode} · ${source?.name ?? record.sourceSessionId}` },
+          llmConnection: sourceConnection, name: source ? resolveSessionName(source) ?? record.sourceSessionId : record.sourceSessionId },
           { emitCreatedEvent: false, reservedSessionId: record.targetSessionId!, handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId,
             sourceMessageId: record.snapshot!.source.messageId, snapshotVersion: record.snapshotVersion } })
         record.status = 'created'; store.save(record)

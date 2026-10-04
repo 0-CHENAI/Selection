@@ -5,6 +5,8 @@ import { motion } from 'motion/react'
 import { ArrowUp, ChevronDown } from 'lucide-react'
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
 import { HandoverMessageBubble } from '@/components/app-shell/HandoverMessageBubble'
+import { SessionModeBadge } from '@/components/app-shell/SessionModeBadge'
+import { getSessionTitle } from '@/utils/session'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -92,10 +94,10 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
   }, [state, setMetadata, setLoaded, store])
   if (!session) return null
   const sourceLink = session.handover
-  const titleTrigger = <button data-handover-title-menu type="button" className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium hover:bg-foreground/5"><span>{session.workMode} · {session.name}</span><ChevronDown className="size-3.5 text-muted-foreground" /></button>
-  return <div data-handover-session={session.id} className="flex h-[520px] flex-col rounded-xl border border-border bg-background">
+  const titleTrigger = <button data-handover-title-menu type="button" className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium hover:bg-foreground/5"><span data-handover-title className="truncate">{getSessionTitle(session)}</span><SessionModeBadge mode={session.workMode} /><ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /></button>
+  return <div data-handover-session={session.id} data-handover-mode={session.workMode} className="flex h-[520px] flex-col rounded-xl border border-border bg-background">
     <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-      {state === 'compact' ? <CompactSessionMenu title={session.name} item={extractSessionMeta(session)} trigger={titleTrigger} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /> :
+      {state === 'compact' ? <CompactSessionMenu title={getSessionTitle(session)} badge={<SessionModeBadge mode={session.workMode} />} item={extractSessionMeta(session)} trigger={titleTrigger} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /> :
       <DropdownMenu><DropdownMenuTrigger asChild>{titleTrigger}</DropdownMenuTrigger>
         <StyledDropdownMenuContent><SessionMenu item={extractSessionMeta(session)} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /></StyledDropdownMenuContent>
       </DropdownMenu>}
