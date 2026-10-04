@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
 import { ArrowUp, ChevronDown } from 'lucide-react'
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
+import { HandoverMessageBubble } from '@/components/app-shell/HandoverMessageBubble'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -43,7 +44,9 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     }
     const apply = (record: HandoverRecord) => {
       const targetSessionId = `${record.targetMode.toLowerCase()}-${record.handoverId}`
-      sessions.set(targetSessionId, { ...makeSession(targetSessionId, record.targetMode), handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId, snapshotVersion: 1 } })
+      sessions.set(targetSessionId, { ...makeSession(targetSessionId, record.targetMode),
+        messages: [{ id: `handover-${record.handoverId}`, role: 'info', hidden: true, content: 'Background applied', timestamp: record.updatedAt }],
+        handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId, snapshotVersion: 1 } })
       Object.assign(record, { status: 'applied', targetSessionId, snapshot: { ...snapshot, targetMode: record.targetMode, source: { ...snapshot.source, sessionId: record.sourceSessionId } } })
     }
     const create = (id: string, sourceSessionId: string, targetMode: 'NORM' | 'PRO'): HandoverRecord => {
@@ -100,6 +103,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     </div>
     <div data-handover-chat className="relative flex min-h-0 flex-1 flex-col">
     <motion.div key={session.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} className="flex min-h-0 flex-1 flex-col px-6 py-4 text-sm">
+      <HandoverMessageBubble session={session} />
       <div className="space-y-3"><p>A 两年总成本为 1000000 元；B 的成本口径未知，风险资料存在缺口。</p><p className="text-muted-foreground">本次仅分析约定资料，不部署、不执行外部操作。</p></div>
       <div className="mt-auto rounded-xl border border-border p-3">
         <textarea key={session.id} aria-label="消息" placeholder={t('chatInput.placeholder.typeMessage')} className="min-h-16 w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground" />

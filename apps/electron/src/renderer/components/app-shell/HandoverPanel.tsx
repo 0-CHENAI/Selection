@@ -69,7 +69,6 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
       if (!store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
       setOpen(false)
       navigate(routes.view.allSessions(target.id))
-      toast.success(t('handover.success', { mode: record.targetMode }), { duration: 2000 })
     } catch (reason) {
       if (alive.current) { setInspecting(false); setOpen(true) }
       throw reason

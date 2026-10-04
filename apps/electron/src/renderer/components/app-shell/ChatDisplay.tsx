@@ -1,5 +1,6 @@
 import { BodyFeedbackDialog, type BodyFeedbackTarget } from './BodyFeedbackDialog'
 import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
+import { HandoverMessageBubble } from './HandoverMessageBubble'
 import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
 import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
 import { isTerminalResponseError } from '@/utils/terminal-error'
@@ -1853,7 +1854,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     skip={skipScrollToBottom}
                   />
                   {/* Empty state for compact mode - inviting conversational prompt, centered in full popover */}
-                  {compactMode && turns.length === 0 && (
+                  {compactMode && turns.length === 0 && !session.handover && (
                     <div className="pointer-events-none absolute inset-0 overflow-hidden flex flex-col items-center justify-center select-none gap-1">
                       <span className="text-sm text-muted-foreground">{emptyStateLabel || t("editPopover.whatToChange")}</span>
                       {!emptyStateLabel && (
@@ -1876,6 +1877,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       ↑ {t('chat.scrollUpForEarlier', { count: startIndex })}
                     </div>
                   )}
+                  {!hasMoreAbove && <HandoverMessageBubble session={session} compactMode={compactMode} />}
                   {turns.map((turn, index) => {
                     // Compute turn key and check if it's a search match
                     const turnKey = getTurnKey(turn, startIndex + index)

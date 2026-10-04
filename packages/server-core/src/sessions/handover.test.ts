@@ -252,6 +252,10 @@ test('F2 handover preserves source, constraints, file versions and the chosen pe
     expect(again.targetSessionId).toBe(first.targetSessionId)
     expect(f.internal.sessions.size).toBe(2)
     expect(loadSession(f.root, first.targetSessionId!)?.messages.filter(message => message.id === 'handover-f2')).toHaveLength(1)
+    // The chat success bubble is restored from this persisted receipt, never a new user prompt.
+    expect(loadSession(f.root, first.targetSessionId!)?.messages.find(message => message.id === 'handover-f2'))
+      .toMatchObject({ type: 'info', hidden: true })
+    expect(target?.messages.find(message => message.id === 'handover-f2')).toMatchObject({ role: 'info', hidden: true })
     // Explicitly creating another handover gets a fresh snapshot/target; retries never refresh one.
     writeFileSync(f.file, 'changed later')
     const changed = await f.manager.handoverSession(first.targetSessionId!, { type: 'get', handoverId: 'f2' })
