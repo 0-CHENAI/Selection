@@ -17,7 +17,7 @@ export function criticalPathRemaining(
   const dependents = new Map<string, string[]>();
   for (const node of spec.nodes) dependents.set(node.id, []);
   for (const node of spec.nodes) {
-    for (const dep of effectiveNodeDeps(node)) {
+    for (const dep of effectiveNodeDeps(node, spec.nodes)) {
       dependents.get(dep)?.push(node.id);
     }
   }

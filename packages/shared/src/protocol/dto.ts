@@ -140,6 +140,10 @@ export interface Session extends WorkModeMetadata {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: total DAG node count (orchestrator only) — stable board progress denominator. */
   taskNodeCount?: number
   /** Tasks Conductor: generate-time draft orchestrator, hidden from the board until adopted by createTask. */
@@ -201,6 +205,10 @@ export interface CreateSessionOptions {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: mark the orchestrator as a generate-time draft (hidden until adopted by createTask). */
   taskDraft?: boolean
   swarmEnabled?: boolean
@@ -367,6 +375,7 @@ export interface TaskGenerateResult {
 }
 
 export interface TaskRunRequest {
+  resumedFrom?: string
   /** Save-and-run identity: reject if another editor saved after confirmation. */
   expectedEtag?: string
   slug: string
@@ -450,6 +459,7 @@ export interface SwarmRunDetailsDto {
 }
 
 export interface TaskNodeRunStateDto {
+  actor?: { id: string; persona?: string }
   title?: string
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
   approvalFeedback?: string
@@ -475,6 +485,12 @@ export interface TaskNodeRunStateDto {
 }
 
 export interface TaskRunSnapshotDto {
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  resumedFrom?: string
+  supersededBy?: string
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  planChanges?: import('../tasks/planner').PlanChange[]
+  planner?: { phase: import('../tasks/planner').PlannerPhase; pendingResults: import('../tasks/planner').PlannerResultEvent[]; consumedResults: number }
   /** Owning workspace; optional for compatibility with older hosts. */
   workspaceId?: string
   slug: string
@@ -599,6 +615,10 @@ export interface TaskResultNodeDto {
  * `TaskRunSnapshotDto` this survives restart and does not require an active in-memory run.
  */
 export interface TaskResultsDto {
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  resumedFrom?: string
+  supersededBy?: string
   taskId?: string
   orchestratorSessionId?: string
   slug: string

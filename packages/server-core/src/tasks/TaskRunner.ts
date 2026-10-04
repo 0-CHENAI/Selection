@@ -24,6 +24,7 @@ import { statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
 import {
   type TaskSpec,
   type TaskNode,
@@ -46,6 +47,7 @@ import {
   appendRunLog,
   writeRunState,
   readRunState,
+  committedRunLog,
   writeNodeOutput,
   writeNodeAttempt,
   writeNodeSubmission,
@@ -71,6 +73,7 @@ import {
   CONDUCTOR_CACHE_RUNTIME_VERSION,
   computeVerifyReserve,
   taskSourceVersion,
+  planValueKey,
   validateOrchestrationPatch,
   validateOrchestrationDecision,
   validateTaskNodeVerdict,
@@ -110,6 +113,14 @@ export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 // ---------------------------------------------------------------------------
 
 export interface ConductorSessionHost {
+  /** Inspection is separate from a stop request; unknown side effects must be reviewed. */
+  assertTaskSafePoint?(sessionIds: string[]): void;
+  settleTaskSessionStop?(sessionId: string): Promise<void>;
+  canReuseTaskSession?(sessionId: string): boolean;
+  inspectTaskWorker?(worker: TaskWorkerRecord): { state: 'done' | 'failed' | 'stopped'; output?: NodeOutput; reason?: string; tokensUsed?: number } | undefined;
+  /** Bind each turn before sending; the generation fences late completions from the preceding task. */
+  bindTaskSession?(sessionId: string, binding: import('@craft-agent/shared/tasks').TaskSessionBinding): Promise<{ generation: number }>;
+  nextTaskSessionGeneration?(sessionId: string): number;
   assertTaskRunAllowed?(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void;
   /** Creates the child session. DAG workers are persisted but hidden from the
    * ordinary session list; run details address them by task/run/node metadata. */
@@ -132,7 +143,7 @@ export interface ConductorSessionHost {
     sessionId: string,
     status: 'running' | 'completed' | 'need-to-check' | 'stopped',
     blocker?: string,
-  ): Promise<void>;
+  ): Promise<void> | void;
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>;
   /** Explicitly stop managed spawn_session descendants owned by a DAG worker. */
   stopSwarm?(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>;
@@ -144,6 +155,7 @@ export interface ConductorSessionHost {
   getSessionModel?(sessionId: string): string | undefined;
   /** Current LLM connection of a session, so DAG workers inherit the orchestrator when the spec omits one. */
   getSessionLlmConnection?(sessionId: string): string | undefined;
+  getSessionPermissionModeState?(sessionId: string): { permissionMode: 'safe' | 'ask' | 'allow-all' } | null | undefined;
   /** True when the session invoked tools. Undefined means unknown — workspace-pure will not store. */
   sessionUsedTools?(sessionId: string): boolean | undefined;
   /** Skill file contents for cache fingerprints. Missing slugs bypass workspace-pure. */
@@ -172,6 +184,9 @@ export interface TaskRunnerDeps {
 }
 
 export interface RunOptions {
+  resumedFrom?: string;
+  /** Internal durable policy restored from the run checkpoint. */
+  plannerRequired?: boolean;
   /** The task's persistent parent/orchestrator session (author + final verifier). */
   orchestratorSessionId?: string;
   /** Resolved task param values (merged over the spec's declared defaults). */
@@ -200,6 +215,7 @@ export class TaskControlError extends Error {
 }
 
 export interface NodeRunStatus {
+  actor?: TaskNode['actor'];
   title?: string;
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[];
   approvalFeedback?: string;
@@ -223,6 +239,12 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  artifactAvailability?: { nodeIds: string[]; reason: string };
+  resumedFrom?: string;
+  supersededBy?: string;
+  workers?: TaskWorkerRecord[];
+  planChanges?: import('@craft-agent/shared/tasks').PlanChange[];
+  planner?: { phase: PlannerPhase; pendingResults: PlannerResultEvent[]; consumedResults: number };
   workspaceId: string;
   slug: string;
   runId: string;
@@ -317,6 +339,7 @@ type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : n
 type RunLogEntryInput = DistributiveOmit<RunLogEntry, 't'>;
 
 interface NodeStateEntry {
+  generation?: number;
   approvalFeedback?: string;
   state: NodeRunState;
   sessionId?: string;
@@ -331,6 +354,19 @@ interface NodeStateEntry {
 // ---------------------------------------------------------------------------
 
 class ActiveRun {
+  private resumedFrom?: string;
+  private supersededBy?: string;
+  private readonly plannerRequired: boolean;
+  private readonly workers = new Map<string, TaskWorkerRecord>();
+  private readonly deferredCompletions = new Map<string, SessionCompletionEvent>();
+  private readonly unconfirmedShutdown = new Set<string>();
+  private artifactAvailability?: RunSnapshot['artifactAvailability'];
+  private plannerPhase: 'active' | 'draining' = 'active';
+  private readonly resultEvents = new Map<string, PlannerResultEvent>();
+  private readonly consumedResultIds = new Set<string>();
+  private readonly decisionEventSeqs = new Set<number>();
+  private readonly planChanges: NonNullable<RunSnapshot['planChanges']> = [];
+  private readonly actors = new Map<string, { sessionId: string; signature: string; prefix: string[] }>();
   private progressParentResume?: 'coordinator' | 'verifying';
   private historicalMetrics?: TaskRunMetrics;
   private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string; revision?: number }[]>();
@@ -411,6 +447,8 @@ class ActiveRun {
     private readonly deps: TaskRunnerDeps,
   ) {
     this.sourceVersion = opts.sourceVersion ?? taskSourceVersion(spec);
+    this.resumedFrom = opts.resumedFrom;
+    this.plannerRequired = opts.plannerRequired ?? isTasksOrchestrateEnabled();
     this.runStartedAtMs = this.nowMs();
     this.tokenBudget = spec.token_budget;
     this.edges = materializeDeps(spec);
@@ -426,7 +464,7 @@ class ActiveRun {
 
   // --- lifecycle ---
 
-  start(): void {
+  start(beforeDispatch?: () => void): void {
     this.assertSensitiveReady();
     // Freeze the policy only for new runs; rehydrated revisions retain their original policy.
     this.spec = { ...this.spec, execution: { ...this.spec.execution, artifact_delivery: 1 } };
@@ -435,7 +473,8 @@ class ActiveRun {
     // written; otherwise a restart could only consult the mutable task.yaml.
     writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, 0, this.spec);
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId });
+    this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom });
+    beforeDispatch?.();
     this.runStatus = 'running';
     // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
     // (those runs are refused before start()).
@@ -464,6 +503,7 @@ class ActiveRun {
     if (this.isTerminal() || this.runStatus === 'interrupted') {
       throw new TaskControlError(this.runStatus, `Cannot pause a ${this.runStatus} run`);
     }
+    this.clearCoordinatorGate();
     if (this.inFlight === 0) {
       this.runStatus = 'paused';
       this.log({ kind: 'run-paused' });
@@ -476,11 +516,17 @@ class ActiveRun {
   }
 
   resume(): RunSnapshot {
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop before resuming');
     if (this.runStatus === 'running') return this.snapshot();
     if (this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
       throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
     }
     this.assertSensitiveReady();
+    const restoredExecutions = [...this.state.values(), ...this.instances.values()].some(state => state.sessionId && ['pending', 'interrupted'].includes(state.state));
+    if (restoredExecutions) {
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      this.reconcileWorkers();
+    }
     if (this.progressParentResume && this.opts.orchestratorSessionId) {
       const phase = this.progressParentResume;
       if (phase === 'verifying' && !this.deps.host.continueProgress) throw new TaskControlError(this.runStatus, 'Host cannot resume verification checkpoint');
@@ -505,6 +551,7 @@ class ActiveRun {
     for (const [, st] of this.instances) if (st.state === 'cancelled') st.state = 'pending';
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.restorePrimaryCompletions();
     this.restorePreparedDeliveries();
     if (reopenGate) {
       if (!this.enterCoordinatorGate(reopenReason)) this.scheduleReady();
@@ -530,6 +577,9 @@ class ActiveRun {
       throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
     }
     this.assertSensitiveReady();
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+    this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+    this.reconcileWorkers();
     for (const [, st] of this.state) {
       if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
     }
@@ -538,6 +588,7 @@ class ActiveRun {
     }
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.restorePrimaryCompletions();
     this.restorePreparedDeliveries();
     this.scheduleReady();
     this.emitChanged();
@@ -563,7 +614,7 @@ class ActiveRun {
       this.submittedOutputs.set(nodeId, output);
       st.state = 'running';
       this.inFlight += 1;
-      this.onSessionComplete({ sessionId: st.sessionId, workspaceId: this.deps.workspaceId, generation: 0, reason: 'complete' });
+      this.onSessionComplete({ sessionId: st.sessionId, workspaceId: this.deps.workspaceId, generation: st.generation ?? 0, reason: 'complete' });
     }
   }
 
@@ -583,6 +634,8 @@ class ActiveRun {
       throw new TaskControlError('failed', 'No failed execution nodes to retry');
     }
     this.assertSensitiveReady();
+    if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+    this.deps.host.assertTaskSafePoint?.(this.executionSessions());
     // One durable event also invalidates stale reviewer decisions and expanded descendants.
     this.log({ kind: 'run-resumed', retryNodeIds: retryIds, discardInstanceIds: discardIds });
     this.applyRetryReset(retryIds, discardIds);
@@ -645,18 +698,25 @@ class ActiveRun {
       invalidPatchCount: number;
       completedCheckpointIds?: string[];
       coordinatorGate?: CoordinatorGateState;
+      plannerPhase?: PlannerPhase;
+      consumedResultIds?: string[];
+      decisionEventSeqs?: number[];
     } | null,
     revisionFallback: number,
+    nextSequenceFloor = 0,
   ): void {
     this.revision = checkpoint?.revision ?? revisionFallback;
     if (!checkpoint) return;
-    this.nextSeq = checkpoint.seq + 1;
+    this.nextSeq = Math.max(checkpoint.seq + 1, nextSequenceFloor);
     this.tokensUsed = checkpoint.tokensUsed;
     if (checkpoint.tokenBudget !== undefined) this.tokenBudget = checkpoint.tokenBudget;
     if (checkpoint.params) this.opts.params = { ...this.opts.params, ...checkpoint.params };
     this.invalidPatchCount = checkpoint.invalidPatchCount;
     for (const id of checkpoint.seenDecisionIds) this.seenDecisionIds.add(id);
     for (const id of checkpoint.completedCheckpointIds ?? []) this.completedCheckpointIds.add(id);
+    for (const id of checkpoint.consumedResultIds ?? []) this.consumedResultIds.add(id);
+    for (const seq of checkpoint.decisionEventSeqs ?? []) this.decisionEventSeqs.add(seq);
+    this.plannerPhase = checkpoint.plannerPhase === 'draining' || checkpoint.plannerPhase === 'exhausted' ? 'draining' : 'active';
     if (checkpoint.coordinatorGate) this.coordinatorGate = checkpoint.coordinatorGate;
   }
 
@@ -677,7 +737,22 @@ class ActiveRun {
       const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
       if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
       if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
-      if (e.kind === 'artifact-results-invalidated') {
+      if (e.kind === 'run-started') {
+        this.resumedFrom = e.resumedFrom;
+      } else if (e.kind === 'run-superseded') {
+        this.supersededBy = e.supersededBy;
+      } else if (e.kind === 'execution-shutdown') {
+        if (e.confirmed) this.unconfirmedShutdown.delete(e.sessionId); else this.unconfirmedShutdown.add(e.sessionId);
+      } else if (e.kind === 'task-worker') {
+        this.workers.set(e.worker.workerId, structuredClone(e.worker));
+      } else if (e.kind === 'node-awaiting-workers') {
+        this.deferredCompletions.set(e.nodeId, { workspaceId: this.deps.workspaceId, sessionId: e.sessionId, generation: e.generation,
+          reason: e.reason, finalText: e.finalText, errorCode: e.errorCode, artifacts: e.artifacts,
+          tokenUsage: { inputTokens: e.inputTokens ?? 0, outputTokens: e.outputTokens ?? 0, totalTokens: (e.inputTokens ?? 0) + (e.outputTokens ?? 0), contextTokens: 0, costUsd: 0 } });
+        if (e.output) this.submittedOutputs.set(e.nodeId, structuredClone(e.output));
+      } else if (e.kind === 'artifact-availability') {
+        this.artifactAvailability = e.nodeIds.length ? { nodeIds: [...e.nodeIds], reason: e.reason } : undefined;
+      } else if (e.kind === 'artifact-results-invalidated') {
         for (const id of e.nodeIds) {
           const st = this.instances.get(id) ?? this.state.get(id);
           if (st) { st.state = 'invalid'; st.lastFailure = e.reason; }
@@ -690,6 +765,7 @@ class ActiveRun {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
+          st.generation = e.generation;
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
       } else if (e.kind === 'run-resumed' && e.retryNodeIds) {
@@ -701,6 +777,8 @@ class ActiveRun {
           if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
         }
       } else if (e.kind === 'node-finished') {
+        if (e.state !== 'interrupted') this.deferredCompletions.delete(e.nodeId);
+        if (e.resultEvent) { this.resultEvents.set(e.resultEvent.id, e.resultEvent); this.plannerPhase = 'active'; }
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.state = e.state;
@@ -737,8 +815,12 @@ class ActiveRun {
           reason: e.reason,
           revision: e.revision,
           deadline: e.deadline,
+          resultEventIds: e.resultEventIds,
         };
       } else if (e.kind === 'coordinator-decision') {
+        if (e.seq !== undefined) this.decisionEventSeqs.add(e.seq);
+        for (const id of e.consumedResults ?? []) this.consumedResultIds.add(id);
+        if (e.plannerPhase) this.plannerPhase = e.plannerPhase === 'active' ? 'active' : 'draining';
         this.lastCoordinatorTimeout = false;
         this.seenDecisionIds.add(e.decisionId);
         this.completedCheckpointIds.add(e.checkpointId);
@@ -767,6 +849,14 @@ class ActiveRun {
       } else if (e.kind === 'cache-bypass') {
         this.cacheBypasses += 1;
         this.timing(e.nodeId).cacheStatus = 'bypass';
+      } else if (e.kind === 'orchestration-patch') {
+        this.planChanges.push({ revision: e.revision ?? e.baseRevision + 1, decisionId: e.decisionId, kind: e.changeKind ?? 'structure', reason: e.rationale,
+          added: e.added ?? [], updated: e.updated ?? [], cancelled: e.cancelled ?? [] });
+        if (e.seq !== undefined) this.decisionEventSeqs.add(e.seq);
+        for (const id of e.consumedResults ?? []) this.consumedResultIds.add(id);
+        this.plannerPhase = e.plannerPhase === 'draining' ? 'draining' : 'active';
+      } else if (e.kind === 'run-paused' || e.kind === 'run-pausing') {
+        this.coordinatorGate = null;
       }
     }
     // `instanceCount` is an execution-attempt guard, not just the number of
@@ -786,6 +876,8 @@ class ActiveRun {
       }
     }
     this.runStatus = deriveRunStatusFromLog(log);
+    this.supersededBy ??= listRunIds(this.deps.workspaceRoot, this.slug).find(id => id !== this.runId
+      && readRunLog(this.deps.workspaceRoot, this.slug, id).some(event => event.kind === 'run-started' && event.resumedFrom === this.runId));
     // History reads must never subscribe, start timers, change states or write logs.
     if (mode === 'view') {
       for (const [nodeId, state] of this.state) {
@@ -895,7 +987,9 @@ class ActiveRun {
     this.coordinatorTimers.clear();
     for (const nodeId of [...this.acquiredConnections.keys()]) this.releaseConnection(nodeId);
 
-    const sessionsToCancel = new Set<string>();
+    const sessionsToCancel = new Set<string>(this.unconfirmedShutdown);
+    if (this.opts.orchestratorSessionId && ['waiting-coordinator', 'verifying', 'repairing'].includes(this.runStatus)) sessionsToCancel.add(this.opts.orchestratorSessionId);
+    for (const worker of this.workers.values()) if (worker.sessionId && ['reserved', 'running'].includes(worker.state)) sessionsToCancel.add(worker.sessionId);
     for (const [nodeId, st] of [...this.state, ...this.instances]) {
       const node = this.spec.nodes.find((candidate) => candidate.id === definitionId(nodeId));
       // Cleanup nodes are allowed to finish (or start below) after stop. Every
@@ -909,6 +1003,11 @@ class ActiveRun {
       if (st.sessionId) sessionsToCancel.add(st.sessionId);
     }
 
+    if (this.deps.host.settleTaskSessionStop) {
+      for (const sessionId of sessionsToCancel) {
+        this.unconfirmedShutdown.add(sessionId); this.log({ kind: 'execution-shutdown', sessionId, confirmed: false });
+      }
+    }
     for (const sessionId of sessionsToCancel) {
       let stoppedBySwarm = false;
       if (this.deps.host.stopSwarm) {
@@ -930,6 +1029,16 @@ class ActiveRun {
         }
       }
       this.applyCard(sessionId, TODO_STATUS);
+      if (this.deps.host.settleTaskSessionStop) {
+        try { await this.deps.host.settleTaskSessionStop(sessionId); }
+        catch (error) {
+          this.runStatus = 'paused'; this.log({ kind: 'run-paused' }); this.suppressSchedule = false; this.emitChanged();
+          throw new TaskControlError('paused', `Execution shutdown is unconfirmed for ${sessionId}: ${error instanceof Error ? error.message : error}`);
+        }
+        this.unconfirmedShutdown.delete(sessionId); this.log({ kind: 'execution-shutdown', sessionId, confirmed: true });
+      }
+      const worker = [...this.workers.values()].find(candidate => candidate.sessionId === sessionId && ['reserved', 'running'].includes(candidate.state));
+      if (worker) this.completeWorker(worker.workerId, sessionId, 'stopped', undefined, 'Task run stopped');
     }
     this.suppressSchedule = false;
     const hasFinally =
@@ -1021,8 +1130,18 @@ class ActiveRun {
     for (const [id, state] of this.instances) {
       if (state.state === 'done' && (invalidInstances.has(id) || affected.has(definitionId(id)) && !instanceRootDefinitions.has(definitionId(id)))) nodeIds.push(id);
     }
-    if (!nodeIds.length) return this.snapshot();
     const reason = 'Artifact input or output changed; revalidation required';
+    if (this.isTerminal()) {
+      // Completion is a historical fact. Changed bytes affect availability and
+      // future reuse, never the old output, verdict or execution history.
+      if (JSON.stringify(this.artifactAvailability?.nodeIds ?? []) !== JSON.stringify(nodeIds)) {
+        this.artifactAvailability = nodeIds.length ? { nodeIds, reason } : undefined;
+        this.log({ kind: 'artifact-availability', nodeIds, reason });
+        this.emitChanged();
+      }
+      return this.snapshot();
+    }
+    if (!nodeIds.length) return this.snapshot();
     // One durable event preserves the entire impact set before changing memory.
     this.log({ kind: 'artifact-results-invalidated', nodeIds, reason, completedRun: this.runStatus === 'completed' });
     for (const id of nodeIds) {
@@ -1043,6 +1162,7 @@ class ActiveRun {
       .filter(([, st]) => st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
       .map(([id]) => id);
     if (this.isOverBudget() && this.hasPendingNodes()) blockers.push('budget');
+    for (const sessionId of this.unconfirmedShutdown) blockers.push(`shutdown-unconfirmed:${sessionId}`);
     if (this.runStatus === 'waiting-coordinator') blockers.push(this.coordinatorGate?.reason ?? 'coordinator');
     if (this.runStatus === 'paused' && this.lastCoordinatorTimeout) blockers.push(COORDINATOR_TIMEOUT_BLOCKER);
     const metrics = this.historicalMetrics ?? this.buildMetrics();
@@ -1063,6 +1183,7 @@ class ActiveRun {
         retryCount: Math.max(0, st.attempt - 1),
         role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
         model: this.resolveNodeModel(node),
+        actor: node?.actor,
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
         blocker: st.lastFailure,
         elapsedMs: timing?.elapsedMs,
@@ -1088,6 +1209,12 @@ class ActiveRun {
       tokenBudget: this.tokenBudget,
       blockers: blockers.length ? blockers : undefined,
       revision: this.revision,
+      artifactAvailability: this.artifactAvailability ? structuredClone(this.artifactAvailability) : undefined,
+      resumedFrom: this.resumedFrom,
+      supersededBy: this.supersededBy,
+      ...(this.workers.size ? { workers: [...this.workers.values()].map(worker => structuredClone(worker)) } : {}),
+      ...(this.planChanges.length ? { planChanges: this.planChanges.map(change => structuredClone(change)) } : {}),
+      ...(this.coordinatorGateEnabled() ? { planner: { phase: this.planningPhase(), pendingResults: this.pendingPlannerResults(), consumedResults: this.consumedResultIds.size } } : {}),
       metrics,
       nodes: [
         ...this.spec.nodes.map((n) => toNodeStatus(n.id, this.state.get(n.id)!, n)),
@@ -1113,6 +1240,11 @@ class ActiveRun {
       return;
     }
     if (this.runStatus !== 'running') return;
+    if (this.pendingPlannerResults().length && this.coordinatorGateEnabled()) {
+      this.enterCoordinatorGate(this.allNodesSettled() ? 'before-verify' : 'new-result');
+      this.emitChanged();
+      return;
+    }
     this.settleBlockedNodes();
     this.pumpExpandedInstances();
     // Resume/hydrate of a v1 run can leave deferred kinds pending; never dispatch them as sessions.
@@ -1202,6 +1334,11 @@ class ActiveRun {
 
   private isReady(node: TaskNode): boolean {
     if (this.state.get(node.id)!.state !== 'pending') return false;
+    if (node.actor && this.actorBusy(node.actor.id)) return false;
+    if (node.actor) {
+      const previous = this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).findLast(candidate => candidate.actor?.id === node.actor!.id);
+      if (previous && !isTerminalNodeState(this.state.get(previous.id)?.state)) return false;
+    }
     if (this.sourceVersion >= 2 && node.kind === 'finally') return this.isFinallyReady(node);
     const deps = [...(this.edges.get(node.id) ?? [])];
     const states = deps.map((dep) => this.state.get(dep)?.state);
@@ -1564,6 +1701,7 @@ class ActiveRun {
     iid: string,
     locals: { item?: unknown; index?: number; prev?: string },
   ): boolean {
+    if (node.actor && this.actorBusy(node.actor.id, node.id)) return false;
     if (!this.tryAcquireConnection(node, iid)) {
       this.timing(iid).scheduledAtMs ??= this.nowMs();
       return false;
@@ -1687,12 +1825,8 @@ class ActiveRun {
   }
 
   private cacheKey(node: TaskNode, locals?: { item?: unknown; index?: number; prev?: string }): string {
-    const prompt = interpolateLocals(
-      interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params }),
-      locals ?? {},
-    );
     const inputs = captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, this.outputs, this.deps.workspaceRoot, this.edges);
-    return createHash('sha256').update(`${node.id}\n${prompt}\n${JSON.stringify(inputs)}`).digest('hex');
+    return createHash('sha256').update(`${node.id}\n${this.workspaceFingerprint(node, locals)}\n${JSON.stringify(inputs)}`).digest('hex');
   }
 
   private rememberCache(node: TaskNode, output: NodeOutput, locals?: { item?: unknown; index?: number; prev?: string }): void {
@@ -1876,7 +2010,83 @@ class ActiveRun {
   }
 
   hasSession(sessionId: string): boolean {
-    return this.sessionToNode.has(sessionId) || this.opts.orchestratorSessionId === sessionId;
+    return this.sessionToNode.has(sessionId) || [...this.workers.values()].some(worker => worker.sessionId === sessionId) || this.opts.orchestratorSessionId === sessionId;
+  }
+
+  executionSessions(): string[] {
+    return [...new Set([...this.sessionToNode.keys(), ...[...this.workers.values()].flatMap(worker => worker.sessionId ? [worker.sessionId] : []),
+      ...(this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])])];
+  }
+
+  markSuperseded(runId: string): void {
+    if (this.supersededBy && this.supersededBy !== runId) throw new TaskControlError(this.runStatus, `Run is already superseded by ${this.supersededBy}`);
+    if (this.supersededBy === runId) return;
+    this.supersededBy = runId; this.log({ kind: 'run-superseded', supersededBy: runId });
+  }
+
+  private actorBusy(actorId: string, expandingNodeId?: string): boolean {
+    return [...this.state, ...this.instances].some(([id, state]) => state.state === 'running'
+      && id !== expandingNodeId && this.spec.nodes.find(node => node.id === definitionId(id))?.actor?.id === actorId);
+  }
+
+  reserveWorker(rootSessionId: string, nodeId: string, workerId: string, role: 'worker' | 'reviewer', permissionMode?: TaskSessionBinding['permissionMode']): TaskSessionBinding {
+    const state = this.instances.get(nodeId) ?? this.state.get(nodeId);
+    const node = this.spec.nodes.find(candidate => candidate.id === definitionId(nodeId));
+    if (rootSessionId !== this.opts.orchestratorSessionId || this.isTerminal() || this.stopRequested
+      || !['running', 'waiting-coordinator'].includes(this.runStatus) || state?.state !== 'running' || !node) throw new Error('Delegated work requires an active running node owned by this root');
+    if (this.workers.has(workerId)) throw new Error('Worker identity already exists');
+    const ceiling = node.permissionMode ?? this.spec.defaults?.permissionMode ?? 'safe';
+    if (permissionMode && !permissionAllowedByTask(permissionMode, ceiling)) throw new Error('Delegated permission exceeds the owning task node');
+    const worker: TaskWorkerRecord = { workerId, rootSessionId, parentSessionId: rootSessionId, nodeId, attempt: state.attempt,
+      revision: this.attemptRevisions.get(nodeId) ?? this.revision, role, state: 'reserved' };
+    this.workers.set(workerId, worker); this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+    return { rootSessionId, taskSlug: this.slug, taskRunId: this.runId, taskNodeId: nodeId, taskAttempt: worker.attempt,
+      taskRevision: worker.revision, taskActor: node.actor, permissionMode: ceiling,
+      contract: structuredClone({ goal: this.spec.goal, node, constraints: this.spec.constraints, decisions: this.spec.decisions }) };
+  }
+
+  bindWorker(workerId: string, sessionId: string): void {
+    const worker = this.workers.get(workerId);
+    if (!worker) throw new Error('Worker reservation is unavailable');
+    if (this.stopRequested || this.isTerminal() || worker.state !== 'reserved') {
+      Object.assign(worker, { sessionId, state: 'stopped', reason: 'Owning run stopped before worker dispatch' });
+      this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+      throw new Error('Worker reservation is no longer active');
+    }
+    Object.assign(worker, { sessionId, state: 'running' }); this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+  }
+
+  completeWorker(workerId: string, sessionId: string | undefined, state: 'done' | 'failed' | 'stopped', output?: NodeOutput, reason?: string, tokensUsed?: number): void {
+    const worker = this.workers.get(workerId);
+    if (!worker || worker.sessionId !== sessionId || !['reserved', 'running'].includes(worker.state)) return;
+    Object.assign(worker, { state, output: output ? structuredClone(output) : undefined, reason, tokensUsed });
+    if (sessionId && tokensUsed !== undefined) {
+      const previous = this.sessionTokens.get(sessionId) ?? 0; this.tokensUsed += Math.max(0, tokensUsed - previous); this.sessionTokens.set(sessionId, tokensUsed);
+    }
+    this.log({ kind: 'task-worker', worker: structuredClone(worker) }); this.emitChanged();
+    const pending = [...this.workers.values()].some(candidate => candidate.nodeId === worker.nodeId && candidate.attempt === worker.attempt && ['reserved', 'running'].includes(candidate.state));
+    const completion = this.deferredCompletions.get(worker.nodeId);
+    const node = this.instances.get(worker.nodeId) ?? this.state.get(worker.nodeId);
+    if (!pending && completion && node?.state === 'running') { this.deferredCompletions.delete(worker.nodeId); this.onSessionComplete(completion); }
+  }
+
+  private reconcileWorkers(): void {
+    for (const worker of this.workers.values()) {
+      if (!['reserved', 'running'].includes(worker.state)) continue;
+      if (!worker.sessionId) { this.completeWorker(worker.workerId, undefined, 'stopped', undefined, 'Interrupted before worker dispatch'); continue; }
+      const result = this.deps.host.inspectTaskWorker?.(worker);
+      if (!result) throw new TaskControlError(this.runStatus, `Worker ${worker.workerId} outcome requires inspection before replay`);
+      this.completeWorker(worker.workerId, worker.sessionId, result.state, result.output, result.reason, result.tokensUsed);
+    }
+  }
+
+  private restorePrimaryCompletions(): void {
+    for (const [nodeId, completion] of this.deferredCompletions) {
+      const state = this.instances.get(nodeId) ?? this.state.get(nodeId);
+      if (!state || state.state === 'running' || isTerminalNodeState(state.state)) continue;
+      if ([...this.workers.values()].some(worker => worker.nodeId === nodeId && worker.attempt === state.attempt && ['reserved', 'running'].includes(worker.state))) continue;
+      state.state = 'running'; this.inFlight += 1; this.deferredCompletions.delete(nodeId); this.onSessionComplete(completion);
+    }
   }
 
   expireApprovals(nowIso?: string): void {
@@ -1976,6 +2186,10 @@ class ActiveRun {
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
       const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance, promptOutputs));
       if (!canDispatch()) return;
+      if (state.sessionId && state.lastFailure && state.lastFailure !== 'progress-paused') {
+        await this.deps.host.settleTaskSessionStop?.(state.sessionId);
+        this.deps.host.assertTaskSafePoint?.([state.sessionId]);
+      }
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
@@ -1990,6 +2204,9 @@ class ActiveRun {
         taskSlug: this.slug,
         taskRunId: this.runId,
         taskNodeId: definitionId(instance?.id ?? node.id),
+        taskAttempt: attempt,
+        taskRevision: this.attemptRevisions.get(key) ?? this.revision,
+        taskActor: node.actor,
         hidden: true,
         name: instance?.id ?? nodeTitle(node),
         model: this.resolveNodeModel(node),
@@ -2011,11 +2228,28 @@ class ActiveRun {
       // Hidden workers remain persisted/queryable by their task/run/node linkage,
       // but do not appear as ordinary project sessions.
       const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
-      const child = resuming ? { id: state.sessionId! } : await this.deps.host.createSession(this.deps.workspaceId, options);
+      const prefix = node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => candidate.id) : [];
+      const signature = planValueKey({ actor: node.actor, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
+      const actor = node.actor ? this.actors.get(node.actor.id) : undefined;
+      const reuse = !!node.actor && !instance && requested === 'safe' && !!this.deps.host.bindTaskSession && actor?.signature === signature
+        && (!this.deps.host.canReuseTaskSession || this.deps.host.canReuseTaskSession(actor.sessionId))
+        && (!this.deps.host.getSessionPermissionModeState || this.deps.host.getSessionPermissionModeState(actor.sessionId)?.permissionMode === requested)
+        && (!options.model || this.deps.host.getSessionModel?.(actor.sessionId) === options.model)
+        && (!options.llmConnection || this.deps.host.getSessionLlmConnection?.(actor.sessionId) === options.llmConnection)
+        && planValueKey(actor.prefix) === planValueKey(prefix) && prefix.every(id => this.state.get(id)?.state === 'done');
+      const child = resuming ? { id: state.sessionId! } : reuse ? { id: actor!.sessionId } : await this.deps.host.createSession(this.deps.workspaceId, options);
       const st = this.instances.get(key) ?? this.state.get(node.id)!;
+      if (resuming) st.generation = this.deps.host.nextTaskSessionGeneration?.(child.id);
+      if (this.deps.host.bindTaskSession && this.opts.orchestratorSessionId && !resuming) {
+        const bound = await this.deps.host.bindTaskSession(child.id, { rootSessionId: this.opts.orchestratorSessionId, taskSlug: this.slug, taskRunId: this.runId,
+          taskNodeId: key, taskAttempt: attempt, taskRevision: options.taskRevision!, taskActor: node.actor, model: options.model, llmConnection: options.llmConnection, permissionMode: requested });
+        st.generation = bound.generation;
+      }
       st.sessionId = child.id;
       this.sessionToNode.set(child.id, key);
-      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id });
+      this.integratedSessions.delete(child.id);
+      if (node.actor && !instance) this.actors.set(node.actor.id, { sessionId: child.id, signature, prefix: [...prefix, node.id] });
+      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id, generation: st.generation, actor: node.actor, reused: reuse });
       if (!canDispatch()) {
         // Creation may finish after Stop. Preserve its history, but never send the prompt.
         this.log({ kind: 'node-finished', nodeId: key, sessionId: child.id, state: 'cancelled', reason: 'stopped-before-dispatch' });
@@ -2024,6 +2258,10 @@ class ActiveRun {
         return;
       }
       let deliveryPrompt = prompt;
+      if (node.actor) {
+        deliveryPrompt = `Logical actor ${node.actor.id}${node.actor.persona ? `: ${node.actor.persona}` : ''}. Work binding: run=${this.runId}, node=${key}, attempt=${attempt}, revision=${options.taskRevision}. Submit this task's output separately; prior task outputs remain immutable.\n\n${deliveryPrompt}`;
+        if (!reuse && prefix.length) deliveryPrompt += `\n\nConfirmed prior actor task results (new execution context): ${JSON.stringify(prefix.map(id => ({ nodeId: id, output: this.outputs[id] ?? null })))}`;
+      }
       if (!resuming && this.spec.execution?.artifact_delivery === 1 && requested !== 'safe') {
         if (!this.deps.host.prepareTaskWorkspace) throw new Error('Host does not support isolated artifact delivery');
         const prepared = await this.deps.host.prepareTaskWorkspace(child.id, cwd ?? this.deps.workspaceRoot, node.workspace_inputs ?? []);
@@ -2110,6 +2348,7 @@ class ActiveRun {
     return [
       ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
       ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
+      ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
     ].join('\n');
   }
 
@@ -2131,7 +2370,16 @@ class ActiveRun {
     }
     const defId = definitionId(nodeId);
     const st = this.instances.get(nodeId) ?? this.state.get(defId);
-    if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId) return; // stale/already settled
+    if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId || st.generation !== undefined && evt.generation < st.generation) return; // stale/already settled
+    const ownedWorkers = [...this.workers.values()].filter(worker => worker.nodeId === nodeId && worker.attempt === st.attempt);
+    if (ownedWorkers.some(worker => ['reserved', 'running'].includes(worker.state))) {
+      if (!this.deferredCompletions.has(nodeId)) this.log({ kind: 'node-awaiting-workers', nodeId, sessionId: evt.sessionId, generation: evt.generation,
+        reason: evt.reason, finalText: evt.finalText, errorCode: evt.errorCode, artifacts: evt.artifacts, output: this.submittedOutputs.get(nodeId), inputTokens: evt.tokenUsage?.inputTokens, outputTokens: evt.tokenUsage?.outputTokens });
+      this.deferredCompletions.set(nodeId, evt); return;
+    }
+    if (evt.reason === 'complete' && ownedWorkers.some(worker => worker.state !== 'done')) {
+      evt = { ...evt, reason: 'error', finalText: ownedWorkers.filter(worker => worker.state !== 'done').map(worker => worker.reason ?? `Worker ${worker.workerId}: ${worker.state}`).join('; ') };
+    }
     const timeout = this.sessionTimers.get(evt.sessionId);
     if (timeout) clearTimeout(timeout);
     this.sessionTimers.delete(evt.sessionId);
@@ -2556,6 +2804,14 @@ class ActiveRun {
   private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }): void {
     if (this.runStatus !== 'verifying') return;
     if (this.verdictLocked) return;
+    if (verdict.result === 'pass') {
+      this.revalidateCompletedArtifacts();
+      if ([...this.state.values(), ...this.instances.values()].some(state => !['done', 'skipped'].includes(state.state))
+        || [...this.workers.values()].some(worker => ['reserved', 'running'].includes(worker.state))
+        || this.unconfirmedShutdown.size || this.coordinatorGateEnabled() && this.pendingPlannerResults().length) {
+        throw new TaskControlError(this.runStatus, 'Cannot accept PASS: execution, result consumption or artifact validation is unsettled');
+      }
+    }
     this.verdictLocked = true;
     this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes });
 
@@ -2740,6 +2996,7 @@ class ActiveRun {
     if (this.runStatus === 'waiting-coordinator') {
       throw new TaskControlError(this.runStatus, 'Use submit_orchestration_decision while waiting for a coordinator checkpoint');
     }
+    if (this.planningPhase() === 'exhausted' && this.coordinatorGateEnabled()) throw new TaskControlError(this.runStatus, 'Planning is exhausted; create a successor run for new work');
     const wasVerifying = this.runStatus === 'verifying';
     const result = validateOrchestrationPatch(patch, {
       spec: this.spec,
@@ -2749,6 +3006,7 @@ class ActiveRun {
       nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
       allowedModels: this.deps.allowedModels,
       invalidPatchCount: this.invalidPatchCount,
+      pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
     });
     if (!result.ok) {
       this.invalidPatchCount += 1;
@@ -2771,9 +3029,6 @@ class ActiveRun {
       this.verdictLocked = false;
       this.log({ kind: 'run-resumed' });
       this.scheduleReady();
-    } else if (this.runStatus === 'paused' || this.runStatus === 'pausing') {
-      this.runStatus = 'running';
-      this.scheduleReady();
     } else {
       this.scheduleReady();
     }
@@ -2781,33 +3036,46 @@ class ActiveRun {
     return this.snapshot();
   }
 
-  private commitPlanPatch(result: PatchOk, patch: OrchestrationPatch, decision?: OrchestrationDecision): void {
+  private commitPlanPatch(result: PatchOk | undefined, patch: Pick<OrchestrationPatch, 'decisionId' | 'baseRevision' | 'rationale' | 'consumedResults' | 'plannerPhase' | 'changeKind'>, decision?: OrchestrationDecision): void {
     // Stage immutable revision first. No in-memory plan changes on write failure.
-    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, result.revision, result.spec);
+    if (result) writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, result.revision, result.spec);
     const logPath = join(runDir(this.deps.workspaceRoot, this.slug, this.runId), 'run-log.jsonl');
     const logLength = statSync(logPath).size;
     const previous = { spec: this.spec, revision: this.revision, state: new Map([...this.state].map(([id, state]) => [id, { ...state }])),
-      edges: this.edges, dependents: this.dependents, seen: new Set(this.seenDecisionIds), completed: new Set(this.completedCheckpointIds), invalid: this.invalidPatchCount, seq: this.nextSeq };
+      edges: this.edges, dependents: this.dependents, seen: new Set(this.seenDecisionIds), completed: new Set(this.completedCheckpointIds), consumed: new Set(this.consumedResultIds), decisionSeqs: new Set(this.decisionEventSeqs), phase: this.plannerPhase, invalid: this.invalidPatchCount, seq: this.nextSeq };
     try {
-      this.spec = result.spec; this.revision = result.revision; this.invalidPatchCount = 0;
+      if (result) { this.spec = result.spec; this.revision = result.revision; }
+      this.invalidPatchCount = 0;
       this.seenDecisionIds.add(patch.decisionId);
       if (decision) this.completedCheckpointIds.add(decision.checkpointId);
+      const consumedResults = patch.consumedResults ?? (decision ? decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [] : []);
+      if (decision?.action !== 'pause') for (const id of consumedResults) this.consumedResultIds.add(id);
+      this.plannerPhase = patch.plannerPhase ?? (result ? 'active' : this.allNodesSettled() ? 'draining' : this.plannerPhase);
       this.edges = materializeDeps(this.spec); this.dependents = undefined;
       for (const node of this.spec.nodes) if (!this.state.has(node.id)) this.state.set(node.id, { state: 'pending', attempt: 0 });
-      for (const id of result.cancelled) { const state = this.state.get(id); if (state) state.state = 'cancelled'; }
+      for (const id of result?.cancelled ?? []) { const state = this.state.get(id); if (state) state.state = 'cancelled'; }
       // Append both facts, then atomically checkpoint revision + decision identity once.
       const t = this.deps.now ? this.deps.now() : new Date().toISOString();
-      if (decision) appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
-        kind: 'coordinator-decision', checkpointId: decision.checkpointId, decisionId: decision.decisionId, action: decision.action, baseRevision: decision.baseRevision });
-      appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+      const change = result ? { revision: this.revision, decisionId: patch.decisionId, kind: patch.changeKind ?? 'structure' as const, reason: patch.rationale,
+        added: result.spec.nodes.filter(node => !previous.state.has(node.id)).map(node => node.id),
+        updated: result.spec.nodes.filter(node => previous.spec.nodes.some(old => old.id === node.id && JSON.stringify(old) !== JSON.stringify(node))).map(node => node.id),
+        cancelled: result.cancelled } : undefined;
+      if (decision) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
+        kind: 'coordinator-decision', checkpointId: decision.checkpointId, decisionId: decision.decisionId, action: decision.action, baseRevision: decision.baseRevision,
+        consumedResults: decision.action === 'pause' ? [] : consumedResults, plannerPhase: this.planningPhase() }); }
+      if (result) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
         kind: 'orchestration-patch', decisionId: patch.decisionId, baseRevision: patch.baseRevision, rationale: patch.rationale,
-        cancelled: result.cancelled.length ? result.cancelled : undefined });
+        added: change!.added, updated: change!.updated, cancelled: result.cancelled.length ? result.cancelled : undefined, consumedResults, plannerPhase: this.planningPhase(), changeKind: patch.changeKind ?? 'structure' }); }
       this.writeCheckpoint(this.nextSeq - 1);
+      if (change) this.planChanges.push(change);
     } catch (error) {
       this.spec = previous.spec; this.revision = previous.revision; this.state.clear(); for (const [id, state] of previous.state) this.state.set(id, state);
       this.edges = previous.edges; this.dependents = previous.dependents;
       this.seenDecisionIds.clear(); for (const id of previous.seen) this.seenDecisionIds.add(id);
       this.completedCheckpointIds.clear(); for (const id of previous.completed) this.completedCheckpointIds.add(id);
+      this.consumedResultIds.clear(); for (const id of previous.consumed) this.consumedResultIds.add(id);
+      this.decisionEventSeqs.clear(); for (const seq of previous.decisionSeqs) this.decisionEventSeqs.add(seq);
+      this.plannerPhase = previous.phase;
       this.invalidPatchCount = previous.invalid; this.nextSeq = previous.seq;
       truncateSync(logPath, logLength);
       throw error;
@@ -2816,6 +3084,18 @@ class ActiveRun {
 
   currentSpec(): TaskSpec {
     return this.spec;
+  }
+
+  private pendingPlannerResults(): PlannerResultEvent[] {
+    return [...this.resultEvents.values()].filter(event => !this.consumedResultIds.has(event.id));
+  }
+
+  private allNodesSettled(): boolean {
+    return this.inFlight === 0 && [...this.state.values(), ...this.instances.values()].every(state => isTerminalNodeState(state.state));
+  }
+
+  private planningPhase(): PlannerPhase {
+    return this.plannerPhase === 'draining' && this.allNodesSettled() && !this.pendingPlannerResults().length ? 'exhausted' : this.plannerPhase;
   }
 
   private coordinatorCheckpoint(reason: string): void {
@@ -2834,7 +3114,7 @@ class ActiveRun {
     return (
       this.sourceVersion === 3
       && this.spec.runner === 'orchestrate'
-      && isTasksOrchestrateEnabled()
+      && this.plannerRequired
       && !!this.opts.orchestratorSessionId
       && (this.spec.execution?.coordinator_gate?.mode ?? 'required') === 'required'
     );
@@ -2890,13 +3170,13 @@ class ActiveRun {
     const now = this.nowMs();
     const checkpointId = `cp-${this.runId}-${this.revision}-${reason}-${this.nextSeq}`;
     const deadline = new Date(now + COORDINATOR_GATE_TIMEOUT_SECONDS * 1000).toISOString();
-    this.coordinatorGate = { checkpointId, reason, revision: this.revision, deadline };
+    this.coordinatorGate = { checkpointId, reason, revision: this.revision, deadline, resultEventIds: this.pendingPlannerResults().map(event => event.id) };
     this.lastCoordinatorTimeout = false;
     this.runStatus = 'waiting-coordinator';
     this.coordinatorWaits += 1;
     this.coordinatorWaitStartedAt = now;
     this.log({ kind: 'run-waiting-coordinator' });
-    this.log({ kind: 'coordinator-request', checkpointId, reason, revision: this.revision, deadline });
+    this.log({ kind: 'coordinator-request', checkpointId, reason, revision: this.revision, deadline, resultEventIds: this.coordinatorGate.resultEventIds });
     const orch = this.opts.orchestratorSessionId;
     if (orch) {
       void this.sendToOrchestrator(
@@ -2909,6 +3189,9 @@ class ActiveRun {
           'Call submit_orchestration_decision with action continue, patch, or pause.',
           'Parent chat messages are not decisions.',
           this.planContext(),
+          `Task slug=${this.slug}; runId=${this.runId}. Frozen plan: ${JSON.stringify(this.spec)}`,
+          `New results for this checkpoint: ${JSON.stringify(this.pendingPlannerResults().filter(event => this.coordinatorGate?.resultEventIds?.includes(event.id)))}`,
+          'Consume the checkpoint results by a valid continue/patch decision. Add work for new evidence, failures or unresolved gaps. A final continue declares draining only when no planned work remains; exhausted then proceeds to independent final verification. Pause preserves unconsumed results. Never change locked contents, live nodes, permissions or goal scope.',
           ...(advisory ? [`Progress advisory (untrusted evidence): ${advisory}`] : []),
         ].join(' '),
       );
@@ -2918,6 +3201,7 @@ class ActiveRun {
   }
 
   applyOrchestrationDecision(decision: OrchestrationDecision): RunSnapshot {
+    if (this.runStatus !== 'waiting-coordinator') throw new TaskControlError(this.runStatus, 'Run is not waiting for a coordinator; resume a human pause explicitly');
     const result = validateOrchestrationDecision(
       decision,
       {
@@ -2926,6 +3210,7 @@ class ActiveRun {
         gate: this.coordinatorGate,
         seenDecisionIds: this.seenDecisionIds,
         completedCheckpointIds: this.completedCheckpointIds,
+        pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
       },
       {
         spec: this.spec,
@@ -2935,6 +3220,7 @@ class ActiveRun {
         nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
         allowedModels: this.deps.allowedModels,
         invalidPatchCount: this.invalidPatchCount,
+        pendingResultIds: new Set(this.pendingPlannerResults().map(event => event.id)),
       },
     );
     if (!result.ok) {
@@ -2951,18 +3237,11 @@ class ActiveRun {
       throw new TaskControlError(this.runStatus, result.error);
     }
     const reason = this.coordinatorGate?.reason;
+    const consumedResults = decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [];
     if (result.action === 'patch' && result.patch) {
-      this.commitPlanPatch(result.patch, { ...decision, action: 'continue', rationale: decision.rationale ?? '' }, decision);
+      this.commitPlanPatch(result.patch, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
     } else {
-      this.seenDecisionIds.add(decision.decisionId);
-      this.completedCheckpointIds.add(decision.checkpointId);
-      this.log({
-        kind: 'coordinator-decision',
-        checkpointId: decision.checkpointId,
-        decisionId: decision.decisionId,
-        action: decision.action,
-        baseRevision: decision.baseRevision,
-      });
+      this.commitPlanPatch(undefined, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
     }
     this.clearCoordinatorGate();
     if (result.action === 'pause') {
@@ -2973,7 +3252,7 @@ class ActiveRun {
     }
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
-    if (reason === 'before-verify') this.enterVerifying({ skipGate: true });
+    if (reason === 'before-verify' && this.allNodesSettled() && !this.pendingPlannerResults().length && this.planningPhase() === 'exhausted') this.enterVerifying({ skipGate: true });
     else this.scheduleReady();
     this.emitChanged();
     return this.snapshot();
@@ -3270,6 +3549,19 @@ class ActiveRun {
     }
     const fingerprint = this.workspaceFingerprint(node);
     const lookup = readWorkspaceCache(this.deps.workspaceRoot, this.connectionKey(node), fingerprint, this.nowMs());
+    if (lookup.status === 'bypass') {
+      this.markCache(node.id, 'bypass'); this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: lookup.reason ?? 'incomplete-reuse-record' }); return undefined;
+    }
+    if (lookup.record) {
+      const original = lookup.record.sourceTaskSlug ? readNodeOutput(this.deps.workspaceRoot, lookup.record.sourceTaskSlug, lookup.record.sourceRunId, lookup.record.sourceNodeId) : null;
+      const invalidContract = (node.outputs ?? []).some(declaration => declaration.required !== false && !(declaration.name in (lookup.record!.output.params ?? {}))
+        || declaration.kind !== 'artifact' && declaration.name in (lookup.record!.output.params ?? {}) && !!outputTypeError(declaration.type, declaration.enum, lookup.record!.output.params![declaration.name]));
+      if (!original || planValueKey(original) !== planValueKey(lookup.record.output) || invalidContract) {
+        this.markCache(node.id, 'bypass'); this.cacheBypasses += 1;
+        this.log({ kind: 'cache-bypass', nodeId: node.id, reason: !original ? 'source-version-unavailable' : invalidContract ? 'output-contract-changed' : 'source-output-version-changed' }); return undefined;
+      }
+    }
     if (lookup.status === 'hit' && lookup.record && !invalidArtifactInput(this.deps.workspaceRoot, new Set([node.id]), [node], { [node.id]: lookup.record.output })) {
       this.markCache(node.id, 'hit', { createdAt: lookup.record.createdAt, sourceRunId: lookup.record.sourceRunId });
       this.cacheHits += 1;
@@ -3298,6 +3590,7 @@ class ActiveRun {
       fingerprint: this.workspaceFingerprint(node, locals),
       createdAt: this.deps.now ? this.deps.now() : new Date().toISOString(),
       sourceRunId: this.runId,
+      sourceTaskSlug: this.slug,
       sourceNodeId: node.id,
       connection: this.connectionKey(node),
       output,
@@ -3322,8 +3615,11 @@ class ActiveRun {
       }
     }
     return fingerprintWorkspaceCache({
+      context: { actor: node.actor, actorPrefix: node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => ({ id: candidate.id, actor: candidate.actor, prompt: candidate.prompt, inputs: candidate.inputs, outputs: candidate.outputs })) : [],
+        outputs: node.outputs, sourceVersion: this.sourceVersion, sources: this.spec.sources, goal: this.spec.goal, constraints: this.spec.constraints, decisions: this.spec.decisions },
       prompt,
-      inputs: node.inputs ?? {},
+      inputs: Object.fromEntries(Object.entries(node.inputs ?? {}).map(([name, reference]) => [name, { definition: reference,
+        value: interpolateLocals(interpolateRefs(typeof reference === 'string' ? reference : reference.from, { nodeOutputs: this.outputs, params: this.opts.params }), locals ?? {}) }])),
       dependencyOutputs,
       artifactHashes,
       model: this.resolveNodeModel(node),
@@ -3351,6 +3647,8 @@ class ActiveRun {
   }
 
   private workspaceCacheBypass(node: TaskNode, sessionId?: string): string | undefined {
+    if (node.workspace_inputs?.length) return 'workspace-inputs-without-version-proof';
+    if (Object.values(node.inputs ?? {}).some(reference => typeof reference !== 'string' && reference.summarize)) return 'summary-version-unavailable';
     const sensitive = sensitiveParamNames(this.spec.params);
     const usedSensitive = sensitive.some((name) => JSON.stringify(this.opts.params ?? {}).includes(name) || (node.prompt ?? '').includes(`params.${name}`));
     const writesEnabled = (node.permissionMode ?? this.spec.defaults?.permissionMode ?? 'safe') !== 'safe';
@@ -3396,13 +3694,24 @@ class ActiveRun {
     } else if (entry.kind === 'node-finished' || entry.kind === 'node-retry') {
       const attempts = this.attemptHistory.get(entry.nodeId);
       const attempt = entry.kind === 'node-finished'
-        ? attempts?.find(item => item.sessionId === entry.sessionId)
+        ? attempts?.findLast(item => item.sessionId === entry.sessionId)
         : attempts?.at(-1);
       if (attempt) attempt.state = entry.kind === 'node-retry' ? 'failed' : entry.state;
     }
   }
 
   private log(entry: RunLogEntryInput): void {
+    if (entry.kind === 'node-finished' && this.coordinatorGateEnabled() && ['done', 'failed', 'invalid', 'skipped'].includes(entry.state)) {
+      const state = this.instances.get(entry.nodeId) ?? this.state.get(entry.nodeId);
+      const output = this.instanceOutputs.get(entry.nodeId) ?? this.outputs[entry.nodeId];
+      const revision = this.attemptRevisions.get(entry.nodeId) ?? this.revision;
+      const resultEvent: PlannerResultEvent = { id: `${this.runId}:${entry.nodeId}:${state?.attempt ?? 0}:${revision}:${entry.state}`, nodeId: entry.nodeId,
+        attempt: state?.attempt ?? 0, revision, state: entry.state, reason: entry.reason,
+        ...(output ? { output: structuredClone(output), outputHash: createHash('sha256').update(JSON.stringify(output)).digest('hex') } : {}) };
+      entry = { ...entry, resultEvent };
+      this.resultEvents.set(resultEvent.id, resultEvent);
+      this.plannerPhase = 'active';
+    }
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
     const seq = this.nextSeq++;
     appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, {
@@ -3443,9 +3752,12 @@ class ActiveRun {
       ...(Object.keys(persistedParams).length ? { params: persistedParams } : {}),
       seenDecisionIds: [...this.seenDecisionIds],
       invalidPatchCount: this.invalidPatchCount,
+      plannerRequired: this.plannerRequired,
       completedCheckpointIds: [...this.completedCheckpointIds],
+      decisionEventSeqs: [...this.decisionEventSeqs],
       ...(this.coordinatorGate ? { coordinatorGate: this.coordinatorGate } : {}),
       metrics: this.buildMetrics(),
+      ...(this.coordinatorGateEnabled() ? { plannerPhase: this.planningPhase(), consumedResultIds: [...this.consumedResultIds] } : {}),
     });
   }
 }
@@ -3616,6 +3928,15 @@ export class TaskRunner {
     // their verifications). Block it. NOTE: this does not guard against a human typing into the
     // orchestrator mid-`verifying` — that race is a known, bounded v1 limitation.
     const orchestrator = opts.orchestratorSessionId;
+    const latest = orchestrator ? this.getLatestRun(slug) : null;
+    const previousId = opts.resumedFrom ?? (latest?.orchestratorSessionId === orchestrator ? latest?.runId : undefined);
+    const previous = previousId ? this.runs.get(this.key(slug, previousId)) ?? this.rehydrate(slug, previousId, 'view') : undefined;
+    if (previous) {
+      const snapshot = previous.snapshot();
+      if (!orchestrator || snapshot.orchestratorSessionId !== orchestrator || !isTerminalRunStatus(snapshot.status)) throw new TaskControlError(snapshot.status, 'Predecessor is still active or belongs to a different root; stop it and wait for confirmed shutdown');
+      if (snapshot.supersededBy) throw new TaskControlError(snapshot.status, `Predecessor already has successor ${snapshot.supersededBy}`);
+      this.deps.host.assertTaskSafePoint?.(previous.executionSessions());
+    }
     if (orchestrator) {
       for (const existing of this.runs.values()) {
         const snap = existing.snapshot();
@@ -3642,6 +3963,7 @@ export class TaskRunner {
       runId,
       {
         ...opts,
+        resumedFrom: previousId,
         sourceVersion: loaded.sourceVersion,
         params: resolveParams(loaded.spec, opts.params),
         verifyOnComplete: opts.verifyOnComplete ?? true,
@@ -3650,7 +3972,7 @@ export class TaskRunner {
     );
     // Do not publish a half-started run. start() first freezes revision 0 and
     // may fail on storage errors; only a durably started run enters the registry.
-    run.start();
+    run.start(() => previous?.markSuperseded(runId));
     this.runs.set(this.key(slug, runId), run);
     return run.snapshot();
   }
@@ -3789,11 +4111,12 @@ export class TaskRunner {
         params: restoreParams(spec, checkpoint?.params),
         verifyOnComplete: true,
         sourceVersion: taskSourceVersion(spec),
+        plannerRequired: checkpoint?.plannerRequired ?? (log.some(event => event.kind === 'coordinator-request') ? true : undefined),
       },
       this.deps,
     );
-    run.restoreCheckpoint(checkpoint, durableRevision);
-    const committedLog = log.filter(entry => (entry.revision ?? 0) <= durableRevision);
+    run.restoreCheckpoint(checkpoint, durableRevision, log.reduce((max, entry) => Math.max(max, (entry.seq ?? -1) + 1), 0));
+    const committedLog = committedRunLog(log, checkpoint);
     run.hydrate(committedLog, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode, checkpoint?.metrics);
     if (mode !== 'view') this.runs.set(this.key(slug, runId), run);
     return run;
@@ -3847,8 +4170,23 @@ export class TaskRunner {
   }
 
   private findRunBySession(sessionId: string): ActiveRun | undefined {
-    for (const run of this.runs.values()) if (run.hasSession(sessionId)) return run;
+    for (const run of [...this.runs.values()].reverse()) if (run.hasSession(sessionId)) return run;
     return undefined;
+  }
+
+  reserveTaskWorker(rootSessionId: string, binding: { runId: string; nodeId: string }, workerId: string, role: 'worker' | 'reviewer', permissionMode?: TaskSessionBinding['permissionMode']): TaskSessionBinding {
+    const run = [...this.runs.values()].find(candidate => candidate.snapshot().runId === binding.runId && candidate.snapshot().orchestratorSessionId === rootSessionId);
+    if (!run) throw new Error('No active canonical run belongs to this root');
+    return run.reserveWorker(rootSessionId, binding.nodeId, workerId, role, permissionMode);
+  }
+
+  bindTaskWorker(binding: TaskSessionBinding, workerId: string, sessionId: string): void {
+    this.requireRun(binding.taskSlug, binding.taskRunId).bindWorker(workerId, sessionId);
+  }
+
+  completeTaskWorker(slug: string, runId: string, workerId: string, sessionId: string | undefined, state: 'done' | 'failed' | 'stopped', output?: NodeOutput, reason?: string, tokensUsed?: number): void {
+    const run = this.runs.get(this.key(slug, runId)) ?? this.rehydrate(slug, runId, 'hydrate');
+    run.completeWorker(workerId, sessionId, state, output, reason, tokensUsed);
   }
 
   progressContext(sessionId: string): RunSnapshot | undefined { return this.findRunBySession(sessionId)?.snapshot(); }

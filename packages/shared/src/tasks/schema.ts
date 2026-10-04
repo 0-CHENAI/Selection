@@ -260,6 +260,8 @@ const TaskNodeObject = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional(),
   labels: z.array(z.string()).optional(),
   status: z.string().optional(),
+  /** Logical actor, independent of a task node; definition order is its serial execution order. */
+  actor: z.object({ id: ident('actor id'), persona: z.string().min(1).optional() }).strict().optional(),
 
   /** Explicit user protection against generated and runtime edits. */
   locked: z.boolean().optional(),

@@ -111,3 +111,14 @@ TaskSpec 是表单、YAML、生成提案、图和执行的共同定义。`tasks/
 `tasks:patchRun` 的 `{slug, runId, baseRevision, yaml, rationale}` 由宿主验证所属 PRO 根与工作区，再通过 definitionToPatch 与 TaskRunner.applyManualPlanPatch 进入既有协调器/patch 校验和提交。仅 pending/ready 可改，运行中或已执行节点、锁、模型连接及权限范围继续受控。新 revision 和日志完成一次 durable checkpoint 后才确认成功；失败回滚内存和追加日志，恢复忽略孤立 revision。冻结计划的约束与决策传给 worker 和评审；评审复用运行已校验的 typed outputs。
 
 F3 的真实两轮生成、模型锁定、A/B 独立运行及 C 等待两份输入、保存不改当前 run，另含客户端冲突与实际 RPC 同 revision 竞争/落盘故障验收，见 `docs/qa/selection-3.0-canonical-plan.md`。#454 应直接复用此规范变更入口、版本和 checkpoint，追加动态调度与运行替换，不另建计划或调度解释。
+
+
+## #454：动态执行、协作与后继
+
+规划阶段 active/draining/exhausted 是既有运行上的派生信息。node-finished 携带稳定 resultEvent，coordinator checkpoint 冻结待消费集合；计划决定、consumedResultIds 和 revision 原子提交，decisionEventSeqs 排除孤立日志。过期/重复失败不消费成果，关闭 feature flag 不改变既有 run 的规划契约。
+
+TaskNode.actor 为 id/persona，同 actor 的定义顺序进入 effective dependencies，实例也串行。每次执行先落盘 taskRunId/taskNodeId/taskAttempt/taskRevision/taskActor，generation 拒绝前任务迟到事件；当前读取来源字节、模型、连接、权限和完整前缀都符合才复用上下文，否则显式传入已确认成果。托管 worker 以 taskWorkerId 和 taskBinding 定位 root/run/node/attempt/revision，主节点等待所有归属 worker 结算，worker 成果独立保留并参与既有 planner/验收。
+
+停止意图与实际确认写入 execution-shutdown；未知外部结果、执行锁、pending worker 或交付物阻止后继重叠执行。新 run 的 resumedFrom 为规范后继回执，旧 supersededBy 可由其恢复。纯任务缓存 v2 核对原成果 hash/版本和完整条件；已完成历史不原地改写，文件版本变化以 artifact-availability 警告披露，按新输入执行创建后继 run。
+
+F4-a/c/b 三步真实记录及 F4-d/e/f 故障边界见 docs/qa/selection-3.0-dynamic-execution.md/json。#455 在这些身份与独立执行上下文上附研究记录，不能另设执行完成状态或调度器。

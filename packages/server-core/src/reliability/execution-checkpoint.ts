@@ -16,16 +16,35 @@ export interface ExecutionTaskIdentity {
   taskSlug?: string
   taskRunId?: string
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   orchestrationId?: string
   parentSessionId?: string
 }
 /** Link to the existing coordinator state, without duplicating its node scheduler. */
 export function executionTaskIdentity(session: ExecutionTaskIdentity): ExecutionTaskIdentity | undefined {
-  const identity = Object.fromEntries(['taskSlug', 'taskRunId', 'taskNodeId', 'orchestrationId', 'parentSessionId']
+  const identity = Object.fromEntries(['taskSlug', 'taskRunId', 'taskNodeId', 'taskAttempt', 'taskRevision', 'taskActor', 'taskWorkerId', 'orchestrationId', 'parentSessionId']
     .flatMap(key => session[key as keyof ExecutionTaskIdentity] === undefined ? [] : [[key, session[key as keyof ExecutionTaskIdentity]]]))
   return Object.keys(identity).length ? identity : undefined
 }
+
+function validTaskIdentity(value: unknown): value is ExecutionTaskIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.entries(value).every(([key, field]) => {
+    if (['taskAttempt', 'taskRevision'].includes(key)) return Number.isSafeInteger(field) && field >= 0
+    if (key === 'taskActor') return !!field && typeof field === 'object' && !Array.isArray(field)
+      && typeof field.id === 'string' && !!field.id
+      && Object.keys(field).every(name => ['id', 'persona'].includes(name))
+      && (field.persona === undefined || typeof field.persona === 'string' && !!field.persona)
+    return ['taskSlug', 'taskRunId', 'taskNodeId', 'taskWorkerId', 'orchestrationId', 'parentSessionId'].includes(key)
+      && typeof field === 'string' && !!field
+  })
+}
 export interface ExecutionCheckpoint {
+  contextReads?: Record<string, { path: string; hash: string; complete: boolean }>
+  contextUnverified?: boolean
   version: 1
   sessionId: string
   userMessageId: string
@@ -98,8 +117,11 @@ export function readExecutionCheckpoint(sessionPath: string): CheckpointRead {
     if (c?.version !== 1) return { kind: 'unsupported' }
     if (typeof c.sessionId !== 'string' || typeof c.userMessageId !== 'string'
       || ['sdkTurnAnchor', 'compactionMessageId'].some(key => c[key] !== undefined && (typeof c[key] !== 'string' || !c[key]))
-      || (c.taskIdentity !== undefined && (!c.taskIdentity || typeof c.taskIdentity !== 'object' || Array.isArray(c.taskIdentity)
-        || Object.entries(c.taskIdentity).some(([key, value]) => !['taskSlug', 'taskRunId', 'taskNodeId', 'orchestrationId', 'parentSessionId'].includes(key) || typeof value !== 'string' || !value)))
+      || (c.taskIdentity !== undefined && !validTaskIdentity(c.taskIdentity))
+      || (c.contextUnverified !== undefined && typeof c.contextUnverified !== 'boolean')
+      || (c.contextReads !== undefined && (!c.contextReads || typeof c.contextReads !== 'object' || Array.isArray(c.contextReads)
+        || Object.values(c.contextReads).some((read: any) => !read || typeof read.path !== 'string' || !read.path
+          || typeof read.hash !== 'string' || !/^[a-f0-9]{64}$/.test(read.hash) || typeof read.complete !== 'boolean')))
       || (c.waitingFor !== undefined && !['model', 'tool', 'user', 'recovery'].includes(c.waitingFor))
       || (c.sdkStateSize !== undefined && (!Number.isSafeInteger(c.sdkStateSize) || c.sdkStateSize <= 0))
       || !Number.isSafeInteger(c.generation) || c.generation < 0 || !Number.isFinite(c.updatedAt)

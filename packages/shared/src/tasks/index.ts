@@ -28,3 +28,4 @@ export * from './metrics.ts';
 export * from './critical-path.ts';
 export * from './workspace-cache.ts';
 export * from './plan.ts';
+export * from './planner.ts';

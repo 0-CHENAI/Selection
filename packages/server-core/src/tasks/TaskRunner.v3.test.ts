@@ -811,6 +811,19 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(after.status).toBe('waiting-coordinator');
     expect(after.blockers).toContain('approval');
   });
+  it('F4-f rejects a final PASS when a file changed after the verification context was frozen', async () => {
+    writeFileSync(join(root,'late.txt'),'original');
+    saveTaskSpec(root,v3Spec({ id: 'late-artifact', runner: 'conduct', nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const execution = runner(); execution.run('late-artifact',{runId:'r',orchestratorSessionId:'orch'}); await tick();
+    expect(execution.submitNodeOutput('sess-a',{values:{file:'late.txt'}}).ok).toBe(true);
+    host.complete('a'); await tick(); expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
+    writeFileSync(join(root,'late.txt'),'changed');
+    expect(() => execution.submitVerdict('orch',{runId:'r',result:'pass'})).toThrow('artifact validation is unsettled');
+    expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
+    expect(readRunLog(root,'late-artifact','r').some(event => event.kind === 'verdict' && event.result === 'pass')).toBe(false);
+    await execution.stop('late-artifact','r');
+  });
+
   it('rejects workspace cache receipts after the referenced artifact changes', async () => {
     writeFileSync(join(root, 'report.txt'), 'original');
     const spec = (id: string) => v3Spec({ id, runner: 'conduct',
@@ -829,8 +842,12 @@ describe('TaskRunner v3 quality/efficiency', () => {
     cachedRunner.run('cache-file-reused', { runId: 'cached', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false }); await tick();
     expect(cachedHost.dispatchedNames()).toHaveLength(0);
     expect(readRunLog(root, 'cache-file-reused', 'cached').some(event => event.kind === 'node-artifact-inputs' && event.nodeId === 'pure' && event.sessionId === '')).toBe(true);
+    expect(cachedRunner.getRunState('cache-file-reused', 'cached')?.status).toBe('verifying');
+    cachedRunner.submitVerdict('orch', { runId: 'cached', result: 'pass' });
     writeFileSync(join(root, 'report.txt'), 'external replacement');
-    expect(cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached').nodes.find(node => node.id === 'pure')?.state).toBe('invalid');
+    const previous = cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached');
+    expect(previous.nodes.find(node => node.id === 'pure')?.state).toBe('done');
+    expect(previous.artifactAvailability?.nodeIds).toContain('pure');
     saveTaskSpec(root, spec('cache-file-next'));
     const nextHost = new MockHost();
     const next = new TaskRunner({ host: nextHost, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });

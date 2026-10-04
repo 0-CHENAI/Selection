@@ -573,6 +573,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'a')?.options.workingDirectory).toBe('/parent/dir')
 
     // With no orchestrator cwd, the spec's declared cwd is used.
+    await runner.stop('cwd', 'r1')
     host.created.length = 0
     host.workingDirById.clear()
     const runner2 = makeRunner()
@@ -2544,7 +2545,7 @@ describe('TaskRunner (Conductor)', () => {
     if (!changed) { nextHost.complete('b'); await tick(); }
   });
 
-  it('persists completed artifact invalidation without discarding unrelated results', async () => {
+  it('preserves completed history while persisting changed artifact availability', async () => {
     writeFileSync(join(root, 'input.txt'), 'original');
     saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
       execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
@@ -2560,18 +2561,21 @@ describe('TaskRunner (Conductor)', () => {
     const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
     fresh.revalidateKnownArtifacts();
     expect(freshHost.created).toHaveLength(0);
-    expect(fresh.getLatestRun('invalidate')?.status).toBe('failed');
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('completed');
     const state = fresh.getLatestRun('invalidate')!;
-    expect(state.status).toBe('failed');
-    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('invalid');
-    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(state.status).toBe('completed');
+    expect(state.artifactAvailability?.nodeIds).toContain('a');
+    expect(state.artifactAvailability?.nodeIds).toContain('b');
+    expect(state.artifactAvailability?.nodeIds).not.toContain('other');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('done');
     expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
     expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
-    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('done');
     fresh.revalidateKnownArtifacts();
-    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-results-invalidated')).toHaveLength(1);
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-availability')).toHaveLength(1);
   });
-  it('restores invalidated map instances while retaining unrelated results', async () => {
+  it('restores completed map history and separate availability warnings', async () => {
     writeFileSync(join(root, 'input.txt'), 'original');
     saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
       execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
@@ -2587,18 +2591,21 @@ describe('TaskRunner (Conductor)', () => {
     const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
     fresh.revalidateKnownArtifacts();
     expect(freshHost.created).toHaveLength(0);
-    expect(fresh.getLatestRun('invalidate')?.status).toBe('failed');
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('completed');
     const state = fresh.getLatestRun('invalidate')!;
-    expect(state.status).toBe('failed');
-    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('invalid');
-    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
-    expect(state.nodes.find(node => node.id === 'b#0')?.state).toBe('invalid');
-    expect(state.nodes.find(node => node.id === 'b#1')?.state).toBe('invalid');
+    expect(state.status).toBe('completed');
+    expect(state.artifactAvailability?.nodeIds).toContain('a');
+    expect(state.artifactAvailability?.nodeIds).toContain('b');
+    expect(state.artifactAvailability?.nodeIds).not.toContain('other');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b#0')?.state).toBe('done');
+    expect(state.nodes.find(node => node.id === 'b#1')?.state).toBe('done');
     expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
     expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
-    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('done');
     fresh.revalidateKnownArtifacts();
-    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-results-invalidated')).toHaveLength(1);
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-availability')).toHaveLength(1);
   });
 
   it('stops a running stale consumer and ignores late success without cancelling independent work', async () => {
@@ -2622,7 +2629,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(readNodeOutput(root, 'active-invalidate', 'r1', 'b')).toBeNull();
   });
 
-  for (const replicas of [false, true]) it(`retains valid expanded siblings when one artifact requires repair (replicas=${replicas})`, async () => {
+  for (const replicas of [false, true]) it(`preserves expanded history and identifies only affected artifact siblings (replicas=${replicas})`, async () => {
     writeFileSync(join(root, 'zero.txt'), 'zero'); writeFileSync(join(root, 'one.txt'), 'one');
     saveTaskSpec(root, specOf({ schema_version: 2, id: 'map-artifacts', title: 'Map', goal: 'g',
       nodes: [replicas
@@ -2637,14 +2644,13 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.revalidateCompletedArtifacts('map-artifacts', 'r1').status).toBe('completed');
     writeFileSync(join(root, 'zero.txt'), 'changed');
     const invalid = runner.revalidateCompletedArtifacts('map-artifacts', 'r1');
-    expect(invalid.nodes.find(node => node.id === 'fan#0')?.state).toBe('invalid');
+    expect(invalid.nodes.find(node => node.id === 'fan#0')?.state).toBe('done');
+    expect(invalid.artifactAvailability?.nodeIds).toContain('fan#0');
+    expect(invalid.artifactAvailability?.nodeIds).not.toContain('fan#1');
     expect(invalid.nodes.find(node => node.id === 'fan#1')?.state).toBe('done');
-    runner.continue('map-artifacts', 'r1'); await tick();
-    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(2);
+    expect(() => runner.continue('map-artifacts', 'r1')).toThrow('completed');
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(1);
     expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(1);
-    expect(runner.submitNodeOutput('sess-fan#0', { values: { file: 'zero.txt' } }).ok).toBe(true);
-    host.complete('fan#0'); await tick();
-    expect(runner.getRunState('map-artifacts', 'r1')?.status).toBe('completed');
   });
 
   it('accepts sequential loop artifact updates and exposes the final receipt to consumers', async () => {
@@ -2668,7 +2674,8 @@ describe('TaskRunner (Conductor)', () => {
     expect(restored.getLatestRun('loop-files')?.status).toBe('completed');
     writeFileSync(join(root, 'result.txt'), 'external');
     restored.revalidateKnownArtifacts();
-    expect(restored.getLatestRun('loop-files')?.status).toBe('failed');
+    expect(restored.getLatestRun('loop-files')?.status).toBe('completed');
+    expect(restored.getLatestRun('loop-files')?.artifactAvailability?.nodeIds).toContain('iter');
   });
 
   it('replay does not mistake a null input snapshot for a historical run without snapshots', async () => {
@@ -2678,7 +2685,8 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('damaged-input', 'r1')?.status).toBe('completed');
     appendRunLog(root, 'damaged-input', 'r1', { kind: 'node-artifact-inputs', nodeId: 'a', sessionId: 'sess-a', inputs: null, t: new Date().toISOString() } as never);
     const restored = makeRunner(); restored.revalidateKnownArtifacts();
-    expect(restored.getLatestRun('damaged-input')?.status).toBe('failed');
+    expect(restored.getLatestRun('damaged-input')?.status).toBe('completed');
+    expect(restored.getLatestRun('damaged-input')?.artifactAvailability?.nodeIds).toContain('a');
   });
 
 });

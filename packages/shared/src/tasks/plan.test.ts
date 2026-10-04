@@ -13,6 +13,16 @@ const spec = () => parseTaskSpec({ schema_version: 3, id: 'f3', title: 'F3', goa
 ] });
 function plan() { const parsed = spec(); if (!parsed.success) throw new Error(JSON.stringify(parsed.error)); return parsed.data; }
 
+it('F4-c uses the same actor sequence for validation, graph and scheduling and detects a conflicting authored edge', () => {
+  const p = plan(); p.nodes[0]!.actor = { id: 'analyst' }; p.nodes[1]!.actor = { id: 'other' }; p.nodes[2]!.actor = { id: 'analyst' };
+  p.nodes[2]!.depends_on = []; p.nodes[2]!.inputs = {};
+  expect(materializeDeps(p).get('c')).toEqual(new Set(['a']));
+  expect(specToGraph(p).edges).toEqual([{ source: 'a', target: 'c' }]);
+  expect(parseTaskDocument(JSON.stringify(p)).spec).toEqual(p);
+  p.nodes[0]!.depends_on = ['c'];
+  expect(validateTaskSpec(p).errors.some(issue => /[Cc]ycle/.test(issue.message))).toBe(true);
+});
+
 it('F3 renders exactly the dependency graph validated and scheduled, without rewriting authored edges', () => {
   const p = plan(), before = JSON.stringify(p);
   expect(effectiveNodeDeps(p.nodes[2]!)).toEqual(['a', 'b']);

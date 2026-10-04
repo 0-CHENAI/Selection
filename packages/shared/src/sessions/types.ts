@@ -66,6 +66,10 @@ export const SESSION_PERSISTENT_FIELDS = [
   'taskSlug',
   'taskRunId',
   'taskNodeId',
+  'taskAttempt',
+  'taskRevision',
+  'taskActor',
+  'taskWorkerId',
   'taskNodeCount',
   'taskDraft',
   // Per-session Swarm preview state and lineage
@@ -333,6 +337,11 @@ export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
@@ -447,6 +456,11 @@ export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
@@ -546,6 +560,11 @@ export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata 
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */

@@ -198,6 +198,11 @@ export async function createSession(
     taskSlug?: string;
     taskRunId?: string;
     taskNodeId?: string;
+    taskAttempt?: number;
+    taskRevision?: number;
+    taskActor?: { id: string; persona?: string };
+    taskWorkerId?: string;
+
     taskDraft?: boolean;
     swarmEnabled?: boolean;
     orchestrationId?: string;
@@ -253,6 +258,10 @@ export async function createSession(
     taskSlug: options?.taskSlug,
     taskRunId: options?.taskRunId,
     taskNodeId: options?.taskNodeId,
+    taskAttempt: options?.taskAttempt,
+    taskRevision: options?.taskRevision,
+    taskActor: options?.taskActor,
+    taskWorkerId: options?.taskWorkerId,
     taskDraft: options?.taskDraft,
     swarmEnabled: options?.swarmEnabled ?? false,
     orchestrationId: options?.orchestrationId,

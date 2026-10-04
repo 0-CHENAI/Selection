@@ -196,6 +196,8 @@ export const BrowserToolSchema = z.object({
 });
 
 export const SpawnSessionSchema = z.object({
+  taskBinding: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }).optional()
+    .describe('Required for 3.0 task delegation, and whenever this root owns an active task run. Start the canonical plan first, then delegate to an already running logical node; results stay bound to its run, revision and attempt.'),
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
   name: z.string().optional().describe('Session name'),
@@ -304,6 +306,9 @@ export const ControlTaskRunSchema = z.object({
 });
 
 export const SubmitOrchestrationPatchSchema = z.object({
+  consumedResults: z.array(z.string()).optional().describe('Stable result event ids consumed by this decision'),
+  plannerPhase: z.enum(['active', 'draining']).optional().describe('Keep planning active or propose draining; exhausted is derived by the runtime'),
+  changeKind: z.enum(['structure', 'repair', 'research']).optional(),
   runId: z.string().describe('Active run id'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this patch is based on'),
@@ -324,6 +329,9 @@ export const SubmitTaskVerdictSchema = z.object({
 });
 
 export const SubmitOrchestrationDecisionSchema = z.object({
+  consumedResults: z.array(z.string()).optional().describe('Result event ids consumed; defaults to exactly the checkpoint events'),
+  plannerPhase: z.enum(['active', 'draining']).optional(),
+  changeKind: z.enum(['structure', 'repair', 'research']).optional(),
   runId: z.string().describe('Active run id'),
   checkpointId: z.string().describe('Checkpoint this decision answers'),
   decisionId: z.string().describe('Idempotency key for this decision'),
