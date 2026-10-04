@@ -120,6 +120,7 @@ import { useAutomations } from "@/hooks/useAutomations"
 import { useProjects } from "@/hooks/useProjects"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { PanelHeader } from "./PanelHeader"
+import { SessionModeBadge } from "./SessionModeBadge"
 import { FabNewChat } from "./FabNewChat"
 import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { CreateProjectDialog } from "../projects/CreateProjectDialog"
@@ -2143,7 +2144,9 @@ function AppShellContent({
               title={isSidebarVisible ? listTitle : undefined}
               titleAlign="start"
               compensateForStoplight={!isSidebarVisible}
-              badge={automationFilter?.automationType === 'scheduled' ? (
+              badge={isSidebarVisible && isSessionsNavigation(navState) ? (
+                <SessionModeBadge mode={workModeView} />
+              ) : automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-muted-foreground/50 cursor-default flex items-center titlebar-no-drag">

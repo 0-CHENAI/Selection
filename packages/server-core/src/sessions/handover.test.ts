@@ -240,7 +240,7 @@ test('F2 handover preserves source, constraints, file versions and the chosen pe
     const first = (await f.manager.handoverSession(f.source.id, request)).records[0]!
     expect(first.status).toBe('applied')
     const target = await f.manager.getSession(first.targetSessionId!)
-    expect(target).toMatchObject({ workMode: 'PRO', permissionMode: f.source.permissionMode, model: f.source.model })
+    expect(target).toMatchObject({ name: f.source.name, workMode: 'PRO', permissionMode: f.source.permissionMode, model: f.source.model })
     expect(target?.parentSessionId).toBeUndefined()
     expect(target?.handover).toMatchObject({ handoverId: 'f2', sourceSessionId: f.source.id, snapshotVersion: 1 })
     expect(first.snapshot?.constraints.join(' ')).toContain('不部署')
@@ -268,7 +268,7 @@ test('F2 handover preserves source, constraints, file versions and the chosen pe
     expect(f.internal.handoverInput(f.internal.sessions.get(first.targetSessionId!))).toBe(before)
     expect(readFileSync(copied, 'utf8')).toContain('1000000')
     const norm = (await f.manager.handoverSession(first.targetSessionId!, { type: 'create', handoverId: 'f2-back', targetMode: 'NORM' })).records[0]!
-    expect(await f.manager.getSession(norm.targetSessionId!)).toMatchObject({ workMode: 'NORM', permissionMode: target?.permissionMode })
+    expect(await f.manager.getSession(norm.targetSessionId!)).toMatchObject({ name: f.source.name, workMode: 'NORM', permissionMode: target?.permissionMode })
     expect(norm.snapshot?.constraints.join(' ')).toContain('不部署')
     expect(norm.snapshot?.files.some(file => file.versionId === f.artifact.currentVersion)).toBe(true)
   } finally { await f.cleanup() }

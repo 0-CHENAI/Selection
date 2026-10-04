@@ -25,7 +25,7 @@ async function check(mode, screenshot) {
     const wrapper = document.querySelector(selector), body = wrapper.querySelector('.bg-user-message-bubble')
     const r = body.getBoundingClientRect(), parent = wrapper.getBoundingClientRect()
     return { count: document.querySelectorAll(selector).length, text: body.textContent,
-      mode: document.querySelector('[data-handover-title-menu]').textContent,
+      mode: document.querySelector('[data-handover-session]').dataset.handoverMode,
       right: Math.abs(r.right - parent.right) < 1,
       fits: r.left >= parent.left && r.right <= parent.right,
       position: getComputedStyle(wrapper).position, time: !!wrapper.querySelector('time'),
@@ -35,7 +35,7 @@ async function check(mode, screenshot) {
   }, bubble)
   assert.equal(result.count, 1, 'exactly one handover message belongs to each target')
   assert.equal(result.text, `已成功交接工作至${mode}`)
-  assert.ok(result.mode.startsWith(mode) && !result.dialog)
+  assert.ok(result.mode === mode && !result.dialog)
   assert.ok(result.right && result.fits && result.position === 'static', 'use the user message bubble in the chat flow')
   assert.ok(result.time && result.copy && !result.toast, 'reuse timestamp and copy affordances without a success notification')
   if (screenshot) {

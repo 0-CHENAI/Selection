@@ -20,7 +20,7 @@ try {
   })
   const state = () => page.evaluate(() => {
     const button = document.querySelector('[data-handover-trigger]')
-    return { target: button.textContent, source: button.parentElement.firstElementChild.textContent,
+    return { target: button.textContent, source: document.querySelector('[data-handover-title]').textContent,
       disabled: button.disabled, dialog: !!document.querySelector('[role=dialog]'),
       records: document.querySelector('[data-handover-record-count]').textContent }
   })
@@ -39,7 +39,7 @@ try {
     })
     return page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-button'}/${name}.png`, clip })
   }
-  assert.deepEqual(await state(), { target: 'PRO', source: 'NORM · 成本分析', disabled: false, dialog: false, records: '交接记录：0' })
+  assert.deepEqual(await state(), { target: 'PRO', source: '成本分析', disabled: false, dialog: false, records: '交接记录：0' })
   assert.ok(await page.evaluate(() => {
     const button = document.querySelector('[data-handover-trigger]'), r = button.getBoundingClientRect()
     return button.tagName === 'BUTTON' && button.getAttribute('aria-haspopup') === 'dialog'
@@ -53,7 +53,7 @@ try {
   assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').textContent.includes('交接至 PRO')))
   await page.click('[data-handover-trigger]')
   await page.waitForSelector('[role=dialog]')
-  assert.deepEqual(await state(), { target: 'PRO', source: 'NORM · 成本分析', disabled: true, dialog: true, records: '交接记录：0' }, 'opening review must preserve the source and require confirmation')
+  assert.deepEqual(await state(), { target: 'PRO', source: '成本分析', disabled: true, dialog: true, records: '交接记录：0' }, 'opening review must preserve the source and require confirmation')
   await close()
   await page.focus('[data-handover-trigger]')
   assert.ok(await page.evaluate(() => { const button = document.querySelector('[data-handover-trigger]'); return button.matches(':focus-visible') && getComputedStyle(button).boxShadow !== 'none' }))
@@ -65,16 +65,16 @@ try {
   await page.click('[role=dialog] button:text-is("交接到 PRO")')
   await page.waitForFunction(() => document.querySelector('[data-handover-record-count]').textContent === '交接记录：1')
   await page.waitForFunction(() => document.querySelector('[data-handover-trigger]').textContent === 'NORM' && !document.querySelector('[role=dialog]'))
-  assert.equal((await state()).source, 'PRO · 成本核对', 'confirmation must open the PRO chat automatically')
+  assert.equal((await state()).source, '成本核对', 'confirmation must open the PRO chat automatically')
   assert.equal(await page.evaluate(() => !!document.querySelector('[role=alert]')), false, 'confirmation must reach the existing handover transport')
-  assert.deepEqual(await state(), { target: 'NORM', source: 'PRO · 成本核对', disabled: false, dialog: false, records: '交接记录：1' })
+  assert.deepEqual(await state(), { target: 'NORM', source: '成本核对', disabled: false, dialog: false, records: '交接记录：1' })
   await page.click('loc=role:button[name="Dark"]')
   const dark = await capture('handover-button-norm-dark')
   const point = await page.evaluate(() => { const r = document.querySelector('[data-handover-trigger]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })
   await page.cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...point, id: 1 }] })
   await page.cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await page.waitForSelector('[role=dialog]')
-  assert.equal((await state()).source, 'PRO · 成本核对')
+  assert.equal((await state()).source, '成本核对')
   assert.equal((await state()).records, '交接记录：1')
   assert.equal(await page.evaluate(() => document.querySelector('[data-handover-trigger]').getAttribute('aria-label')), '交接至 NORM', 'the reverse action must describe the NORM handover')
   await close()

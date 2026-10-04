@@ -21,11 +21,11 @@ const state = () => page.evaluate(key => ({
   records: document.querySelector('[data-handover-record-count]').textContent,
   preference: localStorage.getItem(key),
   checked: document.querySelector('input[type=checkbox]')?.checked,
-  mode: document.querySelector('[data-handover-trigger]').parentElement.firstElementChild.textContent,
+  mode: document.querySelector('[data-handover-session]').dataset.handoverMode,
   sessionId: document.querySelector('[data-handover-session]').dataset.handoverSession,
 }), storageKey)
 async function waitForChat(mode) {
-  await page.waitForFunction(mode => document.querySelector('[data-handover-trigger]').parentElement.firstElementChild.textContent.startsWith(mode)
+  await page.waitForFunction(mode => document.querySelector('[data-handover-session]').dataset.handoverMode === mode
     && !document.querySelector('[role=dialog]'), mode)
   assert.equal(await page.evaluate(() => !!document.querySelector('textarea[aria-label="消息"]')), true)
 }
@@ -155,14 +155,14 @@ try {
   await page.click('[role=dialog] button:text-is("取消等待")')
   await page.waitForFunction(() => ![...document.querySelectorAll('[role=dialog] button')].some(button => button.textContent === '取消等待'))
   await close()
-  assert.equal((await state()).mode, 'NORM · 成本分析', 'cancelled waits must not navigate')
+  assert.equal((await state()).mode, 'NORM', 'cancelled waits must not navigate')
   await page.selectOption('select', 'ready')
   await page.evaluate(() => { window.electronAPI.sessionCommand = async () => { throw new Error('QA: 交接不可用') } })
   await page.click('[data-handover-trigger]')
   await page.waitForSelector('[role=dialog] [role=alert]')
   assert.ok(await page.evaluate(() => document.querySelector('[role=alert]').textContent.includes('QA: 交接不可用')), 'failed direct actions must remain recoverable')
   assert.equal((await state()).preference, 'true')
-  assert.equal((await state()).mode, 'NORM · 成本分析', 'failed creation must retain the source chat')
+  assert.equal((await state()).mode, 'NORM', 'failed creation must retain the source chat')
   await close()
   await reload()
   await page.evaluate(() => {
@@ -174,7 +174,7 @@ try {
   })
   await page.click('[data-handover-trigger]')
   await page.waitForFunction(() => typeof window.releaseTargetLoad === 'function')
-  assert.equal((await state()).mode, 'NORM · 成本分析', 'navigation must wait for the target session to load')
+  assert.equal((await state()).mode, 'NORM', 'navigation must wait for the target session to load')
   assert.equal(await page.evaluate(() => document.querySelector('[data-handover-trigger]').disabled), true)
   await page.evaluate(() => window.releaseTargetLoad())
   await waitForChat('PRO')
@@ -185,7 +185,7 @@ try {
   })
   await page.click('[data-handover-trigger]')
   await page.waitForSelector('[role=dialog] [role=alert]')
-  assert.equal((await state()).mode, 'NORM · 成本分析', 'failed target loading must remain recoverable in the source chat')
+  assert.equal((await state()).mode, 'NORM', 'failed target loading must remain recoverable in the source chat')
   assert.equal((await state()).records, '交接记录：1')
   await page.evaluate(() => { window.electronAPI.getSessionMessages = window.originalTargetLoad })
   await page.click('[role=dialog] button:text-is("交接到 PRO")')
