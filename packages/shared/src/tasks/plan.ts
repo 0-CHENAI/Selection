@@ -35,9 +35,9 @@ export function planValueKey(value: unknown): string {
 }
 
 /** Locks can only be changed by explicit manual editing, never AI or a running patch. */
-export function planProtectionErrors(from: Pick<TaskSpec, 'nodes' | 'locked_fields' | 'constraints' | 'decisions' | 'goal' | 'acceptance_criteria' | 'research'>, to: typeof from): string[] {
+export function planProtectionErrors(from: Pick<TaskSpec, 'nodes' | 'locked_fields' | 'constraints' | 'decisions' | 'goal' | 'acceptance_criteria' | 'research'>, to: typeof from, appendResearch = false): string[] {
   const errors: string[] = [];
-  if (planValueKey(from.research) !== planValueKey(to.research)) errors.push('Research question, required dimensions and source versions cannot be changed by a proposal or runtime patch. Edit the definition and start a new run.');
+  if (planValueKey(appendResearch && from.research ? { ...from.research, lines: undefined, questions: undefined } : from.research) !== planValueKey(appendResearch && to.research ? { ...to.research, lines: undefined, questions: undefined } : to.research)) errors.push('Research question, required dimensions and source versions cannot be changed by a proposal or runtime patch. Edit the definition and start a new run.');
   const next = new Map(to.nodes.map(node => [node.id, node]));
   for (const node of from.nodes) {
     const following = next.get(node.id);

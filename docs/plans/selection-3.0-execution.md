@@ -130,3 +130,11 @@ F4-a/c/b 三步真实记录及 F4-d/e/f 故障边界见 docs/qa/selection-3.0-dy
 - 同版本校验与渲染保持机器状态和报告一致，普通 PRO/NORM 没有新增研究工作；结果查询、界面与 Handover 保留当前版本和资料限制。
 - 真实 F5 运行在审查后重建实例、实际动态追加修订/复核，最终 cost@2/独立支持、成本 covered 1/2、风险 uncovered 1/2、structured PASS；实际交接到新 NORM。驱动失败与恢复核验分别记录。
 - 入口、范围与验收见 `docs/qa/selection-3.0-deep-research.md/json`；后续 #456 继续扩展语义关系、多前提与共享规范任务。3.1 自动阅读凭据和自动来源包仍在 #449。
+
+### #456 多前提、共享问题与条件式报告
+
+- 在同一研究记录上追加稳定研究线、六项明确口径的共享问题及双方精确父输入，沿用既有原子 revision 注册一个 canonical task。语义 supports/refutes/converges 关系不改变执行 DAG。
+- 精确 inputClaimRefs、来源版本及独立审查派生当前有效性；同一执行根的安全后继核对标准、records hash 与生产凭证，只重新安排受影响任务。异议必须明确 correct/revisedClaimRef 且独立支持才能解决。
+- 条件式报告与界面保留不同推荐、各线覆盖、双方共享输入、替代解释与改变结论所需证据。Handover 保留历史报告并明确当前后继，当前待办不会复活已被修正的旧缺口。
+- 实际 F6 在共享电价复核后重建宿主，后继仅修正高线原事实并复核/报告；高利用率选 A、低利用率选 B，成本 2/2 covered、风险 2/2 uncovered、市场异议仍 limited、实际 PASS 后交接新 NORM。首次失败、驱动断言及实际高开销均保留。
+- 入口、边界、组件截图和全部实际凭证见 `docs/qa/selection-3.0-research-lines.md/json`；#457 复验完整桌面闭环与真实模型对照。3.1 九项仍在 #449。

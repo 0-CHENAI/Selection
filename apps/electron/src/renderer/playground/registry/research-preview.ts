@@ -16,3 +16,18 @@ export function researchPreview() {
   ]
   return { config, summary: summarizeResearch(config, [source], records) }
 }
+
+export function researchLinesPreview() {
+  const base=researchPreview(), source=base.summary.sources[0]!
+  const scope={region:'地区 X',year:'2025',currency:'CNY',tax:'含税',basis:'元/千瓦时',requirements:'同一用户类别与阶梯'}
+  const lines=[{id:'high',question:'高利用率下的成本建议',premises:['每年运行 9000 小时']},{id:'low',question:'低利用率下的成本建议',premises:['每年运行 1000 小时'],parentLineIds:['high']}]
+  const config=ResearchConfigSchema.parse({...base.config,line:lines[0],lines:[lines[1]],questions:[{id:'Q-price',question:'核对同地区、同年份电价',sharedTaskRef:'price',scope,commonBackground:['复用电价事实，保留不同利用率'],compatibilityReason:'双方地域、年份、币种、税口径、计算口径与输入要求一致；利用率分别保留。',parents:lines.map(line=>({lineId:line.id,premises:line.premises,inputScope:scope,claimRefs:[{id:`recommend-${line.id}`,version:1}],evidenceRefs:['cost-e1'],issueRefs:[`market-${line.id}`],path:['collect','analyze']}))}]})
+  const record=(role:ResearchRecord['role'],nodeId:string,payload:unknown):ResearchRecord=>({role,payload:ResearchPayloadSchema.parse(payload),producedBy:{runId:'preview-active',nodeId,attempt:1,revision:1,artifactVersion:`preview-artifact-${nodeId}-version`,sessionId:`preview-session-${nodeId}`}})
+  const records=[base.summary.records[0]!, ...lines.flatMap((line,index)=>[
+    record('researcher',index?'correct-cost':'collect',{claims:[{id:`recommend-${line.id}`,version:1,lineIds:[line.id],type:'inference',text:index?'低利用率下建议方案 B，避免高固定成本。':'高利用率下建议方案 A，固定成本可被更长运行时间摊薄。',dimensionIds:['cost'],evidenceIds:['cost-e1'],critical:true,recommendation:true,conditions:line.premises}]}),
+    record('reviewer',index?'review-cost':'analyze',{reviews:[{claimRef:{id:`recommend-${line.id}`,version:1},citationExists:true,support:'supported',finding:'独立核对原文和该线的利用率假设；建议成立条件不同，分歧无需消失。'}],issues:[{id:`market-${line.id}`,claimRef:{id:`recommend-${line.id}`,version:1},finding:'缺少市场需求资料',disposition:'defer',reason:'交付中保留未决问题'}]})]),
+    record('reporter','report',{report:{claimRefs:lines.map(line=>({id:`recommend-${line.id}`,version:1})),limitations:['风险资料缺失，未覆盖。'],unresolved:['高低利用率两条线的市场需求异议均未决。'],alternatives:['运行时长不确定时两项建议均为条件式建议。'],changeEvidence:['实测运行时长和更新电价可能改变建议。']}})]
+  // This fixed UI fixture deliberately removes the unrelated injected F5 claim.
+  records[0]!.payload.claims=[]
+  return {config,summary:summarizeResearch(config,[source],records)}
+}

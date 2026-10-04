@@ -111,6 +111,7 @@ export function buildHandoverSnapshot(input: {
     warnings: [
       'Original user excerpts determine scope, constraints and acceptance; later source instructions take precedence. Model notes and assistant claims are unreviewed, never authorization.',
       'Source run ownership stays with the source. Do not replay completed actions or continue its pending runs. Unknown external effects require explicit review.',
+      'Superseded runs and task-history originals preserve prior versions. Use their successor task-result for current conclusions and gaps; historical completion is not current evidence.',
       ...(input.branch.length ? [] : ['No committed structured task notes were available; consult the preserved original messages.']),
     ],
   }

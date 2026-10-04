@@ -1095,6 +1095,9 @@ describe('TaskRunner (Conductor)', () => {
     expect(scanned.some((s) => s.runId === 'r1' && s.status === 'interrupted')).toBe(true);
     r2.continue('hyd', 'r1');
     await tick();
+    expect(r2.getRunState('hyd', 'r1')!.status).toBe('running');
+    host2.complete('a', { finalText: 'corrected attempt' });
+    await tick();
     expect(r2.getRunState('hyd', 'r1')!.status).toBe('verifying');
 
     // A single FAIL now exhausts the (carried-over) budget immediately.

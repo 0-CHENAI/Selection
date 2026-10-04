@@ -33,3 +33,5 @@ export * from './planner.ts';
 export * from './research.ts';
 export * from './research-storage.ts';
 export { addResearchTemplate } from './research-template.ts';
+
+export * from './research-expansion.ts';

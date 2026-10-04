@@ -75,6 +75,39 @@ test('F5-d research handover preserves current reviewed versions, uncovered ques
   } finally { await f.cleanup() }
 })
 
+test('F6 handover keeps predecessor results as history and only successor gaps as current', async () => {
+  const f = await fixture('PRO')
+  try {
+    f.source.taskSlug = 'lineage'
+    const parsed = parseTaskSpec({ schema_version: 3, id: 'lineage', title: 'Lineage', goal: 'old goal', nodes: [{ id: 'a', prompt: 'read' }] })
+    expect(parsed.success).toBe(true); if (!parsed.success) return
+    saveTaskSpec(f.root, parsed.data)
+    writeSpecRevision(f.root, 'lineage', 'old', 0, parsed.data)
+    writeSpecRevision(f.root, 'lineage', 'new', 0, { ...parsed.data, goal: 'current goal' })
+    const event = { t: new Date().toISOString() }
+    appendRunLog(f.root, 'lineage', 'old', { ...event, kind: 'run-started', taskId: 'lineage', runId: 'old', orchestratorSessionId: f.source.id })
+    appendRunLog(f.root, 'lineage', 'old', { ...event, kind: 'node-scheduled', nodeId: 'a' })
+    appendRunLog(f.root, 'lineage', 'old', { ...event, kind: 'run-paused' })
+    appendRunLog(f.root, 'lineage', 'new', { ...event, kind: 'run-started', taskId: 'lineage', runId: 'new', orchestratorSessionId: f.source.id, resumedFrom: 'old' })
+    appendRunLog(f.root, 'lineage', 'old', { ...event, kind: 'run-superseded', supersededBy: 'new' })
+    writeNodeOutput(f.root, 'lineage', 'new', 'a', { text: 'current result' })
+    appendRunLog(f.root, 'lineage', 'new', { ...event, kind: 'node-finished', nodeId: 'a', state: 'done', sessionId: 'current-author' })
+    appendRunLog(f.root, 'lineage', 'new', { ...event, kind: 'run-completed' })
+    f.manager.setTaskRunnerLookup(() => new TaskRunner({ host: f.manager, workspaceId: f.workspace.id, workspaceRoot: f.root }))
+    const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'lineage-handover', targetMode: 'NORM' })).records[0]!
+    expect(record.snapshot!.goal).toContain('current goal')
+    expect(record.snapshot!.goal).not.toContain('old goal')
+    expect(record.snapshot!.openQuestions.join(' ')).not.toContain('Source retains lineage/a')
+    expect(record.snapshot!.runs.find(run => run.runId === 'old')?.supersededBy).toBe('new')
+    expect(record.snapshot!.runs.find(run => run.runId === 'new')?.resumedFrom).toBe('old')
+    const history = JSON.parse(record.snapshot!.originals.find(original => original.role === 'task-history')!.text)
+    const current = JSON.parse(record.snapshot!.originals.find(original => original.role === 'task-result')!.text)
+    expect(history.runId).toBe('old'); expect(history.nodes[0].state).toBe('running')
+    expect(current.runId).toBe('new'); expect(current.nodes[0].output).toBe('current result')
+    expect(f.internal.handoverInput(f.internal.sessions.get(record.targetSessionId!))).toContain('Superseded runs')
+  } finally { await f.cleanup() }
+})
+
 test('F2 handover preserves source, constraints, file versions and independent target permissions', async () => {
   const f = await fixture()
   try {
