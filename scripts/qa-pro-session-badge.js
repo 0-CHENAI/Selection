@@ -26,7 +26,8 @@ try {
     const url = [...entry.matchAll(/from "([^"]+)"/g)].map(match => match[1]).find(url => url.includes('/i18n/'))
     await (await import(url)).i18n.changeLanguage('zh-Hans')
   })
-  await page.click('[data-work-mode-preview] button:text-is("PRO")')
+  await page.click('loc=role:button[name="PRO"]')
+  await page.waitForFunction(() => document.documentElement.dataset.workMode === 'PRO' && !document.documentElement.dataset.workModeTransitionPhase)
   await page.click('[data-session-id=pro-root] .entity-row-btn')
   await page.waitForFunction(() => document.querySelector('[data-work-mode-chat] h1')?.textContent === '成本核对')
   for (const theme of ['Dark', 'Light']) {
@@ -64,7 +65,8 @@ try {
     return title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === 'ellipsis'
       && title.getBoundingClientRect().right < row.getBoundingClientRect().right
   }), 'a long conversation title truncates without row badges')
-  await page.click('[data-work-mode-preview] button:text-is("NORM")')
+  await page.click('loc=role:button[name="NORM"]')
+  await page.waitForFunction(() => document.documentElement.dataset.workMode === 'NORM' && !document.documentElement.dataset.workModeTransitionPhase)
   assert.equal(await page.evaluate(() => document.querySelectorAll('[data-work-mode-preview] .session-mode-badge').length), 0)
   await page.click('loc=role:button[name="会话交接与来源"]')
   await page.selectOption('select', 'compact')

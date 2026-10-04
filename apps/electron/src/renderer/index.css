@@ -333,6 +333,47 @@
   --permission-ask-rgb: 67, 115, 175;
 }
 
+/* Snapshot only the changing surfaces. Chrome and the selected mode indicator stay live. */
+html[data-work-mode-transition-phase] {
+  view-transition-name: none;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="list"] {
+  view-transition-name: work-mode-list;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="chat"] {
+  view-transition-name: work-mode-chat;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition] {
+  pointer-events: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(work-mode-list),
+::view-transition-group(work-mode-chat) {
+  animation: none;
+}
+::view-transition-old(work-mode-list),
+::view-transition-old(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-fade-out 240ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+::view-transition-new(work-mode-list),
+::view-transition-new(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-fade-in 240ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(work-mode-list),
+  ::view-transition-old(work-mode-chat),
+  ::view-transition-new(work-mode-list),
+  ::view-transition-new(work-mode-chat) {
+    animation-duration: 150ms;
+  }
+}
+@keyframes work-mode-fade-out { to { opacity: 0; } }
+@keyframes work-mode-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
 /* Theme Override - Semi-transparent background to allow macOS vibrancy through.
    Only applied when ThemeContext sets data-theme-override (macOS desktop). */
 html[data-theme-override]::before {

@@ -13,9 +13,11 @@ import { AppShellProvider, useAppShellContext } from '@/context/AppShellContext'
 import { SessionListProvider } from '@/context/SessionListContext'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { ModalProvider } from '@/context/ModalContext'
+import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { FocusProvider } from '@/context/FocusContext'
 import { ActionRegistryProvider } from '@/actions/registry'
 import { sessionWorkModeView } from '@/lib/work-mode-navigation'
+import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { sessionAtomFamily, sessionMetaMapAtom, loadedSessionsAtom, extractSessionMeta } from '@/atoms/sessions'
 import { createMockContext } from './session-list'
@@ -70,7 +72,12 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
   React.useEffect(() => { if (selectedMode) setMode(selectedMode) }, [selected, selectedMode, setMode])
   const select = (id: string) => { setSelected(id) }
   const listContext = createMockContext({ selectedSessionId: selected, onSelectSessionById: select })
-  return <AppShellProvider value={context}><ActionRegistryProvider><FocusProvider><ModalProvider><NavigationProvider workspaceId={base.activeWorkspaceId} workspaceSlug="playground" onCreateSession={base.onCreateSession} isReady={false}><SessionListProvider value={listContext}>
+  const switchMode = (next: 'NORM' | 'PRO') => {
+    if (next === mode) { cancelWorkModeTransition(); return }
+    void transitionWorkMode(() => { setMode(next); setSelected(null) })
+  }
+  React.useEffect(() => () => cancelWorkModeTransition(), [])
+  return <AppShellProvider value={context}><ActionRegistryProvider><FocusProvider><DismissibleLayerProvider><ModalProvider><NavigationProvider workspaceId={base.activeWorkspaceId} workspaceSlug="playground" onCreateSession={base.onCreateSession} isReady={false}><SessionListProvider value={listContext}>
     <div className="flex h-[600px] w-full min-w-0 flex-col rounded-xl border border-border bg-background" data-work-mode-preview>
       <div className="h-12 shrink-0 border-b border-border" style={{ transform: 'translateZ(0)', '--topbar-height': '48px', width: compactTopBar ? 375 : undefined } as React.CSSProperties} data-work-mode-topbar>
         <TopBar workspaces={base.workspaces} activeWorkspaceId={base.activeWorkspaceId} onSelectWorkspace={() => {}}
@@ -78,20 +85,20 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
           onOpenKeyboardShortcuts={() => {}} onOpenStoredUserPreferences={() => {}}
           onBack={() => {}} onForward={() => {}} canGoBack={false} canGoForward={false}
           onToggleSidebar={() => {}} onToggleFocusMode={() => {}} isCompact={compactTopBar}
-          afterWorkspace={<BoardListToggle className={compactTopBar ? '[&_svg]:hidden' : undefined} value={mode} onChange={next => { setMode(next); setSelected(null) }} />} />
+          afterWorkspace={<BoardListToggle className={compactTopBar ? '[&_svg]:hidden' : undefined} value={mode} onChange={switchMode} />} />
       </div>
       <button type="button" className="self-end px-4 py-1 text-xs text-muted-foreground" onClick={() => select('pro-worker')}>打开 PRO 子会话深链接</button>
       <div className="flex min-h-0 flex-1">
-        <div className="w-64 shrink-0 border-r border-border" data-work-mode-list>
+        <div className="w-64 shrink-0 border-r border-border" data-work-mode-list data-work-mode-transition="list">
           <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" badge={<SessionModeBadge mode={mode} />} />
           <button type="button" className="px-4 py-2 text-xs text-muted-foreground" onClick={() => setSelected(null)}>新建 {mode}</button>
           {mode === 'PRO' && <><SessionItem item={extractSessionMeta(sessions[0]!)} index={0} itemProps={{ onKeyDown: () => {} }} isSelected={!!selected} isFirstInGroup isInMultiSelect={false} onSelect={() => select('pro-root')} />
             <ExecutionChildren children={[extractSessionMeta(sessions[1]!)]} selectedSessionId={selected} onSelect={select} /></>}
         </div>
-        <div className="min-w-0 flex-1" data-work-mode-chat><ChatPage sessionId={selected} /></div>
+        <div className="min-w-0 flex-1" data-work-mode-chat data-work-mode-transition="chat"><ChatPage sessionId={selected} /></div>
       </div>
     </div>
-  </SessionListProvider></NavigationProvider></ModalProvider></FocusProvider></ActionRegistryProvider></AppShellProvider>
+  </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider></AppShellProvider>
 }
 export const workModeComponents: ComponentEntry[] = [{
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',

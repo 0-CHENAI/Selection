@@ -139,7 +139,10 @@ export function PanelSlot({
           ),
         }}
       >
-        <div className="h-full flex flex-col">
+        <div
+          className="h-full flex flex-col overflow-hidden rounded-[inherit]"
+          data-work-mode-transition={isFocusedPanel ? 'chat' : undefined}
+        >
           <AppShellProvider value={contextOverride}>
             <MainContentPanel
               navStateOverride={navState}

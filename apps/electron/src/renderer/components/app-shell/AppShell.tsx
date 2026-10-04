@@ -70,6 +70,7 @@ import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/ato
 import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
 import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
 import { executionChildrenByRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
+import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
@@ -1058,17 +1059,21 @@ function AppShellContent({
     && isUnownedExecution(meta, sessionMetaMap)
   ), [sessionMetaMap, workModeView, activeWorkspaceId, remoteWorkspaceId])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
-    if (mode === workModeView && !isBoardView) return
+    if (mode === workModeView && !isBoardView) { cancelWorkModeTransition(); return }
     if (isBoardView && !(await leaveOrchestrationView())) return
     const scope = activeWorkspaceId ?? ''
     const remembered = modeNavigation.get(`${scope}:${mode}`)
-    setModeNavigation(previous => new Map(previous).set(`${scope}:${workModeView}`, focusedSessionId ?? null))
-    setWorkModeView(mode)
-    setSearchActive(false)
-    setSearchQuery('')
     const target = remembered && sessionMetaMap.get(remembered)?.workMode === mode ? remembered : undefined
-    navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
+    await transitionWorkMode(() => {
+      setModeNavigation(previous => new Map(previous).set(`${scope}:${workModeView}`, focusedSessionId ?? null))
+      setWorkModeView(mode)
+      setSearchActive(false)
+      setSearchQuery('')
+      navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
+    })
   }, [workModeView, isBoardView, leaveOrchestrationView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
+
+  useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
   // Classification metadata is retained for backward compatibility, but it no
   // longer removes sessions from the ordinary list (#180).
@@ -2137,6 +2142,7 @@ function AppShellContent({
           sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
           navigatorSlot={
             <div
+              data-work-mode-transition="list"
               style={{ width: isAutoCompact ? '100%' : sessionListWidth }}
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
