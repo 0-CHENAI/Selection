@@ -1266,6 +1266,7 @@
   "sendToWorkspace.title": "Küldés munkaterületre",
   "session.clearSearch": "Keresés törlése",
   "session.closeSearch": "Keresés bezárása",
+  "session.currentProMode": "Jelenleg PRO módban",
   "session.defaultTitle": "Új csevegés",
   "session.enterSessionName": "Add meg a munkamenet nevét...",
   "session.executionChildren": "Execution sessions ({{count}})",

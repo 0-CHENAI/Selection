@@ -1,5 +1,4 @@
 import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
-import { SessionModeBadge } from '@/components/app-shell/SessionModeBadge'
 import { PanelResizeHandle } from '@/components/app-shell/PanelResizeHandle'
 import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 /**
@@ -750,7 +749,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const compactTitleMenu = React.useMemo(() => (sessionMeta && isCompactMode) ? (
     <CompactSessionMenu
       title={displayTitle}
-      badge={<SessionModeBadge mode={currentWorkMode} />}
       isRegeneratingTitle={isAsyncOperationOngoing}
       item={sessionMeta}
       onRename={handleRename}
@@ -762,7 +760,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     sessionMeta,
     isCompactMode,
     displayTitle,
-    currentWorkMode,
     isAsyncOperationOngoing,
     handleRename,
     handleMarkUnread,
@@ -847,6 +844,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       // Session exists in metadata but not loaded yet - show loading state
       const skeletonSession = {
         id: sessionMeta.id,
+        workMode: currentWorkMode,
         workspaceId: sessionMeta.workspaceId,
         workspaceName: '',
         name: sessionMeta.name,
@@ -872,7 +870,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       return (
         <>
           <div className="h-full flex flex-col">
-            <PanelHeader title={displayTitle} badge={isCompactMode && compactTitleMenu ? undefined : <SessionModeBadge mode={currentWorkMode} />} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+            <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="flex-1 flex flex-col min-h-0">
               {orchestrationProgress}
               {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
@@ -958,7 +956,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={optionsSessionId} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
       renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
       <div className="h-full flex flex-col">
-        <PanelHeader title={displayTitle} badge={isCompactMode && compactTitleMenu ? undefined : <SessionModeBadge mode={currentWorkMode} />} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+        <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="relative flex-1 flex flex-col min-h-0">
           {orchestrationProgress}
           {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (

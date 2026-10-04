@@ -7,7 +7,6 @@ import { BoardListToggle } from '@/components/app-shell/kanban/BoardListToggle'
 import { ExecutionChildren } from '@/components/app-shell/ExecutionChildren'
 import { SessionItem } from '@/components/app-shell/SessionItem'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
-import { SessionModeBadge } from '@/components/app-shell/SessionModeBadge'
 import ChatPage from '@/pages/ChatPage'
 import { AppShellProvider, useAppShellContext } from '@/context/AppShellContext'
 import { SessionListProvider } from '@/context/SessionListContext'
@@ -90,7 +89,7 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
       <button type="button" className="self-end px-4 py-1 text-xs text-muted-foreground" onClick={() => select('pro-worker')}>打开 PRO 子会话深链接</button>
       <div className="flex min-h-0 flex-1">
         <div className="w-64 shrink-0 border-r border-border" data-work-mode-list data-work-mode-transition="list">
-          <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" badge={<SessionModeBadge mode={mode} />} />
+          <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" />
           <button type="button" className="px-4 py-2 text-xs text-muted-foreground" onClick={() => setSelected(null)}>新建 {mode}</button>
           {mode === 'PRO' && <><SessionItem item={extractSessionMeta(sessions[0]!)} index={0} itemProps={{ onKeyDown: () => {} }} isSelected={!!selected} isFirstInGroup isInMultiSelect={false} onSelect={() => select('pro-root')} />
             <ExecutionChildren children={[extractSessionMeta(sessions[1]!)]} selectedSessionId={selected} onSelect={select} /></>}

@@ -2339,6 +2339,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
             inputProps={{
+              workMode: session.workMode,
               placeholder,
               disabled: isInputDisabled,
               isProcessing: sessionBusy,

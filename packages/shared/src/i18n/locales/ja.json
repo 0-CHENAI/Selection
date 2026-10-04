@@ -1266,6 +1266,7 @@
   "sendToWorkspace.title": "Workspaceに送信",
   "session.clearSearch": "検索をクリア",
   "session.closeSearch": "検索を閉じる",
+  "session.currentProMode": "現在は PRO モードです",
   "session.defaultTitle": "新しいチャット",
   "session.enterSessionName": "セッション名を入力...",
   "session.executionChildren": "Execution sessions ({{count}})",

@@ -4,7 +4,7 @@
 
 取色来自 Binchael 实际运行样式 `binchael-next-replica/src/app/globals.css` 的 `--accent-champagne`：浅色 `#8B5527`，深色 `#D2AD76`。在 Selection 中使用等价 OKLCH 值，PRO 视图统一映射 `accent` 及其阴影颜色。NORM 恢复所选主题；成功、警告和错误语义颜色不变。
 
-PRO 徽标使用同一组深浅主题色作为文字和 1px 边框，背景透明。徽标直接读取 PRO 色值，因此在 NORM 视图展示 PRO 标识时也不会变成紫色。列表标题和聊天标题的位置保持原样。
+PRO 徽标使用同一组深浅主题色作为文字和 1px 边框，背景透明。徽标直接读取 PRO 色值，因此在 NORM 视图展示 PRO 标识时也不会变成紫色。2026-10-05 后的位置调整见 [PRO 输入框铭牌](pro-session-badge.md)。
 
 主题作用于文档根节点，覆盖弹出菜单及直接读取根节点颜色的编辑器、加载效果。后台完成提示和工作区传输进度边框原有的固定紫色也适配 PRO；后台提示在 NORM 下保留原来的紫色样式。
 

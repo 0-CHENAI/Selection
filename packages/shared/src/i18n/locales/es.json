@@ -1266,6 +1266,7 @@
   "sendToWorkspace.title": "Enviar al Workspace",
   "session.clearSearch": "Borrar búsqueda",
   "session.closeSearch": "Cerrar búsqueda",
+  "session.currentProMode": "Actualmente en modo PRO",
   "session.defaultTitle": "Nuevo chat",
   "session.enterSessionName": "Introduce el nombre de la sesión...",
   "session.executionChildren": "Execution sessions ({{count}})",
