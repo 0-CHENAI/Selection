@@ -96,6 +96,8 @@
   --pro-accent-rgb: 97, 60, 27;
   --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
+  --permission-ask: var(--info);
+  --permission-ask-rgb: var(--info-rgb);
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
@@ -322,6 +324,13 @@
 :root[data-work-mode="PRO"] {
   --accent: var(--pro-accent);
   --accent-rgb: var(--pro-accent-rgb);
+  --permission-ask: oklch(0.48819831 0.21716546 264.37630409); /* blue #1D4ED8 */
+  --permission-ask-rgb: 20, 55, 151;
+}
+
+:root.dark[data-work-mode="PRO"] {
+  --permission-ask: oklch(0.71374005 0.14338051 254.62402137); /* blue #60A5FA */
+  --permission-ask-rgb: 67, 115, 175;
 }
 
 /* Theme Override - Semi-transparent background to allow macOS vibrancy through.
@@ -450,6 +459,7 @@ html[data-font="inter"] {
   --color-foreground: var(--foreground);
   --color-accent: var(--accent);
   --color-info: var(--info);
+  --color-permission-ask: var(--permission-ask);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
 
