@@ -1,7 +1,7 @@
 import { markdownToPlainText } from './markdown-to-plain-text'
 
 export interface SourceMetadata { title?: string; description: string }
-export interface SourceToolMessage { role: string; toolName?: string; content: string; toolResult?: string }
+export interface SourceToolMessage { role: string; toolName?: string; toolInput?: Record<string, unknown>; content: string; toolResult?: string }
 export function sourceUrlKey(value: string): string {
   try { const url = new URL(value); url.hash = ''; return url.href } catch { return value }
 }
@@ -9,7 +9,14 @@ export function sourcePlainText(value: string): string {
   return markdownToPlainText(value).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 }
 
-/** Read the actual web_search/web_fetch output contracts without making extra network requests. */
+/** Handover stores WebFetch results as immutable, content-addressed text files. */
+function isHandoverWebSnapshotRead(message: SourceToolMessage): boolean {
+  const path = message.toolInput?.file_path ?? message.toolInput?.path
+  return /^read$/i.test(message.toolName ?? '') && typeof path === 'string'
+    && /(?:^|[\\/])data[\\/]handover[\\/][^\\/]+[\\/]files[\\/][a-f0-9]{64}\.txt$/i.test(path)
+}
+
+/** Read live and frozen web tool output contracts without making extra network requests. */
 export function collectSourceMetadata(messages: SourceToolMessage[]): Map<string, SourceMetadata> {
   const metadata = new Map<string, SourceMetadata>()
   for (const message of messages) {
@@ -21,7 +28,8 @@ export function collectSourceMetadata(messages: SourceToolMessage[]): Map<string
         metadata.set(sourceUrlKey(match[2]!), { title: sourcePlainText(match[1]!), description: sourcePlainText(match[3]!).slice(0, 1200) })
       }
     }
-    if (/^web_?fetch$/i.test(message.toolName ?? '') || (!message.toolName && text.startsWith('Content from '))) {
+    if (/^web_?fetch$/i.test(message.toolName ?? '') || isHandoverWebSnapshotRead(message)
+      || (!message.toolName && text.startsWith('Content from '))) {
       const match = text.match(/^Content from (https?:\/\/\S+?)(?: \(asked: [^\n]*\))?:\r?\n\r?\n([\s\S]+)/)
       if (match && !metadata.get(sourceUrlKey(match[1]!))?.description) {
         metadata.set(sourceUrlKey(match[1]!), { description: sourcePlainText(match[2]!).slice(0, 1200) })
@@ -39,7 +47,7 @@ export function collectTurnResearchSources(activities: ReadonlyArray<{
   const results = new Map<string, import('./response-sources').ResponseSource>()
   for (const activity of successful) {
     const text = activity.content ?? ''
-    const metadata = collectSourceMetadata([{ role: 'tool', toolName: activity.toolName, content: text }])
+    const metadata = collectSourceMetadata([{ role: 'tool', toolName: activity.toolName, toolInput: activity.toolInput, content: text }])
     if (/^(?:web_?fetch)$/i.test(activity.toolName ?? '') && typeof activity.toolInput?.url === 'string'
       && text && !/^(?:Failed to fetch|Refused to fetch|Error\b)/i.test(text)) {
       const key = sourceUrlKey(activity.toolInput.url)
