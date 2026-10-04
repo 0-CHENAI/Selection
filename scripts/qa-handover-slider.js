@@ -5,6 +5,7 @@ const { strict: assert } = await import('node:assert')
 const config = globalThis.handoverQA ?? {}
 const task = await taskSpace(config.spaceId ?? 'Handover slider QA')
 const page = task.page('p1')
+await page.mouse.up()
 await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
 await page.evaluate(() => localStorage.setItem('playground-selected-component', 'session-handover'))
 await page.reload()
@@ -21,15 +22,15 @@ const state = () => page.evaluate(() => {
     dialog: !!document.querySelector('[role=dialog]'), alert: document.querySelector('[role=alert]')?.textContent,
     records: document.querySelector('[data-handover-record-count]').textContent }
 })
-async function drag(mode, progress) {
-  const r = await page.evaluate(async () => {
+async function drag(mode, progress, settle = true) {
+  const r = await page.evaluate(async shouldSettle => {
     await new Promise(requestAnimationFrame)
-    await Promise.all(document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
+    if (shouldSettle) await Promise.all(document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
     const input = document.querySelector('input[type=range]')
     const bounds = input.getBoundingClientRect()
-    const thumb = input.parentElement.querySelector('span[style]').getBoundingClientRect()
-    return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width, thumbX: thumb.x, thumbWidth: thumb.width }
-  })
+    const thumbWidth = parseFloat(getComputedStyle(input.parentElement.querySelector('[data-handover-thumb]')).width)
+    return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width, thumbX: bounds.x + (bounds.width - thumbWidth) * Number(input.value) / 100, thumbWidth }
+  }, settle)
   const start = r.thumbX + r.thumbWidth / 2
   const end = mode === 'NORM' ? r.x + r.width - r.thumbWidth / 2 : r.x + r.thumbWidth / 2
   await page.mouse.move(start, r.y)
@@ -41,19 +42,22 @@ async function dismiss(start) {
   await page.waitForFunction(() => document.querySelector('[role=dialog]') === null)
   assert.equal((await state()).value, start, 'closing review must reset the source position')
 }
-async function capture(name) {
+async function capture(name, hint = false) {
   // Capture the settled theme/hover state rather than a transition's first frame.
-  await page.evaluate(async () => {
+  await page.evaluate(async showHint => {
     await new Promise(requestAnimationFrame)
+    if (showHint) return
     const root = document.querySelector('[data-handover-control]')
     const animations = root.getAnimations({ subtree: true })
     for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) animations.push(...ancestor.getAnimations())
     await Promise.all(animations.map(animation => animation.finished.catch(() => {})))
-  })
-  const clip = await page.evaluate(() => {
-    const r = document.querySelector('[data-handover-control]').getBoundingClientRect()
-    return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 }
-  })
+  }, hint)
+  const clip = await page.evaluate(showHint => {
+    const rects = [document.querySelector('[data-handover-control]').getBoundingClientRect()]
+    if (showHint) rects.push(document.querySelector('[data-slot=tooltip-content]').getBoundingClientRect())
+    const x = Math.min(...rects.map(r => r.x)) - 12, y = Math.min(...rects.map(r => r.y)) - 12
+    return { x, y, width: Math.max(...rects.map(r => r.right)) + 12 - x, height: Math.max(...rects.map(r => r.bottom)) + 12 - y }
+  }, hint)
   return page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-slider'}/${name}.png`, clip })
 }
 assert.equal((await state()).records, '交接记录：0')
@@ -73,10 +77,35 @@ const hover = await capture('handover-slider-norm-hover')
 assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').getBoundingClientRect().width), width, 'hover must not shift the header layout')
 await page.mouse.move(0, 0)
 await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '0')
-await drag('NORM', 0.5)
+const points = () => page.evaluate(() => {
+  const input = document.querySelector('input[type=range]'), r = input.getBoundingClientRect()
+  const half = r.width / 2, norm = r.x + half / 2, pro = r.right - half / 2
+  return { source: input.value === '0' ? norm : pro, target: input.value === '0' ? pro : norm, y: r.y + r.height / 2,
+    restX: document.querySelector('[data-handover-thumb]').getBoundingClientRect().x }
+})
+const clickPoint = await points()
+await page.mouse.click(clickPoint.target, clickPoint.y)
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' })
+assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').textContent.includes('滑动交接至 PRO')))
+await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x > restX + 4, clickPoint.restX)
+const hint = await capture('handover-slider-click-hint', true)
+await page.waitForSelector('[data-slot=tooltip-content]', { state: 'hidden' })
+await page.mouse.move(clickPoint.source, clickPoint.y)
+await page.mouse.down()
+await page.mouse.move(clickPoint.source + 2, clickPoint.y)
+await page.mouse.up()
+assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' }, 'tap jitter must not count as a drag')
+for (let i = 0; i < 3; i++) await page.mouse.click(clickPoint.source, clickPoint.y)
+assert.equal((await state()).dialog, false)
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().iterations === 2).length), 1, 'repeated taps must replace the hint animation')
+await drag('NORM', 0.5, false)
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().iterations === 2).length), 0, 'grabbing must interrupt the hint immediately')
 assert.ok((await state()).value > 0 && (await state()).value < 100, 'native drag must move the thumb')
 assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').dataset.mode), 'NORM')
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-thumb]')).transitionProperty), 'none', 'dragging must follow the pointer without animation lag')
+await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector('[data-handover-grip]')).scale) > 1)
+assert.ok(await page.evaluate(() => document.querySelector('[data-handover-trail]').getBoundingClientRect().width > 0))
 const moving = await capture('handover-slider-norm-drag')
 await page.mouse.up()
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' })
@@ -111,6 +140,12 @@ await page.click('text="打开目标预览"')
 await page.waitForFunction(() => document.querySelector('input[type=range]').value === '100')
 await page.click('loc=role:button[name="Dark"]')
 const dark = await capture('handover-slider-pro-dark')
+const reversePoint = await points()
+await page.mouse.click(reversePoint.target, reversePoint.y)
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.equal((await state()).value, 100)
+assert.equal((await state()).dialog, false)
+assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').textContent.includes('NORM')))
 await drag('PRO', 0.5)
 await page.mouse.up()
 assert.equal((await state()).value, 100)
@@ -144,6 +179,12 @@ const touch = (type, point) => page.cdp('Input.dispatchTouchEvent', {
   type, touchPoints: point ? [{ x: point.x, y: point.y, id: 1 }] : [],
 })
 const point = await touchPoint()
+const tapTarget = await points()
+await touch('touchStart', { x: tapTarget.target, y: tapTarget.y })
+await touch('touchEnd')
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.equal((await state()).value, 100)
+assert.equal((await state()).dialog, false)
 await touch('touchStart', point)
 await touch('touchMove', { x: point.x - point.travel / 2, y: point.y })
 assert.ok((await state()).value > 0 && (await state()).value < 100)
@@ -158,8 +199,17 @@ await page.waitForSelector('[role=dialog]')
 assert.equal((await state()).records, '交接记录：1')
 await dismiss(100)
 await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('input[type=range]').parentElement.querySelector('span[style]')).transitionProperty), 'none')
-assert.ok(await page.evaluate(() => ['[data-handover-mode]', '[data-handover-label]'].every(selector => getComputedStyle(document.querySelector(selector)).transitionProperty === 'none')))
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-thumb]')).transitionProperty), 'none')
+assert.ok(await page.evaluate(() => ['[data-handover-mode]', '[data-handover-label]', '[data-handover-grip]', '[data-handover-trail]'].every(selector => getComputedStyle(document.querySelector(selector)).transitionProperty === 'none')))
+await page.mouse.move(point.x, point.y)
+await page.mouse.down()
+assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('[data-handover-grip]')).scale)), 1)
+await page.mouse.up()
+await page.mouse.click(tapTarget.target, tapTarget.y)
+await page.waitForSelector('[data-slot=tooltip-content]')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().length), 0, 'reduced motion should keep the message without directional animation')
+assert.equal((await state()).dialog, false)
+await page.waitForSelector('[data-slot=tooltip-content]', { state: 'hidden' })
 await page.cdp('Emulation.setEmulatedMedia', { features: [] })
 await page.evaluate(async () => {
   const entry = await (await fetch('/playground.tsx')).text()
@@ -177,5 +227,5 @@ await page.evaluate(async () => {
 console.log(await page.snapshot())
 console.log({ passed: true, bidirectionalDrag: true, partialReset: true, confirmationRequired: true,
   keyboard: ['ArrowRight', 'Escape', 'End', 'Enter', 'Home', 'Space'], reducedMotion: true,
-  unified: true, width, touch: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, moving, armed, dark] })
+  unified: true, width, touch: true, tapHint: true, interruption: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, hint, moving, armed, dark] })
 if (!config.spaceId) await task.finish({ keep: [] })
