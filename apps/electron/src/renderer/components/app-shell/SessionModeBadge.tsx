@@ -11,7 +11,7 @@ export function SessionModeBadge({ mode }: { mode?: WorkMode }) {
         <span
           tabIndex={0}
           aria-label={t('session.currentProMode')}
-          className="session-mode-badge inline-flex h-5 shrink-0 cursor-default items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--pro-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="session-mode-badge ml-1 inline-flex h-5 shrink-0 cursor-default items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--pro-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           PRO
         </span>
