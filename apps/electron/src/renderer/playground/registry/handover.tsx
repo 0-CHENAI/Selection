@@ -105,7 +105,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
     </div>
     <div data-handover-chat className="relative flex min-h-0 flex-1 flex-col">
     <motion.div key={session.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} className="flex min-h-0 flex-1 flex-col px-6 py-4 text-sm">
-      <HandoverMessageBubble session={session} />
+      <HandoverMessageBubble session={session} compactMode={state === 'compact'} />
       <div className="space-y-3"><p>A 两年总成本为 1000000 元；B 的成本口径未知，风险资料存在缺口。</p><p className="text-muted-foreground">本次仅分析约定资料，不部署、不执行外部操作。</p></div>
       <div className="mt-auto rounded-xl border border-border p-3">
         <textarea key={session.id} aria-label="消息" placeholder={t('chatInput.placeholder.typeMessage')} className="min-h-16 w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
