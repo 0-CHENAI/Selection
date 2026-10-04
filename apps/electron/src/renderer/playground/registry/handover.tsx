@@ -12,7 +12,8 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
   const setMetadata = useSetAtom(sessionMetaMapAtom)
   const [records, setRecords] = React.useState<HandoverRecord[]>([])
   const [target, setTarget] = React.useState(false)
-  React.useEffect(() => {
+  // Install transport before HandoverPanel's passive effect loads its records.
+  React.useLayoutEffect(() => {
     let stored: HandoverRecord[] = []
     const snapshot: HandoverSnapshot = {
       version: 1, source: { workspaceId: 'preview', sessionId: 'norm-analysis', messageId: 'answer', checkpoint: 'cp-f2' }, targetMode: 'PRO', capturedAt: 1,

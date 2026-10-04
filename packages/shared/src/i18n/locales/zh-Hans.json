@@ -871,6 +871,8 @@
   "handover.reviewOperation": "复核 {{tool}} 的结果",
   "handover.saveReview": "保存复核",
   "handover.scope": "范围与优先级",
+  "handover.slide": "交接",
+  "handover.slideTo": "滑动交接至 {{mode}}",
   "handover.sourceChanged": "源文件已变化",
   "handover.sourceRemoved": "源会话已删除",
   "handover.status.applied": "背景已应用",

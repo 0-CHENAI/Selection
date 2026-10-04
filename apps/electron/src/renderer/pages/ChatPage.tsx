@@ -712,14 +712,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     </div>
   ) : (editTaskButton ?? primaryHeaderAction)
 
+  const canHandover = !!sessionId && !sessionMeta?.parentSessionId && !sessionMeta?.taskNodeId && !sessionMeta?.workModeNeedsReview
+    && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)
   const headerActions = (
     <div className="flex items-center gap-1.5">
-      <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
+      {!canHandover && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
         {currentWorkMode}
-      </span>
+      </span>}
       {sessionHeaderActions}
       {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
-        canCreate={!sessionMeta?.parentSessionId && !sessionMeta?.taskNodeId && !sessionMeta?.workModeNeedsReview && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)} headerOnly />}
+        canCreate={canHandover} headerOnly />}
     </div>
   )
 

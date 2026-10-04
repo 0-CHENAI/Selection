@@ -871,6 +871,8 @@
   "handover.reviewOperation": "Review {{tool}} outcome",
   "handover.saveReview": "Save review",
   "handover.scope": "Scope and priorities",
+  "handover.slide": "引き継ぎ",
+  "handover.slideTo": "スライドして {{mode}} に引き継ぐ",
   "handover.sourceChanged": "Source file changed",
   "handover.sourceRemoved": "Source conversation removed",
   "handover.status.applied": "Background applied",

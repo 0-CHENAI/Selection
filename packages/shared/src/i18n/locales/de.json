@@ -871,6 +871,8 @@
   "handover.reviewOperation": "Review {{tool}} outcome",
   "handover.saveReview": "Save review",
   "handover.scope": "Scope and priorities",
+  "handover.slide": "Übergabe",
+  "handover.slideTo": "Zur Übergabe an {{mode}} schieben",
   "handover.sourceChanged": "Source file changed",
   "handover.sourceRemoved": "Source conversation removed",
   "handover.status.applied": "Background applied",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowRightLeft, ArrowUpRight, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { HandoverSlider } from './HandoverSlider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtomValue } from 'jotai'
@@ -82,7 +83,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const unknown = selected?.snapshot?.actions.filter(action => action.outcome === 'unknown' && !selected.reviews[action.ref]) ?? []
   const sourceExists = selected ? metadata.has(selected.sourceSessionId) : sourceLink ? metadata.has(sourceLink.sourceSessionId) : false
   return <>
-    {headerOnly ? canCreate && <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setOpen(true)}><ArrowRightLeft className="size-3.5" />{actionLabel}</Button>
+    {headerOnly ? canCreate && <HandoverSlider key={`${sessionId}:${mode}`} mode={mode} disabled={busy || open} onActivate={() => setOpen(true)} />
       : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
         <ArrowRightLeft className="size-3.5 text-muted-foreground" /><span>{t('handover.backgroundReady')}</span>
         <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" disabled={!metadata.has(sourceLink.sourceSessionId)} onClick={() => navigate(routes.view.allSessions(sourceLink.sourceSessionId))}>{metadata.has(sourceLink.sourceSessionId) ? t('handover.openSource') : t('handover.sourceRemoved')}</button>
