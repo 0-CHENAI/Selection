@@ -43,22 +43,28 @@ async function dismiss(start) {
   assert.equal((await state()).value, start, 'closing review must reset the source position')
 }
 async function capture(name, hint = false) {
-  // Capture the settled theme/hover state rather than a transition's first frame.
+  // Capture settled styling, or the actual demonstration's held midpoint.
   await page.evaluate(async showHint => {
     await new Promise(requestAnimationFrame)
-    if (showHint) return
     const root = document.querySelector('[data-handover-control]')
+    if (showHint) {
+      for (const animation of root.getAnimations({ subtree: true }).filter(a => a.effect.getComputedTiming().duration === 1100)) {
+        animation.pause(); animation.currentTime = 600
+      }
+      await new Promise(requestAnimationFrame)
+      return
+    }
     const animations = root.getAnimations({ subtree: true })
     for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) animations.push(...ancestor.getAnimations())
     await Promise.all(animations.map(animation => animation.finished.catch(() => {})))
   }, hint)
-  const clip = await page.evaluate(showHint => {
-    const rects = [document.querySelector('[data-handover-control]').getBoundingClientRect()]
-    if (showHint) rects.push(document.querySelector('[data-slot=tooltip-content]').getBoundingClientRect())
-    const x = Math.min(...rects.map(r => r.x)) - 12, y = Math.min(...rects.map(r => r.y)) - 12
-    return { x, y, width: Math.max(...rects.map(r => r.right)) + 12 - x, height: Math.max(...rects.map(r => r.bottom)) + 12 - y }
-  }, hint)
-  return page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-slider'}/${name}.png`, clip })
+  const clip = await page.evaluate(() => {
+    const r = document.querySelector('[data-handover-control]').getBoundingClientRect()
+    return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 }
+  })
+  const screenshot = await page.screenshot({ path: `${config.outputDir ?? '/tmp/selection-handover-slider'}/${name}.png`, clip })
+  if (hint) await page.evaluate(() => document.querySelector('[data-handover-control]').getAnimations({ subtree: true }).filter(a => a.playState === 'paused').forEach(a => a.play()))
+  return screenshot
 }
 assert.equal((await state()).records, '交接记录：0')
 await page.click('loc=role:button[name="Light"]')
@@ -85,12 +91,15 @@ const points = () => page.evaluate(() => {
 })
 const clickPoint = await points()
 await page.mouse.click(clickPoint.target, clickPoint.y)
-await page.waitForSelector('[data-slot=tooltip-content]')
+await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' })
-assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').textContent.includes('滑动交接至 PRO')))
-await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x > restX + 4, clickPoint.restX)
+assert.equal(await page.evaluate(() => !!document.querySelector('[data-slot=tooltip-content]')), false, 'the hint must stay inside the capsule')
+assert.ok(await page.evaluate(() => document.querySelector('[data-handover-control] [role=status]').textContent.includes('滑动交接至 PRO')))
+await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x > restX + 30, clickPoint.restX)
+assert.ok(await page.evaluate(() => document.querySelector('[data-handover-trail]').getBoundingClientRect().width > 50), 'the trail must demonstrate the direction with the thumb')
 const hint = await capture('handover-slider-click-hint', true)
-await page.waitForSelector('[data-slot=tooltip-content]', { state: 'hidden' })
+await page.waitForFunction(() => !document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
+assert.ok(await page.evaluate(restX => Math.abs(document.querySelector('[data-handover-thumb]').getBoundingClientRect().x - restX) < 1, clickPoint.restX), 'the demonstration must return to the source')
 await page.mouse.move(clickPoint.source, clickPoint.y)
 await page.mouse.down()
 await page.mouse.move(clickPoint.source + 2, clickPoint.y)
@@ -98,9 +107,9 @@ await page.mouse.up()
 assert.deepEqual(await state(), { value: 0, disabled: false, dialog: false, records: '交接记录：0' }, 'tap jitter must not count as a drag')
 for (let i = 0; i < 3; i++) await page.mouse.click(clickPoint.source, clickPoint.y)
 assert.equal((await state()).dialog, false)
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().iterations === 2).length), 1, 'repeated taps must replace the hint animation')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().duration === 1100).length), 1, 'repeated taps must replace the hint animation')
 await drag('NORM', 0.5, false)
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().iterations === 2).length), 0, 'grabbing must interrupt the hint immediately')
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().filter(a => a.effect.getComputedTiming().duration === 1100).length), 0, 'grabbing must interrupt the hint immediately')
 assert.ok((await state()).value > 0 && (await state()).value < 100, 'native drag must move the thumb')
 assert.equal(await page.evaluate(() => document.querySelector('[data-handover-control]').dataset.mode), 'NORM')
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-thumb]')).transitionProperty), 'none', 'dragging must follow the pointer without animation lag')
@@ -142,10 +151,11 @@ await page.click('loc=role:button[name="Dark"]')
 const dark = await capture('handover-slider-pro-dark')
 const reversePoint = await points()
 await page.mouse.click(reversePoint.target, reversePoint.y)
-await page.waitForSelector('[data-slot=tooltip-content]')
+await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
 assert.equal((await state()).value, 100)
 assert.equal((await state()).dialog, false)
-assert.ok(await page.evaluate(() => document.querySelector('[data-slot=tooltip-content]').textContent.includes('NORM')))
+await page.waitForFunction(restX => document.querySelector('[data-handover-thumb]').getBoundingClientRect().x < restX - 30, reversePoint.restX)
+assert.ok(await page.evaluate(() => document.querySelector('[data-handover-control] [role=status]').textContent.includes('NORM')))
 await drag('PRO', 0.5)
 await page.mouse.up()
 assert.equal((await state()).value, 100)
@@ -182,7 +192,7 @@ const point = await touchPoint()
 const tapTarget = await points()
 await touch('touchStart', { x: tapTarget.target, y: tapTarget.y })
 await touch('touchEnd')
-await page.waitForSelector('[data-slot=tooltip-content]')
+await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
 assert.equal((await state()).value, 100)
 assert.equal((await state()).dialog, false)
 await touch('touchStart', point)
@@ -206,10 +216,11 @@ await page.mouse.down()
 assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('[data-handover-grip]')).scale)), 1)
 await page.mouse.up()
 await page.mouse.click(tapTarget.target, tapTarget.y)
-await page.waitForSelector('[data-slot=tooltip-content]')
-assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().length), 0, 'reduced motion should keep the message without directional animation')
+await page.waitForFunction(() => document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
+assert.equal(await page.evaluate(() => document.querySelector('[data-handover-thumb]').getAnimations().length), 0, 'reduced motion should keep the color feedback without directional animation')
+assert.ok(await page.evaluate(() => document.querySelector('[data-handover-grip]').classList.contains('ring-1')), 'reduced motion must retain visible feedback')
 assert.equal((await state()).dialog, false)
-await page.waitForSelector('[data-slot=tooltip-content]', { state: 'hidden' })
+await page.waitForFunction(() => !document.querySelector('[data-handover-control]').hasAttribute('data-hint'))
 await page.cdp('Emulation.setEmulatedMedia', { features: [] })
 await page.evaluate(async () => {
   const entry = await (await fetch('/playground.tsx')).text()
