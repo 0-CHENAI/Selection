@@ -92,6 +92,8 @@ F1 使用 `bun scripts/selection-3.0-f1.ts`，真实单 agent 读取固定资料
 
 执行前拒绝及原生文件操作写入前的确定失败由运行时记录 `not-performed`，不再统一误判为未知；SDK 原始回执优先于 UI 显示字段。交接包提供可被原生 Read 分页读取的独立 `operations.json`，旧目标在完整性校验后补齐索引。真正未知的调用仍要求保存复核结果，聊天确认和“完全接管”不会代替复核。实际故障、当前会话恢复和真实模型写入验证见 `docs/qa/pro-handover-unknown-outcomes.md`。
 
+修复后的复审进一步保留每次 SDK 调用发生的独立身份及缺失 UI 展示的执行结果，防止复用 ID 丢失完成操作；网页来源按同次调用配对。SDK 准备拒绝与已执行异常分别记录，模型背景使用已保存的生效复核结果。长操作证据使用可无损拼接的分块索引，旧索引校验后原子升级，不改冻结快照。缺陷、兼容边界与 474 项相关验证见 `docs/qa/pro-handover-review.md`。
+
 宿主入口：`SessionManager.handoverSession`、`handover-snapshot.ts`、`reliability/handover-store.ts`；UI 为实际 ChatPage 中的 `HandoverPanel`。F2 命令 `bun scripts/selection-3.0-f2.ts`，阶段记录见 `docs/qa/selection-3.0-handover.md`。交给 #453 的是新 PRO 根与可追溯背景，任务编辑与执行继续复用当前 TaskEditor/TaskRunner。
 
 ## #320：多轮编排编辑

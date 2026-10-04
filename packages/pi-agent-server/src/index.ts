@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
-import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome } from './tool-recovery';
+import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
 import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
@@ -855,6 +855,7 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
+  installToolExecutionOutcomeTracking(session.agent);
   installUnknownToolGuard(session);
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
   applyCompactionPolicy(session.model, true);

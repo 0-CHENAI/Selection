@@ -1,7 +1,7 @@
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveSessionName } from '@craft-agent/shared/display-titles'
 import { HandoverStore, handoverHash } from '../reliability/handover-store'
-import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverWebHash, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
+import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverToolExecutions, handoverOperationEvidence, handoverWebHash, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
 import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
@@ -10822,16 +10822,23 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!record?.snapshot || record.targetSessionId !== managed.id || record.status !== 'applied') throw new Error('Handover input is not ready')
     const directory = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'handover', record.handoverId)
     const copied = loadIsolationFile(join(directory, 'snapshot.json'), 'utf8')
-    if (![JSON.stringify(record.snapshot), JSON.stringify(record.snapshot, null, 2)].some(expected => handoverHash(copied) === handoverHash(expected))) throw new Error('Handover background integrity check failed')
+    const copiedHash = handoverHash(copied)
+    if (copiedHash !== handoverHash(JSON.stringify(record.snapshot, null, 2)) && copiedHash !== handoverHash(JSON.stringify(record.snapshot))) throw new Error('Handover background integrity check failed')
     // Small, readable evidence index also repairs older one-line packages. The
     // committed snapshot is unchanged; a modified index is rejected, not trusted.
-    const operationPath = join(directory, 'operations.json'), operationBytes = JSON.stringify(record.snapshot.actions, null, 2)
+    const operationPath = join(directory, 'operations.json'), operationBytes = handoverOperationEvidence(record.snapshot)
     if (!existsSync(operationPath)) atomicWrite(operationPath, operationBytes)
-    else if (handoverHash(loadIsolationFile(operationPath, 'utf8')) !== handoverHash(operationBytes)) throw new Error('Handover operation evidence integrity check failed')
+    else {
+      const evidenceHash = handoverHash(loadIsolationFile(operationPath, 'utf8'))
+      if (evidenceHash !== handoverHash(operationBytes)) {
+        if (evidenceHash !== handoverHash(JSON.stringify(record.snapshot.actions, null, 2))) throw new Error('Handover operation evidence integrity check failed')
+        atomicWrite(operationPath, operationBytes)
+      }
+    }
     for (const file of record.snapshot.files) {
       if (handoverHash(loadIsolationFile(join(directory, file.snapshotPath))) !== file.hash) throw new Error('Handover input file integrity check failed')
     }
-    return `${handoverBackground(record.snapshot, directory)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.`
+    return `${handoverBackground(record.snapshot, directory, record.reviews)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.`
   }
 
   async handoverSession(sessionId: string, operation: HandoverOperation): Promise<HandoverResult> {
@@ -10966,24 +10973,22 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const candidates: Array<{ path: string; expectedHash?: string; versionId?: string; artifactId?: string }> = members.flatMap(member => {
       const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
       const toolInputs = handoverToolInputs(branch)
-      return member.messages.flatMap(message => {
+      const executions = handoverToolExecutions(branch)
+      const downloads = executions.filter(call => call.tool === 'WebFetch' && call.outcome === 'completed').flatMap(call =>
+        [...call.evidence.matchAll(/\(saved to ([^)]+)\)|Saved to: ([^\n]+)/g)].map(match => match[1] ?? match[2]!).filter(path => isAbsolute(path)).map(path => ({ path })))
+      return [...downloads, ...member.messages.flatMap(message => {
         const originalInput = message.toolUseId ? toolInputs.get(message.toolUseId) : undefined
         const inputPath = originalInput?.file_path ?? originalInput?.path ?? message.toolInput?.file_path ?? message.toolInput?.path
-        const webResult = ['WebFetch','web_fetch'].includes(message.toolName ?? '') && !message.isError
-          ? branch.find(entry => entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === message.toolUseId) : undefined
-        const webText = webResult?.type === 'message' && webResult.message.role === 'toolResult' ? webResult.message.content.filter(part => part.type === 'text').map(part => part.text).join('') : ''
-        const downloads = [...webText.matchAll(/\(saved to ([^)]+)\)|Saved to: ([^\n]+)/g)].map(match => match[1] ?? match[2]!).filter(path => isAbsolute(path))
         const isRead = ['Read','read','read_file'].includes(message.toolName ?? '')
         const canResolveRead = typeof inputPath === 'string' && (originalInput !== undefined || isAbsolute(inputPath))
         if (isRead && typeof inputPath === 'string' && !canResolveRead) snapshot.warnings.push(`Input snapshot unavailable: ${inputPath} (original tool arguments unavailable; display-relative paths cannot identify file bytes)`)
         return [
-          ...downloads.map(path => ({ path, versionId: undefined, artifactId: undefined })),
           ...(message.attachments ?? []).map(attachment => ({ path: attachment.storedPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined })),
           ...(message.artifactVersions ?? []).map(ref => ({ path: ref.path, versionId: ref.versionId, artifactId: ref.artifactId })),
           ...(isRead && canResolveRead && typeof inputPath === 'string'
             ? [{ path: expandPath(inputPath, expandPath(member.sdkCwd ?? member.workingDirectory ?? member.workspace.rootPath)), versionId: undefined, artifactId: undefined }] : []),
         ]
-      })
+      })]
     })
     candidates.push(...runFiles)
     const seen = new Set<string>()
@@ -11018,18 +11023,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     // Preserve the fetched response, never refresh a URL while committing the source snapshot.
     for (const member of members) {
       const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
-      const calls = handoverToolInputs(branch)
-      for (const message of member.messages) {
-        if (!['WebFetch','web_fetch'].includes(message.toolName ?? '') || message.toolStatus !== 'completed' || message.isError) continue
-        const input = message.toolUseId && calls.get(message.toolUseId) || message.toolInput
+      const calls = handoverToolExecutions(branch).filter(call => call.tool === 'WebFetch')
+      const capturedIds = new Set(calls.map(call => call.callId))
+      const displayInputs = new Map(member.messages.filter(message => ['WebFetch','web_fetch'].includes(message.toolName ?? ''))
+        .map(message => [message.toolUseId, message.toolInput]))
+      const evidence = [...calls.filter(call => call.outcome === 'completed').map(call => ({ ref: `${member.id}:${call.ref}`, input: call.input ?? displayInputs.get(call.callId), text: call.evidence })),
+        ...member.messages.filter(message => ['WebFetch','web_fetch'].includes(message.toolName ?? '') && message.toolStatus === 'completed' && !message.isError
+          && !capturedIds.has(message.toolUseId ?? '')).map(message => ({ ref: `${member.id}:${message.toolUseId ?? message.id}`, input: message.toolInput, text: message.toolResult ?? message.content }))]
+      for (const { ref, input, text } of evidence) {
         if (typeof input?.url !== 'string') continue
         const url = new URL(input.url)
         if (url.username || url.password || [...url.searchParams.keys()].some(key => /token|key|secret|password|auth/i.test(key))) { snapshot.warnings.push('Credential-bearing URL omitted'); continue }
-        const sdkResult = branch.find(entry => entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === message.toolUseId)
-        const text = sdkResult?.type === 'message' && sdkResult.message.role === 'toolResult' ? sdkResult.message.content.filter(part => part.type === 'text').map(part => part.text).join('') : message.toolResult ?? message.content
         const safeBytes = Buffer.from(redactHandoverText(text)), hash = handoverHash(safeBytes), path = `files/${hash}.txt`
         atomicWrite(join(store.directory(record.handoverId), path), safeBytes)
-        snapshot.files.push({ ref: `${member.id}:${message.toolUseId ?? message.id}`, originalPath: input.url, sourceUrl: input.url, urlPrompt: typeof input.prompt === 'string' ? redactHandoverText(input.prompt) : undefined, snapshotPath: path, hash, originalHash: handoverWebHash(text) })
+        snapshot.files.push({ ref, originalPath: input.url, sourceUrl: input.url, urlPrompt: typeof input.prompt === 'string' ? redactHandoverText(input.prompt) : undefined, snapshotPath: path, hash, originalHash: handoverWebHash(text) })
       }
     }
     if (source.handover) {
@@ -11047,7 +11054,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     await this.ensureMessagesLoaded(managed)
     const directory = join(getSessionStoragePath(managed.workspace.rootPath, targetId), 'data', 'handover', record.handoverId)
     atomicWrite(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot, null, 2))
-    atomicWrite(join(directory, 'operations.json'), JSON.stringify(record.snapshot!.actions, null, 2))
+    atomicWrite(join(directory, 'operations.json'), handoverOperationEvidence(record.snapshot!))
     for (const file of record.snapshot!.files) atomicWrite(join(directory, file.snapshotPath), store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash))
     const messageId = `handover-${record.handoverId}`
     if (!managed.messages.some(message => message.id === messageId)) {

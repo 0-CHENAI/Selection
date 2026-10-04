@@ -1,5 +1,5 @@
 import type { Message } from '@craft-agent/core/types'
-import type { HandoverSnapshot } from '@craft-agent/shared/protocol'
+import type { HandoverRecord, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import { historyRecords } from '../../../pi-agent-server/src/history-records'
 import { taskContextItems } from '../../../pi-agent-server/src/task-context'
@@ -49,21 +49,32 @@ export function handoverWebHash(text: string): string {
   return handoverHash(text.replace(/\(saved to [^)]+\)/g, '(saved to [snapshot])').replace(/Saved to: [^\n]+/g, 'Saved to: [snapshot]'))
 }
 
-/** Tool UI fields have display-relative paths; use original SDK calls for execution identity. */
+/** Tool UI fields have display-relative paths; only unambiguous SDK calls can identify their input. */
 export function handoverToolInputs(branch: SessionEntry[]): Map<string, Record<string, unknown>> {
-  const calls = new Map<string, Record<string, unknown>>()
+  const calls = new Map<string, Record<string, unknown>>(), seen = new Set<string>()
   for (const entry of branch) if (entry.type === 'message' && entry.message.role === 'assistant') {
-    for (const part of entry.message.content) if (part.type === 'toolCall') calls.set(part.id, part.arguments)
+    for (const part of entry.message.content) if (part.type === 'toolCall') {
+      if (seen.has(part.id)) calls.delete(part.id)
+      else { calls.set(part.id, part.arguments); seen.add(part.id) }
+    }
   }
   return calls
 }
 
 /** Use execution receipts, not display status or arbitrary words in tool output. */
-function handoverToolOutcomes(branch: SessionEntry[]): Map<string, Pick<HandoverSnapshot['actions'][number], 'tool' | 'outcome' | 'evidence'>> {
-  const results = new Map<string, Pick<HandoverSnapshot['actions'][number], 'tool' | 'outcome' | 'evidence'>>()
+export function handoverToolExecutions(branch: SessionEntry[]) {
+  type Execution = { ref: string; callId: string; entryId: string; tool: string; input?: Record<string, unknown>; outcome: HandoverSnapshot['actions'][number]['outcome']; evidence: string; ambiguous?: boolean }
+  const executions: Execution[] = [], latest = new Map<string, Execution>()
   for (const entry of branch) {
     if (entry.type === 'message' && entry.message.role === 'assistant') {
-      for (const part of entry.message.content) if (part.type === 'toolCall') results.delete(part.id)
+      entry.message.content.forEach((part, index) => { if (part.type === 'toolCall') {
+        const previous = latest.get(part.id)
+        const execution: Execution = { ref: previous ? `${part.id}:sdk-${entry.id}-${index}` : part.id, callId: part.id, entryId: entry.id,
+          tool: handoverToolName(part.name), input: part.arguments, outcome: 'unknown', evidence: 'No confirmed completion receipt; review before retrying.' }
+        // Duplicate IDs inside one batch cannot identify which call produced a result.
+        if (previous?.entryId === entry.id) { previous.ambiguous = true; execution.ambiguous = true }
+        executions.push(execution); latest.set(part.id, execution)
+      } })
     }
     if (entry.type !== 'message' || entry.message.role !== 'toolResult') continue
     const result = entry.message
@@ -78,9 +89,28 @@ function handoverToolOutcomes(branch: SessionEntry[]): Map<string, Pick<Handover
       /^Could not find edits\[\d+\] in [\s\S]+\. The oldText must match exactly including all whitespace and newlines\.$/.test(text)
       || /^Could not find the exact text in [\s\S]+\. The old text must match exactly including all whitespace and newlines\.$/.test(text)
     )) outcome = 'not-performed'
-    results.set(result.toolCallId, { tool: handoverToolName(result.toolName), outcome, evidence: text })
+    const execution = latest.get(result.toolCallId)
+    if (execution) {
+      if (execution.ambiguous) {
+        for (const call of executions.filter(call => call.callId === result.toolCallId && call.entryId === execution.entryId)) {
+          call.evidence += `\nUnattributed ${result.toolName} receipt for a duplicate SDK call ID:\n${text}`
+        }
+      } else if (execution.tool === handoverToolName(result.toolName)) {
+        execution.outcome = outcome; execution.evidence = text
+      }
+    } else {
+      const orphan: Execution = { ref: result.toolCallId, callId: result.toolCallId, entryId: entry.id, tool: handoverToolName(result.toolName), outcome, evidence: text }
+      executions.push(orphan); latest.set(result.toolCallId, orphan)
+    }
   }
-  return results
+  return executions
+}
+
+/** Keep each JSON line below Read's 50KB limit, including escaped Unicode/control characters. */
+export function handoverOperationEvidence(snapshot: HandoverSnapshot): string {
+  return JSON.stringify(snapshot.actions.map(({ evidence, ...action }) => ({ ...action,
+    evidenceChunks: evidence.match(/[\s\S]{1,4096}/gu) ?? [''],
+  })), null, 2)
 }
 
 /** Auth requests, tool arguments and credentials are not transferable authority. */
@@ -120,8 +150,7 @@ export function buildHandoverSnapshot(input: {
         message.role === 'user' && !message.hidden && !message.isQueued && message.content.includes(note.quote)))
   })
   const sourceMessages = [{ id: input.sessionId, messages: input.messages, branch: input.branch }, ...input.children]
-  const toolInputs = new Map(sourceMessages.map(source => [source.id, handoverToolInputs(source.branch ?? [])]))
-  const toolOutcomes = new Map(sourceMessages.map(source => [source.id, handoverToolOutcomes(source.branch ?? [])]))
+  const toolExecutions = new Map(sourceMessages.map(source => [source.id, handoverToolExecutions(source.branch ?? [])]))
   const originals: HandoverSnapshot['originals'] = sourceMessages.flatMap(source => source.messages.filter(message => !message.hidden && !message.isQueued
     && ['user','assistant','tool','info'].includes(message.role)).map(message => ({ id: message.id, sessionId: source.id, role: message.role,
       text: redactHandoverText(message.toolResult ?? message.content) })))
@@ -131,31 +160,34 @@ export function buildHandoverSnapshot(input: {
   const userText = input.messages.filter(message => message.role === 'user' && !message.hidden && !message.isQueued)
     .map(message => redactHandoverText(message.content))
   const list = latestTaskList(input.messages) ?? []
-  const actions: HandoverSnapshot['actions'] = sourceMessages.flatMap(source => source.messages.filter(message => message.role === 'tool'
-    && message.toolName && !isHandoverReadOrLocalTool(message.toolName)
-    && !isRunRecordTool(message.toolName)).map(message => {
-      const args = message.toolUseId && toolInputs.get(source.id)?.get(message.toolUseId) || message.toolInput
-      const receipt = message.toolUseId ? toolOutcomes.get(source.id)?.get(message.toolUseId) : undefined
-      return {
+  const transferable = (tool: string) => !isHandoverReadOrLocalTool(tool) && !isRunRecordTool(tool)
+  const actions: HandoverSnapshot['actions'] = sourceMessages.flatMap(source => {
+    const executions = toolExecutions.get(source.id)!
+    const identified = new Set(executions.map(call => JSON.stringify([call.callId, call.tool])))
+    const displayInputs = new Map(source.messages.filter(message => message.role === 'tool' && message.toolName)
+      .map(message => [JSON.stringify([message.toolUseId, handoverToolName(message.toolName!)]), message.toolInput]))
+    return [...source.messages.filter(message => message.role === 'tool' && message.toolName && transferable(message.toolName)
+      && !identified.has(JSON.stringify([message.toolUseId, handoverToolName(message.toolName)]))).map(message => ({
         ref: `${source.id}:${message.toolUseId ?? message.id}`, tool: message.toolName!, sourceSessionId: source.id,
-        outcome: receipt?.tool === handoverToolName(message.toolName!) ? receipt.outcome
-          : message.toolStatus === 'completed' && args !== undefined && !message.isError ? 'completed' as const : 'unknown' as const,
-        requestHash: args === undefined ? undefined : handoverOperationHash(message.toolName!, args),
+        outcome: message.toolStatus === 'completed' && message.toolInput !== undefined && !message.isError ? 'completed' as const : 'unknown' as const,
+        requestHash: message.toolInput === undefined ? undefined : handoverOperationHash(message.toolName!, message.toolInput),
         evidence: redactHandoverText(message.toolResult ?? message.content),
-      }
-    }))
+      })), ...executions.filter(call => transferable(call.tool)).map(call => {
+        const args = call.input ?? displayInputs.get(JSON.stringify([call.callId, call.tool]))
+        return { ref: `${source.id}:${call.ref}`, tool: call.tool, sourceSessionId: source.id, outcome: call.outcome,
+          requestHash: args === undefined ? undefined : handoverOperationHash(call.tool, args), evidence: redactHandoverText(call.evidence) }
+      })]
+  })
   for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !isHandoverReadOrLocalTool(operation.tool)) {
     const callId = operation.ref.slice(operation.sessionId.length + 1)
-    const receipt = toolOutcomes.get(operation.sessionId)?.get(callId)
-    const matched = receipt?.tool === handoverToolName(operation.tool)
-    const action = actions.find(action => action.ref === operation.ref)
+    const call = toolExecutions.get(operation.sessionId)?.findLast(call => call.callId === callId && call.tool === handoverToolName(operation.tool))
+    const action = actions.find(action => action.ref === (call ? `${operation.sessionId}:${call.ref}` : operation.ref))
     if (action) {
-      action.outcome = matched ? receipt.outcome : 'unknown'
+      if (!call) action.outcome = 'unknown'
       continue
     }
-    const args = toolInputs.get(operation.sessionId)?.get(callId)
-    actions.push({ ref: operation.ref, tool: operation.tool, outcome: matched ? receipt.outcome : 'unknown', requestHash: args ? handoverOperationHash(operation.tool, args) : undefined,
-      evidence: matched ? redactHandoverText(receipt.evidence) : 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
+    actions.push({ ref: operation.ref, tool: operation.tool, outcome: 'unknown',
+      evidence: 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
   }
   const inherited = input.inherited
   const pending = [...noteTexts('pending'), ...list.filter(item => item.status !== 'completed').map(item => item.content)]
@@ -179,7 +211,7 @@ export function buildHandoverSnapshot(input: {
     ],
   }
 }
-export function handoverBackground(snapshot: HandoverSnapshot, directory: string): string {
+export function handoverBackground(snapshot: HandoverSnapshot, directory: string, reviews: HandoverRecord['reviews'] = {}): string {
   // Share verbatim excerpts across fields without summarizing or truncating any
   // user constraint. Full operation evidence stays in the immutable package.
   const verbatimTexts: string[] = [], indices = new Map<string, number>()
@@ -190,6 +222,7 @@ export function handoverBackground(snapshot: HandoverSnapshot, directory: string
       if (index === undefined) { index = verbatimTexts.length; indices.set(text, index); verbatimTexts.push(text) }
       return index
     })]))
-  const actions = snapshot.actions.map(({ evidence: _evidence, ...action }) => ({ ...action, evidenceRef: action.ref }))
-  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nReadable operation evidence: ${directory}/operations.json\nContext fields contain indices into verbatimTexts; resolve each index, in field order, to its exact text: ${JSON.stringify({ verbatimTexts, ...fields })}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nOperation outcomes (evidenceRef identifies an action in operations.json): ${JSON.stringify(actions)}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nUse the preserved context above and native Read with offset/limit for relevant operation evidence, original excerpts and frozen files. Do not parse the whole package with Bash, Python, script_sandbox or call_llm while outcomes remain unknown; these tools are also blocked. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Unreviewed unknown operations block writes, delegation and workflows even in Allow All. Ask the user to open View handover from the conversation title menu, verify each unknown operation and save its outcome with evidence; a chat acknowledgement alone does not record a review. New target permissions are checked independently.`
+  const actions = snapshot.actions.map(({ evidence: _evidence, ...action }) => ({ ...action,
+    ...(reviews[action.ref] ? { outcome: reviews[action.ref]!.outcome } : {}), evidenceRef: action.ref }))
+  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nReadable operation evidence: ${directory}/operations.json. Concatenate each evidenceChunks array without separators to recover the exact evidence.\nContext fields contain indices into verbatimTexts; resolve each index, in field order, to its exact text: ${JSON.stringify({ verbatimTexts, ...fields })}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nOperation outcomes (evidenceRef identifies an action in operations.json): ${JSON.stringify(actions)}\nUnreviewed unknown operations: ${actions.filter(action => action.outcome === 'unknown').length}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nUse the preserved context above and native Read with offset/limit for relevant operation evidence, original excerpts and frozen files. Do not parse the whole package with Bash, Python, script_sandbox or call_llm while outcomes remain unknown; these tools are also blocked. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Unreviewed unknown operations block writes, delegation and workflows even in Allow All. Only if unreviewed unknown operations remain, ask the user to open View handover from the conversation title menu, verify each unknown operation and save its outcome with evidence; a chat acknowledgement alone does not record a review. New target permissions are checked independently.`
 }

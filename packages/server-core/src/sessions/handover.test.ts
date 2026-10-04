@@ -108,13 +108,18 @@ test('handover distinguishes pre-execution rejection and atomic Edit validation 
     ] } }] as Parameters<typeof buildHandoverSnapshot>[0]['branch'], children: [],
     pendingOperations: [{ ref: 's:5', tool: 'Write', sessionId: 's' }], runs: [],
     messages: [{ id: 'reused', role: 'tool', toolUseId: '5', toolName: 'Write', toolStatus: 'completed', content: 'Earlier result still displayed', timestamp: 1 }] })
-  expect(interrupted.actions[0]!.outcome).toBe('unknown')
+  expect(interrupted.actions.find(action => action.ref.startsWith('s:5:sdk-'))!.outcome).toBe('unknown')
+  expect(interrupted.actions.find(action => action.ref === 's:5')!.outcome).toBe('completed')
   const prepared = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp',
     branch: [{ type: 'message', id: 'prep', parentId: null, timestamp: '1970-01-01T00:00:00.001Z', message: { role: 'toolResult', timestamp: 1, toolCallId: 'guide', toolName: 'mcp__external__publish',
       isError: false, details: { isError: false, selectionExecutionOutcome: 'not-performed' }, content: [{ type: 'text', text: 'Guide prepared; tool not executed' }] } }] as Parameters<typeof buildHandoverSnapshot>[0]['branch'],
     children: [], messages: [], pendingOperations: [{ ref: 's:guide', tool: 'mcp__external__publish', sessionId: 's' }], runs: [] })
   expect(prepared.actions[0]!.outcome).toBe('not-performed')
   expect(prepared.actions[0]!.evidence).toContain('tool not executed')
+  const legacy = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp',
+    branch: [{ type: 'message', id: 'old-result', message: { role: 'toolResult', toolCallId: 'old', toolName: 'write', isError: false, content: [{ type: 'text', text: 'Written' }] } }] as Parameters<typeof buildHandoverSnapshot>[0]['branch'],
+    messages: [{ id: 'old-ui', role: 'tool', toolName: 'Write', toolUseId: 'old', toolStatus: 'completed', content: 'Written', timestamp: 1, toolInput: { path: '/old', content: 'saved' } }], children: [], pendingOperations: [], runs: [] })
+  expect(legacy.actions[0]!.requestHash).toBeDefined()
 })
 
 test('large and legacy handovers expose readable operation evidence without changing their immutable receipt', async () => {
@@ -122,7 +127,7 @@ test('large and legacy handovers expose readable operation evidence without chan
   try {
     f.source.messages.push({ id: 'large', role: 'assistant', content: 'x'.repeat(260_000), timestamp: 4 },
       { id: 'uncertain', role: 'tool', toolName: 'Bash', toolUseId: 'uncertain', toolInput: { command: 'publish' },
-        toolStatus: 'error', content: 'Outcome unknown; check publication receipt', timestamp: 5 })
+        toolStatus: 'error', content: `Outcome unknown; check publication receipt\n${'中文证据😀\\"\n'.repeat(10_000)}`, timestamp: 5 })
     const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'large-input', targetMode: 'PRO' })).records[0]!
     const target = f.internal.sessions.get(record.targetSessionId!)
     const directory = join(getSessionPath(f.root, target.id), 'data', 'handover', record.handoverId)
@@ -137,13 +142,78 @@ test('large and legacy handovers expose readable operation evidence without chan
     writeFileSync(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot))
     rmSync(operationPath)
     expect(f.internal.handoverInput(target)).toContain('operations.json')
-    expect(JSON.parse(readFileSync(operationPath, 'utf8'))).toEqual(record.snapshot!.actions)
+    const evidence = JSON.parse(readFileSync(operationPath, 'utf8'))
+    expect(evidence.map((action: { evidenceChunks: string[] }) => action.evidenceChunks.join(''))).toEqual(record.snapshot!.actions.map(action => action.evidence))
+    expect(readFileSync(operationPath, 'utf8').split('\n').every(line => Buffer.byteLength(line) < 50 * 1024)).toBe(true)
     expect(readFileSync(join(f.store.directory(record.handoverId), 'record.json'), 'utf8')).toBe(immutable)
+    const indexed = readFileSync(operationPath, 'utf8')
+    writeFileSync(operationPath, JSON.stringify(record.snapshot!.actions, null, 2))
+    expect(f.internal.handoverInput(target)).toContain('evidenceChunks')
+    expect(readFileSync(operationPath, 'utf8')).toBe(indexed)
     writeFileSync(operationPath, '[]')
     expect(() => f.internal.handoverInput(target)).toThrow('operation evidence integrity')
     writeFileSync(join(directory, 'snapshot.json'), '{}')
     expect(() => f.internal.handoverInput(target)).toThrow('background integrity')
   } finally { await f.cleanup() }
+})
+
+test('SDK call occurrences retain separate identities and completed operations without UI messages', async () => {
+  const f = await fixture()
+  try {
+    const { SessionManager: PiSessionManager } = await import('@earendil-works/pi-coding-agent')
+    const sdk = PiSessionManager.create(f.root, join(getSessionPath(f.root, f.source.id), '.pi-sessions'))
+    f.source.sdkSessionId = sdk.getSessionId()
+    const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+    const calls = [
+      { id: 'reused', tool: 'write', args: { path: '/first.txt', content: 'first' }, outcome: 'completed', text: 'First write completed' },
+      { id: 'reused', tool: 'write', args: { path: '/second.txt', content: 'second' }, outcome: 'not-performed', text: 'Second write rejected before execution' },
+      { id: 'hidden', tool: 'external_publish', args: { target: 'original' }, outcome: 'completed', text: 'Publication confirmed' },
+      { id: 'fetch', tool: 'web_fetch', args: { url: 'https://example.com/first' }, outcome: 'completed', text: 'First original page' },
+      { id: 'fetch', tool: 'web_fetch', args: { url: 'https://example.com/second' }, outcome: 'completed', text: 'Second original page' },
+    ] as const
+    for (const call of calls) {
+      sdk.appendMessage({ role: 'assistant', api: 'openai-responses', provider: 'openai', model: 'fixture', usage, stopReason: 'toolUse', timestamp: 1,
+        content: [{ type: 'toolCall', id: call.id, name: call.tool, arguments: call.args }] })
+      sdk.appendMessage({ role: 'toolResult', toolCallId: call.id, toolName: call.tool, timestamp: 2, isError: call.outcome === 'not-performed',
+        details: { selectionExecutionOutcome: call.outcome }, content: [{ type: 'text', text: call.text }] })
+    }
+    sdk.appendMessage({ role: 'toolResult', toolCallId: 'legacy-fetch', toolName: 'web_fetch', timestamp: 3, isError: false,
+      content: [{ type: 'text', text: 'Legacy original page' }] })
+    // The UI merges repeated IDs and has no entry for the hidden publication.
+    f.source.messages.push({ id: 'last-write', role: 'tool', toolName: 'Write', toolUseId: 'reused', toolStatus: 'error', content: calls[1].text, timestamp: 4 })
+    f.source.messages.push({ id: 'last-fetch', role: 'tool', toolName: 'WebFetch', toolUseId: 'fetch', toolStatus: 'completed', content: 'Last displayed page', timestamp: 5 })
+    f.source.messages.push({ id: 'legacy-fetch-ui', role: 'tool', toolName: 'WebFetch', toolUseId: 'legacy-fetch', toolInput: { url: 'https://example.com/legacy' }, toolStatus: 'completed', content: 'Legacy displayed page', timestamp: 6 })
+    const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'call-occurrences', targetMode: 'PRO' })).records[0]!
+    const actions = record.snapshot!.actions
+    expect(actions).toHaveLength(3)
+    expect(new Set(actions.map(action => action.ref)).size).toBe(3)
+    expect(actions.map(action => action.outcome)).toEqual(['completed', 'not-performed', 'completed'])
+    const target = f.internal.sessions.get(record.targetSessionId!)
+    expect(() => f.internal.assertHandoverOperationAllowed(target, 'Write', { file_path: '/first.txt', content: 'first' })).toThrow('already completed')
+    expect(() => f.internal.assertHandoverOperationAllowed(target, 'Write', { file_path: '/second.txt', content: 'second' })).not.toThrow()
+    expect(() => f.internal.assertHandoverOperationAllowed(target, 'external_publish', { target: 'original' })).toThrow('already completed')
+    const pages = record.snapshot!.files.filter(file => file.sourceUrl)
+    expect(pages).toHaveLength(3)
+    expect(pages.map(page => page.sourceUrl)).toEqual(['https://example.com/first', 'https://example.com/second', 'https://example.com/legacy'])
+    expect(pages.map(page => f.store.snapshotBytes(record.handoverId, page.snapshotPath, page.hash).toString('utf8'))).toEqual(['First original page', 'Second original page', 'Legacy original page'])
+  } finally { await f.cleanup() }
+})
+
+test('duplicate SDK IDs in one batch keep separate unresolved operations and cannot reuse a receipt', async () => {
+  const { buildHandoverSnapshot, handoverToolInputs } = await import('./handover-snapshot')
+  const branch = [
+    { type: 'message', id: 'batch', message: { role: 'assistant', content: [
+      { type: 'toolCall', id: 'same', name: 'write', arguments: { path: '/a', content: 'a' } },
+      { type: 'toolCall', id: 'same', name: 'write', arguments: { path: '/b', content: 'b' } },
+    ] } },
+    { type: 'message', id: 'result', message: { role: 'toolResult', toolCallId: 'same', toolName: 'write', isError: false, content: [{ type: 'text', text: 'Written' }] } },
+  ] as Parameters<typeof buildHandoverSnapshot>[0]['branch']
+  const snapshot = buildHandoverSnapshot({ workspaceId: 'w', sessionId: 's', targetMode: 'PRO', checkpoint: 'cp', branch, messages: [], children: [], pendingOperations: [], runs: [] })
+  expect(snapshot.actions.map(action => action.outcome)).toEqual(['unknown', 'unknown'])
+  expect(snapshot.actions.every(action => action.evidence.includes('Unattributed write receipt') && action.evidence.includes('Written'))).toBe(true)
+  expect(new Set(snapshot.actions.map(action => action.ref)).size).toBe(2)
+  expect(new Set(snapshot.actions.map(action => action.requestHash)).size).toBe(2)
+  expect(handoverToolInputs(branch).has('same')).toBe(false)
 })
 
 test('coordinator checkpoints are hidden system input, never user handover constraints', async () => {
@@ -446,11 +516,20 @@ test('unknown external operations block side effects until explicit review; comp
     expect(() => f.internal.assertHandoverOperationAllowed(target, 'Write', { file_path: f.file })).toThrow('unknown outcomes')
     expect(() => f.manager.assertTaskRunAllowed(f.workspace.id, target.id)).toThrow('unknown outcomes')
     await f.manager.handoverSession(target.id, { type: 'review', handoverId: 'effects', actionRef: `${f.source.id}:publish`, outcome: 'not-performed', note: 'Verified the remote system: no publication occurred.' })
+    const background = f.internal.handoverInput(target)
+    const outcomes = JSON.parse(background.split('\n').find((line: string) => line.startsWith('Operation outcomes'))!.split('): ')[1]!)
+    expect(outcomes.find((action: { ref: string }) => action.ref === `${f.source.id}:publish`).outcome).toBe('not-performed')
+    expect(background).toContain('Unreviewed unknown operations: 0')
     expect(() => f.internal.assertHandoverOperationAllowed(target, 'Write', { file_path: f.file })).not.toThrow()
     expect(target.permissionMode).toBe('allow-all')
     expect(() => f.internal.assertHandoverOperationAllowed(target, 'external_send', { target: 'example', value: 'sent' })).toThrow('already completed')
     const worker = createManagedSession({ id: 'handover-worker', workMode: 'PRO', parentSessionId: target.id, executionRootSessionId: target.id }, f.workspace, { messagesLoaded: true })
     expect(() => f.internal.assertHandoverOperationAllowed(worker, 'external_send', { target: 'example', value: 'sent' })).toThrow('already completed')
+    const next = (await f.manager.handoverSession(target.id, { type: 'create', handoverId: 'reviewed-chain', targetMode: 'NORM' })).records[0]!
+    expect(next.snapshot!.actions.find(action => action.ref === `${f.source.id}:publish`)!.outcome).toBe('not-performed')
+    const nextTarget = f.internal.sessions.get(next.targetSessionId!)
+    expect(() => f.internal.assertHandoverOperationAllowed(nextTarget, 'Write', { file_path: '/new.txt', content: 'new' })).not.toThrow()
+    expect(() => f.internal.assertHandoverOperationAllowed(nextTarget, 'external_send', { target: 'example', value: 'sent' })).toThrow('already completed')
   } finally { await f.cleanup() }
 })
 
