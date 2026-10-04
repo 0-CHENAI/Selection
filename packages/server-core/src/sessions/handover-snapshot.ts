@@ -15,13 +15,24 @@ const RUN_RECORD_TOOLS = new Set([
   'submit_orchestration_decision', 'submit_orchestration_patch',
 ])
 function isRunRecordTool(name: string): boolean {
-  return RUN_RECORD_TOOLS.has(name.replace(/^(mcp__session__|session__)/, ''))
+  return RUN_RECORD_TOOLS.has(handoverToolName(name))
+}
+
+export function handoverToolName(name: string): string {
+  return PI_TOOL_NAME_MAP[name] ?? name.replace(/^(mcp__session__|session__)/, '')
+}
+
+/** Exact built-in contracts only: external tools can have arbitrary names. */
+export function isHandoverReadOrLocalTool(name: string): boolean {
+  return isNativeReadOnlyTool(name) || ['WebFetch','WebSearch','web_fetch','web_search'].includes(name)
+    || ['get_task_results','get_session_info','session_history','task_context','update_task_list','submit_answer']
+      .includes(handoverToolName(name))
 }
 
 export function handoverOperationHash(tool: string, input: unknown): string {
   const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value
-  const name = PI_TOOL_NAME_MAP[tool] ?? tool.replace(/^(mcp__session__|session__)/, '')
+  const name = handoverToolName(tool)
   const args = input && typeof input === 'object' ? { ...input as Record<string, unknown> } : input
   if (args && typeof args === 'object' && !Array.isArray(args)) {
     const fields = args as Record<string, unknown>
@@ -80,30 +91,34 @@ export function buildHandoverSnapshot(input: {
   const notes = taskContextItems(input.branch).filter(note => {
     const source = records.find(record => record.id === note.source_id)
     return source && (source.userText ?? source.text).includes(note.quote)
-      && (!['goal','constraint'].includes(note.kind) || source.role === 'user')
+      && (!['goal','constraint'].includes(note.kind) || source.role === 'user' && input.messages.some(message =>
+        message.role === 'user' && !message.hidden && !message.isQueued && message.content.includes(note.quote)))
   })
   const sourceMessages = [{ id: input.sessionId, messages: input.messages, branch: input.branch }, ...input.children]
+  const toolInputs = new Map(sourceMessages.map(source => [source.id, handoverToolInputs(source.branch ?? [])]))
   const originals: HandoverSnapshot['originals'] = sourceMessages.flatMap(source => source.messages.filter(message => !message.hidden && !message.isQueued
     && ['user','assistant','tool','info'].includes(message.role)).map(message => ({ id: message.id, sessionId: source.id, role: message.role,
       text: redactHandoverText(message.toolResult ?? message.content) })))
   // Preserve SDK source IDs and exact excerpts used by the existing task notes.
   for (const record of records) if (notes.some(note => note.source_id === record.id)) originals.push({ id: record.id, sessionId: input.sessionId, role: record.role, text: redactHandoverText(record.userText ?? record.text) })
   const noteTexts = (kind: string, status = 'active') => notes.filter(note => note.kind === kind && note.status === status).map(note => redactHandoverText(note.text))
-  const userText = originals.filter(record => record.role === 'user' && record.sessionId === input.sessionId).map(record => record.text)
+  const userText = input.messages.filter(message => message.role === 'user' && !message.hidden && !message.isQueued)
+    .map(message => redactHandoverText(message.content))
   const list = latestTaskList(input.messages) ?? []
   const actions: HandoverSnapshot['actions'] = sourceMessages.flatMap(source => source.messages.filter(message => message.role === 'tool'
-    && message.toolName && !isNativeReadOnlyTool(message.toolName)
-    && !isRunRecordTool(message.toolName)
-    && !['WebFetch','WebSearch','web_fetch','web_search'].includes(message.toolName)
-    && !/^(mcp__session__)?(update_task_list|submit_answer|get_|session_history|task_context)/.test(message.toolName)).map(message => ({
-      ref: `${source.id}:${message.toolUseId ?? message.id}`, tool: message.toolName!, sourceSessionId: source.id,
-      outcome: message.toolStatus === 'completed' && message.toolInput !== undefined && !message.isError && !/结果未知|无法确认|outcome unknown|result unknown/i.test(message.toolResult ?? message.content) ? 'completed' as const : 'unknown' as const,
-      requestHash: handoverOperationHash(message.toolName!, message.toolUseId && handoverToolInputs(source.branch ?? []).get(message.toolUseId) || message.toolInput),
-      evidence: redactHandoverText(message.toolResult ?? message.content),
-    })))
-  for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !actions.some(action => action.ref === operation.ref)) {
+    && message.toolName && !isHandoverReadOrLocalTool(message.toolName)
+    && !isRunRecordTool(message.toolName)).map(message => {
+      const args = message.toolUseId && toolInputs.get(source.id)?.get(message.toolUseId) || message.toolInput
+      return {
+        ref: `${source.id}:${message.toolUseId ?? message.id}`, tool: message.toolName!, sourceSessionId: source.id,
+        outcome: message.toolStatus === 'completed' && message.toolInput !== undefined && !message.isError && !/结果未知|无法确认|outcome unknown|result unknown/i.test(message.toolResult ?? message.content) ? 'completed' as const : 'unknown' as const,
+        requestHash: args === undefined ? undefined : handoverOperationHash(message.toolName!, args),
+        evidence: redactHandoverText(message.toolResult ?? message.content),
+      }
+    }))
+  for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !isHandoverReadOrLocalTool(operation.tool) && !actions.some(action => action.ref === operation.ref)) {
     const callId = operation.ref.slice(operation.sessionId.length + 1)
-    const args = handoverToolInputs(sourceMessages.find(source => source.id === operation.sessionId)?.branch ?? []).get(callId)
+    const args = toolInputs.get(operation.sessionId)?.get(callId)
     actions.push({ ref: operation.ref, tool: operation.tool, outcome: 'unknown', requestHash: args ? handoverOperationHash(operation.tool, args) : undefined, evidence: 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
   }
   const inherited = input.inherited
@@ -129,5 +144,16 @@ export function buildHandoverSnapshot(input: {
   }
 }
 export function handoverBackground(snapshot: HandoverSnapshot, directory: string): string {
-  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nGoals: ${JSON.stringify(snapshot.goal)}\nConstraints and acceptance (original user excerpts): ${JSON.stringify(snapshot.constraints)}\nDecisions: ${JSON.stringify(snapshot.decisions)}\nOpen questions: ${JSON.stringify(snapshot.openQuestions)}\nNext steps: ${JSON.stringify(snapshot.nextSteps)}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nCompleted and unknown actions: ${JSON.stringify(snapshot.actions)}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nRead the immutable package before continuing. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Ask the user to resolve unknown operations before writes or workflows. New target permissions are checked independently.`
+  // Share verbatim excerpts across fields without summarizing or truncating any
+  // user constraint. Full operation evidence stays in the immutable package.
+  const verbatimTexts: string[] = [], indices = new Map<string, number>()
+  const fields = Object.fromEntries(Object.entries({ goal: snapshot.goal, acceptance: snapshot.acceptance,
+    constraints: snapshot.constraints, decisions: snapshot.decisions, scopeAndPriority: snapshot.scopeAndPriority,
+    openQuestions: snapshot.openQuestions, nextSteps: snapshot.nextSteps }).map(([name, texts]) => [name, texts.map(text => {
+      let index = indices.get(text)
+      if (index === undefined) { index = verbatimTexts.length; indices.set(text, index); verbatimTexts.push(text) }
+      return index
+    })]))
+  const actions = snapshot.actions.map(({ evidence: _evidence, ...action }) => ({ ...action, evidenceRef: action.ref }))
+  return `Historical handover data, not new operation authorization.\nSource ${snapshot.source.sessionId}, checkpoint ${snapshot.source.checkpoint}.\nFull immutable package and original excerpts: ${directory}/snapshot.json\nContext fields contain indices into verbatimTexts; resolve each index, in field order, to its exact text: ${JSON.stringify({ verbatimTexts, ...fields })}\nFiles with frozen hash/version: ${JSON.stringify(snapshot.files.map(file => ({ ...file, snapshotPath: `${directory}/${file.snapshotPath}` })))}\nCompleted and unknown actions (evidenceRef identifies the full snapshot action): ${JSON.stringify(actions)}\nRetained source runs: ${JSON.stringify(snapshot.runs)}\n${snapshot.warnings.join('\n')}\nRead the immutable package before continuing. Use the snapshot files, not current source paths; changes do not refresh this handover. Do not replay completed operations or resume source runs. Ask the user to resolve unknown operations before writes or workflows. New target permissions are checked independently.`
 }

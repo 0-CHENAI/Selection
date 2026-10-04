@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, unlinkSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseTaskSpec, saveTaskSpec, loadTaskResults, readRunState, readRunLog, runDir, specRevisionPath, type OrchestrationDecision, type TaskNode } from '@craft-agent/shared/tasks';
+import { parseTaskSpec, saveTaskSpec, loadTaskResults, readRunState, readRunLog, runDir, specRevisionPath, freezeResearchSources, ResearchConfigSchema, type OrchestrationDecision, type TaskNode } from '@craft-agent/shared/tasks';
 import { TaskRunner, type ConductorSessionHost } from './TaskRunner';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 
@@ -70,6 +70,7 @@ test('F5-a/d durable business records survive restart, dynamic correction and ex
   expect(results.research!.claims[0]!.producedBy).toMatchObject({runId:'r',nodeId:'fix',attempt:1,revision:1,sessionId:'session-fix'});
   expect(sent.filter(send=>send.id==='session-review2')[0]!.message).toContain('[skill:deep-research]');
   expect(sent.filter(send=>send.id==='session-review2')[0]!.message).toContain('source-0.txt');
+  expect(sent.filter(send=>send.id==='session-review2')[0]!.message).not.toContain('Research business state and delivery requirements:');
 });
 
 test('F5-c a changed snapshot or forged producer receipt never becomes supported coverage',async()=>{
@@ -83,6 +84,34 @@ test('F5-c a changed snapshot or forged producer receipt never becomes supported
   if(entry.kind==='node-finished')entry.researchRecord!.producedBy.runId='wrong-run';
   writeFileSync(path,log.map(entry=>JSON.stringify(entry)).join('\n')+'\n');
   expect(loadTaskResults(root,'research','r').research!.blockers).toContain('Corrupt research execution receipt requires inspection');
+});
+
+test('research recovery rejects payloads that disagree with the hashed attempt output',async()=>{
+  await firstReview();
+  const path=join(runDir(root,'research','r'),'run-log.jsonl');
+  const log=readRunLog(root,'research','r');
+  const entry=log.find(entry=>entry.kind==='node-finished'&&entry.researchRecord?.role==='reviewer')!;
+  if(entry.kind==='node-finished') {
+    entry.researchRecord!.payload.reviews[0]!.support='supported';
+    entry.researchRecord!.payload.reviews[0]!.finding='Forged approval, not the persisted reviewer output';
+  }
+  writeFileSync(path,log.map(entry=>JSON.stringify(entry)).join('\n')+'\n');
+  const summary=loadTaskResults(root,'research','r').research!;
+  expect(summary.blockers).toContain('Corrupt research execution receipt requires inspection');
+  expect(summary.claims[0]!.review?.support).not.toBe('supported');
+  expect(summary.coverage.covered).toBe(0);
+});
+
+test('frozen research sources accept dot-prefixed file names while rejecting directory escapes',()=>{
+  const directory=join(root,'authorized');mkdirSync(directory);
+  writeFileSync(join(directory,'..notes.txt'),'authorized cost evidence');
+  symlinkSync(join(root,'source.txt'),join(directory,'escape.txt'));
+  const config=ResearchConfigSchema.parse({line:{id:'main',question:'cost'},dimensions:[{id:'cost',requirement:'cost evidence'}],sources:[
+    {id:'valid',path:'..notes.txt'},{id:'outside',path:'../source.txt'},{id:'symlink',path:'escape.txt'},
+  ]});
+  const sources=freezeResearchSources(root,'paths','r',config,directory);
+  expect(sources[0]!.text).toBe('authorized cost evidence');
+  for(const source of sources.slice(1))expect(source.unavailableReason).toContain('inside the authorized task directory');
 });
 
 test('ordinary PRO execution keeps one original node and no research source or Skill work',async()=>{

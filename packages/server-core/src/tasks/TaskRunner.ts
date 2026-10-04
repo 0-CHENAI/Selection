@@ -131,7 +131,7 @@ export interface ConductorSessionHost {
   hasPreparedTaskDelivery?(sessionId: string): boolean;
   canAutoResumeTaskDelivery?(sessionId: string): boolean;
   finalizeTaskWorkspace?(sessionId: string, outputs: Record<string, string>, ensureCurrent: () => void, verifyInputs?: () => void): Promise<Record<string, unknown>>;
-  sendMessage(sessionId: string, message: string): Promise<void>;
+  sendMessage(sessionId: string, message: string, attachments?: undefined, storedAttachments?: undefined, options?: { hidden?: boolean }): Promise<void>;
   continueProgress?(sessionId: string): Promise<void>;
   getProgressLiveTokens?(sessionId: string): number;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
@@ -2390,13 +2390,16 @@ class ActiveRun {
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
       text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. Chat text is not a verdict.`;
     }
-    const planContext = this.planContext();
+    // Research workers already receive their role/line-specific frozen context
+    // in dispatch. Repeating the global context wastes input and leaks unrelated
+    // line records back into an otherwise scoped assignment.
+    const planContext = this.planContext(!node.researchRole);
     return planContext ? `${planContext}\n\n${text}` : text;
   }
 
-  private planContext(): string {
+  private planContext(includeResearch = true): string {
     return [
-      ...(this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify((() => { const research = loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId); return research ? researchTaskContext(research) : undefined; })())}`] : []),
+      ...(includeResearch && this.spec.research ? [`Research business state and delivery requirements: ${JSON.stringify((() => { const research = loadResearchResults(this.deps.workspaceRoot,this.slug,this.runId); return research ? researchTaskContext(research) : undefined; })())}`] : []),
       ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
       ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
       ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
@@ -2839,7 +2842,7 @@ class ActiveRun {
   /** Send to the orchestrator, failing the run (rather than hanging in `verifying`) if the send rejects. */
   private async sendToOrchestrator(orchestrator: string, message: string): Promise<void> {
     try {
-      await this.deps.host.sendMessage(orchestrator, message);
+      await this.deps.host.sendMessage(orchestrator, message, undefined, undefined, { hidden: true });
     } catch {
       // The verdict will never arrive — detach the listener and settle as failed instead of hanging.
       this.verdictOff?.();
