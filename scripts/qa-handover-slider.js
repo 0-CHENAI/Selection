@@ -40,6 +40,14 @@ async function dismiss(start) {
   assert.equal((await state()).value, start, 'closing review must reset the source position')
 }
 async function capture(name) {
+  // Capture the settled theme/hover state rather than a transition's first frame.
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
+    const root = document.querySelector('input[type=range]').parentElement.parentElement
+    const animations = root.getAnimations({ subtree: true })
+    for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) animations.push(...ancestor.getAnimations())
+    await Promise.all(animations.map(animation => animation.finished.catch(() => {})))
+  })
   const clip = await page.evaluate(() => {
     const r = document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect()
     return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24 }
@@ -49,6 +57,20 @@ async function capture(name) {
 assert.equal((await state()).records, '交接记录：0')
 await page.click('loc=role:button[name="Light"]')
 const light = await capture('handover-slider-norm-light')
+const width = await page.evaluate(() => document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect().width)
+assert.ok(width < 210, 'the icon control must keep the header compact')
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity), '0')
+const hoverPoint = await page.evaluate(() => {
+  const r = document.querySelector('[data-handover-icon]').getBoundingClientRect()
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+})
+await page.mouse.move(hoverPoint.x, hoverPoint.y)
+await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '1')
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-handover-icon]')).opacity), '0')
+const hover = await capture('handover-slider-norm-hover')
+assert.equal(await page.evaluate(() => document.querySelector('input[type=range]').parentElement.parentElement.getBoundingClientRect().width), width, 'hover must not shift the header layout')
+await page.mouse.move(0, 0)
+await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '0')
 await drag('NORM', 0.5)
 assert.ok((await state()).value > 0 && (await state()).value < 100, 'native drag must move the thumb')
 await page.mouse.up()
@@ -62,6 +84,7 @@ await dismiss(0)
 await page.focus('input[type=range]')
 await page.press('input[type=range]', 'ArrowRight')
 assert.equal((await state()).value, 1)
+await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-handover-label]')).opacity === '1')
 assert.ok(await page.evaluate(() => {
   const input = document.querySelector('input[type=range]')
   return input.matches(':focus-visible') && getComputedStyle(input.nextElementSibling).boxShadow !== 'none'
@@ -102,7 +125,22 @@ await page.waitForSelector('[role=dialog]')
 await dismiss(100)
 await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('input[type=range]').parentElement.querySelector('span[style]')).transitionProperty), 'none')
+assert.ok(await page.evaluate(() => ['[data-handover-icon]', '[data-handover-label]'].every(selector => getComputedStyle(document.querySelector(selector)).transitionProperty === 'none')))
 await page.cdp('Emulation.setEmulatedMedia', { features: [] })
+await page.evaluate(async () => {
+  const entry = await (await fetch('/playground.tsx')).text()
+  const url = [...entry.matchAll(/from "([^"]+)"/g)].map(m => m[1]).find(u => u.includes('/i18n/'))
+  const { i18n } = await import(url)
+  for (const locale of ['zh-Hans', 'en', 'de', 'es', 'pl', 'hu', 'ja']) {
+    await i18n.changeLanguage(locale)
+    await new Promise(requestAnimationFrame)
+    const label = document.querySelector('[data-handover-label]')
+    const range = document.createRange(); range.selectNodeContents(label)
+    if (range.getBoundingClientRect().width > label.getBoundingClientRect().width - 4) throw new Error(`Handover label overflows in ${locale}`)
+  }
+  await i18n.changeLanguage('zh-Hans')
+})
 console.log({ passed: true, bidirectionalDrag: true, partialReset: true, confirmationRequired: true,
-  keyboard: ['ArrowRight', 'Escape', 'End', 'Enter', 'Home', 'Space'], reducedMotion: true, screenshots: [light, dark] })
+  keyboard: ['ArrowRight', 'Escape', 'End', 'Enter', 'Home', 'Space'], reducedMotion: true,
+  compactIcon: true, hoverReveal: true, stableWidth: true, locales: 7, screenshots: [light, hover, dark] })
 if (!config.spaceId) await task.finish({ keep: [] })
