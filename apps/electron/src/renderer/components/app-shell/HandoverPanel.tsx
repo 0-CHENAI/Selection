@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowRightLeft, ArrowUpRight, LoaderCircle, Redo2 } from 'lucide-react'
+import { ArrowRightLeft, ArrowUpRight, Check, LoaderCircle, Redo2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
+import { skipHandoverConfirmationAtom } from '@/atoms/handover'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import type { HandoverOperation, HandoverRecord, HandoverResult } from '@craft-agent/shared/protocol'
@@ -22,6 +24,8 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const { t } = useTranslation()
   const { onOpenFile } = useAppShellContext()
   const metadata = useAtomValue(sessionMetaMapAtom)
+  const [skipConfirmation, setSkipConfirmation] = useAtom(skipHandoverConfirmationAtom)
+  const [dontShowAgain, setDontShowAgain] = useState(false)
   const [open, setOpen] = useState(false)
   const [records, setRecords] = useState<HandoverRecord[]>([])
   const [selectedId, setSelectedId] = useState(sourceLink?.handoverId)
@@ -70,14 +74,36 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const run = async (operation: HandoverOperation) => {
     if (activeCall.current) return
     activeCall.current = true; setBusy(true); setError(undefined)
-    try { accept(await call(operation)); window.dispatchEvent(new Event('selection-handover-updated')) }
+    try { const result = await call(operation); accept(result); window.dispatchEvent(new Event('selection-handover-updated')); return result }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { activeCall.current = false; if (alive.current) setBusy(false) }
   }
-  const begin = () => {
+  const begin = async () => {
+    if (activeCall.current) return
     const pending = records.find(record => record.sourceSessionId === sessionId && ['waiting','prepared','created'].includes(record.status))
+    if (selected?.status === 'applied' || selected?.status === 'cancelled') requestId.current = undefined
     requestId.current ??= pending?.handoverId ?? crypto.randomUUID()
-    void run({ type: 'create', handoverId: requestId.current, targetMode })
+    return run({ type: 'create', handoverId: requestId.current, targetMode })
+  }
+  const showDialog = () => {
+    setDontShowAgain(skipConfirmation === true)
+    setOpen(true)
+  }
+  const confirm = async () => {
+    const result = await begin()
+    if (result?.records.length) setSkipConfirmation(dontShowAgain)
+  }
+  const handover = async () => {
+    if (skipConfirmation !== true) { showDialog(); return }
+    if (activeCall.current) return
+    const result = await begin()
+    if (!alive.current) return
+    const record = result?.records[0]
+    if (record?.status === 'applied' && record.targetSessionId) {
+      toast.success(t('handover.backgroundReady'), { action: { label: t('handover.openTarget'), onClick: () => navigate(routes.view.allSessions(record.targetSessionId!)) } })
+    } else if (record?.status === 'waiting') {
+      toast(t('handover.status.waiting'), { description: t('handover.waiting'), action: { label: t('handover.viewBackground'), onClick: showDialog } })
+    } else showDialog()
   }
   const targetOwned = selected?.targetSessionId === sessionId
   const unknown = selected?.snapshot?.actions.filter(action => action.outcome === 'unknown' && !selected.reviews[action.ref]) ?? []
@@ -85,14 +111,14 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   return <>
     {headerOnly ? canCreate && <Tooltip><TooltipTrigger asChild>
       <Button type="button" data-handover-trigger variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1 px-2 text-foreground/70 hover:text-foreground"
-        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup="dialog" disabled={busy || open} onClick={() => setOpen(true)}>
-        <Redo2 aria-hidden="true" /><span className="tracking-[0.04em]">{targetMode}</span>
+        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup={skipConfirmation === true ? undefined : 'dialog'} disabled={busy || open} onClick={() => void handover()}>
+        {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Redo2 aria-hidden="true" />}<span className="tracking-[0.04em]">{targetMode}</span>
       </Button>
     </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip>
       : sourceLink && <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs">
         <ArrowRightLeft className="size-3.5 text-muted-foreground" /><span>{t('handover.backgroundReady')}</span>
         <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" disabled={!metadata.has(sourceLink.sourceSessionId)} onClick={() => navigate(routes.view.allSessions(sourceLink.sourceSessionId))}>{metadata.has(sourceLink.sourceSessionId) ? t('handover.openSource') : t('handover.sourceRemoved')}</button>
-        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground transition-colors" onClick={() => setOpen(true)}>{t('handover.viewBackground')}</button>
+        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground transition-colors" onClick={showDialog}>{t('handover.viewBackground')}</button>
         {unknown.length > 0 && <span role="status" className="w-full text-warning">{t('handover.unknownBlocked', { count: unknown.length })}</span>}
       </div>}
     <Dialog open={open} onOpenChange={setOpen}>
@@ -124,12 +150,20 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
             </>}
           </>}
         </div>
+        {canCreate && (!selected || selected.status !== 'waiting') && <label className="flex min-h-6 cursor-pointer items-center gap-2 text-xs leading-relaxed text-muted-foreground">
+          <span className="relative flex size-3.5 shrink-0 items-center justify-center">
+            <input type="checkbox" className="peer absolute inset-0 size-full appearance-none rounded-[3px] border border-foreground/30 bg-transparent transition-colors checked:border-foreground checked:bg-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+              checked={dontShowAgain} disabled={busy} onChange={event => setDontShowAgain(event.target.checked)} />
+            <Check aria-hidden="true" className="pointer-events-none size-3 text-background opacity-0 peer-checked:opacity-100" />
+          </span>
+          {t('handover.dontShowAgain')}
+        </label>}
         <DialogFooter className="shrink-0 flex-row flex-wrap items-center justify-end pt-2">
           {selected && <Button variant="ghost" className="mr-auto" disabled={busy || !sourceExists} onClick={() => navigate(routes.view.allSessions(selected.sourceSessionId))}>{sourceExists ? t('handover.openSource') : t('handover.sourceRemoved')}</Button>}
           <Button variant="outline" onClick={() => setOpen(false)}>{selected ? t('common.close') : t('common.cancel')}</Button>
           {selected?.status === 'waiting' && <Button variant="outline" disabled={busy} onClick={() => void run({ type: 'cancel', handoverId: selected.handoverId })}>{t('handover.cancelWait')}</Button>}
           {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => navigate(routes.view.allSessions(selected.targetSessionId!))}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
-          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => { if (selected?.status === 'applied' || selected?.status === 'cancelled') requestId.current = undefined; begin() }}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{selected?.status === 'prepared' || selected?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
+          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => void confirm()}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{selected?.status === 'prepared' || selected?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -145,7 +179,7 @@ function Detail({ title, values }: { title: string; values: string[] }) {
   if (!values.length) return null
   return <section className="space-y-1.5"><h3 className="text-xs font-medium text-muted-foreground">{title}</h3><ul className="space-y-1 text-sm">{[...new Set(values)].map((value,index) => <li key={index} className="whitespace-pre-wrap break-words">{value}</li>)}</ul></section>
 }
-function OperationReview({ text, tool, disabled, onSave }: { text: string; tool: string; disabled: boolean; onSave: (outcome: 'completed' | 'not-performed', note: string) => Promise<void> }) {
+function OperationReview({ text, tool, disabled, onSave }: { text: string; tool: string; disabled: boolean; onSave: (outcome: 'completed' | 'not-performed', note: string) => Promise<unknown> }) {
   const { t } = useTranslation()
   const [outcome, setOutcome] = useState<'completed' | 'not-performed'>()
   const [note, setNote] = useState('')
