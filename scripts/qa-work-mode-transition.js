@@ -52,10 +52,11 @@ async function probe(mode, reduced = false) {
   for (const pair of result.opacities) {
     assert.ok(pair.every(value => value > 0 && value < 1), 'both pictures are visible at the midpoint')
     assert.ok(Math.abs(pair[0] + pair[1] - 1) < .01, 'matching fades overlap without a blank gap')
+    if (!reduced) assert.ok(pair[1] < .4, 'the main view does not finish most of its transition in the first 60ms')
   }
   assert.ok(result.filters.flat().every(filter => reduced ? filter === 'none' : /^blur\([\d.]+px\)$/.test(filter) && Number(filter.match(/[\d.]+/)[0]) > 0 && Number(filter.match(/[\d.]+/)[0]) < 2), 'normal motion has bounded soft focus; reduced motion has no blur')
   for (const animation of result.animations) {
-    assert.equal(animation.duration, reduced ? 150 : 240)
+    assert.equal(animation.duration, reduced ? 150 : 360)
     assert.ok(animation.frames.every(frame => !frame.transform || frame.transform === 'none'), 'content dissolves without moving or scaling the frame')
     assert.ok(reduced
       ? animation.frames.every(frame => !frame.filter || frame.filter === 'none')
@@ -121,7 +122,7 @@ try {
     await page.click('loc=role:button[name="PRO"]')
     await page.waitForFunction(() => window.motionQAFallbackAnimations.length === 2)
     const fallback = await page.evaluate(() => window.motionQAFallbackAnimations.map(a => ({ duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes() })))
-    assert.ok(fallback.every(a => a.duration === (reduce ? 150 : 240) && (reduce ? a.frames.every(f => !f.filter) : a.frames[0].filter === 'blur(2px)' && a.frames[1].filter === 'blur(0px)')))
+    assert.ok(fallback.every(a => a.duration === (reduce ? 150 : 360) && (reduce ? a.frames.every(f => !f.filter) : a.frames[0].filter === 'blur(2px)' && a.frames[1].filter === 'blur(0px)')))
     await page.evaluate(() => {
       window.motionQAFallbackAnimations.forEach(a => a.play())
       Element.prototype.animate = window.motionQAAnimate

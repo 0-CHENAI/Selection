@@ -51,7 +51,7 @@ export async function transitionWorkMode(update: () => void): Promise<void> {
         .map(element => element.animate(reduced
           ? [{ opacity: 0 }, { opacity: 1 }]
           : [{ opacity: 0, filter: 'blur(2px)' }, { opacity: 1, filter: 'blur(0px)' }],
-        { duration: reduced ? 150 : 240, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }))
+        { duration: reduced ? 150 : 360, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }))
       await Promise.allSettled(animations.map(animation => animation.finished))
     }
   } finally {
