@@ -917,6 +917,7 @@
   "kanban.column.remove": "删除列",
   "kanban.column.setDropStatus": "设置移动到此处时的状态",
   "kanban.column.todo": "待办",
+  "kanban.createOrchestrationDescription": "在此 PRO 会话中创建计划，保留交接背景与历史。创建不会启动执行，也不会改变会话的模型或权限。",
   "kanban.describeSubtask": "描述一个子任务…",
   "kanban.editOrchestration": "编辑任务编排",
   "kanban.editOrchestrationDescription": "调整编排定义中的目标、验收标准、子任务、依赖关系及执行配置，并可基于新定义重新运行。不会重命名会话，也不会改写已有回复或运行历史。",

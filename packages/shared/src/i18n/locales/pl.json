@@ -917,6 +917,7 @@
   "kanban.column.remove": "Usuń kolumnę",
   "kanban.column.setDropStatus": "Ustaw status po przeniesieniu tutaj",
   "kanban.column.todo": "Do zrobienia",
+  "kanban.createOrchestrationDescription": "Utwórz plan w tej rozmowie PRO, zachowując kontekst przekazania i historię. Utworzenie nie rozpoczyna wykonania ani nie zmienia modelu lub uprawnień.",
   "kanban.describeSubtask": "Opisz podzadanie…",
   "kanban.editOrchestration": "Edytuj przepływ zadań",
   "kanban.editOrchestrationDescription": "Dostosuj cele, kryteria akceptacji, podzadania, zależności i ustawienia wykonania definicji, a następnie uruchom nową definicję. Nie zmienia to nazwy sesji, istniejących odpowiedzi ani historii uruchomień.",

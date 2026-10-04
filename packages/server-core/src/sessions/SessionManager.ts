@@ -12767,6 +12767,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       })
       return false
     }
+    if (managed.isProcessing || this.handoverCapturing.has(sessionId)) throw new Error('Wait for the PRO root to settle before binding a plan')
 
     // What actually changes — so we fire canonical live-updates (agent + caches + per-field events)
     // only when needed. A quick-add tile is already live, so these keep its running agent in step.

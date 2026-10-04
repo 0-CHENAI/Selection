@@ -917,6 +917,7 @@
   "kanban.column.remove": "Oszlop eltávolítása",
   "kanban.column.setDropStatus": "Állapot beállítása idehúzáskor",
   "kanban.column.todo": "Teendő",
+  "kanban.createOrchestrationDescription": "Hozz létre tervet ebben a PRO-beszélgetésben, megőrizve az átadás hátterét és az előzményeket. A létrehozás nem indít végrehajtást, és nem módosítja a modellt vagy az engedélyeket.",
   "kanban.describeSubtask": "Írj le egy részfeladatot…",
   "kanban.editOrchestration": "Feladatfolyamat szerkesztése",
   "kanban.editOrchestrationDescription": "Módosítsd a definíció céljait, elfogadási feltételeit, részfeladatait, függőségeit és futtatási beállításait, majd futtasd az új definíciót. A munkamenet neve, a meglévő válaszok és a futtatási előzmények nem változnak.",

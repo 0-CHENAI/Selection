@@ -582,7 +582,7 @@ export function TaskEditor(props: TaskEditorProps) {
     />
   }
   return <ExistingTaskEditor
-    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : projectId ?? ''}`}
+    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : props.target?.rootSessionId ?? projectId ?? ''}`}
     {...props}
     onImport={() => setPane('import')}
     onOpenLibrary={() => setPane('library')}
@@ -628,7 +628,7 @@ function ExistingTaskEditor({
   }, [setDirty])
   const [constraintsText, setConstraintsText] = React.useState('')
   const [decisionsText, setDecisionsText] = React.useState('')
-  const [title, setTitle] = React.useState('')
+  const [title, setTitle] = React.useState(target.mode === 'create' ? target.initialTitle ?? '' : '')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
   // Empty string = "use the runner default"; a number pins the spec's max_iterations.
@@ -705,6 +705,15 @@ function ExistingTaskEditor({
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
   const store = useStore()
+  const createRootId = target.mode === 'create' ? target.rootSessionId : undefined
+  React.useEffect(() => {
+    if (!createRootId) return
+    const root = store.get(sessionMetaMapAtom).get(createRootId)
+    if (root?.model) setOrchModel(root.model)
+    setOrchConnection(root?.llmConnection)
+    if (root?.permissionMode === 'safe' || root?.permissionMode === 'ask' || root?.permissionMode === 'allow-all') setPermissionMode(root.permissionMode)
+    setCwd(root?.workingDirectory ?? '')
+  }, [createRootId, store])
 
   /**
    * The tile's quick-add children as editor rows, so hand-spawned subtasks show up (and get
@@ -1241,7 +1250,7 @@ function ExistingTaskEditor({
         return
       }
       if (!isEdit) {
-        const created = await window.electronAPI.createTask(workspaceId, { yaml })
+        const created = await window.electronAPI.createTask(workspaceId, { yaml, ...(createRootId ? {rootSessionId:createRootId} : {}) })
         if (!created.validation.valid) {
           setYamlDiagnostics(created.validation.errors.map(e => `${e.path}: ${e.message}`))
           toast.error(t('tasks.toastInvalid'), { description: created.validation.errors[0]?.message })
@@ -1359,7 +1368,7 @@ function ExistingTaskEditor({
           )}
           {isEdit && liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
             <div className="flex items-center gap-1.5">
-              {(liveRun.status === 'running' || liveRun.status === 'verifying' || liveRun.status === 'repairing') && (
+              {['running', 'verifying', 'repairing', 'waiting-coordinator', 'waiting-approval', 'waiting-budget'].includes(liveRun.status) && (
                 <Btn variant="secondary" onClick={() => void controlRun('pause')}>{t('tasks.pauseRun')}</Btn>
               )}
               {(liveRun.status === 'paused' || liveRun.status === 'pausing') && (
@@ -1551,8 +1560,8 @@ function ExistingTaskEditor({
             }}
           /></div>
           <div className="flex flex-wrap gap-1 border-b border-border pb-4">
-              <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
-              {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+              {!createRootId && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>}
+              {!isEdit && !createRootId && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
               <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
               {isTasksOrchestrateEnabled() && !preservedSpec?.research && <Button variant="ghost" disabled={busy} onClick={() => {
                 const question = goal.trim() || t('tasks.research.question')

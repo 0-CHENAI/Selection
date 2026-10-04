@@ -233,9 +233,11 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
     const snapshot = r.continue('v3demo', 'r1');
     expect(snapshot.status).toBe('waiting-coordinator');
+    expect(snapshot.nodes[0]?.blocker).toBeUndefined();
     expect(host.dispatchedNames()).toEqual(['a']);
     advance('retry'); await tick();
     expect(host.dispatchedNames()).toEqual(['a', 'a']);
+    expect(r.getRunState('v3demo', 'r1')?.nodes[0]?.blocker).toBeUndefined();
     await r.stop('v3demo', 'r1');
   });
 

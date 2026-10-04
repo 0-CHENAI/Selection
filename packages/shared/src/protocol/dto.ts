@@ -286,6 +286,8 @@ export interface TaskSaveResult {
 export interface TaskCreateRequest {
   /** task.yaml source text (authoritative). */
   yaml: string
+  /** Explicit user creation of a plan in this idle PRO root, preserving its history and permissions. */
+  rootSessionId?: string
   /**
    * Deprecated client field. CREATE rejects adoption; proposal sessions are temporary.
    */

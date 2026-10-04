@@ -298,6 +298,7 @@ const EXPECTED_CHANNELS: string[] = [
   'tasks:list',
   'tasks:listRuns',
   'tasks:listTemplates',
+  'tasks:patchRun',
   'tasks:pause',
   'tasks:respondApproval',
   'tasks:resume',

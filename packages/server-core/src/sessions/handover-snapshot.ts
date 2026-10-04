@@ -7,6 +7,17 @@ import { handoverHash } from '../reliability/handover-store'
 import { latestTaskList } from '@craft-agent/shared/utils/task-list'
 import { isNativeReadOnlyTool, PI_TOOL_NAME_MAP } from '../../../shared/src/agent/backend/pi/constants'
 
+// These records only affect a source-owned run. Its committed plan and results
+// are transferred separately, and a target cannot submit to or resume that run.
+// Rejected bookkeeping is not an unknown external operation.
+const RUN_RECORD_TOOLS = new Set([
+  'submit_task_output', 'submit_task_verdict', 'submit_task_node_verdict',
+  'submit_orchestration_decision', 'submit_orchestration_patch',
+])
+function isRunRecordTool(name: string): boolean {
+  return RUN_RECORD_TOOLS.has(name.replace(/^(mcp__session__|session__)/, ''))
+}
+
 export function handoverOperationHash(tool: string, input: unknown): string {
   const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value
@@ -82,6 +93,7 @@ export function buildHandoverSnapshot(input: {
   const list = latestTaskList(input.messages) ?? []
   const actions: HandoverSnapshot['actions'] = sourceMessages.flatMap(source => source.messages.filter(message => message.role === 'tool'
     && message.toolName && !isNativeReadOnlyTool(message.toolName)
+    && !isRunRecordTool(message.toolName)
     && !['WebFetch','WebSearch','web_fetch','web_search'].includes(message.toolName)
     && !/^(mcp__session__)?(update_task_list|submit_answer|get_|session_history|task_context)/.test(message.toolName)).map(message => ({
       ref: `${source.id}:${message.toolUseId ?? message.id}`, tool: message.toolName!, sourceSessionId: source.id,
@@ -89,7 +101,7 @@ export function buildHandoverSnapshot(input: {
       requestHash: handoverOperationHash(message.toolName!, message.toolUseId && handoverToolInputs(source.branch ?? []).get(message.toolUseId) || message.toolInput),
       evidence: redactHandoverText(message.toolResult ?? message.content),
     })))
-  for (const operation of input.pendingOperations) if (!actions.some(action => action.ref === operation.ref)) {
+  for (const operation of input.pendingOperations) if (!isRunRecordTool(operation.tool) && !actions.some(action => action.ref === operation.ref)) {
     const callId = operation.ref.slice(operation.sessionId.length + 1)
     const args = handoverToolInputs(sourceMessages.find(source => source.id === operation.sessionId)?.branch ?? []).get(callId)
     actions.push({ ref: operation.ref, tool: operation.tool, outcome: 'unknown', requestHash: args ? handoverOperationHash(operation.tool, args) : undefined, evidence: 'No confirmed completion receipt; review before retrying.', sourceSessionId: operation.sessionId })
