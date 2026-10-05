@@ -24,7 +24,7 @@ export interface HandoverSnapshot {
   files: Array<{ ref: string; originalPath: string; snapshotPath: string; hash: string; originalHash: string; versionId?: string; artifactId?: string; redacted?: boolean; sourceUrl?: string; urlPrompt?: string }>
   originals: Array<{ id: string; sessionId: string; role: string; text: string }>
   taskList: Array<{ id: string; content: string; status: string }>
-  runs: Array<{ slug: string; runId: string; revision: number; status: string; retainedBy: string; resumedFrom?: string; supersededBy?: string }>
+  runs: Array<{ slug: string; runId: string; revision: number; status: string; retainedBy: string; resumedFrom?: string; supersededBy?: string; logSequence?: number }>
   warnings: string[]
 }
 export interface HandoverRecord {
@@ -52,4 +52,5 @@ export type HandoverOperation =
 export interface HandoverResult {
   records: HandoverRecord[]
   changes?: Array<{ ref: string; state: 'unchanged' | 'changed' | 'missing' | 'unavailable' }>
+  researchUpdates?: Array<{ handoverId: string; slug: string; runId: string; errata: import('../tasks/research').ResearchSummary['errata']; unavailableReason?: string }>
 }

@@ -33,6 +33,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const [records, setRecords] = useState<HandoverRecord[]>([])
   const [selectedId, setSelectedId] = useState(sourceLink?.handoverId)
   const [changes, setChanges] = useState<HandoverResult['changes']>()
+  const [researchUpdates, setResearchUpdates] = useState<HandoverResult['researchUpdates']>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const selectedRef = useRef(selectedId)
@@ -51,6 +52,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
     setRecords(previous => operationMerge(previous, result.records))
     if (result.records[0]) setSelectedId(result.records[0].handoverId)
     setChanges(result.changes)
+    setResearchUpdates(result.researchUpdates)
     const pending = pendingNavigation.current
     const record = result.records.find(record => record.handoverId === pending?.handoverId)
     if (!pending || !record) return
@@ -176,6 +178,7 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
               <Detail title={t('handover.openQuestions')} values={selected.snapshot.openQuestions} />
               <Detail title={t('handover.nextSteps')} values={selected.snapshot.nextSteps} />
               {selected.snapshot.files.length > 0 && <section className="space-y-2"><h3 className="text-xs font-medium text-muted-foreground">{t('handover.files')}</h3>{selected.snapshot.files.map(file => <div key={file.ref} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 p-2 text-xs"><span className="min-w-0 flex-1 break-all">{file.originalPath.split(/[\\/]/).at(-1)}</span><code className="text-muted-foreground">{file.hash.slice(0,12)}</code>{file.versionId && <span>{t('handover.frozenVersion')}</span>}{changes?.find(change => change.ref === file.ref)?.state !== 'unchanged' && changes?.some(change => change.ref === file.ref) && <span className="text-warning">{t(`handover.fileState.${changes.find(change => change.ref === file.ref)!.state}`)}</span>}<button type="button" className="text-muted-foreground hover:text-foreground" disabled={!selected.targetSessionId} onClick={() => { if (selected.targetSessionId) void window.electronAPI.getSessionMessages(selected.targetSessionId).then(target => { if (target?.sessionFolderPath) onOpenFile(`${target.sessionFolderPath}/data/handover/${selected.handoverId}/${file.snapshotPath}`) }) }}>{t('handover.openSnapshot')}</button></div>)}</section>}
+              {!!researchUpdates?.some(update => update.handoverId === selected.handoverId) && <section className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs"><h3 className="font-medium">{t('handover.researchCorrections')}</h3><p className="text-muted-foreground">{t('handover.frozenCorrectionsNotice')}</p>{researchUpdates.filter(update => update.handoverId === selected.handoverId).map(update => <div key={`${update.slug}/${update.runId}`} className="space-y-1"><p className="break-all font-mono">{update.slug}/{update.runId}</p>{update.unavailableReason && <p>{update.unavailableReason}</p>}{update.errata.map(value => <p key={value.id}>{value.reason} · {t('tasks.research.affectedClaims')}: {value.affectedClaimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p>)}</div>)}</section>}
               <Detail title={t('handover.completedActions')} values={selected.snapshot.actions.filter(action => action.outcome === 'completed' || selected.reviews[action.ref]?.outcome === 'completed').map(action => `${action.tool}: ${action.evidence}`)} />
               {selected.snapshot.warnings.some(warning => warning.startsWith('Input snapshot unavailable:') || warning.includes('omitted')) && <p role="status" className="rounded-lg bg-warning/10 p-3 text-xs text-warning">{t('handover.incompleteFiles')}</p>}
               {unknown.map(action => <OperationReview key={action.ref} text={action.evidence} tool={action.tool} disabled={busy || !targetOwned} onSave={(outcome, note) => run({ type: 'review', handoverId: selected.handoverId, actionRef: action.ref, outcome, note })} />)}

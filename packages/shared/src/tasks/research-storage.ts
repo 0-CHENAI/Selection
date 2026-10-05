@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { atomicWriteFileSync } from '../utils/files.ts';
-import { committedRunLog, readRunLog, readRunState, readNodeAttempt, runDir } from './storage.ts';
+import { committedRunLog, readRunLog, readRunState, readNodeAttempt, listRunIds, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
 import { summarizeResearch, researchReadRangeTexts, ResearchRecordSchema, ResearchPayloadSchema, ResearchReadReceiptSchema, type ResearchConfig, type ResearchSource, type ResearchSummary, type ResearchReadReceipt } from './research.ts';
 import { planValueKey } from './plan.ts';
@@ -120,4 +120,37 @@ export function loadResearchResults(root: string, slug: string, runId: string, v
     return summary;
   }
   catch { const summary = summarizeResearch(config, [], records); summary.blockers.push('Frozen research sources are unavailable; restore and inspect before delivery'); return summary; }
+}
+
+/** Read later append-only corrections through canonical lineage; never rewrite a frozen handover. */
+export function researchErrataAfter(root: string, slug: string, captured: { runId: string; retainedBy: string; logSequence?: number }, capturedAt: number): Array<{ runId: string; errata: ResearchSummary['errata'] }> {
+  const runs = new Map(listRunIds(root, slug).flatMap(runId => {
+    const log = committedRunLog(readRunLog(root, slug, runId), readRunState(root, slug, runId));
+    const start = log.find(entry => entry.kind === 'run-started');
+    return start?.kind === 'run-started' && start.orchestratorSessionId === captured.retainedBy ? [[runId, { start, log }] as const] : [];
+  }));
+  if (!runs.has(captured.runId)) throw new Error('Retained research history is unavailable');
+  const descendsFromCaptured = (runId: string): boolean => {
+    const seen = new Set<string>();
+    while (!seen.has(runId)) {
+      if (runId === captured.runId) return true;
+      seen.add(runId);
+      const parent = runs.get(runId)?.start.resumedFrom;
+      if (!parent) return false;
+      runId = parent;
+    }
+    throw new Error('Cyclic retained research history');
+  };
+  return [...runs].flatMap(([runId, { log }]) => {
+    if (!descendsFromCaptured(runId)) return [];
+    const summary = loadResearchResults(root, slug, runId);
+    if (!summary) return [];
+    if (summary.blockers.some(blocker => blocker.includes('Corrupt') || blocker.includes('Frozen'))) throw new Error('Retained research correction integrity is unavailable');
+    const newRecords = log.filter((entry, index) => entry.kind === 'node-finished' && entry.state === 'done'
+      && (runId !== captured.runId || (captured.logSequence !== undefined ? (entry.seq ?? index + 1) > captured.logSequence : Date.parse(entry.t) > capturedAt)));
+    const errata = summary.errata.filter(value => value.producedBy.runId === runId && newRecords.some(entry => entry.kind === 'node-finished'
+      && entry.researchRecord?.producedBy.artifactVersion === value.producedBy.artifactVersion
+      && entry.researchRecord.producedBy.nodeId === value.producedBy.nodeId));
+    return errata.length ? [{ runId, errata }] : [];
+  });
 }

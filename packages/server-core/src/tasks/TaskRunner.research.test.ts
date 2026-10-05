@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, unlinkSyn
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseTaskSpec, saveTaskSpec, loadTaskSpec, loadTaskResults, readRunState, readRunLog, runDir, specRevisionPath, freezeResearchSources, ResearchConfigSchema, type OrchestrationDecision, type TaskNode } from '@craft-agent/shared/tasks';
+import { parseTaskSpec, saveTaskSpec, loadTaskSpec, loadTaskResults, readRunState, readRunLog, runDir, specRevisionPath, freezeResearchSources, ResearchConfigSchema, researchErrataAfter, type OrchestrationDecision, type TaskNode } from '@craft-agent/shared/tasks';
 import { TaskRunner, type ConductorSessionHost } from './TaskRunner';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 
@@ -156,6 +156,8 @@ test('F6-d successor preserves unaffected independent review and immutable old r
   await complete('initial-review',{reviews:['cost','risk'].map(id=>({claimRef:{id,version:1},citationExists:true,support:'supported',finding:'Independent original support'}))});
   await complete('initial-report',{report:{claimRefs:[{id:'cost',version:1},{id:'risk',version:1}],limitations:[],unresolved:[]}});
   const old=loadTaskResults(root,'research','run-1');expect(old.runStatus).toBe('completed');
+  const oldLog = readFileSync(join(runDir(root, 'research', 'run-1'), 'run-log.jsonl'), 'utf8');
+  const captured = { runId: 'run-1', retainedBy: 'orch', logSequence: readRunState(root, 'research', 'run-1')!.seq };
   writeFileSync(join(root,'source.txt'),'Title\nA two-year cost is 1,200,000 yuan.');
   save([node('fix','researcher'),node('new-review','reviewer',['fix']),node('new-report','reporter',['new-review'])]);
   runner.run('research',{runId:'run-2',orchestratorSessionId:'orch',resumedFrom:'run-1',verifyOnComplete:false});await tick();
@@ -165,17 +167,25 @@ test('F6-d successor preserves unaffected independent review and immutable old r
   expect(inherited.claims.find(claim=>claim.id==='risk')!.reviewer).toEqual(old.research!.claims.find(claim=>claim.id==='risk')!.reviewer);
   const currentSource=inherited.sources[0]!;
   recordAllSources('session-fix', 'run-2');
-  await complete('fix',{evidence:[{id:'cost-new',sourceId:'s',sourceVersion:currentSource.version,locator:{startLine:2,endLine:2},excerpt:'A two-year cost is 1,200,000 yuan.'}],claims:[{id:'cost',version:2,type:'fact',text:'Cost 1,200,000 yuan',dimensionIds:['cost'],evidenceIds:['cost-new'],critical:true}]});
+  await complete('fix',{evidence:[{id:'cost-new',sourceId:'s',sourceVersion:currentSource.version,locator:{startLine:2,endLine:2},excerpt:'A two-year cost is 1,200,000 yuan.'}],claims:[{id:'cost',version:2,type:'fact',text:'Cost 1,200,000 yuan',dimensionIds:['cost'],evidenceIds:['cost-new'],critical:true}],
+    errata: [{ id: 'new-original-cost', target: { kind: 'source', sourceId: 's', sourceVersion: source.version }, reason: 'Revised source changes the cost; historical report is no longer current' }]});
   expect(loadTaskResults(root,'research','run-2').research!.claims.find(claim=>claim.id==='cost')!.review).toBeUndefined();
+  expect(researchErrataAfter(root, 'research', captured, 0)[0]!.errata[0]!.state).toBe('pending');
   recordAllSources('session-new-review', 'run-2');
   await complete('new-review',{reviews:[{claimRef:{id:'cost',version:2},citationExists:true,support:'supported',finding:'New original supports revised cost'}]});
-  await complete('new-report',{report:{claimRefs:[{id:'cost',version:2},{id:'risk',version:1}],limitations:[],unresolved:[]}});
+  expect(runner.submitNodeOutput('session-new-report', { values: { research: { report: { claimRefs: [{ id: 'cost', version: 2 }, { id: 'risk', version: 1 }], limitations: [], unresolved: [] } } } }).ok).toBe(false);
+  await complete('new-report',{report:{claimRefs:[{id:'cost',version:2},{id:'risk',version:1}],limitations:[],unresolved:[],erratumIds:['new-original-cost'],changeEvidence:['Revised cost source invalidates the historical report; risk is unchanged']}});
   const latest=loadTaskResults(root,'research');expect(latest.runStatus).toBe('completed');expect(latest.research!.blockers).toEqual([]);
   expect(latest.research!.claims.find(claim=>claim.id==='risk')!.reviewer!.runId).toBe('run-1');
   expect(latest.research!.report!.claimRefs).toEqual([{id:'cost',version:2},{id:'risk',version:1}]);
   expect(loadTaskResults(root,'research','run-1').research).toEqual(old.research);
+  // The successor appends its lineage receipt; all prior committed bytes stay intact.
+  expect(readFileSync(join(runDir(root, 'research', 'run-1'), 'run-log.jsonl'), 'utf8').startsWith(oldLog)).toBe(true);
+  expect(researchErrataAfter(root, 'research', captured, Date.now())[0]!.errata[0]).toMatchObject({ id: 'new-original-cost', state: 'resolved', affectedClaimRefs: [{ id: 'cost', version: 1 }], affectedReports: [old.research!.report!.producedBy] });
+  expect(() => researchErrataAfter(root, 'research', { ...captured, retainedBy: 'unrelated-root' }, 0)).toThrow('history is unavailable');
   listeners.clear();runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});
   expect(runner.getLatestRun('research')!.research).toEqual(latest.research);
+  expect(researchErrataAfter(root, 'research', captured, Date.now())[0]!.errata[0]!.state).toBe('resolved');
 });
 
 test('F6-b shared question and its task commit once, with rollback and exact restart identity',async()=>{

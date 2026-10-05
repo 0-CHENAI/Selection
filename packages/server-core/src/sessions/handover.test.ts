@@ -9,7 +9,7 @@ import { SessionManager, createManagedSession } from './SessionManager'
 import { ArtifactVersions } from '../reliability/artifact-versions'
 import { HandoverStore } from '../reliability/handover-store'
 import { writeExecutionCheckpoint } from '../reliability/execution-checkpoint'
-import { parseTaskSpec, saveTaskSpec, writeSpecRevision, freezeResearchSources, ResearchPayloadSchema, appendRunLog, writeNodeAttempt, writeNodeOutput, runDir, type ResearchRecord } from '@craft-agent/shared/tasks'
+import { parseTaskSpec, saveTaskSpec, writeSpecRevision, freezeResearchSources, ResearchPayloadSchema, appendRunLog, writeNodeAttempt, writeNodeOutput, runDir, loadResearchResults, readRunLog, researchErrataAfter, type ResearchRecord } from '@craft-agent/shared/tasks'
 import { TaskRunner } from '../tasks/TaskRunner'
 
 async function fixture(mode: 'NORM' | 'PRO' = 'NORM') {
@@ -339,6 +339,64 @@ test('F5-d research handover preserves current reviewed versions, uncovered ques
     expect(target?.workMode).toBe('NORM'); expect(target?.parentSessionId).toBeUndefined()
     expect(readFileSync(join(getSessionPath(f.root, target!.id), 'data', 'handover', record.handoverId, copy.snapshotPath), 'utf8')).toContain('1000000')
     expect(f.internal.handoverInput(f.internal.sessions.get(target!.id))).toContain('cost')
+  } finally { await f.cleanup() }
+})
+
+test('A3 later canonical corrections reach existing handovers without rewriting snapshots; corrupt receipts are disclosed', async () => {
+  const f = await fixture('PRO')
+  try {
+    const parsed = parseTaskSpec({ schema_version: 3, id: 'research', title: 'Research', goal: 'cost', research: {
+      line: { id: 'main', question: 'cost' }, dimensions: [{ id: 'cost', requirement: 'original cost' }], sources: [{ id: 's', path: 'costs.txt' }],
+    }, nodes: ['researcher', 'reviewer', 'reporter'].map(role => ({ id: role, researchRole: role, prompt: role, outputs: [{ name: 'research', kind: 'param', type: 'json', required: true }] })) })
+    if (!parsed.success) throw new Error(JSON.stringify(parsed.error))
+    const spec = parsed.data
+    const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+    function start(runId: string, predecessor?: string, owner = f.source.id) {
+      writeSpecRevision(f.root, 'research', runId, 0, spec)
+      const sources = freezeResearchSources(f.root, 'research', runId, spec.research!, f.root)
+      const previous = predecessor ? loadResearchResults(f.root, 'research', predecessor)! : undefined
+      appendRunLog(f.root, 'research', runId, { t: new Date().toISOString(), kind: 'run-started', taskId: 'research', runId, orchestratorSessionId: owner, resumedFrom: predecessor, researchSourcesHash: digest(sources),
+        researchPredecessor: previous ? { runId: predecessor!, recordsHash: digest(previous.records), readsHash: digest(previous.reads) } : undefined })
+      return sources
+    }
+    function finish(runId: string, role: ResearchRecord['role'], raw: unknown) {
+      const payload = ResearchPayloadSchema.parse(raw), output = { text: role, params: { research: payload } }
+      writeNodeAttempt(f.root, 'research', runId, role, 1, output)
+      const researchRecord: ResearchRecord = { role, payload, producedBy: { runId, nodeId: role, revision: 0, attempt: 1, sessionId: `${runId}-${role}`, artifactVersion: digest(output) } }
+      appendRunLog(f.root, 'research', runId, { t: new Date().toISOString(), kind: 'node-finished', nodeId: role, sessionId: `${runId}-${role}`, state: 'done', researchRecord })
+    }
+    saveTaskSpec(f.root, parsed.data)
+    const sources = start('original')
+    finish('original', 'researcher', { evidence: [{ id: 'e', sourceId: 's', sourceVersion: sources[0]!.version, locator: { startLine: 1, endLine: 1 }, excerpt: readFileSync(f.file, 'utf8') }], claims: [{ id: 'cost', version: 1, type: 'fact', text: 'Cost 1000000', dimensionIds: ['cost'], evidenceIds: ['e'], critical: true }] })
+    finish('original', 'reviewer', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'supported', finding: 'Original reviewed' }] })
+    finish('original', 'reporter', { report: { claimRefs: [{ id: 'cost', version: 1 }], limitations: [], unresolved: [] } })
+    appendRunLog(f.root, 'research', 'original', { t: new Date().toISOString(), kind: 'run-completed' })
+    f.source.taskSlug = 'research'; f.internal.persistSession(f.source)
+    f.manager.setTaskRunnerLookup(() => new TaskRunner({ host: f.manager, workspaceId: f.workspace.id, workspaceRoot: f.root }))
+    const record = (await f.manager.handoverSession(f.source.id, { type: 'create', handoverId: 'late-erratum', targetMode: 'NORM' })).records[0]!
+    const target = f.internal.sessions.get(record.targetSessionId!)
+    const snapshotPath = join(getSessionPath(f.root, target.id), 'data', 'handover', record.handoverId, 'snapshot.json')
+    const frozen = readFileSync(snapshotPath, 'utf8'), stored = readFileSync(join(f.store.directory(record.handoverId), 'record.json'), 'utf8')
+    expect(record.snapshot!.runs[0]!.logSequence).toBe(5)
+    expect((await f.manager.handoverSession(target.id, { type: 'get', handoverId: record.handoverId })).researchUpdates).toEqual([])
+    const erratum = { id: 'cost-limit', target: { kind: 'claim', claimRef: { id: 'cost', version: 1 } }, reason: 'Previously omitted cost boundary requires revision' }
+    start('successor', 'original'); finish('successor', 'reviewer', { errata: [erratum] })
+    appendRunLog(f.root, 'research', 'successor', { t: new Date().toISOString(), kind: 'run-completed' })
+    // An unrelated root cannot inject a correction into this source-owned history.
+    start('unrelated', 'original', 'another-root'); finish('unrelated', 'reviewer', { errata: [{ ...erratum, id: 'foreign' }] })
+    const updates = (await f.manager.handoverSession(target.id, { type: 'list' })).researchUpdates!
+    expect(updates).toHaveLength(1)
+    expect(updates[0]).toMatchObject({ handoverId: record.handoverId, runId: 'successor', errata: [{ ...erratum, state: 'pending', affectedClaimRefs: [{ id: 'cost', version: 1 }] }] })
+    expect(f.internal.handoverInput(target)).toContain(erratum.reason)
+    // A sequence watermark excludes corrections already included in a snapshot, independent of clock drift.
+    const seq = readRunLog(f.root, 'research', 'successor').length
+    expect(researchErrataAfter(f.root, 'research', { runId: 'successor', retainedBy: f.source.id, logSequence: seq }, 0)).toEqual([])
+    writeNodeAttempt(f.root, 'research', 'successor', 'reviewer', 1, { text: 'tampered' })
+    const unavailable = (await f.manager.handoverSession(target.id, { type: 'get', handoverId: record.handoverId })).researchUpdates!
+    expect(unavailable[0]!.unavailableReason).toContain('integrity is unavailable')
+    expect(f.internal.handoverInput(target)).toContain('Unavailable history does not establish')
+    expect(readFileSync(snapshotPath, 'utf8')).toBe(frozen)
+    expect(readFileSync(join(f.store.directory(record.handoverId), 'record.json'), 'utf8')).toBe(stored)
   } finally { await f.cleanup() }
 })
 

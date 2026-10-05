@@ -47,6 +47,6 @@ export function researchTaskContext(summary: ResearchSummary, nodeId?: string, l
   return { assuranceVersion: summary.assuranceVersion, reads: summary.reads, sourceBundle: summary.sourceBundle, line: summary.line, lines: summary.lines.filter(line => selected.includes(line.id)), questions,
     sources: summary.sources.map(({ text: _text, ...source }) => source), dimensions: summary.dimensions.filter(dimension => selected.includes(dimension.lineId)),
     claims, parentClaims, evidence: summary.records.flatMap(record => record.payload.evidence).filter(evidence => evidenceIds.has(evidence.id)),
-    issues: summary.issues.filter(issue => claims.some(claim => claim.id === issue.claimRef.id)), relations: summary.relations,
+    issues: summary.issues.filter(issue => claims.some(claim => claim.id === issue.claimRef.id)), relations: summary.relations, errata: summary.errata,
     report: summary.report, blockers: summary.blockers };
 }

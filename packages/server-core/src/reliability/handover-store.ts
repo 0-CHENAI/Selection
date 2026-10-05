@@ -81,6 +81,8 @@ export class HandoverStore {
         || action.requestHash !== undefined && !/^[a-f0-9]{64}$/.test(action.requestHash))
       || ['goal','acceptance','constraints','decisions','scopeAndPriority','openQuestions','nextSteps','warnings'].some(key => {
         const value = snapshot[key as keyof HandoverSnapshot]; return !Array.isArray(value) || value.some(item => typeof item !== 'string')
-      }) || !Array.isArray(snapshot.originals) || !Array.isArray(snapshot.claims) || !Array.isArray(snapshot.runs) || !Array.isArray(snapshot.taskList)) throw new Error('Invalid handover snapshot')
+      }) || !Array.isArray(snapshot.originals) || !Array.isArray(snapshot.claims) || !Array.isArray(snapshot.runs)
+      || snapshot.runs.some(run => run.logSequence !== undefined && (!Number.isInteger(run.logSequence) || run.logSequence < 0))
+      || !Array.isArray(snapshot.taskList)) throw new Error('Invalid handover snapshot')
   }
 }

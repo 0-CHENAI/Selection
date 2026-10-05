@@ -132,7 +132,7 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { loadTaskResults, resolveArtifact, readSpecRevision, specRevisionPath } from '@craft-agent/shared/tasks'
+import { loadTaskResults, resolveArtifact, readSpecRevision, specRevisionPath, committedRunLog, readRunLog, readRunState, researchErrataAfter } from '@craft-agent/shared/tasks'
 import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
@@ -10813,8 +10813,23 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const runner = this.taskRunnerLookup?.(source.workspace.id)
       if (!runner) throw new Error('Source workflow state is unavailable; wait for its host to recover')
       return runner.getRunHistory(slug, source.id).map(run => ({ slug, runId: run.runId, revision: run.revision ?? 0, status: run.status, retainedBy: source.id,
-        resumedFrom: run.resumedFrom, supersededBy: run.supersededBy }))
+        resumedFrom: run.resumedFrom, supersededBy: run.supersededBy,
+        logSequence: committedRunLog(readRunLog(source.workspace.rootPath, slug, run.runId), readRunState(source.workspace.rootPath, slug, run.runId)).reduce((seq, entry, index) => Math.max(seq, entry.seq ?? index + 1), 0) }))
     })
+  }
+
+  private handoverResearchUpdates(managed: ManagedSession, records: HandoverRecord[]): NonNullable<HandoverResult['researchUpdates']> {
+    const updates: NonNullable<HandoverResult['researchUpdates']> = [];
+    const seen = new Set<string>();
+    for (const record of records) for (const run of record.snapshot?.runs ?? []) {
+      try {
+        for (const update of researchErrataAfter(managed.workspace.rootPath, run.slug, run, record.snapshot!.capturedAt)) {
+          const identity = `${record.handoverId}/${run.slug}/${update.runId}`;
+          if (!seen.has(identity)) { seen.add(identity); updates.push({ ...update, handoverId: record.handoverId, slug: run.slug }); }
+        }
+      } catch (error) { updates.push({ handoverId: record.handoverId, slug: run.slug, runId: run.runId, errata: [], unavailableReason: error instanceof Error ? error.message : 'Research history unavailable' }); }
+    }
+    return updates;
   }
 
   private handoverWaitReason(source: ManagedSession): string | undefined {
@@ -10864,20 +10879,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     for (const file of record.snapshot.files) {
       if (handoverHash(loadIsolationFile(join(directory, file.snapshotPath))) !== file.hash) throw new Error('Handover input file integrity check failed')
     }
-    return `${handoverBackground(record.snapshot, directory, record.reviews)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.`
+    return `${handoverBackground(record.snapshot, directory, record.reviews)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.\nLater associated research corrections: ${JSON.stringify(this.handoverResearchUpdates(managed, [record]))}\nThe snapshot remains frozen. Later corrections invalidate their affected historical claim/report versions; inspect current independent review before relying on them. Unavailable history does not establish that no correction exists.`
   }
 
   async handoverSession(sessionId: string, operation: HandoverOperation): Promise<HandoverResult> {
     const current = this.sessions.get(sessionId)
     if (!current) throw new Error('Session not found')
     const store = this.handoverStore(current)
-    if (operation.type === 'list') return { records: store.list(sessionId) }
+    if (operation.type === 'list') { const records = store.list(sessionId); return { records, researchUpdates: this.handoverResearchUpdates(current, records) }; }
     const release = store.tryClaim(operation.handoverId)
     if (!release) {
       const existing = store.read(operation.handoverId)
       if ((operation.type === 'create' || operation.type === 'get') && existing
         && (existing.sourceSessionId === sessionId || operation.type === 'get' && existing.targetSessionId === sessionId)
-        && (operation.type !== 'create' || existing.targetMode === operation.targetMode)) return { records: [existing] }
+        && (operation.type !== 'create' || existing.targetMode === operation.targetMode)) return { records: [existing], researchUpdates: this.handoverResearchUpdates(current, [existing]) }
       throw new Error('This handover is being updated; retry after it settles')
     }
     try {
@@ -10986,7 +11001,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           return { ref: file.ref, state: existsSync(file.originalPath) ? handoverHash(loadIsolationFile(file.originalPath)) === file.originalHash ? 'unchanged' as const : 'changed' as const : 'missing' as const }
         } catch { return { ref: file.ref, state: 'unavailable' as const } }
       })) : undefined
-      return { records: [record], changes }
+      return { records: [record], changes, researchUpdates: this.handoverResearchUpdates(current, [record]) }
     } catch (error) {
       const record = store.read(operation.handoverId)
       if (record && record.status !== 'applied' && record.status !== 'cancelled') { record.error = error instanceof Error ? error.message : 'Handover failed'; store.save(record) }

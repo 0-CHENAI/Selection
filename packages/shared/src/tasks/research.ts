@@ -67,13 +67,18 @@ const review = z.object({ claimRef, citationExists: z.boolean(), support: z.enum
   finding: id, limitations: z.array(id).default([]) }).strict();
 const issue = z.object({ id, claimRef, finding: id, disposition: z.enum(['correct', 'add-evidence', 'respond', 'limit', 'followup-task', 'defer']),
   reason: id, revisedClaimRef: claimRef.optional(), followupTaskRef: id.optional() }).strict();
+const erratum = z.object({ id, reason: z.string().trim().min(1), target: z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('claim'), claimRef }).strict(),
+  z.object({ kind: z.literal('source'), sourceId: id, sourceVersion: id }).strict(),
+]) }).strict();
 export const ResearchPayloadSchema = z.object({
   evidence: z.array(evidence).default([]), claims: z.array(claim).default([]), reviews: z.array(review).default([]), issues: z.array(issue).default([]),
+  errata: z.array(erratum).optional(),
   relations: z.array(z.object({ id, type: z.enum(['supports', 'refutes', 'converges']), from: claimRef, to: claimRef, reason: id }).strict()).optional(),
   report: z.object({ claimRefs: z.array(claimRef), limitations: z.array(id), unresolved: z.array(id),
-    alternatives: z.array(id).optional(), changeEvidence: z.array(id).optional() }).strict().optional(),
+    alternatives: z.array(id).optional(), changeEvidence: z.array(id).optional(), erratumIds: z.array(id).optional() }).strict().optional(),
 }).strict().superRefine((payload, ctx) => {
-  for (const field of ['evidence', 'claims', 'issues', 'relations'] as const) {
+  for (const field of ['evidence', 'claims', 'issues', 'relations', 'errata'] as const) {
     const identities = (payload[field] ?? []).map(item => item.id);
     if (new Set(identities).size !== identities.length) ctx.addIssue({ code: 'custom', path: [field], message: `Duplicate ${field} identity` });
   }
@@ -94,6 +99,8 @@ export interface ResearchSummary {
   sourceBundle: { cited: Array<{ sourceId: string; sourceVersion: string; claimRefs: Array<{ id: string; version: number }>; readIds: string[] }>;
     readNotCited: ResearchReadReceipt[]; unresolved: Array<{ claimRef: { id: string; version: number }; evidenceId: string; reason: string }>;
     unrecorded: string[] };
+  errata: Array<NonNullable<ResearchPayload['errata']>[number] & { producedBy: ResearchProducer;
+    affectedClaimRefs: Array<{ id: string; version: number }>; affectedReports: ResearchProducer[]; state: 'pending' | 'resolved' }>;
   line: ResearchConfig['line']; lines: Array<ResearchConfig['line'] & { claimRefs: Array<{id: string; version: number}>; issueIds: string[]; taskRefs: string[]; sourceIds: string[] }> ; questions: NonNullable<ResearchConfig['questions']>;
   relations: Array<NonNullable<ResearchPayload['relations']>[number] & { producedBy: ResearchProducer; current: boolean }>; sources: ResearchSource[]; records: ResearchRecord[];
   dimensions: Array<ResearchConfig['dimensions'][number] & { lineId: string; state: 'covered' | 'limited' | 'uncovered'; claimRefs: Array<{ id: string; version: number }> }>;
@@ -114,6 +121,14 @@ export function validateResearchRecord(config: ResearchConfig, sources: Research
   if (role !== 'reporter' && payload.report) errors.push('Report requires a reporter node');
   const knownClaims = previous.flatMap(entry => entry.payload.claims.map(value => ({ ...value, producer: entry.producedBy })));
   const knownEvidence = previous.flatMap(entry => entry.payload.evidence);
+  for (const value of payload.errata ?? []) {
+    const target = value.target;
+    if (previous.some(entry => entry.payload.errata?.some(old => old.id === value.id))) errors.push(`Erratum ${value.id} is immutable; append a new identity`);
+    if (target.kind === 'claim') {
+      if (![...knownClaims, ...payload.claims].some(claim => key(claim) === key(target.claimRef))) errors.push(`Unknown erratum claim ${key(target.claimRef)}`);
+    } else if (![...sources.map(source => ({ sourceId: source.id, sourceVersion: source.version })), ...knownEvidence, ...payload.evidence]
+      .some(source => source.sourceId === target.sourceId && source.sourceVersion === target.sourceVersion)) errors.push(`Unknown erratum source ${target.sourceId}@${target.sourceVersion}`);
+  }
   for (const value of payload.evidence) {
     if (knownEvidence.some(old => old.id === value.id)) errors.push(`Evidence identity ${value.id} already exists; use a new evidence version identity`);
     const source = sources.find(source => source.id === value.sourceId && source.version === value.sourceVersion);
@@ -160,6 +175,9 @@ export function validateResearchRecord(config: ResearchConfig, sources: Research
     for (const ref of [relation.from, relation.to]) if (![...knownClaims, ...payload.claims].some(claim => key(claim) === key(ref))) errors.push(`Unknown relation claim ${key(ref)}`);
     if (key(relation.from) === key(relation.to)) errors.push('Research relations require distinct conclusions');
   }
+  const knownErrata = [...previous.flatMap(entry => entry.payload.errata ?? []), ...(payload.errata ?? [])];
+  for (const ref of payload.report?.erratumIds ?? []) if (!knownErrata.some(value => value.id === ref)) errors.push(`Unknown report erratum ${ref}`);
+  if (payload.report?.erratumIds && new Set(payload.report.erratumIds).size !== payload.report.erratumIds.length) errors.push('Duplicate report erratum identity');
   return errors;
 }
 const keyLines = (claim: {lineIds?: string[]}, config: ResearchConfig) => [...(claim.lineIds ?? [config.line.id])].sort().join('\n');
@@ -205,6 +223,27 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
     }
   }
   const claims = [...current.values()];
+  const historicalClaims = records.flatMap(record => record.payload.claims);
+  const errata: ResearchSummary['errata'] = records.flatMap(record => (record.payload.errata ?? []).map(value => {
+    const affected = new Map<string, { id: string; version: number }>();
+    for (const claim of historicalClaims) {
+      const direct = value.target.kind === 'claim' ? key(claim) === key(value.target.claimRef)
+        : claim.evidenceIds.some(id => allEvidence.some(evidence => evidence.id === id && value.target.kind === 'source'
+          && evidence.sourceId === value.target.sourceId && evidence.sourceVersion === value.target.sourceVersion));
+      if (direct) affected.set(key(claim), { id: claim.id, version: claim.version });
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const claim of historicalClaims) if (!affected.has(key(claim)) && claim.inputClaimRefs?.some(ref => affected.has(key(ref)))) {
+        affected.set(key(claim), { id: claim.id, version: claim.version }); changed = true;
+      }
+    }
+    return { ...value, producedBy: record.producedBy, affectedClaimRefs: [...affected.values()], state: 'pending' as const,
+      affectedReports: records.filter(record => record.payload.report?.claimRefs.some(ref => affected.has(key(ref)))).map(record => record.producedBy) };
+  }));
+  const invalidated = new Set(errata.flatMap(value => value.affectedClaimRefs.map(key)));
+  for (const value of claims) if (value.review && invalidated.has(key(value))) value.review = { ...value.review, support: 'unverified', finding: `${value.review.finding}; append-only erratum invalidates this exact conclusion version` };
   const cited = new Map<string, ResearchSummary['sourceBundle']['cited'][number]>();
   const unresolved: ResearchSummary['sourceBundle']['unresolved'] = [];
   for (const value of claims) for (const evidenceId of value.evidenceIds) {
@@ -247,6 +286,10 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
   };
   for (const value of current.values()) if (value.review && staleInput(value)) value.review = { ...value.review, support:'unverified', finding:`${value.review.finding}; exact input claim changed or unsupported` };
   const isSupported = (value: ResearchSummary['claims'][number]) => value.review?.citationExists && value.review.support === 'supported';
+  for (const value of errata) value.state = value.affectedClaimRefs.every(ref => {
+    const next = current.get(ref.id);
+    return !!next && !invalidated.has(key(next)) && isSupported(next);
+  }) ? 'resolved' : 'pending';
   for (const issue of issues) {
     const correction = issue.revisedClaimRef ? current.get(issue.revisedClaimRef.id) : undefined;
     const corrected = issue.disposition === 'correct' && correction && correction.version > issue.claimRef.version && isSupported(correction)
@@ -266,8 +309,8 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
     return { ...dimension, lineId: line.id, state: relevant.length && relevant.every(isSupported) ? 'covered' as const : relevant.length ? 'limited' as const : 'uncovered' as const,
       claimRefs: relevant.map(value => ({ id: value.id, version: value.version })) };
   }));
-  const relations = records.flatMap(record => (record.payload.relations ?? []).map(relation => ({...relation,producedBy:record.producedBy,current:[relation.from,relation.to].every(ref => current.get(ref.id)?.version === ref.version)})));
-  const reportRecord = records.findLast(record => record.payload.report);
+  const relations = records.flatMap(record => (record.payload.relations ?? []).map(relation => ({...relation,producedBy:record.producedBy,current:[relation.from,relation.to].every(ref => current.get(ref.id)?.version === ref.version && !invalidated.has(key(ref)))})));
+  const reportRecord = [...records].reverse().find(record => record.payload.report);
   const report = reportRecord?.payload.report ? { ...reportRecord.payload.report, producedBy: reportRecord.producedBy } : undefined;
   const blockers: string[] = [];
   for (const value of claims) {
@@ -276,6 +319,8 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
     if (mandatory && value.review && !isSupported(value) && !issues.some(issue => key(issue.claimRef) === key(value) && issue.reason.trim())) blockers.push(`Claim ${key(value)} requires explicit issue disposition`);
   }
   if (report) {
+    if (errata.length && !report.changeEvidence?.length) blockers.push('Report must disclose append-only errata and affected historical conclusions/reports');
+    for (const value of errata) if (!report.erratumIds?.includes(value.id)) blockers.push(`Report must cite appended erratum ${value.id}`);
     if (lines.length > 1 && (!report.alternatives?.length || !report.changeEvidence?.length)) blockers.push('Conditional report must describe alternatives and evidence that could change the conclusions');
     for (const ref of report.claimRefs) {
       const value = current.get(ref.id);
@@ -291,7 +336,7 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
   return { assuranceVersion: config.assuranceVersion, line: config.line, lines, questions: config.questions ?? [], relations, sources, records, reads, sourceBundle, dimensions,
     coverage: { covered: dimensions.filter(dimension => dimension.state === 'covered').length,
       limited: dimensions.filter(dimension => dimension.state === 'limited').length, uncovered: dimensions.filter(dimension => dimension.state === 'uncovered').length, total: dimensions.length },
-    claims, issues, report, blockers };
+    claims, issues, errata, report, blockers };
 }
 
 /** Visible report is rendered from the same approved versions used by the gate. */
@@ -311,6 +356,7 @@ export function renderResearchReport(summary: ResearchSummary): string {
     ...(summary.report?.alternatives ?? []).map(item => `替代解释：${item}`),
     ...(summary.report?.changeEvidence ?? []).map(item => `可能改变结论的证据：${item}`),
     ...summary.relations.filter(relation => relation.current).map(relation => `研究关系：${key(relation.from)} ${relation.type} ${key(relation.to)}；${relation.reason}`),
+    ...summary.errata.map(value => `追加勘误：${value.id} · ${value.target.kind === 'claim' ? key(value.target.claimRef) : `${value.target.sourceId}@${value.target.sourceVersion}`} · ${value.reason}；影响 ${value.affectedClaimRefs.map(key).join(', ')}；${value.state}`),
     ...(summary.report?.unresolved ?? []).map(item => `未决问题：${item}`),
     `可追溯版本：${refs.map(key).join(', ')}`].join('\n');
 }
