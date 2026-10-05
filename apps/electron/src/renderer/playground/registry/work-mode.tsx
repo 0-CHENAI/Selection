@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtom, useSetAtom } from 'jotai'
+import { useAtom, useSetAtom, useStore } from 'jotai'
 import type { ComponentEntry } from './types'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { BoardListToggle } from '@/components/app-shell/kanban/BoardListToggle'
-import { ExecutionChildren } from '@/components/app-shell/ExecutionChildren'
+import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { SessionItem } from '@/components/app-shell/SessionItem'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import ChatPage from '@/pages/ChatPage'
@@ -31,44 +31,54 @@ import { buildOrchestrationProgressRows } from '@/components/app-shell/kanban/or
 function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 'completed' | 'failed' }) {
   const base = useAppShellContext()
   const { t } = useTranslation()
-  const [selected, setSelected] = React.useState('preview-root')
-  const titles = ['读取原始资料', '审查报告草稿', '独立核验草稿', '修正报告', '核验修订结果']
-  const run: TaskRunSnapshotDto = {
+  const store = useStore()
+  const [previewSessionId, setPreviewSessionId] = React.useState<string | null>(null)
+  const [previewContainer, setPreviewContainer] = React.useState<HTMLDivElement | null>(null)
+  const run = React.useMemo((): TaskRunSnapshotDto => ({
     runId: 'preview-run', taskId: 'preview-task', slug: 'preview-task', status, tokensUsed: 0,
-    nodes: titles.map((title, index) => ({
+    nodes: ['读取原始资料', '审查报告草稿', '独立核验草稿', '修正报告', '核验修订结果'].map((title, index) => ({
       id: `node-${index}`, title, attempt: 1,
       state: status === 'completed' || index < 3 ? 'done' : index === 3 ? (status === 'failed' ? 'failed' : 'running') : 'pending',
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
     })),
-  }
+  }), [status])
   const root = extractSessionMeta({ id: 'preview-root', name: '正式安装包聊天闭环验收', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', workMode: 'PRO', messages: [], lastMessageAt: Date.now(), isProcessing: status === 'running' })
-  const children = run.nodes.filter(node => node.sessionId).map(node => extractSessionMeta({
-    id: node.sessionId!, name: node.title, parentSessionId: root.id, workMode: 'PRO',
-    workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(),
-    isProcessing: node.state === 'running', hasUnread: node.state === 'done',
-  }))
-  const context = createMockContext({ selectedSessionId: selected, onSelectSessionById: setSelected })
-  return <ActionRegistryProvider><SessionListProvider value={context}>
-    <div className="@container h-[480px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
+  const sessions = React.useMemo(() => run.nodes.filter(node => node.sessionId).map(node => ({
+    id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO',
+    workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground',
+    messages: [{ id: `${node.id}-output`, role: 'assistant', content: `${node.title}。\n\n已核对方案 A 的金额为 **1,000,000 元**；方案 B 的统计口径尚未确认，暂时不能直接比较。\n\n此处使用固定预览数据，不调用模型。`, timestamp: 1 }],
+    lastMessageAt: 1, isProcessing: node.state === 'running', permissionMode: 'safe',
+  } as Session)), [run, base.activeWorkspaceId])
+  React.useEffect(() => {
+    store.set(sessionMetaMapAtom, new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
+    store.set(loadedSessionsAtom, new Set(sessions.map(session => session.id)))
+    for (const session of sessions) store.set(sessionAtomFamily(session.id), session)
+  }, [store, sessions])
+  const context = createMockContext({ selectedSessionId: root.id, onSelectSessionById: () => setPreviewSessionId(null) })
+  return <ActionRegistryProvider><FocusProvider><DismissibleLayerProvider><ModalProvider><NavigationProvider workspaceId={base.activeWorkspaceId} workspaceSlug="playground" onCreateSession={base.onCreateSession} isReady={false}><SessionListProvider value={context}>
+    <div className="@container h-[560px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
       style={{ '--accent': 'var(--pro-accent)', '--accent-rgb': 'var(--pro-accent-rgb)' } as React.CSSProperties}>
       <div className="flex h-full min-w-0">
         <aside className="hidden w-60 shrink-0 border-r border-border @min-[600px]:block">
           <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" />
-          <SessionItem item={root} index={0} itemProps={{ onKeyDown: () => {} }} isSelected isFirstInGroup isInMultiSelect={false} onSelect={() => setSelected(root.id)} />
-          <ExecutionChildren children={children} selectedSessionId={selected} onSelect={setSelected} />
+          <SessionItem item={root} index={0} itemProps={{ onKeyDown: () => {} }} isSelected isFirstInGroup isInMultiSelect={false} onSelect={() => setPreviewSessionId(null)} />
         </aside>
-        <main className="min-w-0 flex-1">
-          <PanelHeader title={selected === root.id ? root.name : children.find(child => child.id === selected)?.name} />
-          {selected === root.id && <OrchestrationRunProgressView liveRun={run} rows={buildOrchestrationProgressRows(undefined, run)} onPreviewSession={setSelected}
-            onRetry={status === 'failed' ? () => {} : undefined} />}
-          <div className="p-6 text-sm leading-relaxed text-foreground">
-            <p>{selected === root.id ? '报告已经完成资料核对与草稿审查，正在整合修订结果。' : children.find(child => child.id === selected)?.name}</p>
-            <p className="mt-4 text-foreground/60">固定预览数据；点击进度展开详情，或从左侧查看子代理会话。</p>
+        <main className="min-w-0 flex-1 flex flex-col">
+          <PanelHeader title={root.name} />
+          <div className="min-h-0 flex-1 flex flex-col">
+            <OrchestrationRunProgressView liveRun={run} rows={buildOrchestrationProgressRows(undefined, run)} onPreviewSession={setPreviewSessionId}
+              onRetry={status === 'failed' ? () => {} : undefined} />
+            <div ref={setPreviewContainer} className="relative min-h-0 flex-1 p-6 text-sm leading-relaxed text-foreground">
+              <p>报告已经完成资料核对与草稿审查，正在整合修订结果。</p>
+              <p className="mt-4 text-foreground/60">固定预览数据；点击进度展开详情，再选择任务就地查看子代理输出。</p>
+            </div>
           </div>
+          <ChildSessionPreviewDialog container={previewContainer} sessionId={previewSessionId} open={!!previewSessionId}
+            onOpenChange={open => { if (!open) setPreviewSessionId(null) }} />
         </main>
       </div>
     </div>
-  </SessionListProvider></ActionRegistryProvider>
+  </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider>
 }
 
 // Real composer and rows with deterministic transport; never starts model work.
@@ -137,8 +147,7 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
         <div className="w-64 shrink-0 border-r border-border" data-work-mode-list data-work-mode-transition="list">
           <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" />
           <button type="button" className="px-4 py-2 text-xs text-muted-foreground" onClick={() => setSelected(null)}>新建 {mode}</button>
-          {mode === 'PRO' && <><SessionItem item={extractSessionMeta(sessions[0]!)} index={0} itemProps={{ onKeyDown: () => {} }} isSelected={!!selected} isFirstInGroup isInMultiSelect={false} onSelect={() => select('pro-root')} />
-            <ExecutionChildren children={[extractSessionMeta(sessions[1]!)]} selectedSessionId={selected} onSelect={select} /></>}
+          {mode === 'PRO' && <SessionItem item={extractSessionMeta(sessions[0]!)} index={0} itemProps={{ onKeyDown: () => {} }} isSelected={!!selected} isFirstInGroup isInMultiSelect={false} onSelect={() => select('pro-root')} />}
         </div>
         <div className="min-w-0 flex-1" data-work-mode-chat data-work-mode-transition="chat"><ChatPage sessionId={selected} /></div>
       </div>
@@ -147,7 +156,7 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
 }
 export const workModeComponents: ComponentEntry[] = [{
   id: 'subagent-progress', name: '子代理协作进度', category: 'Session List',
-  description: '实际子代理列表及运行进度组件；固定预览数据，不调用模型。', component: SubagentProgressPreview,
+  description: '主会话内展开任务并就地查看子代理输出；固定预览数据，不调用模型。', component: SubagentProgressPreview,
   props: [{ name: 'status', control: { type: 'select', options: [{ label: '运行中', value: 'running' }, { label: '已完成', value: 'completed' }, { label: '失败', value: 'failed' }] }, defaultValue: 'running' }], layout: 'top',
 }, {
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',

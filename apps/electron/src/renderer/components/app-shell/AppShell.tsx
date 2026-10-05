@@ -69,7 +69,7 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
 import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
-import { executionChildrenByRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
+import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
@@ -1052,11 +1052,6 @@ function AppShellContent({
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
 
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
-  const unownedExecutions = useMemo(() => [...sessionMetaMap.values()].filter(meta =>
-    meta.workModeNeedsReview && (meta.workMode ?? 'NORM') === workModeView
-    && (meta.workspaceId === activeWorkspaceId || meta.workspaceId === remoteWorkspaceId)
-    && isUnownedExecution(meta, sessionMetaMap)
-  ), [sessionMetaMap, workModeView, activeWorkspaceId, remoteWorkspaceId])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
     if (mode === workModeView && !isBoardView) { cancelWorkModeTransition(); return }
     if (isBoardView && !(await leaveOrchestrationView())) return
@@ -2329,7 +2324,6 @@ function AppShellContent({
                   key={sessionFilter?.kind}
                   items={searchActive ? filterSessionsBySidebarProjectScope(workspaceSessionMetas, projectFilter) : filteredSessionMetas}
                   childrenByRoot={workModeView === 'PRO' ? childrenByRoot : undefined}
-                  unownedExecutions={unownedExecutions}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}

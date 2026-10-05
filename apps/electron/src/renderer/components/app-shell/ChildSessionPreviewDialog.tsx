@@ -27,16 +27,19 @@ import type { Session } from '../../../shared/types'
 
 export interface ChildSessionPreviewDialogProps {
   sessionId: string | null
+  container: HTMLElement | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 export function ChildSessionPreviewDialog({
   sessionId,
+  container,
   open,
   onOpenChange,
 }: ChildSessionPreviewDialogProps) {
   const { t } = useTranslation()
+  const previewFocus = React.useRef<{ content: HTMLElement; previous: HTMLElement | null } | null>(null)
   const {
     onOpenFile,
     onOpenUrl,
@@ -92,15 +95,30 @@ export function ChildSessionPreviewDialog({
   })
 
   return (
-    <Dialog open={open && !!sessionId} onOpenChange={onOpenChange} modal={false}>
+    <Dialog open={open && !!sessionId && !!container} onOpenChange={onOpenChange} modal={false}>
       <DialogContent
         overlay={false}
+        portalContainer={container}
+        onEscapeKeyDown={(event) => event.stopPropagation()}
+        onOpenAutoFocus={(event) => {
+          previewFocus.current = {
+            content: event.target as HTMLElement,
+            previous: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          const focus = previewFocus.current
+          if (focus?.previous?.isConnected && (document.activeElement === document.body || focus.content.contains(document.activeElement))) {
+            focus.previous.focus()
+          }
+        }}
         onPointerDownOutside={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
-        className="left-auto right-6 top-[12%] translate-x-0 translate-y-0 sm:max-w-3xl w-[min(42rem,calc(100vw-3rem))] h-[min(70vh,720px)] p-0 gap-0 flex flex-col overflow-hidden"
+        className="absolute inset-y-3 left-auto right-3 z-20 translate-x-0 translate-y-0 max-w-none sm:max-w-none w-[min(32rem,calc(100%-1.5rem))] p-0 gap-0 flex flex-col overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-right-2"
       >
         <DialogHeader className="px-4 py-3 border-b border-border/50 shrink-0">
-          <DialogTitle className="truncate pr-8">{title}</DialogTitle>
+          <DialogTitle className="truncate pr-8 text-sm leading-6">{title}</DialogTitle>
           <DialogDescription className="sr-only">
             {t('chat.viewOutput')}
           </DialogDescription>
@@ -128,7 +146,7 @@ export function ChildSessionPreviewDialog({
               emptyStateLabel={title}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+            <div className="h-full flex items-center justify-center text-sm text-foreground/60">
               {t('chat.sessionNoLongerExists')}
             </div>
           )}

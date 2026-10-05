@@ -46,11 +46,12 @@ describe('shouldPreviewBackgroundTask', () => {
     expect(shouldPreviewBackgroundTask({ type: 'agent', status: 'stale' })).toBe(true)
   })
 
-  it('previews every terminal managed Swarm agent state and ignores shells', () => {
+  it('previews terminal agents with or without orchestration ownership and ignores shells', () => {
     for (const status of ['completed', 'failed', 'stopped', 'orphaned']) {
       expect(shouldPreviewBackgroundTask({ type: 'agent', status, orchestrationId: 'orch-1' })).toBe(true)
+      expect(shouldPreviewBackgroundTask({ type: 'agent', status })).toBe(true)
     }
-    expect(shouldPreviewBackgroundTask({ type: 'agent', status: 'completed' })).toBe(false)
+    expect(shouldPreviewBackgroundTask(undefined)).toBe(false)
     expect(shouldPreviewBackgroundTask({ type: 'shell', status: 'running' })).toBe(false)
   })
 })

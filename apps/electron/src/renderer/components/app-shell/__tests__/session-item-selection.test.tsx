@@ -16,7 +16,6 @@ let SessionListProvider: typeof import('@/context/SessionListContext').SessionLi
 let SessionItem: typeof import('../SessionItem').SessionItem
 let TooltipProvider: typeof import('@craft-agent/ui').TooltipProvider
 let ActionRegistryProvider: typeof import('@/actions/registry').ActionRegistryProvider
-let ExecutionChildren: typeof import('../ExecutionChildren').ExecutionChildren
 const i18n = i18next.createInstance()
 
 beforeAll(async () => {
@@ -26,7 +25,6 @@ beforeAll(async () => {
   ;({ AppShellProvider } = await import('@/context/AppShellContext'))
   ;({ SessionListProvider } = await import('@/context/SessionListContext'))
   ;({ SessionItem } = await import('../SessionItem'))
-  ;({ ExecutionChildren } = await import('../ExecutionChildren'))
 })
 
 function wrap(ui: ReactNode) {
@@ -72,27 +70,5 @@ describe('session row selection', () => {
 
   it('keeps multi-selected conversations accessible', () => {
     expect(render(false, true, false)).toContain('aria-selected="true"')
-  })
-})
-
-describe('execution child disclosure', () => {
-  const children = [
-    { id: 'reader', name: '读取资料', hasUnread: true },
-    { id: 'reviewer', name: '独立核验', isProcessing: true },
-  ] as SessionMeta[]
-
-  it('keeps unread and processing children collapsed without hiding the unread summary', () => {
-    const html = wrap(<ExecutionChildren children={children} selectedSessionId="root" onSelect={() => {}} />)
-    expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('Unread (1)')
-    expect(html).not.toContain('data-session-id="reader"')
-  })
-
-  it('reveals a selected child and retains its real selection and unread indicator', () => {
-    const html = wrap(<ExecutionChildren children={children} selectedSessionId="reader" onSelect={() => {}} />)
-    expect(html).toContain('aria-expanded="true"')
-    expect(html).toContain('data-session-id="reader"')
-    expect(html).toContain('aria-selected="true"')
-    expect(html).toContain('aria-label="Unread (1)"')
   })
 })

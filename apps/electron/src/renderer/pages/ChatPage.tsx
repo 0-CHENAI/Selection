@@ -133,6 +133,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [childPreviewContainer, setChildPreviewContainer] = React.useState<HTMLDivElement | null>(null)
   const [previewChildSessionId, setPreviewChildSessionId] = React.useState<string | null>(null)
   React.useEffect(() => {
     setPreviewChildSessionId(null)
@@ -750,6 +751,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const childPreviewDialog = (
     <ChildSessionPreviewDialog
+      container={childPreviewContainer}
       sessionId={previewChildSessionId}
       open={previewChildSessionId !== null}
       onOpenChange={(open) => {
@@ -852,59 +854,61 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         <>
           <div className="h-full flex flex-col">
             <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-            <div className="flex-1 flex flex-col min-h-0">
+            <div className="relative flex-1 flex flex-col min-h-0">
               {orchestrationProgress}
               {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
                 <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
                   {t('session.workModeNeedsReview')}
                 </div>
               )}
-              <ChatDisplay
-                ref={chatDisplayRef}
-                session={skeletonSession}
-                onSendMessage={() => {}}
-                onOpenFile={handleOpenFile}
-                onOpenArtifact={handleOpenArtifact}
-                onOpenUrl={handleOpenUrl}
-                currentModel={effectiveModel}
-                onModelChange={handleModelChange}
-                onConnectionChange={handleConnectionChange}
-                pendingPermission={undefined}
-                onRespondToPermission={onRespondToPermission}
-                pendingCredential={undefined}
-                onRespondToCredential={onRespondToCredential}
-                thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
-                onThinkingLevelChange={handleThinkingLevelChange}
-                permissionMode={sessionOpts.permissionMode}
-                onPermissionModeChange={setPermissionMode}
-                enabledModes={enabledModes}
-                inputValue={inputValue}
-                onInputChange={handleInputChange}
-                attachmentsValue={attachmentsValue}
-                onAttachmentsChange={handleAttachmentsChange}
-                sources={enabledSources}
-                skills={skills}
-                swarmEnabled={swarmEnabled}
-                onSwarmEnabledChange={undefined}
-                swarmToggleDisabled={swarmToggleDisabled}
-                swarmRunning={orchestrationStatus === 'running'}
-                workspaceId={activeWorkspaceId || undefined}
-                onSourcesChange={handleSourcesChange}
-                workingDirectory={sessionMeta.workingDirectory}
-                composerSessionId={sessionId}
-                onWorkingDirectoryChange={handleWorkingDirectoryChange}
-                messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error}
-                messagesRetrying={messagesRetrying}
-                onRetryMessagesLoad={handleRetryMessagesLoad}
-                searchQuery={sessionListSearchQuery}
-                isSearchModeActive={isSearchModeActive}
-                onMatchInfoChange={onChatMatchInfoChange}
-                connectionUnavailable={connectionUnavailable}
-                compactMode={!!isCompactMode}
-                enableCompactModelPicker={!!isCompactMode}
-                onPreviewSession={setPreviewChildSessionId}
-              />
+              <div ref={setChildPreviewContainer} className="relative min-h-0 flex-1">
+                <ChatDisplay
+                  ref={chatDisplayRef}
+                  session={skeletonSession}
+                  onSendMessage={() => {}}
+                  onOpenFile={handleOpenFile}
+                  onOpenArtifact={handleOpenArtifact}
+                  onOpenUrl={handleOpenUrl}
+                  currentModel={effectiveModel}
+                  onModelChange={handleModelChange}
+                  onConnectionChange={handleConnectionChange}
+                  pendingPermission={undefined}
+                  onRespondToPermission={onRespondToPermission}
+                  pendingCredential={undefined}
+                  onRespondToCredential={onRespondToCredential}
+                  thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+                  onThinkingLevelChange={handleThinkingLevelChange}
+                  permissionMode={sessionOpts.permissionMode}
+                  onPermissionModeChange={setPermissionMode}
+                  enabledModes={enabledModes}
+                  inputValue={inputValue}
+                  onInputChange={handleInputChange}
+                  attachmentsValue={attachmentsValue}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  sources={enabledSources}
+                  skills={skills}
+                  swarmEnabled={swarmEnabled}
+                  onSwarmEnabledChange={undefined}
+                  swarmToggleDisabled={swarmToggleDisabled}
+                  swarmRunning={orchestrationStatus === 'running'}
+                  workspaceId={activeWorkspaceId || undefined}
+                  onSourcesChange={handleSourcesChange}
+                  workingDirectory={sessionMeta.workingDirectory}
+                  composerSessionId={sessionId}
+                  onWorkingDirectoryChange={handleWorkingDirectoryChange}
+                  messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+                  messagesLoadError={messageLoadState.error}
+                  messagesRetrying={messagesRetrying}
+                  onRetryMessagesLoad={handleRetryMessagesLoad}
+                  searchQuery={sessionListSearchQuery}
+                  isSearchModeActive={isSearchModeActive}
+                  onMatchInfoChange={onChatMatchInfoChange}
+                  connectionUnavailable={connectionUnavailable}
+                  compactMode={!!isCompactMode}
+                  enableCompactModelPicker={!!isCompactMode}
+                  onPreviewSession={setPreviewChildSessionId}
+                />
+              </div>
             </div>
           </div>
           <RenameDialog
@@ -945,54 +949,56 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               {t('session.workModeNeedsReview')}
             </div>
           )}
-          <ChatDisplay
-            ref={chatDisplayRef}
-            session={displaySession ?? draftSession}
-            onSendMessage={handleSendMessage}
-            onOpenFile={handleOpenFile}
-            onOpenArtifact={handleOpenArtifact}
-            onOpenUrl={handleOpenUrl}
-            currentModel={effectiveModel}
-            onModelChange={handleModelChange}
-            onConnectionChange={handleConnectionChange}
-            disabled={draftBusy}
-            pendingPermission={pendingPermission}
-            onRespondToPermission={onRespondToPermission}
-            pendingCredential={pendingCredential}
-            onRespondToCredential={onRespondToCredential}
-            thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
-            onThinkingLevelChange={handleThinkingLevelChange}
-            permissionMode={sessionOpts.permissionMode}
-            onPermissionModeChange={setPermissionMode}
-            enabledModes={enabledModes}
-            inputValue={inputValue}
-            onInputChange={handleInputChange}
-            attachmentsValue={attachmentsValue}
-            onAttachmentsChange={handleAttachmentsChange}
-            sources={enabledSources}
-            skills={skills}
-            swarmEnabled={swarmEnabled}
-            onSwarmEnabledChange={undefined}
-            swarmToggleDisabled={swarmToggleDisabled}
-            swarmRunning={orchestrationStatus === 'running'}
-            workspaceId={activeWorkspaceId || undefined}
-            onSourcesChange={handleSourcesChange}
-            workingDirectory={workingDirectory}
-            onWorkingDirectoryChange={handleWorkingDirectoryChange}
-            sessionFolderPath={session?.sessionFolderPath}
-            composerSessionId={sessionId}
-            messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error}
-            messagesRetrying={messagesRetrying}
-            onRetryMessagesLoad={handleRetryMessagesLoad}
-            searchQuery={sessionListSearchQuery}
-            isSearchModeActive={isSearchModeActive}
-            onMatchInfoChange={onChatMatchInfoChange}
-            connectionUnavailable={connectionUnavailable}
-            compactMode={!!isCompactMode}
-            enableCompactModelPicker={!!isCompactMode}
-            onPreviewSession={setPreviewChildSessionId}
-          />
+          <div ref={setChildPreviewContainer} className="relative min-h-0 flex-1">
+            <ChatDisplay
+              ref={chatDisplayRef}
+              session={displaySession ?? draftSession}
+              onSendMessage={handleSendMessage}
+              onOpenFile={handleOpenFile}
+              onOpenArtifact={handleOpenArtifact}
+              onOpenUrl={handleOpenUrl}
+              currentModel={effectiveModel}
+              onModelChange={handleModelChange}
+              onConnectionChange={handleConnectionChange}
+              disabled={draftBusy}
+              pendingPermission={pendingPermission}
+              onRespondToPermission={onRespondToPermission}
+              pendingCredential={pendingCredential}
+              onRespondToCredential={onRespondToCredential}
+              thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+              onThinkingLevelChange={handleThinkingLevelChange}
+              permissionMode={sessionOpts.permissionMode}
+              onPermissionModeChange={setPermissionMode}
+              enabledModes={enabledModes}
+              inputValue={inputValue}
+              onInputChange={handleInputChange}
+              attachmentsValue={attachmentsValue}
+              onAttachmentsChange={handleAttachmentsChange}
+              sources={enabledSources}
+              skills={skills}
+              swarmEnabled={swarmEnabled}
+              onSwarmEnabledChange={undefined}
+              swarmToggleDisabled={swarmToggleDisabled}
+              swarmRunning={orchestrationStatus === 'running'}
+              workspaceId={activeWorkspaceId || undefined}
+              onSourcesChange={handleSourcesChange}
+              workingDirectory={workingDirectory}
+              onWorkingDirectoryChange={handleWorkingDirectoryChange}
+              sessionFolderPath={session?.sessionFolderPath}
+              composerSessionId={sessionId}
+              messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+              messagesLoadError={messageLoadState.error}
+              messagesRetrying={messagesRetrying}
+              onRetryMessagesLoad={handleRetryMessagesLoad}
+              searchQuery={sessionListSearchQuery}
+              isSearchModeActive={isSearchModeActive}
+              onMatchInfoChange={onChatMatchInfoChange}
+              connectionUnavailable={connectionUnavailable}
+              compactMode={!!isCompactMode}
+              enableCompactModelPicker={!!isCompactMode}
+              onPreviewSession={setPreviewChildSessionId}
+            />
+          </div>
         </div>
       </div>
       <RenameDialog

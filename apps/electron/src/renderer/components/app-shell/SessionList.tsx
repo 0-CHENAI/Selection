@@ -16,7 +16,6 @@ import { EntityListEmptyScreen } from "@/components/ui/entity-list-empty"
 import { EntityList, type EntityListGroup } from "@/components/ui/entity-list"
 import { RenameDialog } from "@/components/ui/rename-dialog"
 import { SessionSearchHeader } from "./SessionSearchHeader"
-import { ExecutionChildren } from './ExecutionChildren'
 import { SessionItem } from "./SessionItem"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
@@ -44,7 +43,6 @@ export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'project'
 interface SessionListProps {
   items: SessionMeta[]
   childrenByRoot?: Map<string, SessionMeta[]>
-  unownedExecutions?: SessionMeta[]
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onFlag?: (sessionId: string) => void
   onUnflag?: (sessionId: string) => void
@@ -118,7 +116,6 @@ export type { SessionStatusId }
 export function SessionList({
   items,
   childrenByRoot,
-  unownedExecutions = [],
   onDelete,
   onFlag,
   onUnflag,
@@ -737,7 +734,7 @@ export function SessionList({
 
   // --- Empty state (non-search) — render before EntityList ---
   // Don't show empty state when there are collapsed groups with content
-  if (flatRows.length === 0 && rowData.groups.length === 0 && unownedExecutions.length === 0 && !searchActive) {
+  if (flatRows.length === 0 && rowData.groups.length === 0 && !searchActive) {
     if (currentFilter?.kind === 'archived') {
       return (
         <EntityListEmptyScreen
@@ -777,10 +774,10 @@ export function SessionList({
         renderItem={(row, _indexInGroup, isFirstInGroup) => {
           const flatIndex = rowIndexMap.get(row.item.id) ?? 0
           const rowProps = interactions.getRowProps(row, flatIndex)
+          // Child deep links still highlight their owning root, without adding sidebar rows.
           const executionChildren = childrenByRoot?.get(row.item.id) ?? []
           const selectedId = focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected
           return (
-            <div>
             <SessionItem
               item={row.item}
               index={flatIndex}
@@ -792,8 +789,6 @@ export function SessionList({
               onToggleSelect={() => handleToggleSelect(row, flatIndex)}
               onRangeSelect={() => handleRangeSelect(flatIndex)}
             />
-            <ExecutionChildren children={executionChildren} selectedSessionId={selectedId} onSelect={handleSelectSessionById} />
-            </div>
           )
         }}
         header={
@@ -836,16 +831,11 @@ export function SessionList({
             </div>
           ) : undefined
         }
-        footer={<>
-          <ExecutionChildren children={unownedExecutions}
-            selectedSessionId={focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected}
-            onSelect={handleSelectSessionById} label={t('session.executionOwnershipReview')} />
-          {hasMore ? (
-            <div className="flex justify-center py-4">
-              <Spinner className="text-muted-foreground" />
-            </div>
-          ) : undefined}
-        </>}
+        footer={hasMore ? (
+          <div className="flex justify-center py-4">
+            <Spinner className="text-muted-foreground" />
+          </div>
+        ) : undefined}
         viewportRef={scrollViewportRef}
         containerRef={zoneRef}
         containerProps={{

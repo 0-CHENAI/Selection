@@ -1,6 +1,6 @@
 import { formatDistanceToNowStrict } from "date-fns"
 import type { Locale } from "date-fns"
-import { Circle, ShieldAlert } from "lucide-react"
+import { ShieldAlert } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -20,7 +20,6 @@ import { navigate, routes } from "@/lib/navigate"
 import type { SessionMeta } from "@/atoms/sessions"
 import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
-import { useTranslation } from 'react-i18next'
 
 const PLATFORM_PILL: Record<'lark', { label: string; colorClass: string }> = {
   lark: {
@@ -39,7 +38,6 @@ export interface SessionItemProps {
   onSelect: () => void
   onToggleSelect?: () => void
   onRangeSelect?: () => void
-  isExecutionChild?: boolean
 }
 
 export function SessionItem({
@@ -51,9 +49,7 @@ export function SessionItem({
   onSelect,
   onToggleSelect,
   onRangeSelect,
-  isExecutionChild = false,
 }: SessionItemProps) {
-  const { t } = useTranslation()
   const ctx = useSessionListContext()
   const { workspaces, isCompactMode } = useAppShellContext()
   const canSendToWorkspace = hasTransferTargets(workspaces)
@@ -67,7 +63,7 @@ export function SessionItem({
   const chatMatchCount = isActiveSession ? activeMatch!.count : ripgrepMatchCount
   const hasMatch = chatMatchCount != null && chatMatchCount > 0
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
-  const previewText = isCompactMode && !isExecutionChild ? getSessionPreviewText(item) : null
+  const previewText = isCompactMode ? getSessionPreviewText(item) : null
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
@@ -111,18 +107,17 @@ export function SessionItem({
     <EntityRow
       className="session-item"
       dataAttributes={{ 'data-session-id': item.id }}
-      showSeparator={!isFirstInGroup && !isExecutionChild}
+      showSeparator={!isFirstInGroup}
       separatorClassName="pl-[38px] pr-4"
       isSelected={isSelected}
       isInMultiSelect={isInMultiSelect}
       // When a project stripe is drawn at the leading edge, suppress EntityRow's
       // own blue selection bar so they don't stack. The row's background tint
       // continues to convey "selected".
-      suppressSelectionBar={!!projectColor || isExecutionChild}
+      suppressSelectionBar={!!projectColor}
       onMouseDown={handleClick}
       buttonProps={{
         ...itemProps,
-        className: cn(itemProps.className as string | undefined, isExecutionChild && 'min-h-8 items-center py-1.5 pr-3'),
         'aria-selected': isSelected || isInMultiSelect,
         onKeyDown: (e: React.KeyboardEvent) => {
           ;(itemProps as { onKeyDown: (event: React.KeyboardEvent) => void }).onKeyDown(e)
@@ -160,11 +155,7 @@ export function SessionItem({
         />
       )}
       icon={
-        isExecutionChild ? (
-          <span className="flex size-3.5 items-center justify-center text-foreground/60">
-            {hasPendingPrompt ? <ShieldAlert className="size-3.5 text-info" aria-hidden="true" /> : item.isProcessing ? <Spinner className="text-[10px] text-accent" /> : <Circle className="size-2" aria-hidden="true" />}
-          </span>
-        ) : <>
+        <>
           <div className={cn(
             "flex items-center justify-center overflow-hidden gap-1",
             "transition-all duration-200 ease-out",
@@ -190,7 +181,7 @@ export function SessionItem({
         </>
       }
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
-      titleClassName={cn(isExecutionChild ? 'text-xs font-normal' : 'text-[13px]', item.isAsyncOperationOngoing && "animate-shimmer-text")}
+      titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
       titleSuffix={
         (projectName || hasMessagingBinding) ? (
@@ -222,7 +213,6 @@ export function SessionItem({
         ) : undefined
       }
       titleTrailing={hasMatch ? (
-        <>
         <span
           className={cn(
             "inline-flex items-center justify-center min-w-[24px] px-1 py-0.5 rounded-[6px] text-[10px] font-medium tabular-nums leading-tight whitespace-nowrap shadow-tinted",
@@ -236,12 +226,6 @@ export function SessionItem({
           title={`Matches found (${nextHotkey} next, ${prevHotkey} prev)`}
         >
           {chatMatchCount}
-        </span>
-        {isExecutionChild && hasUnreadMeta(item) && <span className="size-1.5 rounded-full bg-accent" aria-label={t('session.unreadGroup', { count: 1 })} />}
-        </>
-      ) : isExecutionChild ? (
-        <span className="flex w-3 items-center justify-center">
-          {hasUnreadMeta(item) && <span className="size-1.5 rounded-full bg-accent" aria-label={t('session.unreadGroup', { count: 1 })} />}
         </span>
       ) : item.lastMessageAt ? (
         <span className="text-[11px] text-foreground/40 whitespace-nowrap">

@@ -2040,7 +2040,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
                         resolveAnnotationResult={resolveAnnotationResult}
-                        onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy
+                        onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy && !disableSend
                           ? async () => {
                             if (!session) return
                             const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
