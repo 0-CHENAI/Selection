@@ -23,6 +23,7 @@
   width: clamp(80px, 16vw, 128px);
   height: auto;
   flex-shrink: 0;
+  transform: translateY(3px);
   color: var(--pro-accent);
   overflow: visible;
   font-size: 34px;
