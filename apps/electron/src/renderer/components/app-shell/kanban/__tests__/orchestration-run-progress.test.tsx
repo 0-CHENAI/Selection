@@ -33,6 +33,28 @@ function node(partial: Partial<TaskNodeRunStateDto> & Pick<TaskNodeRunStateDto, 
 }
 
 describe('inline orchestration progress', () => {
+  it('uses dispatch times across operations and keeps undispatched or legacy nodes last without fabricated times', () => {
+    const turn: Turn = { type: 'assistant', taskRunId: 'run-1', turnId: 'root', timestamp: 10,
+      isComplete: false, isStreaming: true, activities: [
+        { id: 'read', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 15 },
+        { id: 'review', type: 'intermediate', content: '核对结果', status: 'completed', timestamp: 30 },
+      ] }
+    const projected = withOrchestrationProgress([turn], snapshot({ nodes: [
+      node({ id: 'later', startedAt: 25, state: 'running' }),
+      node({ id: 'first', startedAt: 20, state: 'done' }),
+      node({ id: 'pending' }), node({ id: 'legacy', state: 'done' }),
+    ] }), key => key)[0]
+    if (projected?.type !== 'assistant') throw Error('Missing work chain')
+    expect(projected.activities.filter(row => row.statusType !== 'task_progress').sort((a, b) => a.timestamp - b.timestamp)
+      .map(row => row.id)).toEqual(['read', 'task-node:run-1:first', 'task-node:run-1:later', 'review', 'task-node:run-1:pending', 'task-node:run-1:legacy'])
+    expect(projected.activities.filter(row => row.taskNode).map(row => row.timestamp)).toEqual([25, 20, 30, 30])
+    expect(turn.activities.map(row => row.id)).toEqual(['read', 'review'])
+    const activeOnly = withOrchestrationProgress([turn], snapshot({ nodes: [
+      node({ id: 'active', state: 'running', startedAt: 40 }), node({ id: 'next' }),
+    ] }), key => key)[0]
+    if (activeOnly?.type !== 'assistant') throw Error('Missing active chain')
+    expect(activeOnly.activities.find(row => row.id === 'task-node:run-1:next')?.timestamp).toBe(40)
+  })
   it('updates only the latest matching chain, keeps worker states folded and preserves the report', () => {
     const turns: Turn[] = ['run-1', 'run-2', 'run-1'].map((taskRunId, index) => ({
       type: 'assistant', taskRunId, turnId: `turn-${index}`, activities: [], timestamp: index,
@@ -181,7 +203,7 @@ describe('instance and history visibility', () => {
 
   })
 
-  it('keeps completed runs and past attempts in their own work chains', () => {
+  it('keeps completed runs in their own chains with only the current child session shown', () => {
     const turns: Turn[] = ['old', 'new'].map(taskRunId => ({ type: 'assistant', taskRunId,
       turnId: taskRunId, timestamp: 1, activities: [], isComplete: true, isStreaming: false }))
     const runs = [snapshot({ runId: 'old', status: 'stopped', nodes: [node({ id: 'cost', state: 'cancelled',
@@ -193,7 +215,7 @@ describe('instance and history visibility', () => {
     if (oldTurn?.type !== 'assistant' || newTurn?.type !== 'assistant') throw Error('Missing work chains')
     expect(oldTurn.intent).toContain('tasks.runStatusStopped')
     expect(newTurn.intent).toContain('tasks.runStatusRunning')
-    expect(oldTurn.activities[0]?.taskNode?.attempts).toEqual([{ number: 1, stateLabel: 'tasks.nodeStateFailed', sessionId: 'old-attempt' }])
+    expect(oldTurn.activities[0]?.taskNode).not.toHaveProperty('attempts')
     expect(oldTurn.activities[0]?.taskNode?.sessionId).toBe('latest-attempt')
     expect(newTurn.activities[0]?.taskNode?.sessionId).toBe('new-worker')
     expect(turns.every(turn => turn.type === 'assistant' && !turn.activities.length)).toBe(true)

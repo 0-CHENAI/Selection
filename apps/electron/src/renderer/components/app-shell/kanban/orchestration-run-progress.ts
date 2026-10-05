@@ -18,6 +18,7 @@ export interface OrchestrationProgressRow {
   description?: string
   state: string
   sessionId?: string
+  startedAt?: number
   attempt?: number
   attempts?: TaskNodeRunStateDto["attempts"]
   children?: OrchestrationProgressRow[]
@@ -83,6 +84,7 @@ export function buildOrchestrationProgressRows(
       : taskAssignmentSummary({ kind: 'assignment', instruction: title }) || description || title
     return {
       id: node.id, title: readableTitle, state: node.state, sessionId: node.sessionId, description,
+      ...(Number.isFinite(node.startedAt) ? { startedAt: node.startedAt } : {}),
       ...(node.attempt > 1 ? { attempt: node.attempt } : {}),
       ...(node.attempts?.length ? { attempts: node.attempts } : {}),
     }
@@ -112,7 +114,7 @@ export function countFinishedProgressRows(rows: OrchestrationProgressRow[]): num
   return rows.filter((row) => row.state === 'done' || row.state === 'skipped').length
 }
 
-/** Put child states and historical attempts in the matching execution's collapsed work chain. */
+/** Put child states at their first dispatch time in the matching work chain. */
 export function withOrchestrationProgress(
   turns: Turn[], run: TaskRunSnapshotDto,
   t: (key: string, options?: { count: number }) => string,
@@ -122,28 +124,27 @@ export function withOrchestrationProgress(
   if (latest?.type !== 'assistant') return turns
   const rows = buildOrchestrationProgressRows(undefined, run)
   const summary = `${t('session.executionChildren', { count: rows.length })} · ${countFinishedProgressRows(rows)}/${rows.length} · ${t(runStatusLabelKey(run.status) ?? 'tasks.starting')}`
-  let timestamp = latest.activities.reduce((time, activity) => Math.max(time, activity.timestamp), latest.timestamp)
+  // Undispatched/legacy nodes follow known work without inventing execution times.
+  const fallbackTimestamp = run.nodes.reduce((time, node) => Number.isFinite(node.startedAt) ? Math.max(time, node.startedAt!) : time,
+    latest.activities.reduce((time, activity) => Math.max(time, activity.timestamp), latest.timestamp))
   const statusRows = (nodes: OrchestrationProgressRow[]): ActivityItem[] => nodes.flatMap(row => [{
     id: `task-node:${run.runId}:${row.id}`, type: 'status' as const,
     statusType: 'task_node',
     taskNode: { title: row.title, description: row.description, sessionId: row.sessionId,
       stateLabel: t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted'),
-      ...(row.attempts?.some(attempt => attempt.sessionId !== row.sessionId) ? { attempts: row.attempts.filter(attempt => attempt.sessionId !== row.sessionId).map(attempt => ({
-        number: attempt.attempt, sessionId: attempt.sessionId, stateLabel: t(resolveNodeStatePill(attempt.state).labelKey ?? 'tasks.nodeStateInterrupted'),
-      })) } : {}),
     },
     status: ['done', 'skipped'].includes(row.state) ? 'completed' as const
       : ['failed', 'invalid'].includes(row.state) ? 'error' as const
       : ['running', 'verifying'].includes(row.state) ? 'running' as const : 'pending' as const,
     content: `${row.title} · ${t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted')}`,
-    timestamp: ++timestamp,
+    timestamp: row.startedAt ?? fallbackTimestamp,
   }, ...statusRows(row.children ?? [])])
   const activities = [...latest.activities, ...statusRows(rows), {
     id: `task-progress:${run.runId}`, type: 'status' as const,
     statusType: 'task_progress',
     status: ['running', 'waiting-coordinator', 'verifying', 'repairing'].includes(run.status) ? 'running' as const
       : run.status === 'failed' ? 'error' as const : run.status === 'completed' ? 'completed' as const : 'pending' as const,
-    content: summary, timestamp: ++timestamp,
+    content: summary, timestamp: fallbackTimestamp,
   }]
   return turns.map((turn, turnIndex) => turnIndex === index ? { ...latest, activities, intent: summary } : turn)
 }

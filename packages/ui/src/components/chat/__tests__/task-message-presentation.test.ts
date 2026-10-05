@@ -166,6 +166,9 @@ describe('root orchestration work chain', () => {
       expect(turns[0].activities.filter(item => item.type === 'intermediate').map(item => item.content)).toEqual([
         '已消费结果，等待其他子代理。', '下一步核验修订稿。',
       ])
+      expect(turns[0].activities.filter(item => item.type === 'intermediate').map(item => item.timestamp)).toEqual([3, 6])
+      expect([...turns[0].activities].sort((a, b) => a.timestamp - b.timestamp).map(item => item.id))
+        .toEqual(['cp-1', 'continue', 'ack-1', 'cp-2', 'patch', 'ack-2'])
       expect(turns[0].isComplete).toBe(!running)
       expect(turns[0].turnId).toBe('answer-answer-cp-1')
     }

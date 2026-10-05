@@ -49,9 +49,10 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
       id: `node-${index}`, title, instruction: previewWorkerInstructions[index], attempt: 1,
       state: status === 'completed' || index < 3 ? 'done' : index === 3 ? (status === 'failed' ? 'failed' : 'running') : 'pending',
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
+      ...(status === 'completed' || index < 4 ? { startedAt: startedAt + 1000 + index * 4000 } : {}),
       ...(index === 0 ? { attempt: 2, attempts: [{ attempt: 1, sessionId: 'preview-worker-first', state: 'failed' }, { attempt: 2, sessionId: 'preview-worker-0', state: 'done' }] } : {}),
     })),
-  }), [status])
+  }), [status, startedAt])
   // Historical research assignments used a skills preamble and contained long host JSON.
   const legacyAssignment = `Apply these skills: [skill:deep-research]\n\nResearch role: researcher. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify({
     line: { question: '核对方案成本与风险，保留尚未确认的资料限制', premises: ['金额以人民币元计，只分析两年期间'] },
@@ -59,15 +60,15 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
     dimensions: [{ requirement: '方案 A 两年成本必须可定位原始资料' }, { requirement: '方案 B 的统计口径未确认时，不直接比较' }],
     claims: [{ id: 'cost', version: 2, text: '方案 A 两年成本为 100 万元' }],
   })}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["只读资料，不修改文件或部署"]\nConfirmed plan decisions: ["submit_orchestration_patch depends_on=[review2,basis-review]"]\n\n`
-  const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: 3,
+  const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: startedAt + 22_000,
     content: 'The task "核对成本与风险" has finished running.\nTask slug: preview-task; runId: preview-run; revision: 4\nFrozen plan: {"nodes":[{"id":"cost"}]}\nNode outputs:\n{"claims":[{"id":"cost","version":2}]}\nCall submit_task_verdict with result pass or fail.',
   }, { taskSlug: run.slug })
   const reviewTurn = withOrchestrationProgress(groupMessagesByTurn([
-    { id: 'preview-checkpoint', role: 'user', hidden: true, timestamp: 1, content: 'host checkpoint', taskContext: { kind: 'coordination', runId: run.runId } },
-    { id: 'preview-next-step', role: 'assistant', timestamp: 2, content: '草稿审查已完成；等待修订报告，再核验修订结果。' },
+    { id: 'preview-checkpoint', role: 'user', hidden: true, timestamp: startedAt, content: 'host checkpoint', taskContext: { kind: 'coordination', runId: run.runId } },
+    { id: 'preview-next-step', role: 'assistant', timestamp: startedAt + 11_000, content: '草稿审查已完成；等待修订报告，再核验修订结果。' },
     ...(status === 'completed' ? [reviewMessage,
-      { id: 'preview-verdict', role: 'tool' as const, timestamp: 4, toolName: 'mcp__session__submit_task_verdict', toolStatus: 'completed' as const, toolInput: { runId: run.runId }, content: '', toolResult: '{"status":"completed"}' },
-      { id: 'preview-report', role: 'assistant' as const, timestamp: 5, content: '报告已完成资料核对与草稿审查。方案 B 的统计口径尚未确认，暂时不能直接比较。' },
+      { id: 'preview-verdict', role: 'tool' as const, timestamp: startedAt + 23_000, toolName: 'mcp__session__submit_task_verdict', toolStatus: 'completed' as const, toolInput: { runId: run.runId }, content: '', toolResult: '{"status":"completed"}' },
+      { id: 'preview-report', role: 'assistant' as const, timestamp: startedAt + 24_000, content: '报告已完成资料核对与草稿审查。方案 B 的统计口径尚未确认，暂时不能直接比较。' },
     ] : []),
   ], { isSessionProcessing: false, isTaskOrchestrationRoot: true, isTaskOrchestrationRunning: status === 'running' }), run, t)[0]
   const root = extractSessionMeta({ id: 'preview-root', name: '正式安装包聊天闭环验收', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', workMode: 'PRO', messages: [], lastMessageAt: Date.now(), isProcessing: status === 'running' })

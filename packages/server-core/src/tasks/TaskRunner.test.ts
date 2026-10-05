@@ -140,6 +140,8 @@ describe('TaskRunner (Conductor)', () => {
     };
     runner.run('history', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
     await tick();
+    const dispatchedAt = runner.getRunState('history', 'r1')?.nodes[0]?.startedAt;
+    expect(dispatchedAt).toBe(Date.parse(readRunLog(root, 'history', 'r1').find(entry => entry.kind === 'node-scheduled')!.t));
     // Drive distinct session ids for the initial failure and its manual retry.
     const complete = (id: string, reason: 'error' | 'complete', finalText?: string) => {
       for (const listener of (host as unknown as { listeners: Set<(event: SessionCompletionEvent) => void> }).listeners)
@@ -149,6 +151,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     runner.continue('history', 'r1');
     await tick();
+    expect(runner.getRunState('history', 'r1')?.nodes[0]?.startedAt).toBe(dispatchedAt);
     await runner.stop('history', 'r1');
     runner.run('history', { runId: 'r2', orchestratorSessionId: 'owner', verifyOnComplete: false });
     await tick();
@@ -164,6 +167,8 @@ describe('TaskRunner (Conductor)', () => {
     expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', instruction: 'a', state: 'cancelled', attempt: 2,
       attempts: [{ attempt: 1, sessionId: 'attempt-1', state: 'failed' }, { attempt: 2, sessionId: 'attempt-2', state: 'cancelled' }] });
     expect(history[0]?.nodes[1]?.state).toBe('cancelled');
+    expect(history[0]?.nodes[0]?.startedAt).toBe(dispatchedAt);
+    expect(history[0]?.nodes[1]?.startedAt).toBeUndefined();
     expect(reader.getRunState('history', 'r1')).toBeNull();
     expect(reader.getRunHistory('history', 'unknown')).toEqual([]);
     expect(reader.getRunHistory('history', 'owner')).toEqual(history);

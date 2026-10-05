@@ -71,35 +71,40 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
-  it('keeps past attempts and retry controls inside the expanded work chain', async () => {
+  it('keeps retry controls inside the work chain without a nested attempt history', async () => {
     const activities: ActivityItem[] = [{ id: 'node', type: 'status', status: 'error', timestamp: 1,
-      taskNode: { title: '核对成本', sessionId: 'current', stateLabel: '失败',
-        attempts: [{ number: 1, sessionId: 'previous', stateLabel: '失败' }] } }]
+      taskNode: { title: '核对成本', sessionId: 'current', stateLabel: '失败' } }]
     const options = { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {}, workControls: <button>重试失败节点</button> }
     const html = await renderTurn('zh-Hans', activities, options)
-    expect(html).toContain('历史尝试')
-    expect(html).toContain('第 1 次尝试')
+    expect(html).not.toContain('历史尝试')
+    expect(html).not.toContain('第 1 次尝试')
     expect(html).toContain('重试失败节点')
     const collapsed = await renderTurn('zh-Hans', activities, { ...options, expanded: false })
-    expect(collapsed).toMatch(/aria-hidden="true"[\s\S]*历史尝试[\s\S]*重试失败节点/)
+    expect(collapsed).toMatch(/aria-hidden="true"[\s\S]*重试失败节点/)
     expect(collapsed).toContain('grid-template-rows:0fr')
   })
-  it.each(['en', 'zh-Hans'] as const)('separates child assignments from folded coordinator records in %s', async language => {
+  it.each(['en', 'zh-Hans'] as const)('interleaves child tasks and operations chronologically at the same row level in %s', async language => {
     const html = await renderTurn(language, [
-      { id: 'coordination', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1 },
+      { id: 'last', type: 'intermediate', status: 'completed', timestamp: 5, content: '集中交付修订报告' },
+      { id: 'coordination', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1, displayName: '读取冻结资料' },
+      { id: 'revision', type: 'status', status: 'running', timestamp: 4,
+        taskNode: { title: '修订报告', sessionId: 'revision-worker', stateLabel: '运行中' } },
       { id: 'node', type: 'status', status: 'completed', timestamp: 2,
         taskNode: { title: '核对两年成本', description: '读取原始资料并核对金额。', sessionId: 'worker', stateLabel: '完成' } },
+      { id: 'decision', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 3, displayName: '复核金额差异' },
     ], { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {} })
-    expect(html).toContain('data-work-group="subagents"')
-    expect(html).toContain('读取原始资料并核对金额。')
+    expect(html).not.toContain('data-work-group')
+    expect(html).not.toContain('子代理工作')
+    expect(html).not.toContain('协调与复核')
+    expect(html).not.toContain('历史尝试')
+    expect(html).not.toContain('读取原始资料并核对金额。')
     expect(html).toContain('lucide-users-round')
     expect(html).toMatch(/<button[^>]*>[\s\S]*?核对两年成本/)
-    const coordinator = html.match(/<details[^>]*data-work-group="coordinator"[^>]*>[\s\S]*?<\/details>/)?.[0]
-    expect(coordinator).toBeDefined()
-    expect(coordinator).not.toMatch(/<details[^>]*\bopen=/)
-    expect(coordinator).toContain(language === 'zh-Hans' ? '读取文件' : 'Read')
-    expect(coordinator).not.toContain('核对两年成本')
-    expect(html.indexOf('data-work-group="subagents"')).toBeLessThan(html.indexOf('data-work-group="coordinator"'))
+    const ordered = ['读取冻结资料', '核对两年成本', '复核金额差异', '修订报告', '集中交付修订报告']
+    for (let index = 1; index < ordered.length; index++) {
+      expect(html.indexOf(ordered[index - 1]!)).toBeGreaterThan(-1)
+      expect(html.indexOf(ordered[index - 1]!)).toBeLessThan(html.indexOf(ordered[index]!))
+    }
   })
   it('keeps completed child results inspectable before a root response exists', async () => {
     const html = await renderTurn('zh-Hans', [{ id: 'node', type: 'status', status: 'completed', timestamp: 1,

@@ -225,6 +225,8 @@ export interface NodeRunStatus {
   actor?: TaskNode['actor'];
   title?: string;
   instruction?: string;
+  /** First dispatch time in Unix milliseconds, restored from the durable log. */
+  startedAt?: number;
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[];
   approvalFeedback?: string;
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
@@ -382,6 +384,7 @@ class ActiveRun {
   private progressParentResume?: 'coordinator' | 'verifying';
   private historicalMetrics?: TaskRunMetrics;
   private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string; revision?: number }[]>();
+  private readonly nodeStartedAt = new Map<string, number>();
   private readonly attemptNumbers = new Map<string, number>();
   private readonly attemptRevisions = new Map<string, number>();
   private readonly state = new Map<string, NodeStateEntry>();
@@ -1220,6 +1223,7 @@ class ActiveRun {
         id,
         title: node ? nodeDisplayTitle(node) : id,
         instruction: node?.prompt,
+        startedAt: this.nodeStartedAt.get(id),
         attempts: this.attemptHistory.get(id)?.map(attempt => ({ ...attempt })),
         definitionId: node?.id ?? definitionId(id),
         state: st.state,
@@ -3965,7 +3969,11 @@ class ActiveRun {
     return ['## Inputs by dependency', ...sections].join('\n\n');
   }
 
-  private recordAttempt(entry: RunLogEntryInput & { revision?: number }): void {
+  private recordAttempt(entry: RunLogEntryInput & { revision?: number; t?: string }): void {
+    if ((entry.kind === 'node-scheduled' || entry.kind === 'node-spawned') && !this.nodeStartedAt.has(entry.nodeId)) {
+      const startedAt = Date.parse(entry.t ?? '');
+      if (Number.isFinite(startedAt)) this.nodeStartedAt.set(entry.nodeId, startedAt);
+    }
     if (entry.kind === 'node-scheduled') {
       this.attemptNumbers.set(entry.nodeId, (this.attemptNumbers.get(entry.nodeId) ?? 0) + 1);
       this.attemptRevisions.set(entry.nodeId, entry.revision ?? 0);
@@ -4002,7 +4010,7 @@ class ActiveRun {
       seq,
       revision: this.revision,
     });
-    this.recordAttempt({ ...entry, revision: this.revision });
+    this.recordAttempt({ ...entry, t, revision: this.revision });
     this.writeCheckpoint(seq);
     if (
       entry.kind === 'run-started' ||

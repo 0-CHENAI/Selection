@@ -465,6 +465,8 @@ export interface TaskNodeRunStateDto {
   title?: string
   /** Frozen node assignment for display; never grants execution authority. */
   instruction?: string
+  /** First dispatch time in Unix milliseconds; absent on legacy snapshots. */
+  startedAt?: number
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
   approvalFeedback?: string
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }

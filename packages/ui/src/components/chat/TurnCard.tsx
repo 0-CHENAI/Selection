@@ -290,8 +290,7 @@ export interface ActivityItem {
   /** Readable internal task step; its protocol stays out of the response body. */
   taskContext?: import('@craft-agent/core').Message['taskContext']
   /** Child execution identity, kept separate from the coordinator's own tools. */
-  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string;
-    attempts?: { number: number; sessionId: string; stateLabel: string }[] }
+  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
   attachments?: import('@craft-agent/core').Message['attachments']
   /** Live-only text/image blocks from a tool result. */
   toolResultContent?: AgentToolResultContent[]
@@ -322,6 +321,8 @@ export interface ResponseContent {
   isAnswerPreview?: boolean
   text: string
   isStreaming: boolean
+  /** Original message time for retaining chronology if demoted into the work chain. */
+  timestamp?: number
   streamStartTime?: number
   /** Completion clock for the one-shot local reveal; old responses render immediately. */
   completedRevealStartTime?: number
@@ -804,7 +805,6 @@ interface ActivityRowProps {
   activity: ActivityItem
   /** Callback to open activity details in Monaco */
   onOpenDetails?: () => void
-  onOpenAttempt?: (sessionId: string) => void
   /** Whether this is the last child at its depth level (for └ corner in tree view) */
   isLastChild?: boolean
   /** Session folder path for stripping from file paths in tool display */
@@ -1078,40 +1078,25 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
 }
 
 /** Single activity row in expanded view */
-function ActivityRow({ activity, onOpenDetails, onOpenAttempt, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
-  const { t } = useTranslation()
+function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
   if (activity.taskNode) {
     const node = activity.taskNode
     const content = <>
-      <UsersRound className={cn(SIZE_CONFIG.iconSize, 'mt-0.5 shrink-0 text-accent')} aria-hidden="true" />
-      <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="min-w-0 font-medium text-foreground [overflow-wrap:anywhere]">{node.title}</span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <ActivityStatusIcon status={activity.status} />{node.stateLabel}
-          </span>
-        </span>
-        {node.description && node.description !== node.title && <span className="mt-1 block whitespace-pre-wrap text-foreground/75 [overflow-wrap:anywhere]">{node.description}</span>}
+      <UsersRound className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-accent')} aria-hidden="true" />
+      <span className="min-w-0 truncate text-foreground/75">{node.title}</span>
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
+        <ActivityStatusIcon status={activity.status} />{node.stateLabel}
       </span>
-      {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'mt-0.5 shrink-0 text-muted-foreground')} aria-hidden="true" />}
+      {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'ml-auto shrink-0 text-muted-foreground')} aria-hidden="true" />}
     </>
-    const className = cn('flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left', SIZE_CONFIG.fontSize)
-    return <div>
+    const className = cn('flex w-full min-w-0 items-center gap-2 rounded-md py-0.5 text-left', SIZE_CONFIG.fontSize)
+    return <div className="flex items-stretch">
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
       {node.sessionId && onOpenDetails
         ? <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} onClick={onOpenDetails}>{content}</button>
         : <div className={className}>{content}</div>}
-      {!!node.attempts?.length && <details className="ml-6 text-xs text-muted-foreground">
-        <summary className="w-fit cursor-pointer py-1 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{t('tasks.attemptHistory')}</summary>
-        <div className="flex flex-wrap gap-1 py-1">
-          {node.attempts.map(attempt => <button key={attempt.sessionId} type="button" disabled={!onOpenAttempt}
-            className="rounded px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
-            onClick={() => onOpenAttempt?.(attempt.sessionId)}>
-            {t('tasks.runAttempt', { number: attempt.number })} · {attempt.stateLabel}
-          </button>)}
-        </div>
-      </details>}
     </div>
   }
 
@@ -3288,21 +3273,18 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities, response, isComplete],
   )
 
-  const subagentActivities = useMemo(() => visibleActivities.filter(activity => activity.taskNode), [visibleActivities])
-  const coordinatorActivities = useMemo(() => visibleActivities.filter(activity => !activity.taskNode), [visibleActivities])
-  const CoordinatorRecords = subagentActivities.length ? 'details' : 'div'
-
-  // Check if we have any Task subagents - if so, use grouped view
+  // PRO workers share one chronological chain with coordinator operations.
+  // Keep the existing SDK Task tree only for turns without orchestration rows.
   const hasTaskSubagents = useMemo(
-    () => coordinatorActivities.some(a => isParentTaskTool(a.toolName ?? '')),
-    [coordinatorActivities]
+    () => !visibleActivities.some(a => a.taskNode) && visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    [visibleActivities]
   )
 
   // Group activities by parent Task for better visualization
   // Only group if there are Task subagents, otherwise keep flat for simpler view
   const groupedActivities = useMemo(
-    () => hasTaskSubagents ? groupActivitiesByParent(coordinatorActivities) : null,
-    [coordinatorActivities, hasTaskSubagents]
+    () => hasTaskSubagents ? groupActivitiesByParent(visibleActivities) : null,
+    [visibleActivities, hasTaskSubagents]
   )
 
   const renderedActivityRows = useMemo(
@@ -3316,8 +3298,8 @@ export const TurnCard = React.memo(function TurnCard({
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
-    () => !hasTaskSubagents ? computeLastChildSet(coordinatorActivities) : new Set<string>(),
-    [coordinatorActivities, hasTaskSubagents]
+    () => !hasTaskSubagents ? computeLastChildSet(visibleActivities) : new Set<string>(),
+    [visibleActivities, hasTaskSubagents]
   )
 
   const hasVisibleResponse = !!response && (
@@ -3477,20 +3459,6 @@ export const TurnCard = React.memo(function TurnCard({
                   {/* Rows joining a header that is already on screen slide in;
                       history and a header mounting with its rows do not. */}
                   <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
-                  {!!subagentActivities.length && <WorkChainRow key="subagent-work" reduceMotion={reduceMotion} stagger={!!staggerOnThisExpand} staggerIndex={0}>
-                    <div data-work-group="subagents" className="pb-2">
-                      <p className="px-2 py-1 text-xs font-medium text-foreground/80">{t('chat.subagentWork', { count: subagentActivities.length })}</p>
-                      {subagentActivities.map(activity => <ActivityRow key={activity.id} activity={activity}
-                        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
-                        onOpenAttempt={onOpenActivityDetails ? sessionId => onOpenActivityDetails({ ...activity, taskNode: { ...activity.taskNode!, sessionId } }) : undefined} />)}
-                    </div>
-                  </WorkChainRow>}
-                  {!!coordinatorActivities.length && <CoordinatorRecords key="coordinator-work" data-work-group={subagentActivities.length ? 'coordinator' : undefined}
-                    className={subagentActivities.length ? 'group/coordinator border-t border-border/40 py-1' : undefined}>
-                  {!!subagentActivities.length && <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-                    <ChevronRight className="size-3.5 shrink-0 transition-transform group-open/coordinator:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                    {t('chat.coordinationWork', { count: coordinatorActivities.length })}
-                  </summary>}
                   {/* Grouped view for Task subagents */}
                   {groupedActivities ? (
                     groupedActivities.map((item, index) => (
@@ -3530,7 +3498,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
-                    coordinatorActivities.map((activity, index) => (
+                    visibleActivities.map((activity, index) => (
                       <WorkChainRow
                         key={activity.id}
                         reduceMotion={reduceMotion}
@@ -3547,7 +3515,6 @@ export const TurnCard = React.memo(function TurnCard({
                       </WorkChainRow>
                     ))
                   )}
-                  </CoordinatorRecords>}
                   {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {reserveThinkingSlot && (

@@ -237,7 +237,7 @@ export function demoteResponseToWorkChain(turn: AssistantTurn): void {
         type: 'intermediate',
         status: 'completed',
         content: response.text,
-        timestamp: turn.timestamp,
+        timestamp: response.timestamp ?? response.streamStartTime ?? turn.timestamp,
         depth: 0,
       })
     }
@@ -915,6 +915,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           currentTurn.response = {
             text: promotedText,
             isStreaming: false,
+            timestamp: lastTextActivity.timestamp,
             messageId: lastTextActivity.id,
           }
           // The same body has changed semantic roles from process commentary
@@ -1159,6 +1160,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         if (keepOnCard) {
           currentTurn.response = {
             text: message.content,
+            timestamp: message.timestamp,
             isStreaming: !!(message.isStreaming || message.isPending),
             isCommentary: false,
             streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
@@ -1202,6 +1204,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
+        timestamp: message.timestamp,
         isAnswerPreview: message.answerPreview,
         answerSalvaged: message.answerSalvaged,
         artifactVersions: message.artifactVersions,
