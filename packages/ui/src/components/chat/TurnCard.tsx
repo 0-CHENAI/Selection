@@ -503,6 +503,12 @@ function formatToolInput(
   // For call_llm: model shown as badge, prompt duplicates intent
   if (toolName === 'mcp__session__call_llm') return ''
 
+  // Task protocol payloads are machine inputs. The row already shows the action
+  // and intent; keep full values in the existing tool inspector, not inline.
+  if (['submit_task_output', 'submit_task_verdict', 'submit_task_node_verdict',
+    'submit_orchestration_decision', 'submit_orchestration_patch', 'get_task_results']
+    .includes(normalizeCraftSessionToolName(toolName ?? ''))) return ''
+
   const parts: string[] = []
 
   // For Edit/Write tools, only show file_path (skip old_string, new_string, replace_all, content)
@@ -1068,6 +1074,29 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
 
   if (activity.type === 'task-context' && activity.taskContext) {
     const context = activity.taskContext
+    if (context.briefing) {
+      return <div className="flex min-w-0 items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <details className={cn('group/task min-w-0 flex-1 text-muted-foreground', SIZE_CONFIG.fontSize)}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-success')} aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words">{i18n.t('chat.taskContext.assignment.title')}{context.title && ` · ${context.title}`}</span>
+            <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'shrink-0 transition-transform group-open/task:rotate-90 motion-reduce:transition-none')} aria-hidden="true" />
+          </summary>
+          <div className="space-y-3 py-2 pl-6 text-foreground/75 [overflow-wrap:anywhere]">
+            {context.description && <div><p className="mb-1 font-medium text-foreground">{i18n.t('tasks.goal')}</p><p className="whitespace-pre-wrap">{context.description}</p></div>}
+            {([
+              ['tasks.research.scope.requirements', context.briefing.requirements],
+              ['tasks.research.sources', context.briefing.sources],
+              ['tasks.research.limits', context.briefing.limits],
+            ] as const).filter(([, items]) => items.length).map(([label, items]) => <div key={label}>
+              <p className="mb-1 font-medium text-foreground">{i18n.t(label)}</p>
+              <ul className="list-disc space-y-1 pl-4">{items.map((item, index) => <li key={index} className="whitespace-pre-wrap">{item}</li>)}</ul>
+            </div>)}
+          </div>
+        </details>
+      </div>
+    }
     activity = {
       ...activity,
       type: 'status',
@@ -1167,7 +1196,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
             )}
           </div>
-          <span className="truncate">{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
+          <span className={activity.taskContext ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'truncate'}>{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
         </div>
       </div>
     )

@@ -323,6 +323,12 @@ export interface Message {
     runId?: string;
     title?: string;
     description?: string;
+    /** Human-readable assignment inputs; the model protocol remains in content. */
+    briefing?: {
+      requirements: string[];
+      sources: string[];
+      limits: string[];
+    };
   };
   timestamp: number;
   // Tool-specific fields

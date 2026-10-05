@@ -8,6 +8,7 @@ import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ActivityItem } from '../TurnCard'
+import { TooltipProvider } from '../../tooltip'
 
 // TurnCard's pure preview helpers use the shared i18next singleton, so the
 // provider and helpers must use the same initialized instance and real locales.
@@ -49,6 +50,7 @@ async function renderTurn(
 
   return renderToStaticMarkup(
     <I18nextProvider i18n={testI18n}>
+      <TooltipProvider>
       <TurnCard
         turnId="issue-239"
         activities={activities}
@@ -57,6 +59,7 @@ async function renderTurn(
         defaultExpanded
         renderActionsMenu={() => null}
       />
+      </TooltipProvider>
     </I18nextProvider>,
   )
 }
@@ -94,6 +97,37 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).not.toContain('<article')
     expect(activity.type).toBe('task-context')
     expect(activity.content).toContain('internal-run-123')
+  })
+
+  it.each(['en', 'zh-Hans'] as const)('provides a folded, fully readable assignment brief without raw fields in %s', async language => {
+    const html = await renderTurn(language, [{
+      id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1,
+      content: 'Apply these skills: [skill:deep-research] {"hash":"internal-hash","depends_on":["cost"]}',
+      taskContext: { kind: 'assignment', description: '核对两年成本', briefing: {
+        requirements: ['关键金额须经独立审查'], sources: ['已冻结的原始成本资料'], limits: ['只读资料，不修改文件'],
+      } },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }], { isComplete: true, isStreaming: false })
+    expect(html).toContain('<details')
+    expect(html).not.toContain('<details open')
+    expect(html).toContain('<summary')
+    expect(html).toContain('lucide-circle-check')
+    for (const text of ['核对两年成本', '关键金额须经独立审查', '已冻结的原始成本资料', '只读资料，不修改文件']) expect(html).toContain(text)
+    expect(html).toContain(resources[language].translation['tasks.research.sources'])
+    expect(html).not.toMatch(/internal-hash|depends_on|Apply these skills|查看原始记录/)
+  })
+
+  it('keeps structured research submissions readable while preserving rejected verdicts', async () => {
+    const html = await renderTurn('zh-Hans', [
+      { id: 'output', type: 'tool', status: 'completed', timestamp: 1, toolName: 'mcp__session__submit_task_output',
+        displayName: '提交研究记录', intent: '登记核对后的成本与资料限制', toolInput: { values: { research: { claims: [{ id: 'cost', evidenceIds: ['e-cost'], sourceVersion: 'internal-hash' }] } } } },
+      { id: 'verdict', type: 'tool', status: 'error', timestamp: 2, toolName: 'mcp__session__submit_task_node_verdict',
+        displayName: '提交核验结果', intent: '核验成本记录', toolInput: { result: 'pass', runId: 'internal-run' }, error: '此会话没有验证运行' },
+    ], { isComplete: true, isStreaming: false })
+    expect(html).toContain('提交研究记录')
+    expect(html).toContain('登记核对后的成本与资料限制')
+    expect(html).toContain('data-slot="activity-error-badge"')
+    expect(html).toContain('错误')
+    expect(html).not.toMatch(/sourceVersion|internal-hash|internal-run|evidenceIds/)
   })
 
   it('localizes the live header and renders one spinner for an intermediate row', async () => {

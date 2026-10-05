@@ -6,6 +6,12 @@ import { groupMessagesByTurn } from '../turn-utils'
 const assignment = 'Canonical execution identity: slug="task", runId="run-123", nodeId="risk".\nOriginal user goal: 比较成本与风险\nAcceptance criteria: 保留资料限制\nResearch role: researcher. Frozen research criteria and records: {"sourceVersion":"abc123"}'
 const verification = 'The task "成本与风险" has finished running.\nTask slug: task; runId: run-123\nNode outputs:\n{"claims":[]}\nCall submit_task_verdict with result pass or fail.'
 const user = (content: string): Message => ({ id: 'user', role: 'user', timestamp: 1, content })
+const legacyResearchAssignment = `Apply these skills: [skill:deep-research]\n\nResearch role: researcher. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify({
+  line: { question: '比较两年成本与风险', premises: ['只分析两年期间'] },
+  dimensions: [{ requirement: '成本必须可定位原始资料' }],
+  sources: [{ ref: '已冻结的成本资料', hash: 'internal-hash', snapshotPath: '/internal/source.txt' }],
+  claims: [{ id: 'cost', version: 1 }],
+})}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["不得修改文件","只分析两年期间"]\nConfirmed plan decisions: ["submit_orchestration_patch with depends_on=[cost]"]\n\nRead the original source and submit values.research.`
 
 describe('task message presentation', () => {
   it('makes an owned historical assignment readable without mutating its protocol or routing', () => {
@@ -20,6 +26,40 @@ describe('task message presentation', () => {
   it('recognizes result review and coordinator checkpoints on historical roots', () => {
     expect(withTaskMessagePresentation(user(verification), { taskSlug: 'task' }).taskContext).toEqual({ kind: 'verification' })
     expect(withTaskMessagePresentation(user('Conductor checkpoint (batch-complete). Call submit_orchestration_decision with action continue.'), { taskSlug: 'task' }).taskContext).toEqual({ kind: 'coordination' })
+  })
+
+  it('projects the real legacy skill-prefixed research format into readable inputs and preserves the answer', () => {
+    const message = user(legacyResearchAssignment)
+    const presented = withTaskMessagePresentation(message, { taskSlug: 'task', nodeId: 'cost', title: 'cost' })
+    expect(presented.taskContext).toEqual({
+      kind: 'assignment', description: '比较两年成本与风险',
+      briefing: { requirements: ['成本必须可定位原始资料'], sources: ['已冻结的成本资料'], limits: ['只分析两年期间', '不得修改文件'] },
+    })
+    expect(JSON.stringify(presented.taskContext)).not.toMatch(/internal-hash|snapshotPath|depends_on|values\.research/)
+    const answer = { ...user('成本已核对，风险资料存在缺口。'), id: 'answer', role: 'assistant' as const }
+    const turns = groupMessagesByTurn([presented, answer], { isSessionProcessing: false })
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.type === 'assistant' && turns[0].response?.text).toBe(answer.content)
+    expect(message).not.toHaveProperty('taskContext')
+    expect(presented.content).toBe(legacyResearchAssignment)
+  })
+
+  it('enriches current assignment metadata without changing its host-provided title, goal or run identity', () => {
+    const message = { ...user(legacyResearchAssignment), taskContext: { kind: 'assignment' as const, runId: 'run', title: '核对资料', description: '原目标' } }
+    expect(withTaskMessagePresentation(message, { taskSlug: 'task', nodeId: 'cost' }).taskContext).toMatchObject({
+      ...message.taskContext, briefing: { sources: ['已冻结的成本资料'] },
+    })
+    expect(message.taskContext).not.toHaveProperty('briefing')
+  })
+
+  it('handles damaged research JSON without displaying protocol and leaves skill-only user messages alone', () => {
+    const damaged = user('Apply these skills: [skill:deep-research]\n\nResearch role: researcher. Frozen research criteria and records: {broken-json}')
+    expect(withTaskMessagePresentation(damaged, { taskSlug: 'task', nodeId: 'cost' }).taskContext).toEqual({ kind: 'assignment' })
+    for (const message of [user('Apply these skills: [skill:deep-research]\n\n这是用户要求'), user(legacyResearchAssignment)]) {
+      expect(withTaskMessagePresentation(message, {})).toBe(message)
+    }
+    const ordinary = user('Apply these skills: [skill:deep-research]\n\n这是用户要求')
+    expect(withTaskMessagePresentation(ordinary, { taskSlug: 'task', nodeId: 'cost' })).toBe(ordinary)
   })
 
   it('preserves ordinary JSON, quoted protocols outside tasks, partial matches and assistant answers', () => {

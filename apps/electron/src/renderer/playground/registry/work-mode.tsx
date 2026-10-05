@@ -42,6 +42,13 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
     })),
   }), [status])
+  // Historical research assignments used a skills preamble and contained long host JSON.
+  const legacyAssignment = `Apply these skills: [skill:deep-research]\n\nResearch role: researcher. Frozen research criteria and records (read necessary original source snapshot paths independently): ${JSON.stringify({
+    line: { question: '核对方案成本与风险，保留尚未确认的资料限制', premises: ['金额以人民币元计，只分析两年期间'] },
+    sources: [{ ref: '已冻结的成本原始资料', hash: '4c99133f'.repeat(8), snapshotPath: '/internal/research/source-0.txt' }],
+    dimensions: [{ requirement: '方案 A 两年成本必须可定位原始资料' }, { requirement: '方案 B 的统计口径未确认时，不直接比较' }],
+    claims: [{ id: 'cost', version: 2, text: '方案 A 两年成本为 100 万元' }],
+  })}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["只读资料，不修改文件或部署"]\nConfirmed plan decisions: ["submit_orchestration_patch depends_on=[review2,basis-review]"]\n\n独立读取原始资料并核对金额。`
   const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: 3,
     content: 'The task "核对成本与风险" has finished running.\nTask slug: preview-task; runId: preview-run; revision: 4\nFrozen plan: {"nodes":[{"id":"cost"}]}\nNode outputs:\n{"claims":[{"id":"cost","version":2}]}\nCall submit_task_verdict with result pass or fail.',
   }, { taskSlug: run.slug })
@@ -58,11 +65,11 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
     id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO', taskSlug: run.slug, taskNodeId: node.id,
     workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground',
     messages: [
-      { id: `${node.id}-assignment`, role: 'user', content: `Canonical execution identity: slug="preview-task", runId="preview-run", nodeId="${node.id}", attempt=1, revision=4.\nOriginal user goal: 核对方案成本与风险，保留尚未确认的资料限制\nAcceptance criteria: 每项重要结论须经独立审查\nResearch role: researcher. Frozen research criteria and records: ${JSON.stringify({ sources: [{ id: 'cost-source', sourceVersion: '4c991335faba0554887a6e679c276035b886b13a6d88c6da6fbc4868c0a144fb6' }], claims: [{ id: 'cost', version: 2, text: '方案 A 两年成本为 100 万元' }] })}`, timestamp: startedAt },
+      { id: `${node.id}-assignment`, role: 'user', content: legacyAssignment, timestamp: startedAt },
       { id: `${node.id}-output`, role: 'assistant', content: `${node.title}。\n\n已核对方案 A 的金额为 **1,000,000 元**；方案 B 的统计口径尚未确认，暂时不能直接比较。\n\n此处使用固定预览数据，不调用模型。`, timestamp: startedAt + 1000 },
     ],
     lastMessageAt: startedAt + 1000, isProcessing: node.state === 'running', permissionMode: 'safe',
-  } as Session)), [run, base.activeWorkspaceId, startedAt])
+  } as Session)), [run, base.activeWorkspaceId, startedAt, legacyAssignment])
   React.useEffect(() => {
     store.set(sessionMetaMapAtom, new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
     store.set(loadedSessionsAtom, new Set(sessions.map(session => session.id)))

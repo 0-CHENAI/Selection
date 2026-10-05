@@ -121,6 +121,9 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
       lastMessageAt: sessionMeta.lastMessageAt || 0,
       messages: [],
       isProcessing: sessionMeta.isProcessing || false,
+      taskSlug: sessionMeta.taskSlug,
+      taskNodeId: sessionMeta.taskNodeId,
+      parentSessionId: sessionMeta.parentSessionId,
     }
   }, [session, sessionId, sessionMeta])
 
