@@ -35,7 +35,7 @@ function ProModeBadge() {
             aria-label={t('session.currentProMode')}
             aria-haspopup="dialog"
             aria-expanded={open}
-            className="session-mode-badge ml-2 inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--pro-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="session-mode-badge ml-2 inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--pro-accent)]"
           >
             PRO
           </button>

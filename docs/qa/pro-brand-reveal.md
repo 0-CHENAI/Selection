@@ -41,3 +41,11 @@ PRO 保持单层、实心金色字面，移除描边绘制、叠层和扫光。�
 以下截图来自本次横向布局调整后的实际 Electron 窗口。
 
 ![浅色主题](pro-brand-reveal-light.png)
+
+## 铭牌焦点样式
+
+展示层关闭后，焦点返回铭牌会触发可见焦点样式。原来的 2px 外圈与 2px 间隙产生了第二层外框，现改为 1px 内部描边，保持铭牌单层轮廓。
+
+实际 Electron 窗口确认三连击打开、Esc 关闭后焦点返回且没有外圈；随后 Enter 仍能打开，Esc 再次关闭并恢复焦点。此次样式调整通过 Electron 类型检查、文件 ESLint、Impeccable 机械检测和 renderer 生产构建。
+
+![铭牌焦点恢复](pro-badge-focus.png)
