@@ -528,6 +528,10 @@ export function parseError(
   } else if (isLikelyProxyInterception(lowerMessage)) {
     code = 'proxy_error';
   // Check for specific HTTP status codes or patterns
+  } else if (/^(?:error:\s*)?(?:500|502|503|504)\s*[: ]/.test(lowerMessage.trim())) {
+    // An upstream proxy's authentication failure is still an HTTP 5xx service error.
+    // Never ask users to replace their API key or replay their turn for that payload.
+    code = 'service_error';
   } else if (lowerMessage.includes('402') || lowerMessage.includes('payment required')) {
     code = 'billing_error';
   } else if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid api key') || lowerMessage.includes('invalid x-api-key') || lowerMessage.includes('authentication failed') || lowerMessage.includes('token is expired') || lowerMessage.includes('token expired')) {

@@ -36,6 +36,10 @@ describe('parseError proxy interception handling', () => {
   })
 })
 
+it('keeps upstream 500 proxy authentication failures separate from user credentials', () => {
+  expect(parseError(new Error('500: {"message":"socks connect: username/password authentication failed"}')).code).toBe('service_error')
+})
+
 describe('parseError tool-support classification', () => {
   // Regression for the misclassification in the screenshot: an Anthropic
   // cache_control TTL ordering error mentioning `tools` in its hint string
