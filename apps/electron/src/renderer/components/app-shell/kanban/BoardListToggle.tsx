@@ -1,10 +1,14 @@
-import { Layers, MessageSquare } from 'lucide-react'
+import { createLucideIcon, MessageSquare } from 'lucide-react'
 import { useId } from 'react'
 import { LayoutGroup, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
 export type BoardListValue = 'NORM' | 'PRO'
+
+const Lambda = createLucideIcon('Lambda', [
+  ['path', { d: 'M4 4h4l9 16h3M12 12l-7 8', key: 'lambda' }],
+])
 
 interface BoardListToggleProps {
   value: BoardListValue
@@ -31,7 +35,7 @@ export function BoardListToggle({ value, onChange, className }: BoardListToggleP
         <ToggleButton active={value === 'NORM'} icon={MessageSquare} label="NORM" onClick={() => onChange('NORM')} />
         <ToggleButton
           active={value === 'PRO'}
-          icon={Layers}
+          icon={Lambda}
           label="PRO"
           onClick={() => onChange('PRO')}
         />
