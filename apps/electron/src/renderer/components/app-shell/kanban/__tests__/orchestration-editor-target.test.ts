@@ -44,7 +44,7 @@ describe('kanban board UI is removed (#261)', () => {
     expect(container).not.toContain("sessionStatus: 'todo'")
     expect(toggle).toContain('label="NORM"')
     expect(toggle).toContain('label="PRO"')
-    expect(toggle).toContain('Workflow')
+    expect(toggle).not.toContain('icon={Workflow}')
     expect(appShell).toContain('BoardListToggle')
     expect(appShell).toContain('orchestrationProjectId')
   })
