@@ -158,6 +158,7 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
       compactMode
       disableSend
       hideComposer
+      showRecordNavigation={false}
       enableFocusZone={false}
       messagesLoading={loadState.messagesLoading}
       emptyStateLabel={title}
