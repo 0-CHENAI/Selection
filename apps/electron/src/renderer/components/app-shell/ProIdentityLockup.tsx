@@ -1,10 +1,14 @@
 import { useLayoutEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { gsap } from 'gsap'
+import { CustomEase } from 'gsap/CustomEase'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import swan from '@/assets/selection-swan-trimmed.svg'
 import wordmark from '@/assets/selection-wordmark.svg'
+
+gsap.registerPlugin(CustomEase)
+const microScaleEase = CustomEase.create('proMicroScaleFade', '0.32,0.72,0,1')
 
 export default function ProIdentityLockup({ open }: { open: boolean }) {
   const { t } = useTranslation()
@@ -17,14 +21,17 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
     media.add({ all: 'all', reduceMotion: '(prefers-reduced-motion: reduce)' }, context => {
       const reduced = context.conditions?.reduceMotion
       animation.current = gsap.timeline({ paused: !isOpen.current })
-        .fromTo('.pro-identity-fill', {
+        .fromTo('.pro-identity-mode', {
           autoAlpha: 0,
+          scale: reduced ? 1 : 0.98,
+          transformOrigin: '50% 50%',
           '--pro-ink-progress': reduced ? '100%' : '0%',
         }, {
           autoAlpha: 1,
+          scale: 1,
           '--pro-ink-progress': '100%',
           duration: reduced ? 0.15 : 1.1,
-          ease: 'sine.inOut',
+          ease: microScaleEase,
         }, reduced ? 0.65 : 1.5)
         .fromTo('.pro-identity-close', { autoAlpha: 0 }, {
           autoAlpha: 1,
