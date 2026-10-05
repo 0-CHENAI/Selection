@@ -1,6 +1,19 @@
 import { expect, test } from 'bun:test'
 import { SessionManager, createManagedSession, buildAgentSessionConfig } from './SessionManager'
 import { runPreToolUseChecks, type PreToolUseInput } from '@craft-agent/shared/agent/core/pre-tool-use'
+import { getSessionToolProxyDefs } from '@craft-agent/shared/agent/backend/pi/session-tool-defs'
+import { buildPiExecutionScope } from '@craft-agent/shared/agent/pi-agent'
+
+test('provider projection preserves node identity even when legacy orchestration role is absent', () => {
+  const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
+  const managed = createManagedSession({ id: 'child', workMode: 'PRO', parentSessionId: 'root', taskSlug: 'plan',
+    taskRunId: 'run', taskNodeId: 'review', taskAttempt: 2, taskRevision: 3, taskActor: { id: 'reviewer' }, taskWorkerId: 'worker' }, workspace)
+  const session = buildAgentSessionConfig(managed)
+  expect(session).toMatchObject({ parentSessionId: 'root', taskSlug: 'plan', taskRunId: 'run', taskNodeId: 'review',
+    taskAttempt: 2, taskRevision: 3, taskActor: { id: 'reviewer' }, taskWorkerId: 'worker' })
+  expect(buildPiExecutionScope(session, session.id)).toContain('role: worker')
+  expect(getSessionToolProxyDefs({ executionSession: session }).map(tool => tool.name)).not.toContain('mcp__session__create_task')
+})
 
 test('NORM rejects automatic/explicit spawn, direct DAG runs and native delegation before effects', async () => {
   const manager = new SessionManager()
