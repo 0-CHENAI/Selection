@@ -5,8 +5,8 @@
   animation: pro-identity-focus 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .dark .pro-identity-backdrop { background: rgb(4 5 9 / 24%); }
-.pro-identity-lockup { gap: clamp(16px, 2vw, 24px); }
 .pro-identity-brand { gap: clamp(16px, 2vw, 24px); }
+.pro-identity-label { gap: clamp(16px, 2vw, 24px); margin-bottom: 4px; }
 .pro-identity-brand img { filter: none; }
 .dark .pro-identity-brand img { filter: invert(1); }
 .pro-identity-mark {
@@ -17,11 +17,10 @@
 .pro-identity-wordmark {
   height: clamp(24px, 4.6vw, 43.2px);
   width: auto;
-  margin-bottom: 4px;
   animation: pro-identity-brand 800ms 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .pro-identity-mode {
-  width: clamp(64px, 13vw, 104px);
+  width: clamp(80px, 16vw, 128px);
   height: auto;
   flex-shrink: 0;
   color: var(--pro-accent);

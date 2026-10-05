@@ -28,18 +28,20 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
             <div className="pro-identity-brand flex shrink-0 items-end">
               {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
               <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
-              <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
+              <div className="pro-identity-label flex items-center">
+                <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
+                <svg className="pro-identity-mode" viewBox="32 10 104 34">
+                  <defs>
+                    <clipPath id={glintClip}>
+                      <rect className="pro-identity-glint-window" x="-50" y="0" width="24" height="54" />
+                    </clipPath>
+                  </defs>
+                  <text x="84" y="40" textAnchor="middle" className="pro-identity-outline">PRO</text>
+                  <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
+                  <text x="84" y="40" textAnchor="middle" clipPath={`url(#${glintClip})`} className="pro-identity-glint">PRO</text>
+                </svg>
+              </div>
             </div>
-            <svg className="pro-identity-mode" viewBox="32 10 104 34">
-              <defs>
-                <clipPath id={glintClip}>
-                  <rect className="pro-identity-glint-window" x="-50" y="0" width="24" height="54" />
-                </clipPath>
-              </defs>
-              <text x="84" y="40" textAnchor="middle" className="pro-identity-outline">PRO</text>
-              <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
-              <text x="84" y="40" textAnchor="middle" clipPath={`url(#${glintClip})`} className="pro-identity-glint">PRO</text>
-            </svg>
           </div>
           <Dialog.Close asChild>
             <button type="button" aria-label={t('common.close')}
