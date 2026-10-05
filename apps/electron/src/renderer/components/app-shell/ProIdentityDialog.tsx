@@ -24,13 +24,13 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
         >
           <Dialog.Title className="sr-only">Selection PRO</Dialog.Title>
           <Dialog.Description className="sr-only">{t('session.currentProMode')}</Dialog.Description>
-          <div className="pro-identity-lockup pointer-events-none flex flex-col items-center" aria-hidden="true">
-            <div className="pro-identity-brand flex items-end">
+          <div className="pro-identity-lockup pointer-events-none flex items-end" aria-hidden="true">
+            <div className="pro-identity-brand flex shrink-0 items-end">
               {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
               <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
               <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
             </div>
-            <svg className="pro-identity-mode" viewBox="0 0 160 54">
+            <svg className="pro-identity-mode" viewBox="32 10 104 34">
               <defs>
                 <clipPath id={glintClip}>
                   <rect className="pro-identity-glint-window" x="-50" y="0" width="24" height="54" />
