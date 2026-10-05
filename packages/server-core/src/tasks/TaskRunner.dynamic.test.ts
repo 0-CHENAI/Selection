@@ -145,16 +145,16 @@ it('F4-d restores the committed graph when interrupted before a newly added work
   expect(() => restored.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId, decisionId: 'late', baseRevision: 0, action: 'continue' })).toThrow();
 });
 
-it.each([{ changePersona: false, contextCurrent: true }, { changePersona: true, contextCurrent: true }, { changePersona: false, contextCurrent: false }])('F4-c reuses only a compatible actor with current context (%j)', async ({ changePersona, contextCurrent }) => {
+it.each([{ changePersona: false, contextCurrent: true, permission: 'safe' as const }, { changePersona: true, contextCurrent: true, permission: 'safe' as const }, { changePersona: false, contextCurrent: false, permission: 'safe' as const }, { changePersona: false, contextCurrent: true, permission: 'ask' as const }, { changePersona: false, contextCurrent: true, permission: 'allow-all' as const }])('F4-c reuses only a compatible actor with current context (%j)', async ({ changePersona, contextCurrent, permission }) => {
   const freshContext = changePersona || !contextCurrent;
   const parsed = parseTaskSpec({ schema_version: 3, id: 'actor', title: 'F4-c', goal: 'actor continuity', runner: 'conduct',
-    execution: { verification: { required: false } }, defaults: { model: 'm', llmConnection: 'connection', permissionMode: 'safe' },
+    execution: { verification: { required: false } }, defaults: { model: 'm', llmConnection: 'connection', permissionMode: permission },
     nodes: [{ id: 'a1', prompt: 'Remember cost 1000000', actor: { id: 'analyst', persona: 'careful' } },
       { id: 'a2', prompt: 'Report from your prior task', actor: { id: 'analyst', persona: changePersona ? 'skeptical' : 'careful' } },
       { id: 'b', prompt: 'Independent B', actor: { id: 'other' } }] });
   if (!parsed.success) throw new Error(JSON.stringify(parsed.error)); saveTaskSpec(root, parsed.data);
   const bindings: import('@craft-agent/shared/tasks').TaskSessionBinding[] = [], generations = new Map<string, number>();
-  const actorHost = { ...makeHost(), canReuseTaskSession: () => contextCurrent, getSessionModel: () => 'm', getSessionLlmConnection: () => 'connection',
+  const actorHost = { ...makeHost(), prepareTaskWorkspace: async () => ({ directory: root }), finalizeTaskWorkspace: async () => ({}), canReuseTaskSession: () => contextCurrent, getSessionModel: () => 'm', getSessionLlmConnection: () => 'connection',
     async bindTaskSession(id: string, binding: import('@craft-agent/shared/tasks').TaskSessionBinding) {
       bindings.push(structuredClone(binding)); const generation = (generations.get(id) ?? 0) + 1; generations.set(id, generation); return { generation };
     } };
@@ -300,3 +300,22 @@ it('a late-created delegated session retains its stopped original ownership and 
   expect(record).toMatchObject({ sessionId: 'late-session', rootSessionId: 'orch', nodeId: 'a', attempt: 1, state: 'stopped' });
   expect(host.sent.some(message => message.id === 'late-session')).toBe(false);
 });
+
+it('keeps same-actor verify contexts independent even when reuse is otherwise proven', async () => {
+  const parsed = parseTaskSpec({ schema_version: 3, id: 'independent-actor', title: 'Independent', goal: 'Review', runner: 'conduct', execution: { verification: { required: false } },
+    nodes: [{ id: 'work', prompt: 'Produce', actor: { id: 'analyst' } }, { id: 'review', kind: 'verify', prompt: 'Review', actor: { id: 'analyst' } }] });
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error)); saveTaskSpec(root, parsed.data);
+  const host = { ...makeHost(), canReuseTaskSession: () => true, bindTaskSession: async () => ({ generation: 1 }) };
+  const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root });
+  runner.run('independent-actor', { runId: 'independent', orchestratorSessionId: 'orch', verifyOnComplete: false }); await tick();
+  host.complete('work', 'Produced', 1); await tick();
+  expect(host.created).toEqual(['session-work', 'session-review']);
+});
+
+ it('every v3 worker receives canonical identities, the original goal and acceptance criteria', async () => {
+  await start();
+  const prompt = host.sent.find(item => item.id === 'session-a')!.message;
+  expect(prompt).toContain('slug="dynamic", runId="r", nodeId="a", attempt=1, revision=0');
+  expect(prompt).toContain('Original user goal: compare');
+  expect(prompt).toContain('Acceptance criteria: use both results');
+ });

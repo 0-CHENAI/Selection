@@ -1,3 +1,7 @@
+import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
+import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
+import { finishTaskOrchestrator } from '../tasks/create-task'
+import type { CreateTaskInput } from '@craft-agent/session-tools-core'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveSessionName } from '@craft-agent/shared/display-titles'
 import { HandoverStore, handoverHash } from '../reliability/handover-store'
@@ -45,7 +49,7 @@ import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
-import { existsSync, statSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
@@ -5068,12 +5072,11 @@ export class SessionManager implements ISessionManager {
             await this.unarchiveSession(sessionId)
           }
         },
-        createTaskFn: async () => {
-          throw new Error('Agent task creation is disabled. Import a V3 YAML definition in the application.')
-        },
+        createTaskFn: input => this.createChatTask(managed, input),
         runTaskFn: async (input) => {
           assertComplexCapability(managed, 'run-workflow')
-          return this.runTaskFromTool(managed.workspace.id, input)
+          if (input.orchestratorSessionId && input.orchestratorSessionId !== managed.id || input.slug && input.slug !== managed.taskSlug) throw new Error('run_task must use the current PRO root plan')
+          return this.runTaskFromTool(managed.workspace.id, { ...input, orchestratorSessionId: managed.id, slug: managed.taskSlug, waitForCompletion: false })
         },
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
         submitTaskOutputFn: async (input) => {
@@ -7422,11 +7425,12 @@ export class SessionManager implements ISessionManager {
     }
     const answerConnection = managed.llmConnection ? getLlmConnection(managed.llmConnection) : null
     const nativeTextAnswers = usesStreamingAnswerDelivery(answerConnection)
+    const canonicalChatRoot = !!managed.taskSlug && !managed.taskNodeId && !managed.taskDraft && !managed.parentSessionId
     agent.configurePresentationProtocol?.(nativeTextAnswers && !managed.parentSessionId && !managed.taskSlug
       && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')
       ? (answerConnection?.presentationProtocol ?? 'legacy') : 'legacy')
-    if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
-      const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
+    if ((!nativeTextAnswers || canonicalChatRoot) && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskNodeId && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+      const continuingAnswer = isUserTaskContinuation || (options?.hidden && !canonicalChatRoot && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer
         ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
         : userMessage
@@ -12153,9 +12157,43 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return undefined
   }
 
+  private async createChatTask(managed: ManagedSession, input: CreateTaskInput) {
+    assertComplexCapability(managed, 'create-workflow')
+    if (!isTasksOrchestrateEnabled()) throw new Error('PRO orchestration is disabled in this build')
+    this.assertTaskRunAllowed(managed.workspace.id, managed.id)
+    const spec = buildChatPlan(input, { ...managed, originalRequest: managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)?.content })
+    const release = acquireProjectLock(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'chat-plan'))
+    try {
+      const path = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'chat-plan', `${chatRequestKey(managed.id, input.requestId!)}.json`)
+      const inputHash = chatInputHash(input)
+      let receipt: { inputHash: string; spec: typeof spec; result?: { slug: string; orchestratorSessionId: string; taskLabelId?: string; warnings: string[] } }
+      if (existsSync(path)) {
+        receipt = JSON.parse(readFileSync(path, 'utf8'))
+        if (receipt.inputHash !== inputHash) throw new Error('Creation requestId was already used for different inputs')
+        if (receipt.result) {
+          if (managed.taskSlug !== receipt.result.slug) throw new Error('Creation receipt no longer owns this root')
+          return receipt.result
+        }
+      } else {
+        if (managed.taskSlug) throw new Error('This root already owns a plan; revise the canonical plan instead')
+        if (this.getSessions(managed.workspace.id).some(child => child.id !== managed.id && child.executionRootSessionId === managed.id && child.isProcessing)) throw new Error('Wait for existing workers to settle before creating a plan')
+        receipt = { inputHash, spec }
+        atomicWrite(path, JSON.stringify(receipt))
+      }
+      const saved = loadTaskDocument(managed.workspace.rootPath, receipt.spec.id)
+      if (saved && (!saved.valid || planValueKey(saved.spec) !== planValueKey(receipt.spec))) throw new Error('An existing plan differs from the prepared creation; inspect it before retrying')
+      if (!saved) saveTaskDocument(managed.workspace.rootPath, serializeTaskYaml(receipt.spec), null)
+      if (!await this.bindExistingSessionToTask(managed.id, receipt.spec.id, undefined, managed.processingGeneration)) throw new Error('Cannot bind this PRO root')
+      const setup = await finishTaskOrchestrator(this, managed.id, receipt.spec)
+      receipt.result = { slug: receipt.spec.id, orchestratorSessionId: managed.id, ...setup }
+      atomicWrite(path, JSON.stringify(receipt))
+      return receipt.result
+    } finally { release() }
+  }
+
   private async runTaskFromTool(
     workspaceId: string,
-    input: { slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
+    input: { requestId?: string; slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
   ) {
     const runner = this.taskRunnerLookup?.(workspaceId)
     if (!runner) {
@@ -12176,14 +12214,29 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getDagOrchestrationEnabled()) {
-      throw new Error('DAG orchestration is disabled in Advanced settings')
+      throw new Error('PRO orchestration is disabled by this build')
     }
     this.assertTaskRunAllowed(workspaceId, orchestratorSessionId, { slug })
-    const snapshot = runner.run(slug, {
+    const root = this.sessions.get(orchestratorSessionId!)!
+    const requestId = input.requestId?.trim()
+    if (input.requestId !== undefined && (!requestId || requestId.length > 128)) throw new Error('Invalid start requestId')
+    const reservedRunId = requestId ? `chat-${chatRequestKey(root.id, requestId)}` : undefined
+    const receiptPath = requestId ? join(getSessionStoragePath(root.workspace.rootPath, root.id), 'data', 'chat-starts', `${chatRequestKey(root.id, requestId)}.json`) : undefined
+    const requestHash = chatInputHash({ slug, params: input.params })
+    if (receiptPath) {
+      if (existsSync(receiptPath)) {
+        const saved = JSON.parse(readFileSync(receiptPath, 'utf8'))
+        if (saved.requestHash !== requestHash || saved.runId !== reservedRunId) throw new Error('Start requestId was already used for different inputs')
+      } else atomicWrite(receiptPath, JSON.stringify({ requestHash, runId: reservedRunId }))
+    }
+    const existing = reservedRunId ? runner.getRunState(slug, reservedRunId) : undefined
+    if (existing && existing.orchestratorSessionId !== root.id) throw new Error('Start receipt belongs to another root')
+    const snapshot = existing ?? runner.run(slug, {
+      runId: reservedRunId,
       orchestratorSessionId,
       params: input.params,
       orchestrateAllowed: orchestratorSessionId
-        ? this.sessions.get(orchestratorSessionId)?.swarmEnabled === true
+        ? this.sessions.get(orchestratorSessionId)?.workMode === 'PRO' && isTasksOrchestrateEnabled()
         : false,
     })
     const settled = input.waitForCompletion
@@ -12193,6 +12246,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       slug: settled.slug,
       runId: settled.runId,
       status: settled.status,
+      ...(['running', 'waiting-coordinator'].includes(settled.status) ? { nextAction: 'Finish this chat turn with a short plan/start acknowledgment. Do not poll or wait in a loop. The scheduler will send coordinator checkpoints and the final verification turn automatically.' } : {}),
       nodeCount: settled.nodes.filter((n) => n.state !== 'skipped').length,
       nodes: settled.nodes.map((n) => ({ id: n.id, state: n.state, sessionId: n.sessionId })),
       tokensUsed: settled.tokensUsed,
@@ -12724,6 +12778,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     sessionId: string,
     taskSlug: string,
     reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
+    currentGeneration?: number,
   ): Promise<boolean> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -12738,7 +12793,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       })
       return false
     }
-    if (managed.isProcessing || this.handoverCapturing.has(sessionId)) throw new Error('Wait for the PRO root to settle before binding a plan')
+    if (managed.isProcessing && (currentGeneration !== managed.processingGeneration || !this.executionOwners.has(sessionId)) || this.handoverCapturing.has(sessionId)) throw new Error('Wait for the PRO root to settle before binding a plan')
 
     // What actually changes — so we fire canonical live-updates (agent + caches + per-field events)
     // only when needed. A quick-add tile is already live, so these keep its running agent in step.

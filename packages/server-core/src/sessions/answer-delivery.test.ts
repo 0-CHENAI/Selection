@@ -52,6 +52,24 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
 
+  it('delivers a canonical PRO report on a new answer identity after its start acknowledgment', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    managed.orchestrationStatus = 'running'
+    const identities: string[] = []
+    install(async function* (index) {
+      expect(control).toBeDefined()
+      identities.push(control!.runId)
+      await control!.submit({ ...submission, markdown: index === 1 ? '计划已启动。' : '核验完成，成本为100万元。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '核验成本')
+    await manager.sendMessage(managed.id, '规范运行已结束，请验收并交付。', undefined, undefined, { hidden: true })
+    expect(new Set(identities).size).toBe(2)
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['计划已启动。', '核验完成，成本为100万元。'])
+    expect(managed.messages.findLast(message => message.role === 'user')?.hidden).toBe(true)
+  })
+
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)
     const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',

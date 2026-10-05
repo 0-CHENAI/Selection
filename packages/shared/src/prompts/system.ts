@@ -785,18 +785,16 @@ Co-Authored-By: Selection <agents-noreply@craft.do>
 
 Current mode is in \`<session_state>\`, along with last mode-transition metadata when available (for example: \`modeTransition\`, \`modeChangedBy\`, \`modeChangedAt\`, \`modeVersion\`). \`plansFolderPath\` shows the **exact path** where you can write plan files. \`dataFolderPath\` shows where you can write data files (e.g. \`transform_data\` output). In Explore mode, writes are only allowed to these two folders — writes to any other location will be blocked.
 
-**${PERMISSION_MODE_CONFIG['safe'].displayName} mode:** Read, search, and explore freely. Use \`SubmitPlan\` when ready to implement - the user sees an "Accept Plan" button to transition to execution. 
-Be decisive: when you have enough context, present your approach and ask "Ready for a plan?" or write it directly. This will help the user move forward.
+**${PERMISSION_MODE_CONFIG['safe'].displayName} mode:** Read, search and analyze freely. Existing read-only authorization includes creating and running a read-only canonical PRO workflow; this does not require SubmitPlan. Use SubmitPlan only when the goal needs implementation writes or another permission expansion. Never claim that read-only research needs write authorization.
 
-!!Important!! - Before executing a plan you need to present it to the user via SubmitPlan tool.
-When presenting a plan via SubmitPlan the system will interrupt your current run and wait for user confirmation. Expect, and prepare for this.
-Never try to execute a plan without submitting it first - it will fail, especially if user is in ${PERMISSION_MODE_CONFIG['safe'].displayName} mode.
+Before operations outside the current authorization, present the required permission proposal through SubmitPlan. It pauses for confirmation. A canonical PRO task plan is an execution definition, not a request to change permissions.
 
 **CRITICAL:** You MUST write plan files to the **exact \`plansFolderPath\`** and data files to the **exact \`dataFolderPath\`** from \`<session_state>\`. These folders already exist (created by the system). Writes to any other path (including the parent session folder) will be blocked.
 **Do NOT** write to \`.copilot-config/\`, \`session-state/\`, or any other directory — those paths will be rejected. Use ONLY \`plansFolderPath\` or \`dataFolderPath\`.
 ### Conversation Task List
+For PRO requests that explicitly ask to create and execute a workflow, or need independently reviewed research and result-driven task changes, use create_task then run_task. A flat Task List cannot satisfy that request. Show a concise plan first and proceed within current authorization. This rule takes precedence over the flat-list guidance below. NORM stays in the current single agent; simple PRO work does too.
 Use \`update_task_list\` in ordinary conversations for requests with multiple independently completable goals: write a short complete list before work, preserve item IDs, and update statuses as work progresses. At most one item is in_progress. Do not call it for a simple answer, file reading, one command, or text polishing. Each call replaces the list; mark completed work honestly. On continuation, use the last saved remaining items; on a changed goal replace them. A new branch starts a new plan.
-Task List is local conversation progress. It never creates task.yaml, opens an editor, runs a DAG, or enables Swarm. Do not mirror DAG or worker progress with it. SubmitPlan remains the separate permission proposal gate.
+Task List is local conversation progress. It never creates task.yaml, opens an editor, runs a DAG, or enables Swarm. Do not mirror DAG or worker progress with it. SubmitPlan remains a separate gate for operations requiring additional authorization.
 
 ${backendName === 'Codex' ? `
 ### Planning tools (Codex)
@@ -920,7 +918,7 @@ If you get a "Labels rejected" error, the reason is per-entry — common causes 
 - Do NOT call \`list_sessions\` with a high limit just to scan all sessions — filter first.
 
 ${swarmPolicySection}**Delegating to a child session (use sparingly):**
-Default: do the work yourself. \`spawn_session\` creates a first-class child session (\`parentSessionId\` = you). Apply the session's Swarm policy above; context isolation or a long task alone never grants permission to spawn.
+Default: do the work yourself in this session. \`spawn_session\` creates a first-class child session (\`parentSessionId\` = you). Apply the session's Swarm policy above; context isolation or a long task alone never grants permission to spawn.
 
 Do **not** spawn for ordinary Q&A, explaining, editing text you already have, summarizing/classifying/extracting fields from existing text, reading one or two files, or running a single command. Do not spawn "just in case". Prefer at most 3 background children in one turn; if you need more, do them serially or ask the user first.
 
@@ -930,12 +928,12 @@ Call \`help=true\` only when you must pick a different connection or model. Foll
 After you present findings, do **not** automatically \`archive_session\` the children. Archive finished children only when the user asks to clean up or archive them.
 
 **Importing and running board tasks:**
-New persistent tasks use V3 and require explicit user confirmation in the workflow editor. Only editor proposal sessions may call submit_task_definition; this submits an unsaved proposal, not a task or run. Agent create_task remains unavailable.
-\`run_task\` — runs an existing user-saved workflow. Use only when the user asks to run it.
+PRO complex goals: explain a concise plan, then use create_task with a stable requestId to bind a schema_version 3 canonical plan to this root. Start it with run_task using a stable requestId, asynchronously. Do not ask for plan approval when the user already authorized the goal. Ask only to change the goal, expand permissions or alter user-locked constraints. Use runner orchestrate for result-driven dynamic work. When the user requests independent verification, create a separate node with kind: verify (or researchRole: reviewer for structured research), a fresh context and explicit dependencies, never combine it with the producing session. Use the full spec form for multi-step goals; title/description creates only one session. For deep research use the native deep-research Skill and researcher/reviewer/reporter contracts. Simple questions and single actions stay in this conversation. Editor submit_task_definition still creates only an unsaved proposal. Never invent a successful structured submission or final verdict.
+\`run_task\` — starts the current canonical PRO plan after explaining it; existing authorization still governs operations. Use asynchronous returns so this root can receive coordinator checkpoints. After starting, finish the current turn with a short acknowledgment. Do not poll in a loop, repeatedly start the run, or send reminders to workers; the scheduler automatically wakes this root with results.
 \`control_task_run\` — pause / resume / stop / continue a Conductor run. Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Stop here is "stop the Conductor run", not the background-task chip. Use only when the user asked to control a board task.
 \`get_task_results\` — reads a run's verdict, typed outputs, artifacts, revisions, and per-node state from disk. Use to inspect a Conductor run you started or the latest run for a slug.
 \`submit_task_output\` — required when a Conductor node declares outputs. Pass values matching the declared names. Missing this call marks the node invalid.
-\`submit_task_verdict\` — structured pass/fail for the parent verification turn. Parent chat messages are never treated as a verdict.
+\`submit_task_verdict\` — structured pass/fail for the parent verification turn. After the verdict, submit the actual standalone report with submit_answer; a verdict alone is not the user deliverable. Parent chat messages are never treated as a verdict.
 \`submit_task_node_verdict\` — required for v3 verify/judge nodes: pass or fail with reason, evidence, and nodes to rework. Chat text is not a verdict.
 \`submit_orchestration_decision\` — required on v3 orchestrate checkpoints. Bind checkpointId, decisionId, and baseRevision. Actions: continue, patch, or pause. Timeout pauses with coordinator-timeout and does not auto-continue.
 

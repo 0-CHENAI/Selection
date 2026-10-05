@@ -18,6 +18,7 @@ import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
 
 // Handlers
+import { handleCreateTask } from './handlers/create-task.ts';
 import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer.ts';
 import { handleArtifactVersions } from './handlers/artifact-versions.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
@@ -266,9 +267,10 @@ export const ArchiveSessionSchema = z.object({
 });
 
 export const CreateTaskSchema = z.object({
+  requestId: z.string().min(1).max(128).describe('Stable creation identity. Reuse for retries, never for a different plan.'),
   title: z.string().optional().describe('Short task title shown on the board (also drives the slug)'),
   description: z.string().optional().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
-  spec: z.record(z.string(), z.unknown()).optional().describe('Full v2 task spec. Mutually exclusive with title+description.'),
+  spec: z.record(z.string(), z.unknown()).optional().describe('Full v3 task spec, exclusive with title/description. Required: title, goal, nodes. acceptance_criteria is one string; constraints and locked_fields are arrays. Unknown fields are rejected. Node ids use lowercase letters/numbers/hyphens. Each node: id, kind (session or verify), prompt, depends_on. Use runner: orchestrate for result-driven work. ${nodes.read.output} resolves only submitted text; ${nodes.read.output.full_text} resolves a declared named output. Include all evidence needed by downstream nodes, or explicit original source paths for independent re-reading. researchRole requires research configuration and a declared research JSON output.'),
   acceptanceCriteria: z.string().optional().describe('Freeform rubric the final result is verified against'),
   sources: z.array(z.string()).optional().describe('Source slugs to enable on the task sessions'),
   skills: z.array(z.string()).optional().describe('Skill slugs applied to dispatched task prompts'),
@@ -279,6 +281,7 @@ export const CreateTaskSchema = z.object({
 });
 
 export const RunTaskSchema = z.object({
+  requestId: z.string().min(1).max(128).optional().describe('Stable start identity. Reuse after a lost response to avoid a second run.'),
   slug: z.string().optional().describe('Task slug to run. Required unless orchestratorSessionId is set.'),
   orchestratorSessionId: z.string().optional().describe('Orchestrator session id of an existing board task. Used to find the slug when omitted.'),
   params: z.record(z.string(), z.unknown()).optional().describe('Optional task params forwarded to TaskRunner'),
@@ -648,17 +651,9 @@ IMPORTANT: never move a task into a closed status (such as "done" or "cancelled"
 Archiving removes a session from the active list and unread counts — it does NOT delete it (pass archived=false to restore). Use it to tidy up finished or superseded sessions.
 Requires an explicit sessionId and cannot target your own session. Use list_sessions / get_session_info to find the target session's ID.`,
 
-  create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
+  create_task: `Create and display the canonical V3 plan on this PRO root. Requires a stable requestId. Provide a full spec, or title/description for a single-node plan. Creation alone never runs it. The host preserves current authorization, model, sources, skills and constraints and prevents duplicate ownership. For complex user goals, explain the plan briefly, create it, then call run_task asynchronously within the existing authorization. Simple chat work needs no workflow. Pending changes use canonical revisions; never create a parallel hidden plan.`,
 
-Provide either title + description (single-node form) OR a full task spec (exclusive). New tasks default to schema_version 3. Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
-
-Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
-
-  run_task: `Start the Conductor DAG for an existing Selection Task on the kanban board.
-
-Provide slug (from the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
-
-Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must save a workflow in the editor or import YAML first. Use only when the user asked to run a board task.`,
+  run_task: `Start the saved canonical plan owned by this PRO root. Use a stable requestId for retries. Returns immediately. End the current chat turn with a short start acknowledgment; do not poll/wait in a loop or send reminders to workers. The scheduler automatically wakes the root for checkpoints and final verification. Existing permissions still govern every operation. Do not start a second run for a lost response; reuse the requestId. Saving in the editor never starts work.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
@@ -803,7 +798,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
   { name: 'archive_session', description: TOOL_DESCRIPTIONS.archive_session, inputSchema: ArchiveSessionSchema, executionMode: 'registry', safeMode: 'block', handler: handleArchiveSession },
-  { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
+  { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'allow', handler: handleCreateTask },
+  { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },

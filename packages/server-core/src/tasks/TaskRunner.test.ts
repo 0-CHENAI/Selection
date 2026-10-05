@@ -506,7 +506,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'c')?.options.permissionMode).toBe('safe')
   })
 
-  it('turns unattended ask permission into a parent need-to-check blocker', async () => {
+  it('dispatches ask tasks without granting unattended write permission', async () => {
     saveTaskSpec(
       root,
       specOf({
@@ -518,17 +518,18 @@ describe('TaskRunner (Conductor)', () => {
         nodes: [{ id: 'a', prompt: 'a' }],
       }),
     )
+    host.prepareTaskWorkspace = async () => ({ directory: root })
+    host.finalizeTaskWorkspace = async () => ({})
     const runner = makeRunner()
     runner.run('perm-ask', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false })
     await tick()
 
-    expect(host.created).toHaveLength(0)
-    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('failed')
-    expect(host.orchestrationStatuses.at(-1)).toMatchObject({
-      sessionId: 'orch',
-      status: 'need-to-check',
-      blocker: 'failed: a',
-    })
+    expect(host.created).toHaveLength(1)
+    expect(host.created[0]?.options.permissionMode).toBe('ask')
+    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('running')
+    host.complete('a', { finalText: 'Read-only result' })
+    await tick()
+    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('completed')
   })
 
   it('stamps task/run/node linkage on each dispatched child session', async () => {

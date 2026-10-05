@@ -2216,10 +2216,6 @@ class ActiveRun {
         this.failNode(instance?.id ?? node.id, `permission ${requested} exceeds task ceiling ${ceiling}`);
         return;
       }
-      if (this.sourceVersion >= 2 && requested === 'ask') {
-        this.failNode(instance?.id ?? node.id, 'permission ask requires user intervention');
-        return;
-      }
       const promptOutputs = structuredClone(this.outputs);
       const frozenInputs = state.lastFailure === 'progress-paused' && state.sessionId && this.artifactInputs.has(state.sessionId)
         ? this.artifactInputs.get(state.sessionId)! : captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, promptOutputs, this.deps.workspaceRoot, this.edges);
@@ -2280,9 +2276,9 @@ class ActiveRun {
       const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
       const prefix = node.actor ? this.spec.nodes.slice(0, this.spec.nodes.findIndex(candidate => candidate.id === node.id)).filter(candidate => candidate.actor?.id === node.actor!.id).map(candidate => candidate.id) : [];
       const signature = planValueKey({ actor: node.actor, researchRole: node.researchRole, model: options.model, connection: options.llmConnection, permission: requested, cwd, sources: this.spec.sources, skills: this.spec.skills, constraints: this.spec.constraints, decisions: this.spec.decisions, workspaceInputs: node.workspace_inputs });
-      const actor = node.actor && node.researchRole !== 'reviewer' ? this.actors.get(node.actor.id) : undefined;
-      const reuse = !!node.actor && !instance && requested === 'safe' && !!this.deps.host.bindTaskSession && actor?.signature === signature
-        && (!this.deps.host.canReuseTaskSession || this.deps.host.canReuseTaskSession(actor.sessionId))
+      const actor = node.actor && options.orchestrationRole !== 'reviewer' ? this.actors.get(node.actor.id) : undefined;
+      const reuse = !!node.actor && !instance && !!this.deps.host.bindTaskSession && actor?.signature === signature
+        && this.deps.host.canReuseTaskSession?.(actor.sessionId) === true
         && (!this.deps.host.getSessionPermissionModeState || this.deps.host.getSessionPermissionModeState(actor.sessionId)?.permissionMode === requested)
         && (!options.model || this.deps.host.getSessionModel?.(actor.sessionId) === options.model)
         && (!options.llmConnection || this.deps.host.getSessionLlmConnection?.(actor.sessionId) === options.llmConnection)
@@ -2292,7 +2288,8 @@ class ActiveRun {
       if (resuming) st.generation = this.deps.host.nextTaskSessionGeneration?.(child.id);
       if (this.deps.host.bindTaskSession && this.opts.orchestratorSessionId && !resuming) {
         const bound = await this.deps.host.bindTaskSession(child.id, { rootSessionId: this.opts.orchestratorSessionId, taskSlug: this.slug, taskRunId: this.runId,
-          taskNodeId: key, taskAttempt: attempt, taskRevision: options.taskRevision!, taskActor: node.actor, model: options.model, llmConnection: options.llmConnection, permissionMode: requested });
+          taskNodeId: key, taskAttempt: attempt, taskRevision: options.taskRevision!, taskActor: node.actor, model: options.model, llmConnection: options.llmConnection, permissionMode: requested,
+          contract: { goal: this.spec.goal, node, constraints: this.spec.constraints ?? [], decisions: this.spec.decisions ?? [] } });
         st.generation = bound.generation;
       }
       st.sessionId = child.id;
@@ -2308,6 +2305,9 @@ class ActiveRun {
         return;
       }
       let deliveryPrompt = prompt;
+      if (this.sourceVersion === 3) {
+        deliveryPrompt = `Canonical execution identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, nodeId=${JSON.stringify(key)}, attempt=${attempt}, revision=${options.taskRevision}. Use these exact identities in result tools; a task label is not a slug.\nOriginal user goal: ${this.spec.goal}\nThe original goal is background for this assigned node. Complete only node ${JSON.stringify(key)}; the scheduler owns all other steps. Return your findings as this node output, then end the turn. Never wait for or search for this node\'s own result.\nAcceptance criteria: ${this.spec.acceptance_criteria ?? 'Not specified'}\n\n${deliveryPrompt}`;
+      }
       if (node.actor) {
         deliveryPrompt = `Logical actor ${node.actor.id}${node.actor.persona ? `: ${node.actor.persona}` : ''}. Work binding: run=${this.runId}, node=${key}, attempt=${attempt}, revision=${options.taskRevision}. Submit this task's output separately; prior task outputs remain immutable.\n\n${deliveryPrompt}`;
         if (!reuse && prefix.length) deliveryPrompt += `\n\nConfirmed prior actor task results (new execution context): ${JSON.stringify(prefix.map(id => ({ nodeId: id, output: this.outputs[id] ?? null })))}`;
@@ -2388,7 +2388,7 @@ class ActiveRun {
       text = `${text}\n\n${this.synthesizeDependencyInputs(node, outputs)}`;
     }
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
-      text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. Chat text is not a verdict.`;
+      text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. For a fail verdict, nodes must name the producing dependency to rework; never submit an empty nodes list. If a tool rejects the verdict, correct it before ending. Chat text is not a verdict.`;
     }
     // Research workers already receive their role/line-specific frozen context
     // in dispatch. Repeating the global context wastes input and leaks unrelated

@@ -501,6 +501,8 @@ export interface ResolvedStatusResult {
 /** Full metadata for a single session (returned by get_session_info). */
 /** Input for create_task — structured fields, mapped onto a TaskSpec by the backend. */
 export interface CreateTaskInput {
+  /** Stable identity for this creation; reuse it after a lost response. */
+  requestId?: string;
   /** Short task title shown on the board (also drives the slug). */
   title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
@@ -534,6 +536,7 @@ export interface CreateTaskResult {
 
 /** Input for run_task — starts an existing board task's Conductor DAG. */
 export interface RunTaskInput {
+  requestId?: string;
   slug?: string;
   orchestratorSessionId?: string;
   params?: Record<string, unknown>;
