@@ -168,6 +168,8 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(review).toContain('Task slug: v3demo; runId: typed; revision: 0.');
     expect(review).toContain('Frozen plan: {');
     expect(review).toContain('"type":"number"'); expect(review).toContain('Run: typed; revision: 0');
+    expect(() => r.submitVerdict('orch', { runId: 'typed', result: 'fail', reason: 'bad target', nodes: ['unknown'] })).toThrow('completed nodes');
+    expect(r.getRunState('v3demo', 'typed')!.nodes.find(node => node.id === 'a')!.state).toBe('done');
     expect(r.submitVerdict('orch', { runId: 'typed', result: 'pass' }).status).toBe('completed');
   });
 
@@ -453,6 +455,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
       nodes: [
         { id: 'work', prompt: 'work' },
         { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+        { id: 'future', prompt: 'future', depends_on: ['review'] },
       ],
     }));
     const r = runner();
@@ -462,6 +465,9 @@ describe('TaskRunner v3 quality/efficiency', () => {
     host.complete('work', { finalText: 'done', tokenUsage: tu(10, 5) });
     await tick();
     expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'fail', reason: 'bad' }).ok).toBe(false);
+    for (const id of ['future', 'unknown', 'review']) {
+      expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'fail', reason: 'bad', evidence: 'audit', nodes: [id] }).ok).toBe(false);
+    }
     expect(r.submitNodeVerdict(host.sessionIdFor('review'), {
       result: 'fail',
       reason: 'missing branch',

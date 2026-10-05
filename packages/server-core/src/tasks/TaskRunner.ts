@@ -2388,7 +2388,7 @@ class ActiveRun {
       text = `${text}\n\n${this.synthesizeDependencyInputs(node, outputs)}`;
     }
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
-      text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. For a fail verdict, nodes must name the producing dependency to rework; never submit an empty nodes list. If a tool rejects the verdict, correct it before ending. Chat text is not a verdict.`;
+      text = `${text}\n\nJudge the assigned inspection contract. An audit of supplied historical material may complete successfully with defect findings; report those defects so the coordinator can schedule correction. It does not certify that material as correct. A deliverable approval fails only when a completed producing dependency needs rework. Call submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. For a fail verdict, nodes must name completed producing dependencies; never submit an empty nodes list or a pending node. If a tool rejects the verdict, correct it before ending. Chat text is not a verdict.`;
     }
     // Research workers already receive their role/line-specific frozen context
     // in dispatch. Repeating the global context wastes input and leaks unrelated
@@ -2867,6 +2867,10 @@ class ActiveRun {
   private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }): void {
     if (this.runStatus !== 'verifying') return;
     if (this.verdictLocked) return;
+    if (this.sourceVersion >= 2 && verdict.result === 'fail' && verdict.nodes?.length) {
+      const invalid = verdict.nodes.filter(id => this.state.get(id)?.state !== 'done');
+      if (invalid.length) throw new TaskControlError(this.runStatus, `FAIL may rework only completed nodes: ${invalid.join(', ')}`);
+    }
     if (verdict.result === 'pass') {
       const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
       if (this.spec.research && (!research || research.blockers.length)) throw new TaskControlError(this.runStatus, `Research delivery is unsettled: ${research?.blockers.join('; ') ?? 'frozen state unavailable'}`);
@@ -3343,6 +3347,11 @@ class ActiveRun {
     }
     const parsed = validateTaskNodeVerdict(payload);
     if (!parsed.ok) return parsed;
+    if (parsed.verdict.result === 'fail') {
+      const ancestors = dependencyAncestors(defId, this.edges);
+      const invalid = parsed.verdict.nodes!.filter(id => !ancestors.has(id) || this.state.get(id)?.state !== 'done');
+      if (invalid.length) return { ok: false, error: `FAIL may rework only completed producing dependencies, not pending, unknown or unrelated nodes: ${invalid.join(', ')}. An audit of supplied historical material can complete with defect findings; return those findings for the coordinator to schedule correction.` };
+    }
     this.nodeVerdicts.set(nodeId, { ...parsed.verdict, nodeId });
     this.nodeVerdicts.set(defId, { ...parsed.verdict, nodeId: defId });
     this.timing(nodeId).verdict = {

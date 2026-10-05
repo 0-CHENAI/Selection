@@ -687,7 +687,7 @@ Requires runId, checkpointId, decisionId, and baseRevision. action continue uses
 
   submit_task_node_verdict: `Submit a structured pass/fail verdict for a verify or judge node.
 
-FAIL requires reason, evidence, and nodes to rework. PASS unblocks dependents. Chat text is not a verdict.`,
+FAIL requires reason, evidence, and completed producing dependency nodes to rework; pending, unknown and unrelated nodes are rejected. Judge the assigned node contract. An audit of supplied historical material can finish with defect findings for the coordinator to schedule correction; its completion does not certify that material as correct. PASS unblocks dependents. Chat text is not a verdict.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
