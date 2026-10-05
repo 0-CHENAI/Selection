@@ -18,6 +18,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
+
 - **Fair model request concurrency** — Conversations, coordinators, workers and utility calls now share host-owned request slots by provider account and endpoint. Queues rotate between runs, release slots during rate-limit backoff, honor Retry-After, and adapt concurrency after throttling. Waiting time is excluded from the active request timeout; cancellation returns queued and active slots. Codex uses its supported SSE transport so requests participate in the same accounting.
 
 - **Compact artifact history** — File changes requested in chat are recorded automatically. Version history shows version numbers, short identifiers, summaries and previews, without a separate edit form or explanatory paragraphs. Existing primary files retain their own history when alternative recovery paths refer to another file.

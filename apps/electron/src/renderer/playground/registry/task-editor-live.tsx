@@ -8,7 +8,7 @@ import { validateTaskSpec } from '../../../../../../packages/shared/src/tasks/va
 import type { TaskGenerateRequest, TaskGenerateResult, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import type { ComponentEntry } from './types'
 import { mockElectronAPI } from '../mock-utils'
-import { researchPreview, researchLinesPreview } from './research-preview'
+import { researchPreview, researchLinesPreview, researchJudgmentPreview } from './research-preview'
 import { renderResearchReport } from '../../../../../../packages/shared/src/tasks/research'
 
 const initial = {
@@ -22,7 +22,7 @@ const initial = {
 }
 
 /** Actual editor and validators, with fixed transport; the real model is tested by the host script. */
-function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' | 'research' | 'research-lines' }) {
+function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'current' }: { mode?: 'create' | 'edit'; response?: 'normal' | 'invalid' | 'delayed' | 'locked'; scenario?: 'current' | 'legacy' | 'long' | 'f3' | 'active' | 'dynamic' | 'research' | 'research-lines' | 'research-judgment' }) {
   const [ready, setReady] = React.useState(false)
   const [requests, setRequests] = React.useState<Array<TaskGenerateRequest | { openSession: string }>>([])
   const [writes, setWrites] = React.useState({ saves: 0, creates: 0, runs: 0 })
@@ -38,7 +38,7 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
       } catch (error) { return { valid: false, errors: [{ path: 'yaml', message: String(error), severity: 'error' as const }], warnings: [] } }
     }
     const definition = TaskSpecSchema.parse(initial)
-    const research = scenario === 'research' ? researchPreview() : scenario === 'research-lines' ? researchLinesPreview() : undefined
+    const research = scenario === 'research' ? researchPreview() : scenario === 'research-lines' ? researchLinesPreview() : scenario === 'research-judgment' ? researchJudgmentPreview() : undefined
     if (research) {
       definition.research = research.config; definition.runner = 'orchestrate'
       definition.nodes.splice(2, 0, { id: 'correct-cost', kind: 'session', title: '修订成本', prompt: '读取原文，修订 cost@2。', depends_on: ['analyze'] }, { id: 'review-cost', kind: 'session', title: '独立复核新版本', prompt: '独立读取原文审查 cost@2。', depends_on: ['correct-cost'] })
@@ -117,6 +117,6 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
 }
 export const taskEditorLiveComponents: ComponentEntry[] = [{ id: 'task-editor-live', name: '实际编排编辑器', category: 'Kanban', description: '实际 TaskEditor、对话提案和图组件，固定传输记录保存/创建/运行及请求。', component: TaskEditorLive, props: [
   { name: 'mode', control: { type: 'select', options: ['create', 'edit'].map(value => ({ label: value, value })) }, defaultValue: 'edit' },
-  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic', 'research', 'research-lines'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
+  { name: 'scenario', control: { type: 'select', options: ['current', 'legacy', 'long', 'f3', 'active', 'dynamic', 'research', 'research-lines', 'research-judgment'].map(value => ({ label: value, value })) }, defaultValue: 'current' },
   { name: 'response', control: { type: 'select', options: ['normal', 'invalid', 'delayed', 'locked'].map(value => ({ label: value, value })) }, defaultValue: 'normal' },
 ], layout: 'top' }]

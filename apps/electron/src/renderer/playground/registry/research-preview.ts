@@ -31,3 +31,13 @@ export function researchLinesPreview() {
   records[0]!.payload.claims=[]
   return {config,summary:summarizeResearch(config,[source],records)}
 }
+
+export function researchJudgmentPreview() {
+  const base = researchPreview()
+  const records = structuredClone(base.summary.records)
+  for (const record of records) for (const claim of record.payload.claims) claim.falsificationConditions = ['更正后的原文金额或统计期间与当前结论矛盾。']
+  records[3]!.payload.premiseReviews = [{ id: 'premise-cost-v2', lineId: 'main', premises: base.config.line.premises,
+    claimRefs: [{ id: 'cost', version: 2 }], classification: 'retained', finding: '两年口径成立，测试资料不能推出真实市场成本。', changeEvidence: ['更新原文或不同统计期间可能改变结论。'] }]
+  const config = ResearchConfigSchema.parse({ ...base.config, judgmentVersion: 1 })
+  return { config, summary: summarizeResearch(config, base.summary.sources, records) }
+}

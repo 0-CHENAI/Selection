@@ -1,21 +1,29 @@
 /** Research business records reference execution receipts; they never schedule work. */
 import { z } from 'zod';
+import { validateResearchJudgment, summarizeResearchJudgment } from './research-judgment';
 const id = z.string().min(1);
 const version = z.number().int().positive();
 export const ResearchLineSchema = z.object({ id, question: id, premises: z.array(id).default([]),
-  parentLineIds: z.array(id).optional(), sourceIds: z.array(id).optional() }).strict();
+  parentLineIds: z.array(id).optional(), sourceIds: z.array(id).optional(), candidateId: id.optional() }).strict();
 export const ResearchScopeSchema = z.object({ region: id, year: id, currency: id, tax: id, basis: id, requirements: id }).strict();
 const claimRef = z.object({ id, version }).strict();
+export const BranchDispositionSchema = z.object({ candidateId: id, action: z.enum(['open', 'not-adopt']), reason: z.string().trim().min(1),
+  lineId: id.optional(), taskRef: id.optional() }).strict().superRefine((value, ctx) => {
+  if (value.action === 'open' && (!value.lineId || !value.taskRef)) ctx.addIssue({ code: 'custom', message: 'Opening a branch requires one line and canonical task' });
+  if (value.action === 'not-adopt' && (value.lineId || value.taskRef)) ctx.addIssue({ code: 'custom', message: 'A declined branch cannot bind an execution task' });
+});
 export const ResearchQuestionSchema = z.object({ id, question: id, sharedTaskRef: id,
   scope: ResearchScopeSchema, commonBackground: z.array(id), compatibilityReason: id,
   parents: z.array(z.object({ lineId: id, premises: z.array(id), inputScope: ResearchScopeSchema,
     claimRefs: z.array(claimRef), evidenceRefs: z.array(id), issueRefs: z.array(id), path: z.array(id) }).strict()).min(1),
 }).strict();
-export const ResearchExpansionSchema = z.object({ lines: z.array(ResearchLineSchema).optional(), questions: z.array(ResearchQuestionSchema).optional() }).strict();
+export const ResearchExpansionSchema = z.object({ lines: z.array(ResearchLineSchema).optional(), questions: z.array(ResearchQuestionSchema).optional(), branchDispositions: z.array(BranchDispositionSchema).optional() }).strict();
 export type ResearchExpansion = z.infer<typeof ResearchExpansionSchema>;
 export const ResearchConfigSchema = z.object({
   /** Absent in legacy records: never retroactively invent read receipts. */
   assuranceVersion: z.literal(2).optional(),
+  judgmentVersion: z.literal(1).optional(),
+  branchDispositions: z.array(BranchDispositionSchema).optional(),
   line: ResearchLineSchema,
   lines: z.array(ResearchLineSchema).optional(), questions: z.array(ResearchQuestionSchema).optional(),
   dimensions: z.array(z.object({ id, requirement: id, required: z.boolean().default(true) }).strict()).min(1),
@@ -27,6 +35,14 @@ export const ResearchConfigSchema = z.object({
   const lines = [config.line, ...(config.lines ?? [])];
   if (new Set(lines.map(line => line.id)).size !== lines.length) ctx.addIssue({ code: 'custom', message: 'Duplicate research line identity' });
   if (new Set((config.questions ?? []).map(question => question.id)).size !== (config.questions ?? []).length) ctx.addIssue({ code: 'custom', message: 'Duplicate shared question identity' });
+  const candidates = lines.flatMap(line => line.candidateId ? [line.candidateId] : []);
+  if (new Set(candidates).size !== candidates.length) ctx.addIssue({ code: 'custom', message: 'A branch candidate has one canonical research line' });
+  const dispositions = config.branchDispositions ?? [];
+  if (new Set(dispositions.map(value => value.candidateId)).size !== dispositions.length) ctx.addIssue({ code: 'custom', message: 'A branch candidate requires exactly one disposition' });
+  for (const value of dispositions) {
+    if (value.action === 'open' && !lines.some(line => line.id === value.lineId && line.candidateId === value.candidateId)) ctx.addIssue({ code: 'custom', message: 'Opened disposition must reference its exact candidate line' });
+    if (value.action === 'not-adopt' && lines.some(line => line.candidateId === value.candidateId)) ctx.addIssue({ code: 'custom', message: 'A declined candidate cannot already have a research line' });
+  }
   const byId = new Map(lines.map(line => [line.id, line]));
   const visit = (lineId: string, path: Set<string>): boolean => {
     if (path.has(lineId)) return false;
@@ -62,7 +78,7 @@ const evidence = z.object({ id, sourceId: id, sourceVersion: id,
   locator: z.object({ startLine: version, endLine: version }).strict(), excerpt: id }).strict();
 const claim = z.object({ id, version, type: z.enum(['fact', 'inference', 'explanation', 'value']), text: id,
   inputClaimRefs: z.array(claimRef).optional(), lineIds: z.array(id).min(1).optional(), dimensionIds: z.array(id).min(1), evidenceIds: z.array(id), critical: z.boolean(),
-  recommendation: z.boolean().default(false), keyNumber: z.boolean().default(false), conditions: z.array(id).default([]) }).strict();
+  recommendation: z.boolean().default(false), keyNumber: z.boolean().default(false), conditions: z.array(id).default([]), falsificationConditions: z.array(z.string().trim().min(1)).optional() }).strict();
 const review = z.object({ claimRef, citationExists: z.boolean(), support: z.enum(['supported', 'partial', 'contradicted', 'unverified']),
   finding: id, limitations: z.array(id).default([]) }).strict();
 const issue = z.object({ id, claimRef, finding: id, disposition: z.enum(['correct', 'add-evidence', 'respond', 'limit', 'followup-task', 'defer']),
@@ -71,14 +87,19 @@ const erratum = z.object({ id, reason: z.string().trim().min(1), target: z.discr
   z.object({ kind: z.literal('claim'), claimRef }).strict(),
   z.object({ kind: z.literal('source'), sourceId: id, sourceVersion: id }).strict(),
 ]) }).strict();
+const premiseReview = z.object({ id, lineId: id, premises: z.array(id), claimRefs: z.array(claimRef).min(1),
+  classification: z.enum(['fact-error', 'evidence-gap', 'alternative-premise', 'retained']), finding: id, changeEvidence: z.array(id).min(1) }).strict();
+const branchCandidate = z.object({ id, critiqueId: id, parentLineId: id, question: id, premises: z.array(id).min(1), reason: id }).strict();
 export const ResearchPayloadSchema = z.object({
   evidence: z.array(evidence).default([]), claims: z.array(claim).default([]), reviews: z.array(review).default([]), issues: z.array(issue).default([]),
   errata: z.array(erratum).optional(),
+  premiseReviews: z.array(premiseReview).optional(), branchCandidates: z.array(branchCandidate).optional(),
   relations: z.array(z.object({ id, type: z.enum(['supports', 'refutes', 'converges']), from: claimRef, to: claimRef, reason: id }).strict()).optional(),
   report: z.object({ claimRefs: z.array(claimRef), limitations: z.array(id), unresolved: z.array(id),
-    alternatives: z.array(id).optional(), changeEvidence: z.array(id).optional(), erratumIds: z.array(id).optional() }).strict().optional(),
+    alternatives: z.array(id).optional(), changeEvidence: z.array(id).optional(), erratumIds: z.array(id).optional(),
+    lineIds: z.array(id).min(1).optional(), branchCandidateIds: z.array(id).optional() }).strict().optional(),
 }).strict().superRefine((payload, ctx) => {
-  for (const field of ['evidence', 'claims', 'issues', 'relations', 'errata'] as const) {
+  for (const field of ['evidence', 'claims', 'issues', 'relations', 'errata', 'premiseReviews', 'branchCandidates'] as const) {
     const identities = (payload[field] ?? []).map(item => item.id);
     if (new Set(identities).size !== identities.length) ctx.addIssue({ code: 'custom', path: [field], message: `Duplicate ${field} identity` });
   }
@@ -95,6 +116,7 @@ export const ResearchRecordSchema = z.object({ role: z.enum(['researcher', 'revi
   payload: ResearchPayloadSchema }).strict();
 export interface ResearchSummary {
   assuranceVersion?: 2;
+  judgment?: ReturnType<typeof summarizeResearchJudgment>;
   reads: ResearchReadReceipt[];
   sourceBundle: { cited: Array<{ sourceId: string; sourceVersion: string; claimRefs: Array<{ id: string; version: number }>; readIds: string[] }>;
     readNotCited: ResearchReadReceipt[]; unresolved: Array<{ claimRef: { id: string; version: number }; evidenceId: string; reason: string }>;
@@ -178,7 +200,7 @@ export function validateResearchRecord(config: ResearchConfig, sources: Research
   const knownErrata = [...previous.flatMap(entry => entry.payload.errata ?? []), ...(payload.errata ?? [])];
   for (const ref of payload.report?.erratumIds ?? []) if (!knownErrata.some(value => value.id === ref)) errors.push(`Unknown report erratum ${ref}`);
   if (payload.report?.erratumIds && new Set(payload.report.erratumIds).size !== payload.report.erratumIds.length) errors.push('Duplicate report erratum identity');
-  return errors;
+  return [...errors, ...validateResearchJudgment(config, previous, record, taskIds)];
 }
 const keyLines = (claim: {lineIds?: string[]}, config: ResearchConfig) => [...(claim.lineIds ?? [config.line.id])].sort().join('\n');
 
@@ -200,7 +222,7 @@ export function researchReadRangeTexts(source: ResearchSource, range: { startLin
   return range.endLine === lines.length - 1 && lines.at(-1) === '' ? [text, text + '\n'] : [text];
 }
 
-export function summarizeResearch(config: ResearchConfig, sources: ResearchSource[], records: ResearchRecord[], reads: ResearchReadReceipt[] = []): ResearchSummary {
+export function summarizeResearch(config: ResearchConfig, sources: ResearchSource[], records: ResearchRecord[], reads: ResearchReadReceipt[] = [], reportScope?: string[]): ResearchSummary {
   const current = new Map<string, ResearchSummary['claims'][number]>();
   const allEvidence = records.flatMap(record => record.payload.evidence);
   const latestIssues = new Map<string, ResearchSummary['issues'][number]>();
@@ -313,30 +335,37 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
   const reportRecord = [...records].reverse().find(record => record.payload.report);
   const report = reportRecord?.payload.report ? { ...reportRecord.payload.report, producedBy: reportRecord.producedBy } : undefined;
   const blockers: string[] = [];
-  for (const value of claims) {
+  const selected = reportScope ?? lines.map(line => line.id);
+  const inScope = (value: { lineIds?: string[] }) => (value.lineIds ?? [config.line.id]).some(id => selected.includes(id));
+  const scopedClaims = claims.filter(inScope), scopedDimensions = dimensions.filter(value => selected.includes(value.lineId));
+  const judgment = config.judgmentVersion ? summarizeResearchJudgment(config, records, claims, issues, report, selected) : undefined;
+  if (judgment) blockers.push(...judgment.blockers);
+  for (const value of scopedClaims) {
     const mandatory = value.critical || value.recommendation || value.keyNumber || config.dimensions.some(dimension => dimension.required && value.dimensionIds.includes(dimension.id));
     if (mandatory && !value.review) blockers.push(`Claim ${key(value)} requires independent review`);
     if (mandatory && value.review && !isSupported(value) && !issues.some(issue => key(issue.claimRef) === key(value) && issue.reason.trim())) blockers.push(`Claim ${key(value)} requires explicit issue disposition`);
   }
   if (report) {
-    if (errata.length && !report.changeEvidence?.length) blockers.push('Report must disclose append-only errata and affected historical conclusions/reports');
-    for (const value of errata) if (!report.erratumIds?.includes(value.id)) blockers.push(`Report must cite appended erratum ${value.id}`);
-    if (lines.length > 1 && (!report.alternatives?.length || !report.changeEvidence?.length)) blockers.push('Conditional report must describe alternatives and evidence that could change the conclusions');
+    if (!reportScope && report.lineIds && lines.some(line => !report.lineIds!.includes(line.id))) blockers.push('Final research report must cover all research lines; local reports do not finish unrelated work');
+    const scopedErrata = reportScope ? errata.filter(value => value.affectedClaimRefs.some(ref => scopedClaims.some(claim => claim.id === ref.id))) : errata;
+    if (scopedErrata.length && !report.changeEvidence?.length) blockers.push('Report must disclose append-only errata and affected historical conclusions/reports');
+    for (const value of scopedErrata) if (!report.erratumIds?.includes(value.id)) blockers.push(`Report must cite appended erratum ${value.id}`);
+    if (selected.length > 1 && (!report.alternatives?.length || !report.changeEvidence?.length)) blockers.push('Conditional report must describe alternatives and evidence that could change the conclusions');
     for (const ref of report.claimRefs) {
       const value = current.get(ref.id);
       if (!value || value.version !== ref.version || !isSupported(value)) blockers.push(`Report cites an outdated or unsupported claim ${key(ref)}`);
     }
-    if (dimensions.some(dimension => dimension.required && dimension.state !== 'covered') && !report.limitations.length) blockers.push('Report must disclose dimensions without evidence coverage');
-    if (claims.some(value => !isSupported(value)) && !report.unresolved.length) blockers.push('Report must disclose unresolved research');
-    if (issues.some(issue => issue.state !== 'resolved') && !report.unresolved.length) blockers.push('Report must disclose unresolved issue dispositions');
-    for (const value of claims.filter(value => value.critical || value.recommendation || value.keyNumber)) {
+    if (scopedDimensions.some(dimension => dimension.required && dimension.state !== 'covered') && !report.limitations.length) blockers.push('Report must disclose dimensions without evidence coverage');
+    if (scopedClaims.some(value => !isSupported(value)) && !report.unresolved.length) blockers.push('Report must disclose unresolved research');
+    if (issues.some(issue => issue.state !== 'resolved' && scopedClaims.some(claim => claim.id === issue.claimRef.id)) && !report.unresolved.length) blockers.push('Report must disclose unresolved issue dispositions');
+    for (const value of scopedClaims.filter(value => value.critical || value.recommendation || value.keyNumber)) {
       if (isSupported(value) && !report.claimRefs.some(ref => key(ref) === key(value))) blockers.push(`Report omits current critical conclusion ${key(value)}`);
     }
   } else blockers.push('Research report has not been produced');
   return { assuranceVersion: config.assuranceVersion, line: config.line, lines, questions: config.questions ?? [], relations, sources, records, reads, sourceBundle, dimensions,
     coverage: { covered: dimensions.filter(dimension => dimension.state === 'covered').length,
       limited: dimensions.filter(dimension => dimension.state === 'limited').length, uncovered: dimensions.filter(dimension => dimension.state === 'uncovered').length, total: dimensions.length },
-    claims, issues, errata, report, blockers };
+    claims, issues, errata, report, judgment, blockers };
 }
 
 /** Visible report is rendered from the same approved versions used by the gate. */
@@ -345,7 +374,7 @@ export function renderResearchReport(summary: ResearchSummary): string {
   const claims = summary.claims.filter(claim => refs.some(ref => key(ref) === key(claim)));
   const evidence = summary.records.flatMap(record => record.payload.evidence);
   return [summary.lines.length > 1 ? '条件式研究报告' : summary.line.question, ...(summary.lines.length === 1 ? summary.line.premises.map(premise => `成立前提：${premise}`) : []), '',
-    ...claims.flatMap(claim => [...summary.lines.filter(line => (claim.lineIds ?? [summary.line.id]).includes(line.id)).flatMap(line => [`研究线：${line.id} · ${line.question}`, ...line.premises.map(premise => `成立前提：${premise}`)]), claim.text, ...claim.conditions.map(condition => `适用条件：${condition}`),
+    ...claims.flatMap(claim => [...summary.lines.filter(line => (claim.lineIds ?? [summary.line.id]).includes(line.id)).flatMap(line => [`研究线：${line.id} · ${line.question}`, ...line.premises.map(premise => `成立前提：${premise}`)]), claim.text, ...claim.conditions.map(condition => `适用条件：${condition}`), ...(claim.falsificationConditions ?? []).map(condition => `证伪条件：${condition}`),
       ...claim.evidenceIds.flatMap(id => { const item = evidence.find(value => value.id === id); const source = summary.sources.find(source => source.id === item?.sourceId);
         return item && source ? [`来源：${source.ref} @ ${source.version}，行 ${item.locator.startLine}–${item.locator.endLine}：${item.excerpt}`] : []; }),
       ...(claim.inputClaimRefs?.length ? [`依据结论版本：${claim.inputClaimRefs.map(key).join(', ')}`] : []),
@@ -356,6 +385,7 @@ export function renderResearchReport(summary: ResearchSummary): string {
     ...(summary.report?.alternatives ?? []).map(item => `替代解释：${item}`),
     ...(summary.report?.changeEvidence ?? []).map(item => `可能改变结论的证据：${item}`),
     ...summary.relations.filter(relation => relation.current).map(relation => `研究关系：${key(relation.from)} ${relation.type} ${key(relation.to)}；${relation.reason}`),
+    ...(summary.judgment?.candidates ?? []).map(candidate => `歧路候选：${candidate.id} · ${candidate.question}；${candidate.disposition?.action ?? 'pending'} · ${candidate.disposition?.reason ?? candidate.reason}`),
     ...summary.errata.map(value => `追加勘误：${value.id} · ${value.target.kind === 'claim' ? key(value.target.claimRef) : `${value.target.sourceId}@${value.target.sourceVersion}`} · ${value.reason}；影响 ${value.affectedClaimRefs.map(key).join(', ')}；${value.state}`),
     ...(summary.report?.unresolved ?? []).map(item => `未决问题：${item}`),
     `可追溯版本：${refs.map(key).join(', ')}`].join('\n');

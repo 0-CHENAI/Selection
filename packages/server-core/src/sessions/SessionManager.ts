@@ -9200,7 +9200,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private isCanonicalCoordinatorWaiting(managed: ManagedSession): boolean {
     const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
-    return run?.orchestratorSessionId === managed.id && !['completed', 'failed', 'stopped'].includes(run.status)
+    // A human-action gate must be reportable. Refusing its explanation traps
+    // the coordinator in a final-answer retry loop without releasing the gate.
+    return run?.orchestratorSessionId === managed.id
+      && !['completed', 'failed', 'stopped', 'paused', 'interrupted', 'waiting-approval', 'waiting-budget'].includes(run.status)
   }
 
   private async *runAnswerDelivery(

@@ -94,6 +94,19 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
   })
 
+  it('can explain a paused canonical run without resuming or certifying it', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status: 'paused' }) }) as never)
+    install(async function* () {
+      await control!.submit({ ...submission, markdown: '计划修订已暂停，尚未完成验收。请检查处置后恢复。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '计划已在保护性检查中暂停，请说明问题。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['计划修订已暂停，尚未完成验收。请检查处置后恢复。'])
+  })
+
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)
     const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',

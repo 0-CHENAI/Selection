@@ -31,4 +31,5 @@ test('new chat research plans require host-owned original-read receipts', () => 
     research: { line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'Verify cost' }], sources: [] },
   } }, root)
   expect(plan.research?.assuranceVersion).toBe(2)
+  expect(plan.research?.judgmentVersion).toBe(1)
 })

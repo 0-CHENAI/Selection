@@ -2,14 +2,38 @@ import { ResearchConfigSchema, ResearchExpansionSchema, type ResearchConfig, typ
 import { planValueKey } from './plan.ts';
 
 /** Append-only business identities travel in the existing atomic plan transaction. */
-export function expandResearch(config: ResearchConfig | undefined, raw: unknown, tasks: ReadonlyMap<string, { researchRole?: string }>, records: ResearchRecord[] = []): ResearchConfig {
+export function expandResearch(config: ResearchConfig | undefined, raw: unknown, tasks: ReadonlyMap<string, { researchRole?: string; researchLineIds?: string[] }>, records: ResearchRecord[] = []): ResearchConfig {
   if (!config) throw new Error('Research expansion requires configured research');
   const expansion = ResearchExpansionSchema.parse(raw);
-  const lines = [...(config.lines ?? [])], questions = [...(config.questions ?? [])];
+  const lines = [...(config.lines ?? [])], questions = [...(config.questions ?? [])], branchDispositions = [...(config.branchDispositions ?? [])];
+  const candidates = records.flatMap(record => record.payload.branchCandidates ?? []);
   for (const line of expansion.lines ?? []) {
     const old = [config.line, ...lines].find(old => old.id === line.id);
     if (old && planValueKey(old) !== planValueKey(line)) throw new Error(`Cannot change premises of existing research line ${line.id}`);
-    if (!old) lines.push(line);
+    if (!old) {
+      if (config.judgmentVersion) {
+        const candidate = candidates.find(candidate => candidate.id === line.candidateId);
+        if (!candidate || planValueKey(candidate.premises) !== planValueKey(line.premises) || candidate.question !== line.question
+          || !line.parentLineIds?.includes(candidate.parentLineId)) throw new Error(`New research line ${line.id} requires the exact independent alternative-premise candidate`);
+        if ([config.line, ...lines].some(old => old.candidateId === candidate.id)) throw new Error(`Candidate ${candidate.id} already has a canonical research line`);
+      }
+      lines.push(line);
+    }
+  }
+  for (const disposition of expansion.branchDispositions ?? []) {
+    const candidate = candidates.find(candidate => candidate.id === disposition.candidateId);
+    if (!candidate) throw new Error(`Unknown branch candidate ${disposition.candidateId}`);
+    const old = branchDispositions.find(old => old.candidateId === disposition.candidateId);
+    if (old && planValueKey(old) !== planValueKey(disposition)) throw new Error(`Branch candidate ${disposition.candidateId} already has an immutable disposition`);
+    if (disposition.action === 'open') {
+      const line = lines.find(line => line.id === disposition.lineId && line.candidateId === candidate.id);
+      const task = tasks.get(disposition.taskRef!);
+      if (!line || task?.researchRole !== 'researcher' || !task.researchLineIds?.includes(line.id)) throw new Error(`Opened candidate ${candidate.id} requires its canonical line-bound researcher task`);
+    } else if (lines.some(line => line.candidateId === candidate.id)) throw new Error(`Cannot decline an already opened candidate ${candidate.id}`);
+    if (!old) branchDispositions.push(disposition);
+  }
+  if (config.judgmentVersion) for (const line of lines.filter(line => !config.lines?.some(old => old.id === line.id))) {
+    if (!branchDispositions.some(value => value.action === 'open' && value.lineId === line.id && value.candidateId === line.candidateId)) throw new Error(`New research line ${line.id} requires an atomic candidate disposition`);
   }
   const claims = records.flatMap(record => record.payload.claims), evidence = records.flatMap(record => record.payload.evidence), issues = records.flatMap(record => record.payload.issues);
   for (const question of expansion.questions ?? []) {
@@ -33,7 +57,7 @@ export function expandResearch(config: ResearchConfig | undefined, raw: unknown,
     } else questions.push(question);
     if (questions.some(other => other.id !== question.id && other.sharedTaskRef === question.sharedTaskRef)) throw new Error('Different logical questions cannot share one task identity');
   }
-  return ResearchConfigSchema.parse({ ...config, lines, questions });
+  return ResearchConfigSchema.parse({ ...config, lines, questions, ...(branchDispositions.length ? { branchDispositions } : {}) });
 }
 
 /** Prompt projection retains exact parent references without concatenating history or source bytes. */
@@ -44,7 +68,7 @@ export function researchTaskContext(summary: ResearchSummary, nodeId?: string, l
   const parentRefs = questions.flatMap(question => question.parents.flatMap(parent => parent.claimRefs));
   const parentClaims = summary.records.flatMap(record => record.payload.claims.filter(claim => parentRefs.some(ref => ref.id === claim.id && ref.version === claim.version) && !claims.some(current => current.id === claim.id && current.version === claim.version)).map(claim => ({...claim,producedBy:record.producedBy})));
   const evidenceIds = new Set([...claims.flatMap(claim => claim.evidenceIds), ...questions.flatMap(question => question.parents.flatMap(parent => parent.evidenceRefs))]);
-  return { assuranceVersion: summary.assuranceVersion, reads: summary.reads, sourceBundle: summary.sourceBundle, line: summary.line, lines: summary.lines.filter(line => selected.includes(line.id)), questions,
+  return { assuranceVersion: summary.assuranceVersion, judgment: summary.judgment, reads: summary.reads, sourceBundle: summary.sourceBundle, line: summary.line, lines: summary.lines.filter(line => selected.includes(line.id)), questions,
     sources: summary.sources.map(({ text: _text, ...source }) => source), dimensions: summary.dimensions.filter(dimension => selected.includes(dimension.lineId)),
     claims, parentClaims, evidence: summary.records.flatMap(record => record.payload.evidence).filter(evidence => evidenceIds.has(evidence.id)),
     issues: summary.issues.filter(issue => claims.some(claim => claim.id === issue.claimRef.id)), relations: summary.relations, errata: summary.errata,

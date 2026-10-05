@@ -428,6 +428,7 @@ class ActiveRun {
   private readonly seenDecisionIds = new Set<string>();
   private readonly completedCheckpointIds = new Set<string>();
   private coordinatorGate: CoordinatorGateState | null = null;
+  private readonly researchStageNotifications = new Map<string, { key: string; blockers: string[] }>();
   private readonly help = new Map<string, TaskHelpRecord>();
   private readonly helpWaiters = new Map<string, { promise: Promise<unknown>; resolve(value: unknown): void; reject(error: Error): void }>();
   private readonly helpTimeouts = new Map<string, number>();
@@ -1229,7 +1230,8 @@ class ActiveRun {
         actor: node?.actor,
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
         // Keep failure history for retry prompts, but expose only a current blocker.
-        blocker: ['pending', 'ready', 'running', 'done', 'skipped'].includes(st.state) ? undefined : st.lastFailure,
+        blocker: st.state === 'pending' && this.researchStageNotifications.has(id) ? this.researchStageNotifications.get(id)!.blockers.join('; ')
+          : ['pending', 'ready', 'running', 'done', 'skipped'].includes(st.state) ? undefined : st.lastFailure,
         elapsedMs: timing?.elapsedMs,
         queueMs: timing?.queueMs,
         cacheStatus: timing?.cacheStatus,
@@ -1320,6 +1322,7 @@ class ActiveRun {
         break;
       }
       if (!this.isReady(node)) continue;
+      if (!this.researchStageReady(node)) continue;
       if (node.kind !== 'filter' && !this.whenAllows(node)) {
         this.skipNode(node.id, 'when');
         continue;
@@ -1984,10 +1987,15 @@ class ActiveRun {
       attempt: state.attempt, revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId,
       artifactVersion: createHash('sha256').update(JSON.stringify(output)).digest('hex') } };
     const errors = validateResearchRecord(config, previous?.sources ?? [], previous?.records ?? [], record, new Set(this.spec.nodes.map(node => node.id)));
-    if (node.researchLineIds && payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))) errors.push('Claim exceeds the task research line binding');
+    if (config.judgmentVersion && node.researchLineIds && payload.report && !payload.report.lineIds
+      && [config.line, ...(config.lines ?? [])].some(line => !node.researchLineIds!.includes(line.id))) errors.push('A local reporter must explicitly identify report.lineIds within its task binding');
+    if (node.researchLineIds && (payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))
+      || payload.premiseReviews?.some(value => !node.researchLineIds!.includes(value.lineId))
+      || payload.branchCandidates?.some(value => !node.researchLineIds!.includes(value.parentLineId))
+      || payload.report?.lineIds?.some(id => !node.researchLineIds!.includes(id)))) errors.push('Research record exceeds the task research line binding');
     if (errors.length) throw new Error(errors.join('; '));
     if (record.payload.report) {
-      const candidate = summarizeResearch(config, previous.sources, [...previous.records, record], previous.reads);
+      const candidate = summarizeResearch(config, previous.sources, [...previous.records, record], previous.reads, record.payload.report.lineIds);
       if (candidate.blockers.length) throw new Error(candidate.blockers.join('; '));
       output.text = renderResearchReport(candidate);
       record.producedBy.artifactVersion = createHash('sha256').update(JSON.stringify(output)).digest('hex');
@@ -2251,6 +2259,28 @@ class ActiveRun {
     if (this.hasPendingNodes() && this.enterCoordinatorGate('no-ready')) {
       this.emitChanged();
     }
+  }
+
+  /** Readiness is local business state, not a second graph or global pause. */
+  private researchStageReady(node: TaskNode): boolean {
+    const config = this.spec.research;
+    if (node.researchRole !== 'reporter' || !config?.judgmentVersion) return true;
+    const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    const summary = research && summarizeResearch(config, research.sources, research.records, research.reads,
+      node.researchLineIds ?? research.lines.map(line => line.id));
+    const blockers = summary ? [...(summary.judgment?.blockers.filter(message => !message.startsWith('Report must disclose')) ?? []),
+      ...summary.blockers.filter(message => message.startsWith('Claim ') && !summary.judgment?.blockers.includes(message))]
+      : ['Frozen research state is unavailable; inspect the current source and execution records'];
+    if (!blockers.length) { this.researchStageNotifications.delete(node.id); return true; }
+    const key = planValueKey({ revision: this.revision, blockers });
+    if (this.researchStageNotifications.get(node.id)?.key !== key) {
+      this.researchStageNotifications.set(node.id, { key, blockers });
+      const root = this.opts.orchestratorSessionId;
+      if (root) void Promise.resolve().then(() => this.deps.host.sendMessage(root,
+        `Research stage is not ready for reporter ${JSON.stringify(node.id)}; unrelated research continues. Run ${JSON.stringify(this.runId)}, revision ${this.revision}.\n${blockers.join('\n')}\nRead get_task_results, then use submit_orchestration_patch with the current revision to record each branch disposition or schedule same-line repair and fresh review. Preserve locked goals, completed records and permissions. Do not start a reporter to repair this missing coordination record.`, undefined, undefined, { hidden: true }))
+        .catch(error => conductorLog.warn('research-stage-notification-failed', { nodeId: node.id, error }));
+    }
+    return false;
   }
 
   private async dispatch(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<void> {

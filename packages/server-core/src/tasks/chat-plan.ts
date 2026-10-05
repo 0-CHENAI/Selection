@@ -35,7 +35,7 @@ export function buildChatPlan(input: CreateTaskInput, root: {
   if (candidate.sources?.some(source => !root.enabledSourceSlugs?.includes(source))) throw new Error('Plan sources exceed the current root source scope')
   const spec = TaskSpecSchema.strict().parse({
     ...candidate, id, goal: root.originalRequest ?? candidate.goal, schema_version: 3, runner: candidate.runner ?? 'orchestrate',
-    ...(candidate.research ? { research: { ...candidate.research, assuranceVersion: 2 } } : {}),
+    ...(candidate.research ? { research: { ...candidate.research, assuranceVersion: 2, judgmentVersion: 1 } } : {}),
     project: root.projectId, cwd: root.workingDirectory,
     locked_fields: [...new Set([...(candidate.locked_fields ?? []), 'goal' as const, 'acceptance_criteria' as const])],
     sources: candidate.sources ?? root.enabledSourceSlugs,

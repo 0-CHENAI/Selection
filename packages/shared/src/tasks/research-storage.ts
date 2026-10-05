@@ -13,6 +13,7 @@ export function researchInheritanceCompatible(previous: ResearchConfig | undefin
     && planValueKey(previous.dimensions) === planValueKey(next.dimensions)
     && previous.sources.every(source => next.sources.some(item => item.id === source.id && item.ref === source.ref))
     && (previous.lines ?? []).every(line => next.lines?.some(item => planValueKey(item) === planValueKey(line)))
+    && (previous.branchDispositions ?? []).every(value => next.branchDispositions?.some(item => planValueKey(item) === planValueKey(value)))
     && (previous.questions ?? []).every(question => next.questions?.some(item => planValueKey({...item,parents:undefined,compatibilityReason:undefined}) === planValueKey({...question,parents:undefined,compatibilityReason:undefined}) && question.parents.every(parent => item.parents.some(next => planValueKey(next) === planValueKey(parent)))));
 }
 

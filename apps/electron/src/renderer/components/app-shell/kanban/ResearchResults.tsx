@@ -18,6 +18,7 @@ export function ResearchResults({ research, onOpenSession }: { research?: Resear
   return <section aria-label={t('tasks.research.title')} className="min-w-0 space-y-3 rounded-lg border border-border p-3 text-xs [overflow-wrap:anywhere]">
     <h3 className="font-semibold">{t('tasks.research.title')}{research.lines.length === 1 && <> · {research.line.question}</>}</h3>
     <p className="text-muted-foreground">{t('tasks.research.coverageHint')}</p>
+    <ResearchJudgment research={research} onOpenSession={onOpenSession} />
     <dl className="grid grid-cols-3 gap-2" aria-live="polite">{(['covered', 'limited', 'uncovered'] as const).map(state => <div key={state} className="rounded-md bg-foreground/[0.04] p-2"><dt>{t(`tasks.research.${state}`)}</dt><dd className="mt-1 text-lg font-semibold tabular-nums">{research.coverage[state]}<span className="text-xs font-normal text-muted-foreground"> / {research.coverage.total}</span></dd></div>)}</dl>
     <ul className="space-y-1">{research.dimensions.map(dimension => <li key={`${dimension.lineId}/${dimension.id}`}><span className="font-medium">{dimension.lineId}/{dimension.id} · {t(`tasks.research.${dimension.state}`)}</span> — {dimension.requirement}</li>)}</ul>
     {research.lines.length === 1 && !!research.line.premises.length && <p>{t('tasks.research.premises')}: {research.line.premises.join('；')}</p>}
@@ -41,6 +42,20 @@ export function ResearchResults({ research, onOpenSession }: { research?: Resear
     {research.report && <div className="space-y-1 border-t border-border pt-2"><p className="font-medium">{t('tasks.research.reportVersions')}: {research.report.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p>{research.report.limitations.map((limit, index) => <p key={index}>{t('tasks.research.limits')}: {limit}</p>)}{research.report.alternatives?.map((item,index) => <p key={`alternative-${index}`}>{t('tasks.research.alternatives')}: {item}</p>)}{research.report.changeEvidence?.map((item,index) => <p key={`change-${index}`}>{t('tasks.research.changeEvidence')}: {item}</p>)}{research.report.unresolved.map((item, index) => <p key={index}>{t('tasks.research.unresolved')}: {item}</p>)}<Receipt producer={research.report.producedBy} onOpenSession={onOpenSession} /></div>}
     {!!research.blockers.length && <details><summary className="cursor-pointer text-warning">{t('tasks.research.pendingDelivery')} ({research.blockers.length})</summary><ul className="mt-1 list-inside list-disc">{research.blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}</ul></details>}
   </section>
+}
+
+function ResearchJudgment({ research, onOpenSession }: { research: ResearchSummary; onOpenSession?: (id: string) => void }) {
+  const { t } = useTranslation()
+  const judgment = research.judgment
+  if (!judgment) return <p className="text-muted-foreground">{t('tasks.research.judgment.unrecorded')}</p>
+  return <div className="space-y-2 border-t border-border pt-2">
+    <h4 className="font-medium">{t('tasks.research.judgment.title')}</h4>
+    <p className="text-muted-foreground">{t('tasks.research.judgment.hint')}</p>
+    <ul className="space-y-1">{judgment.stages.map(stage => <li key={stage.lineId} className="flex min-w-0 items-baseline justify-between gap-3"><span className="truncate">{research.lines.find(line => line.id === stage.lineId)?.question ?? stage.lineId}</span><span className="shrink-0 text-muted-foreground">{t(`tasks.research.judgment.stage.${stage.state}`)}</span></li>)}</ul>
+    <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.falsification')}</summary><ul className="mt-2 space-y-2">{research.claims.map(claim => <li key={`${claim.id}@${claim.version}`}><p>{claim.id}@{claim.version}</p>{claim.falsificationConditions?.length ? claim.falsificationConditions.map((condition, index) => <p key={index} className="text-muted-foreground">{condition}</p>) : <p className="text-muted-foreground">{t('tasks.research.judgment.unrecorded')}</p>}</li>)}</ul></details>
+    {!!judgment.critiques.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.critique')} ({judgment.critiques.length})</summary><ul className="mt-2 space-y-2">{judgment.critiques.map(critique => <li key={critique.id} className="rounded-md border border-border p-2"><p>{critique.lineId} · {critique.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p><p className="text-muted-foreground">{t(`tasks.research.judgment.${critique.current ? 'current' : 'superseded'}`)}</p><p>{critique.finding}</p>{critique.changeEvidence.map((item, index) => <p key={index} className="text-muted-foreground">{item}</p>)}<Receipt producer={critique.producedBy} onOpenSession={onOpenSession} /></li>)}</ul></details>}
+    {!!judgment.candidates.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.judgment.candidates')} ({judgment.candidates.length})</summary><ul className="mt-2 space-y-2">{judgment.candidates.map(candidate => <li key={candidate.id} className="rounded-md border border-border p-2"><p className="font-medium">{candidate.question}</p><p>{candidate.premises.join('；')}</p><p className="text-muted-foreground">{candidate.disposition ? t(`tasks.research.judgment.${candidate.disposition.action}`) : t('tasks.research.judgment.undecided')} · {candidate.disposition?.reason ?? candidate.reason}</p><Receipt producer={candidate.producedBy} onOpenSession={onOpenSession} /></li>)}</ul></details>}
+  </div>
 }
 
 function ResearchSourceBundle({ research, onOpenSession }: { research: ResearchSummary; onOpenSession?: (id: string) => void }) {

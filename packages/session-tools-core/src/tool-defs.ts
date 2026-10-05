@@ -309,11 +309,22 @@ export const ControlTaskRunSchema = z.object({
   action: z.enum(['pause', 'resume', 'stop', 'continue']),
 });
 
+// Expose the decision shape before the host transaction. Exact identities and
+// atomic line/task bindings remain validated by the canonical research schema.
+const ResearchExpansionToolSchema = z.object({
+  lines: z.array(z.record(z.string(), z.unknown())).optional(),
+  questions: z.array(z.record(z.string(), z.unknown())).optional(),
+  branchDispositions: z.array(z.discriminatedUnion('action', [
+    z.object({ candidateId: z.string().min(1), action: z.literal('not-adopt'), reason: z.string().trim().min(1) }).strict(),
+    z.object({ candidateId: z.string().min(1), action: z.literal('open'), reason: z.string().trim().min(1), lineId: z.string().min(1), taskRef: z.string().min(1) }).strict(),
+  ])).optional(),
+}).strict().describe('Append independently critiqued alternative-premise lines and compatible shared questions. Record each candidate as {candidateId,action:"not-adopt",reason} without lineId/taskRef, or {candidateId,action:"open",reason,lineId,taskRef} with its exact new line and canonical researcher task. Fact corrections stay on the original line.');
+
 export const SubmitOrchestrationPatchSchema = z.object({
   consumedResults: z.array(z.string()).optional().describe('Stable result event ids consumed by this decision'),
   plannerPhase: z.enum(['active', 'draining']).optional().describe('Keep planning active or propose draining; exhausted is derived by the runtime'),
   changeKind: z.enum(['structure', 'repair', 'research']).optional(),
-  researchExpansion: z.record(z.string(), z.unknown()).optional().describe('Append research lines and explicitly compatible shared questions in this atomic plan revision; reuse each registered question canonical task'),
+  researchExpansion: ResearchExpansionToolSchema.optional(),
   runId: z.string().describe('Active run id'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this patch is based on'),
@@ -337,7 +348,7 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   consumedResults: z.array(z.string()).optional().describe('Result event ids consumed; defaults to exactly the checkpoint events'),
   plannerPhase: z.enum(['active', 'draining']).optional(),
   changeKind: z.enum(['structure', 'repair', 'research']).optional(),
-  researchExpansion: z.record(z.string(), z.unknown()).optional().describe('Append research lines and explicitly compatible shared questions in this atomic plan revision; reuse each registered question canonical task'),
+  researchExpansion: ResearchExpansionToolSchema.optional(),
   runId: z.string().describe('Active run id'),
   checkpointId: z.string().describe('Checkpoint this decision answers'),
   decisionId: z.string().describe('Idempotency key for this decision'),

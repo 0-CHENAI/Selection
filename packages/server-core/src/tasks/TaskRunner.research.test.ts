@@ -127,6 +127,58 @@ test('ordinary PRO execution keeps one original node and no research source or S
   expect(existsSync(join(runDir(root,'ordinary','plain'),'research'))).toBe(false);
 });
 
+test('B4 local research report completes while an unrelated line keeps running', async () => {
+  const bound = (id: string, role: TaskNode['researchRole'], line: string, dependencies: string[] = []) => ({ ...node(id, role, dependencies), researchLineIds: [line] });
+  const parsed = parseTaskSpec({ schema_version: 3, id: 'research', title: 'Local convergence', goal: 'Independent lines', runner: 'conduct', cwd: root, max_parallel: 2,
+    execution: { coordinator_gate: { mode: 'off' } },
+    research: { judgmentVersion: 1, line: { id: 'main', question: 'Two-year amount', premises: ['two years'] },
+      lines: [{ id: 'other', question: 'Different research', premises: ['different basis'] }],
+      dimensions: [{ id: 'cost', requirement: 'Original amount' }], sources: [{ id: 's', path: 'source.txt' }] },
+    nodes: [bound('a', 'researcher', 'main'), bound('other', 'researcher', 'other'), bound('review', 'reviewer', 'main', ['a']), bound('report', 'reporter', 'main', ['review'])] });
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error));
+  saveTaskSpec(root, parsed.data); runner.run('research', { runId: 'r', orchestratorSessionId: 'orch' }); await tick();
+  const version = loadTaskResults(root, 'research', 'r').research!.sources[0]!.version;
+  await complete('a', { evidence: [{ id: 'amount', sourceId: 's', sourceVersion: version, locator: { startLine: 2, endLine: 2 }, excerpt: 'A two-year cost is 1,000,000 yuan.' }],
+    claims: [{ id: 'cost', version: 1, type: 'fact', text: 'Original says 1,000,000 yuan', lineIds: ['main'], dimensionIds: ['cost'], evidenceIds: ['amount'], critical: true,
+      falsificationConditions: ['A corrected original changes the amount or its two-year scope'] }] });
+  await complete('review', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'supported', finding: 'Original confirms the amount' }],
+    premiseReviews: [{ id: 'premise-main', lineId: 'main', premises: ['two years'], claimRefs: [{ id: 'cost', version: 1 }], classification: 'retained', finding: 'No basis for a market claim', changeEvidence: ['A revised time horizon'] }] });
+  await complete('report', { report: { lineIds: ['main'], claimRefs: [{ id: 'cost', version: 1 }], limitations: ['Only frozen source'], unresolved: [] } });
+  const result = loadTaskResults(root, 'research', 'r');
+  expect(result.nodes.find(node => node.id === 'report')!.state).toBe('done');
+  expect(result.nodes.find(node => node.id === 'other')!.state).toBe('running');
+  expect(result.research!.judgment!.stages.map(stage => stage.state)).toEqual(['deliverable', 'draft']);
+  expect(result.research!.blockers.join(' ')).toContain('Final research report must cover all');
+  const retained = result.research!.records;
+  listeners.clear(); runner = new TaskRunner({ host: host(), workspaceId: 'ws', workspaceRoot: root }); runner.scanUnfinished();
+  expect(loadTaskResults(root, 'research', 'r').research!.records).toEqual(retained);
+});
+
+test('B4 an undisposed alternative waits before reporter dispatch without pausing unrelated work', async () => {
+  const parsed = parseTaskSpec({ schema_version: 3, id: 'research', title: 'Stage gate', goal: 'Explain only the two-year source', runner: 'orchestrate', cwd: root, max_parallel: 2,
+    execution: { coordinator_gate: { mode: 'off' } },
+    research: { judgmentVersion: 1, line: { id: 'main', question: 'Two-year amount', premises: ['two years'] },
+      lines: [{ id: 'other', question: 'Unrelated research', premises: ['different basis'] }],
+      dimensions: [{ id: 'cost', requirement: 'Original amount' }], sources: [{ id: 's', path: 'source.txt' }] },
+    nodes: [node('a', 'researcher'), { ...node('other', 'researcher'), researchLineIds: ['other'] }, node('review', 'reviewer', ['a']), { ...node('report', 'reporter', ['review']), researchLineIds: ['main'] }] });
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error));
+  saveTaskSpec(root, parsed.data); runner.run('research', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); await tick();
+  const version = loadTaskResults(root, 'research', 'r').research!.sources[0]!.version;
+  await complete('a', { evidence: [{ id: 'e1', sourceId: 's', sourceVersion: version, locator: { startLine: 2, endLine: 2 }, excerpt: 'A two-year cost is 1,000,000 yuan.' }],
+    claims: [{ id: 'cost', version: 1, lineIds: ['main'], type: 'fact', text: 'Two-year source amount', dimensionIds: ['cost'], evidenceIds: ['e1'], critical: true, falsificationConditions: ['A revised original changes the period'] }] });
+  await complete('review', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'supported', finding: 'Original supports the amount' }],
+    premiseReviews: [{ id: 'alternative', lineId: 'main', premises: ['two years'], claimRefs: [{ id: 'cost', version: 1 }], classification: 'alternative-premise', finding: 'A one-year interpretation would change the stated premise', changeEvidence: ['A revised original changes the period'] }],
+    branchCandidates: [{ id: 'one-year', critiqueId: 'alternative', parentLineId: 'main', question: 'One-year alternative', premises: ['one year'], reason: 'Alternative period, contradicted by current original' }] });
+  expect(sent.filter(message => message.id === 'session-report')).toHaveLength(0);
+  expect(runner.getRunState('research', 'r')!.nodes.find(node => node.id === 'other')!.state).toBe('running');
+  expect(sent.some(message => message.id === 'orch' && message.message.includes('stage is not ready'))).toBe(true);
+  runner.applyOrchestrationPatchByRunId('orch', 'r', { runId: 'r', baseRevision: 0, decisionId: 'decline-one-year', rationale: 'Outside the original two-year scope',
+    researchExpansion: { branchDispositions: [{ candidateId: 'one-year', action: 'not-adopt', reason: 'Original explicitly says two years; do not expand the goal' }] } });
+  await tick();
+  expect(sent.filter(message => message.id === 'session-report')).toHaveLength(1);
+  expect(loadTaskResults(root, 'research', 'r').research!.judgment!.candidates[0]!.disposition?.action).toBe('not-adopt');
+});
+
 test('final PASS refuses an unavailable frozen research definition rather than dropping its business gate',async()=>{
   const parsed=parseTaskSpec({schema_version:3,id:'research',title:'Limited research',goal:'disclose evidence gaps',execution:{coordinator_gate:{mode:'off'}},
     research:{line:{id:'main',question:'Cost and risk'},dimensions:[{id:'cost',requirement:'cost evidence'}],sources:[]},nodes:[node('only','reporter')]});
