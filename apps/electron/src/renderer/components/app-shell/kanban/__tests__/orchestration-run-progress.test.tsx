@@ -201,6 +201,8 @@ describe('OrchestrationRunProgressView', () => {
     expect(html).toContain('待处理')
     expect(html).toContain('0/2')
     expect(html).toContain('<button')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-hidden="true" inert=""')
   })
 })
 

@@ -1271,7 +1271,7 @@
   "session.currentProMode": "当前处于 PRO 模式",
   "session.defaultTitle": "新聊天",
   "session.enterSessionName": "输入会话名称…",
-  "session.executionChildren": "执行会话（{{count}}）",
+  "session.executionChildren": "子代理（{{count}}）",
   "session.executionOwnershipReview": "执行归属待核对",
   "session.inCurrentView": "在当前视图中",
   "session.newSession": "新建会话",

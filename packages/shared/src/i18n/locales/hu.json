@@ -1271,7 +1271,7 @@
   "session.currentProMode": "Jelenleg PRO módban",
   "session.defaultTitle": "Új csevegés",
   "session.enterSessionName": "Add meg a munkamenet nevét...",
-  "session.executionChildren": "Execution sessions ({{count}})",
+  "session.executionChildren": "Alügynökök ({{count}})",
   "session.executionOwnershipReview": "Execution ownership needs review",
   "session.inCurrentView": "Az aktuális nézetben",
   "session.newSession": "Új munkamenet",

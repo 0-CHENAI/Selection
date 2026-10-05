@@ -1271,7 +1271,7 @@
   "session.currentProMode": "Aktuell im PRO-Modus",
   "session.defaultTitle": "Neuer Chat",
   "session.enterSessionName": "Sitzungsname eingeben...",
-  "session.executionChildren": "Execution sessions ({{count}})",
+  "session.executionChildren": "Unteragenten ({{count}})",
   "session.executionOwnershipReview": "Execution ownership needs review",
   "session.inCurrentView": "In der aktuellen Ansicht",
   "session.newSession": "Neue Sitzung",

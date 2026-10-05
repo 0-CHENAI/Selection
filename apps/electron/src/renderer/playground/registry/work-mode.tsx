@@ -24,6 +24,52 @@ import { mockElectronAPI } from '../mock-utils'
 import type { FileAttachment, Session } from '../../../shared/types'
 import type { SessionOptions } from '@/hooks/useSessionOptions'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
+import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
+import { OrchestrationRunProgressView } from '@/components/app-shell/kanban/OrchestrationRunProgress'
+import { buildOrchestrationProgressRows } from '@/components/app-shell/kanban/orchestration-run-progress'
+
+function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 'completed' | 'failed' }) {
+  const base = useAppShellContext()
+  const { t } = useTranslation()
+  const [selected, setSelected] = React.useState('preview-root')
+  const titles = ['读取原始资料', '审查报告草稿', '独立核验草稿', '修正报告', '核验修订结果']
+  const run: TaskRunSnapshotDto = {
+    runId: 'preview-run', taskId: 'preview-task', slug: 'preview-task', status, tokensUsed: 0,
+    nodes: titles.map((title, index) => ({
+      id: `node-${index}`, title, attempt: 1,
+      state: status === 'completed' || index < 3 ? 'done' : index === 3 ? (status === 'failed' ? 'failed' : 'running') : 'pending',
+      sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
+    })),
+  }
+  const root = extractSessionMeta({ id: 'preview-root', name: '正式安装包聊天闭环验收', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', workMode: 'PRO', messages: [], lastMessageAt: Date.now(), isProcessing: status === 'running' })
+  const children = run.nodes.filter(node => node.sessionId).map(node => extractSessionMeta({
+    id: node.sessionId!, name: node.title, parentSessionId: root.id, workMode: 'PRO',
+    workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(),
+    isProcessing: node.state === 'running', hasUnread: node.state === 'done',
+  }))
+  const context = createMockContext({ selectedSessionId: selected, onSelectSessionById: setSelected })
+  return <ActionRegistryProvider><SessionListProvider value={context}>
+    <div className="@container h-[480px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
+      style={{ '--accent': 'var(--pro-accent)', '--accent-rgb': 'var(--pro-accent-rgb)' } as React.CSSProperties}>
+      <div className="flex h-full min-w-0">
+        <aside className="hidden w-60 shrink-0 border-r border-border @min-[600px]:block">
+          <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" />
+          <SessionItem item={root} index={0} itemProps={{ onKeyDown: () => {} }} isSelected isFirstInGroup isInMultiSelect={false} onSelect={() => setSelected(root.id)} />
+          <ExecutionChildren children={children} selectedSessionId={selected} onSelect={setSelected} />
+        </aside>
+        <main className="min-w-0 flex-1">
+          <PanelHeader title={selected === root.id ? root.name : children.find(child => child.id === selected)?.name} />
+          {selected === root.id && <OrchestrationRunProgressView liveRun={run} rows={buildOrchestrationProgressRows(undefined, run)} onPreviewSession={setSelected}
+            onRetry={status === 'failed' ? () => {} : undefined} />}
+          <div className="p-6 text-sm leading-relaxed text-foreground">
+            <p>{selected === root.id ? '报告已经完成资料核对与草稿审查，正在整合修订结果。' : children.find(child => child.id === selected)?.name}</p>
+            <p className="mt-4 text-foreground/60">固定预览数据；点击进度展开详情，或从左侧查看子代理会话。</p>
+          </div>
+        </main>
+      </div>
+    </div>
+  </SessionListProvider></ActionRegistryProvider>
+}
 
 // Real composer and rows with deterministic transport; never starts model work.
 function WorkModePreview({ compactTopBar = false, compactInput = false }: { compactTopBar?: boolean; compactInput?: boolean }) {
@@ -100,6 +146,10 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
   </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider></AppShellProvider>
 }
 export const workModeComponents: ComponentEntry[] = [{
+  id: 'subagent-progress', name: '子代理协作进度', category: 'Session List',
+  description: '实际子代理列表及运行进度组件；固定预览数据，不调用模型。', component: SubagentProgressPreview,
+  props: [{ name: 'status', control: { type: 'select', options: [{ label: '运行中', value: 'running' }, { label: '已完成', value: 'completed' }, { label: '失败', value: 'failed' }] }, defaultValue: 'running' }], layout: 'top',
+}, {
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',
   description: '实际模式切换、聊天草稿及执行子会话组件；传输使用固定数据。', component: WorkModePreview,
   props: [{ name: 'compactTopBar', control: { type: 'boolean' }, defaultValue: false }, { name: 'compactInput', control: { type: 'boolean' }, defaultValue: false }], layout: 'top',

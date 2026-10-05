@@ -1,5 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { Check, Circle, CircleAlert, CircleCheck, ChevronDown, LoaderCircle, Pause, ShieldAlert } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import { cn } from '@/lib/utils'
 import { resolveNodeStatePill } from './node-state-pill'
@@ -25,35 +27,49 @@ export interface OrchestrationRunProgressViewProps {
   error?: string
 }
 
+function ProgressStateIcon({ state }: { state?: string }) {
+  const className = 'size-3.5 shrink-0'
+  if (state === 'done' || state === 'completed') return <Check className={cn(className, 'text-success')} aria-hidden="true" />
+  if (state === 'failed' || state === 'invalid') return <CircleAlert className={cn(className, 'text-destructive')} aria-hidden="true" />
+  if (state === 'running' || state === 'verifying' || state === 'repairing') return <LoaderCircle className={cn(className, 'text-accent motion-safe:animate-spin')} aria-hidden="true" />
+  if (state === 'waiting-approval' || state === 'waiting-help') return <ShieldAlert className={cn(className, 'text-info')} aria-hidden="true" />
+  if (state === 'paused' || state === 'pausing' || state === 'interrupted' || state === 'stopped') return <Pause className={cn(className, 'text-foreground/60')} aria-hidden="true" />
+  return <Circle className={cn(className, 'text-foreground/60')} aria-hidden="true" />
+}
+
 export function OrchestrationRunProgressView({
   runningHint = false, liveRun, rows, onPreviewSession,
   runs = [], onSelectRun, onRetry, retrying = false, error,
 }: OrchestrationRunProgressViewProps) {
   const { t } = useTranslation()
+  const [expanded, setExpanded] = React.useState(false)
+  const controlsId = React.useId()
+  const reducedMotion = useReducedMotion()
   const status = liveRun?.status ?? (runningHint ? 'running' : undefined)
   const statusKey = runStatusLabelKey(status)
   const finished = countFinishedProgressRows(rows)
-  const pulse = status === 'running' || status === 'verifying' || status === 'repairing' || status === 'pausing'
   const statusLabel = statusKey ? t(statusKey) : t('tasks.starting')
   const heading = t(isActiveTaskRunStatus(status) ? 'tasks.tabLiveRun' : 'tasks.runHistory')
+  const activeRow = rows.find(row => row.state === 'running')
+    ?? rows.flatMap(row => row.children ?? []).find(row => row.state === 'running')
 
   const renderRow = (row: OrchestrationProgressRow): React.ReactNode => {
-    const pill = resolveNodeStatePill(row.state)
-    const label = pill.labelKey ? t(pill.labelKey) : row.state
-    const className = cn('inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-left text-[12px] leading-none', pill.className)
-    const content = <><span className="min-w-0 truncate">{row.title}</span><span className="shrink-0 opacity-80">{label}</span>{row.attempt && <span>{t('tasks.runAttempt', { number: row.attempt })}</span>}</>
+    const labelKey = resolveNodeStatePill(row.state).labelKey
+    const label = labelKey ? t(labelKey) : row.state
+    const className = 'flex min-h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-xs'
+    const content = <><ProgressStateIcon state={row.state} /><span className="min-w-0 flex-1 truncate text-foreground">{row.title}</span>{row.attempt && <span className="shrink-0 text-foreground/60">{t('tasks.runAttempt', { number: row.attempt })}</span>}<span className="shrink-0 text-foreground/60">{label}</span></>
     return (
-      <div key={row.id} className={row.children?.length ? 'w-full' : undefined}>
+      <div key={row.id}>
         {row.sessionId && onPreviewSession ? (
-          <button type="button" className={cn(className, 'hover:brightness-95')} title={t('tasks.openSession')}
+          <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} title={`${row.title} · ${t('tasks.openSession')}`}
             data-session-id={row.sessionId} onClick={() => onPreviewSession(row.sessionId!)}>{content}</button>
-        ) : <span className={className}>{content}</span>}
+        ) : <span className={className} title={row.title}>{content}</span>}
         {!!row.attempts?.some(attempt => attempt.sessionId !== row.sessionId) && (
-          <details className="mt-1 text-xs text-muted-foreground">
-            <summary className="cursor-pointer">{t('tasks.attemptHistory')}</summary>
+          <details className="ml-8 text-xs text-foreground/60">
+            <summary className="w-fit cursor-pointer py-1 hover:text-foreground">{t('tasks.attemptHistory')}</summary>
             <div className="mt-1 flex flex-wrap gap-1">
               {row.attempts.filter(attempt => attempt.sessionId !== row.sessionId).map(attempt => (
-                <button key={attempt.sessionId} type="button" className="rounded px-2 py-1 hover:bg-foreground/5"
+                <button key={attempt.sessionId} type="button" className="rounded px-2 py-1 hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                   disabled={!onPreviewSession} data-session-id={attempt.sessionId}
                   onClick={() => onPreviewSession?.(attempt.sessionId)}>
                   {t('tasks.runAttempt', { number: attempt.attempt })} · {t(resolveNodeStatePill(attempt.state).labelKey ?? 'tasks.nodeStateInterrupted')}
@@ -62,34 +78,40 @@ export function OrchestrationRunProgressView({
             </div>
           </details>
         )}
-        {!!row.children?.length && <div className="ml-3 mt-1 flex flex-wrap gap-1.5 border-l border-border pl-2">{row.children.map(renderRow)}</div>}
+        {!!row.children?.length && <div className="ml-3 border-l border-border/60 pl-2">{row.children.map(renderRow)}</div>}
       </div>
     )
   }
 
   return (
-    <div className="shrink-0 border-b border-border/80 bg-[color-mix(in_srgb,var(--background)_92%,var(--foreground))] px-4 py-2.5"
+    <div className="shrink-0 border-b border-border/60 px-4 py-1.5"
       data-testid="orchestration-run-progress" aria-label={heading}>
-      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-foreground/70">
-        <span className="relative flex size-2 shrink-0" aria-hidden="true">
-          {pulse && <span className="absolute inline-flex size-full rounded-full bg-indigo-400 opacity-75 motion-safe:animate-ping" />}
-          <span className={cn('relative inline-flex size-2 rounded-full', pulse ? 'bg-indigo-500' : 'bg-foreground/35')} />
-        </span>
-        <span className="font-medium text-foreground/85">{heading}</span>
-        <span role="status" aria-live="polite">{statusLabel}</span>
-        {runs.length > 1 && onSelectRun && (
-          <select aria-label={t('tasks.runHistory')} value={liveRun?.runId ?? ''}
-            className="min-w-0 max-w-64 rounded bg-background px-1 py-0.5 text-xs"
-            onChange={event => onSelectRun(event.target.value)}>
-            {[...runs].reverse().map(run => <option key={run.runId} value={run.runId}>{run.runId} · {t(runStatusLabelKey(run.status) ?? 'tasks.starting')}</option>)}
-          </select>
-        )}
-        {rows.length > 0 && <span className="ml-auto tabular-nums text-foreground/45">{finished}/{rows.length}</span>}
-      </div>
-      {rows.length > 0 && <div className="mt-2 flex max-h-52 flex-wrap gap-1.5 overflow-y-auto">{rows.map(renderRow)}</div>}
+      <button type="button" aria-expanded={expanded} aria-controls={controlsId} onClick={() => setExpanded(value => !value)}
+        className="flex min-h-8 w-full min-w-0 items-center gap-2.5 rounded-md text-left text-xs text-foreground/60 transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+        {status === 'completed' ? <CircleCheck className="size-3.5 shrink-0 text-success" aria-hidden="true" /> : <ProgressStateIcon state={status} />}
+        <span className="shrink-0 font-medium text-foreground">{heading}</span>
+        <span className="min-w-0 max-w-[40%] truncate" role="status" aria-live="polite" title={statusLabel}>{statusLabel}</span>
+        <span className="min-w-0 flex-1 truncate" title={activeRow?.title}>{activeRow?.title}</span>
+        {rows.length > 0 && <span className="shrink-0 tabular-nums">{finished}/{rows.length}</span>}
+        <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
+      </button>
+      <motion.div id={controlsId} initial={false} animate={{ height: expanded ? 'auto' : 0, opacity: expanded ? 1 : 0 }}
+        transition={{ duration: reducedMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+        aria-hidden={!expanded} {...(!expanded ? { inert: '' } : {})} className="overflow-hidden">
+        <div className="max-h-52 overflow-y-auto pb-1 pt-1">
+          {runs.length > 1 && onSelectRun && (
+            <select aria-label={t('tasks.runHistory')} value={liveRun?.runId ?? ''}
+              className="mb-1 max-w-full rounded bg-background px-2 py-1 text-xs text-foreground/60"
+              onChange={event => onSelectRun(event.target.value)}>
+              {[...runs].reverse().map(run => <option key={run.runId} value={run.runId}>{run.runId} · {t(runStatusLabelKey(run.status) ?? 'tasks.starting')}</option>)}
+            </select>
+          )}
+          {rows.map(renderRow)}
+        </div>
+      </motion.div>
       {onRetry && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         <button type="button" disabled={retrying} className="rounded border border-border px-2 py-1 disabled:opacity-50" onClick={onRetry}>{t('tasks.retryFailedNodes')}</button>
-        <span className="text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
+        <span className="text-foreground/60">{t('tasks.retryFailedNodesHint')}</span>
       </div>}
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
     </div>

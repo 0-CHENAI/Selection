@@ -1271,7 +1271,7 @@
   "session.currentProMode": "現在は PRO モードです",
   "session.defaultTitle": "新しいチャット",
   "session.enterSessionName": "セッション名を入力...",
-  "session.executionChildren": "Execution sessions ({{count}})",
+  "session.executionChildren": "サブエージェント（{{count}}）",
   "session.executionOwnershipReview": "Execution ownership needs review",
   "session.inCurrentView": "現在のビュー内",
   "session.newSession": "新規セッション",

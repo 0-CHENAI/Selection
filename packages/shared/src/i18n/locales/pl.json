@@ -1271,7 +1271,7 @@
   "session.currentProMode": "Obecnie w trybie PRO",
   "session.defaultTitle": "Nowy czat",
   "session.enterSessionName": "Wprowadź nazwę sesji...",
-  "session.executionChildren": "Execution sessions ({{count}})",
+  "session.executionChildren": "Podagenci ({{count}})",
   "session.executionOwnershipReview": "Execution ownership needs review",
   "session.inCurrentView": "W bieżącym widoku",
   "session.newSession": "Nowa sesja",

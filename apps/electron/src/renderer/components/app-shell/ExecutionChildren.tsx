@@ -15,14 +15,14 @@ export function ExecutionChildren({ children, selectedSessionId, onSelect, label
   const { t } = useTranslation()
   const controlsId = useId()
   const containsSelected = children.some(child => child.id === selectedSessionId)
-  const [open, setOpen] = useState(containsSelected || children.some(child => child.isProcessing || child.hasUnread))
+  const [open, setOpen] = useState(containsSelected)
   const reducedMotion = useReducedMotion()
   useEffect(() => { if (containsSelected) setOpen(true) }, [containsSelected])
   if (children.length === 0) return null
   return (
-    <div className="ml-5 border-l border-border/60" data-execution-children>
+    <div className="ml-4 mb-2 border-l border-border/50" data-execution-children>
       <button type="button" aria-expanded={open} aria-controls={controlsId} onClick={() => setOpen(value => !value)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+        className="flex min-h-8 w-full items-center gap-1.5 px-3 text-xs text-foreground/60 hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
         <ChevronRight className={`size-3 transition-transform motion-reduce:transition-none ${open ? 'rotate-90' : ''}`} />
         {label ?? t('session.executionChildren', { count: children.length })}
         {children.some(child => child.hasUnread) && <span className="ml-auto size-1.5 rounded-full bg-accent" aria-label={t('session.unreadGroup', { count: children.filter(child => child.hasUnread).length })} />}
@@ -30,7 +30,7 @@ export function ExecutionChildren({ children, selectedSessionId, onSelect, label
       <AnimatePresence initial={false}>
         {open && <motion.div id={controlsId} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
           exit={{ height: 0, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.16 }} className="overflow-hidden">
-          {children.map((child, index) => <SessionItem key={child.id} item={child} index={index}
+          {children.map((child, index) => <SessionItem key={child.id} item={child} index={index} isExecutionChild
             itemProps={{ role: 'option', tabIndex: 0, 'aria-selected': child.id === selectedSessionId,
               onKeyDown: (event: React.KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(child.id) } } }}
             isSelected={child.id === selectedSessionId} isFirstInGroup={index === 0} isInMultiSelect={false}
