@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PRO chat planning** — Complex goals can create one canonical plan on the current PRO conversation and start asynchronously within its existing authorization. Stable creation and start requests prevent duplicate plans and runs; saving in the editor remains separate from execution.
+
 - **Reliable task recovery** — Context admission checks cover subsequent tool-loop requests, and execution checkpoints retain confirmed progress. Restart recovery verifies execution ownership, permissions and tool receipts before continuing; uncertain writes pause with details in the existing error panel.
 
 - **Traceable revisions and collaboration** — Body feedback keeps its source, result and history. New writing tasks use isolated candidates, validation and runtime integration, preserving project edits and surfacing conflicts in the existing collaboration details.
@@ -16,7 +18,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Safer Office document edits** — Bundled OfficeCLI is updated to v1.0.152. After a warned or failed write, the agent checks for partial changes before retrying so it does not duplicate document content. PR #417.
 
-- **Simpler settings** — The Input page, spell check, send-key choice, and project color highlight are removed. Connection icons are now labeled provider icons, and an empty default-sources section uses the same settings card as the other rows. A new Advanced section keeps DAG orchestration and Swarm agents off by default and stores an optional AnySearch API key locally without showing the saved value. Fixes #413.
+- **Simpler settings** — The Input page, spell check, send-key choice, and project color highlight are removed. Connection icons are now labeled provider icons, and an empty default-sources section uses the same settings card as the other rows. Advanced settings store an optional AnySearch API key locally without showing the saved value. PRO now provides orchestration in standard builds, with an explicit build override for disabling it. Fixes #413.
 
 - **Document previews** — HTML and Markdown inline cards show file identity and clear boundaries; full content opens in a scrollable preview dialog without expanding the conversation. Keyboard focus returns to the opener after closing. Fixes #409.
 
@@ -47,6 +49,12 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Unified work-chain header** — Thinking and numbered steps share one title row and enter or leave on the same height curve as the processing indicator. The collapsed title no longer appends an error count, and the chevron stays in document flow so the rounded chrome does not clip it. Fixes #405.
 
 ## Bug Fixes
+
+- **Chat composer with run history** — Long reports and task progress no longer push the composer below the window; its model and send controls remain visible.
+
+- **Independent review and verified context** — Verify and judge nodes always start a fresh context. Actor reuse requires a completed execution, known outcomes, matching model and authorization, and unchanged inputs. A confirmed native write cannot conceal an intervening external file change.
+
+- **Upstream service failures** — Proxy 500/502/503/504 responses mentioning authentication are classified as service errors, avoiding a misleading API-key refresh and preserving the recorded task state.
 
 - **Conversation navigation previews** — Hover previews on the left conversation rail now keep only one visual line of the user message, add an ellipsis when it overflows, and preserve the gray response summary. Fixes #397.
 
