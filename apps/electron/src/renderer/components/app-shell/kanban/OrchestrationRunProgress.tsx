@@ -57,7 +57,6 @@ export function OrchestrationRunProgressView({
   const selectedRow = allRows.find(row => row.sessionId === selectedSessionId || row.attempts?.some(attempt => attempt.sessionId === selectedSessionId))
   const defaultRow = allRows.find(row => row.state === 'running' && row.sessionId) ?? allRows.find(row => row.sessionId)
   const previewSessionId = selectedRow ? selectedSessionId : defaultRow?.sessionId
-  const previewTitle = (selectedRow ?? defaultRow)?.title
   const agentsLabel = t('session.executionChildren', { count: rows.length })
 
   React.useEffect(() => { setSelectedSessionId(null) }, [liveRun?.runId])
@@ -129,7 +128,6 @@ export function OrchestrationRunProgressView({
             {rows.map(renderRow)}
           </div>
           <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('chat.viewOutput')}>
-            {previewTitle && <h3 className="shrink-0 truncate px-5 pb-1 pt-4 text-xs font-medium" title={previewTitle}>{previewTitle}</h3>}
             <div className="min-h-0 flex-1">
               {previewSessionId && renderPreviewSession ? renderPreviewSession(previewSessionId) : (
                 <div className="flex h-full items-center justify-center text-sm text-foreground/60">{t('tasks.starting')}</div>

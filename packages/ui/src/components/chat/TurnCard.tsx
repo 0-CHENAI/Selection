@@ -25,6 +25,7 @@ import {
   MessageCircleDashed,
   FileText,
   ArrowUpRight,
+  CornerDownRight,
   Ban,
   Copy,
   Check,
@@ -3343,8 +3344,11 @@ export const TurnCard = React.memo(function TurnCard({
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
     <div>
-      {assignmentSummary && <p className="mb-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
-        <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
+      {assignmentSummary && <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <CornerDownRight className="mt-1 size-4 shrink-0 text-accent" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
+        </span>
       </p>}
       {/* One header chrome for thinking and numbered work — no standalone swap. */}
       <AnimatePresence>
