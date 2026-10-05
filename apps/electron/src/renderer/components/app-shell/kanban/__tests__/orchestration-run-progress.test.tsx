@@ -180,7 +180,7 @@ describe('buildOrchestrationProgressRows', () => {
 })
 
 describe('OrchestrationRunProgressView', () => {
-  it('renders live node titles and states in the main chat chrome', () => {
+  it('keeps task details out of the chat until the subagent button is opened', () => {
     const html = renderWithI18n('zh-Hans', (
       <OrchestrationRunProgressView
         runningHint
@@ -189,20 +189,20 @@ describe('OrchestrationRunProgressView', () => {
           { id: 'hy4', title: '调研 Hy4-preview', state: 'running', sessionId: 'sess-hy4' },
           { id: 'summary', title: '汇总', state: 'pending' },
         ]}
-        onPreviewSession={() => {}}
+        renderPreviewSession={() => null}
       />
     ))
 
     expect(html).toContain('data-testid="orchestration-run-progress"')
     expect(html).toContain('当前运行')
     expect(html).toContain('运行中')
-    expect(html).toContain('调研 Hy4-preview')
-    expect(html).toContain('汇总')
-    expect(html).toContain('待处理')
-    expect(html).toContain('0/2')
+    expect(html).toContain('子代理（2）')
+    expect(html).not.toContain('调研 Hy4-preview')
+    expect(html).not.toContain('汇总')
+    expect(html).not.toContain('0/2')
     expect(html).toContain('<button')
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('aria-hidden="true" inert=""')
+    expect(html).not.toContain('role="dialog"')
   })
 })
 
@@ -221,20 +221,19 @@ describe('instance and history visibility', () => {
     expect(rows[0]!.title).toBe('Original title')
     expect(rows[0]!.sessionId).toBeUndefined()
     expect(rows[0]!.children!.map(row => row.sessionId)).toEqual(['s0', 's1-new', 's2'])
-    const html = renderWithI18n('zh-Hans', <OrchestrationRunProgressView runningHint liveRun={snapshot({ status: 'stopped' })} rows={rows} onPreviewSession={() => {}} />)
-    for (const id of ['s0', 's1-old', 's1-new', 's2']) expect(html).toContain(`data-session-id="${id}"`)
+    expect(rows[0]!.children![1]!.attempts?.map(attempt => attempt.sessionId)).toEqual(['s1-old', 's1-new'])
+    const html = renderWithI18n('zh-Hans', <OrchestrationRunProgressView runningHint liveRun={snapshot({ status: 'stopped' })} rows={rows} renderPreviewSession={() => null} />)
     expect(html).toContain('运行历史')
     expect(html).toContain('已停止')
     expect(html).not.toContain('animate-ping')
     expect(html).not.toContain('重试失败节点')
   })
 
-  it('offers distinct run ids without reviving terminal status from the parent hint', () => {
+  it('does not revive terminal status from the parent hint when browsing history', () => {
     const runs = [snapshot({ runId: 'old', status: 'stopped' }), snapshot({ runId: 'new', status: 'running' })]
     const html = renderWithI18n('en', <OrchestrationRunProgressView runningHint liveRun={runs[0]} runs={runs} onSelectRun={() => {}} rows={[]} />)
-    expect(html).toContain('value="old"')
-    expect(html).toContain('value="new"')
     expect(html).toContain('Stopped')
+    expect(html).not.toContain('Running')
     expect(html).not.toContain('animate-ping')
   })
 })

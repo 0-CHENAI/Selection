@@ -24,10 +24,11 @@ describe('swarm title chrome (#206)', () => {
     expect(chatPageSrc).not.toContain('setSwarmDetailsOpen')
   })
 
-  it('shows live task-run progress in the chat body after create-and-run', () => {
+  it('places a single subagent window trigger in the chat header after create-and-run', () => {
     expect(chatPageSrc).toContain('OrchestrationRunProgress')
     expect(chatPageSrc).toContain('runningHint={orchestrationStatus === \'running\'}')
-    expect(chatPageSrc).toContain('{orchestrationProgress}')
+    expect(chatPageSrc.match(/\{orchestrationProgress\}/g)).toHaveLength(1)
+    expect(chatPageSrc).toContain('renderPreviewSession={renderOrchestrationNode}')
   })
 })
 

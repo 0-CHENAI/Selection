@@ -19,7 +19,7 @@ import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
-import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
+import { ChildSessionPreviewContent, ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -624,10 +624,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     navigate(routes.view.board())
   }, [dagOrchestrationEnabled, taskSlug, canCreateTask, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
 
-  const handlePreviewOrchestrationNode = React.useCallback((childSessionId: string) => {
-    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return
-    setPreviewChildSessionId(childSessionId)
-  }, [sessionId, sessionMetaMap])
+  const renderOrchestrationNode = (childSessionId: string) => {
+    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return (
+      <div className="flex h-full items-center justify-center text-sm text-foreground/60">{t('chat.sessionNoLongerExists')}</div>
+    )
+    return <ChildSessionPreviewContent sessionId={childSessionId} />
+  }
 
   const orchestrationProgress = dagOrchestrationEnabled && !isDraft && isTaskOrchestrator && activeWorkspaceId && taskSlug && sessionId ? (
     <OrchestrationRunProgress
@@ -635,7 +637,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       taskSlug={taskSlug}
       sessionId={sessionId}
       runningHint={orchestrationStatus === 'running'}
-      onPreviewSession={handlePreviewOrchestrationNode}
+      renderPreviewSession={renderOrchestrationNode}
     />
   ) : null
 
@@ -701,6 +703,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       {!canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
         {currentWorkMode}
       </span>}
+      {orchestrationProgress}
       {sessionHeaderActions}
       {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
         canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
@@ -855,7 +858,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           <div className="h-full flex flex-col">
             <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="relative flex-1 flex flex-col min-h-0">
-              {orchestrationProgress}
               {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
                 <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
                   {t('session.workModeNeedsReview')}
@@ -943,7 +945,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="relative flex-1 flex flex-col min-h-0">
-          {orchestrationProgress}
           {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
             <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
               {t('session.workModeNeedsReview')}
