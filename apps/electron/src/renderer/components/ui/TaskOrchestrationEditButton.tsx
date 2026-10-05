@@ -9,11 +9,10 @@ interface TaskOrchestrationEditButtonProps {
   compact?: boolean
   disabled?: boolean
   onEdit: () => void
-  create?: boolean
 }
 
 /** Touch/compact activation explains the destination before leaving the chat. */
-export function TaskOrchestrationEditButton({ compact = false, disabled, onEdit, create = false }: TaskOrchestrationEditButtonProps) {
+export function TaskOrchestrationEditButton({ compact = false, disabled, onEdit }: TaskOrchestrationEditButtonProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const pointerType = React.useRef('')
@@ -21,8 +20,8 @@ export function TaskOrchestrationEditButton({ compact = false, disabled, onEdit,
   const restoreTriggerFocus = React.useRef(true)
   const descriptionId = React.useId()
   const titleId = React.useId()
-  const title = t(create ? 'tasks.newOrchestration' : 'kanban.editOrchestration')
-  const description = t(create ? 'kanban.createOrchestrationDescription' : 'kanban.editOrchestrationDescription')
+  const title = t('kanban.editOrchestration')
+  const description = t('kanban.editOrchestrationDescription')
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

@@ -17,7 +17,7 @@ beforeAll(async () => {
   ;({ TooltipProvider } = await import('@craft-agent/ui'))
 })
 
-function render(language: 'en' | 'zh-Hans', compact = false, disabled = false, create = false) {
+function render(language: 'en' | 'zh-Hans', compact = false, disabled = false) {
   const i18n = i18next.createInstance()
   void i18n.init({
     lng: language,
@@ -27,7 +27,7 @@ function render(language: 'en' | 'zh-Hans', compact = false, disabled = false, c
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <TooltipProvider>
-        <TaskOrchestrationEditButton compact={compact} disabled={disabled} create={create} onEdit={() => {}} />
+        <TaskOrchestrationEditButton compact={compact} disabled={disabled} onEdit={() => {}} />
       </TooltipProvider>
     </I18nextProvider>,
   )
@@ -70,23 +70,16 @@ describe('task orchestration edit entry (#282)', () => {
   it('keeps the top-level spec-backed condition and original editor target/navigation', () => {
     expect(chatSource).toContain('const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug')
     expect(chatSource).toContain('const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)')
-    expect(chatSource).toContain('if (!dagOrchestrationEnabled || !isTaskOrchestrator && !canCreateTask) return undefined')
+    expect(chatSource).toContain('if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined')
     expect(chatSource).toContain('compact={!!isCompactMode}')
     expect(chatSource).toContain('onEdit={handleEditTask}')
-    const handler = chatSource.slice(chatSource.indexOf('const handleEditTask ='), chatSource.indexOf('const handlePreviewOrchestrationNode ='))
-    expect(handler).toContain('if (!dagOrchestrationEnabled || !sessionId || !taskSlug && !canCreateTask) return')
+    const handler = chatSource.slice(chatSource.indexOf('const handleEditTask ='), chatSource.indexOf('const handlePreviewChildSession ='))
+    expect(handler).toContain('if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator) return')
     expect(handler).toContain("mode: 'edit'")
     expect(handler).toContain('sessionId,')
     expect(handler).toContain('taskSlug,')
     expect(handler).toContain('initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined')
     expect(handler).toContain('navigate(routes.view.board())')
-  })
-
-  it.each(['en', 'zh-Hans'] as const)('explains explicit creation in an existing PRO root in %s', (language) => {
-    const html = render(language, false, false, true), messages = LOCALE_REGISTRY[language].messages
-    expect(html).toContain(`aria-label="${messages['tasks.newOrchestration']}"`)
-    expect(html).toContain(messages['kanban.createOrchestrationDescription'])
-    expect(html).not.toContain(messages['kanban.editOrchestrationDescription'])
   })
 
   it('wires title and description to hover/focus tooltip and explicit touch confirmation', () => {

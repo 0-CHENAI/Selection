@@ -619,19 +619,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       className="rounded border border-border px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">{t('tasks.retryFailedNodes')}</button>
     <span className="text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
   </div> : undefined
-  const canCreateTask = !isDraft && !taskSlug && !complexCapabilityError(session ?? sessionMeta, 'create-workflow')
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
-    if (!dagOrchestrationEnabled || !sessionId || !taskSlug && !canCreateTask) return
-    setKanbanEditorTarget(taskSlug ? {
+    if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator) return
+    setKanbanEditorTarget({
       workspaceId: activeWorkspaceId ?? undefined,
       mode: 'edit',
       sessionId,
       taskSlug,
       initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined,
-    } : { mode: 'create', workspaceId: activeWorkspaceId ?? undefined, rootSessionId: sessionId, initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined, initialProjectId: sessionMeta?.projectId })
+    })
     navigate(routes.view.board())
-  }, [dagOrchestrationEnabled, taskSlug, canCreateTask, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
+  }, [dagOrchestrationEnabled, taskSlug, isTaskOrchestrator, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
 
   const handlePreviewChildSession = React.useCallback((childSessionId: string) => {
     if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) {
@@ -678,15 +677,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Topology action opens the definition editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
   const editTaskButton = React.useMemo(() => {
-    if (!dagOrchestrationEnabled || !isTaskOrchestrator && !canCreateTask) return undefined
+    if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined
     return (
       <TaskOrchestrationEditButton
         compact={!!isCompactMode}
-        create={canCreateTask}
         onEdit={handleEditTask}
       />
     )
-  }, [dagOrchestrationEnabled, isTaskOrchestrator, canCreateTask, handleEditTask, isCompactMode])
+  }, [dagOrchestrationEnabled, isTaskOrchestrator, handleEditTask, isCompactMode])
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
   const sessionHeaderActions = editTaskButton && primaryHeaderAction ? (
