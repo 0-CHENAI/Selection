@@ -320,6 +320,7 @@ export interface Message {
   /** Presentation for host-generated task turns. Content remains the complete model input; this grants no authority. */
   taskContext?: {
     kind: 'assignment' | 'verification' | 'coordination' | 'feedback';
+    runId?: string;
     title?: string;
     description?: string;
   };

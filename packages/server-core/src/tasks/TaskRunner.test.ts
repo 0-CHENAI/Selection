@@ -1709,6 +1709,9 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('a', { finalText: 'assistant prose' });
     await tick();
     expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
+    expect(host.sent.findLast(message => message.sessionId === 'orch')?.options).toEqual({
+      hidden: true, taskContext: { kind: 'verification', runId: 'r1' },
+    });
     host.completeSession('orch', { finalText: 'VERDICT: FAIL — human chatter' });
     await tick();
     expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');

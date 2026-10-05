@@ -2,7 +2,7 @@ import type { Message } from '@craft-agent/core'
 
 /** Recognize only historical host protocols in an owned task session, never arbitrary user JSON. */
 export function withTaskMessagePresentation(message: Message, context: { taskSlug?: string; nodeId?: string; title?: string }): Message {
-  if (!context.taskSlug || message.role !== 'user' || message.hidden || message.taskContext) return message
+  if (!context.taskSlug || message.role !== 'user' || message.taskContext || message.hidden && context.nodeId) return message
   const text = message.content
   let kind: NonNullable<Message['taskContext']>['kind'] | undefined
   if (context.nodeId && (

@@ -2902,7 +2902,7 @@ class ActiveRun {
             'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
           ].join('\n'),
     ].join('\n');
-    await this.sendToOrchestrator(orchestrator, message);
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
   /**
@@ -2921,9 +2921,11 @@ class ActiveRun {
   }
 
   /** Send to the orchestrator, failing the run (rather than hanging in `verifying`) if the send rejects. */
-  private async sendToOrchestrator(orchestrator: string, message: string): Promise<void> {
+  private async sendToOrchestrator(orchestrator: string, message: string, kind: 'coordination' | 'verification' = 'coordination'): Promise<void> {
     try {
-      await this.deps.host.sendMessage(orchestrator, message, undefined, undefined, { hidden: true });
+      await this.deps.host.sendMessage(orchestrator, message, undefined, undefined, {
+        hidden: true, taskContext: { kind, runId: this.runId },
+      });
     } catch {
       // The verdict will never arrive — detach the listener and settle as failed instead of hanging.
       this.verdictOff?.();
@@ -3013,7 +3015,7 @@ class ActiveRun {
       'VERDICT: FAIL — <one-line reason>',
       'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
     ].join('\n');
-    await this.sendToOrchestrator(orchestrator, message);
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
   /**

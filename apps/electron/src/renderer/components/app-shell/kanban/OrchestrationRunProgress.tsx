@@ -155,13 +155,14 @@ interface OrchestrationRunProgressProps {
   sessionId?: string
   runningHint?: boolean
   renderPreviewSession?: (sessionId: string) => React.ReactNode
+  onLatestRunChange?: (run: TaskRunSnapshotDto | null) => void
 }
 
 export function OrchestrationRunProgress(props: OrchestrationRunProgressProps) {
   return <OrchestrationRunProgressContent key={`${props.workspaceId}:${props.taskSlug}:${props.sessionId}`} {...props} />
 }
 
-function OrchestrationRunProgressContent({ workspaceId, taskSlug, sessionId, runningHint = false, renderPreviewSession }: OrchestrationRunProgressProps) {
+function OrchestrationRunProgressContent({ workspaceId, taskSlug, sessionId, runningHint = false, renderPreviewSession, onLatestRunChange }: OrchestrationRunProgressProps) {
   const { t } = useTranslation()
   const [runs, setRuns] = React.useState<TaskRunSnapshotDto[]>([])
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -192,6 +193,9 @@ function OrchestrationRunProgressContent({ workspaceId, taskSlug, sessionId, run
   }, [workspaceId, taskSlug, sessionId, t])
 
   const liveRun = runs.find(run => run.runId === selected) ?? runs.at(-1) ?? null
+  // Transcript progress always follows the latest run, independently of the popup's history selection.
+  const latestRun = runs.at(-1) ?? null
+  React.useEffect(() => { onLatestRunChange?.(latestRun) }, [latestRun, onLatestRunChange])
   const rows = React.useMemo(() => buildOrchestrationProgressRows(undefined, liveRun), [liveRun])
   const canRetry = liveRun?.status === 'failed' && liveRun.canRetryFailedNodes
     && liveRun.runId === runs.at(-1)?.runId && !runs.some(run => isActiveTaskRunStatus(run.status))

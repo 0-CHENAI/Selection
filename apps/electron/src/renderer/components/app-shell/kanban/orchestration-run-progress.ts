@@ -1,5 +1,8 @@
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
+import type { ActivityItem, Turn } from '@craft-agent/ui'
 import { overlayState } from './conductor-graph'
+import { resolveNodeStatePill } from './node-state-pill'
+import { runStatusLabelKey } from './task-labels'
 
 const TERMINAL_TASK_RUN_STATUSES = new Set(['completed', 'failed', 'stopped'])
 
@@ -110,4 +113,33 @@ export function buildOrchestrationProgressRows(
 
 export function countFinishedProgressRows(rows: OrchestrationProgressRow[]): number {
   return rows.filter((row) => row.state === 'done' || row.state === 'skipped').length
+}
+
+/** Put live child states inside the latest matching execution's existing collapsed work chain. */
+export function withOrchestrationProgress(
+  turns: Turn[], run: TaskRunSnapshotDto,
+  t: (key: string, options?: { count: number }) => string,
+): Turn[] {
+  const index = turns.findLastIndex(turn => turn.type === 'assistant' && turn.taskRunId === run.runId)
+  const latest = turns[index]
+  if (latest?.type !== 'assistant') return turns
+  const rows = buildOrchestrationProgressRows(undefined, run)
+  const summary = `${t('session.executionChildren', { count: rows.length })} · ${countFinishedProgressRows(rows)}/${rows.length} · ${t(runStatusLabelKey(run.status) ?? 'tasks.starting')}`
+  let timestamp = latest.activities.reduce((time, activity) => Math.max(time, activity.timestamp), latest.timestamp)
+  const statusRows = (nodes: OrchestrationProgressRow[]): ActivityItem[] => nodes.flatMap(row => [{
+    id: `task-node:${run.runId}:${row.id}`, type: 'status' as const,
+    status: ['done', 'skipped'].includes(row.state) ? 'completed' as const
+      : ['failed', 'invalid'].includes(row.state) ? 'error' as const
+      : ['running', 'verifying'].includes(row.state) ? 'running' as const : 'pending' as const,
+    content: `${row.title} · ${t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted')}`,
+    timestamp: ++timestamp,
+  }, ...statusRows(row.children ?? [])])
+  const activities = [...latest.activities, ...statusRows(rows), {
+    id: `task-progress:${run.runId}`, type: 'status' as const,
+    statusType: 'task_progress',
+    status: ['running', 'waiting-coordinator', 'verifying', 'repairing'].includes(run.status) ? 'running' as const
+      : run.status === 'failed' ? 'error' as const : run.status === 'completed' ? 'completed' as const : 'pending' as const,
+    content: summary, timestamp: ++timestamp,
+  }]
+  return turns.map((turn, turnIndex) => turnIndex === index ? { ...latest, activities, intent: summary } : turn)
 }

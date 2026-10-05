@@ -26,7 +26,7 @@ import type { SessionOptions } from '@/hooks/useSessionOptions'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import { OrchestrationRunProgressView } from '@/components/app-shell/kanban/OrchestrationRunProgress'
-import { buildOrchestrationProgressRows } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { buildOrchestrationProgressRows, withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { TurnCard, groupMessagesByTurn, withTaskMessagePresentation } from '@craft-agent/ui'
 
 function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 'completed' | 'failed' }) {
@@ -45,7 +45,14 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
   const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: 3,
     content: 'The task "核对成本与风险" has finished running.\nTask slug: preview-task; runId: preview-run; revision: 4\nFrozen plan: {"nodes":[{"id":"cost"}]}\nNode outputs:\n{"claims":[{"id":"cost","version":2}]}\nCall submit_task_verdict with result pass or fail.',
   }, { taskSlug: run.slug })
-  const reviewTurn = groupMessagesByTurn([reviewMessage, { id: 'preview-report', role: 'assistant', timestamp: 4, content: '报告已完成资料核对与草稿审查。方案 B 的统计口径尚未确认，暂时不能直接比较。' }], { isSessionProcessing: false })[0]
+  const reviewTurn = withOrchestrationProgress(groupMessagesByTurn([
+    { id: 'preview-checkpoint', role: 'user', hidden: true, timestamp: 1, content: 'host checkpoint', taskContext: { kind: 'coordination', runId: run.runId } },
+    { id: 'preview-next-step', role: 'assistant', timestamp: 2, content: '草稿审查已完成；等待修订报告，再核验修订结果。' },
+    ...(status === 'completed' ? [reviewMessage,
+      { id: 'preview-verdict', role: 'tool' as const, timestamp: 4, toolName: 'mcp__session__submit_task_verdict', toolStatus: 'completed' as const, toolInput: { runId: run.runId }, content: '', toolResult: '{"status":"completed"}' },
+      { id: 'preview-report', role: 'assistant' as const, timestamp: 5, content: '报告已完成资料核对与草稿审查。方案 B 的统计口径尚未确认，暂时不能直接比较。' },
+    ] : []),
+  ], { isSessionProcessing: false, isTaskOrchestrationRoot: true, isTaskOrchestrationRunning: status === 'running' }), run, t)[0]
   const root = extractSessionMeta({ id: 'preview-root', name: '正式安装包聊天闭环验收', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', workMode: 'PRO', messages: [], lastMessageAt: Date.now(), isProcessing: status === 'running' })
   const sessions = React.useMemo(() => run.nodes.filter(node => node.sessionId).map(node => ({
     id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO', taskSlug: run.slug, taskNodeId: node.id,
@@ -77,8 +84,8 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
               onRetry={status === 'failed' ? () => {} : undefined} />
           )} />
           <div className="min-h-0 flex-1 flex flex-col">
-            <div className="min-h-0 flex-1 p-6 text-sm leading-relaxed text-foreground">
-              {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete} />}
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 text-sm leading-relaxed text-foreground">
+              {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} intent={reviewTurn.intent} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete} />}
               <p className="mt-4 text-foreground/60">固定预览数据；点击右上角的子代理按钮，在浮窗中选择并查看对应内容。</p>
             </div>
           </div>

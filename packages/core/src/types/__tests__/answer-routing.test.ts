@@ -5,7 +5,7 @@ import type { Message } from '../message'
 test('task presentation survives persistence without replacing the model input or routing', () => {
   const message: Message = {
     id: 'task', role: 'user', timestamp: 1, content: 'Canonical execution identity: {"claims":[]}',
-    taskContext: { kind: 'assignment', title: '核对成本资料', description: '保留资料限制' },
+    taskContext: { kind: 'assignment', runId: 'task-run', title: '核对成本资料', description: '保留资料限制' },
     answerRunId: 'run',
   }
   expect(storedToMessage(JSON.parse(JSON.stringify(messageToStored(message))))).toEqual(message)

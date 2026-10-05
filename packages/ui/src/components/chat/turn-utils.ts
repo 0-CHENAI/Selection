@@ -77,6 +77,8 @@ export interface AssistantTurn {
   todos?: TodoItem[]
   /** Successful submit_answer. Delivery is not a work-chain row. */
   answerDelivered?: boolean
+  /** Canonical execution, distinct from each coordinator model turn's answerRunId. */
+  taskRunId?: string
 }
 
 /** Represents a user message */
@@ -326,7 +328,7 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 
 /**
  * Determines whether the generic thinking row is needed in addition to the
- * visible work-chain activities. A running intermediate/thinking activity
+ * visible work-chain activities. A running prose/status activity
  * renders its own status, so mounting another row would duplicate it.
  */
 export function shouldShowGenericThinkingIndicator(
@@ -336,7 +338,7 @@ export function shouldShowGenericThinkingIndicator(
 ): boolean {
   return shouldShowThinkingIndicator(phase, isBuffering)
     && !renderedActivities.some(
-      activity => (activity.type === 'intermediate' || activity.type === 'thinking')
+      activity => (activity.type === 'intermediate' || activity.type === 'thinking' || activity.type === 'status')
         && activity.status === 'running',
     )
 }
@@ -555,6 +557,8 @@ export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem
 // ============================================================================
 
 export interface GroupTurnsOptions {
+  /** Consolidate host checkpoints only in the owning root; never ordinary chats or workers. */
+  isTaskOrchestrationRoot?: boolean
   /**
    * Whether the session is still actively processing.
    *
@@ -622,6 +626,77 @@ function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
   if (!latestAssistant || latestAssistant.type !== 'assistant') return
   latestAssistant.isComplete = false
   latestAssistant.isStreaming = true
+}
+
+/** Keep coordinator acknowledgments/next steps in one work chain until a host-accepted result. */
+function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] {
+  const result: Turn[] = []
+  let execution: AssistantTurn | undefined
+  let outcome: 'process' | 'delivery' = 'process'
+  let legacyVerdict = false
+  for (const turn of turns) {
+    if (turn.type !== 'assistant') {
+      execution = undefined
+      result.push(turn)
+      continue
+    }
+    const context = turn.activities.find(activity => activity.type === 'task-context'
+      && ['coordination', 'verification'].includes(activity.taskContext?.kind ?? ''))
+    const runId = context?.taskContext?.runId
+      ?? context?.content?.match(/\brunId[=:]\s*"?([\w-]+)/)?.[1]
+    if (context) {
+      // A pause/failure report is a user-facing boundary. A new execution must
+      // also leave the preceding run's report intact, even with no human turn.
+      if (outcome === 'delivery' || runId && execution?.taskRunId && runId !== execution.taskRunId) execution = undefined
+      outcome = 'process'
+      legacyVerdict = context.taskContext?.kind === 'verification' && !!context.content?.includes('VERDICT: PASS')
+    }
+    if (!execution && !context) {
+      result.push(turn)
+      continue
+    }
+    if (!execution) {
+      execution = { ...turn, activities: [...turn.activities], taskRunId: runId }
+      result.push(execution)
+    } else {
+      demoteResponseToWorkChain(execution)
+      execution.activities.push(...turn.activities)
+      execution.response = turn.response
+      execution.isStreaming = turn.isStreaming
+      execution.isComplete = turn.isComplete
+      execution.todos = turn.todos ?? execution.todos
+      execution.taskRunId ??= runId
+    }
+    for (const activity of turn.activities) {
+      if (activity.type !== 'tool' || activity.status !== 'completed') continue
+      const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+      if (!['submit_orchestration_decision', 'submit_orchestration_patch', 'submit_task_verdict'].includes(name)) continue
+      if (execution.taskRunId && activity.toolInput?.runId && activity.toolInput.runId !== execution.taskRunId) continue
+      try {
+        const receipt = JSON.parse(activity.content ?? '') as { status?: string }
+        if (['paused', 'failed', 'stopped', 'waiting-approval', 'waiting-help'].includes(receipt.status ?? '')
+          || receipt.status === 'completed') outcome = 'delivery'
+        else outcome = 'process'
+      } catch { /* An invalid receipt cannot certify a final result. */ }
+    }
+    // Historical v1 verification used an explicit verdict line instead of a tool receipt.
+    if (legacyVerdict && /^VERDICT: (?:PASS|FAIL\b.*)$/m.test(turn.response?.text ?? '')) outcome = 'delivery'
+    if (outcome === 'process') {
+      demoteResponseToWorkChain(execution)
+      execution.isComplete = !turn.isStreaming
+      execution.isStreaming = turn.isStreaming
+    } else if (execution.response) {
+      execution.isComplete = !execution.response.isStreaming && !execution.response.isCommentary
+      execution.isStreaming = !!execution.response.isStreaming
+    }
+  }
+  // Background worker activity keeps only the current chain open. Earlier
+  // stages separated by human messages/errors must not regain running chrome.
+  if (running && outcome === 'process' && execution && execution === result.at(-1)) {
+    execution.isComplete = false
+    execution.isStreaming = true
+  }
+  return result
 }
 
 /**
@@ -718,7 +793,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (isAuthoritativeCommit(normalized) && runId) deliveredRuns.add(runId)
     return [classifyForTurnGrouping(normalized)]
   })
-  const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
+  const visibleMessages = protocolMessages.filter(m => !m.isQueued && (!m.hidden
+    || options.isTaskOrchestrationRoot && m.role === 'user'
+      && ['coordination', 'verification'].includes(m.taskContext?.kind ?? '')))
   // message_end only closes a text segment, not the agent run. Keep its
   // unclassified draft on the card while waiting for the delivery boundary.
   // A subsequent tool/message naturally removes this tail-only reservation.
@@ -1180,7 +1257,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 
-  return turns
+  return options.isTaskOrchestrationRoot
+    ? consolidateOrchestrationTurns(turns, !!options.isTaskOrchestrationRunning || !!options.isSessionProcessing)
+    : turns
 }
 
 /**

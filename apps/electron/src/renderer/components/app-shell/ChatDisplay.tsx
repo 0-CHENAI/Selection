@@ -54,6 +54,8 @@ import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
+import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
+import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
   formatUserMessageTime,
@@ -233,6 +235,7 @@ interface ChatDisplayProps {
   /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
+  orchestrationRun?: TaskRunSnapshotDto | null
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -535,6 +538,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
   swarmRunning = false,
+  orchestrationRun,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -783,6 +787,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const sessionTaskSlug = session?.taskSlug
   const sessionTaskNodeId = session?.taskNodeId
   const sessionName = session?.name
+  const sessionParentId = session?.parentSessionId
+  const taskGroupingOptions = useMemo(() => ({
+    isSessionProcessing: sessionIsProcessing,
+    isManagedSwarmRunning: swarmRunning,
+    isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
+    isTaskOrchestrationRoot: Boolean(sessionTaskSlug && !sessionTaskNodeId && !sessionParentId),
+  }), [sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionTaskNodeId, sessionParentId])
   const sessionDisplayMessages = useMemo(() => sessionMessages?.map(message => withTaskMessagePresentation(message, {
     taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
   })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
@@ -790,7 +801,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!searchQuery.trim() || !sessionDisplayMessages.length) return []
     const startTime = performance.now()
     const query = searchQuery.toLowerCase()
-    const turns = groupMessagesByTurn(sessionDisplayMessages, { isSessionProcessing: sessionIsProcessing })
+    const turns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
     const matches: { matchId: string; turnId: string; turnIndex: number; matchIndexInTurn: number }[] = []
 
     for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
@@ -831,7 +842,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
     }
     return matches
-  }, [searchQuery, sessionDisplayMessages, sessionIsProcessing, countOccurrences])
+  }, [searchQuery, sessionDisplayMessages, taskGroupingOptions, countOccurrences])
 
   // Auto-expand pagination when search is active to show all matching turns
   // This ensures match count is stable and all matches are highlightable from the start
@@ -843,7 +854,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       (min, m) => m.turnIndex < min ? m.turnIndex : min,
       matchingOccurrences[0]!.turnIndex
     )
-    const totalTurns = groupMessagesByTurn(sessionDisplayMessages, { isSessionProcessing: session?.isProcessing }).length
+    const totalTurns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions).length
 
     // Calculate how many turns we need to show to include all matches
     // totalTurns - visibleTurnCount = startIndex, so we need visibleTurnCount = totalTurns - earliestMatchTurnIndex + buffer
@@ -852,7 +863,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (requiredVisibleCount > visibleTurnCount) {
       setVisibleTurnCount(requiredVisibleCount)
     }
-  }, [isSearchActive, matchingOccurrences, sessionDisplayMessages, session?.isProcessing, visibleTurnCount])
+  }, [isSearchActive, matchingOccurrences, sessionDisplayMessages, taskGroupingOptions, visibleTurnCount])
 
   // Extract unique turn IDs that have matches (for highlighting)
   const matchingTurnIds = useMemo(() => {
@@ -1560,16 +1571,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingPermission, pendingCredential])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
-  const sessionParentId = session?.parentSessionId
   const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
   const allTurns = React.useMemo(() => {
     if (!sessionMessages) return []
-    return groupMessagesByTurn(sessionDisplayMessages, {
-      isSessionProcessing: sessionIsProcessing,
-      isManagedSwarmRunning: swarmRunning,
-      isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
-    })
-  }, [sessionMessages, sessionDisplayMessages, sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionParentId])
+    const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
+    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRun) return grouped
+    return withOrchestrationProgress(grouped, orchestrationRun, t)
+  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRun, t])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>

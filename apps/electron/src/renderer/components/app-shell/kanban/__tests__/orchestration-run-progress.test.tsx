@@ -15,7 +15,9 @@ import {
   pickStoppableTaskRun,
   sessionIdForProgressRow,
   shouldShowOrchestrationRunProgress,
+  withOrchestrationProgress,
 } from '../orchestration-run-progress'
+import type { Turn } from '@craft-agent/ui'
 
 function snapshot(partial: Partial<TaskRunSnapshotDto> = {}): TaskRunSnapshotDto {
   return {
@@ -36,6 +38,37 @@ function node(partial: Partial<TaskNodeRunStateDto> & Pick<TaskNodeRunStateDto, 
     ...partial,
   }
 }
+
+describe('inline orchestration progress', () => {
+  it('updates only the latest matching chain, keeps worker states folded and preserves the report', () => {
+    const turns: Turn[] = ['run-1', 'run-2', 'run-1'].map((taskRunId, index) => ({
+      type: 'assistant', taskRunId, turnId: `turn-${index}`, activities: [], timestamp: index,
+      isComplete: true, isStreaming: false, response: { text: '集中报告', isStreaming: false },
+    }))
+    const before = JSON.stringify(turns)
+    const t = (key: string, options?: { count: number }) => key === 'session.executionChildren' ? `子代理 (${options?.count})` : key
+    const projected = withOrchestrationProgress(turns, snapshot({ nodes: [
+      node({ id: 'done', title: '读取资料', state: 'done' }),
+      node({ id: 'running', title: '修订报告', state: 'running' }),
+      node({ id: 'pending', title: '核验修订稿', state: 'pending' }),
+      node({ id: 'failed', title: '审查报告', state: 'failed' }),
+    ] }), t)
+    expect(projected[0]).toBe(turns[0])
+    expect(projected[1]).toBe(turns[1])
+    if (projected[2]?.type !== 'assistant') throw new Error('expected root chain')
+    expect(projected[2].activities.map(row => row.status)).toEqual(['completed', 'running', 'pending', 'error', 'running'])
+    expect(projected[2].intent).toContain('子代理 (4) · 1/4')
+    expect(projected[2].response?.text).toBe('集中报告')
+    expect(JSON.stringify(turns)).toBe(before)
+    expect(withOrchestrationProgress(turns, snapshot({ runId: 'unrelated' }), t)).toBe(turns)
+  })
+
+  it('does not label a paused run as running or completed', () => {
+    const turns: Turn[] = [{ type: 'assistant', taskRunId: 'run-1', turnId: 'cp', activities: [], timestamp: 1, isComplete: true, isStreaming: false }]
+    const result = withOrchestrationProgress(turns, snapshot({ status: 'paused' }), key => key)
+    expect(result[0]?.type === 'assistant' && result[0].activities.at(-1)?.status).toBe('pending')
+  })
+})
 
 function renderWithI18n(language: keyof typeof LOCALE_REGISTRY, ui: ReactNode): string {
   const instance = i18next.createInstance()

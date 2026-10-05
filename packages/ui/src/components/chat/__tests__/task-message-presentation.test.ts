@@ -66,3 +66,97 @@ describe('task message presentation', () => {
     expect(turns[2]?.type === 'assistant' && turns[2].response?.text).toBe('复核后的结论')
   })
 })
+
+describe('root orchestration work chain', () => {
+  const checkpoint = (id: string, timestamp: number, kind: 'coordination' | 'verification' = 'coordination', runId = 'run-123'): Message => ({
+    ...user('host protocol'), id, timestamp, hidden: true, answerRunId: `answer-${id}`,
+    taskContext: { kind, runId },
+  })
+  const reply = (id: string, timestamp: number, content = '已消费结果，等待其他子代理。', answerRunId?: string): Message => ({ id, role: 'assistant', timestamp, content, answerRunId })
+  const committedReply = (id: string, timestamp: number, content: string, checkpointId: string): Message => ({
+    ...reply(id, timestamp, content, `answer-${checkpointId}`), answerProtocol: 'explicit-v1', answerCommitted: true,
+  })
+  const receipt = (id: string, timestamp: number, status: string, toolName = 'submit_orchestration_decision', runId = 'run-123'): Message => ({
+    id, role: 'tool', timestamp, toolName: `mcp__session__${toolName}`, toolStatus: 'completed',
+    content: '', toolResult: JSON.stringify({ status }), toolInput: { runId },
+  })
+  const options = { isTaskOrchestrationRoot: true, isSessionProcessing: false }
+
+  it('collects hidden checkpoints and their replies across answer runs, even between worker callbacks', () => {
+    const messages = [checkpoint('cp-1', 1), receipt('continue', 2, 'running'), reply('ack-1', 3, undefined, 'answer-cp-1'),
+      checkpoint('cp-2', 4), receipt('patch', 5, 'running'), reply('ack-2', 6, '下一步核验修订稿。', 'answer-cp-2')]
+    const frozen = JSON.stringify(messages)
+    for (const running of [true, false]) {
+      const turns = groupMessagesByTurn(messages, { ...options, isTaskOrchestrationRunning: running })
+      expect(turns).toHaveLength(1)
+      if (turns[0]?.type !== 'assistant') throw new Error('expected work chain')
+      expect(turns[0].response).toBeUndefined()
+      expect(turns[0].taskRunId).toBe('run-123')
+      expect(turns[0].activities.filter(item => item.type === 'intermediate').map(item => item.content)).toEqual([
+        '已消费结果，等待其他子代理。', '下一步核验修订稿。',
+      ])
+      expect(turns[0].isComplete).toBe(!running)
+      expect(turns[0].turnId).toBe('answer-answer-cp-1')
+    }
+    expect(JSON.stringify(messages)).toBe(frozen)
+  })
+
+  it('keeps streaming coordinator text inside the closed chain before any receipt', () => {
+    const turns = groupMessagesByTurn([checkpoint('cp', 1), { ...reply('draft', 2), isStreaming: true }], {
+      ...options, isSessionProcessing: true, isTaskOrchestrationRunning: true,
+    })
+    expect(turns[0]?.type === 'assistant' && turns[0].response).toBeUndefined()
+    expect(turns[0]?.type === 'assistant' && turns[0].isStreaming).toBe(true)
+  })
+
+  it('shows the consolidated report only after accepted verification, despite lagging running metadata', () => {
+    const turns = groupMessagesByTurn([checkpoint('cp', 1), receipt('continue', 2, 'running'), reply('ack', 3),
+      checkpoint('verify', 4, 'verification'), receipt('verdict', 5, 'completed', 'submit_task_verdict'), committedReply('report', 6, '最终报告：成本已复核，资料限制已保留。', 'verify')],
+    { ...options, isTaskOrchestrationRunning: true })
+    expect(turns).toHaveLength(1)
+    if (turns[0]?.type !== 'assistant') throw new Error('expected report')
+    expect(turns[0].response?.text).toBe('最终报告：成本已复核，资料限制已保留。')
+    expect(turns[0].isComplete).toBe(true)
+  })
+
+  it('keeps repair steps folded and refuses a rejected or foreign verdict as completion', () => {
+    const messages = [checkpoint('verify', 1, 'verification'),
+      { ...receipt('rejected', 2, 'completed', 'submit_task_verdict'), isError: true }, reply('premature', 3, '尚不能验收。'),
+      checkpoint('repair', 4), receipt('foreign', 5, 'completed', 'submit_task_verdict', 'different-run'), reply('ack', 6)]
+    const turns = groupMessagesByTurn(messages, options)
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.type === 'assistant' && turns[0].response).toBeUndefined()
+    expect(turns[0]?.type === 'assistant' && turns[0].activities.some(activity => activity.status === 'error')).toBe(true)
+  })
+
+  it('preserves pause/failure reports, human replies and preceding completed runs', () => {
+    const turns = groupMessagesByTurn([checkpoint('cp', 1), receipt('pause', 2, 'paused'), committedReply('blocked', 3, '已暂停，请确认范围。', 'cp'),
+      { ...user('只确认恢复标记，先不要继续。'), id: 'human', timestamp: 4 }, reply('human-reply', 5, '已收到，继续等待。'),
+      checkpoint('resume', 6), receipt('failed', 7, 'failed'), committedReply('failure', 8, '请重试失败节点。', 'resume'),
+      checkpoint('new-run', 9, 'coordination', 'run-456'), reply('next', 10)], options)
+    expect(turns).toHaveLength(5)
+    expect(turns[0]?.type === 'assistant' && turns[0].response?.text).toBe('已暂停，请确认范围。')
+    expect(turns[1]?.type).toBe('user')
+    expect(turns[2]?.type === 'assistant' && turns[2].response?.text).toBe('已收到，继续等待。')
+    expect(turns[3]?.type === 'assistant' && turns[3].response?.text).toBe('请重试失败节点。')
+    expect(turns[4]?.type === 'assistant' && turns[4].taskRunId).toBe('run-456')
+  })
+
+  it('keeps only the current chain running after a human boundary', () => {
+    const turns = groupMessagesByTurn([checkpoint('old', 1), reply('old-ack', 2),
+      { ...user('开始下一阶段。'), id: 'human', timestamp: 3 }, checkpoint('current', 4), reply('ack', 5)],
+    { ...options, isTaskOrchestrationRunning: true })
+    expect(turns[0]?.type === 'assistant' && turns[0].isComplete).toBe(true)
+    expect(turns[2]?.type === 'assistant' && turns[2].isComplete).toBe(false)
+  })
+
+  it('recognizes historical hidden root checkpoints while leaving ordinary and worker chat unchanged', () => {
+    const legacy = { ...user('Conductor checkpoint (new-result). Task slug=task; runId=run-123. Call submit_orchestration_decision with action continue.'), hidden: true }
+    const projected = withTaskMessagePresentation(legacy, { taskSlug: 'task' })
+    expect(projected.taskContext?.kind).toBe('coordination')
+    const messages = [projected, reply('ack', 2)]
+    expect(groupMessagesByTurn(messages, options)[0]?.type === 'assistant' && groupMessagesByTurn(messages, options)[0]).toHaveProperty('taskRunId', 'run-123')
+    expect(groupMessagesByTurn(messages, { isSessionProcessing: false })[0]?.type === 'assistant' && groupMessagesByTurn(messages, { isSessionProcessing: false })[0]).toHaveProperty('response.text', '已消费结果，等待其他子代理。')
+    expect(withTaskMessagePresentation(legacy, { taskSlug: 'task', nodeId: 'worker' })).toBe(legacy)
+  })
+})

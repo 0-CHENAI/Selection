@@ -610,6 +610,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // task can be re-run (Save & Run mints a fresh Conductor run).
   const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
+  const [taskProgress, setTaskProgress] = React.useState<{ sessionId: string; run: import('@craft-agent/shared/protocol').TaskRunSnapshotDto | null }>()
+  const handleLatestRunChange = React.useCallback((run: import('@craft-agent/shared/protocol').TaskRunSnapshotDto | null) => {
+    if (sessionId) setTaskProgress({ sessionId, run })
+  }, [sessionId])
   const canCreateTask = !isDraft && !taskSlug && !complexCapabilityError(session ?? sessionMeta, 'create-workflow')
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
@@ -638,6 +642,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       sessionId={sessionId}
       runningHint={orchestrationStatus === 'running'}
       renderPreviewSession={renderOrchestrationNode}
+      onLatestRunChange={handleLatestRunChange}
     />
   ) : null
 
@@ -893,6 +898,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   onSwarmEnabledChange={undefined}
                   swarmToggleDisabled={swarmToggleDisabled}
                   swarmRunning={orchestrationStatus === 'running'}
+                  orchestrationRun={taskProgress?.sessionId === sessionId ? taskProgress.run : undefined}
                   workspaceId={activeWorkspaceId || undefined}
                   onSourcesChange={handleSourcesChange}
                   workingDirectory={sessionMeta.workingDirectory}
@@ -981,6 +987,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               onSwarmEnabledChange={undefined}
               swarmToggleDisabled={swarmToggleDisabled}
               swarmRunning={orchestrationStatus === 'running'}
+              orchestrationRun={taskProgress?.sessionId === sessionId ? taskProgress.run : undefined}
               workspaceId={activeWorkspaceId || undefined}
               onSourcesChange={handleSourcesChange}
               workingDirectory={workingDirectory}

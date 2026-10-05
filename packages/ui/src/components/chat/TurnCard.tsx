@@ -1159,6 +1159,10 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
             {isRunning ? (
               <Spinner className={SIZE_CONFIG.spinnerSizeSmall} />
+            ) : activity.status === 'error' ? (
+              <XCircle className={cn(SIZE_CONFIG.iconSize, 'text-destructive')} />
+            ) : activity.status === 'pending' || activity.status === 'backgrounded' ? (
+              <Circle className={SIZE_CONFIG.iconSize} />
             ) : (
               <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
             )}
@@ -3200,6 +3204,8 @@ export const TurnCard = React.memo(function TurnCard({
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
       activity => !isAnswerDeliveryTool(activity)
+        // The live execution summary already labels the work header.
+        && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
         // The stable header/footer status owns their presentation.
         && !((activity.type === 'intermediate' || activity.type === 'thinking')

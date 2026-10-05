@@ -66,6 +66,16 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it('distinguishes pending, failed and completed subagent status rows', async () => {
+    const html = await renderTurn('zh-Hans', [
+      { id: 'pending', type: 'status', status: 'pending', content: '核验修订结果 · 待处理', timestamp: 1 },
+      { id: 'failed', type: 'status', status: 'error', content: '修正报告 · 失败', timestamp: 2 },
+      { id: 'done', type: 'status', status: 'completed', content: '读取资料 · 完成', timestamp: 3 },
+    ])
+    expect(html).toContain('lucide-circle ')
+    expect(html).toContain('lucide-circle-x')
+    expect(countOccurrences(html, 'lucide-circle-check')).toBe(1)
+  })
   it.each(['en', 'zh-Hans'] as const)('keeps internal task context in a compact status row without raw protocol in %s', async language => {
     const activity: ActivityItem = {
       id: 'task-context', type: 'task-context', status: 'completed', timestamp: 1,
