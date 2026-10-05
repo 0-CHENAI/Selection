@@ -455,7 +455,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
     const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getDagOrchestrationEnabled()) {
-      throw new Error('DAG orchestration is disabled in Advanced settings')
+      throw new Error('PRO orchestration is disabled by this build')
     }
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
@@ -468,7 +468,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       resumedFrom: req.resumedFrom,
       orchestratorSessionId: req.orchestratorSessionId,
       params: req.params,
-      orchestrateAllowed: orchestrator?.swarmEnabled === true,
+      orchestrateAllowed: orchestrator?.workMode === 'PRO',
     })
   })
 

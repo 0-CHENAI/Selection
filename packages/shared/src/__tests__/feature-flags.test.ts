@@ -34,7 +34,7 @@ afterEach(() => {
 
 describe('renderer build flags without a process global', () => {
   for (const [override, preview, enabled] of [
-    ['1', '', true], ['', '1', true], ['0', '1', false], ['', '', false],
+    ['1', '', true], ['', '1', true], ['0', '1', false], ['', '', true],
   ] as const) {
     it(`honors orchestration=${override || 'unset'}, preview=${preview || 'unset'}`, async () => {
       const result = await build({
@@ -126,9 +126,9 @@ describe('feature-flags runtime helpers', () => {
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 
-  it('isTasksOrchestrateEnabled defaults off outside preview', () => {
+  it('isTasksOrchestrateEnabled is available in standard builds', () => {
     delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
-    expect(isTasksOrchestrateEnabled()).toBe(process.env.CRAFT_SWARM_PREVIEW_BUILD === '1');
+    expect(isTasksOrchestrateEnabled()).toBe(true);
   });
 
   it('isTasksOrchestrateEnabled honors explicit override true', () => {

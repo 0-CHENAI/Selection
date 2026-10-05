@@ -50,15 +50,15 @@ export function isCraftAgentsCliEnabled(): boolean {
 
 /**
  * Orchestrate runner for v3 coordinator gates and live graph patches.
- * Defaults off outside the preview build. Override with CRAFT_FEATURE_TASKS_ORCHESTRATE=1|0.
+ * Available in standard V3 builds. Explicit overrides can disable it.
  */
 export function isTasksOrchestrateEnabled(): boolean {
   // Keep static property access so renderer build-time defines are replaced
   // even when the browser has no process global.
   try {
     const override = parseBooleanEnv(process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE);
-    return override ?? parseBooleanEnv(process.env.CRAFT_SWARM_PREVIEW_BUILD) ?? false;
-  } catch { return false; }
+    return override ?? true;
+  } catch { return true; }
 }
 
 /** True only for the separately packaged Swarm/Conductor technical preview. */

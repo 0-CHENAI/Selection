@@ -18,6 +18,7 @@ import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.
 import { debug } from '../utils/debug.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
+import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
 import type { PermissionMode } from '../agent/mode-manager.ts';
@@ -482,11 +483,10 @@ export function setBrowserToolEnabled(enabled: boolean): void {
 }
 
 /**
- * Whether the list / new-orchestration switch and board route are available.
- * Missing values stay off so existing installs do not inherit the old UI.
+ * Availability for older clients. PRO owns orchestration; the build override remains explicit.
  */
 export function getDagOrchestrationEnabled(): boolean {
-  return loadStoredConfig()?.dagOrchestrationEnabled === true;
+  return isTasksOrchestrateEnabled();
 }
 
 export function setDagOrchestrationEnabled(enabled: boolean): void {
@@ -497,11 +497,10 @@ export function setDagOrchestrationEnabled(enabled: boolean): void {
 }
 
 /**
- * Whether Swarm controls, `/delegate`, and spawn_session are available.
- * Missing values stay off so existing installs do not inherit the old UI.
+ * Availability for older clients. Operation permissions remain independent of PRO capabilities.
  */
 export function getSwarmAgentsEnabled(): boolean {
-  return loadStoredConfig()?.swarmAgentsEnabled === true;
+  return isTasksOrchestrateEnabled();
 }
 
 export function setSwarmAgentsEnabled(enabled: boolean): void {

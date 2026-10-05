@@ -144,7 +144,6 @@ import {
   formatSpawnQualificationFailure,
   readCurrentTurnSpawnContext,
   recoverPersistedSwarmStatus,
-  resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
@@ -1333,6 +1332,8 @@ export function createManagedSession(
     managed.branchSeedApplied = !!managed.sdkSessionId
   }
 
+  // Legacy Swarm choices are superseded by the explicit work-mode boundary.
+  managed.swarmEnabled = managed.workMode === 'PRO' && isTasksOrchestrateEnabled()
   return managed
 }
 
@@ -3304,19 +3305,7 @@ export class SessionManager implements ISessionManager {
     const branchSourceForSwarm = options?.branchFromSessionId
       ? this.sessions.get(options.branchFromSessionId)
       : undefined
-    if (options?.parentSessionId && options.swarmEnabled === true && !parentForInheritance?.swarmEnabled) {
-      throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
-    }
-    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
-    const swarmAgentsEnabled = getSwarmAgentsEnabled()
-    if (options?.swarmEnabled === true && !swarmAgentsEnabled) {
-      throw new Error('Swarm agents are disabled in Advanced settings')
-    }
-    const resolvedSwarmEnabled = !swarmAgentsEnabled ? false : resolveInheritedSwarmEnabled({
-      requested: options?.swarmEnabled,
-      parent: parentForInheritance?.swarmEnabled,
-      branchSource: branchSourceForSwarm?.swarmEnabled,
-    })
+    const resolvedSwarmEnabled = isTasksOrchestrateEnabled() && (options?.workMode === 'PRO' || !!options?.taskSlug || !!options?.taskDraft || parentForInheritance?.workMode === 'PRO' || branchSourceForSwarm?.workMode === 'PRO')
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     let validatedBranch: {
@@ -3543,6 +3532,8 @@ export class SessionManager implements ISessionManager {
     if (parentMode) {
       if (this.handoverCapturing.has(parentMode.id)) throw new Error('Source is committing a handover snapshot')
       assertComplexCapability(parentMode, 'delegate')
+      const permissionRank = { safe: 0, ask: 1, 'allow-all': 2 }
+      if (permissionRank[defaultPermissionMode] > permissionRank[parentMode.permissionMode ?? 'safe']) throw new Error('Worker permission exceeds current root authorization')
     }
     if (workMode === 'NORM' && (options?.taskSlug || options?.taskDraft || options?.parentSessionId)) throw new Error('NORM cannot create a workflow or worker session')
     if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Create a PRO conversation before enabling Swarm')
@@ -5301,7 +5292,7 @@ export class SessionManager implements ISessionManager {
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
           assertComplexCapability(managed, 'delegate')
           const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
-          if (!getSwarmAgentsEnabled()) throw new Error('Swarm agents are disabled in Advanced settings')
+          if (!getSwarmAgentsEnabled()) throw new Error('PRO delegation is disabled by this build')
           const target = this.sessions.get(sessionId)
           if (!target || target.workspace.id !== managed.workspace.id || target.executionRootSessionId !== (managed.executionRootSessionId ?? managed.id)) throw new Error('Messages must stay within this execution root')
           // Build FileAttachment[] from paths (same pattern as spawn_session)
@@ -11183,11 +11174,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (managed.messages.length || managed.isProcessing || managed.parentSessionId || managed.taskSlug || managed.taskDraft || managed.taskRunId || managed.orchestrationId || managed.workModeNeedsReview) throw new Error('Work mode is fixed after work starts; create a new conversation')
     if (managed.workMode === workMode) return
     managed.workMode = workMode
-    managed.swarmEnabled = false
+    managed.swarmEnabled = workMode === 'PRO' && isTasksOrchestrateEnabled()
     await this.disposeManagedAgentRuntime(managed, 'Work mode changed before first message')
     this.persistSession(managed)
     await this.flushSession(sessionId)
-    this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: false } }, managed.workspace.id)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: managed.swarmEnabled } }, managed.workspace.id)
   }
 
   private updateOrchestrationMetadata(
@@ -11238,7 +11229,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     this.spawnQualificationCredentials.delete(managed.id)
     if (complexCapabilityError(managed, 'delegate')) return
-    if (managed.swarmEnabled) {
+    if (managed.workMode === 'PRO' && managed.swarmEnabled) {
       this.issueSpawnQualificationCredentials(managed, 'automatic')
     }
     if (userAuthorizedSpawn) {
@@ -11602,11 +11593,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getSwarmAgentsEnabled()) {
-      throw new Error('Swarm agents are disabled in Advanced settings')
+      throw new Error('PRO delegation is disabled by this build')
     }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
-    if (requestedSpawnReason === 'automatic' && !managed.swarmEnabled) {
-      throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
+    if (requestedSpawnReason === 'automatic' && !(managed.workMode === 'PRO' && managed.swarmEnabled)) {
+      throw new Error('Automatic delegation is unavailable in this session; use a PRO root')
     }
     let effectiveSpawnReason = requestedSpawnReason
     let qualificationCredential = this.resolveSpawnQualificationCredential(
@@ -11623,7 +11614,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       !qualificationCredential
       && !request.qualificationCredential
       && requestedSpawnReason === 'user-requested'
-      && managed.swarmEnabled
+      && managed.workMode === 'PRO' && managed.swarmEnabled
     ) {
       qualificationCredential = this.resolveSpawnQualificationCredential(managed, 'automatic')
       if (qualificationCredential) effectiveSpawnReason = 'automatic'
@@ -12539,51 +12530,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
   }
 
-  /**
-   * Toggle autonomous Swarm planning for exactly one session. Spawned children
-   * inherit the value at creation time; a child cannot opt in while its parent
-   * remains opted out.
-   */
-  async updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void> {
+  /** Older clients may send this setting; PRO owns the capability now. */
+  async updateSessionSwarmEnabled(sessionId: string, _enabled: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
-    if (enabled) assertComplexCapability(managed, 'delegate')
-    if (enabled) {
-      const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
-      if (!getSwarmAgentsEnabled()) {
-        throw new Error('Swarm agents are disabled in Advanced settings')
-      }
-    }
-    if (enabled && managed.parentSessionId) {
-      const parent = this.sessions.get(managed.parentSessionId)
-      if (!parent?.swarmEnabled) {
-        throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
-      }
-    }
+    const enabled = managed.workMode === 'PRO' && isTasksOrchestrateEnabled()
     if ((managed.swarmEnabled ?? false) === enabled) return
-
     managed.swarmEnabled = enabled
-    if (enabled) managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
-    this.setMetadataWriteGuard(managed)
     this.persistSession(managed)
     await this.flushSession(managed.id)
-    this.sendEvent({
-      type: 'session_metadata_changed',
-      sessionId: managed.id,
-      changes: {
-        swarmEnabled: enabled,
-        ...(enabled ? { orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET } : {}),
-      },
-    }, managed.workspace.id)
-
-    // The backend system prompt and compaction policy are constructed from
-    // SessionConfig. Keep the active turn stable, but guarantee that the next
-    // queued or user turn recreates the runtime with the new setting.
-    if (managed.agent && (managed.isProcessing || managed.agent.isProcessing())) {
-      managed.swarmRuntimeRefreshPending = true
-    } else if (managed.agent) {
-      await this.disposeManagedAgentRuntime(managed, 'Swarm setting changed')
-    }
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id,
+      changes: { swarmEnabled: enabled } }, managed.workspace.id)
   }
 
   /** Kept for older clients; the technical-preview Swarm ceiling is immutable. */

@@ -264,7 +264,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const setDraftModel = React.useCallback((model: string) => setDraftComposer(previous => ({ ...previous, model })), [setDraftComposer])
   const setDraftConnection = React.useCallback((connection: string | undefined) => setDraftComposer(previous => ({ ...previous, connection })), [setDraftComposer])
   const setDraftWorkingDirectory = React.useCallback((workingDirectory: string | undefined) => setDraftComposer(previous => ({ ...previous, workingDirectory })), [setDraftComposer])
-  const setDraftSwarmEnabled = React.useCallback((swarmEnabled: boolean) => setDraftComposer(previous => ({ ...previous, swarmEnabled })), [setDraftComposer])
   const setDraftSourceSlugs = React.useCallback((sourceSlugs: string[]) => setDraftComposer(previous => ({ ...previous, sourceSlugs, sourcesChosen: true })), [setDraftComposer])
   const draftCreateRef = React.useRef({
     onCreateSession,
@@ -599,28 +598,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const { dagOrchestrationEnabled, swarmAgentsEnabled } = useAdvancedSettings()
   const currentWorkMode = isDraft ? draftWorkMode : session?.workMode ?? sessionMeta?.workMode ?? 'NORM'
   const capabilityError = complexCapabilityError(isDraft ? { workMode: draftWorkMode } : session ?? sessionMeta, 'delegate')
-  const swarmEnabled = !capabilityError && swarmAgentsEnabled && (isDraft ? draftSwarmEnabled : (session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false))
+  const swarmEnabled = !capabilityError && swarmAgentsEnabled
   const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
   const swarmToggleDisabled = !!capabilityError || sessionMeta?.orchestrationRole === 'worker'
     || sessionMeta?.orchestrationRole === 'reviewer'
-  const handleSwarmEnabledChange = React.useCallback(async (enabled: boolean) => {
-    if (enabled && capabilityError) { toast.error(capabilityError); return }
-    if (!sessionId) {
-      setDraftSwarmEnabled(enabled)
-      return
-    }
-    const previous = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
-    updateSession(sessionId, current => current ? { ...current, swarmEnabled: enabled } : current)
-    updateSessionMeta(sessionId, { swarmEnabled: enabled })
-    try {
-      await window.electronAPI.setSessionSwarmEnabled(sessionId, enabled)
-    } catch (error) {
-      updateSession(sessionId, current => current ? { ...current, swarmEnabled: previous } : current)
-      updateSessionMeta(sessionId, { swarmEnabled: previous })
-      console.error('[ChatPage] Failed to update Swarm mode:', error)
-      toast.error(t('common.error'))
-    }
-  }, [sessionId, session?.swarmEnabled, sessionMeta?.swarmEnabled, updateSession, updateSessionMeta, t, capabilityError, setDraftSwarmEnabled])
 
   // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
@@ -904,7 +885,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 sources={enabledSources}
                 skills={skills}
                 swarmEnabled={swarmEnabled}
-                onSwarmEnabledChange={swarmAgentsEnabled && currentWorkMode === 'PRO' ? handleSwarmEnabledChange : undefined}
+                onSwarmEnabledChange={undefined}
                 swarmToggleDisabled={swarmToggleDisabled}
                 swarmRunning={orchestrationStatus === 'running'}
                 workspaceId={activeWorkspaceId || undefined}
@@ -991,7 +972,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             sources={enabledSources}
             skills={skills}
             swarmEnabled={swarmEnabled}
-            onSwarmEnabledChange={swarmAgentsEnabled && currentWorkMode === 'PRO' ? handleSwarmEnabledChange : undefined}
+            onSwarmEnabledChange={undefined}
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={orchestrationStatus === 'running'}
             workspaceId={activeWorkspaceId || undefined}

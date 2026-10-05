@@ -35,13 +35,11 @@ describe('getSessionToolProxyDefs', () => {
   it('exposes the managed artifact version tool to the model', () => {
     expect(getSessionToolProxyDefs().map(def => def.name)).toContain('mcp__session__artifact_versions');
   });
-  it('does not expose disabled task authoring tools through any proxy name', () => {
-    const names = getSessionToolProxyDefs().map(def => def.name);
-    for (const name of ['create_task']) {
-      expect(names).not.toContain(name);
-      expect(names).not.toContain(`${PI_SESSION_TOOL_PREFIX}${name}`);
-      expect(resolveSessionToolProxyName(name)).toBe(name);
-      expect(resolveSessionToolProxyName(`session__${name}`)).toBe(`session__${name}`);
+  it('advertises canonical creation only to eligible PRO roots', () => {
+    const pro = getSessionToolProxyDefs({ executionSession: { id: 'root', workMode: 'PRO' } }).map(def => def.name);
+    expect(pro).toContain('mcp__session__create_task');
+    for (const session of [{ id: 'norm', workMode: 'NORM' as const }, { id: 'worker', workMode: 'PRO' as const, parentSessionId: 'root' }]) {
+      expect(getSessionToolProxyDefs({ executionSession: session }).map(def => def.name)).not.toContain('mcp__session__create_task');
     }
   });
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -14,6 +14,12 @@ import {
   type ManagedSwarmAggregationChild,
 } from './spawn-session-orchestration.ts'
 import * as configStorage from '@craft-agent/shared/config/storage'
+
+// Legacy Swarm lifecycle coverage runs with the explicit pre-canonical build override.
+// Default-build canonical ownership is covered by task-cooperation and chat-plan tests.
+const previousFlag = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE
+beforeAll(() => { process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = 'false' })
+afterAll(() => { if (previousFlag === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE; else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = previousFlag })
 
 let swarmAgentsEnabled = true
 let dagOrchestrationEnabled = true
@@ -106,6 +112,7 @@ describe('SessionManager spawn_session wait/background', () => {
       { messagesLoaded: true },
     )
     managed.isProcessing = true
+    managed.swarmEnabled = false // Model the legacy runtime being exercised in this suite.
     internals(sm).sessions.set(id, managed)
     internals(sm).keepBackgroundTasksAlive = false
     // Lifecycle tests invoke the private entry point without a real sendMessage
@@ -143,6 +150,7 @@ describe('SessionManager spawn_session wait/background', () => {
         parent.workspace,
         { messagesLoaded: true },
       )
+      child.swarmEnabled = options?.swarmEnabled ?? false
       child.isProcessing = true
       internals(sm).sessions.set(id, child)
       return {
@@ -329,10 +337,9 @@ describe('SessionManager spawn_session wait/background', () => {
       prompt: 'Split this task',
       spawnReason: 'automatic',
       qualification: completeQualification,
-    })).rejects.toThrow('Swarm agents are disabled in Advanced settings')
-    await expect(internals(sm).updateSessionSwarmEnabled(parent.id, true)).rejects.toThrow(
-      'Swarm agents are disabled in Advanced settings',
-    )
+    })).rejects.toThrow('PRO delegation is disabled by this build')
+    await internals(sm).updateSessionSwarmEnabled(parent.id, true)
+    expect(parent.swarmEnabled).toBe(false)
     expect(internals(sm).sessions.has('child')).toBe(false)
   })
 
@@ -342,7 +349,7 @@ describe('SessionManager spawn_session wait/background', () => {
     let ran = false
     api.taskRunnerLookup = () => ({ run: () => { ran = true } })
     await expect(api.runTaskFromTool('ws_test', { slug: 'task' })).rejects.toThrow(
-      'DAG orchestration is disabled in Advanced settings',
+      'PRO orchestration is disabled by this build',
     )
     expect(ran).toBe(false)
   })
@@ -354,7 +361,7 @@ describe('SessionManager spawn_session wait/background', () => {
       prompt: 'Split this task',
       spawnReason: 'automatic',
       qualification: completeQualification,
-    })).rejects.toThrow('Automatic spawn_session is disabled')
+    })).rejects.toThrow('Automatic delegation is unavailable')
     expect(internals(sm).sessions.has('child')).toBe(false)
 
     parent.swarmEnabled = true
@@ -1772,14 +1779,15 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.orchestrationBlocker).toContain('aggregation rejected')
   })
 
-  it('prevents a child from enabling Swarm while its parent is disabled', async () => {
+  it('ignores a legacy child toggle in a disabled build', async () => {
     const parent = buildParent()
     const child = createManagedSession({ id: 'child', workMode: 'PRO', parentSessionId: parent.id }, parent.workspace, { messagesLoaded: true })
     internals(sm).sessions.set(child.id, child)
-    await expect(internals(sm).updateSessionSwarmEnabled(child.id, true)).rejects.toThrow('PRO root coordinator')
+    await internals(sm).updateSessionSwarmEnabled(child.id, true)
+    expect(child.swarmEnabled).toBe(false)
   })
 
-  it('refreshes a runtime after an in-flight Swarm toggle before the next turn', async () => {
+  it('does not dispose a runtime for a retired Swarm toggle', async () => {
     const parent = buildParent()
     let runtimeProcessing = true
     let disposeCalls = 0
@@ -1789,14 +1797,14 @@ describe('SessionManager spawn_session wait/background', () => {
     } as never
 
     await internals(sm).updateSessionSwarmEnabled(parent.id, true)
-    expect(parent.swarmEnabled).toBe(true)
+    expect(parent.swarmEnabled).toBe(false)
     expect(parent.agent).not.toBeNull()
     expect(disposeCalls).toBe(0)
 
     runtimeProcessing = false
     await internals(sm).onProcessingStopped(parent.id, 'complete')
-    expect(disposeCalls).toBe(1)
-    expect(parent.agent).toBeNull()
+    expect(disposeCalls).toBe(0)
+    expect(parent.agent).not.toBeNull()
   })
 
   it('wait returns completed + finalText and keeps an inspectable terminal chip', async () => {

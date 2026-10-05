@@ -53,7 +53,7 @@ export function getSessionToolProxyDefs(options?: { executionSession?: WorkModeS
   if (!options) return defs;
   return defs.filter(def => {
     const capability = complexToolCapability(def.name);
-    if (capability && complexCapabilityError(options.executionSession, capability)) return false;
+    if (capability && (!FEATURE_FLAGS.tasksOrchestrate || complexCapabilityError(options.executionSession, capability))) return false;
     return !def.name.endsWith('update_task_list') || (!!options.executionSession && taskListAllowed(options.executionSession));
   });
 }
