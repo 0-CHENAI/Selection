@@ -1,10 +1,9 @@
-import type { RefObject } from 'react'
+import { lazy, Suspense, type RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import swan from '@/assets/selection-swan-trimmed.svg'
-import wordmark from '@/assets/selection-wordmark.svg'
 import './pro-identity-dialog.css'
+
+const ProIdentityLockup = lazy(() => import('./ProIdentityLockup'))
 
 export function ProIdentityDialog({ open, onOpenChange, trigger }: {
   open: boolean
@@ -23,26 +22,9 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
         >
           <Dialog.Title className="sr-only">Selection PRO</Dialog.Title>
           <Dialog.Description className="sr-only">{t('session.currentProMode')}</Dialog.Description>
-          <div className="relative">
-            <div className="pro-identity-lockup pointer-events-none flex items-end" aria-hidden="true">
-              <div className="pro-identity-brand flex shrink-0 items-end">
-                {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
-                <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
-                <div className="pro-identity-label flex items-center">
-                  <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
-                  <svg className="pro-identity-mode" viewBox="32 10 104 34">
-                    <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
-                  </svg>
-                </div>
-              </div>
-            </div>
-            <Dialog.Close asChild>
-              <button type="button" aria-label={t('common.close')}
-                className="pro-identity-close absolute left-1/2 top-full mt-8 flex size-9 -translate-x-1/2 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--pro-accent)]">
-                <X className="size-5" />
-              </button>
-            </Dialog.Close>
-          </div>
+          <Suspense fallback={null}>
+            <ProIdentityLockup open={open} />
+          </Suspense>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
