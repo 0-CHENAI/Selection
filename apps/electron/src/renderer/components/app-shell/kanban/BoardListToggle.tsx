@@ -1,4 +1,4 @@
-import { Gem, MessageSquare } from 'lucide-react'
+import { Layers, MessageSquare } from 'lucide-react'
 import { useId } from 'react'
 import { LayoutGroup, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -31,7 +31,7 @@ export function BoardListToggle({ value, onChange, className }: BoardListToggleP
         <ToggleButton active={value === 'NORM'} icon={MessageSquare} label="NORM" onClick={() => onChange('NORM')} />
         <ToggleButton
           active={value === 'PRO'}
-          icon={Gem}
+          icon={Layers}
           label="PRO"
           onClick={() => onChange('PRO')}
         />
