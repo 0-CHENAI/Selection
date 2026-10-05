@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "协作进展",
   "chat.taskContext.feedback.description": "已记录你的反馈，审批仍需你确认。",
   "chat.taskContext.feedback.title": "修改反馈",
-  "chat.taskContext.originalRecord": "查看原始记录",
   "chat.taskContext.verification.description": "检查各项成果是否符合原目标与验收要求。",
   "chat.taskContext.verification.title": "结果复核",
   "chat.taskOrphanedHint": "此后台任务已在回合结束时被终止。",

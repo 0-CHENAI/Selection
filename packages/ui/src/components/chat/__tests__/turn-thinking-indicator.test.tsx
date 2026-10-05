@@ -66,6 +66,26 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it.each(['en', 'zh-Hans'] as const)('keeps internal task context in a compact status row without raw protocol in %s', async language => {
+    const activity: ActivityItem = {
+      id: 'task-context', type: 'task-context', status: 'completed', timestamp: 1,
+      content: 'Conductor checkpoint (batch-complete). {"runId":"internal-run-123"}',
+      taskContext: { kind: 'coordination' },
+    }
+    const html = await renderTurn(language, [activity, {
+      id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read',
+    }], { isComplete: true, isStreaming: false })
+    expect(html).toContain(resources[language].translation['chat.taskContext.coordination.title'])
+    expect(html).toContain(resources[language].translation['chat.taskContext.coordination.description'])
+    expect(html).toContain('lucide-circle-check')
+    expect(html).not.toContain('Conductor checkpoint')
+    expect(html).not.toContain('internal-run-123')
+    expect(html).not.toContain('<details')
+    expect(html).not.toContain('<article')
+    expect(activity.type).toBe('task-context')
+    expect(activity.content).toContain('internal-run-123')
+  })
+
   it('localizes the live header and renders one spinner for an intermediate row', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'intermediate-1',

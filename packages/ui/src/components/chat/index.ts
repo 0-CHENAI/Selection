@@ -20,7 +20,6 @@ export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardAc
 export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from './SessionViewer'
 export { UserMessageBubble, formatUserMessageTime, type UserMessageBubbleProps } from './UserMessageBubble'
 export { SystemMessage, type SystemMessageProps, type SystemMessageType } from './SystemMessage'
-export { TaskContextMessage } from './TaskContextMessage'
 export { withTaskMessagePresentation } from './task-message-presentation'
 
 // Attachment helpers

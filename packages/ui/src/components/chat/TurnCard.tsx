@@ -5,7 +5,6 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { formatUserMessageTime } from './UserMessageBubble'
-import { TaskContextMessage } from './TaskContextMessage'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
@@ -1068,7 +1067,14 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const depth = activity.depth || 0
 
   if (activity.type === 'task-context' && activity.taskContext) {
-    return <TaskContextMessage message={{ id: activity.id, role: 'user', timestamp: activity.timestamp, content: activity.content ?? '', taskContext: activity.taskContext, attachments: activity.attachments }} />
+    const context = activity.taskContext
+    activity = {
+      ...activity,
+      type: 'status',
+      content: [i18n.t(`chat.taskContext.${context.kind}.title`), context.title,
+        context.description || i18n.t(`chat.taskContext.${context.kind}.description`)]
+        .filter(Boolean).join(' · '),
+    }
   }
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon

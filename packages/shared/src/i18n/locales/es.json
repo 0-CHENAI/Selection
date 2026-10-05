@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "Estado de coordinación",
   "chat.taskContext.feedback.description": "Tus comentarios están registrados. La aprobación aún requiere tu confirmación.",
   "chat.taskContext.feedback.title": "Comentarios de revisión",
-  "chat.taskContext.originalRecord": "Ver registro original",
   "chat.taskContext.verification.description": "Comprobar los resultados según el objetivo original y los criterios de aceptación.",
   "chat.taskContext.verification.title": "Revisión de resultados",
   "chat.taskOrphanedHint": "This background task was terminated when its turn ended.",

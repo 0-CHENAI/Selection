@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "Együttműködés állapota",
   "chat.taskContext.feedback.description": "A visszajelzés rögzítve. A jóváhagyáshoz továbbra is szükséges a megerősítésed.",
   "chat.taskContext.feedback.title": "Módosítási visszajelzés",
-  "chat.taskContext.originalRecord": "Eredeti bejegyzés megtekintése",
   "chat.taskContext.verification.description": "Az eredmények ellenőrzése az eredeti cél és az elfogadási feltételek alapján.",
   "chat.taskContext.verification.title": "Eredmények ellenőrzése",
   "chat.taskOrphanedHint": "This background task was terminated when its turn ended.",

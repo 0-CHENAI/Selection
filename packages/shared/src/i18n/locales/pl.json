@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "Stan koordynacji",
   "chat.taskContext.feedback.description": "Twoje uwagi zostały zapisane. Zatwierdzenie nadal wymaga Twojego potwierdzenia.",
   "chat.taskContext.feedback.title": "Uwagi do zmian",
-  "chat.taskContext.originalRecord": "Pokaż oryginalny zapis",
   "chat.taskContext.verification.description": "Sprawdzenie wyników względem pierwotnego celu i kryteriów akceptacji.",
   "chat.taskContext.verification.title": "Weryfikacja wyników",
   "chat.taskOrphanedHint": "This background task was terminated when its turn ended.",

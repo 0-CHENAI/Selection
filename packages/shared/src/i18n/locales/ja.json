@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "連携の状況",
   "chat.taskContext.feedback.description": "フィードバックを記録しました。承認には引き続きあなたの確認が必要です。",
   "chat.taskContext.feedback.title": "修正のフィードバック",
-  "chat.taskContext.originalRecord": "元の記録を表示",
   "chat.taskContext.verification.description": "成果が当初の目標と受け入れ条件を満たすか確認します。",
   "chat.taskContext.verification.title": "結果の確認",
   "chat.taskOrphanedHint": "This background task was terminated when its turn ended.",

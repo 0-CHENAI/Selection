@@ -493,7 +493,6 @@
   "chat.taskContext.coordination.title": "Coordination update",
   "chat.taskContext.feedback.description": "Your feedback is recorded. Approval still requires your confirmation.",
   "chat.taskContext.feedback.title": "Revision feedback",
-  "chat.taskContext.originalRecord": "View original record",
   "chat.taskContext.verification.description": "Check the results against the original goal and acceptance criteria.",
   "chat.taskContext.verification.title": "Result review",
   "chat.taskOrphanedHint": "This background task was terminated when its turn ended.",
