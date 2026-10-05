@@ -38,7 +38,7 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
             </div>
             <Dialog.Close asChild>
               <button type="button" aria-label={t('common.close')}
-                className="absolute left-1/2 top-full mt-8 flex size-9 -translate-x-1/2 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--pro-accent)]">
+                className="pro-identity-close absolute left-1/2 top-full mt-8 flex size-9 -translate-x-1/2 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--pro-accent)]">
                 <X className="size-5" />
               </button>
             </Dialog.Close>

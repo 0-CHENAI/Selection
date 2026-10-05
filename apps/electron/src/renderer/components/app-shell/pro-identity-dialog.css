@@ -1,4 +1,8 @@
 /* One finite reveal: brand resolves at 1s; PRO starts after a 0.5s pause. */
+.pro-identity-content {
+  --pro-reveal-delay: 1500ms;
+  --pro-reveal-duration: 800ms;
+}
 .pro-identity-backdrop {
   background: rgb(8 10 15 / 10%);
   backdrop-filter: blur(12px);
@@ -32,7 +36,10 @@
 }
 .pro-identity-fill {
   fill: currentColor;
-  animation: pro-identity-settle 800ms 1500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pro-identity-settle var(--pro-reveal-duration) var(--pro-reveal-delay) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pro-identity-close {
+  animation: pro-identity-close 200ms calc(var(--pro-reveal-delay) + var(--pro-reveal-duration) + 1000ms) ease-out both;
 }
 .pro-identity-backdrop[data-state="closed"],
 .pro-identity-content[data-state="closed"] {
@@ -52,9 +59,15 @@
 }
 @keyframes pro-identity-exit { from { opacity: 1; } to { opacity: 0; } }
 @keyframes pro-identity-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pro-identity-close {
+  from { opacity: 0; visibility: hidden; }
+  to { opacity: 1; visibility: visible; }
+}
 @media (prefers-reduced-motion: reduce) {
+  .pro-identity-content { --pro-reveal-delay: 650ms; --pro-reveal-duration: 150ms; }
   .pro-identity-backdrop { backdrop-filter: none; animation: pro-identity-fade 150ms both; }
   .pro-identity-mark, .pro-identity-wordmark { animation: pro-identity-fade 150ms both; }
-  .pro-identity-fill { animation: pro-identity-fade 150ms 650ms both; }
+  .pro-identity-fill { animation: pro-identity-fade var(--pro-reveal-duration) var(--pro-reveal-delay) both; }
+  .pro-identity-close { animation-duration: 150ms; }
   .pro-identity-backdrop[data-state="closed"], .pro-identity-content[data-state="closed"] { animation-duration: 150ms; }
 }
