@@ -69,3 +69,13 @@
 `scripts/selection-pro-chat-acceptance.ts --errata` 额外检验初稿版本、精确勘误、原线修订和新的独立复核。
 
 V3.1 九项增强与三方冻结资料对照仍须单独交付和验收。不得从本轮 V3.0 成功推断其已经实现。
+
+## 2026-10-05：V3.1 B9 协调者优先的结构化求助
+
+worker 的 `task_help` 保存问题、已尝试步骤、所需决策及精确 claim/source 引用，绑定实际 run/node/attempt/revision/session/generation。等待回复只释放受影响节点的执行槽位，其他任务继续；协调者在当前根会话和 revision 内答复。答复不授予权限，改变锁定目标或扩大权限须记录 needs-user 并向用户提问。
+
+回复后继续原工具调用和原会话，不重发任务提示词、不增加 attempt。等待时间不计入节点活动执行超时；重复求助仍正确保留剩余时间。停止与重启退休失去执行上下文的请求（包含已经答复但仍排队的请求），保留完整历史并拒绝迟到回复。历史读取不重建等待实例或调用模型。
+
+真实 GPT-6-luna、只读验收：根会话 `261005-steady-tulip`，计划 `pro-c4466cfd74a852747eefa127`，运行 `chat-018bba9dae26882bd77c08cd3040a7563c993cf096ad81378fecc4d2e7291bcb`。读取 worker 在查看资料后询问 B 是否允许估算；协调者依据原目标回答“不估算、不扩大权限”。worker 在同一会话 `261005-snug-inlet`、attempt 1 / generation 1 继续，读取、独立核验与报告三节点全部完成。22 条事件、232111 ms，没有人工修改计划或补写回复。证据为 `scripts/fixtures/selection-3.0/pro-worker-help-b9-acceptance.json`。
+
+验证：包含 B2/B4 的工作快照完整 CI 8139 pass / 0 fail；新增停止、重启、重复计时与代际围栏后，求助及恢复三文件 16 pass / 0 fail。完整类型检查和主进程构建通过；CI lint 沿用 Electron 86 项、shared 8 项既有警告，无新增错误。普通安装包的 B9 界面与最终整包闭环验收在后续统一执行。

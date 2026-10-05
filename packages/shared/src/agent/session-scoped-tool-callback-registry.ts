@@ -114,6 +114,7 @@ export interface SessionScopedToolCallbacks {
   submitTaskNodeVerdictFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskNodeVerdictInput
   ) => Promise<{ ok: boolean; error?: string }>;
+  taskHelpFn?: (input: import('@craft-agent/session-tools-core').TaskHelpInput) => Promise<unknown>;
   submitTaskDefinitionFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskDefinitionInput
   ) => Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;

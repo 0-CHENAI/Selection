@@ -17,6 +17,7 @@ import {
 } from './storage.ts'
 import { loadResearchResults } from './research-storage.ts'
 import { readSpecRevision } from './revisions.ts'
+import { taskHelpHistory } from './task-help'
 
 export interface LoadedTaskResults {
   research?: import('./research.ts').ResearchSummary
@@ -49,6 +50,7 @@ export interface LoadedTaskResults {
     artifacts?: unknown[]
   }>
   revision?: number
+  help?: import('./task-help').TaskHelpRecord[]
 }
 
 export function loadTaskResults(root: string, slug: string, runId?: string): LoadedTaskResults {
@@ -96,6 +98,8 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
       const node = ensure(entry.nodeId)
       node.sessionId = entry.sessionId
       node.revision ??= entry.revision ?? 0
+    } else if (entry.kind === 'node-help-resumed') {
+      ensure(entry.nodeId).state = 'running'
     } else if (entry.kind === 'artifact-results-invalidated') {
       for (const nodeId of entry.nodeIds) {
         const node = ensure(nodeId)
@@ -125,7 +129,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const runStatus = log.length > 0 ? deriveRunStatusFromLog(log) : undefined
 
   const nodes = [...byId.values()].map((e) => {
-    const out = ['pending', 'running', 'retry-wait'].includes(e.state) ? null : readNodeOutput(root, slug, chosen, e.id)
+    const out = ['pending', 'running', 'retry-wait', 'waiting-help'].includes(e.state) ? null : readNodeOutput(root, slug, chosen, e.id)
     return {
       id: e.id,
       title: titleById.get(e.id) ?? e.id,
@@ -151,6 +155,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     && readRunLog(root, slug, id).some(event => event.kind === 'run-started' && event.resumedFrom === chosen))
 
   return {
+    help: taskHelpHistory(log),
     ...(started?.kind === 'run-started' ? { taskId: started.taskId, orchestratorSessionId: started.orchestratorSessionId } : {}),
     slug,
     resumedFrom: started?.kind === 'run-started' ? started.resumedFrom : undefined,

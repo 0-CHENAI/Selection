@@ -390,6 +390,8 @@ export interface SessionToolContext {
 
   submitTaskNodeVerdict?(input: SubmitTaskNodeVerdictInput): Promise<{ ok: boolean; error?: string }>;
 
+  taskHelp?(input: TaskHelpInput): Promise<unknown>;
+
   submitTaskDefinition?(input: SubmitTaskDefinitionInput): Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
 
   controlTaskRun?(input: ControlTaskRunInput): Promise<{ status: string; conflict?: string }>;
@@ -458,6 +460,14 @@ export interface SessionToolContext {
    * Used by transform_data and render_template for output files.
    */
   dataPath?: string;
+}
+
+export interface TaskHelpInput {
+  action: 'request' | 'answer' | 'needs-user'; requestId: string;
+  runId?: string; baseRevision?: number; responseId?: string; response?: string;
+  problem?: string; tried?: string[]; needed?: string;
+  claimRefs?: Array<{ id: string; version: number }>;
+  sourceRefs?: Array<{ id: string; version: string }>;
 }
 
 // ============================================================

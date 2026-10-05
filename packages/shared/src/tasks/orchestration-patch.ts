@@ -66,6 +66,7 @@ export type PatchResult = PatchOk | PatchErr;
 
 const TERMINAL_OR_LIVE: ReadonlySet<NodeRunState> = new Set([
   'running',
+  'waiting-help',
   'retry-wait',
   'waiting-approval',
   'done',

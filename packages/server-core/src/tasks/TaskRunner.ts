@@ -23,6 +23,7 @@ import { dependencyImpact, dependencyAncestors } from './dependency-impact';
 import { statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SourceReadProof } from '@craft-agent/core/types';
+import type { TaskHelpInput } from '@craft-agent/session-tools-core';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
@@ -98,6 +99,7 @@ import {
   type TaskRunMetrics,
   type TaskNodeTiming,
   type TaskNodeVerdict,
+  type TaskHelpRecord,
   type CacheStatus,
 } from '@craft-agent/shared/tasks';
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags';
@@ -243,6 +245,7 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  help?: TaskHelpRecord[];
   coordinatorGate?: CoordinatorGateState;
   research?: ResearchSummary;
   artifactAvailability?: { nodeIds: string[]; reason: string };
@@ -425,6 +428,9 @@ class ActiveRun {
   private readonly seenDecisionIds = new Set<string>();
   private readonly completedCheckpointIds = new Set<string>();
   private coordinatorGate: CoordinatorGateState | null = null;
+  private readonly help = new Map<string, TaskHelpRecord>();
+  private readonly helpWaiters = new Map<string, { promise: Promise<unknown>; resolve(value: unknown): void; reject(error: Error): void }>();
+  private readonly helpTimeouts = new Map<string, number>();
   private readonly coordinatorTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly nodeTimings = new Map<string, TaskNodeTiming>();
   private readonly nodeVerdicts = new Map<string, TaskNodeVerdict>();
@@ -444,6 +450,7 @@ class ActiveRun {
   private nextSeq = 1;
   private readonly approvalTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly sessionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly sessionTimeoutDeadlines = new Map<string, number>();
   private suppressSchedule = false;
 
   constructor(
@@ -760,6 +767,11 @@ class ActiveRun {
         if (e.confirmed) this.unconfirmedShutdown.delete(e.sessionId); else this.unconfirmedShutdown.add(e.sessionId);
       } else if (e.kind === 'task-worker') {
         this.workers.set(e.worker.workerId, structuredClone(e.worker));
+      } else if (e.kind === 'task-help') {
+        this.help.set(e.help.id, structuredClone(e.help));
+      } else if (e.kind === 'node-help-resumed') {
+        const state = this.instances.get(e.nodeId) ?? this.state.get(e.nodeId);
+        if (state) { state.state = 'running'; delete state.lastFailure; }
       } else if (e.kind === 'node-awaiting-workers') {
         this.deferredCompletions.set(e.nodeId, { workspaceId: this.deps.workspaceId, sessionId: e.sessionId, generation: e.generation,
           reason: e.reason, finalText: e.finalText, errorCode: e.errorCode, artifacts: e.artifacts,
@@ -922,6 +934,10 @@ class ActiveRun {
         const out = loadOutput(nodeId);
         if (out) this.outputs[nodeId] = out;
         else st.state = 'pending';
+      } else if (st.state === 'waiting-help') {
+        this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
+        st.state = 'interrupted'; st.lastFailure = 'progress-paused';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'progress-paused' });
       } else if (st.state === 'running' || st.state === 'retry-wait') {
         if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
           st.state = 'interrupted';
@@ -933,6 +949,12 @@ class ActiveRun {
       }
     }
     for (const [nodeId, st] of this.instances) {
+      if (st.state === 'waiting-help') {
+        this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
+        st.state = 'interrupted'; st.lastFailure = 'progress-paused';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'progress-paused' });
+        continue;
+      }
       if (st.state !== 'running' && st.state !== 'retry-wait') continue;
       if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
         st.state = 'interrupted';
@@ -1002,6 +1024,7 @@ class ActiveRun {
     this.approvalTimers.clear();
     for (const timer of this.sessionTimers.values()) clearTimeout(timer);
     this.sessionTimers.clear();
+    this.sessionTimeoutDeadlines.clear();
     for (const timer of this.coordinatorTimers) clearTimeout(timer);
     this.coordinatorTimers.clear();
     for (const nodeId of [...this.acquiredConnections.keys()]) this.releaseConnection(nodeId);
@@ -1015,6 +1038,7 @@ class ActiveRun {
       // other non-terminal node becomes terminal before any async cancellation,
       // closing the completion-event race and making implicit finally ready.
       if (node?.kind === 'finally' || isTerminalNodeState(st.state)) continue;
+      this.cancelNodeHelp(nodeId, 'Task run stopped');
       if (st.state === 'running') this.inFlight = Math.max(0, this.inFlight - 1);
       st.state = 'cancelled';
       this.submittedOutputs.delete(nodeId);
@@ -1178,7 +1202,7 @@ class ActiveRun {
 
   snapshot(): RunSnapshot {
     const blockers = [...this.state.entries()]
-      .filter(([, st]) => st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
+      .filter(([, st]) => st.state === 'waiting-help' || st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
       .map(([id]) => id);
     if (this.isOverBudget() && this.hasPendingNodes()) blockers.push('budget');
     for (const sessionId of this.unconfirmedShutdown) blockers.push(`shutdown-unconfirmed:${sessionId}`);
@@ -1218,6 +1242,7 @@ class ActiveRun {
     };
     return {
       workspaceId: this.deps.workspaceId,
+      ...(this.help.size ? { help: [...this.help.values()].map(value => structuredClone(value)) } : {}),
       slug: this.slug,
       runId: this.runId,
       taskId: this.spec.id,
@@ -1262,6 +1287,7 @@ class ActiveRun {
       return;
     }
     if (this.runStatus !== 'running') return;
+    this.resumeAnsweredHelp();
     if (this.pendingPlannerResults().length && this.coordinatorGateEnabled()) {
       this.enterCoordinatorGate(this.allNodesSettled() ? 'before-verify' : 'new-result');
       this.emitChanged();
@@ -2204,6 +2230,7 @@ class ActiveRun {
     if (this.runStatus !== 'running' || this.inFlight > 0) return;
     if (this.hasUnsettledRunningNode() || this.hasExpandingWork()) return;
     if (this.spec.nodes.some((n) => this.isReady(n) && this.whenAllows(n))) return;
+    if ([...this.state.values(), ...this.instances.values()].some(st => st.state === 'waiting-help')) return;
     const approval = [...this.state.entries()].filter(([, st]) => st.state === 'waiting-approval').map(([id]) => id);
     if (approval.length) {
       this.runStatus = 'waiting-approval';
@@ -2358,25 +2385,7 @@ class ActiveRun {
       this.emitChanged(); // Publish the new child link while the node is still running.
       if (!canDispatch()) return;
       if (node.timeout && node.timeout > 0) {
-        const timer = setTimeout(() => {
-          this.sessionTimers.delete(child.id);
-          const active = this.instances.get(key) ?? this.state.get(definitionId(key));
-          if (!active || active.state !== 'running' || active.sessionId !== child.id) return;
-          this.failNode(key, 'node-timeout', child.id, 'error');
-          void (async () => {
-            try {
-              const stopped = this.deps.host.stopSwarm
-                ? await this.deps.host.stopSwarm(child.id)
-                : { stoppedSessionIds: [], detachedSessionIds: [] };
-              if (!stopped.stoppedSessionIds.includes(child.id)) {
-                await this.deps.host.cancelProcessing(child.id, true);
-              }
-            } catch (error) {
-              conductorLog.warn('timeout-cancel-failed', { slug: this.slug, runId: this.runId, sessionId: child.id, error });
-            }
-          })();
-        }, node.timeout * 1000);
-        this.sessionTimers.set(child.id, timer);
+        this.startSessionTimeout(key, child.id, node.timeout * 1000);
       }
       if (resuming) {
         if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
@@ -2426,6 +2435,7 @@ class ActiveRun {
       ...(this.spec.constraints?.length ? [`User constraints for every node: ${JSON.stringify(this.spec.constraints)}`] : []),
       ...(this.spec.decisions?.length ? [`Confirmed plan decisions: ${JSON.stringify(this.spec.decisions)}`] : []),
       ...(this.workers.size ? [`Delegated task facts and separate outputs: ${JSON.stringify([...this.workers.values()])}`] : []),
+      ...(this.help.size ? [`Structured help history (responses do not grant permissions): ${JSON.stringify([...this.help.values()])}`] : []),
     ].join('\n');
   }
 
@@ -2447,6 +2457,13 @@ class ActiveRun {
     }
     const defId = definitionId(nodeId);
     const st = this.instances.get(nodeId) ?? this.state.get(defId);
+    if (st?.state === 'waiting-help' && st.sessionId === evt.sessionId && (st.generation === undefined || evt.generation === st.generation)) {
+      this.cancelNodeHelp(nodeId, 'Worker interrupted while awaiting help');
+      // The waiting node already yielded its slot; restore the slot exactly once
+      // before the normal terminal/recovery path settles it.
+      st.state = 'running'; this.inFlight++;
+      if (evt.reason === 'complete') evt = { ...evt, reason: 'error', finalText: 'Worker completed without resolving its structured help request' };
+    }
     if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId || st.generation !== undefined && evt.generation < st.generation) return; // stale/already settled
     const ownedWorkers = [...this.workers.values()].filter(worker => worker.nodeId === nodeId && worker.attempt === st.attempt);
     if (ownedWorkers.some(worker => ['reserved', 'running'].includes(worker.state))) {
@@ -2460,6 +2477,7 @@ class ActiveRun {
     const timeout = this.sessionTimers.get(evt.sessionId);
     if (timeout) clearTimeout(timeout);
     this.sessionTimers.delete(evt.sessionId);
+    this.sessionTimeoutDeadlines.delete(evt.sessionId);
 
     if (evt.tokenUsage) {
       // `tokenUsage` is cumulative-per-session; add only the delta since this session's last
@@ -2728,7 +2746,7 @@ class ActiveRun {
     if (this.inFlight > 0) return;
     if (this.hasUnsettledRunningNode() || this.hasExpandingWork()) return;
     if (this.spec.nodes.some((n) => this.isReady(n))) return;
-    if ([...this.state.values()].some((st) => st.state === 'waiting-approval')) return;
+    if ([...this.state.values(), ...this.instances.values()].some((st) => st.state === 'waiting-approval' || st.state === 'waiting-help')) return;
 
     if (this.stopRequested) {
       this.finish('stopped');
@@ -2802,6 +2820,7 @@ class ActiveRun {
     this.approvalTimers.clear();
     for (const timer of this.sessionTimers.values()) clearTimeout(timer);
     this.sessionTimers.clear();
+    this.sessionTimeoutDeadlines.clear();
     for (const timer of this.coordinatorTimers) clearTimeout(timer);
     this.coordinatorTimers.clear();
     if (this.settled) return;
@@ -3408,6 +3427,126 @@ class ActiveRun {
       this.notifyConnectionReleased();
     }
     return { ok: true };
+  }
+
+  taskHelp(sessionId: string, generation: number, input: TaskHelpInput): Promise<unknown> | unknown {
+    if (this.isTerminal() || this.stopRequested) throw new Error('Help belongs to an active run; stopped or completed attempts cannot receive replies');
+    if (input.action !== 'request') {
+      if (!input.responseId?.trim() || !input.response?.trim()) throw new Error('Root response requires an idempotent response identity and text');
+      if (sessionId !== this.opts.orchestratorSessionId || input.runId !== this.runId) throw new Error('Only the owning root may answer this run');
+      if (input.baseRevision !== this.revision) throw new Error(`Stale help response revision; current revision is ${this.revision}`);
+      const request = this.help.get(input.requestId);
+      if (!request || request.state === 'cancelled') throw new Error('Help request is unavailable or belongs to a retired attempt');
+      const old = request.responses.find(response => response.id === input.responseId);
+      if (old) {
+        if (old.action !== input.action || old.text !== input.response) throw new Error('Response identity already has a different disposition');
+        return { id: request.id, state: request.state };
+      }
+      if (request.state === 'answered') throw new Error('This help request already has an answer');
+      const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      if (request.claimRefs.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
+        || request.sourceRefs.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) throw new Error('Help inputs changed; do not apply a stale response');
+      const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
+      if (state?.state !== 'waiting-help' || state.sessionId !== request.sessionId || state.attempt !== request.attempt || state.generation !== undefined && state.generation !== request.generation) throw new Error('Help request no longer owns this execution attempt');
+      const next: TaskHelpRecord = { ...request, state: input.action === 'answer' ? 'answered' : 'waiting-user',
+        responses: [...request.responses, { id: input.responseId!, action: input.action, text: input.response!, revision: this.revision }] };
+      this.saveHelp(next); this.scheduleReady();
+      return { id: next.id, state: next.state };
+    }
+    const nodeId = this.sessionToNode.get(sessionId);
+    const state = nodeId ? this.instances.get(nodeId) ?? this.state.get(nodeId) : undefined;
+    if (!nodeId || !state || !['running', 'waiting-help'].includes(state.state) || state.sessionId !== sessionId
+      || state.generation !== undefined && state.generation !== generation || !this.opts.orchestratorSessionId) throw new Error('Only a current bound task worker can request coordinator help');
+    if (!input.problem?.trim() || !input.tried?.length || !input.needed?.trim()) throw new Error('Structured help requires problem, attempted steps and needed decision');
+    const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    if (input.claimRefs?.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
+      || input.sourceRefs?.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) throw new Error('Help references unknown or stale claim/source versions');
+    const id = `${nodeId}@${state.attempt}@${generation}:${input.requestId}`;
+    const request: TaskHelpRecord = { id, requestId: input.requestId, runId: this.runId, nodeId, attempt: state.attempt,
+      revision: this.attemptRevisions.get(nodeId) ?? this.revision, sessionId, generation, problem: input.problem,
+      tried: input.tried, needed: input.needed, claimRefs: input.claimRefs ?? [], sourceRefs: input.sourceRefs ?? [], state: 'waiting', responses: [] };
+    const old = this.help.get(id);
+    if (old) {
+      if (planValueKey({ ...old, state: 'waiting', responses: [] }) !== planValueKey(request)) throw new Error('Request identity already has different content');
+      const waiter = this.helpWaiters.get(id);
+      if (waiter) return waiter.promise;
+      throw new Error('This request lost its execution context; recover the task checkpoint before requesting again');
+    }
+    if (state.state === 'waiting-help') throw new Error('Resolve the existing help request first');
+    if (this.submittedOutputs.has(nodeId)) throw new Error('A submitted result must settle before requesting a different task decision');
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void;
+    const promise = new Promise<unknown>((yes, no) => { resolve = yes; reject = no; });
+    // Install the waiter before notifying the coordinator; a synchronous reply
+    // cannot disappear between persistence and registering the continuation.
+    this.helpWaiters.set(id, { promise, resolve, reject });
+    try { this.saveHelp(request); }
+    catch (error) { this.helpWaiters.delete(id); throw error; }
+    state.state = 'waiting-help'; state.lastFailure = input.problem;
+    const timer = this.sessionTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer); this.sessionTimers.delete(sessionId);
+      this.helpTimeouts.set(id, Math.max(0, (this.sessionTimeoutDeadlines.get(sessionId) ?? this.nowMs()) - this.nowMs()));
+      this.sessionTimeoutDeadlines.delete(sessionId);
+    }
+    this.inFlight = Math.max(0, this.inFlight - 1); this.releaseConnection(nodeId);
+    this.log({ kind: 'node-finished', nodeId, sessionId, state: 'waiting-help', reason: input.problem });
+    const root = this.opts.orchestratorSessionId;
+    void Promise.resolve().then(() => this.deps.host.sendMessage(root,
+      `Structured worker help (only node ${JSON.stringify(nodeId)} is waiting): ${JSON.stringify(request)}\nInspect current run revision and answer with task_help. Resolve within existing authority; if the goal, locked decisions or permissions need change, record needs-user and ask the user. Unrelated tasks continue. A reply never grants permissions.`, undefined, undefined, { hidden: true })).catch(error => conductorLog.warn('help-notification-failed', { id, error }));
+    this.scheduleReady(); this.emitChanged();
+    return promise;
+  }
+
+  private saveHelp(help: TaskHelpRecord): void {
+    this.log({ kind: 'task-help', help: structuredClone(help) });
+    this.help.set(help.id, structuredClone(help)); this.emitChanged();
+  }
+
+  private cancelNodeHelp(nodeId: string, reason: string): void {
+    for (const request of this.help.values()) if (request.nodeId === nodeId && request.state !== 'cancelled'
+      && (this.helpWaiters.has(request.id) || ['waiting', 'waiting-user'].includes(request.state)
+        || (this.instances.get(nodeId) ?? this.state.get(nodeId))?.state === 'waiting-help')) {
+      this.saveHelp({ ...request, state: 'cancelled', cancellationReason: reason });
+      this.helpWaiters.get(request.id)?.reject(new Error(reason)); this.helpWaiters.delete(request.id);
+      this.helpTimeouts.delete(request.id);
+    }
+  }
+
+  private startSessionTimeout(nodeId: string, sessionId: string, remaining: number): void {
+    this.sessionTimeoutDeadlines.set(sessionId, this.nowMs() + remaining);
+    const timer = setTimeout(() => {
+      this.sessionTimers.delete(sessionId); this.sessionTimeoutDeadlines.delete(sessionId);
+      const active = this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId));
+      if (active?.state !== 'running' || active.sessionId !== sessionId) return;
+      this.failNode(nodeId, 'node-timeout', sessionId, 'error');
+      void (async () => {
+        try {
+          const stopped = await this.deps.host.stopSwarm?.(sessionId);
+          if (!stopped?.stoppedSessionIds.includes(sessionId)) await this.deps.host.cancelProcessing(sessionId, true);
+        } catch (error) { conductorLog.warn('timeout-cancel-failed', { slug: this.slug, runId: this.runId, sessionId, error }); }
+      })();
+    }, remaining);
+    this.sessionTimers.set(sessionId, timer);
+  }
+
+  private resumeAnsweredHelp(): void {
+    for (const request of this.help.values()) {
+      if (request.state !== 'answered' || !this.helpWaiters.has(request.id) || this.inFlight >= this.maxParallel) continue;
+      const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
+      const node = this.spec.nodes.find(node => node.id === definitionId(request.nodeId));
+      if (state?.state !== 'waiting-help' || !node || state.sessionId !== request.sessionId || state.attempt !== request.attempt) continue;
+      if (!this.tryAcquireConnection(node, request.nodeId)) continue;
+      state.state = 'running'; delete state.lastFailure; this.inFlight++;
+      const remaining = this.helpTimeouts.get(request.id);
+      if (remaining !== undefined) {
+        this.startSessionTimeout(request.nodeId, request.sessionId, remaining);
+        this.helpTimeouts.delete(request.id);
+      }
+      this.log({ kind: 'node-help-resumed', nodeId: request.nodeId, requestId: request.id });
+      this.helpWaiters.get(request.id)!.resolve({ id: request.id, state: 'answered', response: request.responses.at(-1)!.text,
+        permissionGranted: false, instruction: 'Continue only the affected task from retained tool results; never replay completed operations.' });
+      this.helpWaiters.delete(request.id);
+    }
   }
 
   expireCoordinatorGate(nowIso?: string): void {
@@ -4263,6 +4402,13 @@ export class TaskRunner {
     const run = this.findRunBySession(sessionId);
     if (!run) return { ok: false as const, error: 'No active run owns this session' };
     return run.submitNodeVerdict(sessionId, payload);
+  }
+
+  taskHelp(sessionId: string, generation: number, input: TaskHelpInput): Promise<unknown> | unknown {
+    const run = input.action === 'request' ? this.findRunBySession(sessionId)
+      : [...this.runs.values()].find(run => run.snapshot().runId === input.runId && run.snapshot().orchestratorSessionId === sessionId);
+    if (!run) throw new Error('No active canonical run owns this help request');
+    return run.taskHelp(sessionId, generation, input);
   }
 
   submitVerdict(sessionId: string, payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[]; runId?: string }): RunSnapshot {

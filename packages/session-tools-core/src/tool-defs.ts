@@ -51,6 +51,7 @@ import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
 import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
 import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
+import { TaskHelpSchema, handleTaskHelp } from './handlers/task-help.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
@@ -806,6 +807,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
   { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
   { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
+  { name: 'task_help', description: 'Structured coordinator-first help. A bound worker requests help with the problem, attempted steps, needed decision and exact claim/source references. This tool waits for the root response while only this node yields its execution slot; do not invoke unrelated operations in the same tool batch. The root answers within existing authority or records needs-user, then asks the user for the missing decision. Replies never grant permissions or change locked goals. Root replies must use the host-issued request identity and current run revision. Completed operations must not be replayed.', inputSchema: TaskHelpSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTaskHelp },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },

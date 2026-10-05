@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Coordinator-first task help** — A blocked worker records its problem, attempted steps and needed decision, yields only its task slot, then continues the same execution after the root replies. Replies retain the current authority; Stop and restart retire lost waiting instances while preserving history. Issue #449.
+
 - **Research corrections** — Append-only errata invalidate exact claim/source versions, dependent reasoning and historical reports until independently reviewed corrections are available. Frozen handovers disclose later associated corrections without rewriting their snapshots. Part of #449.
 
 - **Research source bundles** — Deep Research records successful original Read ranges with exact source and execution versions, and separates cited, uncited, unresolved and unrecorded material. New research plans require the author and independent reviewer to read the cited ranges themselves; compatible successors preserve verified history. Part of #449.

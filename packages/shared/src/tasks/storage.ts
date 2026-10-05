@@ -67,6 +67,7 @@ export type NodeRunState =
   | 'running'
   | 'retry-wait'
   | 'waiting-approval'
+  | 'waiting-help'
   | 'done'
   | 'failed'
   | 'invalid'
@@ -80,6 +81,7 @@ export const NODE_RUN_STATES = [
   'running',
   'retry-wait',
   'waiting-approval',
+  'waiting-help',
   'done',
   'failed',
   'invalid',
@@ -110,6 +112,8 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
 type RunLogPayload =
+  | { t: string; kind: 'task-help'; help: import('./task-help').TaskHelpRecord }
+  | { t: string; kind: 'node-help-resumed'; nodeId: string; requestId: string }
   | { t: string; kind: 'source-read'; receipt: import('./research.ts').ResearchReadReceipt }
   | { t: string; kind: 'task-worker'; worker: import('./planner').TaskWorkerRecord }
   | { t: string; kind: 'node-awaiting-workers'; nodeId: string; sessionId: string; generation: number;

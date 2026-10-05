@@ -209,6 +209,12 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'taskHelp', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.taskHelpFn; },
+    configurable: true,
+    enumerable: true,
+  });
+
   Object.defineProperty(context, 'submitTaskDefinition', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.submitTaskDefinitionFn;

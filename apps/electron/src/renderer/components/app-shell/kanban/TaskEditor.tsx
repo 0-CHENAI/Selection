@@ -10,6 +10,7 @@ import { TaskYamlImport } from './TaskYamlImport'
 import { TaskProposal } from './TaskProposal'
 import { ResearchConfiguration } from './ResearchConfiguration'
 import { ResearchResults } from './ResearchResults'
+import { TaskHelpHistory } from './TaskHelpHistory'
 import type { ResearchConfig } from '@craft-agent/shared/tasks/research'
 import { addResearchTemplate } from '@craft-agent/shared/tasks/research-template'
 import type { TaskSpec } from '@craft-agent/shared/tasks'
@@ -1922,6 +1923,7 @@ function ResultsPanel({
       {results.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {results.supersededBy}</p>}
       <ManagedTaskWorkers workers={results.workers} runId={results.runId} onOpenSession={onOpenChildSession} />
       <ResearchResults research={results.research} onOpenSession={onOpenChildSession} />
+      <TaskHelpHistory records={results.help} onOpenSession={onOpenChildSession} />
       <div className="flex justify-end">
         <Btn variant="secondary" onClick={onApplyRunRevision} disabled={!canApplyRunRevision}>
           {t('tasks.applyRunRevision')}

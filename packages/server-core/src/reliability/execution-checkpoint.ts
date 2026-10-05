@@ -8,8 +8,11 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 
 export type ToolRecoveryClass = 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown'
-/** Native tool identities only. MCP tools must explicitly register a recovery contract. */
+/** Native identities and explicit host-owned contracts; other MCP effects remain unknown. */
 export function toolRecoveryClass(name: string): ToolRecoveryClass {
+  // Host-owned, identity-fenced coordination has no external effect; a crash
+  // cancels its waiting record before retained-tool recovery can request again.
+  if (/^(?:mcp__session__|session__)?task_help$/.test(name)) return 'read-only'
   return isNativeReadOnlyTool(name) ? 'read-only' : 'unknown'
 }
 export interface ExecutionTaskIdentity {

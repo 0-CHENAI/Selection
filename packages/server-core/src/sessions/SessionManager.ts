@@ -5153,6 +5153,16 @@ export class SessionManager implements ISessionManager {
           if (!runner) return { ok: false, error: 'Task runner is not available' }
           return runner.submitNodeVerdict(managed.id, input)
         },
+        taskHelpFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          if (input.action === 'request') {
+            if (Object.values(managed.executionCheckpoint?.pendingTools ?? {}).some(tool => toolRecoveryClass(tool.name) !== 'read-only')) {
+              throw new Error('Finish outstanding operations before requesting help; unknown effects cannot be suspended or replayed')
+            }
+          } else assertComplexCapability(managed, 'change-plan')
+          return runner.taskHelp(managed.id, managed.processingGeneration, input)
+        },
         submitTaskDefinitionFn: async (input) => {
           assertComplexCapability(managed, 'create-workflow')
           if (!managed.taskDraft) return { valid: false, errors: ['Only an editor proposal session may submit a definition. Open the workflow editor.'] }
@@ -11159,7 +11169,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private captureTaskContextRead(managed: ManagedSession, toolName: string, input: Record<string, unknown>, toolCallId: string): void {
     const checkpoint = managed.executionCheckpoint!
-    if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|session_history|session_search|context_stats)$/.test(toolName)) return
+    if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|task_help|session_history|session_search|context_stats)$/.test(toolName)) return
     const write = ['Write', 'write', 'Edit', 'edit'].includes(toolName)
     if (!write && !['Read', 'read'].includes(toolName)) { checkpoint.contextUnverified = true; return }
     const requested = input.file_path ?? input.path

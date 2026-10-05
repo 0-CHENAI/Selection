@@ -22,6 +22,11 @@ test('only a matching safe checkpoint can resume', () => {
     expect(recoveryBlocker({ ...checkpoint, pendingTools: { call: { name, recovery: 'unknown' } } }, current)).toBe('unknown-tool-result')
   }
   expect(toolRecoveryClass('mcp__external__Find')).toBe('unknown')
+  for (const name of ['task_help', 'session__task_help', 'mcp__session__task_help']) {
+    expect(toolRecoveryClass(name)).toBe('read-only')
+    expect(recoveryBlocker({ ...checkpoint, pendingTools: { help: { name, recovery: 'read-only' } }, completedTools: ['confirmed-write'] }, current)).toBeUndefined()
+  }
+  expect(toolRecoveryClass('mcp__external__task_help')).toBe('unknown')
 })
 test('checkpoint publication survives reload; unknown and damaged records never become fresh runs', () => {
   const root = mkdtempSync(join(tmpdir(), 'checkpoint-'))

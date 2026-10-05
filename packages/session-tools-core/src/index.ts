@@ -119,6 +119,7 @@ export {
 // Context interface
 export type {
   SessionToolContext,
+  TaskHelpInput,
   SessionToolCallbacks,
   FileSystemInterface,
   CredentialManagerInterface,
