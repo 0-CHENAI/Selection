@@ -26,6 +26,7 @@ import {
   FileText,
   ArrowUpRight,
   CornerDownRight,
+  UsersRound,
   Ban,
   Copy,
   Check,
@@ -288,6 +289,8 @@ export interface ActivityItem {
   content?: string
   /** Readable internal task step; its protocol stays out of the response body. */
   taskContext?: import('@craft-agent/core').Message['taskContext']
+  /** Child execution identity, kept separate from the coordinator's own tools. */
+  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
   attachments?: import('@craft-agent/core').Message['attachments']
   /** Live-only text/image blocks from a tool result. */
   toolResultContent?: AgentToolResultContent[]
@@ -1073,6 +1076,27 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
+
+  if (activity.taskNode) {
+    const node = activity.taskNode
+    const content = <>
+      <UsersRound className={cn(SIZE_CONFIG.iconSize, 'mt-0.5 shrink-0 text-accent')} aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="min-w-0 font-medium text-foreground [overflow-wrap:anywhere]">{node.title}</span>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ActivityStatusIcon status={activity.status} />{node.stateLabel}
+          </span>
+        </span>
+        {node.description && node.description !== node.title && <span className="mt-1 block whitespace-pre-wrap text-foreground/75 [overflow-wrap:anywhere]">{node.description}</span>}
+      </span>
+      {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'mt-0.5 shrink-0 text-muted-foreground')} aria-hidden="true" />}
+    </>
+    const className = cn('flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left', SIZE_CONFIG.fontSize)
+    return node.sessionId && onOpenDetails
+      ? <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} onClick={onOpenDetails}>{content}</button>
+      : <div className={className}>{content}</div>
+  }
 
   if (activity.type === 'task-context' && activity.taskContext) {
     const context = activity.taskContext
@@ -3246,17 +3270,21 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities, response, isComplete],
   )
 
+  const subagentActivities = useMemo(() => visibleActivities.filter(activity => activity.taskNode), [visibleActivities])
+  const coordinatorActivities = useMemo(() => visibleActivities.filter(activity => !activity.taskNode), [visibleActivities])
+  const CoordinatorRecords = subagentActivities.length ? 'details' : 'div'
+
   // Check if we have any Task subagents - if so, use grouped view
   const hasTaskSubagents = useMemo(
-    () => visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
-    [visibleActivities]
+    () => coordinatorActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    [coordinatorActivities]
   )
 
   // Group activities by parent Task for better visualization
   // Only group if there are Task subagents, otherwise keep flat for simpler view
   const groupedActivities = useMemo(
-    () => hasTaskSubagents ? groupActivitiesByParent(visibleActivities) : null,
-    [visibleActivities, hasTaskSubagents]
+    () => hasTaskSubagents ? groupActivitiesByParent(coordinatorActivities) : null,
+    [coordinatorActivities, hasTaskSubagents]
   )
 
   const renderedActivityRows = useMemo(
@@ -3270,8 +3298,8 @@ export const TurnCard = React.memo(function TurnCard({
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
-    () => !hasTaskSubagents ? computeLastChildSet(visibleActivities) : new Set<string>(),
-    [visibleActivities, hasTaskSubagents]
+    () => !hasTaskSubagents ? computeLastChildSet(coordinatorActivities) : new Set<string>(),
+    [coordinatorActivities, hasTaskSubagents]
   )
 
   const hasVisibleResponse = !!response && (
@@ -3293,6 +3321,7 @@ export const TurnCard = React.memo(function TurnCard({
   const hasNoMeaningfulWork = isComplete
     && activities.length > 0
     && activities.every(a => {
+      if (a.taskNode) return false
       // Delivery is the card body, not a work record that should keep an empty turn.
       if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
@@ -3430,6 +3459,19 @@ export const TurnCard = React.memo(function TurnCard({
                   {/* Rows joining a header that is already on screen slide in;
                       history and a header mounting with its rows do not. */}
                   <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
+                  {!!subagentActivities.length && <WorkChainRow key="subagent-work" reduceMotion={reduceMotion} stagger={!!staggerOnThisExpand} staggerIndex={0}>
+                    <div data-work-group="subagents" className="pb-2">
+                      <p className="px-2 py-1 text-xs font-medium text-foreground/80">{t('chat.subagentWork', { count: subagentActivities.length })}</p>
+                      {subagentActivities.map(activity => <ActivityRow key={activity.id} activity={activity}
+                        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined} />)}
+                    </div>
+                  </WorkChainRow>}
+                  {!!coordinatorActivities.length && <CoordinatorRecords key="coordinator-work" data-work-group={subagentActivities.length ? 'coordinator' : undefined}
+                    className={subagentActivities.length ? 'group/coordinator border-t border-border/40 py-1' : undefined}>
+                  {!!subagentActivities.length && <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                    <ChevronRight className="size-3.5 shrink-0 transition-transform group-open/coordinator:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+                    {t('chat.coordinationWork', { count: coordinatorActivities.length })}
+                  </summary>}
                   {/* Grouped view for Task subagents */}
                   {groupedActivities ? (
                     groupedActivities.map((item, index) => (
@@ -3469,7 +3511,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
-                    visibleActivities.map((activity, index) => (
+                    coordinatorActivities.map((activity, index) => (
                       <WorkChainRow
                         key={activity.id}
                         reduceMotion={reduceMotion}
@@ -3486,6 +3528,7 @@ export const TurnCard = React.memo(function TurnCard({
                       </WorkChainRow>
                     ))
                   )}
+                  </CoordinatorRecords>}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {reserveThinkingSlot && (
                     <WorkChainRow

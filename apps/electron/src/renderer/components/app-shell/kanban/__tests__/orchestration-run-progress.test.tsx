@@ -48,7 +48,7 @@ describe('inline orchestration progress', () => {
     const before = JSON.stringify(turns)
     const t = (key: string, options?: { count: number }) => key === 'session.executionChildren' ? `子代理 (${options?.count})` : key
     const projected = withOrchestrationProgress(turns, snapshot({ nodes: [
-      node({ id: 'done', title: '读取资料', state: 'done' }),
+      node({ id: 'done', title: '读取资料', instruction: '核对原文金额。提交 values.research={}.', sessionId: 'worker-1', state: 'done' }),
       node({ id: 'running', title: '修订报告', state: 'running' }),
       node({ id: 'pending', title: '核验修订稿', state: 'pending' }),
       node({ id: 'failed', title: '审查报告', state: 'failed' }),
@@ -59,6 +59,8 @@ describe('inline orchestration progress', () => {
     expect(projected[2].activities.map(row => row.status)).toEqual(['completed', 'running', 'pending', 'error', 'running'])
     expect(projected[2].intent).toContain('子代理 (4) · 1/4')
     expect(projected[2].response?.text).toBe('集中报告')
+    expect(projected[2].activities[0]?.taskNode).toEqual({ title: '读取资料', description: '核对原文金额。', sessionId: 'worker-1', stateLabel: 'tasks.nodeStateDone' })
+    expect(projected[2].activities.filter(activity => activity.taskNode)).toHaveLength(4)
     expect(JSON.stringify(turns)).toBe(before)
     expect(withOrchestrationProgress(turns, snapshot({ runId: 'unrelated' }), t)).toBe(turns)
   })
@@ -169,6 +171,16 @@ describe('buildOrchestrationProgressRows', () => {
     { id: 'kimi', title: '调研 Kimi K3' },
     { id: 'summary', title: '汇总' },
   ]
+
+  it('uses actual assignments for internal names and omits protocol clauses from historical titles', () => {
+    const rows = buildOrchestrationProgressRows(undefined, snapshot({ nodes: [
+      node({ id: 'cost', title: 'cost', instruction: '核对原文中的两年成本。提交 values.research={}.', state: 'done' }),
+      node({ id: 'report', title: '提交 values.research.report；只引用独立审查支持的结论', instruction: '只引用独立审查支持的结论。保留资料缺口。' }),
+      node({ id: 'risk', title: '独立 Read 冻结资料' }),
+    ] }))
+    expect(rows.map(row => row.title)).toEqual(['核对原文中的两年成本。', '只引用独立审查支持的结论', '独立读取冻结资料'])
+    expect(rows[1]?.description).toBe('只引用独立审查支持的结论。 保留资料缺口。')
+  })
 
   it('folds live node state onto spec titles and prefers the running session', () => {
     const rows = buildOrchestrationProgressRows(spec, snapshot({

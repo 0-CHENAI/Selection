@@ -161,7 +161,7 @@ describe('TaskRunner (Conductor)', () => {
     const before = JSON.stringify(readRunLog(root, 'history', 'r1'));
     const history = reader.getRunHistory('history', 'owner');
     expect(history.map(run => run.runId)).toEqual(['r1', 'r2']);
-    expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', state: 'cancelled', attempt: 2,
+    expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', instruction: 'a', state: 'cancelled', attempt: 2,
       attempts: [{ attempt: 1, sessionId: 'attempt-1', state: 'failed' }, { attempt: 2, sessionId: 'attempt-2', state: 'cancelled' }] });
     expect(history[0]?.nodes[1]?.state).toBe('cancelled');
     expect(reader.getRunState('history', 'r1')).toBeNull();
@@ -192,7 +192,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(dispatch.message).toContain('Canonical execution identity:');
     expect(dispatch.message).toContain('核对成本资料。保留证据。');
     expect(dispatch.options).toEqual({ taskContext: { kind: 'assignment', title: '核对成本资料', description: '比较方案成本', instruction: '核对成本资料。保留证据。' } });
-    expect(runner.getRunState('readable', 'r1')?.nodes[0]).toMatchObject({ id: 'cost', title: '核对成本资料' });
+    expect(runner.getRunState('readable', 'r1')?.nodes[0]).toMatchObject({ id: 'cost', title: '核对成本资料', instruction: '核对成本资料。保留证据。' });
     await runner.stop('readable', 'r1');
   });
 

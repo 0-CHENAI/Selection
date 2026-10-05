@@ -224,6 +224,7 @@ export class TaskControlError extends Error {
 export interface NodeRunStatus {
   actor?: TaskNode['actor'];
   title?: string;
+  instruction?: string;
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[];
   approvalFeedback?: string;
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
@@ -1218,6 +1219,7 @@ class ActiveRun {
       return {
         id,
         title: node ? nodeDisplayTitle(node) : id,
+        instruction: node?.prompt,
         attempts: this.attemptHistory.get(id)?.map(attempt => ({ ...attempt })),
         definitionId: node?.id ?? definitionId(id),
         state: st.state,

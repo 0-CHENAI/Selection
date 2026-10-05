@@ -4,7 +4,7 @@ import { useAtom, useSetAtom, useStore } from 'jotai'
 import type { ComponentEntry } from './types'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { BoardListToggle } from '@/components/app-shell/kanban/BoardListToggle'
-import { ChildSessionPreviewContent } from '@/components/app-shell/ChildSessionPreviewDialog'
+import { ChildSessionPreviewContent, ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { SessionItem } from '@/components/app-shell/SessionItem'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import ChatPage from '@/pages/ChatPage'
@@ -41,11 +41,13 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
   const base = useAppShellContext()
   const { t } = useTranslation()
   const store = useStore()
+  const [previewId, setPreviewId] = React.useState<string | null>(null)
+  const [previewContainer, setPreviewContainer] = React.useState<HTMLDivElement | null>(null)
   const startedAt = React.useRef(Date.now() - 30_000).current
   const run = React.useMemo((): TaskRunSnapshotDto => ({
     runId: 'preview-run', taskId: 'preview-task', slug: 'preview-task', status, tokensUsed: 0,
     nodes: ['读取原始资料', '审查报告草稿', '独立核验草稿', '修正报告', '核验修订结果'].map((title, index) => ({
-      id: `node-${index}`, title, attempt: 1,
+      id: `node-${index}`, title, instruction: previewWorkerInstructions[index], attempt: 1,
       state: status === 'completed' || index < 3 ? 'done' : index === 3 ? (status === 'failed' ? 'failed' : 'running') : 'pending',
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
     })),
@@ -87,7 +89,7 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
   }, [store, sessions])
   const context = createMockContext({ selectedSessionId: root.id, onSelectSessionById: () => {} })
   return <ActionRegistryProvider><FocusProvider><DismissibleLayerProvider><ModalProvider><NavigationProvider workspaceId={base.activeWorkspaceId} workspaceSlug="playground" onCreateSession={base.onCreateSession} isReady={false}><SessionListProvider value={context}>
-    <div className="@container h-[560px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
+    <div ref={setPreviewContainer} className="@container relative h-[560px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
       style={{ '--accent': 'var(--pro-accent)', '--accent-rgb': 'var(--pro-accent-rgb)' } as React.CSSProperties}>
       <div className="flex h-full min-w-0">
         <aside className="hidden w-60 shrink-0 border-r border-border @min-[600px]:block">
@@ -102,12 +104,14 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
           )} />
           <div className="min-h-0 flex-1 flex flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto p-6 text-sm leading-relaxed text-foreground">
-              {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} intent={reviewTurn.intent} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete} />}
+              {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} intent={reviewTurn.intent} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete}
+                onOpenActivityDetails={activity => { if (activity.taskNode?.sessionId) setPreviewId(activity.taskNode.sessionId) }} />}
               <p className="mt-4 text-foreground/60">固定预览数据；点击右上角的子代理按钮，在浮窗中选择并查看对应内容。</p>
             </div>
           </div>
         </main>
       </div>
+      <ChildSessionPreviewDialog sessionId={previewId} container={previewContainer} open={!!previewId} onOpenChange={open => { if (!open) setPreviewId(null) }} />
     </div>
   </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider>
 }

@@ -1,5 +1,6 @@
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import type { ActivityItem, Turn } from '@craft-agent/ui'
+import { taskAssignmentSummary } from '@craft-agent/ui/chat/task-message-presentation'
 import { overlayState } from './conductor-graph'
 import { resolveNodeStatePill } from './node-state-pill'
 import { runStatusLabelKey } from './task-labels'
@@ -14,6 +15,7 @@ export interface SpecProgressNode {
 export interface OrchestrationProgressRow {
   id: string
   title: string
+  description?: string
   state: string
   sessionId?: string
   attempt?: number
@@ -85,11 +87,16 @@ export function buildOrchestrationProgressRows(
   liveRun: TaskRunSnapshotDto | null | undefined,
 ): OrchestrationProgressRow[] {
   const nodes = liveRun?.nodes ?? []
-  const toRow = (node: TaskNodeRunStateDto, title: string): OrchestrationProgressRow => ({
-    id: node.id, title, state: node.state, sessionId: node.sessionId,
-    ...(node.attempt > 1 ? { attempt: node.attempt } : {}),
-    ...(node.attempts?.length ? { attempts: node.attempts } : {}),
-  })
+  const toRow = (node: TaskNodeRunStateDto, title: string): OrchestrationProgressRow => {
+    const description = taskAssignmentSummary({ kind: 'assignment', instruction: node.instruction })
+    const readableTitle = title === node.id && description ? description
+      : taskAssignmentSummary({ kind: 'assignment', instruction: title }) || description || title
+    return {
+      id: node.id, title: readableTitle, state: node.state, sessionId: node.sessionId, description,
+      ...(node.attempt > 1 ? { attempt: node.attempt } : {}),
+      ...(node.attempts?.length ? { attempts: node.attempts } : {}),
+    }
+  }
   // Run titles/definitions come from its frozen spec, not today's edited task.
   const definitions = liveRun?.nodes.length
     ? nodes.filter(node => !node.definitionId || node.definitionId === node.id).filter(node => !node.id.includes('#'))
@@ -128,6 +135,9 @@ export function withOrchestrationProgress(
   let timestamp = latest.activities.reduce((time, activity) => Math.max(time, activity.timestamp), latest.timestamp)
   const statusRows = (nodes: OrchestrationProgressRow[]): ActivityItem[] => nodes.flatMap(row => [{
     id: `task-node:${run.runId}:${row.id}`, type: 'status' as const,
+    statusType: 'task_node',
+    taskNode: { title: row.title, description: row.description, sessionId: row.sessionId,
+      stateLabel: t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted') },
     status: ['done', 'skipped'].includes(row.state) ? 'completed' as const
       : ['failed', 'invalid'].includes(row.state) ? 'error' as const
       : ['running', 'verifying'].includes(row.state) ? 'running' as const : 'pending' as const,

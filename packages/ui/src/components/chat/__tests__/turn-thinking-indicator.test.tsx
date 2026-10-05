@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -57,6 +57,7 @@ async function renderTurn(
         isStreaming={options.isStreaming ?? true}
         isComplete={options.isComplete ?? false}
         defaultExpanded={options.expanded ?? true}
+        onOpenActivityDetails={options.onOpenActivityDetails}
         renderActionsMenu={() => null}
       />
       </TooltipProvider>
@@ -69,6 +70,29 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it.each(['en', 'zh-Hans'] as const)('separates child assignments from folded coordinator records in %s', async language => {
+    const html = await renderTurn(language, [
+      { id: 'coordination', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1 },
+      { id: 'node', type: 'status', status: 'completed', timestamp: 2,
+        taskNode: { title: '核对两年成本', description: '读取原始资料并核对金额。', sessionId: 'worker', stateLabel: '完成' } },
+    ], { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {} })
+    expect(html).toContain('data-work-group="subagents"')
+    expect(html).toContain('读取原始资料并核对金额。')
+    expect(html).toContain('lucide-users-round')
+    expect(html).toMatch(/<button[^>]*>[\s\S]*?核对两年成本/)
+    const coordinator = html.match(/<details[^>]*data-work-group="coordinator"[^>]*>[\s\S]*?<\/details>/)?.[0]
+    expect(coordinator).toBeDefined()
+    expect(coordinator).not.toMatch(/<details[^>]*\bopen=/)
+    expect(coordinator).toContain(language === 'zh-Hans' ? '读取文件' : 'Read')
+    expect(coordinator).not.toContain('核对两年成本')
+    expect(html.indexOf('data-work-group="subagents"')).toBeLessThan(html.indexOf('data-work-group="coordinator"'))
+  })
+  it('keeps completed child results inspectable before a root response exists', async () => {
+    const html = await renderTurn('zh-Hans', [{ id: 'node', type: 'status', status: 'completed', timestamp: 1,
+      taskNode: { title: '核对成本', sessionId: 'worker', stateLabel: '完成' } }], { isComplete: true, isStreaming: false })
+    expect(html).toContain('核对成本')
+    expect(html).not.toContain('data-work-group="coordinator"')
+  })
   it.each(['en', 'zh-Hans'] as const)('keeps the parent assignment visible above collapsed work in %s', async language => {
     const html = await renderTurn(language, [{
       id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1, content: 'internal-protocol',

@@ -463,6 +463,8 @@ export interface SwarmRunDetailsDto {
 export interface TaskNodeRunStateDto {
   actor?: { id: string; persona?: string }
   title?: string
+  /** Frozen node assignment for display; never grants execution authority. */
+  instruction?: string
   attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
   approvalFeedback?: string
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }

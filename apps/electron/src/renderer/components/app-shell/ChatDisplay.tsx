@@ -2212,6 +2212,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           })
                         }}
                         onOpenActivityDetails={(activity) => {
+                          if (activity.taskNode?.sessionId && onPreviewSession) {
+                            onPreviewSession(activity.taskNode.sessionId)
+                            return
+                          }
                           // Write tool for .md/.txt → Document overlay (rendered markdown)
                           // rather than multi-diff, since these are better viewed as formatted documents
                           const isDocumentWrite = activity.toolName === 'Write' && (() => {
