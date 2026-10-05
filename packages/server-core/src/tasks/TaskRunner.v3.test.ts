@@ -87,12 +87,13 @@ class MockHost implements ConductorSessionHost {
   dispatchedNames(): string[] {
     return this.created.map((c) => c.options.name!).filter(Boolean);
   }
-  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
+  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
     const evt: SessionCompletionEvent = {
       sessionId: this.sessionIdFor(nodeId),
       workspaceId: 'ws',
       generation: 0,
       reason: opts.reason ?? 'complete',
+      errorCode: opts.errorCode,
       finalText: opts.finalText,
       tokenUsage: opts.tokenUsage,
     };
@@ -136,6 +137,43 @@ describe('TaskRunner v3 quality/efficiency', () => {
     if (prevFlag === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
     else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prevFlag;
   });
+
+  it('retries a transient read-only request without replaying completed dependencies', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', execution: { verification: { required: false } }, nodes: [
+      { id: 'read', prompt: 'Read' }, { id: 'review', kind: 'verify', prompt: 'Review', depends_on: ['read'] },
+    ] }))
+    const r = runner(); r.run('v3demo', { runId: 'transient', verifyOnComplete: false }); await tick()
+    host.complete('read', { finalText: 'Confirmed source' }); await tick()
+    host.complete('review', { reason: 'error', errorCode: 'service_error' }); await tick()
+    expect(r.getRunState('v3demo', 'transient')?.nodes.find(node => node.id === 'review')?.state).toBe('retry-wait')
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(host.dispatchedNames().filter(name => name === 'read')).toHaveLength(1)
+    expect(r.getRunState('v3demo', 'transient')?.nodes.find(node => node.id === 'review')?.attempt).toBe(2)
+    expect(r.submitNodeVerdict('sess-review', { result: 'pass', reason: 'Source checked', evidence: 'Confirmed source' }).ok).toBe(true)
+    host.complete('review'); await tick()
+    expect(r.getRunState('v3demo', 'transient')?.status).toBe('completed')
+    expect(readRunLog(root, 'v3demo', 'transient').filter(event => event.kind === 'node-retry')).toHaveLength(1)
+  })
+
+  it.each([
+    ['explicit-off', { retry: { limit: 0 }, permissionMode: 'safe' }], ['write-mode', { permissionMode: 'ask' }],
+  ])('does not apply transient fallback to %s', async (runId, node) => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', defaults: { permissionMode: 'ask' }, nodes: [{ id: 'a', prompt: 'A', ...node }] }))
+    const r = runner(); r.run('v3demo', { runId, verifyOnComplete: false }); await tick()
+    host.complete('a', { reason: 'error', errorCode: 'service_error' }); await tick()
+    expect(r.getRunState('v3demo', runId)?.status).toBe('failed')
+    expect(readRunLog(root, 'v3demo', runId).some(event => event.kind === 'node-retry')).toBe(false)
+  })
+
+  it('refuses a transient retry whose previous operation outcome is unknown', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'a', prompt: 'A' }] }))
+    const r = runner(); r.run('v3demo', { runId: 'unknown', verifyOnComplete: false }); await tick()
+    ;(host as ConductorSessionHost).assertTaskSafePoint = () => { throw new Error('Unknown operation outcome') }
+    host.complete('a', { reason: 'error', errorCode: 'service_error' }); await tick()
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(host.dispatchedNames()).toEqual(['a'])
+    expect(r.getRunState('v3demo', 'unknown')?.status).toBe('failed')
+  })
 
   it('F3 waits for both explicit and input-derived dependencies and keeps a later YAML save out of the frozen run', async () => {
     const frozen = v3Spec({ runner: 'conduct', constraints: ['read only'], decisions: ['unknown risk stays unknown'], execution: { verification: { required: false } }, nodes: [

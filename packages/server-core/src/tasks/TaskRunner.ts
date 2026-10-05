@@ -2627,7 +2627,12 @@ class ActiveRun {
     if (wasRunning) this.settleSessionSlot(nodeId, sessionId, false);
 
     const node = this.spec.nodes.find((n) => n.id === defId);
-    const retry = allowRetry ? node?.retry : undefined;
+    // Only read-only v3 requests receive the transient fallback. Dispatch still
+    // settles the previous runtime and checks its durable operation safe point.
+    const readOnlyTransient = this.sourceVersion === 3 && failure === 'error'
+      && (node?.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) === 'safe'
+      && /^error:(provider_timeout|network_error|service_error|stream_interrupted|rate_limited)$/.test(reason);
+    const retry = allowRetry ? node?.retry ?? (readOnlyTransient ? { limit: 2, when: 'error' as const } : undefined) : undefined;
     if (inst && expanding && retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
       const delay = retryBackoffMs(retry, inst.attempt, reason);
@@ -3864,7 +3869,7 @@ function retryBackoffMs(
   attempt: number,
   reason?: string,
 ): number {
-  const transient = reason === 'timeout' || /^error:(provider_timeout|network_error|service_error|stream_interrupted)$/.test(reason ?? '');
+  const transient = reason === 'timeout' || /^error:(provider_timeout|network_error|service_error|stream_interrupted|rate_limited)$/.test(reason ?? '');
   const base = retry.backoff?.base ?? (transient ? 1000 : 0);
   if (base <= 0) return 0;
   const factor = retry.backoff?.factor ?? 2;

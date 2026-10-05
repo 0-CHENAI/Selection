@@ -70,6 +70,30 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(managed.messages.findLast(message => message.role === 'user')?.hidden).toBe(true)
   })
 
+  it('does not recover or publish a final answer from an unfinished canonical checkpoint', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'waiting-coordinator'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status }) }) as never)
+    install(async function* () {
+      expect(control?.recovery).toBe(false)
+      await expect(control!.submit(submission)).rejects.toThrow('canonical run checkpoint')
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '消费检查点并继续待执行节点。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.some(message => message.answerCommitted || message.role === 'error')).toBe(false)
+    status = 'completed'
+    install(async function* (index) {
+      if (index === 2) await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    prompts = []
+    await manager.sendMessage(managed.id, '运行已验收，请交付。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(2)
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+  })
+
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)
     const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',

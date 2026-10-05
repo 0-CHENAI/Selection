@@ -670,6 +670,12 @@ export interface SessionInfo {
   orchestration?: {
     id?: string;
     status?: string;
+    taskSlug?: string;
+    runId?: string;
+    revision?: number;
+    plannerPhase?: string;
+    blockers?: string[];
+    nodes?: Array<{ id: string; state: string; attempt: number }>;
     pendingAggregation: boolean;
     finalAggregation?: string;
     finalAggregationTruncated?: boolean;

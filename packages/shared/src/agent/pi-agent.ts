@@ -1159,6 +1159,12 @@ export class PiAgent extends BaseAgent {
         break;
       }
 
+      case 'runtime_context_request':
+        this.observeBridgeRequest(this.handleRuntimeContextRequest(msg as {
+          requestId: string; answerRunId?: string;
+        }), this.subprocess);
+        break;
+
       case 'tool_execute_request':
         // Subprocess wants main process to execute a proxy tool (MCP/API/session)
         this.observeBridgeRequest(this.handleToolExecuteRequest(msg as {
@@ -1802,6 +1808,25 @@ export class PiAgent extends BaseAgent {
    * The subprocess expects responses in the format:
    *   { content: string | ToolContent[]; isError: boolean }
    */
+  private async handleRuntimeContextRequest(request: { requestId: string; answerRunId?: string }): Promise<void> {
+    const reply = this.createBridgeReply();
+    const control = this.answerDelivery;
+    if (control && (request.answerRunId !== control.runId || !control.isActive())) {
+      reply({ type: 'tool_execute_response', requestId: request.requestId,
+        result: { content: 'Runtime context belongs to an inactive turn.', isError: true } });
+      return;
+    }
+    try {
+      // No model-supplied tool name, arguments or cross-session identity is accepted.
+      const result = await this.routeToolCall('mcp__session__get_session_info', {});
+      if (control && (this.answerDelivery !== control || !control.isActive())) return;
+      reply({ type: 'tool_execute_response', requestId: request.requestId, result });
+    } catch (error) {
+      reply({ type: 'tool_execute_response', requestId: request.requestId,
+        result: { content: error instanceof Error ? error.message : String(error), isError: true } });
+    }
+  }
+
   private async handleToolExecuteRequest(request: {
     requestId: string;
     toolName: string;

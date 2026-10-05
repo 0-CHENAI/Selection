@@ -5171,6 +5171,7 @@ export class SessionManager implements ISessionManager {
             .filter(child => child.orchestrationId === session.orchestrationId)
           const aggregation = session.orchestrationAggregation?.orchestrationId === session.orchestrationId
             ? session.orchestrationAggregation : undefined
+          const canonical = this.taskRunnerLookup?.(session.workspace.id)?.progressContext(session.id)
           return {
             id: session.id,
             name: session.name ?? session.id,
@@ -5183,7 +5184,21 @@ export class SessionManager implements ISessionManager {
             llmConnection: session.llmConnection,
             model: session.model,
             isActive: session.agent != null,
-            ...(session.orchestrationId || children.length ? { orchestration: {
+            ...(canonical ? { orchestration: {
+              id: canonical.taskId,
+              taskSlug: canonical.slug,
+              runId: canonical.runId,
+              revision: canonical.revision,
+              status: canonical.status,
+              plannerPhase: canonical.planner?.phase,
+              pendingAggregation: !['completed', 'failed', 'stopped'].includes(canonical.status),
+              blockers: canonical.blockers,
+              nodes: canonical.nodes.slice(-24).map(node => ({ id: node.id, state: node.state, attempt: node.attempt })),
+              children: canonical.nodes.filter(node => node.sessionId).slice(-12).map(node => ({
+                id: node.sessionId!, status: node.state, isProcessing: node.state === 'running',
+              })),
+              omittedChildren: Math.max(0, canonical.nodes.filter(node => node.sessionId).length - 12),
+            } } : session.orchestrationId || children.length ? { orchestration: {
               id: session.orchestrationId,
               status: session.orchestrationStatus,
               pendingAggregation: !!aggregation,
@@ -8889,6 +8904,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages[userIndex]?.hidden && this.isCanonicalCoordinatorWaiting(managed)) {
+      throw new Error('Consume the canonical run checkpoint and finish its acceptance before submitting the final answer.')
+    }
     if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && (!toolCallId || m.toolUseId !== toolCallId) && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
       throw new Error('Finish all foreground tools before submitting the answer.')
     }
@@ -9154,6 +9172,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return answer
   }
 
+  private isCanonicalCoordinatorWaiting(managed: ManagedSession): boolean {
+    const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+    return run?.orchestratorSessionId === managed.id && !['completed', 'failed', 'stopped'].includes(run.status)
+  }
+
   private async *runAnswerDelivery(
     managed: ManagedSession,
     agent: AgentInstance,
@@ -9169,7 +9192,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     const owner = managed.messages.find(m => m.id === state.userMessageId)
     const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
-    const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
+    const waiting = (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')
+      || (owner?.hidden && this.isCanonicalCoordinatorWaiting(managed))
     if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
       && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
       && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {

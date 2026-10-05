@@ -65,4 +65,23 @@ describe('answer delivery execution bridge', () => {
     control.isActive = () => false
     expect(answerToolBlock(control, false, 'submit_answer', 'run')).toContain('no longer active')
   })
+  it('reads only its own live runtime context during recovery and rejects stale turns', async () => {
+    control.recovery = true
+    const routed: unknown[] = []
+    ;(agent as any).routeToolCall = async (...args: unknown[]) => {
+      routed.push(args)
+      return { content: '{"orchestration":{"status":"running"}}', isError: false }
+    }
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'context', answerRunId: 'run',
+      toolName: 'Bash', args: { command: 'forbidden', sessionId: 'other' } })
+    expect(routed).toEqual([['mcp__session__get_session_info', {}]])
+    expect(sent.at(-1).result.isError).toBe(false)
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'old', answerRunId: 'old' })
+    expect(sent.at(-1).result.isError).toBe(true)
+    control.isActive = () => false
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'cancelled', answerRunId: 'run' })
+    expect(sent.at(-1).result.isError).toBe(true)
+    expect(routed).toHaveLength(1)
+    expect(answerToolBlock({ ...control, isActive: () => true }, false, 'get_session_info', 'run')).toContain('Only submit_answer')
+  })
 })

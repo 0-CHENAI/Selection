@@ -275,6 +275,7 @@ interface OutboundSourceGuideFailed extends Omit<OutboundSourceGuidePrepared, 't
   reason: string;
 }
 interface OutboundToolExecReq { answerRunId?: string; toolCallId?: string; sdkMessageId?: string; sdkTurnAnchor?: string; type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+interface OutboundRuntimeContextReq { type: 'runtime_context_request'; requestId: string; answerRunId?: string }
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
@@ -322,6 +323,7 @@ type OutboundMessage =
   | OutboundSourceGuidePrepared
   | OutboundSourceGuideFailed
   | OutboundToolExecReq
+  | OutboundRuntimeContextReq
   | OutboundSessionToolCompleted
   | OutboundMiniResult
   | OutboundLlmQueryResult
@@ -1114,7 +1116,7 @@ function wrapSingleTool(
 // Proxy Tools (tools executed in main process)
 // ============================================================
 
-/** Reuse the existing read-only session-info bridge; do not cache live worker state in summaries. */
+/** Internal read-only context is independent of the model's answer-recovery tool restrictions. */
 async function readRuntimeContext(signal?: AbortSignal): Promise<string | undefined> {
   if (signal?.aborted || !proxyToolDefs.some(tool => resolveSessionToolProxyName(tool.name) === 'mcp__session__get_session_info')) return undefined;
   const requestId = `context-${randomUUID()}`;
@@ -1129,7 +1131,7 @@ async function readRuntimeContext(signal?: AbortSignal): Promise<string | undefi
     const timer = setTimeout(cancel, 2000);
     signal?.addEventListener('abort', cancel, { once: true });
     pendingToolExecutions.set(requestId, { resolve: finish });
-    send({ type: 'tool_execute_request', requestId, answerRunId, toolName: 'mcp__session__get_session_info', args: {} });
+    send({ type: 'runtime_context_request', requestId, answerRunId });
   });
   if (result.isError) return JSON.stringify({ unavailable: true, instruction: 'Live scheduler state unavailable. Do not infer completion from an old summary.' });
   try {
