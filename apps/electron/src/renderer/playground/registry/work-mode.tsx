@@ -4,7 +4,7 @@ import { useAtom, useSetAtom, useStore } from 'jotai'
 import type { ComponentEntry } from './types'
 import { TopBar } from '@/components/app-shell/TopBar'
 import { BoardListToggle } from '@/components/app-shell/kanban/BoardListToggle'
-import { ChildSessionPreviewContent, ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
+import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { SessionItem } from '@/components/app-shell/SessionItem'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import ChatPage from '@/pages/ChatPage'
@@ -25,8 +25,7 @@ import type { FileAttachment, Session } from '../../../shared/types'
 import type { SessionOptions } from '@/hooks/useSessionOptions'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { OrchestrationRunProgressView } from '@/components/app-shell/kanban/OrchestrationRunProgress'
-import { buildOrchestrationProgressRows, withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { TurnCard, groupMessagesByTurn, withTaskMessagePresentation } from '@craft-agent/ui'
 
 const previewWorkerInstructions = [
@@ -50,6 +49,7 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
       id: `node-${index}`, title, instruction: previewWorkerInstructions[index], attempt: 1,
       state: status === 'completed' || index < 3 ? 'done' : index === 3 ? (status === 'failed' ? 'failed' : 'running') : 'pending',
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
+      ...(index === 0 ? { attempt: 2, attempts: [{ attempt: 1, sessionId: 'preview-worker-first', state: 'failed' }, { attempt: 2, sessionId: 'preview-worker-0', state: 'done' }] } : {}),
     })),
   }), [status])
   // Historical research assignments used a skills preamble and contained long host JSON.
@@ -83,10 +83,13 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
     lastMessageAt: startedAt + 1000, isProcessing: node.state === 'running', permissionMode: 'safe',
   } as Session)), [run, base.activeWorkspaceId, startedAt, legacyAssignment])
   React.useEffect(() => {
-    store.set(sessionMetaMapAtom, new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
-    store.set(loadedSessionsAtom, new Set(sessions.map(session => session.id)))
-    for (const session of sessions) store.set(sessionAtomFamily(session.id), session)
-  }, [store, sessions])
+    const attempts = [...sessions, { ...sessions[0]!, id: 'preview-worker-first', name: '读取原始资料 · 第 1 次尝试', isProcessing: false,
+      messages: [sessions[0]!.messages[0]!, { id: 'previous-output', role: 'assistant' as const, timestamp: startedAt,
+        content: '第一次读取结果未通过复核，已由后续尝试取代。' }] }]
+    store.set(sessionMetaMapAtom, new Map(attempts.map(session => [session.id, extractSessionMeta(session)])))
+    store.set(loadedSessionsAtom, new Set(attempts.map(session => session.id)))
+    for (const session of attempts) store.set(sessionAtomFamily(session.id), session)
+  }, [store, sessions, startedAt])
   const context = createMockContext({ selectedSessionId: root.id, onSelectSessionById: () => {} })
   return <ActionRegistryProvider><FocusProvider><DismissibleLayerProvider><ModalProvider><NavigationProvider workspaceId={base.activeWorkspaceId} workspaceSlug="playground" onCreateSession={base.onCreateSession} isReady={false}><SessionListProvider value={context}>
     <div ref={setPreviewContainer} className="@container relative h-[560px] w-full overflow-hidden rounded-xl border border-border bg-background" data-subagent-preview
@@ -97,16 +100,13 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
           <SessionItem item={root} index={0} itemProps={{ onKeyDown: () => {} }} isSelected isFirstInGroup isInMultiSelect={false} onSelect={() => {}} />
         </aside>
         <main className="min-w-0 flex-1 flex flex-col">
-          <PanelHeader title={root.name} actions={(
-            <OrchestrationRunProgressView liveRun={run} rows={buildOrchestrationProgressRows(undefined, run)}
-              renderPreviewSession={id => <ChildSessionPreviewContent sessionId={id} />}
-              onRetry={status === 'failed' ? () => {} : undefined} />
-          )} />
+          <PanelHeader title={root.name} />
           <div className="min-h-0 flex-1 flex flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto p-6 text-sm leading-relaxed text-foreground">
               {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} intent={reviewTurn.intent} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete}
+                workControls={status === 'failed' ? <button type="button" className="m-2 rounded border border-border px-2 py-1 text-xs" onClick={() => {}}>{t('tasks.retryFailedNodes')}</button> : undefined}
                 onOpenActivityDetails={activity => { if (activity.taskNode?.sessionId) setPreviewId(activity.taskNode.sessionId) }} />}
-              <p className="mt-4 text-foreground/60">固定预览数据；点击右上角的子代理按钮，在浮窗中选择并查看对应内容。</p>
+              <p className="mt-4 text-foreground/60">固定预览数据；展开子代理工作，点击任务查看对应内容。</p>
             </div>
           </div>
         </main>
@@ -191,7 +191,7 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
 }
 export const workModeComponents: ComponentEntry[] = [{
   id: 'subagent-progress', name: '子代理协作进度', category: 'Session List',
-  description: '点击聊天页按钮，在浮窗中切换子代理并查看输出；固定预览数据，不调用模型。', component: SubagentProgressPreview,
+  description: '从折叠区点击子代理任务查看输出；固定预览数据，不调用模型。', component: SubagentProgressPreview,
   props: [{ name: 'status', control: { type: 'select', options: [{ label: '运行中', value: 'running' }, { label: '已完成', value: 'completed' }, { label: '失败', value: 'failed' }] }, defaultValue: 'running' }], layout: 'top',
 }, {
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',

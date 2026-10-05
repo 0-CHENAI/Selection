@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import i18next, { type InitOptions } from 'i18next'
-import type { ReactNode } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { I18nextProvider } from 'react-i18next'
-import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { OrchestrationRunProgressView } from '../OrchestrationRunProgress'
 import {
   buildOrchestrationProgressRows,
   canPreviewOrchestrationChild,
@@ -14,7 +8,6 @@ import {
   isTaskRunEventForProgress,
   pickStoppableTaskRun,
   sessionIdForProgressRow,
-  shouldShowOrchestrationRunProgress,
   withOrchestrationProgress,
 } from '../orchestration-run-progress'
 import type { Turn } from '@craft-agent/ui'
@@ -69,60 +62,6 @@ describe('inline orchestration progress', () => {
     const turns: Turn[] = [{ type: 'assistant', taskRunId: 'run-1', turnId: 'cp', activities: [], timestamp: 1, isComplete: true, isStreaming: false }]
     const result = withOrchestrationProgress(turns, snapshot({ status: 'paused' }), key => key)
     expect(result[0]?.type === 'assistant' && result[0].activities.at(-1)?.status).toBe('pending')
-  })
-})
-
-function renderWithI18n(language: keyof typeof LOCALE_REGISTRY, ui: ReactNode): string {
-  const instance = i18next.createInstance()
-  void instance.init({
-    lng: language,
-    fallbackLng: 'en',
-    initImmediate: false,
-    resources: Object.fromEntries(
-      Object.entries(LOCALE_REGISTRY).map(([code, entry]) => [
-        code,
-        { translation: entry.messages },
-      ]),
-    ),
-  } as InitOptions)
-  return renderToStaticMarkup(<I18nextProvider i18n={instance}>{ui}</I18nextProvider>)
-}
-
-describe('shouldShowOrchestrationRunProgress', () => {
-  it('hides the panel for ordinary chats and child sessions', () => {
-    expect(shouldShowOrchestrationRunProgress({
-      isTaskOrchestrator: false,
-      orchestrationStatus: 'running',
-      runStatus: 'running',
-    })).toBe(false)
-  })
-
-  it('shows the panel as soon as the orchestrator session is running', () => {
-    expect(shouldShowOrchestrationRunProgress({
-      isTaskOrchestrator: true,
-      orchestrationStatus: 'running',
-    })).toBe(true)
-  })
-
-  it('shows paused and waiting runs even when the session pill is idle', () => {
-    expect(shouldShowOrchestrationRunProgress({
-      isTaskOrchestrator: true,
-      runStatus: 'waiting-approval',
-    })).toBe(true)
-    expect(shouldShowOrchestrationRunProgress({
-      isTaskOrchestrator: true,
-      runStatus: 'paused',
-    })).toBe(true)
-  })
-
-  it('retains completed, failed, and stopped runs as history', () => {
-    expect(isActiveTaskRunStatus('completed')).toBe(false)
-    expect(isActiveTaskRunStatus('failed')).toBe(false)
-    expect(isActiveTaskRunStatus('stopped')).toBe(false)
-    expect(shouldShowOrchestrationRunProgress({
-      isTaskOrchestrator: true,
-      runStatus: 'completed',
-    })).toBe(true)
   })
 })
 
@@ -224,34 +163,6 @@ describe('buildOrchestrationProgressRows', () => {
   })
 })
 
-describe('OrchestrationRunProgressView', () => {
-  it('keeps task details out of the chat until the subagent button is opened', () => {
-    const html = renderWithI18n('zh-Hans', (
-      <OrchestrationRunProgressView
-        runningHint
-        liveRun={snapshot()}
-        rows={[
-          { id: 'hy4', title: '调研 Hy4-preview', state: 'running', sessionId: 'sess-hy4' },
-          { id: 'summary', title: '汇总', state: 'pending' },
-        ]}
-        renderPreviewSession={() => null}
-      />
-    ))
-
-    expect(html).toContain('data-testid="orchestration-run-progress"')
-    expect(html).toContain('当前运行')
-    expect(html).toContain('运行中')
-    expect(html).toContain('子代理（2）')
-    expect(html).not.toContain('调研 Hy4-preview')
-    expect(html).not.toContain('汇总')
-    expect(html).not.toContain('0/2')
-    expect(html).toContain('<button')
-    expect(html).toContain('aria-expanded="false"')
-    expect(html).not.toContain('role="dialog"')
-  })
-})
-
-
 describe('instance and history visibility', () => {
   it('keeps all instances, retries and frozen titles addressable', () => {
     const rows = buildOrchestrationProgressRows([{ id: 'map', title: 'Edited later' }], snapshot({
@@ -267,18 +178,24 @@ describe('instance and history visibility', () => {
     expect(rows[0]!.sessionId).toBeUndefined()
     expect(rows[0]!.children!.map(row => row.sessionId)).toEqual(['s0', 's1-new', 's2'])
     expect(rows[0]!.children![1]!.attempts?.map(attempt => attempt.sessionId)).toEqual(['s1-old', 's1-new'])
-    const html = renderWithI18n('zh-Hans', <OrchestrationRunProgressView runningHint liveRun={snapshot({ status: 'stopped' })} rows={rows} renderPreviewSession={() => null} />)
-    expect(html).toContain('运行历史')
-    expect(html).toContain('已停止')
-    expect(html).not.toContain('animate-ping')
-    expect(html).not.toContain('重试失败节点')
+
   })
 
-  it('does not revive terminal status from the parent hint when browsing history', () => {
-    const runs = [snapshot({ runId: 'old', status: 'stopped' }), snapshot({ runId: 'new', status: 'running' })]
-    const html = renderWithI18n('en', <OrchestrationRunProgressView runningHint liveRun={runs[0]} runs={runs} onSelectRun={() => {}} rows={[]} />)
-    expect(html).toContain('Stopped')
-    expect(html).not.toContain('Running')
-    expect(html).not.toContain('animate-ping')
+  it('keeps completed runs and past attempts in their own work chains', () => {
+    const turns: Turn[] = ['old', 'new'].map(taskRunId => ({ type: 'assistant', taskRunId,
+      turnId: taskRunId, timestamp: 1, activities: [], isComplete: true, isStreaming: false }))
+    const runs = [snapshot({ runId: 'old', status: 'stopped', nodes: [node({ id: 'cost', state: 'cancelled',
+      sessionId: 'latest-attempt', attempt: 2, attempts: [{ attempt: 1, state: 'failed', sessionId: 'old-attempt' }, { attempt: 2, state: 'cancelled', sessionId: 'latest-attempt' }] })] }),
+      snapshot({ runId: 'new', status: 'running', nodes: [node({ id: 'review', state: 'running', sessionId: 'new-worker' })] })]
+    const projected = runs.reduce((history, run) => withOrchestrationProgress(history, run, key => key), turns)
+    const oldTurn = projected[0]
+    const newTurn = projected[1]
+    if (oldTurn?.type !== 'assistant' || newTurn?.type !== 'assistant') throw Error('Missing work chains')
+    expect(oldTurn.intent).toContain('tasks.runStatusStopped')
+    expect(newTurn.intent).toContain('tasks.runStatusRunning')
+    expect(oldTurn.activities[0]?.taskNode?.attempts).toEqual([{ number: 1, stateLabel: 'tasks.nodeStateFailed', sessionId: 'old-attempt' }])
+    expect(oldTurn.activities[0]?.taskNode?.sessionId).toBe('latest-attempt')
+    expect(newTurn.activities[0]?.taskNode?.sessionId).toBe('new-worker')
+    expect(turns.every(turn => turn.type === 'assistant' && !turn.activities.length)).toBe(true)
   })
 })

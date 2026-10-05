@@ -64,16 +64,6 @@ export function canPreviewOrchestrationChild(
   return childMeta.parentSessionId === parentSessionId
 }
 
-export function shouldShowOrchestrationRunProgress(input: {
-  isTaskOrchestrator: boolean
-  orchestrationStatus?: string | null
-  runStatus?: string | null
-}): boolean {
-  if (!input.isTaskOrchestrator) return false
-  if (input.orchestrationStatus === 'running') return true
-  return !!input.runStatus
-}
-
 function relatedRunNodes(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
   return nodes.filter((node) => node.id === nodeId || node.definitionId === nodeId || node.id.startsWith(`${nodeId}#`))
 }
@@ -122,7 +112,7 @@ export function countFinishedProgressRows(rows: OrchestrationProgressRow[]): num
   return rows.filter((row) => row.state === 'done' || row.state === 'skipped').length
 }
 
-/** Put live child states inside the latest matching execution's existing collapsed work chain. */
+/** Put child states and historical attempts in the matching execution's collapsed work chain. */
 export function withOrchestrationProgress(
   turns: Turn[], run: TaskRunSnapshotDto,
   t: (key: string, options?: { count: number }) => string,
@@ -137,7 +127,11 @@ export function withOrchestrationProgress(
     id: `task-node:${run.runId}:${row.id}`, type: 'status' as const,
     statusType: 'task_node',
     taskNode: { title: row.title, description: row.description, sessionId: row.sessionId,
-      stateLabel: t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted') },
+      stateLabel: t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted'),
+      ...(row.attempts?.some(attempt => attempt.sessionId !== row.sessionId) ? { attempts: row.attempts.filter(attempt => attempt.sessionId !== row.sessionId).map(attempt => ({
+        number: attempt.attempt, sessionId: attempt.sessionId, stateLabel: t(resolveNodeStatePill(attempt.state).labelKey ?? 'tasks.nodeStateInterrupted'),
+      })) } : {}),
+    },
     status: ['done', 'skipped'].includes(row.state) ? 'completed' as const
       : ['failed', 'invalid'].includes(row.state) ? 'error' as const
       : ['running', 'verifying'].includes(row.state) ? 'running' as const : 'pending' as const,

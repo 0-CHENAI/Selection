@@ -290,7 +290,8 @@ export interface ActivityItem {
   /** Readable internal task step; its protocol stays out of the response body. */
   taskContext?: import('@craft-agent/core').Message['taskContext']
   /** Child execution identity, kept separate from the coordinator's own tools. */
-  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
+  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string;
+    attempts?: { number: number; sessionId: string; stateLabel: string }[] }
   attachments?: import('@craft-agent/core').Message['attachments']
   /** Live-only text/image blocks from a tool result. */
   toolResultContent?: AgentToolResultContent[]
@@ -387,6 +388,8 @@ export interface TurnCardProps {
   onOpenDetails?: () => void
   /** Callback to open individual activity details in Monaco */
   onOpenActivityDetails?: (activity: ActivityItem) => void
+  /** Contextual execution actions, visible only inside the expanded work chain. */
+  workControls?: React.ReactNode
   /** Callback to open all edits/writes in multi-file diff view */
   onOpenMultiFileDiff?: () => void
   /** Whether this turn has any Edit or Write activities */
@@ -801,6 +804,7 @@ interface ActivityRowProps {
   activity: ActivityItem
   /** Callback to open activity details in Monaco */
   onOpenDetails?: () => void
+  onOpenAttempt?: (sessionId: string) => void
   /** Whether this is the last child at its depth level (for └ corner in tree view) */
   isLastChild?: boolean
   /** Session folder path for stripping from file paths in tool display */
@@ -1074,7 +1078,8 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
 }
 
 /** Single activity row in expanded view */
-function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+function ActivityRow({ activity, onOpenDetails, onOpenAttempt, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+  const { t } = useTranslation()
   const depth = activity.depth || 0
 
   if (activity.taskNode) {
@@ -1093,9 +1098,21 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
       {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'mt-0.5 shrink-0 text-muted-foreground')} aria-hidden="true" />}
     </>
     const className = cn('flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left', SIZE_CONFIG.fontSize)
-    return node.sessionId && onOpenDetails
-      ? <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} onClick={onOpenDetails}>{content}</button>
-      : <div className={className}>{content}</div>
+    return <div>
+      {node.sessionId && onOpenDetails
+        ? <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} onClick={onOpenDetails}>{content}</button>
+        : <div className={className}>{content}</div>}
+      {!!node.attempts?.length && <details className="ml-6 text-xs text-muted-foreground">
+        <summary className="w-fit cursor-pointer py-1 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{t('tasks.attemptHistory')}</summary>
+        <div className="flex flex-wrap gap-1 py-1">
+          {node.attempts.map(attempt => <button key={attempt.sessionId} type="button" disabled={!onOpenAttempt}
+            className="rounded px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+            onClick={() => onOpenAttempt?.(attempt.sessionId)}>
+            {t('tasks.runAttempt', { number: attempt.number })} · {attempt.stateLabel}
+          </button>)}
+        </div>
+      </details>}
+    </div>
   }
 
   if (activity.type === 'task-context' && activity.taskContext) {
@@ -3112,6 +3129,7 @@ export const TurnCard = React.memo(function TurnCard({
   onPopOut,
   onOpenDetails,
   onOpenActivityDetails,
+  workControls,
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
@@ -3463,7 +3481,8 @@ export const TurnCard = React.memo(function TurnCard({
                     <div data-work-group="subagents" className="pb-2">
                       <p className="px-2 py-1 text-xs font-medium text-foreground/80">{t('chat.subagentWork', { count: subagentActivities.length })}</p>
                       {subagentActivities.map(activity => <ActivityRow key={activity.id} activity={activity}
-                        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined} />)}
+                        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
+                        onOpenAttempt={onOpenActivityDetails ? sessionId => onOpenActivityDetails({ ...activity, taskNode: { ...activity.taskNode!, sessionId } }) : undefined} />)}
                     </div>
                   </WorkChainRow>}
                   {!!coordinatorActivities.length && <CoordinatorRecords key="coordinator-work" data-work-group={subagentActivities.length ? 'coordinator' : undefined}
@@ -3529,6 +3548,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   )}
                   </CoordinatorRecords>}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {reserveThinkingSlot && (
                     <WorkChainRow
@@ -3729,6 +3749,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false
+  if (prev.workControls !== next.workControls) return false
 
   // Re-render when response object changes (e.g., annotation updates)
   if (prev.response !== next.response) return false

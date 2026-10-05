@@ -24,11 +24,12 @@ describe('swarm title chrome (#206)', () => {
     expect(chatPageSrc).not.toContain('setSwarmDetailsOpen')
   })
 
-  it('places a single subagent window trigger in the chat header after create-and-run', () => {
-    expect(chatPageSrc).toContain('OrchestrationRunProgress')
-    expect(chatPageSrc).toContain('runningHint={orchestrationStatus === \'running\'}')
-    expect(chatPageSrc.match(/\{orchestrationProgress\}/g)).toHaveLength(1)
-    expect(chatPageSrc).toContain('renderPreviewSession={renderOrchestrationNode}')
+  it('keeps child navigation in the work chain without a duplicate chat header trigger', () => {
+    expect(chatPageSrc).not.toContain('OrchestrationRunProgress')
+    expect(chatPageSrc).not.toContain('{orchestrationProgress}')
+    expect(chatPageSrc).toContain('useOrchestrationRuns')
+    expect(chatPageSrc).toContain('orchestrationRuns={orchestration.runs}')
+    expect(chatPageSrc).toContain('orchestrationWorkControls={orchestrationWorkControls}')
   })
 })
 
@@ -43,7 +44,6 @@ describe('running orchestration composer chrome', () => {
     expect(chatDisplaySrc).toContain('stopSessionSwarm')
     expect(chatDisplaySrc).toContain('pickStoppableTaskRun')
     expect(chatPageSrc).toContain('canPreviewOrchestrationChild')
-    expect(chatPageSrc).toContain('sessionId={sessionId}')
   })
 })
 
@@ -58,7 +58,7 @@ describe('running child preview (#207)', () => {
     expect(chatDisplaySrc).toContain('onPreviewSession')
     expect(chatDisplaySrc).toContain('shouldPreviewBackgroundTask')
     expect(chatPageSrc).toContain('ChildSessionPreviewDialog')
-    expect(chatPageSrc).toContain('onPreviewSession={setPreviewChildSessionId}')
+    expect(chatPageSrc).toContain('onPreviewSession={handlePreviewChildSession}')
   })
 
   it('keeps the parent task bar clickable and does not steal the chat focus zone', () => {

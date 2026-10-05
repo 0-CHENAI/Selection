@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -58,6 +58,7 @@ async function renderTurn(
         isComplete={options.isComplete ?? false}
         defaultExpanded={options.expanded ?? true}
         onOpenActivityDetails={options.onOpenActivityDetails}
+        workControls={options.workControls}
         renderActionsMenu={() => null}
       />
       </TooltipProvider>
@@ -70,6 +71,19 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it('keeps past attempts and retry controls inside the expanded work chain', async () => {
+    const activities: ActivityItem[] = [{ id: 'node', type: 'status', status: 'error', timestamp: 1,
+      taskNode: { title: '核对成本', sessionId: 'current', stateLabel: '失败',
+        attempts: [{ number: 1, sessionId: 'previous', stateLabel: '失败' }] } }]
+    const options = { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {}, workControls: <button>重试失败节点</button> }
+    const html = await renderTurn('zh-Hans', activities, options)
+    expect(html).toContain('历史尝试')
+    expect(html).toContain('第 1 次尝试')
+    expect(html).toContain('重试失败节点')
+    const collapsed = await renderTurn('zh-Hans', activities, { ...options, expanded: false })
+    expect(collapsed).toMatch(/aria-hidden="true"[\s\S]*历史尝试[\s\S]*重试失败节点/)
+    expect(collapsed).toContain('grid-template-rows:0fr')
+  })
   it.each(['en', 'zh-Hans'] as const)('separates child assignments from folded coordinator records in %s', async language => {
     const html = await renderTurn(language, [
       { id: 'coordination', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1 },

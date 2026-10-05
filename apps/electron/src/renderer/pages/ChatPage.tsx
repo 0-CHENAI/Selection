@@ -13,13 +13,13 @@ import { useTranslation } from 'react-i18next'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, FolderOpen, X } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
-import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
+import { useOrchestrationRuns } from '@/hooks/useOrchestrationRuns'
 import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
-import { ChildSessionPreviewContent, ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
+import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -610,10 +610,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // task can be re-run (Save & Run mints a fresh Conductor run).
   const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
-  const [taskProgress, setTaskProgress] = React.useState<{ sessionId: string; run: import('@craft-agent/shared/protocol').TaskRunSnapshotDto | null }>()
-  const handleLatestRunChange = React.useCallback((run: import('@craft-agent/shared/protocol').TaskRunSnapshotDto | null) => {
-    if (sessionId) setTaskProgress({ sessionId, run })
-  }, [sessionId])
+  const orchestration = useOrchestrationRuns(
+    dagOrchestrationEnabled && !isDraft && isTaskOrchestrator ? activeWorkspaceId : undefined,
+    taskSlug, sessionId,
+  )
+  const orchestrationWorkControls = orchestration.retry ? <div className="flex flex-wrap items-center gap-2 px-2 py-2 text-xs">
+    <button type="button" disabled={orchestration.retrying} onClick={orchestration.retry}
+      className="rounded border border-border px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">{t('tasks.retryFailedNodes')}</button>
+    <span className="text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
+  </div> : undefined
   const canCreateTask = !isDraft && !taskSlug && !complexCapabilityError(session ?? sessionMeta, 'create-workflow')
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
@@ -628,23 +633,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     navigate(routes.view.board())
   }, [dagOrchestrationEnabled, taskSlug, canCreateTask, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
 
-  const renderOrchestrationNode = (childSessionId: string) => {
-    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return (
-      <div className="flex h-full items-center justify-center text-sm text-foreground/60">{t('chat.sessionNoLongerExists')}</div>
-    )
-    return <ChildSessionPreviewContent sessionId={childSessionId} />
-  }
-
-  const orchestrationProgress = dagOrchestrationEnabled && !isDraft && isTaskOrchestrator && activeWorkspaceId && taskSlug && sessionId ? (
-    <OrchestrationRunProgress
-      workspaceId={activeWorkspaceId}
-      taskSlug={taskSlug}
-      sessionId={sessionId}
-      runningHint={orchestrationStatus === 'running'}
-      renderPreviewSession={renderOrchestrationNode}
-      onLatestRunChange={handleLatestRunChange}
-    />
-  ) : null
+  const handlePreviewChildSession = React.useCallback((childSessionId: string) => {
+    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) {
+      toast.error(t('chat.sessionNoLongerExists'))
+      return
+    }
+    setPreviewChildSessionId(childSessionId)
+  }, [sessionId, sessionMetaMap, t])
 
   const handleDelete = React.useCallback(async () => {
     if (sessionId) await onDeleteSession(sessionId)
@@ -708,7 +703,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       {!canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
         {currentWorkMode}
       </span>}
-      {orchestrationProgress}
       {sessionHeaderActions}
       {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
         canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
@@ -898,7 +892,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   onSwarmEnabledChange={undefined}
                   swarmToggleDisabled={swarmToggleDisabled}
                   swarmRunning={orchestrationStatus === 'running'}
-                  orchestrationRun={taskProgress?.sessionId === sessionId ? taskProgress.run : undefined}
+                  orchestrationRuns={orchestration.runs}
+                  orchestrationWorkControls={orchestrationWorkControls}
                   workspaceId={activeWorkspaceId || undefined}
                   onSourcesChange={handleSourcesChange}
                   workingDirectory={sessionMeta.workingDirectory}
@@ -914,7 +909,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   connectionUnavailable={connectionUnavailable}
                   compactMode={!!isCompactMode}
                   enableCompactModelPicker={!!isCompactMode}
-                  onPreviewSession={setPreviewChildSessionId}
+                  onPreviewSession={handlePreviewChildSession}
                 />
               </div>
             </div>
@@ -987,7 +982,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               onSwarmEnabledChange={undefined}
               swarmToggleDisabled={swarmToggleDisabled}
               swarmRunning={orchestrationStatus === 'running'}
-              orchestrationRun={taskProgress?.sessionId === sessionId ? taskProgress.run : undefined}
+              orchestrationRuns={orchestration.runs}
+              orchestrationWorkControls={orchestrationWorkControls}
               workspaceId={activeWorkspaceId || undefined}
               onSourcesChange={handleSourcesChange}
               workingDirectory={workingDirectory}
@@ -1004,7 +1000,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               connectionUnavailable={connectionUnavailable}
               compactMode={!!isCompactMode}
               enableCompactModelPicker={!!isCompactMode}
-              onPreviewSession={setPreviewChildSessionId}
+              onPreviewSession={handlePreviewChildSession}
             />
           </div>
         </div>

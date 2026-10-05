@@ -235,7 +235,9 @@ interface ChatDisplayProps {
   /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
-  orchestrationRun?: TaskRunSnapshotDto | null
+  orchestrationRuns?: TaskRunSnapshotDto[]
+  /** Run controls live inside the latest execution's collapsed work chain. */
+  orchestrationWorkControls?: React.ReactNode
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -538,7 +540,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
   swarmRunning = false,
-  orchestrationRun,
+  orchestrationRuns,
+  orchestrationWorkControls,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -1575,9 +1578,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const allTurns = React.useMemo(() => {
     if (!sessionMessages) return []
     const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
-    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRun) return grouped
-    return withOrchestrationProgress(grouped, orchestrationRun, t)
-  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRun, t])
+    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
+    return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
+  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
@@ -2037,6 +2040,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}
                         activities={turn.activities}
+                        workControls={turn.taskRunId === orchestrationRuns?.at(-1)?.runId && turn.activities.some(activity => activity.taskNode) ? orchestrationWorkControls : undefined}
                         response={turn.response}
                         intent={turn.intent}
                         isStreaming={turn.isStreaming}
