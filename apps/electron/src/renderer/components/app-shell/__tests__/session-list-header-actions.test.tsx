@@ -78,8 +78,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
     expect(controls).toContain("value={isBoardView ? 'PRO' : workModeView}")
     expect(controls).toContain('switchWorkModeView(mode)')
-    expect(controls).toContain("workModeView === 'PRO' && dagOrchestrationEnabled")
-    expect(controls).toContain('flex items-center gap-1.5')
+    expect(controls).not.toContain('tasks.newOrchestration')
   })
 
   it('keeps search in the navigator header on desktop and compact layouts', () => {

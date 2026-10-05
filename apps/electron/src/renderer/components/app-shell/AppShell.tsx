@@ -26,6 +26,7 @@ import {
   Radio,
   Info,
   FolderKanban,
+  Workflow,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -1350,6 +1351,12 @@ function AppShellContent({
     navigate(routes.view.skills())
   }, [])
 
+  const handleNewOrchestration = useCallback(async () => {
+    if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return
+    setKanbanEditorTarget(null)
+    navigate(routes.view.board())
+  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
+
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
     navigate(routes.view.automations())
@@ -1693,11 +1700,14 @@ function AppShellContent({
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+    if (workModeView === 'PRO' && dagOrchestrationEnabled) {
+      result.push({ id: 'nav:newOrchestration', type: 'nav', action: handleNewOrchestration })
+    }
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleNewOrchestration, workModeView, dagOrchestrationEnabled, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1883,19 +1893,7 @@ function AppShellContent({
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
           afterWorkspace={isSessionsNavigation(navState) ? (
-            <div className="flex items-center gap-1.5">
-              <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={isBoardView ? 'PRO' : workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
-              {workModeView === 'PRO' && dagOrchestrationEnabled && (
-                <button type="button" aria-label={t('tasks.newOrchestration')} onClick={async () => {
-                  if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return
-                  setKanbanEditorTarget(null)
-                  navigate(routes.view.board())
-                }}
-                  className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  {isAutoCompact ? <Plus className="size-4" /> : t('tasks.newOrchestration')}
-                </button>
-              )}
-            </div>
+            <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={isBoardView ? 'PRO' : workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
           isCompact={isAutoCompact}
         />
@@ -2051,6 +2049,13 @@ function AppShellContent({
                         onAddSkill: openAddSkill,
                       },
                     },
+                    ...(workModeView === 'PRO' && dagOrchestrationEnabled ? [{
+                      id: "nav:newOrchestration",
+                      title: t("tasks.newOrchestration"),
+                      icon: Workflow,
+                      variant: "ghost" as const,
+                      onClick: handleNewOrchestration,
+                    }] : []),
                     {
                       id: "nav:projects",
                       title: t("sidebar.projects"),
