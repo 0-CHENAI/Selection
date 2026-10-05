@@ -1,0 +1,73 @@
+/* One finite reveal: brand resolves at 1s; PRO starts after a 0.5s pause. */
+.pro-identity-backdrop {
+  background: rgb(8 10 15 / 10%);
+  backdrop-filter: blur(12px);
+  animation: pro-identity-focus 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dark .pro-identity-backdrop { background: rgb(4 5 9 / 24%); }
+.pro-identity-lockup { gap: 28px; }
+.pro-identity-brand { gap: clamp(16px, 2vw, 24px); }
+.pro-identity-brand img { filter: none; }
+.dark .pro-identity-brand img { filter: invert(1); }
+.pro-identity-mark {
+  height: clamp(40px, 7.6vw, 72px);
+  width: auto;
+  animation: pro-identity-brand 900ms 100ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pro-identity-wordmark {
+  height: clamp(24px, 4.6vw, 43.2px);
+  width: auto;
+  margin-bottom: 4px;
+  animation: pro-identity-brand 800ms 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pro-identity-mode {
+  width: 160px;
+  height: 54px;
+  color: var(--pro-accent);
+  overflow: visible;
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+}
+.pro-identity-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.65px;
+  stroke-dasharray: 180;
+  animation: pro-identity-trace 1000ms 1500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pro-identity-fill {
+  fill: currentColor;
+  animation: pro-identity-fade 900ms 1850ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pro-identity-glint { fill: color-mix(in srgb, var(--pro-accent) 55%, white); }
+.pro-identity-glint-window {
+  animation: pro-identity-glint 1100ms 2150ms cubic-bezier(0.33, 0, 0.2, 1) both;
+}
+.pro-identity-backdrop[data-state="closed"],
+.pro-identity-content[data-state="closed"] {
+  animation: pro-identity-exit 240ms ease-out both;
+}
+@keyframes pro-identity-focus {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(12px); }
+}
+@keyframes pro-identity-brand {
+  from { opacity: 0; filter: blur(8px); transform: translateY(8px); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+@keyframes pro-identity-trace {
+  from { opacity: 0; stroke-dashoffset: 180; }
+  to { opacity: 1; stroke-dashoffset: 0; }
+}
+@keyframes pro-identity-glint { from { transform: translateX(0) skewX(-14deg); } to { transform: translateX(240px) skewX(-14deg); } }
+@keyframes pro-identity-exit { from { opacity: 1; } to { opacity: 0; } }
+@keyframes pro-identity-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .pro-identity-backdrop { backdrop-filter: none; animation: pro-identity-fade 150ms both; }
+  .pro-identity-mark, .pro-identity-wordmark { animation: pro-identity-fade 150ms both; }
+  .pro-identity-outline, .pro-identity-glint { display: none; }
+  .pro-identity-fill { animation: pro-identity-fade 150ms 650ms both; }
+  .pro-identity-glint-window { animation: none; }
+  .pro-identity-backdrop[data-state="closed"], .pro-identity-content[data-state="closed"] { animation-duration: 150ms; }
+}
