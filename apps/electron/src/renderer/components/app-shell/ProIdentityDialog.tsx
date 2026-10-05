@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import type { RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -12,16 +12,6 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
   trigger: RefObject<HTMLButtonElement>
 }) {
   const { t } = useTranslation()
-  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (dismissTimer.current !== null) clearTimeout(dismissTimer.current)
-    dismissTimer.current = null
-  }, [open])
-  const dismissAfterReveal = () => {
-    if (!open) return
-    if (dismissTimer.current !== null) clearTimeout(dismissTimer.current)
-    dismissTimer.current = setTimeout(() => onOpenChange(false), 2000)
-  }
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -33,24 +23,26 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
         >
           <Dialog.Title className="sr-only">Selection PRO</Dialog.Title>
           <Dialog.Description className="sr-only">{t('session.currentProMode')}</Dialog.Description>
-          <div className="pro-identity-lockup pointer-events-none flex items-end" aria-hidden="true">
-            <div className="pro-identity-brand flex shrink-0 items-end">
-              {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
-              <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
-              <div className="pro-identity-label flex items-center">
-                <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
-                <svg className="pro-identity-mode" viewBox="32 10 104 34">
-                  <text x="84" y="40" textAnchor="middle" className="pro-identity-fill" onAnimationEnd={dismissAfterReveal}>PRO</text>
-                </svg>
+          <div className="relative">
+            <div className="pro-identity-lockup pointer-events-none flex items-end" aria-hidden="true">
+              <div className="pro-identity-brand flex shrink-0 items-end">
+                {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
+                <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
+                <div className="pro-identity-label flex items-center">
+                  <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
+                  <svg className="pro-identity-mode" viewBox="32 10 104 34">
+                    <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
+                  </svg>
+                </div>
               </div>
             </div>
+            <Dialog.Close asChild>
+              <button type="button" aria-label={t('common.close')}
+                className="absolute left-1/2 top-full mt-8 flex size-9 -translate-x-1/2 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--pro-accent)]">
+                <X className="size-5" />
+              </button>
+            </Dialog.Close>
           </div>
-          <Dialog.Close asChild>
-            <button type="button" aria-label={t('common.close')}
-              className="absolute right-6 top-6 flex size-9 items-center justify-center text-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--pro-accent)]">
-              <X className="size-5" />
-            </button>
-          </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
