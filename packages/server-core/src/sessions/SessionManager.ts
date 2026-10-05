@@ -58,11 +58,13 @@ import {
   createBackendFromConnection,
   resolveBackendContext,
   createBackendFromResolvedContext,
+  setBackendModelRequestLimiter,
   cleanupSourceRuntimeArtifacts,
   type AgentBackend,
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
+import { LlmConnectionPool } from '../tasks/connection-pool'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
@@ -1549,6 +1551,9 @@ export function resolveMidStreamDeliveryOutcome(
     wasInterrupted: behavior === 'steer' && !steered,
   }
 }
+
+const hostModelRequestPool = new LlmConnectionPool()
+setBackendModelRequestLimiter((quota, owner, signal) => hostModelRequestPool.acquireRequest(quota, owner, signal))
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()

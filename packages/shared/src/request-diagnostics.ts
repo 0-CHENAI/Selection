@@ -18,6 +18,8 @@ export interface RequestDiagnosticScope {
   invocationId: string;
   attempts: number;
   latest?: RequestDiagnostic;
+  queuedRequests?: number;
+  onQueueState?: (queued: boolean) => void;
 }
 // Preload and bundled runtime must share the same async context, without a session-global last error.
 const key = Symbol.for('selection.request-diagnostics');
@@ -28,6 +30,23 @@ export function createRequestDiagnosticScope(): RequestDiagnosticScope {
 }
 export function runWithRequestDiagnostics<T>(scope: RequestDiagnosticScope, fn: () => T): T {
   return storage.run(scope, fn);
+}
+/** Provider stream invocation only; native tools run outside this async scope. */
+export function hasModelRequestDiagnosticScope(): boolean { return !!storage.getStore(); }
+export function subscribeModelRequestQueue(scope: RequestDiagnosticScope, listener: (queued: boolean) => void): () => void {
+  scope.onQueueState = listener; listener(!!scope.queuedRequests);
+  return () => { if (scope.onQueueState === listener) scope.onQueueState = undefined; };
+}
+export function beginModelRequestQueue(): () => void {
+  const scope = storage.getStore();
+  if (!scope) return () => {};
+  scope.queuedRequests = (scope.queuedRequests ?? 0) + 1; scope.onQueueState?.(true);
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true; scope.queuedRequests = Math.max(0, (scope.queuedRequests ?? 0) - 1);
+    scope.onQueueState?.(!!scope.queuedRequests);
+  };
 }
 export function beginRequestDiagnostic(): (event: Record<string, unknown>) => void {
   const scope = storage.getStore();

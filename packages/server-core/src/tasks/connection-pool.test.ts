@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { LlmConnectionPool } from './connection-pool';
+import { LlmConnectionPool, retryAfterMs } from './connection-pool';
+import { modelQuotaIdentity } from '../../../shared/src/agent/backend/pi/model-quota';
 
 describe('LlmConnectionPool', () => {
   it('tightens concurrency per connection and releases capacity after failure', () => {
@@ -11,4 +12,54 @@ describe('LlmConnectionPool', () => {
     pool.release('alpha');
     expect(pool.tryAcquire('alpha', 2)).toBe(true);
   });
+});
+
+it('A8 groups identical credentials/endpoints across connection names, isolates distinct keys, and keeps OAuth rotation stable', () => {
+  const key = { type: 'api_key', key: 'private-test-key' };
+  const identity = modelQuotaIdentity('openai-responses', 'https://api.example/v1/', key);
+  expect(identity).toBe(modelQuotaIdentity('openai', 'https://api.example/v1/responses', key));
+  expect(identity).not.toBe(modelQuotaIdentity('openai', 'https://api.example/v1', { ...key, key: 'another-key' }));
+  expect(identity).not.toContain(key.key);
+  const oauth = (token: string) => ({ type: 'oauth', access: `header.${Buffer.from(JSON.stringify({ sub: 'same-account', token })).toString('base64url')}.sig`, refresh: token });
+  expect(modelQuotaIdentity('openai-codex', undefined, oauth('old'))).toBe(modelQuotaIdentity('openai-codex', undefined, oauth('new')));
+});
+
+it('A8 fairly rotates runs rather than letting one run consume its whole queue', async () => {
+  const pool = new LlmConnectionPool(1), first = await pool.acquireRequest('shared', 'run-a');
+  const order: string[] = [];
+  const a = pool.acquireRequest('shared', 'run-a').then(lease => { order.push('a'); return lease; });
+  const a2 = pool.acquireRequest('shared', 'run-a').then(lease => { order.push('a2'); return lease; });
+  const b = pool.acquireRequest('shared', 'run-b').then(lease => { order.push('b'); return lease; });
+  first.release(); (await b).release(); (await a).release(); (await a2).release();
+  expect(order).toEqual(['b', 'a', 'a2']);
+  expect(pool.requestState('shared').active).toBe(0);
+});
+
+it('A8 cancellation removes waiting requests and returns active slots once, including late duplicate release', async () => {
+  const pool = new LlmConnectionPool(1), active = new AbortController(), waiting = new AbortController();
+  const lease = await pool.acquireRequest('quota', 'a', active.signal);
+  const cancelled = pool.acquireRequest('quota', 'b', waiting.signal).catch(error => error);
+  waiting.abort(); await cancelled;
+  expect(pool.requestState('quota').queued).toBe(0);
+  const next = pool.acquireRequest('quota', 'c'); active.abort();
+  const granted = await next;
+  lease.release({ status: 429, retryAfter: '600' });
+  expect(pool.requestState('quota')).toMatchObject({ active: 1, retryAt: 0 });
+  granted.release();
+});
+
+it('A8 releases a throttled request before Retry-After, reduces the cap, and recovers gradually', async () => {
+  const pool = new LlmConnectionPool(4);
+  const active = await Promise.all([0, 1, 2, 3].map(n => pool.acquireRequest('quota', `run-${n}`)));
+  active[0]!.release({ status: 429, retryAfter: '0.03' });
+  for (const lease of active.slice(1)) lease.release();
+  expect(pool.requestState('quota')).toMatchObject({ active: 0, cap: 2 });
+  let granted = false;
+  const next = pool.acquireRequest('quota', 'other').then(lease => { granted = true; return lease; });
+  await new Promise(resolve => setTimeout(resolve, 5)); expect(granted).toBe(false);
+  const lease = await next; lease.release({ status: 200 });
+  (await pool.acquireRequest('quota', 'other')).release({ status: 200 });
+  expect(pool.requestState('quota')).toMatchObject({ active: 0, cap: 3 });
+  expect(retryAfterMs('Mon, 05 Oct 2026 09:00:10 GMT', Date.parse('2026-10-05T09:00:00Z'))).toBe(10_000);
+  expect(retryAfterMs('invalid')).toBeUndefined();
 });

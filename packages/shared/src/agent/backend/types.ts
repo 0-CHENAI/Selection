@@ -181,6 +181,8 @@ export interface AnswerDeliveryControl {
 }
 
 export interface CoreBackendConfig {
+  /** Host-only shared model quota. Never supplied by model/tool arguments. */
+  modelRequestLimiter?: (quota: string, owner: string, signal?: AbortSignal) => Promise<import('../../model-request-gate').ModelRequestLease>;
   /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
   isolatedShellDirectory?: string;
   /** Trusted runtime-only recovery data; never provided by model arguments. */

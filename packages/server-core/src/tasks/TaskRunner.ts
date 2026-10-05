@@ -3986,10 +3986,8 @@ export class TaskRunner {
   private readonly deps: TaskRunnerDeps;
 
   constructor(deps: TaskRunnerDeps) {
-    const pool = deps.connectionPool ?? new LlmConnectionPool();
     this.deps = {
       ...deps,
-      connectionPool: pool,
       onConnectionReleased: (sourceRunKey?: string) => {
         deps.onConnectionReleased?.();
         this.wakeRunnableRuns(sourceRunKey);

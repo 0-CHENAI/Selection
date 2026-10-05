@@ -39,6 +39,16 @@
 
 真实 GPT-6-luna / 只读闭环：根会话 `261005-fresh-mist`、计划 `pro-327cfa3e45835a8842b5d5c5`、运行 `chat-91a137d82f080d1be95ac3423dac9c078cfa2bf8ee7e9766d0be2eb67872fc34`。六节点完成，42 条运行事件，耗时 701102 ms；没有人工编辑 YAML、修订输出或补写判定。初稿金额登记为待核实的 `initial-a-cost@1`，独立审查发现十倍错误；追加精确勘误后，在原研究线产生 v2，由新的来源审查上下文复核，报告引用勘误 ID 并保留 B 口径和风险资料限制。勘误状态 resolved，交付阻断为零。证据为 `scripts/fixtures/selection-3.0/pro-research-a3-acceptance.json`。报告字段不符合 schema 时，模型在宿主拒绝后自行修正。普通包界面验收仍待 Mac 解锁后完成。
 
+## 2026-10-05：V3.1 A8 请求配额与公平并发
+
+模型请求现在复用宿主的 LlmConnectionPool，按提供方、端点和凭据账户的不可逆身份归组。连接别名与模型切换不增加同一配额的容量；协调者、worker、普通会话和 utility backend 共享宿主池。请求等待按运行归属轮转，HTTP 429/503 释放槽位后退避，遵循 Retry-After 并减小并发，成功请求逐步恢复容量。工具读取和 MCP 网络调用不占模型请求槽位。排队取消、子进程更换、迟到授权和重复释放均有身份围栏。
+
+生产 SDK 的集成测试发现其请求时钟从 fetch 排队前开始。现由可取消的活跃请求 idle deadline 控制超时，等待宿主槽位时暂停；静默连接与部分响应停滞仍正常超时并取消底层传输。Codex 的持久 WebSocket 会绕过 fetch，因此启用宿主配额时使用该提供方支持的 SSE 路径。没有新增调度器。
+
+真实 GPT-6-luna / safe 闭环从自然语言要求并行分析金额口径与风险覆盖，未编辑计划或节点输出。根会话 `261005-pearl-flood`，计划 `pro-8fbfba94172fbeb0bf5c3c43`，运行 `chat-2803d87d56c47be6ed5e65ca71347caabcccd698fe8ff25307abe95aed2780bf`。五节点完成，两个分析 worker 实际并行，52 条执行事件，耗时 533854 ms，任务 133455 tokens。同一宿主配额记录 52 次真实请求授权与 52 次释放，峰值 3 个活跃请求，最终活跃数为 0，协调者与 worker 归属同一个根。验收脚本只给现有宿主池加计数，没有人工注入模型结果。证据为 `scripts/fixtures/selection-3.0/pro-request-concurrency-a8-acceptance.json`。
+
+限流、HTTP 日期与秒数 Retry-After、运行公平轮转、取消和重复释放通过确定性宿主测试；这次真实提供方运行没有制造 429，因此不将它表述为真实上游限流验收。相关请求链、SDK、超时与桥接测试通过。完整检查快照为 8132 pass / 0 fail，类型、lint、国际化通过（既有 Electron 86、shared 8 项警告），Electron 构建通过；该快照也覆盖同期新增研究判断的兼容性测试。普通包最终界面验收仍待解锁后完成。
+
 ## 已发现并修复的阻断项
 
 - 普通包漏打 Pi 子进程与原生运行资源。

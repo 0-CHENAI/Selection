@@ -16,6 +16,8 @@ import { constrainThinkingLevel } from './thinking-levels.ts';
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { modelQuotaIdentity } from './backend/pi/model-quota';
+import type { ModelRequestLease } from '../model-request-gate';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -239,6 +241,8 @@ export class PiAgent extends BaseAgent {
 
   // Callback server port (managed by subprocess)
   private callbackPort: number = 0;
+  private modelQuota = '';
+  private readonly modelRequests = new Map<string, { controller: AbortController; lease?: ModelRequestLease }>();
 
   // State
   private _isProcessing: boolean = false;
@@ -594,6 +598,8 @@ export class PiAgent extends BaseAgent {
     const piAuth = await this.getPiAuth();
     const isCustomEndpointMode = !!runtime.customEndpoint;
     const legacyApiKey = (!piAuth && !isCustomEndpointMode) ? await this.getApiKey() : undefined;
+    this.modelQuota = modelQuotaIdentity(piAuth?.provider ?? runtime.piAuthProvider ?? this.config.providerType ?? 'pi', runtime.baseUrl,
+      piAuth?.credential ?? { type: 'api_key', key: legacyApiKey ?? '' });
     if (isCustomEndpointMode && !piAuth) {
       this.debug('Custom endpoint mode: no provider credential configured, sending empty API key');
     }
@@ -701,6 +707,7 @@ export class PiAgent extends BaseAgent {
     // Send init command (flat structure matching subprocess InboundMessage type)
     this.send({
       type: 'init',
+      modelRequestSlots: !!this.config.modelRequestLimiter,
       apiKey: legacyApiKey || '',
       model: this._model,
       cwd,
@@ -1176,6 +1183,21 @@ export class PiAgent extends BaseAgent {
           requestId: string; answerRunId?: string;
         }), this.subprocess);
         break;
+
+      case 'model_request_acquire':
+        this.observeBridgeRequest(this.acquireModelRequest(msg.requestId), this.subprocess);
+        break;
+
+      case 'model_request_release': {
+        if (typeof msg.requestId !== 'string') break;
+        const request = this.modelRequests.get(msg.requestId);
+        this.modelRequests.delete(msg.requestId);
+        if (!request) break;
+        if (request.lease) request.lease.release({ status: typeof msg.status === 'number' && msg.status >= 100 && msg.status <= 599 ? msg.status : undefined,
+          retryAfter: typeof msg.retryAfter === 'string' && msg.retryAfter.length <= 256 ? msg.retryAfter : undefined });
+        request.controller.abort();
+        break;
+      }
 
       case 'tool_execute_request':
         // Subprocess wants main process to execute a proxy tool (MCP/API/session)
@@ -1839,6 +1861,31 @@ export class PiAgent extends BaseAgent {
     }
   }
 
+  private async acquireModelRequest(requestId: unknown): Promise<void> {
+    if (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestId) || this.modelRequests.has(requestId)) throw new Error('Invalid model request identity');
+    const reply = this.createBridgeReply(), owner = this.subprocess;
+    const limiter = this.config.modelRequestLimiter;
+    if (!limiter || !this.modelQuota || !owner) { reply({ type: 'model_request_granted', requestId, error: 'Host model quota unavailable' }); return; }
+    const request: { controller: AbortController; lease?: ModelRequestLease } = { controller: new AbortController() };
+    this.modelRequests.set(requestId, request);
+    try {
+      const session = this.config.session;
+      const runOwner = `${this.config.workspace.id}/${session?.executionRootSessionId ?? session?.parentSessionId ?? session?.id ?? this._sessionId}`;
+      const lease = await limiter(this.modelQuota, runOwner, request.controller.signal);
+      if (request.controller.signal.aborted || this.subprocess !== owner || this.modelRequests.get(requestId) !== request) { lease.release(); return; }
+      request.lease = lease;
+      reply({ type: 'model_request_granted', requestId });
+    } catch {
+      this.modelRequests.delete(requestId);
+      reply({ type: 'model_request_granted', requestId, error: 'Model request cancelled before dispatch' });
+    }
+  }
+
+  private cancelModelRequests(): void {
+    for (const request of this.modelRequests.values()) { request.controller.abort(); request.lease?.release(); }
+    this.modelRequests.clear();
+  }
+
   private async handleToolExecuteRequest(request: {
     requestId: string;
     toolName: string;
@@ -2255,6 +2302,7 @@ export class PiAgent extends BaseAgent {
   }
 
   private handleSubprocessExit(code: number | null, signal: string | null): void {
+    this.cancelModelRequests();
     this.sourceToolRegistrationReady = false;
     ++this.subprocessEpoch;
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
@@ -3102,6 +3150,7 @@ export class PiAgent extends BaseAgent {
     if (this.subprocess === child) {
       this.subprocess = null;
     }
+    this.cancelModelRequests();
     this.managedOfficecliShellAvailable = false;
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
@@ -3123,6 +3172,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
+    this.cancelModelRequests();
     this.sourceToolRegistrationReady = false;
     ++this.subprocessEpoch;
     this.cancelSubprocessStartup?.(new Error('Pi startup cancelled'));

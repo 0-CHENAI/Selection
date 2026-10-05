@@ -24,6 +24,8 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
 import { createSessionHistoryTool } from './context-retention.ts';
+import { setModelRequestGate } from '../../shared/src/model-request-gate';
+import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-request-slots';
 import { createTaskContextTool } from './task-context.ts';
 import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
@@ -155,6 +157,7 @@ interface InitMessage {
   authType?: string;
   workspaceId?: string;
   baseUrl?: string;
+  modelRequestSlots?: boolean;
   branchFromSdkSessionId?: string;
   branchFromSessionPath?: string;
   branchFromSdkTurnId?: string;
@@ -201,6 +204,7 @@ type InboundMessage =
   | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
+  | { type: 'model_request_granted'; requestId: string; error?: string }
   | {
       type: 'pre_tool_use_response';
       requestId: string;
@@ -316,6 +320,7 @@ interface OutboundAnySearchApiKeyRequest { type: 'anysearch_api_key_request'; id
 interface OutboundError { type: 'error'; message: string; code?: string }
 
 type OutboundMessage =
+  | ModelRequestSlotMessage
   | { type: 'progress_interrupt_result'; id: string; error?: string }
   | OutboundReady
   | OutboundEvent
@@ -354,6 +359,7 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+const modelRequestSlots = createModelRequestSlots(message => send(message));
 
 function applyCompactionPolicy(model: { contextWindow?: number } | undefined, enabled: boolean): void {
   if (!piSettingsManager) return;
@@ -1699,6 +1705,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // ============================================================
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
+  modelRequestSlots.close();
+  setModelRequestGate(msg.modelRequestSlots ? modelRequestSlots.acquire : undefined);
   runtimeConfigGeneration += 1;
   pendingSpawnFanOutQualifications.clear();
   activeSpawnTools = [];
@@ -2207,6 +2215,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'tool_execute_response':
       handleToolExecuteResponse(msg);
+      break;
+
+    case 'model_request_granted':
+      modelRequestSlots.granted(msg.requestId, msg.error);
       break;
 
     case 'pre_tool_use_response':
