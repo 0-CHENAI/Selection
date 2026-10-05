@@ -67,14 +67,15 @@ describe('task orchestration edit entry (#282)', () => {
     for (const text of ['目标', '验收标准', '子任务', '依赖关系', '执行配置', '新定义重新运行', '不会重命名会话', '不会改写已有回复或运行历史']) expect(zh).toContain(text)
   })
 
-  it('keeps the top-level spec-backed condition and original editor target/navigation', () => {
+  it('requires run history owned by the root and preserves editor target/navigation', () => {
     expect(chatSource).toContain('const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug')
     expect(chatSource).toContain('const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)')
-    expect(chatSource).toContain('if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined')
+    expect(chatSource).toContain('const hasOrchestrationRun = !!sessionId && orchestration.runs.some(run => run.orchestratorSessionId === sessionId)')
+    expect(chatSource).toContain('if (!dagOrchestrationEnabled || !isTaskOrchestrator || !hasOrchestrationRun) return undefined')
     expect(chatSource).toContain('compact={!!isCompactMode}')
     expect(chatSource).toContain('onEdit={handleEditTask}')
     const handler = chatSource.slice(chatSource.indexOf('const handleEditTask ='), chatSource.indexOf('const handlePreviewChildSession ='))
-    expect(handler).toContain('if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator) return')
+    expect(handler).toContain('if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator || !hasOrchestrationRun) return')
     expect(handler).toContain("mode: 'edit'")
     expect(handler).toContain('sessionId,')
     expect(handler).toContain('taskSlug,')

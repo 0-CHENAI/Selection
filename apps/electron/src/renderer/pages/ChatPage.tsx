@@ -604,7 +604,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const swarmToggleDisabled = !!capabilityError || sessionMeta?.orchestrationRole === 'worker'
     || sessionMeta?.orchestrationRole === 'reviewer'
 
-  // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
+  // Task orchestrator sessions with actual run history get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
@@ -614,6 +614,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     dagOrchestrationEnabled && !isDraft && isTaskOrchestrator ? activeWorkspaceId : undefined,
     taskSlug, sessionId,
   )
+  const hasOrchestrationRun = !!sessionId && orchestration.runs.some(run => run.orchestratorSessionId === sessionId)
   const orchestrationWorkControls = orchestration.retry ? <div className="flex flex-wrap items-center gap-2 px-2 py-2 text-xs">
     <button type="button" disabled={orchestration.retrying} onClick={orchestration.retry}
       className="rounded border border-border px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">{t('tasks.retryFailedNodes')}</button>
@@ -621,7 +622,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   </div> : undefined
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
-    if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator) return
+    if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator || !hasOrchestrationRun) return
     setKanbanEditorTarget({
       workspaceId: activeWorkspaceId ?? undefined,
       mode: 'edit',
@@ -630,7 +631,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined,
     })
     navigate(routes.view.board())
-  }, [dagOrchestrationEnabled, taskSlug, isTaskOrchestrator, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
+  }, [dagOrchestrationEnabled, taskSlug, isTaskOrchestrator, hasOrchestrationRun, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
 
   const handlePreviewChildSession = React.useCallback((childSessionId: string) => {
     if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) {
@@ -677,14 +678,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Topology action opens the definition editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
   const editTaskButton = React.useMemo(() => {
-    if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined
+    if (!dagOrchestrationEnabled || !isTaskOrchestrator || !hasOrchestrationRun) return undefined
     return (
       <TaskOrchestrationEditButton
         compact={!!isCompactMode}
         onEdit={handleEditTask}
       />
     )
-  }, [dagOrchestrationEnabled, isTaskOrchestrator, handleEditTask, isCompactMode])
+  }, [dagOrchestrationEnabled, isTaskOrchestrator, hasOrchestrationRun, handleEditTask, isCompactMode])
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
   const sessionHeaderActions = editTaskButton && primaryHeaderAction ? (

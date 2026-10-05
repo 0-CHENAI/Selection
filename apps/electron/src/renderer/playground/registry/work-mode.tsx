@@ -118,7 +118,9 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
 }
 
 // Real composer and rows with deterministic transport; never starts model work.
-function WorkModePreview({ compactTopBar = false, compactInput = false }: { compactTopBar?: boolean; compactInput?: boolean }) {
+function WorkModePreview({ compactTopBar = false, compactInput = false, dagHistory = 'none' }: {
+  compactTopBar?: boolean; compactInput?: boolean; dagHistory?: 'none' | 'saved' | 'running' | 'completed' | 'other-root'
+}) {
   const { t } = useTranslation()
   const base = useAppShellContext()
   const [mode, setMode] = useAtom(workModeViewAtom)
@@ -131,10 +133,11 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
   const setPro = useSetAtom(sessionAtomFamily('pro-root'))
   const setWorker = useSetAtom(sessionAtomFamily('pro-worker'))
   const sessions = React.useMemo(() => [
-    { id: 'pro-root', name: 'PRO · 成本核对', handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
+    { id: 'pro-root', name: 'PRO · 成本核对', taskSlug: dagHistory === 'none' ? undefined : `preview-${dagHistory}`, handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
     { id: 'pro-worker', name: 'A 成本资料读取', workMode: 'PRO', executionRootSessionId: 'pro-root', parentSessionId: 'pro-root', taskNodeId: 'a', hidden: true, workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [{ id: 'a', role: 'assistant', content: 'A 两年成本为 1000000 元，B 的成本口径仍待核实。[参考来源](https://example.com/costs)', timestamp: Date.now() }], lastMessageAt: Date.now(), isProcessing: false, hasUnread: true, permissionMode: 'safe' },
-  ] as Session[], [base.activeWorkspaceId])
+  ] as Session[], [base.activeWorkspaceId, dagHistory])
   React.useEffect(() => {
+    const previousTaskAPI = { getTask: window.electronAPI.getTask, onTaskRunChanged: window.electronAPI.onTaskRunChanged }
     setMetadata(new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
     setOptions(previous => new Map(previous).set('pro-root', { ...defaultSessionOptions, permissionMode: 'safe' }).set('pro-worker', { ...defaultSessionOptions, permissionMode: 'safe' }))
     setPro(sessions[0]!); setWorker(sessions[1]!); setLoaded(new Set(sessions.map(session => session.id)))
@@ -145,9 +148,15 @@ function WorkModePreview({ compactTopBar = false, compactInput = false }: { comp
       getWorkspaceSettings: async () => ({ permissionMode: 'safe' }),
       getAdvancedSettings: async () => ({ dagOrchestrationEnabled: true, swarmAgentsEnabled: true, anySearchApiKeyConfigured: false }),
       getSessionMessages: async (id: string) => sessions.find(session => session.id === id),
+      getTask: async () => ({ runHistory: dagHistory === 'none' || dagHistory === 'saved' ? [] : [{
+        runId: 'preview-run', taskId: 'preview-task', slug: `preview-${dagHistory}`,
+        orchestratorSessionId: dagHistory === 'other-root' ? 'other-root' : 'pro-root',
+        status: dagHistory === 'running' ? 'running' : 'completed', nodes: [], tokensUsed: 0,
+      } satisfies TaskRunSnapshotDto] }),
+      onTaskRunChanged: () => () => {},
     })
-    return () => { Object.assign(window.electronAPI, mockElectronAPI) }
-  }, [sessions, setMetadata, setPro, setWorker, setLoaded])
+    return () => { Object.assign(window.electronAPI, mockElectronAPI, previousTaskAPI) }
+  }, [sessions, dagHistory, setMetadata, setPro, setWorker, setLoaded])
   const onSessionOptionsChange = React.useCallback((id: string, updates: Partial<SessionOptions>) => {
     setOptions(previous => new Map(previous).set(id, { ...defaultSessionOptions, ...previous.get(id), ...updates }))
   }, [])
@@ -197,5 +206,10 @@ export const workModeComponents: ComponentEntry[] = [{
 }, {
   id: 'work-mode-navigation', name: 'NORM / PRO 导航与草稿', category: 'Session List',
   description: '实际模式切换、聊天草稿及执行子会话组件；传输使用固定数据。', component: WorkModePreview,
-  props: [{ name: 'compactTopBar', control: { type: 'boolean' }, defaultValue: false }, { name: 'compactInput', control: { type: 'boolean' }, defaultValue: false }], layout: 'top',
+  props: [{ name: 'compactTopBar', control: { type: 'boolean' }, defaultValue: false }, { name: 'compactInput', control: { type: 'boolean' }, defaultValue: false },
+    { name: 'dagHistory', control: { type: 'select', options: [
+      { label: '无 DAG 计划', value: 'none' }, { label: '仅保存计划', value: 'saved' },
+      { label: '编排运行中', value: 'running' }, { label: '编排已完成', value: 'completed' },
+      { label: '其他会话的运行', value: 'other-root' },
+    ] }, defaultValue: 'none' }], layout: 'top',
 }]
