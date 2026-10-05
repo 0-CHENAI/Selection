@@ -488,6 +488,7 @@
   "chat.stopTask": "Stop Task",
   "chat.tapToType": "Tap to type",
   "chat.taskContext.assignment.description": "The execution details and findings for this task appear below.",
+  "chat.taskContext.assignment.fromParent": "Parent assignment:",
   "chat.taskContext.assignment.title": "Task instructions",
   "chat.taskContext.coordination.description": "Review completed work, next steps and unresolved questions.",
   "chat.taskContext.coordination.title": "Coordination update",

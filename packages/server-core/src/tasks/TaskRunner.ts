@@ -2423,7 +2423,7 @@ class ActiveRun {
         if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
         await this.deps.host.continueProgress(child.id);
       } else await this.deps.host.sendMessage(child.id, deliveryPrompt, undefined, undefined, {
-        taskContext: { kind: 'assignment', title: nodeDisplayTitle(node), description: this.spec.goal },
+        taskContext: { kind: 'assignment', title: nodeDisplayTitle(node), description: this.spec.goal, instruction: node.prompt },
       });
     } catch (err) {
       if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);

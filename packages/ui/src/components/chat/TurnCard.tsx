@@ -1,6 +1,7 @@
 import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
 import { ResponseSources } from './ResponseSources'
 import { extractResponseSources } from './response-sources'
+import { taskAssignmentSummary } from './task-message-presentation'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
@@ -3328,6 +3329,7 @@ export const TurnCard = React.memo(function TurnCard({
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
   const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
   // Keep one status slot across tool -> awaiting -> tool transitions. Toggling
   // its visibility must not repeatedly expand and collapse the work chain.
   const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
@@ -3341,6 +3343,9 @@ export const TurnCard = React.memo(function TurnCard({
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
     <div>
+      {assignmentSummary && <p className="mb-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
+      </p>}
       {/* One header chrome for thinking and numbered work — no standalone swap. */}
       <AnimatePresence>
       {showWorkChrome && (

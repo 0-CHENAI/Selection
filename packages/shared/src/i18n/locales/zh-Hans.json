@@ -488,6 +488,7 @@
   "chat.stopTask": "停止任务",
   "chat.tapToType": "点击输入",
   "chat.taskContext.assignment.description": "下方展示该任务的执行过程与结论。",
+  "chat.taskContext.assignment.fromParent": "父代理交办：",
   "chat.taskContext.assignment.title": "任务说明",
   "chat.taskContext.coordination.description": "根据已完成的成果检查后续步骤与待解决的问题。",
   "chat.taskContext.coordination.title": "协作进展",

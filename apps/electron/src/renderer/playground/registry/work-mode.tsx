@@ -29,6 +29,14 @@ import { OrchestrationRunProgressView } from '@/components/app-shell/kanban/Orch
 import { buildOrchestrationProgressRows, withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { TurnCard, groupMessagesByTurn, withTaskMessagePresentation } from '@craft-agent/ui'
 
+const previewWorkerInstructions = [
+  '读取冻结的成本资料，核对两年总金额。标记尚未确认的口径和资料缺口。',
+  '对照原文审查草稿中的金额与结论。指出错误和缺少依据的内容。',
+  '独立核验草稿中的关键数字。保留尚未确认的口径与风险限制。',
+  '根据审查意见修正报告中的金额。保留资料缺口，不作无依据的推荐。',
+  '独立核验修订后的报告。确认问题已修正且资料限制完整保留。',
+]
+
 function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 'completed' | 'failed' }) {
   const base = useAppShellContext()
   const { t } = useTranslation()
@@ -48,7 +56,7 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
     sources: [{ ref: '已冻结的成本原始资料', hash: '4c99133f'.repeat(8), snapshotPath: '/internal/research/source-0.txt' }],
     dimensions: [{ requirement: '方案 A 两年成本必须可定位原始资料' }, { requirement: '方案 B 的统计口径未确认时，不直接比较' }],
     claims: [{ id: 'cost', version: 2, text: '方案 A 两年成本为 100 万元' }],
-  })}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["只读资料，不修改文件或部署"]\nConfirmed plan decisions: ["submit_orchestration_patch depends_on=[review2,basis-review]"]\n\n独立读取原始资料并核对金额。`
+  })}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["只读资料，不修改文件或部署"]\nConfirmed plan decisions: ["submit_orchestration_patch depends_on=[review2,basis-review]"]\n\n`
   const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: 3,
     content: 'The task "核对成本与风险" has finished running.\nTask slug: preview-task; runId: preview-run; revision: 4\nFrozen plan: {"nodes":[{"id":"cost"}]}\nNode outputs:\n{"claims":[{"id":"cost","version":2}]}\nCall submit_task_verdict with result pass or fail.',
   }, { taskSlug: run.slug })
@@ -65,7 +73,9 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
     id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO', taskSlug: run.slug, taskNodeId: node.id,
     workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground',
     messages: [
-      { id: `${node.id}-assignment`, role: 'user', content: legacyAssignment, timestamp: startedAt },
+      { id: `${node.id}-assignment`, role: 'user', content: legacyAssignment + previewWorkerInstructions[Number(node.id.slice(-1))], timestamp: startedAt,
+        ...(node.id === 'node-1' ? { taskContext: { kind: 'assignment', instruction: previewWorkerInstructions[1], description: '核对方案成本与风险' } } : {}),
+      },
       { id: `${node.id}-output`, role: 'assistant', content: `${node.title}。\n\n已核对方案 A 的金额为 **1,000,000 元**；方案 B 的统计口径尚未确认，暂时不能直接比较。\n\n此处使用固定预览数据，不调用模型。`, timestamp: startedAt + 1000 },
     ],
     lastMessageAt: startedAt + 1000, isProcessing: node.state === 'running', permissionMode: 'safe',

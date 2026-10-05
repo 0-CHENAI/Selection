@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { Message } from '@craft-agent/core'
-import { withTaskMessagePresentation } from '../task-message-presentation'
+import { taskAssignmentSummary, withTaskMessagePresentation } from '../task-message-presentation'
 import { groupMessagesByTurn } from '../turn-utils'
 
 const assignment = 'Canonical execution identity: slug="task", runId="run-123", nodeId="risk".\nOriginal user goal: 比较成本与风险\nAcceptance criteria: 保留资料限制\nResearch role: researcher. Frozen research criteria and records: {"sourceVersion":"abc123"}'
@@ -11,7 +11,7 @@ const legacyResearchAssignment = `Apply these skills: [skill:deep-research]\n\nR
   dimensions: [{ requirement: '成本必须可定位原始资料' }],
   sources: [{ ref: '已冻结的成本资料', hash: 'internal-hash', snapshotPath: '/internal/source.txt' }],
   claims: [{ id: 'cost', version: 1 }],
-})}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["不得修改文件","只分析两年期间"]\nConfirmed plan decisions: ["submit_orchestration_patch with depends_on=[cost]"]\n\nRead the original source and submit values.research.`
+})}\nSubmit values.research using the native Skill contract.\nUser constraints for every node: ["不得修改文件","只分析两年期间"]\nConfirmed plan decisions: ["submit_orchestration_patch with depends_on=[cost]"]\n\n独立核对原始成本资料。保留资料限制。Submit values.research.`
 
 describe('task message presentation', () => {
   it('makes an owned historical assignment readable without mutating its protocol or routing', () => {
@@ -32,10 +32,11 @@ describe('task message presentation', () => {
     const message = user(legacyResearchAssignment)
     const presented = withTaskMessagePresentation(message, { taskSlug: 'task', nodeId: 'cost', title: 'cost' })
     expect(presented.taskContext).toEqual({
-      kind: 'assignment', description: '比较两年成本与风险',
+      kind: 'assignment', description: '比较两年成本与风险', instruction: '独立核对原始成本资料。保留资料限制。Submit values.research.',
       briefing: { requirements: ['成本必须可定位原始资料'], sources: ['已冻结的成本资料'], limits: ['只分析两年期间', '不得修改文件'] },
     })
-    expect(JSON.stringify(presented.taskContext)).not.toMatch(/internal-hash|snapshotPath|depends_on|values\.research/)
+    expect(JSON.stringify(presented.taskContext)).not.toMatch(/internal-hash|snapshotPath|depends_on/)
+    expect(taskAssignmentSummary(presented.taskContext)).toBe('独立核对原始成本资料。 保留资料限制。')
     const answer = { ...user('成本已核对，风险资料存在缺口。'), id: 'answer', role: 'assistant' as const }
     const turns = groupMessagesByTurn([presented, answer], { isSessionProcessing: false })
     expect(turns).toHaveLength(1)
@@ -50,6 +51,36 @@ describe('task message presentation', () => {
       ...message.taskContext, briefing: { sources: ['已冻结的成本资料'] },
     })
     expect(message.taskContext).not.toHaveProperty('briefing')
+  })
+
+  it('shows the specific legacy parent assignment rather than the global goal or prior actor outputs', () => {
+    const instruction = '独立 Read 冻结原文，对 cost@1 做精确版本审查。实际检查100000元是否被原文支持。发现矛盾时记录 wrong-cost issue,claimRef cost@1,disposition=defer。'
+    const message = user(legacyResearchAssignment.replace('独立核对原始成本资料。保留资料限制。Submit values.research.', instruction)
+      + '\n\nConfirmed prior actor task results (new execution context): {"nodeId":"internal-id"}')
+    const presented = withTaskMessagePresentation(message, { taskSlug: 'task', nodeId: 'review' })
+    expect(presented.taskContext?.instruction).toBe(instruction)
+    expect(taskAssignmentSummary(presented.taskContext)).toBe('独立读取冻结原文，对 cost@1 做精确版本审查。 实际检查100000元是否被原文支持。')
+    expect(taskAssignmentSummary(presented.taskContext)).not.toMatch(/比较两年|claimRef|internal-id|disposition/)
+    expect(presented.content).toBe(message.content)
+  })
+
+  it('skips a legacy retry failure and code blocks while preserving error injection and real task requirements', () => {
+    expect(taskAssignmentSummary({ kind: 'assignment', instruction: 'completed without submit_task_output\n\n独立 Read 冻结原文第5行。不要据此作总体推荐。' })).toBe('独立读取冻结原文第5行。 不要据此作总体推荐。')
+    expect(taskAssignmentSummary({ kind: 'assignment', instruction: '```json\n{"claim":"internal"}\n```\n这是合成 QA 错误注入节点。提交错误金额供独立审查发现。' })).toBe('这是合成 QA 错误注入节点。 提交错误金额供独立审查发现。')
+    const message = user(legacyResearchAssignment.replace('独立核对原始成本资料。保留资料限制。Submit values.research.', 'Research output: Error: Evidence identity e-risk already exists; use a new evidence version identity\n\n独立 Read 冻结原文第5行。不要据此作总体推荐。'))
+    expect(taskAssignmentSummary(withTaskMessagePresentation(message, { taskSlug: 'task', nodeId: 'risk' }).taskContext)).toBe('独立读取冻结原文第5行。 不要据此作总体推荐。')
+  })
+
+  it('prefers persisted parent instructions and omits data contracts without changing the source', () => {
+    const instruction = '[skill:deep-research]\n独立读取成本资料。提交 claims 中同一 claim id=cost,version=2，文本准确为“成本为 1,000,000 元”，dimensionIds=[cost]。不得修改旧报告。'
+    const context = { kind: 'assignment' as const, title: '核对成本', instruction }
+    const presented = withTaskMessagePresentation({ ...user(legacyResearchAssignment), taskContext: context }, { taskSlug: 'task', nodeId: 'cost' })
+    expect(presented.taskContext?.instruction).toBe(instruction)
+    expect(taskAssignmentSummary(presented.taskContext)).toBe('独立读取成本资料。 文本准确为“成本为 1,000,000 元”。')
+    expect(context.instruction).toBe(instruction)
+    expect(taskAssignmentSummary({ kind: 'assignment', description: '只提供总体目标' })).toBeUndefined()
+    expect(taskAssignmentSummary({ kind: 'coordination', instruction: '不属于子代理交办' })).toBeUndefined()
+    expect(taskAssignmentSummary({ kind: 'assignment', title: '核对资料', instruction: 'Submit values.research using the native Skill contract.' })).toBe('核对资料')
   })
 
   it('handles damaged research JSON without displaying protocol and leaves skill-only user messages alone', () => {

@@ -488,6 +488,7 @@
   "chat.stopTask": "タスクを停止",
   "chat.tapToType": "タップして入力",
   "chat.taskContext.assignment.description": "このタスクの実行過程と結論を以下に表示します。",
+  "chat.taskContext.assignment.fromParent": "親エージェントからの依頼：",
   "chat.taskContext.assignment.title": "タスクの説明",
   "chat.taskContext.coordination.description": "完了した作業、次の手順、未解決の問題を確認します。",
   "chat.taskContext.coordination.title": "連携の状況",

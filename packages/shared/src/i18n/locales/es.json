@@ -488,6 +488,7 @@
   "chat.stopTask": "Detener tarea",
   "chat.tapToType": "Toca para escribir",
   "chat.taskContext.assignment.description": "El proceso y los resultados de esta tarea aparecen a continuación.",
+  "chat.taskContext.assignment.fromParent": "Encargo del agente principal:",
   "chat.taskContext.assignment.title": "Instrucciones de la tarea",
   "chat.taskContext.coordination.description": "Revisar el trabajo terminado, los siguientes pasos y las preguntas pendientes.",
   "chat.taskContext.coordination.title": "Estado de coordinación",

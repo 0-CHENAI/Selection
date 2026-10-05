@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -56,7 +56,7 @@ async function renderTurn(
         activities={activities}
         isStreaming={options.isStreaming ?? true}
         isComplete={options.isComplete ?? false}
-        defaultExpanded
+        defaultExpanded={options.expanded ?? true}
         renderActionsMenu={() => null}
       />
       </TooltipProvider>
@@ -69,6 +69,19 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it.each(['en', 'zh-Hans'] as const)('keeps the parent assignment visible above collapsed work in %s', async language => {
+    const html = await renderTurn(language, [{
+      id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1, content: 'internal-protocol',
+      taskContext: { kind: 'assignment', description: '比较成本与风险', instruction: '独立核对原始金额。发现差异后交回修正。提交 values.research。' },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }], { isComplete: true, isStreaming: false, expanded: false })
+    expect(html).toContain('data-task-assignment-summary')
+    expect(html).toContain(resources[language].translation['chat.taskContext.assignment.fromParent'])
+    expect(html).toContain('独立核对原始金额。 发现差异后交回修正。')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html.indexOf('data-task-assignment-summary')).toBeLessThan(html.indexOf('aria-expanded="false"'))
+    expect(html).not.toMatch(/internal-protocol|values\.research/)
+    expect(html.match(/<p[^>]*data-task-assignment-summary[^>]*>[\s\S]*?<\/p>/)?.[0]).not.toContain('比较成本与风险')
+  })
   it('distinguishes pending, failed and completed subagent status rows', async () => {
     const html = await renderTurn('zh-Hans', [
       { id: 'pending', type: 'status', status: 'pending', content: '核验修订结果 · 待处理', timestamp: 1 },

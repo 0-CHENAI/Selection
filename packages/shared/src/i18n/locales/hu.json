@@ -488,6 +488,7 @@
   "chat.stopTask": "Feladat leállítása",
   "chat.tapToType": "Koppintson az íráshoz",
   "chat.taskContext.assignment.description": "A feladat végrehajtása és eredményei alább láthatók.",
+  "chat.taskContext.assignment.fromParent": "A szülőügynök feladata:",
   "chat.taskContext.assignment.title": "Feladat leírása",
   "chat.taskContext.coordination.description": "Az elvégzett munka, a következő lépések és a nyitott kérdések áttekintése.",
   "chat.taskContext.coordination.title": "Együttműködés állapota",

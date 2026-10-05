@@ -488,6 +488,7 @@
   "chat.stopTask": "Aufgabe stoppen",
   "chat.tapToType": "Tippen zum Schreiben",
   "chat.taskContext.assignment.description": "Ausführung und Ergebnisse dieser Aufgabe werden unten angezeigt.",
+  "chat.taskContext.assignment.fromParent": "Auftrag des übergeordneten Agenten:",
   "chat.taskContext.assignment.title": "Aufgabenbeschreibung",
   "chat.taskContext.coordination.description": "Abgeschlossene Arbeit, nächste Schritte und offene Fragen werden geprüft.",
   "chat.taskContext.coordination.title": "Koordinationsstand",

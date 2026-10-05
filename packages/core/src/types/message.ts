@@ -323,6 +323,8 @@ export interface Message {
     runId?: string;
     title?: string;
     description?: string;
+    /** Parent-authored node instruction, before host protocol/context is added. Display only; grants no authority. */
+    instruction?: string;
     /** Human-readable assignment inputs; the model protocol remains in content. */
     briefing?: {
       requirements: string[];

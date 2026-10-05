@@ -191,7 +191,7 @@ describe('TaskRunner (Conductor)', () => {
     const dispatch = host.sent[0]!;
     expect(dispatch.message).toContain('Canonical execution identity:');
     expect(dispatch.message).toContain('核对成本资料。保留证据。');
-    expect(dispatch.options).toEqual({ taskContext: { kind: 'assignment', title: '核对成本资料', description: '比较方案成本' } });
+    expect(dispatch.options).toEqual({ taskContext: { kind: 'assignment', title: '核对成本资料', description: '比较方案成本', instruction: '核对成本资料。保留证据。' } });
     expect(runner.getRunState('readable', 'r1')?.nodes[0]).toMatchObject({ id: 'cost', title: '核对成本资料' });
     await runner.stop('readable', 'r1');
   });
