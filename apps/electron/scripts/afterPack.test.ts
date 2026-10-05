@@ -19,7 +19,31 @@ const { copySharpRuntime } = require('./afterPack.cjs') as {
   copySharpRuntime: (context: { arch: string; electronPlatformName: string; packager: { projectDir: string } }, resourcesRoot: string) => void
 }
 
+const { copyAgentRuntimes } = require('./afterPack.cjs') as {
+  copyAgentRuntimes: (context: { electronPlatformName: string; packager: { projectDir: string } }, resourcesRoot: string) => void
+}
+
 describe('afterPack OfficeCLI runtime pruning', () => {
+  it('ships the subprocesses and Bun even when the builder filtered native dependencies', () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-agent-package-'))
+    try {
+      const projectDir = join(root, 'project')
+      const resourcesRoot = join(root, 'packed')
+      const context = { electronPlatformName: 'darwin', packager: { projectDir } }
+      expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Required agent runtime')
+      const files = ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
+        'resources/pi-agent-server/image-resize-worker.js', 'resources/pi-agent-server/photon_rs_bg.wasm',
+        'resources/pi-agent-server/node_modules/koffi/native.node', 'vendor/bun/bun', 'node_modules/@vscode/ripgrep/bin/rg']
+      for (const file of files) {
+        mkdirSync(join(projectDir, file, '..'), { recursive: true })
+        writeFileSync(join(projectDir, file), file)
+      }
+      copyAgentRuntimes(context, resourcesRoot)
+      for (const file of files) expect(readFileSync(join(resourcesRoot, 'app', file), 'utf8')).toBe(file)
+      rmSync(join(projectDir, 'resources/pi-agent-server/photon_rs_bg.wasm'))
+      expect(() => copyAgentRuntimes(context, resourcesRoot)).toThrow('Packaged agent runtime is missing')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
   it('copies the target sharp binding into the packaged app and rejects missing bindings', () => {
     const root = mkdtempSync(join(tmpdir(), 'selection-sharp-package-'))
     try {
