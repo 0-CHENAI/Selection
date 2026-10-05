@@ -72,10 +72,24 @@ test('actor context reuse requires original read bytes and refuses unverifiable 
     internal.captureTaskContextRead(actor,'Read',{ file_path: file },'read-source')
     expect(manager.canReuseTaskSession(actor.id)).toBe(false)
     actor.executionCheckpoint.contextReads!['read-source']!.complete = true
+    internal.captureTaskContextRead(actor,'mcp__session__submit_answer',{ text: 'Confirmed result' },'answer')
     expect(manager.canReuseTaskSession(actor.id)).toBe(true)
+    internal.captureTaskContextRead(actor,'Write',{ file_path: file },'write-source')
+    writeFileSync(file,'confirmed actor output')
+    internal.completeTaskContextAccess(actor,'write-source',false)
+    expect(manager.canReuseTaskSession(actor.id)).toBe(true)
+    actor.executionCheckpoint.pendingTools['pending'] = { name: 'Write', recovery: 'unknown' }
+    expect(manager.canReuseTaskSession(actor.id)).toBe(false)
+    delete actor.executionCheckpoint.pendingTools['pending']
     writeFileSync(file,'changed source')
     expect(manager.canReuseTaskSession(actor.id)).toBe(false)
-    writeFileSync(file,'original source'); actor.enabledSourceSlugs = ['external-source']
+    internal.captureTaskContextRead(actor,'Edit',{ file_path: file },'edit-after-external-change')
+    writeFileSync(file,'confirmed actor output')
+    internal.completeTaskContextAccess(actor,'edit-after-external-change',false)
+    expect(manager.canReuseTaskSession(actor.id)).toBe(false)
+    expect(actor.executionCheckpoint.contextUnverified).toBe(true)
+    actor.executionCheckpoint.contextUnverified = false
+    writeFileSync(file,'confirmed actor output'); actor.enabledSourceSlugs = ['external-source']
     expect(manager.canReuseTaskSession(actor.id)).toBe(false)
     actor.enabledSourceSlugs = []
     internal.captureTaskContextRead(actor,'WebFetch',{ url: 'https://example.com' },'external')

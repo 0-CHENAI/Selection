@@ -43,7 +43,7 @@ function validTaskIdentity(value: unknown): value is ExecutionTaskIdentity {
   })
 }
 export interface ExecutionCheckpoint {
-  contextReads?: Record<string, { path: string; hash: string; complete: boolean }>
+  contextReads?: Record<string, { path: string; hash: string; complete: boolean; write?: boolean }>
   contextUnverified?: boolean
   version: 1
   sessionId: string
@@ -121,7 +121,7 @@ export function readExecutionCheckpoint(sessionPath: string): CheckpointRead {
       || (c.contextUnverified !== undefined && typeof c.contextUnverified !== 'boolean')
       || (c.contextReads !== undefined && (!c.contextReads || typeof c.contextReads !== 'object' || Array.isArray(c.contextReads)
         || Object.values(c.contextReads).some((read: any) => !read || typeof read.path !== 'string' || !read.path
-          || typeof read.hash !== 'string' || !/^[a-f0-9]{64}$/.test(read.hash) || typeof read.complete !== 'boolean')))
+          || typeof read.hash !== 'string' || !/^[a-f0-9]{64}$/.test(read.hash) || typeof read.complete !== 'boolean' || read.write !== undefined && typeof read.write !== 'boolean')))
       || (c.waitingFor !== undefined && !['model', 'tool', 'user', 'recovery'].includes(c.waitingFor))
       || (c.sdkStateSize !== undefined && (!Number.isSafeInteger(c.sdkStateSize) || c.sdkStateSize <= 0))
       || !Number.isSafeInteger(c.generation) || c.generation < 0 || !Number.isFinite(c.updatedAt)

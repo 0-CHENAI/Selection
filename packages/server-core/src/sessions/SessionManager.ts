@@ -7657,11 +7657,7 @@ export class SessionManager implements ISessionManager {
         }
         await this.processEvent(managed, event)
         if (event.type === 'tool_result' && managed.executionCheckpoint) {
-          const read = managed.executionCheckpoint.contextReads?.[event.toolUseId]
-          if (read) {
-            try { read.complete = event.isError !== true && createHash('sha256').update(loadIsolationFile(read.path)).digest('hex') === read.hash }
-            catch { read.complete = false }
-          }
+          this.completeTaskContextAccess(managed, event.toolUseId, event.isError === true)
           delete managed.executionCheckpoint.pendingTools[event.toolUseId]
           if (!managed.executionCheckpoint.completedTools.includes(event.toolUseId)) managed.executionCheckpoint.completedTools.push(event.toolUseId)
         }
@@ -11108,23 +11104,43 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private captureTaskContextRead(managed: ManagedSession, toolName: string, input: Record<string, unknown>, toolCallId: string): void {
     const checkpoint = managed.executionCheckpoint!
-    if (/^(?:mcp__session__|session__)?(?:submit_task_output|submit_task_node_verdict|session_history|session_search|context_stats)$/.test(toolName)) return
-    if (!['Read', 'read'].includes(toolName)) { checkpoint.contextUnverified = true; return }
+    if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|session_history|session_search|context_stats)$/.test(toolName)) return
+    const write = ['Write', 'write', 'Edit', 'edit'].includes(toolName)
+    if (!write && !['Read', 'read'].includes(toolName)) { checkpoint.contextUnverified = true; return }
     const requested = input.file_path ?? input.path
     try {
       if (typeof requested !== 'string') throw new Error('Read path is unavailable')
-      const path = realpathSync(expandPath(requested, managed.sdkCwd ?? managed.workingDirectory ?? managed.workspace.rootPath))
+      const requestedPath = expandPath(requested, managed.sdkCwd ?? managed.workingDirectory ?? managed.workspace.rootPath)
+      const path = existsSync(requestedPath) ? realpathSync(requestedPath) : join(realpathSync(dirname(requestedPath)), basename(requestedPath))
       const directory = realpathSync(managed.workingDirectory ?? managed.workspace.rootPath)
       if (!path.startsWith(`${directory}/`)) throw new Error('Read source has no task context proof')
-      const hash = createHash('sha256').update(loadIsolationFile(path)).digest('hex')
-      checkpoint.contextReads ??= {}; checkpoint.contextReads[toolCallId] = { path, hash, complete: false }
+      const hash = createHash('sha256').update(existsSync(path) ? loadIsolationFile(path) : Buffer.alloc(0)).digest('hex')
+      if (write && Object.values(checkpoint.contextReads ?? {}).some(read => read.path === path && read.complete && read.hash !== hash)) checkpoint.contextUnverified = true
+      checkpoint.contextReads ??= {}; checkpoint.contextReads[toolCallId] = { path, hash, complete: false, ...(write ? { write: true } : {}) }
     } catch { checkpoint.contextUnverified = true }
+  }
+
+  private completeTaskContextAccess(managed: ManagedSession, toolCallId: string, isError: boolean): void {
+    const read = managed.executionCheckpoint?.contextReads?.[toolCallId]
+    if (!read) return
+    try {
+      const currentHash = createHash('sha256').update(loadIsolationFile(read.path)).digest('hex')
+      read.complete = !isError && (read.write === true || currentHash === read.hash)
+      if (read.write && read.complete) {
+        // Confirmed native writes advance the actor's file view; external changes still invalidate it.
+        for (const prior of Object.values(managed.executionCheckpoint!.contextReads ?? {})) {
+          if (prior.path === read.path && prior.complete) prior.hash = currentHash
+        }
+        read.hash = currentHash
+      }
+    } catch { read.complete = false }
   }
 
   canReuseTaskSession(sessionId: string): boolean {
     const managed = this.sessions.get(sessionId), checkpoint = managed?.executionCheckpoint
-    if (!managed || managed.isProcessing || managed.messageQueue.length || managed.enabledSourceSlugs?.length
-      || !checkpoint || checkpoint.status !== 'completed' || checkpoint.contextUnverified || !checkpoint.contextReads) return false
+    if (!managed || managed.isProcessing || managed.messageQueue.length || managed.enabledSourceSlugs?.length || managed.agentCreation || managed.deleting
+      || this.executionOwners.has(sessionId) || (this.pendingSwarmChildren.get(sessionId) ?? 0) > 0 || this.hasPreparedTaskDelivery(sessionId)
+      || Object.keys(checkpoint?.pendingTools ?? {}).length || !checkpoint || checkpoint.status !== 'completed' || checkpoint.contextUnverified || !checkpoint.contextReads) return false
     return Object.values(checkpoint.contextReads).every(read => {
       try { return read.complete && createHash('sha256').update(loadIsolationFile(read.path)).digest('hex') === read.hash }
       catch { return false }
