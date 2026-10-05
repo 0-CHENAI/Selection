@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,16 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
   trigger: RefObject<HTMLButtonElement>
 }) {
   const { t } = useTranslation()
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (dismissTimer.current !== null) clearTimeout(dismissTimer.current)
+    dismissTimer.current = null
+  }, [open])
+  const dismissAfterReveal = () => {
+    if (!open) return
+    if (dismissTimer.current !== null) clearTimeout(dismissTimer.current)
+    dismissTimer.current = setTimeout(() => onOpenChange(false), 2000)
+  }
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -30,7 +40,7 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
               <div className="pro-identity-label flex items-center">
                 <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
                 <svg className="pro-identity-mode" viewBox="32 10 104 34">
-                  <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
+                  <text x="84" y="40" textAnchor="middle" className="pro-identity-fill" onAnimationEnd={dismissAfterReveal}>PRO</text>
                 </svg>
               </div>
             </div>
