@@ -1750,7 +1750,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
 
   return (
-    <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
+    <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat">
       <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
         refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
         onClose={() => setBodyFeedbackTarget(null)}
