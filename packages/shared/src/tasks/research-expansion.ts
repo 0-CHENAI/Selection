@@ -44,7 +44,7 @@ export function researchTaskContext(summary: ResearchSummary, nodeId?: string, l
   const parentRefs = questions.flatMap(question => question.parents.flatMap(parent => parent.claimRefs));
   const parentClaims = summary.records.flatMap(record => record.payload.claims.filter(claim => parentRefs.some(ref => ref.id === claim.id && ref.version === claim.version) && !claims.some(current => current.id === claim.id && current.version === claim.version)).map(claim => ({...claim,producedBy:record.producedBy})));
   const evidenceIds = new Set([...claims.flatMap(claim => claim.evidenceIds), ...questions.flatMap(question => question.parents.flatMap(parent => parent.evidenceRefs))]);
-  return { line: summary.line, lines: summary.lines.filter(line => selected.includes(line.id)), questions,
+  return { assuranceVersion: summary.assuranceVersion, reads: summary.reads, sourceBundle: summary.sourceBundle, line: summary.line, lines: summary.lines.filter(line => selected.includes(line.id)), questions,
     sources: summary.sources.map(({ text: _text, ...source }) => source), dimensions: summary.dimensions.filter(dimension => selected.includes(dimension.lineId)),
     claims, parentClaims, evidence: summary.records.flatMap(record => record.payload.evidence).filter(evidence => evidenceIds.has(evidence.id)),
     issues: summary.issues.filter(issue => claims.some(claim => claim.id === issue.claimRef.id)), relations: summary.relations,

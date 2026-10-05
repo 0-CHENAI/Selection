@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
-import { access, readFile } from 'node:fs/promises'
-import { createReadToolDefinition } from '@earendil-works/pi-coding-agent'
+import { access, readFile, realpath } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createReadToolDefinition, truncateHead } from '@earendil-works/pi-coding-agent'
 import type { ReadOperations, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { detectReadImageMimeType } from './image-mime.ts'
 import {
@@ -43,7 +44,46 @@ export function createSelectionReadToolDefinition(
     ): Promise<Awaited<ReturnType<typeof baseTool.execute>>> {
       let image: SelectionImagePayload
       try {
-        return await baseTool.execute(...args)
+        // Capture each invocation separately: parallel reads must not exchange identities.
+        let captured: { path: string; bytes: Buffer } | undefined
+        const invocation = createReadToolDefinition(cwd, {
+          operations: {
+            ...operations,
+            async readFile(path) {
+              const canonical = await realpath(path)
+              const bytes = await operations.readFile(path)
+              captured = { path: canonical, bytes }
+              return bytes
+            },
+          },
+        })
+        const result = await invocation.execute(...args)
+        if (!captured || captured.bytes.includes(0)) return result
+        let text: string
+        try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(captured.bytes) } catch { return result }
+        const params = args[1] as { offset?: number; limit?: number }
+        if (params.offset !== undefined && (!Number.isInteger(params.offset) || params.offset < 1)
+          || params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 1)) return result
+        const start = (params.offset ?? 1) - 1
+        const selected = text.split('\n').slice(start, params.limit === undefined ? undefined : start + params.limit).join('\n')
+        const returned = truncateHead(selected)
+        const delivered = result.content.filter(part => part.type === 'text').map(part => part.text).join('\n')
+        if (returned.firstLineExceedsLimit || !returned.content || !delivered.startsWith(returned.content)) return result
+        const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
+        const enriched = {
+          ...result,
+          details: {
+            ...result.details,
+            sourceRead: {
+              path: captured.path,
+              contentHash: hash(captured.bytes),
+              startLine: start + 1,
+              endLine: start + returned.outputLines,
+              returnedTextHash: hash(returned.content),
+            },
+          },
+        }
+        return enriched
       } catch (error) {
         if (!(error instanceof SelectionImagePayload)) throw error
         image = error

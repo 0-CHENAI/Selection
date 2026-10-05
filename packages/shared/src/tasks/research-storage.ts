@@ -4,7 +4,7 @@ import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { atomicWriteFileSync } from '../utils/files.ts';
 import { committedRunLog, readRunLog, readRunState, readNodeAttempt, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
-import { summarizeResearch, ResearchRecordSchema, ResearchPayloadSchema, type ResearchConfig, type ResearchSource, type ResearchSummary } from './research.ts';
+import { summarizeResearch, researchReadRangeTexts, ResearchRecordSchema, ResearchPayloadSchema, ResearchReadReceiptSchema, type ResearchConfig, type ResearchSource, type ResearchSummary, type ResearchReadReceipt } from './research.ts';
 import { planValueKey } from './plan.ts';
 
 /** A successor may preserve reviewed history only under the same research criteria. */
@@ -27,9 +27,9 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
       const bytes = readFileSync(path);
       const hash = createHash('sha256').update(bytes).digest('hex');
       if (bytes.includes(0)) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
       const snapshotPath = join(target, `source-${index}.txt`); writeFileSync(snapshotPath, bytes);
-      return { id: source.id, ref, version: hash, hash, acquiredAt, snapshotPath, text };
+      return { id: source.id, ref, version: hash, hash, acquiredAt, originalPath: path, snapshotPath: realpathSync(snapshotPath), text };
     } catch (error) {
       return { id: source.id, ref, version: 'unavailable', acquiredAt, unavailableReason: error instanceof Error ? error.message : String(error) };
     }
@@ -48,7 +48,7 @@ export function readResearchSources(root: string, slug: string, runId: string, e
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Snapshot leaves its owning research run');
       const bytes = readFileSync(path);
       if (createHash('sha256').update(bytes).digest('hex') !== source.hash) throw new Error('Source snapshot version changed');
-      return { ...source, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+      return { ...source, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
     } catch (error) { return { ...source, text: undefined, unavailableReason: String(error) }; }
   });
 }
@@ -80,6 +80,7 @@ export function loadResearchResults(root: string, slug: string, runId: string, v
   const started = log.find(entry => entry.kind === 'run-started');
   try {
     if (started?.kind !== 'run-started' || !started.researchSourcesHash) throw new Error('Research source version receipt is unavailable');
+    const inheritedReads: ResearchReadReceipt[] = [];
     if (started.researchPredecessor) {
       if (started.resumedFrom !== started.researchPredecessor.runId) throw new Error('Research predecessor is not the canonical successor lineage');
       const predecessorState = readRunState(root,slug,started.researchPredecessor.runId);
@@ -87,10 +88,36 @@ export function loadResearchResults(root: string, slug: string, runId: string, v
       if (!researchInheritanceCompatible(predecessorSpec?.research,config)) throw new Error('Research predecessor criteria changed');
       const predecessor = loadResearchResults(root,slug,started.researchPredecessor.runId,visited);
       if (!predecessor || predecessor.blockers.some(blocker => blocker.includes('Corrupt') || blocker.includes('Frozen'))
-        || createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex') !== started.researchPredecessor.recordsHash) throw new Error('Research predecessor records changed or unavailable');
+        || createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex') !== started.researchPredecessor.recordsHash
+        || started.researchPredecessor.readsHash && createHash('sha256').update(JSON.stringify(predecessor.reads)).digest('hex') !== started.researchPredecessor.readsHash) throw new Error('Research predecessor records changed or unavailable');
       records.unshift(...predecessor.records);
+      inheritedReads.push(...predecessor.reads);
     }
-    return summarizeResearch(config, readResearchSources(root, slug, runId, started.researchSourcesHash), records);
+    const sources = readResearchSources(root, slug, runId, started.researchSourcesHash);
+    const readEvents = log.filter(entry => entry.kind === 'source-read');
+    const spawns = new Map<string, Extract<(typeof log)[number], { kind: 'node-spawned' }>>();
+    const retryAttempts = new Map<string, number>();
+    const reads = log.flatMap(entry => {
+      if (entry.kind === 'node-spawned') spawns.set(entry.nodeId, entry);
+      if (entry.kind === 'node-retry') retryAttempts.set(entry.nodeId, entry.attempt + 1);
+      if (entry.kind !== 'source-read') return [];
+      const parsed = ResearchReadReceiptSchema.safeParse(entry.receipt);
+      if (!parsed.success || parsed.data.producedBy.runId !== runId) return [];
+      const read = parsed.data, source = sources.find(source => source.id === read.sourceId && source.version === read.sourceVersion);
+      if (!source?.text || source.unavailableReason || source.hash !== read.contentHash || read.startLine > read.endLine
+        || read.endLine > source.text.split('\n').length || ![source.snapshotPath, source.originalPath].includes(read.path)) return [];
+      const returned = researchReadRangeTexts(source, read);
+      const spawn = spawns.get(read.producedBy.nodeId);
+      return returned.some(text => createHash('sha256').update(text).digest('hex') === read.returnedTextHash)
+        && spawn?.kind === 'node-spawned' && spawn.sessionId === read.producedBy.sessionId
+        && (spawn.generation ?? 0) === read.producedBy.generation && (spawn.attempt ?? retryAttempts.get(read.producedBy.nodeId) ?? 1) === read.producedBy.attempt
+        && (spawn.attemptRevision ?? spawn.revision ?? 0) === read.producedBy.revision ? [read] : [];
+    });
+    const uniqueReads = new Map([...inheritedReads.filter(read => sources.some(source => source.id === read.sourceId
+      && source.version === read.sourceVersion && !source.unavailableReason)), ...reads].map(read => [read.id, read]));
+    const summary = summarizeResearch(config, sources, records, [...uniqueReads.values()]);
+    if (reads.length !== readEvents.length) summary.blockers.push('Corrupt research read receipt requires inspection');
+    return summary;
   }
   catch { const summary = summarizeResearch(config, [], records); summary.blockers.push('Frozen research sources are unavailable; restore and inspect before delivery'); return summary; }
 }

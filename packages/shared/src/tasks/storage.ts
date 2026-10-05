@@ -110,18 +110,19 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
 type RunLogPayload =
+  | { t: string; kind: 'source-read'; receipt: import('./research.ts').ResearchReadReceipt }
   | { t: string; kind: 'task-worker'; worker: import('./planner').TaskWorkerRecord }
   | { t: string; kind: 'node-awaiting-workers'; nodeId: string; sessionId: string; generation: number;
       reason: 'complete' | 'interrupted' | 'error' | 'timeout'; finalText?: string; errorCode?: string; output?: import('./refs').NodeOutput;
       artifacts?: Record<string, unknown>; inputTokens?: number; outputTokens?: number }
-  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string; resumedFrom?: string; researchSourcesHash?: string; researchPredecessor?: { runId: string; recordsHash: string } }
+  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string; resumedFrom?: string; researchSourcesHash?: string; researchPredecessor?: { runId: string; recordsHash: string; readsHash?: string } }
   | { t: string; kind: 'run-superseded'; supersededBy: string }
   | { t: string; kind: 'execution-shutdown'; sessionId: string; confirmed: boolean; reason?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }
   | { t: string; kind: 'artifact-availability'; nodeIds: string[]; reason: string }
   | { t: string; kind: 'artifact-results-invalidated'; completedRun?: boolean; nodeIds: string[]; reason: string }
   | { t: string; kind: 'node-artifact-inputs'; nodeId: string; sessionId: string; inputs: Record<string, import('./refs').NodeOutput> }
-  | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string; generation?: number; actor?: { id: string; persona?: string }; reused?: boolean }
+  | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string; generation?: number; attempt?: number; attemptRevision?: number; actor?: { id: string; persona?: string }; reused?: boolean }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string; resultEvent?: PlannerResultEvent; researchRecord?: import('./research.ts').ResearchRecord }
   | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
   | { t: string; kind: 'approval-response'; nodeId: string; approved?: boolean; feedback: string }

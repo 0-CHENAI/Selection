@@ -22,6 +22,7 @@ import { dependencyImpact, dependencyAncestors } from './dependency-impact';
  */
 import { statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SourceReadProof } from '@craft-agent/core/types';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
@@ -86,7 +87,7 @@ import {
   workspaceCacheBypassReason,
   isWorkspaceCacheKindAllowed,
   COORDINATOR_TIMEOUT_BLOCKER,
-  ResearchPayloadSchema, researchTaskContext, validateResearchRecord, summarizeResearch, renderResearchReport, freezeResearchSources, loadResearchResults, researchInheritanceCompatible,
+  ResearchPayloadSchema, researchTaskContext, validateResearchRecord, summarizeResearch, researchReadRangeTexts, renderResearchReport, freezeResearchSources, loadResearchResults, researchInheritanceCompatible,
   type ResearchRecord, type ResearchSummary,
   type OrchestrationPatch,
   type PatchOk,
@@ -485,7 +486,7 @@ class ActiveRun {
     const predecessor = this.spec.research && this.resumedFrom && researchInheritanceCompatible(predecessorSpec?.research,this.spec.research)
       ? loadResearchResults(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
     for (const question of this.spec.research?.questions ?? []) if (!this.spec.nodes.some(node => node.id === question.sharedTaskRef && node.researchRole === 'researcher') && !predecessor?.records.some(record => record.role === 'researcher' && record.producedBy.nodeId === question.sharedTaskRef)) throw new Error(`Unknown canonical shared research task ${question.sharedTaskRef}`);
-    const researchPredecessor = predecessor ? {runId:this.resumedFrom!,recordsHash:createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex')} : undefined;
+    const researchPredecessor = predecessor ? {runId:this.resumedFrom!,recordsHash:createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex'),readsHash:createHash('sha256').update(JSON.stringify(predecessor.reads)).digest('hex')} : undefined;
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
     this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(researchPredecessor ? {researchPredecessor} : {}), ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
     beforeDispatch?.();
@@ -1960,12 +1961,34 @@ class ActiveRun {
     if (node.researchLineIds && payload.claims.some(claim => (claim.lineIds ?? [config.line.id]).some(id => !node.researchLineIds!.includes(id)))) errors.push('Claim exceeds the task research line binding');
     if (errors.length) throw new Error(errors.join('; '));
     if (record.payload.report) {
-      const candidate = summarizeResearch(config, previous?.sources ?? [], [...(previous?.records ?? []), record]);
+      const candidate = summarizeResearch(config, previous.sources, [...previous.records, record], previous.reads);
       if (candidate.blockers.length) throw new Error(candidate.blockers.join('; '));
       output.text = renderResearchReport(candidate);
       record.producedBy.artifactVersion = createHash('sha256').update(JSON.stringify(output)).digest('hex');
     }
     return record;
+  }
+
+  recordSourceRead(sessionId: string, proof: SourceReadProof, toolUseId: string, result: string): boolean {
+    const nodeId = this.sessionToNode.get(sessionId), state = nodeId ? this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId)) : undefined;
+    if (!this.spec.research || !nodeId || !state || state.state !== 'running' || state.sessionId !== sessionId) return false;
+    const previous = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+    const sources = previous?.sources.filter(source => source.hash === proof.contentHash && [source.snapshotPath, source.originalPath].includes(proof.path)) ?? [];
+    let recorded = false;
+    for (const source of sources) {
+      if (!source.text || source.unavailableReason || !Number.isInteger(proof.startLine) || !Number.isInteger(proof.endLine)
+        || proof.startLine < 1 || proof.endLine < proof.startLine || proof.endLine > source.text.split('\n').length) continue;
+      const original = researchReadRangeTexts(source, proof).find(text => createHash('sha256').update(text).digest('hex') === proof.returnedTextHash);
+      if (!toolUseId || !original || !result.startsWith(original)) continue;
+      const producedBy = { runId: this.runId, nodeId, sessionId, attempt: state.attempt,
+        revision: this.attemptRevisions.get(nodeId) ?? this.revision, generation: state.generation ?? 0 };
+      const id = createHash('sha256').update(JSON.stringify({ producedBy, toolUseId, sourceId: source.id })).digest('hex');
+      if (!previous?.reads.some(read => read.id === id)) this.log({ kind: 'source-read', receipt: { ...proof, id, sourceId: source.id, sourceVersion: source.version,
+        toolUseId, producedBy, receivedAt: new Date().toISOString() } });
+      recorded = true;
+    }
+    if (recorded) this.emitChanged();
+    return recorded;
   }
 
   acceptOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }): { ok: true } | { ok: false; error: string } {
@@ -2296,7 +2319,7 @@ class ActiveRun {
       this.sessionToNode.set(child.id, key);
       this.integratedSessions.delete(child.id);
       if (node.actor && !instance) this.actors.set(node.actor.id, { sessionId: child.id, signature, prefix: [...prefix, node.id] });
-      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id, generation: st.generation, actor: node.actor, reused: reuse });
+      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id, generation: st.generation, attempt, attemptRevision: this.attemptRevisions.get(key) ?? this.revision, actor: node.actor, reused: reuse });
       if (!canDispatch()) {
         // Creation may finish after Stop. Preserve its history, but never send the prompt.
         this.log({ kind: 'node-finished', nodeId: key, sessionId: child.id, state: 'cancelled', reason: 'stopped-before-dispatch' });
@@ -4232,6 +4255,10 @@ export class TaskRunner {
     const run = this.findRunBySession(sessionId);
     if (!run) return { ok: false as const, error: 'No active run owns this session' };
     return run.acceptOutput(sessionId, payload);
+  }
+
+  recordSourceRead(sessionId: string, proof: SourceReadProof, toolUseId: string, result: string): boolean {
+    return this.findRunBySession(sessionId)?.recordSourceRead(sessionId, proof, toolUseId, result) ?? false;
   }
 
   submitNodeVerdict(sessionId: string, payload: TaskNodeVerdict) {

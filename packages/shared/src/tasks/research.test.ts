@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ResearchConfigSchema, ResearchPayloadSchema, summarizeResearch, validateResearchRecord, renderResearchReport, type ResearchRecord } from './research.ts';
+import { ResearchConfigSchema, ResearchPayloadSchema, summarizeResearch, validateResearchRecord, renderResearchReport, type ResearchRecord, type ResearchReadReceipt } from './research.ts';
 import { addResearchTemplate } from './research-template.ts';
 import { parseTaskSpec } from './schema.ts';
 import { planProtectionErrors } from './plan.ts';
@@ -88,3 +88,44 @@ test('source locators reject literal newline escapes and intervals extending bey
   bad.payload.evidence[0]!.locator.endLine=100;
   expect(validateResearchRecord(config,sources,[],bad).join(' ')).toContain('frozen source locator');
 });
+
+function receipt(producer: ResearchRecord['producedBy'], startLine = 2, endLine = 2): ResearchReadReceipt {
+  return { id: `${producer.nodeId}-${startLine}-${endLine}`, toolUseId: 'read', sourceId: 's', sourceVersion: 'v1', path: '/source',
+    contentHash: 'source-hash', returnedTextHash: 'text-hash', startLine, endLine, receivedAt: 'now', producedBy: { ...producer, generation: 0 } };
+}
+
+test('A1 requires exact author and independent reviewer read ranges without manufacturing legacy proof', () => {
+  const authored = structuredClone(corrected), check = structuredClone(reviewed);
+  const records = [researcher, authored, check];
+  const strict = { ...config, assuranceVersion: 2 as const };
+  const authorRead = receipt(authored.producedBy), reviewRead = receipt(check.producedBy);
+  expect(summarizeResearch(config, sources, records).claims[0]!.review!.support).toBe('supported');
+  expect(summarizeResearch(config, sources, records).sourceBundle.unrecorded).toEqual(['s']);
+  for (const reads of [[], [authorRead], [reviewRead], [authorRead, { ...reviewRead, producedBy: { ...reviewRead.producedBy, revision: 1 } }],
+    [authorRead, { ...reviewRead, startLine: 1, endLine: 1 }]]) {
+    expect(summarizeResearch(strict, sources, records, reads).claims[0]!.review!.support).toBe('unverified');
+  }
+  const accepted = summarizeResearch(strict, sources, records, [authorRead, reviewRead]);
+  expect(accepted.claims[0]!.review!.support).toBe('supported');
+  expect(accepted.sourceBundle.cited[0]!.claimRefs).toEqual([{ id: 'cost', version: 2 }]);
+  expect(accepted.sourceBundle.cited[0]!.readIds).toHaveLength(2);
+})
+
+test('A1 combines contiguous returned ranges, discloses uncited reads and propagates an unrecorded factual input', () => {
+  const authored = record('researcher', { evidence: [{ ...researcher.payload.evidence[0], locator: { startLine: 1, endLine: 2 }, excerpt: sources[0]!.text.split('\n').slice(0, 2).join('\n') }],
+    claims: [{ ...corrected.payload.claims[0], version: 2 }, { ...corrected.payload.claims[0], id: 'recommend', type: 'inference', inputClaimRefs: [{ id: 'cost', version: 2 }] }] }, 'author');
+  const check = record('reviewer', { reviews: ['cost', 'recommend'].map(id => ({ ...reviewed.payload.reviews[0], claimRef: { id, version: 2 } })) }, 'audit');
+  const reads = [receipt(authored.producedBy, 1, 1), receipt(authored.producedBy, 2, 2), receipt(check.producedBy, 1, 2), receipt(check.producedBy, 3, 3)];
+  const strict = { ...config, assuranceVersion: 2 as const };
+  const summary = summarizeResearch(strict, sources, [authored, check], reads);
+  expect(summary.claims.every(claim => claim.review?.support === 'supported')).toBe(true);
+  expect(summary.sourceBundle.readNotCited.map(read => read.startLine)).toEqual([3]);
+  const another = record('researcher', { claims: [{ ...authored.payload.claims[0], version: 3 }] }, 'changed-author');
+  const nextCheck = record('reviewer', { reviews: [{ ...check.payload.reviews[0], claimRef: { id: 'cost', version: 3 } }] }, 'next-audit');
+  const dependent = record('researcher', { claims: [{ ...authored.payload.claims[1], version: 3, inputClaimRefs: [{ id: 'cost', version: 3 }] }] }, 'dependent');
+  const dependentReview = record('reviewer', { reviews: [{ ...check.payload.reviews[1], claimRef: { id: 'recommend', version: 3 } }] }, 'dependent-audit');
+  const dependentReads = [receipt(dependent.producedBy, 1, 2), receipt(dependentReview.producedBy, 1, 2)];
+  const invalid = summarizeResearch(strict, sources, [authored, check, another, nextCheck, dependent, dependentReview], [...reads, ...dependentReads]);
+  expect(invalid.claims.find(claim => claim.id === 'cost')!.review!.support).toBe('unverified');
+  expect(invalid.claims.find(claim => claim.id === 'recommend')!.review!.support).toBe('unverified');
+})

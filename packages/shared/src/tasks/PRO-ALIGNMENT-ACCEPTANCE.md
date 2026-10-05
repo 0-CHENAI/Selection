@@ -17,6 +17,18 @@
 
 界面补充：运行历史栏出现后，聊天区默认最小高度把输入区挤出窗口。给聊天区补齐可收缩高度约束后重建普通 DMG（SHA-256 `7c1b305bb70e3f9460db54500eafd4445e6a9cf38386c60f7c9f3be6d214f4dd`），原生界面确认输入框、PRO 铭牌、模型和发送按钮完整可见。Electron 类型检查、lint、renderer 构建及界面检测通过。重启后通过同一验收脚本只读观察，已完成的 5/5 节点、尝试历史和最终报告恢复，未重新调用模型或执行节点。
 
+## 2026-10-05：V3.1 A1 原文查阅与来源包
+
+从自然语言研究目标运行真实 SessionManager、Pi 和 TaskRunner，使用 GPT-6-luna 与只读权限。根会话 `261005-strong-slate` 创建计划 `pro-4040f60630d89307eb87d8e2`，运行 `chat-6a2652985d75d8c94b134280103d0978fffc79b0c74111632c98432a9a693db7`，没有预写 YAML、人工修改计划或补写输出、判定与查阅记录。
+
+- 研究者、独立来源审查、报告和独立质量门四个节点全部完成；三项当前结论通过独立来源审查。报告只确认资料所载金额，保留 B 口径及风险缺口，不把测试资料当作市场事实。
+- 原生 Read 成功返回的四份凭据都为冻结原文第 1–6 行，分别绑定实际 run/node/attempt/revision/session/generation。来源包关联这些凭据与三项精确 claim 版本，未解决引用及最终交付阻断为零。
+- 首次报告提交使用了不合法字段；宿主拒绝，Agent 在同一授权内自行修正，最终完成任务。全程没有人工提供修正后的 payload。
+- 26 条运行事件，目标到最终答复耗时 594510 ms。紧凑证据见 `scripts/fixtures/selection-3.0/pro-research-a1-acceptance.json`，不含连接凭据。
+- 前一轮真实运行暴露了 SDK 行数不计末尾空行、但返回内容保留末尾换行的差异。宿主范围哈希校验现同时验证实际末尾换行；中断的 `261005-bright-ember` 保留失败记录，没有补造凭据。
+
+验证：完整 CI 快照为 8099 pass / 0 fail；末尾换行修正后的相关六文件 139 项测试、完整类型检查、lint 和 Electron 构建通过，仍有 8 项原有 lint 警告。普通 arm64 DMG 构建通过，SHA-256 为 `05af9c07d4c4dc8c634aa6f026aaf7ffd5666586827ed4527c8db29f2fa75b17`。本轮新增凭据目前只覆盖原生 Read 成功返回的 UTF-8 文本；Office、PDF 的原文定位与识别限制属于后续 C5，未伪造其阅读证明。新安装包的原生界面重载验收因 Mac 再次锁定尚待完成。
+
 ## 已发现并修复的阻断项
 
 - 普通包漏打 Pi 子进程与原生运行资源。
@@ -31,5 +43,7 @@
 `scripts/selection-pro-package-acceptance.ts <隔离配置目录> - <GPT-6-luna 连接 slug>` 连接该隔离安装包的 loopback RPC，创建普通 PRO 会话并发出完整自然语言目标。已有会话 ID 可替换 `-`，此时只观察，不重新发送目标。配置目录须来自用户授权的现有连接；脚本不会生成或输出凭据。
 
 `scripts/selection-pro-chat-acceptance.ts --repair` 使用实际宿主与 TaskRunner 补充检验结果驱动修订。两者均严格要求 GPT-6-luna，不以合成模型结果替代真实闭环。
+
+`scripts/selection-pro-chat-acceptance.ts --research` 使用同一真实宿主检验原文查阅、独立来源审查、来源包与最终研究交付。
 
 V3.1 九项增强与三方冻结资料对照仍须单独交付和验收。不得从本轮 V3.0 成功推断其已经实现。

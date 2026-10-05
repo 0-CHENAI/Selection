@@ -292,6 +292,15 @@ export interface ArtifactDeliveryRef {
   change?: ArtifactDeliveryChange;
 }
 
+/** Native read result identity. Delivery proves returned bytes, never semantic understanding. */
+export interface SourceReadProof {
+  path: string;
+  contentHash: string;
+  startLine: number;
+  endLine: number;
+  returnedTextHash: string;
+}
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -314,6 +323,7 @@ export interface Message {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string;
+  sourceRead?: SourceReadProof;
   /** Live-only multimodal tool output; excluded by messageToStored to keep Base64 out of JSONL. */
   toolResultContent?: AgentToolResultContent[];
   toolStatus?: ToolStatus;
@@ -440,6 +450,7 @@ export interface StoredMessage {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string;
+  sourceRead?: SourceReadProof;
   toolStatus?: ToolStatus;
   toolDuration?: number;
   toolIntent?: string;
@@ -712,7 +723,7 @@ export type AgentEvent =
   | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
-  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; sourceRead?: SourceReadProof; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | {
       type: 'permission_request';
       requestId: string;

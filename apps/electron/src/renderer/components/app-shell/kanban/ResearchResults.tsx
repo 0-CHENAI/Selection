@@ -23,6 +23,7 @@ export function ResearchResults({ research, onOpenSession }: { research?: Resear
     {research.lines.length === 1 && !!research.line.premises.length && <p>{t('tasks.research.premises')}: {research.line.premises.join('；')}</p>}
     {research.lines.length > 1 && <details open><summary className="cursor-pointer font-medium">{t('tasks.research.lines')} ({research.lines.length})</summary><ul className="mt-2 space-y-2">{research.lines.map(line => <li key={line.id} className="rounded-md border border-border p-2"><p className="font-medium">{line.id} · {line.question}</p><p>{t('tasks.research.premises')}: {line.premises.join('；')}</p><p>{t('tasks.research.sources')}: {line.sourceIds.join(', ')}</p><p>{t('tasks.research.claims')}: {line.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p><p>{t('tasks.research.issues')}: {line.issueIds.join(', ')}</p><p>{t('tasks.research.tasks')}: {line.taskRefs.join(', ')}</p>{!!line.parentLineIds?.length && <p>{t('tasks.research.parents')}: {line.parentLineIds.join(', ')}</p>}</li>)}</ul></details>}
     {!!research.questions.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.sharedQuestions')} ({research.questions.length})</summary>{research.questions.map(question => <div key={question.id} className="mt-2 space-y-1 rounded-md border border-border p-2"><p className="font-medium">{question.id} · {question.question} → {question.sharedTaskRef}</p><p>{question.compatibilityReason}</p><p>{question.commonBackground.join('；')}</p><dl>{Object.entries(question.scope).map(([field,value]) => <div key={field} className="flex flex-wrap gap-1"><dt>{t(`tasks.research.scope.${field}`)}:</dt><dd>{value}</dd></div>)}</dl>{question.parents.map(parent => <details key={parent.lineId}><summary className="cursor-pointer">{t('tasks.research.parents')}: {parent.lineId} · {parent.premises.join('；')}</summary><p>{parent.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p><p>{parent.evidenceRefs.join(', ')} · {parent.issueRefs.join(', ')}</p><p>{parent.path.join(' → ')}</p></details>)}</div>)}</details>}
+    <ResearchSourceBundle research={research} onOpenSession={onOpenSession} />
     {!!research.relations.length && <details><summary className="cursor-pointer font-medium">{t('tasks.research.relations')} ({research.relations.length})</summary>{research.relations.map(relation => <div key={relation.id} className="mt-2 rounded-md border border-border p-2"><p>{relation.from.id}@{relation.from.version} · {t(`tasks.research.relation.${relation.type}`)} · {relation.to.id}@{relation.to.version}</p><p>{relation.reason}</p>{!relation.current && <p className="text-muted-foreground">{t('tasks.research.historicalRelation')}</p>}<Receipt producer={relation.producedBy} onOpenSession={onOpenSession} /></div>)}</details>}
     <details>
       <summary className="cursor-pointer font-medium">{t('tasks.research.claims')} ({research.claims.length})</summary>
@@ -39,4 +40,31 @@ export function ResearchResults({ research, onOpenSession }: { research?: Resear
     {research.report && <div className="space-y-1 border-t border-border pt-2"><p className="font-medium">{t('tasks.research.reportVersions')}: {research.report.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</p>{research.report.limitations.map((limit, index) => <p key={index}>{t('tasks.research.limits')}: {limit}</p>)}{research.report.alternatives?.map((item,index) => <p key={`alternative-${index}`}>{t('tasks.research.alternatives')}: {item}</p>)}{research.report.changeEvidence?.map((item,index) => <p key={`change-${index}`}>{t('tasks.research.changeEvidence')}: {item}</p>)}{research.report.unresolved.map((item, index) => <p key={index}>{t('tasks.research.unresolved')}: {item}</p>)}<Receipt producer={research.report.producedBy} onOpenSession={onOpenSession} /></div>}
     {!!research.blockers.length && <details><summary className="cursor-pointer text-warning">{t('tasks.research.pendingDelivery')} ({research.blockers.length})</summary><ul className="mt-1 list-inside list-disc">{research.blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}</ul></details>}
   </section>
+}
+
+function ResearchSourceBundle({ research, onOpenSession }: { research: ResearchSummary; onOpenSession?: (id: string) => void }) {
+  const { t } = useTranslation()
+  const bundle = research.sourceBundle
+  if (!bundle) return null
+  const read = (receipt: ResearchSummary['reads'][number]) => <li key={receipt.id} className="space-y-1 border-l border-border pl-2">
+    <p>{receipt.sourceId} · {t('tasks.research.readRange', { start: receipt.startLine, end: receipt.endLine })}</p>
+    <p className="font-mono text-muted-foreground">{receipt.producedBy.runId} / {receipt.producedBy.nodeId} · r{receipt.producedBy.revision} · {t('tasks.nodeAttempt')} {receipt.producedBy.attempt}</p>
+    <p className="text-muted-foreground">{receipt.receivedAt}</p>
+    {onOpenSession && <button type="button" className="text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onOpenSession(receipt.producedBy.sessionId)}>{t('tasks.openChildSession')}</button>}
+  </li>
+  return <details>
+    <summary className="cursor-pointer font-medium">{t('tasks.research.sourceBundle')} ({bundle.cited.length})</summary>
+    <div className="mt-2 space-y-3">
+      <p className="text-muted-foreground">{t('tasks.research.readReceiptHint')}</p>
+      <p className="font-medium">{t('tasks.research.citedSources')}</p>
+      {bundle.cited.map(source => <details key={`${source.sourceId}@${source.sourceVersion}`} className="rounded-md border border-border p-2">
+        <summary className="cursor-pointer">{research.sources.find(item => item.id === source.sourceId && item.version === source.sourceVersion)?.ref ?? source.sourceId} · {source.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</summary>
+        <p className="mt-1 font-mono text-muted-foreground">{source.sourceVersion}</p>
+        {source.readIds.length ? <ul className="mt-2 space-y-2">{research.reads.filter(receipt => source.readIds.includes(receipt.id)).map(read)}</ul> : <p>{t('tasks.research.unrecordedReads')}</p>}
+      </details>)}
+      {!!bundle.readNotCited.length && <details><summary className="cursor-pointer">{t('tasks.research.readNotCited')} ({bundle.readNotCited.length})</summary><ul className="mt-2 space-y-2">{bundle.readNotCited.map(read)}</ul></details>}
+      {!!bundle.unresolved.length && <details><summary className="cursor-pointer text-warning">{t('tasks.research.unresolvedReferences')} ({bundle.unresolved.length})</summary><ul className="mt-1 space-y-1">{bundle.unresolved.map((item, index) => <li key={index}>{item.claimRef.id}@{item.claimRef.version} · {item.evidenceId} · {item.reason}</li>)}</ul></details>}
+      {!!bundle.unrecorded.length && <p className="text-muted-foreground">{t('tasks.research.unrecordedReads')}: {bundle.unrecorded.join(', ')}</p>}
+    </div>
+  </details>
 }

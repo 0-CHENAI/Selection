@@ -14,6 +14,8 @@ export const ResearchQuestionSchema = z.object({ id, question: id, sharedTaskRef
 export const ResearchExpansionSchema = z.object({ lines: z.array(ResearchLineSchema).optional(), questions: z.array(ResearchQuestionSchema).optional() }).strict();
 export type ResearchExpansion = z.infer<typeof ResearchExpansionSchema>;
 export const ResearchConfigSchema = z.object({
+  /** Absent in legacy records: never retroactively invent read receipts. */
+  assuranceVersion: z.literal(2).optional(),
   line: ResearchLineSchema,
   lines: z.array(ResearchLineSchema).optional(), questions: z.array(ResearchQuestionSchema).optional(),
   dimensions: z.array(z.object({ id, requirement: id, required: z.boolean().default(true) }).strict()).min(1),
@@ -48,8 +50,14 @@ export const ResearchConfigSchema = z.object({
 export type ResearchConfig = z.infer<typeof ResearchConfigSchema>;
 export interface ResearchSource {
   id: string; ref: string; version: string; hash?: string; acquiredAt: string;
-  snapshotPath?: string; text?: string; unavailableReason?: string;
+  originalPath?: string; snapshotPath?: string; text?: string; unavailableReason?: string;
 }
+export const ResearchReadReceiptSchema = z.object({ id, sourceId: id, sourceVersion: id, toolUseId: id,
+  path: id, contentHash: id, startLine: version, endLine: version, returnedTextHash: id,
+  producedBy: z.object({ runId: id, nodeId: id, attempt: version, revision: z.number().int().nonnegative(),
+    sessionId: id, generation: z.number().int().nonnegative() }).strict(), receivedAt: id,
+}).strict();
+export type ResearchReadReceipt = z.infer<typeof ResearchReadReceiptSchema>;
 const evidence = z.object({ id, sourceId: id, sourceVersion: id,
   locator: z.object({ startLine: version, endLine: version }).strict(), excerpt: id }).strict();
 const claim = z.object({ id, version, type: z.enum(['fact', 'inference', 'explanation', 'value']), text: id,
@@ -81,6 +89,11 @@ export const ResearchRecordSchema = z.object({ role: z.enum(['researcher', 'revi
   producedBy: z.object({ runId: id, nodeId: id, attempt: version, revision: z.number().int().nonnegative(), artifactVersion: id, sessionId: id }).strict(),
   payload: ResearchPayloadSchema }).strict();
 export interface ResearchSummary {
+  assuranceVersion?: 2;
+  reads: ResearchReadReceipt[];
+  sourceBundle: { cited: Array<{ sourceId: string; sourceVersion: string; claimRefs: Array<{ id: string; version: number }>; readIds: string[] }>;
+    readNotCited: ResearchReadReceipt[]; unresolved: Array<{ claimRef: { id: string; version: number }; evidenceId: string; reason: string }>;
+    unrecorded: string[] };
   line: ResearchConfig['line']; lines: Array<ResearchConfig['line'] & { claimRefs: Array<{id: string; version: number}>; issueIds: string[]; taskRefs: string[]; sourceIds: string[] }> ; questions: NonNullable<ResearchConfig['questions']>;
   relations: Array<NonNullable<ResearchPayload['relations']>[number] & { producedBy: ResearchProducer; current: boolean }>; sources: ResearchSource[]; records: ResearchRecord[];
   dimensions: Array<ResearchConfig['dimensions'][number] & { lineId: string; state: 'covered' | 'limited' | 'uncovered'; claimRefs: Array<{ id: string; version: number }> }>;
@@ -158,7 +171,18 @@ export function evidenceExists(value: ResearchPayload['evidence'][number], sourc
     && source.text.split('\n').slice(value.locator.startLine - 1, value.locator.endLine).join('\n').includes(value.excerpt);
 }
 
-export function summarizeResearch(config: ResearchConfig, sources: ResearchSource[], records: ResearchRecord[]): ResearchSummary {
+/** The SDK counts content lines but retains a terminal newline in its delivered text. */
+export function researchReadRangeTexts(source: ResearchSource, range: { startLine: number; endLine: number }): string[] {
+  if (source.text === undefined || source.unavailableReason || !Number.isInteger(range.startLine) || !Number.isInteger(range.endLine)
+    || range.startLine < 1 || range.endLine < range.startLine) return [];
+  const lines = source.text.split('\n');
+  if (range.endLine > lines.length) return [];
+  const text = lines.slice(range.startLine - 1, range.endLine).join('\n');
+  if (!text) return [];
+  return range.endLine === lines.length - 1 && lines.at(-1) === '' ? [text, text + '\n'] : [text];
+}
+
+export function summarizeResearch(config: ResearchConfig, sources: ResearchSource[], records: ResearchRecord[], reads: ResearchReadReceipt[] = []): ResearchSummary {
   const current = new Map<string, ResearchSummary['claims'][number]>();
   const allEvidence = records.flatMap(record => record.payload.evidence);
   const latestIssues = new Map<string, ResearchSummary['issues'][number]>();
@@ -180,6 +204,38 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
       value.reviewer = latest.producer;
     }
   }
+  const claims = [...current.values()];
+  const cited = new Map<string, ResearchSummary['sourceBundle']['cited'][number]>();
+  const unresolved: ResearchSummary['sourceBundle']['unresolved'] = [];
+  for (const value of claims) for (const evidenceId of value.evidenceIds) {
+    const item = allEvidence.find(evidence => evidence.id === evidenceId);
+    if (!item || !evidenceExists(item, sources)) {
+      unresolved.push({ claimRef: { id: value.id, version: value.version }, evidenceId, reason: 'Original source or exact locator is unavailable' }); continue;
+    }
+    const identity = `${item.sourceId}@${item.sourceVersion}`;
+    const entry = cited.get(identity) ?? { sourceId: item.sourceId, sourceVersion: item.sourceVersion, claimRefs: [], readIds: [] };
+    if (!entry.claimRefs.some(ref => key(ref) === key(value))) entry.claimRefs.push({ id: value.id, version: value.version });
+    entry.readIds = [...new Set([...entry.readIds, ...reads.filter(read => read.sourceId === item.sourceId && read.sourceVersion === item.sourceVersion
+      && read.startLine <= item.locator.endLine && read.endLine >= item.locator.startLine).map(read => read.id)])];
+    cited.set(identity, entry);
+  }
+  const sourceBundle: ResearchSummary['sourceBundle'] = { cited: [...cited.values()],
+    readNotCited: reads.filter(read => ![...cited.values()].some(source => source.readIds.includes(read.id))), unresolved,
+    unrecorded: sources.filter(source => !reads.some(read => read.sourceId === source.id && read.sourceVersion === source.version)).map(source => source.id) };
+  if (config.assuranceVersion === 2) for (const value of current.values()) {
+    const hasReads = (producer?: ResearchProducer) => !!producer && value.evidenceIds.every(evidenceId => {
+      const evidence = allEvidence.find(item => item.id === evidenceId);
+      if (!evidence) return false;
+      const ranges = reads.filter(read => read.producedBy.runId === producer.runId && read.producedBy.nodeId === producer.nodeId
+        && read.producedBy.revision === producer.revision && read.producedBy.sessionId === producer.sessionId
+        && read.producedBy.attempt === producer.attempt && read.sourceId === evidence.sourceId && read.sourceVersion === evidence.sourceVersion)
+        .sort((a, b) => a.startLine - b.startLine);
+      let nextLine = evidence.locator.startLine;
+      for (const range of ranges) if (range.startLine <= nextLine) nextLine = Math.max(nextLine, range.endLine + 1);
+      return nextLine > evidence.locator.endLine;
+    });
+    if (value.review && (!hasReads(value.producedBy) || !hasReads(value.reviewer))) value.review = { ...value.review, support: 'unverified', finding: `${value.review.finding}; successful original read range has not been recorded for this author/reviewer attempt` };
+  }
   // A review cannot remain current when one of its exact numerical/factual inputs changes.
   const staleInput = (value: ResearchSummary['claims'][number], seen = new Set<string>()): boolean => {
     if (seen.has(key(value))) return true;
@@ -190,7 +246,6 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
     });
   };
   for (const value of current.values()) if (value.review && staleInput(value)) value.review = { ...value.review, support:'unverified', finding:`${value.review.finding}; exact input claim changed or unsupported` };
-  const claims = [...current.values()];
   const isSupported = (value: ResearchSummary['claims'][number]) => value.review?.citationExists && value.review.support === 'supported';
   for (const issue of issues) {
     const correction = issue.revisedClaimRef ? current.get(issue.revisedClaimRef.id) : undefined;
@@ -233,7 +288,7 @@ export function summarizeResearch(config: ResearchConfig, sources: ResearchSourc
       if (isSupported(value) && !report.claimRefs.some(ref => key(ref) === key(value))) blockers.push(`Report omits current critical conclusion ${key(value)}`);
     }
   } else blockers.push('Research report has not been produced');
-  return { line: config.line, lines, questions: config.questions ?? [], relations, sources, records, dimensions,
+  return { assuranceVersion: config.assuranceVersion, line: config.line, lines, questions: config.questions ?? [], relations, sources, records, reads, sourceBundle, dimensions,
     coverage: { covered: dimensions.filter(dimension => dimension.state === 'covered').length,
       limited: dimensions.filter(dimension => dimension.state === 'limited').length, uncovered: dimensions.filter(dimension => dimension.state === 'uncovered').length, total: dimensions.length },
     claims, issues, report, blockers };

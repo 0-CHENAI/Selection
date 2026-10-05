@@ -714,7 +714,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         const accumulatedOutput = this.consumeOutput(toolCallId);
 
         const resultDetails = event.result && typeof event.result === 'object'
-          ? (event.result as { details?: { isError?: unknown } }).details
+          ? (event.result as { details?: { isError?: unknown; sourceRead?: import('@craft-agent/core/types').SourceReadProof } }).details
           : undefined;
         const isError = event.isError === true || resultDetails?.isError === true;
         let result: string;
@@ -746,7 +746,12 @@ export class PiEventAdapter extends BaseEventAdapter {
           break;
         }
 
-        yield this.createToolResult(toolCallId, resolvedToolName, result, isError, undefined, content);
+        const toolResult = this.createToolResult(toolCallId, resolvedToolName, result, isError, undefined, content);
+        // Only the native read implementation owns this metadata; MCP or Bash summaries cannot assert it.
+        if (toolResult.type === 'tool_result' && event.toolName === 'read' && !isError && !blockReason) {
+          toolResult.sourceRead = resultDetails?.sourceRead;
+        }
+        yield toolResult;
         break;
       }
 

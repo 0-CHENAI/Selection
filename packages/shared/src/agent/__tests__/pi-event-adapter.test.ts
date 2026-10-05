@@ -65,6 +65,17 @@ describe('PiEventAdapter', () => {
     expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'unknown_error', details } });
   });
 
+  it('trusts read-range metadata only from a successful native Read, never Bash, MCP or an error', () => {
+    const proof = { path: '/source', contentHash: 'hash', startLine: 1, endLine: 1, returnedTextHash: 'returned' };
+    for (const [toolName, isError] of [['read', false], ['bash', false], ['mcp__source__read', false], ['read', true]] as const) {
+      const toolCallId = `${toolName}-${isError}`;
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolName, toolCallId, args: { path: '/source', command: 'cat /source' } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolName, toolCallId, isError,
+        result: { content: [{ type: 'text', text: 'original' }], details: { sourceRead: proof } } } as any));
+      expect(events.find(event => event.type === 'tool_result')?.sourceRead).toEqual(toolName === 'read' && !isError ? proof : undefined);
+    }
+  });
+
   // ============================================================
   // Agent lifecycle
   // ============================================================

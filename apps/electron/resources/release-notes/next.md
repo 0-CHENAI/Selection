@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Research source bundles** — Deep Research records successful original Read ranges with exact source and execution versions, and separates cited, uncited, unresolved and unrecorded material. New research plans require the author and independent reviewer to read the cited ranges themselves; compatible successors preserve verified history. Part of #449.
+
 - **PRO chat planning** — Complex goals can create one canonical plan on the current PRO conversation and start asynchronously within its existing authorization. Stable creation and start requests prevent duplicate plans and runs; saving in the editor remains separate from execution.
 
 - **Reliable task recovery** — Context admission checks cover subsequent tool-loop requests, and execution checkpoints retain confirmed progress. Restart recovery verifies execution ownership, permissions and tool receipts before continuing; uncertain writes pause with details in the existing error panel.

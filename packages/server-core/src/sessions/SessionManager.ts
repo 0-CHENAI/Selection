@@ -7689,6 +7689,9 @@ export class SessionManager implements ISessionManager {
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
+          if (event.type === 'tool_result' && event.sourceRead && !event.isError && managed.processingGeneration === myGeneration) {
+            this.taskRunnerLookup?.(managed.workspace.id)?.recordSourceRead(managed.id, event.sourceRead, event.toolUseId, event.result)
+          }
         }
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
@@ -13409,7 +13412,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           : rawFormattedResult
 
         // Some backends omit explicit isError but still prefix with [ERROR].
-        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
+        const inferredError = event.isError === true || !event.sourceRead && /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
 
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
@@ -13427,6 +13430,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           existingToolMsg.toolResult = formattedResult
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
+          existingToolMsg.sourceRead = inferredError ? undefined : event.sourceRead
           // If message doesn't have parent set, use event's parentToolUseId
           if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
             existingToolMsg.parentToolUseId = event.parentToolUseId
@@ -13451,6 +13455,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             toolPurpose,
             toolUseId: event.toolUseId,
             toolResult: formattedResult,
+            sourceRead: inferredError ? undefined : event.sourceRead,
             toolStatus: inferredError ? 'error' : 'completed',
             toolDisplayMeta: fallbackToolDisplayMeta,
             parentToolUseId,

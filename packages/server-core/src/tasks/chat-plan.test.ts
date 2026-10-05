@@ -24,3 +24,11 @@ test('creation rejects ambiguous or escalated plans before writing', () => {
   expect(() => buildChatPlan({ requestId: 'new', spec: { ...plan, defaults: { permissionMode: 'allow-all' } } }, root)).toThrow('authorization')
   expect(() => buildChatPlan({ requestId: 'new', spec: { ...plan, nodes: [{ id: 'work', kind: 'session', prompt: 'Do work', permissionMode: 'allow-all' }] } }, root)).toThrow('ceiling')
 })
+
+test('new chat research plans require host-owned original-read receipts', () => {
+  const plan = buildChatPlan({ requestId: 'research', spec: {
+    title: 'Research', goal: 'Verify cost', nodes: [{ id: 'work', prompt: 'Read originals', researchRole: 'researcher', outputs: [{ name: 'research', kind: 'param', type: 'json', required: true }] }],
+    research: { line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'Verify cost' }], sources: [] },
+  } }, root)
+  expect(plan.research?.assuranceVersion).toBe(2)
+})
