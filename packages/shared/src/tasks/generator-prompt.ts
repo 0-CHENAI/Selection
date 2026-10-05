@@ -21,6 +21,7 @@ export function buildGeneratorPrompt(goal: string, title?: string, context?: { c
     '- After submit_task_definition succeeds, reply only with a brief confirmation; the tool payload is the authored definition.',
     '- Keep runner as conduct unless the user asked for live orchestration. Do not set runner: orchestrate by default.',
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
+    '- Give EVERY node a short, descriptive title in the user\'s language. Titles describe the work (e.g. 核对成本资料), never repeat internal IDs such as cost or review.',
     '- When revising, change only what the latest user request requires. Preserve every untouched node id, kind, prompt, model, connection, configuration, dependency and task field. Do not redesign or simplify an existing graph.',
     '- The current definition below is authoritative and includes the latest manual edits. Earlier proposals (especially discarded ones) are conversation context, not instructions to restore old values. Preserve the existing task id.',
     '- Never change or remove a node with locked: true, or change fields listed in locked_fields. Preserve constraints, decisions and every lock. If the requested change conflicts, explain the lock and leave it intact.',

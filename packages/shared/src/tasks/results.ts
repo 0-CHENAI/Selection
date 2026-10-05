@@ -5,7 +5,7 @@
 import {
   DEFAULT_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
-  nodeTitle,
+  nodeDisplayTitle,
 } from './schema.ts'
 import {
   deriveRunStatusFromLog,
@@ -66,7 +66,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const snapshot = readSpecRevision(root, slug, chosen, revision)
   const started = log.find(entry => entry.kind === 'run-started')
   const titleById = new Map<string, string>()
-  if (snapshot) for (const n of snapshot.nodes) titleById.set(n.id, nodeTitle(n))
+  if (snapshot) for (const n of snapshot.nodes) titleById.set(n.id, nodeDisplayTitle(n))
 
   const byId = new Map<string, { id: string; state: string; sessionId?: string; attempt: number; revision?: number; failureReason?: string }>()
   const ensure = (id: string) => {

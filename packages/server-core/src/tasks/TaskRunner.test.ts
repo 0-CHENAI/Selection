@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
-import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
+import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
 import { appendRunLog, parseTaskSpec, saveTaskSpec, writeNodeOutput, readNodeSubmission, readRunLog, readNodeOutput, specRevisionPath, writeSpecRevision, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
@@ -28,7 +28,7 @@ class MockHost implements ConductorSessionHost {
   // verdict listener attached at the same time while a run is `verifying`.
   private readonly listeners = new Set<(evt: SessionCompletionEvent) => void>();
   readonly created: { id: string; options: CreateSessionOptions }[] = [];
-  readonly sent: { sessionId: string; message: string }[] = [];
+  readonly sent: { sessionId: string; message: string; options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'> }[] = [];
   readonly statuses: { sessionId: string; status: string }[] = [];
   readonly columns: { sessionId: string; column: string | null }[] = [];
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
@@ -47,8 +47,8 @@ class MockHost implements ConductorSessionHost {
     this.created.push({ id, options });
     return { id };
   }
-  async sendMessage(sessionId: string, message: string): Promise<void> {
-    this.sent.push({ sessionId, message });
+  async sendMessage(sessionId: string, message: string, _attachments?: undefined, _storedAttachments?: undefined, options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'>): Promise<void> {
+    this.sent.push({ sessionId, message, options });
   }
   async setSessionStatus(sessionId: string, status: string): Promise<void> {
     this.statuses.push({ sessionId, status });
@@ -181,6 +181,19 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     expect(snapshots.some(snapshot => snapshot.nodes.some(node => node.sessionId === 'sess-a' && node.state === 'running'))).toBe(true);
     await runner.stop('links', 'r1');
+  });
+
+  it('dispatches the complete model protocol with a separate readable task presentation', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'readable', title: '核对资料', goal: '比较方案成本', nodes: [{ id: 'cost', prompt: '核对成本资料。保留证据。' }] }));
+    const runner = makeRunner();
+    runner.run('readable', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    const dispatch = host.sent[0]!;
+    expect(dispatch.message).toContain('Canonical execution identity:');
+    expect(dispatch.message).toContain('核对成本资料。保留证据。');
+    expect(dispatch.options).toEqual({ taskContext: { kind: 'assignment', title: '核对成本资料', description: '比较方案成本' } });
+    expect(runner.getRunState('readable', 'r1')?.nodes[0]).toMatchObject({ id: 'cost', title: '核对成本资料' });
+    await runner.stop('readable', 'r1');
   });
 
   it('does not send work when session creation completes after Stop', async () => {

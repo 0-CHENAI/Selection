@@ -6962,6 +6962,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         hidden: true,
       }
       managed.messages.push(userMessage)
@@ -7119,6 +7120,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -7172,6 +7174,7 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
         badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -11903,6 +11906,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       ? `${ownedPrompt}\n\nRuntime file delivery contract: work in the assigned isolated working directory. Produce these declared project-relative files: ${JSON.stringify(delivery.outputs)}. They are candidates until runtime validation and integration succeed. Do not claim that candidate paths are final project paths.`
       : isolateWrites ? `${ownedPrompt}\n\nWork only in the assigned isolated working directory. The runtime discovers actual file changes, validates and integrates them before completion. Candidate paths are not final project paths. For non-Git projects, declare required input files with artifactDelivery before spawning.` : ownedPrompt
 
+    const childMessageOptions: SendMessageOptions | undefined = taskBinding
+      ? { taskContext: { kind: 'assignment', title: request.name, description: taskBinding.contract?.goal } }
+      : undefined
+
     // Build FileAttachment[] from paths (if any)
     let fileAttachments: FileAttachment[] | undefined
     if (request.attachments?.length) {
@@ -11992,7 +11999,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         },
         onAttach: (settle) => { settleWait = settle },
       })
-      this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
+      this.sendMessage(session.id, childPrompt, fileAttachments, undefined, childMessageOptions).catch(err => {
         sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
         if (childManaged) {
           this.surfaceSpawnedSessionCompletion({
@@ -12018,7 +12025,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       }
     }
 
-    this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
+    this.sendMessage(session.id, childPrompt, fileAttachments, undefined, childMessageOptions).catch(err => {
       sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
       if (childManaged) {
         this.surfaceSpawnedSessionCompletion({

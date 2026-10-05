@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { parseTaskSpec, nodeDeps, nodeTitle, resolveNewTaskSchemaVersion, type TaskSpec } from './schema.ts';
+import { parseTaskSpec, nodeDeps, nodeTitle, nodeDisplayTitle, resolveNewTaskSchemaVersion, type TaskSpec } from './schema.ts';
 import { extractRefs, interpolateRefs } from './refs.ts';
 import { validateTaskSpec, validateTaskInput, TASK_CAPS } from './validate.ts';
 import { buildGeneratorPrompt, buildRepairPrompt } from './generator-prompt.ts';
@@ -47,6 +47,16 @@ function parsed(): TaskSpec {
 // ---------------------------------------------------------------------------
 
 describe('schema', () => {
+  it('derives readable legacy labels while preserving authored titles and execution IDs', () => {
+    const node = parsed().nodes[0]!;
+    expect(nodeDisplayTitle(node)).toBe('Audit the code');
+    expect(nodeDisplayTitle({ ...node, title: '审查成本' })).toBe('审查成本');
+    expect(nodeDisplayTitle({ ...node, title: 'audit', prompt: '[skill:deep-research]\n核对成本资料。提交结构化结果 {"claims":[]}' })).toBe('核对成本资料');
+    expect(nodeDisplayTitle({ ...node, prompt: '{"claims":[]}' })).toBe('audit');
+    expect(nodeDisplayTitle({ ...node, prompt: '读取资料 ${nodes.source.output}' })).toBe('读取资料');
+    expect(nodeTitle(node)).toBe('audit');
+    expect(node.id).toBe('audit');
+  });
   it('parses a valid chain and applies defaults', () => {
     const r = parseTaskSpec(CHAIN);
     expect(r.success).toBe(true);

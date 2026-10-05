@@ -879,6 +879,18 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // If there's a current turn, it's complete (something follows it)
       if (currentTurn) currentTurn.isComplete = true
       flushCurrentTurn()
+      if (message.taskContext) {
+        currentTurn = {
+          type: 'assistant', turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.id,
+          answerRunId: message.answerRunId, answerRoutingVersion: message.answerRoutingVersion,
+          presentationProtocol: message.presentationProtocol, timestamp: message.timestamp,
+          isStreaming: false, isComplete: false,
+          activities: [{ id: message.id, messageId: message.id, type: 'task-context', status: 'completed',
+            content: message.content, taskContext: message.taskContext, attachments: message.attachments,
+            timestamp: message.timestamp }],
+        }
+        continue
+      }
       turns.push({
         type: 'user',
         message,

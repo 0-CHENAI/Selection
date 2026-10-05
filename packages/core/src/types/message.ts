@@ -317,6 +317,12 @@ export interface Message {
   annotationFollowUps?: AnnotationFeedbackSnapshot[];
   role: MessageRole;
   content: string;
+  /** Presentation for host-generated task turns. Content remains the complete model input; this grants no authority. */
+  taskContext?: {
+    kind: 'assignment' | 'verification' | 'coordination' | 'feedback';
+    title?: string;
+    description?: string;
+  };
   timestamp: number;
   // Tool-specific fields
   toolName?: string;
@@ -444,6 +450,7 @@ export interface StoredMessage {
   annotationFollowUps?: AnnotationFeedbackSnapshot[];
   type: MessageRole;
   content: string;
+  taskContext?: Message['taskContext'];
   timestamp?: number;
   // Tool-specific fields
   toolName?: string;

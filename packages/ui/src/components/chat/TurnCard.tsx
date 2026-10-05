@@ -5,6 +5,7 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { formatUserMessageTime } from './UserMessageBubble'
+import { TaskContextMessage } from './TaskContextMessage'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
@@ -255,7 +256,7 @@ const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 // ============================================================================
 
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
-export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan'
+export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan' | 'task-context'
 export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 
 // ============================================================================
@@ -284,6 +285,9 @@ export interface ActivityItem {
   toolUseId?: string  // For matching parent-child relationships
   toolInput?: Record<string, unknown>
   content?: string
+  /** Readable internal task step; its protocol stays out of the response body. */
+  taskContext?: import('@craft-agent/core').Message['taskContext']
+  attachments?: import('@craft-agent/core').Message['attachments']
   /** Live-only text/image blocks from a tool result. */
   toolResultContent?: AgentToolResultContent[]
   intent?: string
@@ -1062,6 +1066,10 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
+
+  if (activity.type === 'task-context' && activity.taskContext) {
+    return <TaskContextMessage message={{ id: activity.id, role: 'user', timestamp: activity.timestamp, content: activity.content ?? '', taskContext: activity.taskContext, attachments: activity.attachments }} />
+  }
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete

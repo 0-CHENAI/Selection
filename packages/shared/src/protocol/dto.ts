@@ -739,6 +739,8 @@ export interface SendMessageOptions {
    * surfacing) that should wake the agent without looking user-authored.
    */
   hidden?: boolean
+  /** Readable presentation of an internal task turn; never changes model input or authorization. */
+  taskContext?: Message['taskContext']
 }
 
 // ---------------------------------------------------------------------------

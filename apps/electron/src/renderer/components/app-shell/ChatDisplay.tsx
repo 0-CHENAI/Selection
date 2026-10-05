@@ -59,6 +59,7 @@ import {
   formatUserMessageTime,
   HeightPresence,
   UserMessageBubble,
+  withTaskMessagePresentation,
   groupMessagesByTurn,
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
@@ -777,11 +778,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Find ALL individual match occurrences (not just turns)
   // Returns array with unique matchId for each occurrence
+  const sessionMessages = session?.messages
+  const sessionIsProcessing = session?.isProcessing
+  const sessionTaskSlug = session?.taskSlug
+  const sessionTaskNodeId = session?.taskNodeId
+  const sessionName = session?.name
+  const sessionDisplayMessages = useMemo(() => sessionMessages?.map(message => withTaskMessagePresentation(message, {
+    taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
+  })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
   const matchingOccurrences = useMemo(() => {
-    if (!searchQuery.trim() || !session?.messages) return []
+    if (!searchQuery.trim() || !sessionDisplayMessages.length) return []
     const startTime = performance.now()
     const query = searchQuery.toLowerCase()
-    const turns = groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
+    const turns = groupMessagesByTurn(sessionDisplayMessages, { isSessionProcessing: sessionIsProcessing })
     const matches: { matchId: string; turnId: string; turnIndex: number; matchIndexInTurn: number }[] = []
 
     for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
@@ -822,7 +831,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
     }
     return matches
-  }, [searchQuery, session?.messages, session?.isProcessing, countOccurrences])
+  }, [searchQuery, sessionDisplayMessages, sessionIsProcessing, countOccurrences])
 
   // Auto-expand pagination when search is active to show all matching turns
   // This ensures match count is stable and all matches are highlightable from the start
@@ -834,7 +843,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       (min, m) => m.turnIndex < min ? m.turnIndex : min,
       matchingOccurrences[0]!.turnIndex
     )
-    const totalTurns = groupMessagesByTurn(session?.messages || [], { isSessionProcessing: session?.isProcessing }).length
+    const totalTurns = groupMessagesByTurn(sessionDisplayMessages, { isSessionProcessing: session?.isProcessing }).length
 
     // Calculate how many turns we need to show to include all matches
     // totalTurns - visibleTurnCount = startIndex, so we need visibleTurnCount = totalTurns - earliestMatchTurnIndex + buffer
@@ -843,7 +852,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (requiredVisibleCount > visibleTurnCount) {
       setVisibleTurnCount(requiredVisibleCount)
     }
-  }, [isSearchActive, matchingOccurrences, session?.messages, session?.isProcessing, visibleTurnCount])
+  }, [isSearchActive, matchingOccurrences, sessionDisplayMessages, session?.isProcessing, visibleTurnCount])
 
   // Extract unique turn IDs that have matches (for highlighting)
   const matchingTurnIds = useMemo(() => {
@@ -1551,19 +1560,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingPermission, pendingCredential])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
-  const sessionMessages = session?.messages
-  const sessionIsProcessing = session?.isProcessing
-  const sessionTaskSlug = session?.taskSlug
   const sessionParentId = session?.parentSessionId
   const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
   const allTurns = React.useMemo(() => {
     if (!sessionMessages) return []
-    return groupMessagesByTurn(sessionMessages, {
+    return groupMessagesByTurn(sessionDisplayMessages, {
       isSessionProcessing: sessionIsProcessing,
       isManagedSwarmRunning: swarmRunning,
       isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
     })
-  }, [sessionMessages, sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionParentId])
+  }, [sessionMessages, sessionDisplayMessages, sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionParentId])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
@@ -1590,7 +1596,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!showRecordNavigation) return []
     const items: ConversationNavigationItem[] = []
     allTurns.forEach((turn, index) => {
-      if (turn.type === 'user') {
+      if (turn.type === 'user' && !turn.message.taskContext) {
         items.push({ key: getTurnKey(turn, index), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
       } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
         const item = items[items.length - 1]!

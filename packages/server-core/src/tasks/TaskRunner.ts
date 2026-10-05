@@ -24,7 +24,7 @@ import { statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SourceReadProof } from '@craft-agent/core/types';
 import type { TaskHelpInput } from '@craft-agent/session-tools-core';
-import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
+import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
 import {
@@ -35,6 +35,7 @@ import {
   type NodeRunState,
   type RunStatus,
   nodeTitle,
+  nodeDisplayTitle,
   interpolateRefs,
   interpolateLocals,
   instanceId,
@@ -134,7 +135,7 @@ export interface ConductorSessionHost {
   hasPreparedTaskDelivery?(sessionId: string): boolean;
   canAutoResumeTaskDelivery?(sessionId: string): boolean;
   finalizeTaskWorkspace?(sessionId: string, outputs: Record<string, string>, ensureCurrent: () => void, verifyInputs?: () => void): Promise<Record<string, unknown>>;
-  sendMessage(sessionId: string, message: string, attachments?: undefined, storedAttachments?: undefined, options?: { hidden?: boolean }): Promise<void>;
+  sendMessage(sessionId: string, message: string, attachments?: undefined, storedAttachments?: undefined, options?: Pick<SendMessageOptions, 'hidden' | 'taskContext'>): Promise<void>;
   continueProgress?(sessionId: string): Promise<void>;
   getProgressLiveTokens?(sessionId: string): number;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
@@ -1216,7 +1217,7 @@ class ActiveRun {
       const verdict = st.state === 'invalid' ? undefined : recorded ?? timing?.verdict;
       return {
         id,
-        title: node ? nodeTitle(node) : id,
+        title: node ? nodeDisplayTitle(node) : id,
         attempts: this.attemptHistory.get(id)?.map(attempt => ({ ...attempt })),
         definitionId: node?.id ?? definitionId(id),
         state: st.state,
@@ -1942,7 +1943,8 @@ class ActiveRun {
       if (feedbackOnly && this.opts.orchestratorSessionId) {
         const coordinatorId = this.opts.orchestratorSessionId;
         void Promise.resolve().then(() => this.deps.host.sendMessage(coordinatorId,
-          `Human feedback for approval node ${nodeId} in run ${this.runId}:\n${message}\nThe human approval gate remains CLOSED. Discuss the requested changes with the user. Do not approve or resume on their behalf. Definition changes require explicit user confirmation and do not alter this run snapshot.`
+          `Human feedback for approval node ${nodeId} in run ${this.runId}:\n${message}\nThe human approval gate remains CLOSED. Discuss the requested changes with the user. Do not approve or resume on their behalf. Definition changes require explicit user confirmation and do not alter this run snapshot.`,
+          undefined, undefined, { taskContext: { kind: 'feedback', description: message } },
         )).then(() => {
           if (st.state === 'waiting-approval' && st.approvalFeedback === message) {
             this.log({ kind: 'approval-feedback-delivery', nodeId, feedback: message, status: 'delivered' });
@@ -2420,7 +2422,9 @@ class ActiveRun {
       if (resuming) {
         if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
         await this.deps.host.continueProgress(child.id);
-      } else await this.deps.host.sendMessage(child.id, deliveryPrompt);
+      } else await this.deps.host.sendMessage(child.id, deliveryPrompt, undefined, undefined, {
+        taskContext: { kind: 'assignment', title: nodeDisplayTitle(node), description: this.spec.goal },
+      });
     } catch (err) {
       if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);
     }

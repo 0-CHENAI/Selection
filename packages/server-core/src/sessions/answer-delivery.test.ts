@@ -70,6 +70,19 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(managed.messages.findLast(message => message.role === 'user')?.hidden).toBe(true)
   })
 
+  it('preserves readable task metadata while executing and persisting the complete model input', async () => {
+    install(async function* () { yield { type: 'complete' } })
+    const content = 'Canonical execution identity: {"claims":[],"sourceVersion":"hash"}'
+    const taskContext = { kind: 'assignment' as const, title: '核对成本资料', description: '比较成本与风险' }
+    await manager.sendMessage(managed.id, content, undefined, undefined, { taskContext })
+    expect(prompts[0]).toBe(content)
+    expect(managed.messages.find(message => message.role === 'user')).toMatchObject({ content, taskContext })
+    expect(events.find(event => event.type === 'user_message')?.message).toMatchObject({ content, taskContext })
+    await manager.flushSession(managed.id)
+    const stored = loadStoredSession(root, managed.id)!
+    expect(stored.messages.find(message => message.type === 'user')).toMatchObject({ content, taskContext })
+  })
+
   it('does not recover or publish a final answer from an unfinished canonical checkpoint', async () => {
     managed.workMode = 'PRO'
     managed.taskSlug = 'canonical-plan'

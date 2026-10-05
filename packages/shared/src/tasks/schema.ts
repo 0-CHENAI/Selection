@@ -467,6 +467,17 @@ export function nodeTitle(node: TaskNode): string {
   return node.title ?? node.id;
 }
 
+/** Readable label for old plans whose authored title is missing or just repeats the node ID. */
+export function nodeDisplayTitle(node: TaskNode): string {
+  const title = node.title?.trim();
+  if (title && title !== node.id) return title;
+  const instruction = (node.prompt ?? '').replace(/\[skill:[^\]]+\]/g, '').trim()
+    .split(/[\n。]|\.\s|\$\{|[\[{]/, 1)[0]?.replace(/^[#*\s-]+/, '').trim();
+  if (!instruction) return node.id;
+  const chars = Array.from(instruction);
+  return chars.length > 42 ? `${chars.slice(0, 42).join('')}…` : instruction;
+}
+
 /** Parse an unknown value (parsed yaml/json) into a TaskSpec. */
 export function parseTaskSpec(raw: unknown) {
   return TaskSpecSchema.safeParse(raw);

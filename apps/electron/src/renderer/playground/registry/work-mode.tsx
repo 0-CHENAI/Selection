@@ -27,11 +27,13 @@ import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import { OrchestrationRunProgressView } from '@/components/app-shell/kanban/OrchestrationRunProgress'
 import { buildOrchestrationProgressRows } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { TurnCard, groupMessagesByTurn, withTaskMessagePresentation } from '@craft-agent/ui'
 
 function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 'completed' | 'failed' }) {
   const base = useAppShellContext()
   const { t } = useTranslation()
   const store = useStore()
+  const startedAt = React.useRef(Date.now() - 30_000).current
   const run = React.useMemo((): TaskRunSnapshotDto => ({
     runId: 'preview-run', taskId: 'preview-task', slug: 'preview-task', status, tokensUsed: 0,
     nodes: ['读取原始资料', '审查报告草稿', '独立核验草稿', '修正报告', '核验修订结果'].map((title, index) => ({
@@ -40,13 +42,20 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
       sessionId: status === 'completed' || index < 4 ? `preview-worker-${index}` : undefined,
     })),
   }), [status])
+  const reviewMessage = withTaskMessagePresentation({ id: 'preview-verification', role: 'user', timestamp: 3,
+    content: 'The task "核对成本与风险" has finished running.\nTask slug: preview-task; runId: preview-run; revision: 4\nFrozen plan: {"nodes":[{"id":"cost"}]}\nNode outputs:\n{"claims":[{"id":"cost","version":2}]}\nCall submit_task_verdict with result pass or fail.',
+  }, { taskSlug: run.slug })
+  const reviewTurn = groupMessagesByTurn([reviewMessage, { id: 'preview-report', role: 'assistant', timestamp: 4, content: '报告已完成资料核对与草稿审查。方案 B 的统计口径尚未确认，暂时不能直接比较。' }], { isSessionProcessing: false })[0]
   const root = extractSessionMeta({ id: 'preview-root', name: '正式安装包聊天闭环验收', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', workMode: 'PRO', messages: [], lastMessageAt: Date.now(), isProcessing: status === 'running' })
   const sessions = React.useMemo(() => run.nodes.filter(node => node.sessionId).map(node => ({
-    id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO',
+    id: node.sessionId!, name: node.title, parentSessionId: 'preview-root', workMode: 'PRO', taskSlug: run.slug, taskNodeId: node.id,
     workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground',
-    messages: [{ id: `${node.id}-output`, role: 'assistant', content: `${node.title}。\n\n已核对方案 A 的金额为 **1,000,000 元**；方案 B 的统计口径尚未确认，暂时不能直接比较。\n\n此处使用固定预览数据，不调用模型。`, timestamp: 1 }],
-    lastMessageAt: 1, isProcessing: node.state === 'running', permissionMode: 'safe',
-  } as Session)), [run, base.activeWorkspaceId])
+    messages: [
+      { id: `${node.id}-assignment`, role: 'user', content: `Canonical execution identity: slug="preview-task", runId="preview-run", nodeId="${node.id}", attempt=1, revision=4.\nOriginal user goal: 核对方案成本与风险，保留尚未确认的资料限制\nAcceptance criteria: 每项重要结论须经独立审查\nResearch role: researcher. Frozen research criteria and records: ${JSON.stringify({ sources: [{ id: 'cost-source', sourceVersion: '4c991335faba0554887a6e679c276035b886b13a6d88c6da6fbc4868c0a144fb6' }], claims: [{ id: 'cost', version: 2, text: '方案 A 两年成本为 100 万元' }] })}`, timestamp: startedAt },
+      { id: `${node.id}-output`, role: 'assistant', content: `${node.title}。\n\n已核对方案 A 的金额为 **1,000,000 元**；方案 B 的统计口径尚未确认，暂时不能直接比较。\n\n此处使用固定预览数据，不调用模型。`, timestamp: startedAt + 1000 },
+    ],
+    lastMessageAt: startedAt + 1000, isProcessing: node.state === 'running', permissionMode: 'safe',
+  } as Session)), [run, base.activeWorkspaceId, startedAt])
   React.useEffect(() => {
     store.set(sessionMetaMapAtom, new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
     store.set(loadedSessionsAtom, new Set(sessions.map(session => session.id)))
@@ -69,7 +78,7 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
           )} />
           <div className="min-h-0 flex-1 flex flex-col">
             <div className="min-h-0 flex-1 p-6 text-sm leading-relaxed text-foreground">
-              <p>报告已经完成资料核对与草稿审查，正在整合修订结果。</p>
+              {reviewTurn?.type === 'assistant' && <TurnCard turnId={reviewTurn.turnId} activities={reviewTurn.activities} response={reviewTurn.response} isStreaming={reviewTurn.isStreaming} isComplete={reviewTurn.isComplete} />}
               <p className="mt-4 text-foreground/60">固定预览数据；点击右上角的子代理按钮，在浮窗中选择并查看对应内容。</p>
             </div>
           </div>
