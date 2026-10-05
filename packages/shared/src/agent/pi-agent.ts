@@ -152,6 +152,18 @@ export function buildPiSwarmInitConfig(session: SessionConfig | undefined): {
   };
 }
 
+/** Give each execution role only its own policy; worker prohibitions do not apply to the root. */
+export function buildPiExecutionScope(session: SessionConfig | undefined, sessionId: string): string {
+  const role = session?.orchestrationRole ?? (session?.parentSessionId || session?.taskNodeId ? 'worker' : 'coordinator');
+  const root = FEATURE_FLAGS.tasksOrchestrate && !complexCapabilityError(session, 'create-workflow');
+  const policy = role !== 'coordinator'
+    ? 'Complete only the assigned node; the original goal is background. Return the complete node result with submit_task_output when outputs are declared, otherwise final text. Do not create or run plans, wait for your own node output or execute downstream steps. Verify/judge nodes must successfully submit_task_node_verdict before ending.'
+    : root
+      ? 'You are the PRO root coordinator. For an explicit workflow request or complex research requiring independent review, first explain a concise plan, then create_task with a stable requestId and a full schema_version 3 spec, and run_task asynchronously with a stable requestId. These steps are required before performing the workflow; a flat Task List or call_llm does not replace the requested canonical plan. Use separate producing and verify/reviewer nodes with explicit dependencies. Proceed within existing authorization; a read-only workflow does not require SubmitPlan. After start, acknowledge and end this turn; the scheduler wakes you with checkpoints. Simple questions and single actions stay in this conversation. PRO preserves model and operation permissions; selecting PRO alone starts no work.'
+      : 'Complete the request in this conversation with existing tools, Sources, Skills and Task List. Workflow creation and delegation are unavailable in this execution scope; do not offer or attempt them.';
+  return `<execution_scope>\nworkMode: ${session?.workMode ?? 'NORM'}\nrootSessionId: ${session?.executionRootSessionId ?? sessionId}\nrole: ${role}\nownershipNeedsReview: ${!!session?.workModeNeedsReview}\n${policy}\n</execution_scope>`;
+}
+
 /** Backend-executed session tools currently supported by PiAgent. */
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
@@ -2606,7 +2618,7 @@ export class PiAgent extends BaseAgent {
       // consumes the one-shot mode-change signal, so it is called exactly once.
       const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
       const stableParts = this.promptBuilder.buildStableContextParts();
-      stableParts.push(`<execution_scope>\nworkMode: ${this.config.session?.workMode ?? 'NORM'}\nrootSessionId: ${this.config.session?.executionRootSessionId ?? this._sessionId}\nrole: ${this.config.session?.orchestrationRole ?? (this.config.session?.parentSessionId ? 'worker' : 'coordinator')}\nownershipNeedsReview: ${!!this.config.session?.workModeNeedsReview}\nNORM performs work in this conversation with its existing tools, Sources, Skills and Task List. Delegation and workflow creation/execution require a new PRO root. PRO preserves model and write permissions. Selecting PRO alone starts no work. Explicit workflow requests and complex research goals use create_task and asynchronous run_task on this root; proceed within existing authorization after explaining the plan. Read-only workflows do not require SubmitPlan. Workers and reviewers complete only the assigned node, even when the original overall goal is included as background. Return a complete node result with submit_task_output when outputs are declared; otherwise return the complete findings as final text. Do not create or run plans, wait for your own node output or execute downstream steps. A verify/judge node must successfully submit_task_node_verdict before ending.\n</execution_scope>`);
+      stableParts.push(buildPiExecutionScope(this.config.session, this._sessionId));
       const volatileParts = this.promptBuilder.buildVolatileContextParts(
         { plansFolderPath },
         sourceContext
