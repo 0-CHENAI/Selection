@@ -28,8 +28,21 @@ test('creation rejects ambiguous or escalated plans before writing', () => {
 test('new chat research plans require host-owned original-read receipts', () => {
   const plan = buildChatPlan({ requestId: 'research', spec: {
     title: 'Research', goal: 'Verify cost', nodes: [{ id: 'work', prompt: 'Read originals', researchRole: 'researcher', outputs: [{ name: 'research', kind: 'param', type: 'json', required: true }] }],
-    research: { line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'Verify cost' }], sources: [] },
+    research: { line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'Verify cost' }], sources: [{ id: 'cost', path: '/work/cost.txt' }] },
   } }, root)
   expect(plan.research?.assuranceVersion).toBe(2)
   expect(plan.research?.judgmentVersion).toBe(1)
+})
+
+test('web discovery cannot start a frozen research protocol without original sources', () => {
+  const spec = { title: 'Web research', goal: 'Check public reports', nodes: [
+    { id: 'research', prompt: 'Read web pages' },
+    { id: 'review', kind: 'verify', depends_on: ['research'], prompt: 'Independently read sources' },
+  ] }
+  expect(() => buildChatPlan({ requestId: 'web', spec: { ...spec,
+    research: { line: { id: 'main', question: 'Reports' }, dimensions: [{ id: 'reports', requirement: 'Check reports' }], sources: [] },
+  } }, root)).toThrow('local originals')
+  const plan = buildChatPlan({ requestId: 'web', spec }, root)
+  expect(plan.research).toBeUndefined()
+  expect(plan.nodes[1]?.kind).toBe('verify')
 })

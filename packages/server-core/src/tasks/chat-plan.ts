@@ -41,6 +41,9 @@ export function buildChatPlan(input: CreateTaskInput, root: {
     sources: candidate.sources ?? root.enabledSourceSlugs,
     defaults: { ...candidate.defaults, model: root.model, llmConnection: root.llmConnection, permissionMode: candidate.defaults?.permissionMode ?? permission },
   })
+  if (spec.research && !spec.research.sources.length) {
+    throw new Error('Frozen research requires existing local originals in research.sources. For open-web discovery, omit research and researchRole; use normal session nodes with WebSearch/WebFetch and an independent verify node. Source-backed research can start after original snapshots exist.')
+  }
   const validation = validateTaskSpec(spec)
   if (validation.errors.length) throw new Error(validation.errors.map(issue => issue.message).join('; '))
   return spec
