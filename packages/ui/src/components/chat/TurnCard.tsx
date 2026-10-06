@@ -2827,8 +2827,9 @@ export function ResponseCard({
           role={isProgress ? 'note' : undefined}
           data-response-kind={isProgress ? 'progress' : variant}
           className={cn("relative group transition-colors duration-200",
-            !isProgress && "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
+            isProgress ? "ml-[9px]" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
         >
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-0 top-5 size-3.5 text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
