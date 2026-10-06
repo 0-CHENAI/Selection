@@ -32,7 +32,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           '--pro-ink-progress': '100%',
           duration: reduced ? 0.15 : 1.1,
           ease: microScaleEase,
-        }, reduced ? 0.4 : 1.25)
+        }, reduced ? 0.25 : 1.1)
         .fromTo('.pro-identity-close', { autoAlpha: 0 }, {
           autoAlpha: 1,
           duration: reduced ? 0.15 : 0.2,
