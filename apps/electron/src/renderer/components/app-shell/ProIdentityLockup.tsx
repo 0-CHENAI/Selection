@@ -9,6 +9,9 @@ import wordmark from '@/assets/selection-wordmark.svg'
 
 gsap.registerPlugin(CustomEase)
 const microScaleEase = CustomEase.create('proMicroScaleFade', '0.32,0.72,0,1')
+// Smooth speed, acceleration, and jerk, including the transition through the peak.
+const edgeOrbitEase = (progress: number) =>
+  progress ** 4 * (35 + progress * (-84 + progress * (70 - 20 * progress)))
 
 export default function ProIdentityLockup({ open }: { open: boolean }) {
   const { t } = useTranslation()
@@ -38,9 +41,9 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
       if (!reduced) {
         animation.current
           .fromTo('.pro-identity-edge-trace', { opacity: 0, strokeDashoffset: 0 }, {
-            opacity: 1, duration: 0.12,
+            opacity: 1, duration: 0.12, ease: 'sine.inOut',
           }, 1.1)
-          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: 'power2.inOut' }, 1.1)
+          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: edgeOrbitEase }, 1.1)
           .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
       }
       animation.current.fromTo('.pro-identity-close', { autoAlpha: 0 }, {
@@ -53,7 +56,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
         duration: 6.4,
         delay: 2.9,
         repeat: -1,
-        ease: 'none',
+        ease: edgeOrbitEase,
         paused: !isOpen.current,
       })
     }, root)
