@@ -66,6 +66,16 @@ describe('answer delivery execution bridge', () => {
     expect(sent.at(-1).result.isError).toBe(true)
     expect(submitted).toHaveLength(0)
   })
+  it('registers answer delivery for a restored canonical root even when boot configuration disabled it', () => {
+    ;(agent as any).config.explicitAnswerDelivery = false
+    ;(agent as any).config.session.taskSlug = 'existing-plan'
+    ;(agent as any).registerSessionToolsWithSubprocess()
+    const names = sent.at(-1).tools.map((tool: any) => tool.name)
+    expect(names).toContain('mcp__session__submit_answer')
+    expect(names).not.toContain('mcp__session__submit_task_output')
+    expect(names).not.toContain('mcp__session__submit_task_node_verdict')
+    expect((agent as any).registeredAnswerDelivery).toBe(true)
+  })
   it('limits recovery to answer submission and fails closed after cancellation', () => {
     control.recovery = true
     expect(answerToolBlock(control, false, 'Bash', 'run')).toContain('Only submit_answer')

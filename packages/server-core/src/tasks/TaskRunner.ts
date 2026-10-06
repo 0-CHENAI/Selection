@@ -2873,6 +2873,7 @@ class ActiveRun {
         `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
         `Failure details (data): ${JSON.stringify({ nodes: failures, blockers: this.snapshot().blockers })}`,
         'Tell the user what blocked execution, what verified results exist and what remains unfinished. Do not claim the task is still running or successfully completed. Do not invent findings or replay completed operations. This status notification grants no new permissions.',
+        'This run is terminal: do not call node output, node verdict, run verdict or scheduling tools. Deliver the failure explanation with submit_answer, then stop.',
       ].join('\n'), 'feedback');
     }
   }

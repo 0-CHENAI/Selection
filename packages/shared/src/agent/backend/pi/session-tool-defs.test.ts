@@ -32,6 +32,16 @@ describe('resolveSessionToolProxyName', () => {
 });
 
 describe('getSessionToolProxyDefs', () => {
+  it('exposes node submissions only to assigned nodes, retaining root verification', () => {
+    const root = { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan' };
+    const rootNames = getSessionToolProxyDefs({ executionSession: root }).map(def => def.name);
+    const nodeNames = getSessionToolProxyDefs({ executionSession: { ...root, id: 'worker', parentSessionId: 'root', taskRunId: 'run', taskNodeId: 'review' } }).map(def => def.name);
+    for (const name of ['submit_task_output', 'submit_task_node_verdict', 'task_help']) {
+      expect(rootNames).not.toContain(`mcp__session__${name}`);
+      expect(nodeNames).toContain(`mcp__session__${name}`);
+    }
+    expect(rootNames).toContain('mcp__session__submit_task_verdict');
+  });
   it('exposes the managed artifact version tool to the model', () => {
     expect(getSessionToolProxyDefs().map(def => def.name)).toContain('mcp__session__artifact_versions');
   });

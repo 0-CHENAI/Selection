@@ -29,7 +29,7 @@ import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-r
 import { createTaskContextTool } from './task-context.ts';
 import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
-import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
+import { answerExecutionError, isAnswerTool, answerTurnToolNames } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -201,7 +201,7 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; answerCoordinationOnly?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | { type: 'model_request_granted'; requestId: string; error?: string }
@@ -382,7 +382,7 @@ let answerSdkMessageId: string | undefined;
 let answerBatchSize = 0;
 const answerBatchGate = new AnswerBatchGate();
 let answerSubmissionSdkMessageId: string | undefined;
-let answerRecoveryToolNames: string[] | undefined;
+let unscopedToolNames: string[] | undefined;
 
 const sourceGuideEventGate = new SourceGuideEventGate<OutboundAgentEvent>();
 
@@ -1777,7 +1777,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // we create a fresh session via continueRecent() with all tools known upfront.
     if (toolsChanged && piSession) {
       debugLog('Recreating session due to tool changes');
-      answerRecoveryToolNames = undefined; // The rebuilt session has the newly registered tool set.
+      unscopedToolNames = undefined; // The rebuilt session has the newly registered tool set.
       if (unsubscribeEvents) {
         unsubscribeEvents();
         unsubscribeEvents = null;
@@ -1787,14 +1787,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
 
     const session = await ensureSession();
-    if (answerRecoveryToolNames) {
-      session.setActiveToolsByName(answerRecoveryToolNames);
-      answerRecoveryToolNames = undefined;
+    if (unscopedToolNames) {
+      session.setActiveToolsByName(unscopedToolNames);
+      unscopedToolNames = undefined;
     }
-    if (answerRecovery) {
-      answerRecoveryToolNames = session.getActiveToolNames();
-      session.setActiveToolsByName(answerRecoveryToolNames.filter(isAnswerTool));
-    }
+    unscopedToolNames = session.getActiveToolNames();
+    session.setActiveToolsByName(answerTurnToolNames(unscopedToolNames, {
+      runId: answerRunId, recovery: answerRecovery, coordinationOnly: msg.answerCoordinationOnly,
+    }));
     // Force the Craft-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
     // SDK (see system-prompt-override.ts).

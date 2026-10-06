@@ -8916,9 +8916,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
     const state = managed.answerDelivery!
     const owner = managed.messages.find(message => message.id === state.userMessageId)
+    const runner = this.taskRunnerLookup?.(managed.workspace.id)
+    const run = owner?.hidden && owner.taskContext?.kind === 'feedback'
+      ? runner?.progressContext(managed.id) ?? (managed.taskSlug ? runner?.getLatestRun(managed.taskSlug) : undefined) : undefined
+    const failedTaskFeedback = run?.status === 'failed' && run.runId === owner?.taskContext?.runId
+      && run.orchestratorSessionId === managed.id
     return {
       runId: state.runId,
-      recovery: state.recovery,
+      recovery: state.recovery || failedTaskFeedback,
       coordinationOnly: !!owner?.hidden && owner.taskContext?.kind === 'coordination',
       isActive: () => managed.answerDelivery === state && managed.isProcessing
         && !state.persistenceFailed && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,

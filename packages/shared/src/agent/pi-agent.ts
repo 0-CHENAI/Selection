@@ -409,6 +409,7 @@ export class PiAgent extends BaseAgent {
   private _sessionToolContext: SessionToolContext | null = null;
   private answerDelivery: AnswerDeliveryControl | undefined;
   private answerAccepted = false;
+  private registeredAnswerDelivery = false;
 
   configurePresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
     this.config.presentationProtocol = protocol;
@@ -757,8 +758,17 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
+    this.registerSessionToolsWithSubprocess();
+
+    // If pool has source tools, register them with the subprocess.
+    this.sourceToolRegistrationReady = true;
+    this.registerPoolToolsWithSubprocess();
+  }
+
+  private registerSessionToolsWithSubprocess(): void {
     let sessionToolDefs = getSessionToolProxyDefs({ executionSession: this.config.session });
-    if (!this.config.explicitAnswerDelivery) {
+    const includeAnswerDelivery = !!this.answerDelivery || !!this.config.explicitAnswerDelivery;
+    if (!includeAnswerDelivery) {
       sessionToolDefs = sessionToolDefs.filter(def => !isSubmitAnswer(def.name));
     }
 
@@ -787,10 +797,7 @@ export class PiAgent extends BaseAgent {
       tools: sessionToolDefs,
     });
     this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess`);
-
-    // If pool has source tools, register them with the subprocess.
-    this.sourceToolRegistrationReady = true;
-    this.registerPoolToolsWithSubprocess();
+    this.registeredAnswerDelivery = includeAnswerDelivery;
   }
 
   /**
@@ -2614,6 +2621,9 @@ export class PiAgent extends BaseAgent {
       }
 
       if (!this._isProcessing || this.abortReason) return;
+      // A persisted or newly bound canonical root can acquire this protocol
+      // after its subprocess was created with native text answers.
+      if (this.answerDelivery && !this.registeredAnswerDelivery) this.registerSessionToolsWithSubprocess();
       const trimmedMessage = message.trim();
       const compactMatch = trimmedMessage.match(/^\/compact(?:\s+([\s\S]+))?$/i);
       if (compactMatch) {
@@ -2736,6 +2746,7 @@ export class PiAgent extends BaseAgent {
         presentationProtocol: this.config.presentationProtocol,
         answerRunId: this.answerDelivery?.runId,
         answerRecovery: this.answerDelivery?.recovery,
+        answerCoordinationOnly: this.answerDelivery?.coordinationOnly,
         id: turnId,
         message: userMessage,
         userTextOffset: userMessage.length - message.length,

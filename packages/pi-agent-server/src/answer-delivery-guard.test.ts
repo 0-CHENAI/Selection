@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'bun:test'
-import { answerExecutionError } from './answer-delivery-guard'
+import { answerExecutionError, answerTurnToolNames } from './answer-delivery-guard'
 
 describe('SDK answer delivery boundary', () => {
   const normal = { runId: 'run', accepted: false, recovery: false, batchSize: 1 }
+  it('switches between coordination, failure delivery and final verification tool sets', () => {
+    const tools = ['WebFetch', 'mcp__session__submit_orchestration_decision', 'mcp__session__submit_task_verdict', 'mcp__session__submit_answer']
+    expect(answerTurnToolNames(tools, { runId: 'run', coordinationOnly: true })).toEqual(tools.slice(0, -1))
+    expect(answerTurnToolNames(tools, { runId: 'run', recovery: true })).toEqual(['mcp__session__submit_answer'])
+    expect(answerTurnToolNames(tools, { runId: 'run' })).toEqual(tools)
+    expect(answerTurnToolNames(tools, {})).toEqual(tools.slice(0, -1))
+    expect(tools).toHaveLength(4)
+  })
   it('rejects an answer in a parallel batch, without blocking its business tools', () => {
     const batch = { ...normal, batchSize: 2 }
     expect(answerExecutionError(batch, 'mcp__session__submit_answer')).toContain('alone')

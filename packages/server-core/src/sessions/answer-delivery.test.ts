@@ -109,6 +109,31 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
   })
 
+  it('delivers a failed run explanation without offering more task submissions', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'failed'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => undefined,
+      getLatestRun: () => ({ orchestratorSessionId: managed.id, runId: 'canonical-run', status }) }) as never)
+    install(async function* () {
+      expect(control?.recovery).toBe(true)
+      await control!.submit({ ...submission, markdown: '研究节点失败，独立复核未完成；已完成的资料不重放。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '执行失败，请说明已知结果和未完成部分。', undefined, undefined,
+      { hidden: true, taskContext: { kind: 'feedback', runId: 'canonical-run' } })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+    status = 'waiting-approval'
+    install(async function* () {
+      expect(control?.recovery).toBe(false)
+      await control!.submit({ ...submission, markdown: '等待用户审批。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '审批反馈', undefined, undefined,
+      { hidden: true, taskContext: { kind: 'feedback', runId: 'canonical-run' } })
+  })
+
   it('does not recover or publish a final answer from an unfinished canonical checkpoint', async () => {
     managed.workMode = 'PRO'
     managed.taskSlug = 'canonical-plan'

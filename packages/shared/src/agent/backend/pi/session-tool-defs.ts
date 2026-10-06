@@ -52,6 +52,9 @@ export function getSessionToolProxyDefs(options?: { executionSession?: WorkModeS
   const defs = aliases.length > 0 ? [...prefixed, ...aliases] : prefixed;
   if (!options) return defs;
   return defs.filter(def => {
+    const name = def.name.replace(/^mcp__session__/, '');
+    if (['submit_task_output', 'submit_task_node_verdict', 'task_help'].includes(name)
+      && !(options.executionSession?.taskRunId && options.executionSession.taskNodeId)) return false;
     const capability = complexToolCapability(def.name);
     if (capability && (!FEATURE_FLAGS.tasksOrchestrate || complexCapabilityError(options.executionSession, capability))) return false;
     return !def.name.endsWith('update_task_list') || (!!options.executionSession && taskListAllowed(options.executionSession));
