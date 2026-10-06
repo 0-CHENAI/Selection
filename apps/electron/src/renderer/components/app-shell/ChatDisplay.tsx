@@ -1804,7 +1804,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               <div className={cn(
                 CHAT_LAYOUT.maxWidth,
                 "mx-auto min-w-0",
-                compactMode ? "w-full px-3 py-4 space-y-2 [overflow-wrap:anywhere]" : [CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing]
+                taskPreview ? "w-full px-5 py-5 space-y-3 [overflow-wrap:anywhere]" : compactMode ? "w-full px-3 py-4 space-y-2 [overflow-wrap:anywhere]" : [CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing]
               )}>
                 {/* Session-level AnimatePresence: Prevents layout jump when switching sessions */}
                 <AnimatePresence mode={compactMode ? "sync" : "wait"} initial={false}>

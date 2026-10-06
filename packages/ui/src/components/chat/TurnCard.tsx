@@ -1700,6 +1700,8 @@ export interface ResponseCardProps {
   isCommentary?: boolean
   /** An asynchronous task-start update, presented as a note rather than a final reply. */
   isTaskProgress?: boolean
+  /** Render child output directly on the preview surface instead of nesting a reply card. */
+  taskPreview?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1972,6 +1974,7 @@ export function ResponseCard({
   resolveAnnotationResult,
   isCommentary = false,
   isTaskProgress = false,
+  taskPreview = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const reduceArtifactMotion = useReducedMotion()
@@ -2827,7 +2830,7 @@ export function ResponseCard({
           role={isProgress ? 'note' : undefined}
           data-response-kind={isProgress ? 'progress' : variant}
           className={cn("relative group transition-colors duration-200",
-            isProgress ? "ml-[9px]" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
+            isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
         >
           {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-0 top-5 size-3.5 text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
@@ -2851,7 +2854,7 @@ export function ResponseCard({
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
-            className={cn("pl-[22px] pr-[16px]", isProgress ? "py-2 text-[13px] text-foreground/70" : "py-3 text-sm")}
+            className={cn(isProgress ? "pl-[22px] pr-4 py-2 text-[13px] text-foreground/70" : taskPreview && !isPlan ? "px-4 py-1 text-sm" : "pl-[22px] pr-4 py-3 text-sm")}
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
@@ -3397,12 +3400,12 @@ export const TurnCard = React.memo(function TurnCard({
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
     <div>
-      {assignmentSummary && (taskPreview ? <section className="mb-5 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
-        <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/60">
+      {assignmentSummary && (taskPreview ? <section className="mb-4 rounded-lg bg-foreground/[0.035] p-4 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/70">
           <CornerDownRight className="size-4 shrink-0 text-accent" aria-hidden="true" />
           {i18n.t('chat.taskContext.assignment.fromParent')}
         </h3>
-        <p className="mt-2 text-foreground/75">{assignmentSummary}</p>
+        <p className="mt-2 text-foreground/80">{assignmentSummary}</p>
       </section> : <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
         <CornerDownRight className="mt-1 size-4 shrink-0 text-accent" aria-hidden="true" />
         <span className="min-w-0 flex-1">
@@ -3621,7 +3624,7 @@ export const TurnCard = React.memo(function TurnCard({
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
               className={cn("select-text", showWorkChrome && "mt-3")}
             >
-              {taskPreview && <h3 className="mb-3 mt-5 flex items-center gap-2 text-xs font-medium text-foreground/60" data-task-output-heading>
+              {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
                 <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
               </h3>}
               <ResponseCard
@@ -3653,6 +3656,7 @@ export const TurnCard = React.memo(function TurnCard({
                 compactMode={compactMode}
                 isCommentary={showCommentary}
                 isTaskProgress={isTaskProgress}
+                taskPreview={taskPreview}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3679,7 +3683,7 @@ export const TurnCard = React.memo(function TurnCard({
           {/* Gap lives inside the tween; border-box padding on the tweened
               element would floor the collapsed height at the padding. */}
           <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
-          {taskPreview && <h3 className="mb-3 mt-5 flex items-center gap-2 text-xs font-medium text-foreground/60" data-task-output-heading>
+          {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
             <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
           </h3>}
           <ResponseCard
@@ -3711,6 +3715,7 @@ export const TurnCard = React.memo(function TurnCard({
             compactMode={compactMode}
             isCommentary={showCommentary}
             isTaskProgress={isTaskProgress}
+            taskPreview={taskPreview}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}

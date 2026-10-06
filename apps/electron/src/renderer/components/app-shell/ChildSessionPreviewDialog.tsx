@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { UsersRound, X } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 import { ChatDisplay } from '@/components/app-shell/ChatDisplay'
 import {
   Dialog,
@@ -63,7 +64,7 @@ export function ChildSessionPreviewDialog({
           {visible && <motion.div
             key="child-preview-backdrop"
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-10 bg-foreground/[0.06] dark:bg-black/25 backdrop-blur-[1.5px]"
+            className="pointer-events-none absolute inset-0 z-10 bg-foreground/[0.04] dark:bg-black/15"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -89,22 +90,18 @@ export function ChildSessionPreviewDialog({
             focus.previous.focus({ preventScroll: true })
           }
         }}
-        onPointerDownOutside={(event) => event.preventDefault()}
-        onInteractOutside={(event) => event.preventDefault()}
-        className="absolute inset-y-3 left-auto right-3 z-20 translate-x-0 translate-y-0 max-w-none sm:max-w-none w-[min(32rem,calc(100%-1.5rem))] p-0 gap-0 flex flex-col overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-right-2"
+        className="absolute top-3 left-auto right-3 z-20 translate-x-0 translate-y-0 max-w-none sm:max-w-none w-[min(36rem,calc(100%-1.5rem))] h-[min(34rem,calc(100%-1.5rem))] p-0 gap-0 flex flex-col overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-right-2"
       >
-        <DialogHeader className="relative px-6 py-5 border-b border-border/60 shrink-0 text-left">
-          <div className="flex items-start gap-3 pr-8">
-            <UsersRound className="mt-1 size-5 shrink-0 text-accent" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <DialogTitle className="text-base leading-6 [overflow-wrap:anywhere]">{title}</DialogTitle>
-              {status?.labelKey && <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
-                {t(status.labelKey)}
-              </span>}
-            </div>
+        <DialogHeader className="relative px-5 py-4 border-b border-border/60 shrink-0 text-left">
+          <div className="flex items-center gap-2.5 pr-8">
+            <UsersRound className="size-4 shrink-0 text-accent" aria-hidden="true" />
+            <DialogTitle className="min-w-0 flex-1 text-sm leading-6 [overflow-wrap:anywhere]">{title}</DialogTitle>
+            {status?.labelKey && <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
+              {t(status.labelKey)}
+            </span>}
           </div>
           <DialogDescription className="sr-only">{t('chat.viewOutput')}</DialogDescription>
-          <DialogClose className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
+          <DialogClose className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
             <X className="size-4" aria-hidden="true" />
             <span className="sr-only">{t('common.close')}</span>
           </DialogClose>
@@ -178,28 +175,30 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
   })
 
   return displaySession ? (
-    <ChatDisplay
-      key={displaySession.id}
-      session={displaySession}
-      onSendMessage={() => {}}
-      onOpenFile={openFile}
-      onOpenArtifact={openArtifact}
-      onOpenUrl={onOpenUrl}
-      currentModel={displaySession.model ?? ''}
-      onModelChange={() => {}}
-      pendingPermission={pendingPermission}
-      onRespondToPermission={onRespondToPermission}
-      pendingCredential={pendingCredential}
-      onRespondToCredential={onRespondToCredential}
-      compactMode
-      taskPreview
-      disableSend
-      hideComposer
-      showRecordNavigation={false}
-      enableFocusZone={false}
-      messagesLoading={loadState.messagesLoading}
-      emptyStateLabel={title}
-    />
+    <ResponseSourcesLayout key={displaySession.id} messages={displaySession.messages} onOpenUrl={onOpenUrl}>
+      <ChatDisplay
+        key={displaySession.id}
+        session={displaySession}
+        onSendMessage={() => {}}
+        onOpenFile={openFile}
+        onOpenArtifact={openArtifact}
+        onOpenUrl={onOpenUrl}
+        currentModel={displaySession.model ?? ''}
+        onModelChange={() => {}}
+        pendingPermission={pendingPermission}
+        onRespondToPermission={onRespondToPermission}
+        pendingCredential={pendingCredential}
+        onRespondToCredential={onRespondToCredential}
+        compactMode
+        taskPreview
+        disableSend
+        hideComposer
+        showRecordNavigation={false}
+        enableFocusZone={false}
+        messagesLoading={loadState.messagesLoading}
+        emptyStateLabel={title}
+      />
+    </ResponseSourcesLayout>
   ) : (
     <div className="h-full flex items-center justify-center text-sm text-foreground/60">
       {t('chat.sessionNoLongerExists')}
