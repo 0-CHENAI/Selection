@@ -1575,6 +1575,17 @@ function parseOrchestrationResult(content: string): Record<string, unknown> | nu
   return null
 }
 
+/** An asynchronous start acknowledgment is progress, even if its chat turn ended. */
+export function isTaskStartAcknowledgment(activities: ActivityItem[]): boolean {
+  const start = activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
+    && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
+  const result = start?.content ? parseOrchestrationResult(start.content) : null
+  return typeof result?.runId === 'string' && result.status === 'running'
+    && !activities.some(activity => activity.taskContext?.kind === 'verification' || activity.taskContext?.kind === 'feedback'
+      || activity.type === 'tool' && activity.status === 'completed'
+        && normalizeCraftSessionToolName(activity.toolName ?? '') === 'submit_task_verdict')
+}
+
 function truncateOneLine(text: string, max: number): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
   if (oneLine.length <= max) return oneLine

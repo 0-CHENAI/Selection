@@ -67,6 +67,7 @@ import {
   getActiveTurnPreview,
   countWorkRecords,
   isVisibleCommentaryCard,
+  isTaskStartAcknowledgment,
   isMirroredCommentaryActivity,
   shouldShowGenericThinkingIndicator,
   shouldShowThinkingIndicator,
@@ -1692,6 +1693,8 @@ export interface ResponseCardProps {
   resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
+  /** Hide the action row for task-start progress without changing the reply body. */
+  hideActions?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1962,6 +1965,7 @@ export function ResponseCard({
   annotationInteractionMode = 'interactive',
   resolveAnnotationResult,
   isCommentary = false,
+  hideActions = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const reduceArtifactMotion = useReducedMotion()
@@ -2035,7 +2039,7 @@ export function ResponseCard({
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
   const actionsVisible = useCompletionActions(
-    ((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan',
+    !hideActions && (((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan'),
     contentRef,
     responseText,
   )
@@ -2794,11 +2798,11 @@ export function ResponseCard({
   const bodyText = paced.text
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
-  const showCompletedChrome = (isCompleted && !isCommentary)
-    || variant === 'plan'
+  const showCompletedChrome = !hideActions && ((isCompleted && !isCommentary)
+    || variant === 'plan')
   // Hold the action-row height while the body is still arriving so the card
   // bottom does not jump when regenerate / copy / Markdown mount.
-  const reserveDesktopFooter = !compactMode && !isCommentary
+  const reserveDesktopFooter = !hideActions && !compactMode && !isCommentary
     && (showCompletedChrome || (isStreaming && variant === 'response'))
 
   // Keep one content tree throughout streaming and completion. Only chrome
@@ -3146,6 +3150,7 @@ export const TurnCard = React.memo(function TurnCard({
     isComplete,
     hasRunningTools,
   )
+  const hideResponseActions = !response?.isPlan && isTaskStartAcknowledgment(activities)
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -3618,6 +3623,7 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
+                hideActions={hideResponseActions}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3671,6 +3677,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
+            hideActions={hideResponseActions}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
