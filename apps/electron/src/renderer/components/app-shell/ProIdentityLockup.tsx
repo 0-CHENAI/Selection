@@ -35,23 +35,23 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           duration: reduced ? 0.15 : 1.1,
           ease: microScaleEase,
         }, reduced ? 0.25 : 1.1)
-        .fromTo('.pro-identity-close', { autoAlpha: 0 }, {
-          autoAlpha: 1,
-          duration: reduced ? 0.15 : 0.2,
-          ease: 'power2.out',
-        }, '+=0.5')
       if (!reduced) {
         animation.current
           .fromTo('.pro-identity-edge-trace', { opacity: 0, strokeDashoffset: 0 }, {
             opacity: 1, duration: 0.12,
           }, 1.1)
-          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.1, ease: 'power2.inOut' }, 1.1)
-          .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.2 }, 2)
+          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: 'sine.inOut' }, 1.1)
+          .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
       }
+      animation.current.fromTo('.pro-identity-close', { autoAlpha: 0 }, {
+        autoAlpha: 1,
+        duration: reduced ? 0.15 : 0.2,
+        ease: 'power2.out',
+      }, '+=0.5')
       light.current = reduced ? null : gsap.to('.pro-identity-reflection', {
         attr: { gradientTransform: 'rotate(332 84 27)' },
         duration: 6.4,
-        delay: 2.2,
+        delay: 2.9,
         repeat: -1,
         ease: 'none',
         paused: !isOpen.current,
