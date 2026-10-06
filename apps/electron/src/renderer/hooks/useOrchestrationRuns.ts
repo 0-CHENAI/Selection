@@ -1,8 +1,10 @@
 import * as React from 'react'
+import { atom, useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { isActiveTaskRunStatus, isTaskRunEventForProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { collectOrchestrationResearchSources, isActiveTaskRunStatus, isTaskRunEventForProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { ensureSessionMessagesLoadedAtom, sessionAtomFamily } from '@/atoms/sessions'
 
 /** Feed the transcript's work chains without adding a second navigation surface. */
 export function useOrchestrationRuns(workspaceId?: string | null, taskSlug?: string, sessionId?: string | null) {
@@ -12,6 +14,15 @@ export function useOrchestrationRuns(workspaceId?: string | null, taskSlug?: str
   const [retrying, setRetrying] = React.useState(false)
   const retryInFlight = React.useRef(false)
   const runs = state.key === key ? state.runs : []
+  const workerIdsKey = JSON.stringify([...new Set(runs.flatMap(run => run.nodes.flatMap(node => node.sessionId ? [node.sessionId] : [])))])
+  const workerIds: string[] = React.useMemo(() => JSON.parse(workerIdsKey), [workerIdsKey])
+  const workerSessionsAtom = React.useMemo(() => atom(get => workerIds.map(id => get(sessionAtomFamily(id)))), [workerIds])
+  const workers = useAtomValue(workerSessionsAtom)
+  const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
+  React.useEffect(() => {
+    for (const id of workerIds) void ensureMessagesLoaded(id).catch(error => console.warn('[Sources] Failed to load worker sources:', error))
+  }, [workerIds, ensureMessagesLoaded])
+  const sourcesByRun = React.useMemo(() => new Map(runs.map(run => [run.runId, collectOrchestrationResearchSources(run, workers, runs)])), [runs, workers])
 
   React.useEffect(() => {
     setState({ key, runs: [] })
@@ -49,5 +60,5 @@ export function useOrchestrationRuns(workspaceId?: string | null, taskSlug?: str
     } catch { toast.error(t('tasks.toastRunFailed')) }
     finally { retryInFlight.current = false; setRetrying(false) }
   }
-  return { runs, retry: canRetry ? retry : undefined, retrying }
+  return { runs, sourcesByRun, retry: canRetry ? retry : undefined, retrying }
 }

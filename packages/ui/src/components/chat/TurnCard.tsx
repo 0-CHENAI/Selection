@@ -1,6 +1,6 @@
 import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
 import { ResponseSources } from './ResponseSources'
-import { extractResponseSources } from './response-sources'
+import { extractResponseSources, type ResponseSource } from './response-sources'
 import { taskAssignmentSummary } from './task-message-presentation'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
@@ -360,6 +360,8 @@ export interface TurnCardProps {
   turnId: string
   /** All activities in this turn (tools, thinking, intermediate text) */
   activities: ActivityItem[]
+  /** Sources retrieved by workers belonging to this execution. */
+  researchSources?: ResponseSource[]
   /** Final response content (may be streaming) */
   response?: ResponseContent
   /** Primary intent/goal for this turn (shown in collapsed preview) */
@@ -1632,6 +1634,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 export interface ResponseCardProps {
   artifactVersions?: ResponseContent['artifactVersions']
   researchActivities?: ActivityItem[]
+  researchSources?: ResponseSource[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
@@ -1936,6 +1939,7 @@ function applyTextHighlightRange(
 export function ResponseCard({
   artifactVersions,
   researchActivities,
+  researchSources,
   text,
   isAnswerPreview = false,
   completedRevealStartTime,
@@ -1978,7 +1982,11 @@ export function ResponseCard({
   const canCollectSources = variant === 'response' && !isCommentary && !isAnswerPreview
   const showArtifacts = canCollectSources
     && !isStreaming && (isTurnComplete ?? true)
-  const turnSources = useMemo(() => collectTurnResearchSources(researchActivities ?? []), [researchActivities])
+  const turnSources = useMemo(() => {
+    const merged = new Map((researchSources ?? []).map(source => [sourceUrlKey(source.url), source]))
+    for (const source of collectTurnResearchSources(researchActivities ?? [])) merged.set(sourceUrlKey(source.url), source)
+    return [...merged.values()]
+  }, [researchActivities, researchSources])
   const sourceEvidence = useMemo(() => new Set(turnSources.map(source => sourceUrlKey(source.url))), [turnSources])
   const sourceSummary = useMemo(
     () => canCollectSources ? extractResponseSources(parsedSkillUsage.content, sourceEvidence, isStreaming) : { content: parsedSkillUsage.content, sources: [] },
@@ -3106,6 +3114,7 @@ export const TurnCard = React.memo(function TurnCard({
   sessionId,
   turnId,
   activities,
+  researchSources,
   response,
   intent,
   isComplete,
@@ -3612,6 +3621,7 @@ export const TurnCard = React.memo(function TurnCard({
                 text={response.text}
             artifactVersions={response.artifactVersions}
                 researchActivities={activities}
+                researchSources={researchSources}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
                 isTurnComplete={isComplete}
@@ -3669,6 +3679,7 @@ export const TurnCard = React.memo(function TurnCard({
             text={response.text}
             artifactVersions={response.artifactVersions}
             researchActivities={activities}
+            researchSources={researchSources}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
             isTurnComplete={isComplete}
@@ -3739,6 +3750,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false
+  if (prev.researchSources !== next.researchSources) return false
   if (prev.workControls !== next.workControls) return false
 
   // Re-render when response object changes (e.g., annotation updates)

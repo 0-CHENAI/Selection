@@ -1,11 +1,45 @@
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import type { ActivityItem, Turn } from '@craft-agent/ui'
+import type { Message } from '@craft-agent/core'
+import { collectTurnResearchSources, sourceUrlKey, type ResponseSource } from '@craft-agent/ui/chat'
 import { taskAssignmentSummary } from '@craft-agent/ui/chat/task-message-presentation'
 import { overlayState } from './conductor-graph'
 import { resolveNodeStatePill } from './node-state-pill'
 import { runStatusLabelKey } from './task-labels'
 
 const TERMINAL_TASK_RUN_STATUSES = new Set(['completed', 'failed', 'stopped'])
+
+/** Only successful reads by this run's current workers contribute to its parent answer. */
+export function collectOrchestrationResearchSources(
+  run: TaskRunSnapshotDto,
+  sessions: Array<{ id: string; parentSessionId?: string; taskRunId?: string; messages: Message[] } | null>,
+  runs: TaskRunSnapshotDto[] = [run],
+): ResponseSource[] {
+  const sources = new Map<string, ResponseSource>()
+  for (const session of sessions) {
+    if (!session || session.parentSessionId !== run.orchestratorSessionId) continue
+    const nodes = run.nodes.filter(node => node.sessionId === session.id)
+    if (!nodes.length) continue
+    const starts = nodes.flatMap(node => Number.isFinite(node.startedAt) ? [node.startedAt!] : [])
+    const start = starts.length ? Math.min(...starts) : undefined
+    // Reused actors must not leak later/earlier runs into this historical answer.
+    if (start === undefined && session.taskRunId !== run.runId) continue
+    const nextStart = Math.min(...runs.filter(other => other.runId !== run.runId).flatMap(other => other.nodes
+      .filter(node => node.sessionId === session.id && node.startedAt !== undefined && node.startedAt > (start ?? Infinity))
+      .map(node => node.startedAt!)))
+    const activities = session.messages.filter(message => message.role === 'tool'
+      && (start === undefined || message.timestamp >= start) && message.timestamp < nextStart).map(message => ({
+      type: 'tool', status: message.isError ? 'error' : message.toolStatus ?? 'pending', toolName: message.toolName,
+      toolInput: message.toolInput, content: message.toolResult || message.content,
+    }))
+    for (const source of collectTurnResearchSources(activities)) {
+      const url = sourceUrlKey(source.url)
+      const previous = sources.get(url)
+      sources.set(url, { ...source, title: source.title === source.hostname ? previous?.title ?? source.title : source.title })
+    }
+  }
+  return [...sources.values()]
+}
 
 export interface SpecProgressNode {
   id: string

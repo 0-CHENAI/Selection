@@ -29,3 +29,5 @@ export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attach
 export { AcceptPlanDropdown } from './AcceptPlanDropdown'
 
 export { ResponseSourcesLayout } from './ResponseSourcesLayout'
+export { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
+export type { ResponseSource } from './response-sources'

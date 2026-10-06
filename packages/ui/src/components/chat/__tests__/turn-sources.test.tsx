@@ -4,16 +4,18 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { TooltipProvider } from '../../tooltip'
 import { ResponseSourcesLayout } from '../ResponseSourcesLayout'
 import type { ActivityItem } from '../TurnCard'
+import type { ResponseSource } from '../response-sources'
 mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.worker.mjs' }))
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 let TurnCard: typeof import('../TurnCard').TurnCard
 beforeAll(async () => { ({ TurnCard } = await import('../TurnCard')) })
 
-function render(animateResponse: boolean, researched: boolean, text = '调查结论', streaming = false, activities?: ActivityItem[]) {
+function render(animateResponse: boolean, researched: boolean, text = '调查结论', streaming = false, activities?: ActivityItem[], researchSources?: ResponseSource[]) {
   return renderToStaticMarkup(
     <TooltipProvider>
       <ResponseSourcesLayout messages={[{ role: 'tool', toolName: 'WebFetch', content: 'Content from https://old.example.com:\n\n上一轮网页' }]}>
         <TurnCard turnId="sources-regression" isStreaming={streaming} isComplete={!streaming} animateResponse={animateResponse}
+          researchSources={researchSources}
           activities={activities ?? (researched ? [{ id: 'fetch', type: 'tool', status: 'completed', timestamp: 1, toolName: 'WebFetch', toolInput: { url: 'https://example.com' }, content: 'Content from https://example.com:\n\n本轮网页' }] : [])}
           response={{ text, isStreaming: streaming }} />
       </ResponseSourcesLayout>
@@ -22,6 +24,18 @@ function render(animateResponse: boolean, researched: boolean, text = '调查结
 }
 it('renders the source shelf in both app and animated paths without an explicit bibliography', () => {
   for (const animated of [false, true]) expect(render(animated, true)).toContain('chat.sourcesLabel')
+})
+it('shows worker sources on the parent answer without copying worker tools into its work chain', () => {
+  const sources = [{ url: 'https://worker.example.com', hostname: 'worker.example.com', title: '子代理查阅资料', description: '实际返回的资料摘要' }]
+  for (const animated of [false, true]) {
+    const html = render(animated, false, '父代理汇总答复', false, [], sources)
+    expect(html).toContain('chat.sourcesLabel')
+    expect(html).toContain('worker.example.com')
+    expect(html).not.toContain('old.example.com')
+  }
+  const hidden = render(false, false, '汇总中', true, [], sources)
+  expect(hidden).toContain('opacity:0')
+  expect(hidden).toMatch(/data-response-sources[^]*?<button[^>]*disabled=""/)
 })
 it('renders sources for a PRO answer that reads handover web snapshots', () => {
   const activities: ActivityItem[] = [{ id: 'read', type: 'tool', status: 'completed', timestamp: 1,

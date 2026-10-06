@@ -893,6 +893,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   swarmToggleDisabled={swarmToggleDisabled}
                   swarmRunning={orchestrationStatus === 'running'}
                   orchestrationRuns={orchestration.runs}
+                  orchestrationSources={orchestration.sourcesByRun}
                   orchestrationWorkControls={orchestrationWorkControls}
                   workspaceId={activeWorkspaceId || undefined}
                   onSourcesChange={handleSourcesChange}
@@ -983,6 +984,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               swarmToggleDisabled={swarmToggleDisabled}
               swarmRunning={orchestrationStatus === 'running'}
               orchestrationRuns={orchestration.runs}
+              orchestrationSources={orchestration.sourcesByRun}
               orchestrationWorkControls={orchestrationWorkControls}
               workspaceId={activeWorkspaceId || undefined}
               onSourcesChange={handleSourcesChange}

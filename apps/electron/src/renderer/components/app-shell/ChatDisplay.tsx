@@ -55,6 +55,7 @@ import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequ
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
+import type { ResponseSource } from '@craft-agent/ui/chat'
 import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
@@ -236,6 +237,7 @@ interface ChatDisplayProps {
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
   orchestrationRuns?: TaskRunSnapshotDto[]
+  orchestrationSources?: ReadonlyMap<string, ResponseSource[]>
   /** Run controls live inside the latest execution's collapsed work chain. */
   orchestrationWorkControls?: React.ReactNode
   /** Workspace ID for loading skill icons */
@@ -543,6 +545,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   swarmToggleDisabled = false,
   swarmRunning = false,
   orchestrationRuns,
+  orchestrationSources,
   orchestrationWorkControls,
   workspaceId,
   // Working directory
@@ -2043,6 +2046,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}
                         activities={turn.activities}
+                        researchSources={turn.taskRunId ? orchestrationSources?.get(turn.taskRunId) : undefined}
                         workControls={turn.taskRunId === orchestrationRuns?.at(-1)?.runId && turn.activities.some(activity => activity.taskNode) ? orchestrationWorkControls : undefined}
                         response={turn.response}
                         intent={turn.intent}

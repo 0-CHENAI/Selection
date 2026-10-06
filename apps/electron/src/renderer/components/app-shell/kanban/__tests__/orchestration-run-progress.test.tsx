@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import {
   buildOrchestrationProgressRows,
+  collectOrchestrationResearchSources,
   canPreviewOrchestrationChild,
   countFinishedProgressRows,
   isActiveTaskRunStatus,
@@ -12,6 +13,7 @@ import {
   withOrchestrationProgress,
 } from '../orchestration-run-progress'
 import type { Turn } from '@craft-agent/ui'
+import type { Message } from '@craft-agent/core'
 
 function snapshot(partial: Partial<TaskRunSnapshotDto> = {}): TaskRunSnapshotDto {
   return {
@@ -32,6 +34,33 @@ function node(partial: Partial<TaskNodeRunStateDto> & Pick<TaskNodeRunStateDto, 
     ...partial,
   }
 }
+
+it('collects distinct successful worker sources for the owning run, including reloaded history', () => {
+  const fetch = (url: string, timestamp: number, partial: Partial<Message> = {}): Message => ({
+    id: `${url}-${timestamp}`, role: 'tool', timestamp, content: 'Running WebFetch...', toolName: 'WebFetch',
+    toolStatus: 'completed', toolInput: { url }, toolResult: `Content from ${url}:\n\nActual source text.`, ...partial,
+  })
+  const run = snapshot({ orchestratorSessionId: 'parent', nodes: [
+    node({ id: 'read', sessionId: 'actor', startedAt: 10 }), node({ id: 'review', sessionId: 'reviewer' }),
+  ] })
+  const sessions = [null,
+    { id: 'actor', parentSessionId: 'parent', taskRunId: 'run-2', messages: [
+      fetch('https://earlier.example.com', 5), fetch('https://example.com/page#first', 11),
+      fetch('https://example.com/page#second', 12), fetch('https://failed.example.com', 13, { isError: true }),
+      fetch('https://pending.example.com', 14, { toolStatus: 'executing' }),
+      fetch('https://later.example.com', 21),
+    ] },
+    { id: 'reviewer', parentSessionId: 'parent', taskRunId: 'run-1', messages: [fetch('https://verified.example.com', 15)] },
+    { id: 'unrelated', parentSessionId: 'parent', messages: [fetch('https://unrelated.example.com', 15)] },
+  ]
+  const nextRun = snapshot({ runId: 'run-2', orchestratorSessionId: 'parent', nodes: [node({ id: 'next', sessionId: 'actor', startedAt: 20 })] })
+  const sources = collectOrchestrationResearchSources(run, sessions, [run, nextRun])
+  expect(sources.map(source => source.url)).toEqual(['https://example.com/page', 'https://verified.example.com/'])
+  expect(sources[0]?.description).toBe('Actual source text.')
+  expect(collectOrchestrationResearchSources({ ...run, orchestratorSessionId: 'other' }, sessions)).toEqual([])
+  expect(collectOrchestrationResearchSources(run, sessions.map(session => session?.id === 'reviewer' ? { ...session, taskRunId: 'other' } : session), [run, nextRun])).toHaveLength(1)
+  expect(collectOrchestrationResearchSources(nextRun, sessions, [run, nextRun]).map(source => source.hostname)).toEqual(['later.example.com'])
+})
 
 describe('inline orchestration progress', () => {
   it('shows the selected worker state without mistaking a previous attempt for a completed retry', () => {
