@@ -40,7 +40,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           .fromTo('.pro-identity-edge-trace', { opacity: 0, strokeDashoffset: 0 }, {
             opacity: 1, duration: 0.12,
           }, 1.1)
-          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: 'sine.inOut' }, 1.1)
+          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: 'power2.inOut' }, 1.1)
           .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
       }
       animation.current.fromTo('.pro-identity-close', { autoAlpha: 0 }, {
