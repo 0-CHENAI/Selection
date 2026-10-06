@@ -38,6 +38,10 @@
   stroke-width: 0.25;
   paint-order: stroke fill;
 }
+.pro-identity-edge-trace {
+  opacity: 0;
+  filter: drop-shadow(0 0.5px 0.7px var(--pro-accent));
+}
 .pro-identity-backdrop[data-state="closed"],
 .pro-identity-content[data-state="closed"] {
   animation: pro-identity-exit 240ms ease-out both;

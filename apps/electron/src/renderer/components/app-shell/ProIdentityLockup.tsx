@@ -40,10 +40,18 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           duration: reduced ? 0.15 : 0.2,
           ease: 'power2.out',
         }, '+=0.5')
+      if (!reduced) {
+        animation.current
+          .fromTo('.pro-identity-edge-trace', { opacity: 0, strokeDashoffset: 0 }, {
+            opacity: 1, duration: 0.12,
+          }, 1.1)
+          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.1, ease: 'none' }, 1.1)
+          .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.2 }, 2)
+      }
       light.current = reduced ? null : gsap.to('.pro-identity-reflection', {
         attr: { gradientTransform: 'rotate(332 84 27)' },
         duration: 6.4,
-        delay: 1.1,
+        delay: 2.2,
         repeat: -1,
         ease: 'none',
         paused: !isOpen.current,
@@ -93,6 +101,8 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
               <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
               <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
               <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />
+              <use href={`#${glassId}-glyph`} className="pro-identity-edge-trace" fill="none"
+                stroke="var(--pro-glass-reflection)" strokeWidth="1.1" strokeLinecap="round" strokeDasharray="18 78" />
             </svg>
           </div>
         </div>
