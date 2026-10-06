@@ -17,7 +17,8 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
         <Dialog.Overlay className="pro-identity-backdrop fixed inset-0 z-modal" />
         <Dialog.Content
           className="pro-identity-content fixed inset-0 z-modal flex select-none items-center justify-center p-6 outline-none"
-          onPointerDown={event => { if (event.target === event.currentTarget) onOpenChange(false) }}
+          onEscapeKeyDown={event => event.preventDefault()}
+          onInteractOutside={event => event.preventDefault()}
           onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }}
         >
           <Dialog.Title className="sr-only">Selection PRO</Dialog.Title>

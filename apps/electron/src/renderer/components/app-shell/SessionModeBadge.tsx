@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -13,12 +13,11 @@ function ProModeBadge() {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const clicks = useRef({ count: 0, at: 0 })
-  const reveal = (event: MouseEvent<HTMLButtonElement>) => {
+  const reveal = () => {
     const at = performance.now()
-    const count = at - clicks.current.at <= 500 ? clicks.current.count + 1 : 1
+    const count = at - clicks.current.at <= 1000 ? clicks.current.count + 1 : 1
     clicks.current = { count, at }
-    // Keyboard and assistive activation keep the standard one-press button behavior.
-    if (event.detail === 0 || count === 3) {
+    if (count === 3) {
       clicks.current = { count: 0, at: 0 }
       setOpen(true)
     }
