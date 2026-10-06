@@ -11168,7 +11168,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, sessionId))
         if (saved.kind === 'corrupt' || saved.kind === 'unsupported') throw new Error(`Execution ${sessionId} checkpoint requires inspection`)
         if (saved.kind === 'ok' && Object.values(saved.checkpoint.pendingTools).some(tool => tool.recovery !== 'read-only' || toolRecoveryClass(tool.name) !== 'read-only')) throw new Error(`Execution ${sessionId} has unknown side effects; review the actual operation outcome before retry or successor execution`)
-        if (this.hasPreparedTaskDelivery(sessionId)) throw new Error(`Execution ${sessionId} has an unsettled artifact delivery`)
+        // A completed receipt freezes this context, but does not block a new
+        // attempt. Only delivery whose outcome is still unsettled blocks it.
+        const delivery = managed.isolatedWorkspace
+        if (delivery?.pendingDelivery || delivery?.delivery && delivery.status !== 'integrated') throw new Error(`Execution ${sessionId} has an unsettled artifact delivery`)
       } finally { release() }
     }
   }

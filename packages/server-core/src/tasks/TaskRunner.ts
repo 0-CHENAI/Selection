@@ -626,7 +626,8 @@ class ActiveRun {
   private restorePreparedDeliveries(): void {
     if (this.spec.execution?.artifact_delivery !== 1) return;
     for (const [nodeId, st] of [...this.state, ...this.instances]) {
-      if (st.state !== 'pending' || !st.sessionId || !this.deps.host.hasPreparedTaskDelivery?.(st.sessionId)) continue;
+      if (st.state !== 'pending' || !st.sessionId || this.integratedSessions.has(st.sessionId)
+        || !this.deps.host.hasPreparedTaskDelivery?.(st.sessionId)) continue;
       let output: NodeOutput | null;
       try {
         output = readNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.sessionId, st.attempt);
@@ -795,6 +796,7 @@ class ActiveRun {
         if (e.sessionId) this.artifactInputs.set(e.sessionId, e.inputs);
         else this.controlArtifactInputs.set(e.nodeId, e.inputs);
       } else if (e.kind === 'node-spawned') {
+        this.integratedSessions.delete(e.sessionId);
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
@@ -814,6 +816,7 @@ class ActiveRun {
           if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
         }
       } else if (e.kind === 'node-finished') {
+        if (e.state === 'done' && e.sessionId && loadOutput(e.nodeId)?.integratedArtifacts) this.integratedSessions.add(e.sessionId);
         if (e.state !== 'interrupted') this.deferredCompletions.delete(e.nodeId);
         if (e.resultEvent) { this.resultEvents.set(e.resultEvent.id, e.resultEvent); this.plannerPhase = 'active'; }
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);

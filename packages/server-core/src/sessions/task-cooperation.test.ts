@@ -59,6 +59,27 @@ test('production spawn lifecycle preserves canonical worker binding and cannot e
   } finally { enabled.mockRestore(); manager.cleanup(); rmSync(path, { recursive: true, force: true }) }
 })
 
+test('settled artifact delivery permits a new attempt but keeps the old actor context frozen', () => {
+  const path = mkdtempSync(join(tmpdir(), 'task-delivery-safe-point-'))
+  const manager = new SessionManager(), internal = manager as any
+  const workspace = { id: 'delivery-safe-point', name: 'Workspace', slug: 'workspace', rootPath: path, createdAt: 0 }
+  const worker = createManagedSession({ id: 'worker', workMode: 'PRO' }, workspace, { messagesLoaded: true })
+  internal.sessions.set(worker.id, worker)
+  const receipt = { version: 1 as const, outputs: {}, hashes: {}, checks: [] }
+  worker.isolatedWorkspace = { version: 1, id: 'candidate', sourceRoot: path, directory: path,
+    kind: 'files', inputs: {}, status: 'integrated', delivery: receipt }
+  try {
+    expect(() => manager.assertTaskSafePoint([worker.id])).not.toThrow()
+    expect(manager.hasPreparedTaskDelivery(worker.id)).toBe(true)
+    expect(manager.canReuseTaskSession(worker.id)).toBe(false)
+    worker.isolatedWorkspace.pendingDelivery = receipt
+    expect(() => manager.assertTaskSafePoint([worker.id])).toThrow('unsettled artifact delivery')
+    delete worker.isolatedWorkspace.pendingDelivery
+    worker.isolatedWorkspace.status = 'candidate'
+    expect(() => manager.assertTaskSafePoint([worker.id])).toThrow('unsettled artifact delivery')
+  } finally { manager.cleanup(); rmSync(path, { recursive: true, force: true }) }
+})
+
 test('actor context reuse requires original read bytes and refuses unverifiable external context', () => {
   const path = mkdtempSync(join(tmpdir(), 'actor-source-'))
   const manager = new SessionManager(), internal = manager as any

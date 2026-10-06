@@ -2489,6 +2489,32 @@ describe('TaskRunner (Conductor)', () => {
     original.stop('resume-delivery', 'r1');
   });
 
+  it.each([false, true])('does not restore a completed delivery into an invalidated retry (restart=%s)', async restart => {
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.hasPreparedTaskDelivery = id => id === 'sess-report';
+    let deliveries = 0;
+    host.finalizeTaskWorkspace = async () => { deliveries++; return {}; };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'settled-retry', title: 'Retry', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' },
+      nodes: [{ id: 'input', permissionMode: 'safe', prompt: 'read' },
+        { id: 'report', permissionMode: 'allow-all', trigger: 'all_done', depends_on: ['input'], prompt: '${nodes.input.output}' }] }));
+    let runner = makeRunner(); runner.run('settled-retry', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('input', { reason: 'error' }); await tick();
+    host.complete('report', { finalText: 'old failure report' }); await tick();
+    expect(runner.getRunState('settled-retry', 'r1')!.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('settled-retry', 'r1'); await tick();
+    expect(deliveries).toBe(1);
+    expect(runner.getRunState('settled-retry', 'r1')!.nodes.find(node => node.id === 'report')!.state).not.toBe('done');
+    host.complete('input', { finalText: 'recovered input' }); await tick();
+    expect(host.dispatchedNames().filter(name => name === 'report')).toHaveLength(2);
+    expect(host.sent.filter(message => message.sessionId === 'sess-report').at(-1)!.message).toContain('recovered input');
+    host.complete('report', { finalText: 'new report' }); await tick();
+    expect(deliveries).toBe(2);
+    expect(runner.getRunState('settled-retry', 'r1')!.status).toBe('completed');
+  });
+
   it('does not turn an integration failure into a new worker even with automatic retry', async () => {
     writeFileSync(join(root, 'candidate.txt'), 'candidate');
     host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
