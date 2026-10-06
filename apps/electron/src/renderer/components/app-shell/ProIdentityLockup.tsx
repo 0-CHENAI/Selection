@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useId, useLayoutEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { gsap } from 'gsap'
 import { CustomEase } from 'gsap/CustomEase'
@@ -15,6 +15,8 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
   const root = useRef<HTMLDivElement>(null)
   const isOpen = useRef(open)
   const animation = useRef<gsap.core.Timeline | null>(null)
+  const light = useRef<gsap.core.Tween | null>(null)
+  const glassId = useId()
 
   useLayoutEffect(() => {
     const media = gsap.matchMedia()
@@ -38,10 +40,19 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           duration: reduced ? 0.15 : 0.2,
           ease: 'power2.out',
         }, '+=0.5')
+      light.current = reduced ? null : gsap.to('.pro-identity-reflection', {
+        attr: { gradientTransform: 'rotate(332 84 27)' },
+        duration: 6.4,
+        delay: 1.1,
+        repeat: -1,
+        ease: 'none',
+        paused: !isOpen.current,
+      })
     }, root)
     return () => {
       media.revert()
       animation.current = null
+      light.current = null
     }
   }, [])
 
@@ -49,6 +60,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
     isOpen.current = open
     // Keep the current reveal frame while Radix retains the fading dialog.
     animation.current?.paused(!open)
+    light.current?.paused(!open)
   }, [open])
 
   return (
@@ -60,7 +72,27 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           <div className="pro-identity-label flex items-center">
             <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
             <svg className="pro-identity-mode font-cathalie" viewBox="32 10 104 34">
-              <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
+              <defs>
+                <text id={`${glassId}-glyph`} x="84" y="40" textAnchor="middle">PRO</text>
+                <linearGradient id={`${glassId}-body`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="var(--pro-glass-highlight)" />
+                  <stop offset="0.24" stopColor="currentColor" stopOpacity="0.85" />
+                  <stop offset="0.47" stopColor="var(--pro-glass-highlight)" stopOpacity="0.8" />
+                  <stop offset="0.54" stopColor="currentColor" stopOpacity="0.42" />
+                  <stop offset="0.8" stopColor="currentColor" stopOpacity="0.95" />
+                  <stop offset="1" stopColor="var(--pro-glass-highlight)" />
+                </linearGradient>
+                <linearGradient id={`${glassId}-light`} className="pro-identity-reflection"
+                  gradientUnits="userSpaceOnUse" x1="32" y1="27" x2="136" y2="27" gradientTransform="rotate(-28 84 27)">
+                  <stop offset="0.45" stopColor="var(--pro-glass-reflection)" stopOpacity="0" />
+                  <stop offset="0.72" stopColor="var(--pro-glass-reflection)" stopOpacity="0.3" />
+                  <stop offset="0.84" stopColor="var(--pro-glass-reflection)" />
+                  <stop offset="1" stopColor="var(--pro-glass-reflection)" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
+              <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
+              <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />
             </svg>
           </div>
         </div>

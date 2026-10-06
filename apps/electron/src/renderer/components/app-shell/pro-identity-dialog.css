@@ -23,15 +23,20 @@
   height: auto;
   flex-shrink: 0;
   transform: translateY(3px);
-  color: var(--pro-accent);
+  --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 72%, white);
+  --pro-glass-reflection: color-mix(in srgb, var(--pro-accent) 10%, white);
+  /* Keep the ink reveal in CSS so GSAP never has to parse OKLCH colors. */
+  color: color-mix(in srgb, var(--muted-foreground), var(--pro-accent) var(--pro-ink-progress, 100%));
   overflow: visible;
   font-size: 34px;
   font-weight: 400;
   letter-spacing: 0.22em;
 }
-.pro-identity-fill {
-  /* Mix theme tokens in CSS so GSAP never has to parse OKLCH colors. */
-  fill: color-mix(in srgb, var(--muted-foreground), currentColor var(--pro-ink-progress, 100%));
+.dark .pro-identity-mode { --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 18%, white); }
+.pro-identity-glass {
+  stroke: color-mix(in srgb, currentColor 70%, var(--pro-glass-highlight));
+  stroke-width: 0.25;
+  paint-order: stroke fill;
 }
 .pro-identity-backdrop[data-state="closed"],
 .pro-identity-content[data-state="closed"] {
