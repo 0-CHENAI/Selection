@@ -110,6 +110,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
                 </linearGradient>
               </defs>
               <g className="pro-identity-ink">
+                <use href={`#${glassId}-glyph`} fill="currentColor" className="pro-identity-base" />
                 <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
                 <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
                 <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />

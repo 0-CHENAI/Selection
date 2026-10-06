@@ -30,25 +30,35 @@ body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
   height: auto;
   flex-shrink: 0;
   transform: translateY(3px);
-  --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 72%, white);
-  --pro-glass-reflection: color-mix(in srgb, var(--pro-accent) 10%, white);
+  --pro-glass-ink: oklch(0.42 0.075 80);
+  --pro-glass-highlight: oklch(0.52 0.065 80);
+  --pro-glass-reflection: oklch(0.64 0.08 84);
+  --pro-glass-outline: oklch(0.38 0.07 80);
+  --pro-glass-base-opacity: 1;
   /* Keep the ink reveal in CSS so GSAP never has to parse OKLCH colors. */
-  color: color-mix(in srgb, var(--muted-foreground), var(--pro-accent) var(--pro-ink-progress, 100%));
+  color: color-mix(in srgb, var(--muted-foreground), var(--pro-glass-ink) var(--pro-ink-progress, 100%));
   overflow: visible;
   font-size: 34px;
   font-weight: 400;
   letter-spacing: 0.22em;
 }
-.dark .pro-identity-mode { --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 18%, white); }
+.dark .pro-identity-mode {
+  --pro-glass-ink: var(--pro-accent);
+  --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 18%, white);
+  --pro-glass-reflection: color-mix(in srgb, var(--pro-accent) 10%, white);
+  --pro-glass-outline: color-mix(in srgb, currentColor 70%, var(--pro-glass-highlight));
+  --pro-glass-base-opacity: 0;
+}
 .pro-identity-ink { opacity: var(--pro-ink-opacity, 1); }
+.pro-identity-base { opacity: var(--pro-glass-base-opacity); }
 .pro-identity-glass {
-  stroke: color-mix(in srgb, currentColor 70%, var(--pro-glass-highlight));
+  stroke: var(--pro-glass-outline);
   stroke-width: 0.25;
   paint-order: stroke fill;
 }
 .pro-identity-edge-trace {
   opacity: 0;
-  filter: drop-shadow(0 0.5px 0.7px var(--pro-accent));
+  filter: drop-shadow(0 0.5px 0.7px var(--pro-glass-ink));
 }
 /* Radix needs a named open animation to retain content through the exit. */
 .pro-identity-content[role="dialog"][data-state="open"] {
