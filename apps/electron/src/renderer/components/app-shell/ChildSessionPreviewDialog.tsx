@@ -86,7 +86,7 @@ export function ChildSessionPreviewDialog({
           event.preventDefault()
           const focus = previewFocus.current
           if (focus?.previous?.isConnected && (document.activeElement === document.body || focus.content.contains(document.activeElement))) {
-            focus.previous.focus()
+            focus.previous.focus({ preventScroll: true })
           }
         }}
         onPointerDownOutside={(event) => event.preventDefault()}

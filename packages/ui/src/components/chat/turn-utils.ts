@@ -386,12 +386,13 @@ export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
 ): string | undefined {
-  if (phase === 'complete') return undefined
+  // Completed orchestration chains still describe their last real operation.
+  if (phase === 'complete' && !activities.some(activity => activity.statusType === 'task_progress')) return undefined
 
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    if (isAnswerDeliveryTool(activity)) return
+    if (isAnswerDeliveryTool(activity) || activity.statusType === 'task_progress') return
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
       toolIntent = activity.intent?.trim()

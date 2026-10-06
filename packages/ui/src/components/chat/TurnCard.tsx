@@ -1088,7 +1088,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
     const node = activity.taskNode
     const content = <>
       <UsersRound className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-accent')} aria-hidden="true" />
-      <span className="min-w-0 truncate text-foreground/75">{node.title}</span>
+      <span className="min-w-0 truncate text-foreground/75 group-focus-visible/child:text-foreground group-focus-visible/child:underline group-focus-visible/child:underline-offset-4">{node.title}</span>
       <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
         <ActivityStatusIcon status={activity.status} />{node.stateLabel}
       </span>
@@ -1098,7 +1098,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
     return <div className="flex items-stretch">
       <TreeViewConnector depth={depth} isLastChild={isLastChild} />
       {node.sessionId && onOpenDetails
-        ? <button type="button" className={cn(className, 'transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring')} onClick={onOpenDetails}>{content}</button>
+        ? <button type="button" className={cn(className, 'group/child transition-colors hover:bg-foreground/5 focus-visible:outline-none')} onClick={onOpenDetails}>{content}</button>
         : <div className={className}>{content}</div>}
     </div>
   }
@@ -3270,7 +3270,7 @@ export const TurnCard = React.memo(function TurnCard({
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
       activity => !isAnswerDeliveryTool(activity)
-        // The live execution summary already labels the work header.
+        // Aggregate status is a fallback, not a work record or the latest step.
         && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
         // The stable header/footer status owns their presentation.
