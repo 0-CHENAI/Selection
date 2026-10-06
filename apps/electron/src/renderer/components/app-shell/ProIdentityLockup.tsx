@@ -37,7 +37,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           autoAlpha: 1,
           duration: reduced ? 0.15 : 0.2,
           ease: 'power2.out',
-        }, '+=0.5')
+        }, '+=0.25')
     }, root)
     return () => {
       media.revert()
