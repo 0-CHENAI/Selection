@@ -37,7 +37,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           autoAlpha: 1,
           duration: reduced ? 0.15 : 0.2,
           ease: 'power2.out',
-        }, '+=1')
+        }, '+=0.5')
     }, root)
     return () => {
       media.revert()
@@ -59,7 +59,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
           <div className="pro-identity-label flex items-center">
             <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
-            <svg className="pro-identity-mode" viewBox="32 10 104 34">
+            <svg className="pro-identity-mode font-cathalie" viewBox="32 10 104 34">
               <text x="84" y="40" textAnchor="middle" className="pro-identity-fill">PRO</text>
             </svg>
           </div>
