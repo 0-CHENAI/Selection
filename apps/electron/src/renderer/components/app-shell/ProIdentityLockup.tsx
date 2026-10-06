@@ -41,7 +41,8 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
         }, reduced ? 0.25 : 1.1)
       if (!reduced) {
         animation.current
-          .set('.pro-identity-edge-trace', { opacity: 1, strokeDashoffset: 0 }, 1.1)
+          .set('.pro-identity-edge-trace', { opacity: 1, strokeDashoffset: 0, strokeDasharray: '0 96' }, 1.1)
+          .to('.pro-identity-edge-trace', { strokeDasharray: '18 78', duration: 0.4, ease: edgeOrbitEase }, 1.1)
           .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: edgeOrbitEase }, 1.1)
           .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
       }
