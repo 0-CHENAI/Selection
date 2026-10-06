@@ -691,6 +691,46 @@ describe('TaskRunner (Conductor)', () => {
     expect(log.some((e) => e.kind === 'run-failed')).toBe(true);
   });
 
+  it('reports a failed static PRO run to the parent after settling, without claiming completion', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'research-failed', title: '网页调研', goal: '核实来源',
+      runner: 'conduct', nodes: [
+        { id: 'research', prompt: '查阅网页', outputs: [{ name: 'notes', kind: 'param', type: 'json', required: true }] },
+        { id: 'review', kind: 'verify', prompt: '独立审查', depends_on: ['research'] },
+      ] }));
+    const runner = makeRunner();
+    runner.run('research-failed', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    host.finalTextById.set('sess-research', '网页搜索被环境拦截，未取得证据。');
+    host.complete('research', { finalText: host.finalTextById.get('sess-research') });
+    await tick();
+    expect(runner.getRunState('research-failed', 'r1')!.status).toBe('failed');
+    const reports = host.sent.filter(message => message.sessionId === 'orch');
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.options).toEqual({ hidden: true, taskContext: { kind: 'feedback', runId: 'r1' } });
+    expect(reports[0]!.message).toContain('completed without submit_task_output');
+    expect(reports[0]!.message).toContain('网页搜索被环境拦截');
+    expect(reports[0]!.message).toContain('Do not claim');
+    expect(host.promptFor('review')).toBeUndefined();
+  });
+
+  it('does not recursively retry a failed parent-status notification', async () => {
+    saveTaskSpec(root, specOf({ id: 'feedback-rejected', title: 'F', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const send = host.sendMessage.bind(host);
+    let reports = 0;
+    host.sendMessage = async (...args) => {
+      if (args[0] === 'orch') { reports++; throw new Error('Parent unavailable'); }
+      return send(...args);
+    };
+    const runner = makeRunner();
+    runner.run('feedback-rejected', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    host.complete('a', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('feedback-rejected', 'r1')!.status).toBe('failed');
+    expect(reports).toBe(1);
+    expect(readRunLog(root, 'feedback-rejected', 'r1').filter(event => event.kind === 'run-failed')).toHaveLength(1);
+  });
+
   it('honors max_parallel', async () => {
     saveTaskSpec(
       root,

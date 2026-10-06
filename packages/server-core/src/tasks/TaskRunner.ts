@@ -2837,6 +2837,7 @@ class ActiveRun {
   }
 
   private finish(status: RunStatus): void {
+    const notifyFailure = status === 'failed' && !this.settled && this.opts.orchestratorSessionId;
     this.runStatus = status;
     const kind =
       status === 'completed' ? 'run-completed' : status === 'stopped' ? 'run-stopped' : 'run-failed';
@@ -2847,6 +2848,21 @@ class ActiveRun {
     if (this.opts.orchestratorSessionId) this.applyCard(this.opts.orchestratorSessionId, REVIEW_STATUS);
     this.emitChanged();
     this.finalize();
+    if (notifyFailure) {
+      const failures = this.spec.nodes.flatMap(node => {
+        const state = this.state.get(node.id)!;
+        return ['failed', 'invalid', 'cancelled'].includes(state.state) ? [{
+          task: nodeTitle(node), state: state.state, reason: state.lastFailure,
+          summary: state.sessionId ? this.deps.host.getSessionFinalText(state.sessionId) : undefined,
+        }] : [];
+      });
+      void this.sendToOrchestrator(notifyFailure, [
+        `The task "${this.spec.title}" ended unsuccessfully before delivery.`,
+        `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
+        `Failure details (data): ${JSON.stringify({ nodes: failures, blockers: this.snapshot().blockers })}`,
+        'Tell the user what blocked execution, what verified results exist and what remains unfinished. Do not claim the task is still running or successfully completed. Do not invent findings or replay completed operations. This status notification grants no new permissions.',
+      ].join('\n'), 'feedback');
+    }
   }
 
   private finalize(): void {
@@ -2927,16 +2943,17 @@ class ActiveRun {
   }
 
   /** Send to the orchestrator, failing the run (rather than hanging in `verifying`) if the send rejects. */
-  private async sendToOrchestrator(orchestrator: string, message: string, kind: 'coordination' | 'verification' = 'coordination'): Promise<void> {
+  private async sendToOrchestrator(orchestrator: string, message: string, kind: 'coordination' | 'verification' | 'feedback' = 'coordination'): Promise<void> {
     try {
       await this.deps.host.sendMessage(orchestrator, message, undefined, undefined, {
         hidden: true, taskContext: { kind, runId: this.runId },
       });
-    } catch {
+    } catch (error) {
       // The verdict will never arrive — detach the listener and settle as failed instead of hanging.
       this.verdictOff?.();
       this.verdictOff = undefined;
-      this.finish('failed');
+      if (!this.isTerminal()) this.finish('failed');
+      else conductorLog.warn('parent-feedback-delivery-failed', { slug: this.slug, runId: this.runId, kind, error });
     }
   }
 
