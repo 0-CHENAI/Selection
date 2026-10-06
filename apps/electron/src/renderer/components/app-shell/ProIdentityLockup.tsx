@@ -27,22 +27,21 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
       const reduced = context.conditions?.reduceMotion
       animation.current = gsap.timeline({ paused: !isOpen.current })
         .fromTo('.pro-identity-mode', {
-          autoAlpha: 0,
+          '--pro-ink-opacity': 0,
           scale: reduced ? 1 : 0.98,
           transformOrigin: '50% 50%',
           '--pro-ink-progress': reduced ? '100%' : '0%',
         }, {
-          autoAlpha: 1,
+          '--pro-ink-opacity': 1,
           scale: 1,
           '--pro-ink-progress': '100%',
-          duration: reduced ? 0.15 : 1.1,
-          ease: microScaleEase,
+          // Let the lettering form at the same pace as the edge light travels.
+          duration: reduced ? 0.15 : 1.8,
+          ease: reduced ? microScaleEase : edgeOrbitEase,
         }, reduced ? 0.25 : 1.1)
       if (!reduced) {
         animation.current
-          .fromTo('.pro-identity-edge-trace', { opacity: 0, strokeDashoffset: 0 }, {
-            opacity: 1, duration: 0.12, ease: 'sine.inOut',
-          }, 1.1)
+          .set('.pro-identity-edge-trace', { opacity: 1, strokeDashoffset: 0 }, 1.1)
           .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: edgeOrbitEase }, 1.1)
           .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
       }
@@ -101,9 +100,11 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
                   <stop offset="1" stopColor="var(--pro-glass-reflection)" stopOpacity="0" />
                 </linearGradient>
               </defs>
-              <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
-              <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
-              <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />
+              <g className="pro-identity-ink">
+                <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
+                <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
+                <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />
+              </g>
               <use href={`#${glassId}-glyph`} className="pro-identity-edge-trace" fill="none"
                 stroke="var(--pro-glass-reflection)" strokeWidth="1.1" strokeLinecap="round" strokeDasharray="18 78" />
             </svg>

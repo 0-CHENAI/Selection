@@ -33,6 +33,7 @@
   letter-spacing: 0.22em;
 }
 .dark .pro-identity-mode { --pro-glass-highlight: color-mix(in srgb, var(--pro-accent) 18%, white); }
+.pro-identity-ink { opacity: var(--pro-ink-opacity, 1); }
 .pro-identity-glass {
   stroke: color-mix(in srgb, currentColor 70%, var(--pro-glass-highlight));
   stroke-width: 0.25;
