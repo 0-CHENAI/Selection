@@ -20,7 +20,7 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('completed response semantic reveal boundary', () => {
-  it('omits the entire action row from async start acknowledgments while retaining final reply actions', () => {
+  it('presents async start acknowledgments as notes while retaining final reply chrome', () => {
     const start: ActivityItem = { id: 'start', type: 'tool', timestamp: 1, status: 'completed',
       toolName: 'mcp__session__run_task', content: JSON.stringify({ runId: 'run', status: 'running' }) }
     const verdict: ActivityItem = { id: 'verdict', type: 'tool', timestamp: 2, status: 'completed',
@@ -34,11 +34,22 @@ describe('completed response semantic reveal boundary', () => {
             onRegenerate: () => {}, onPopOut: () => {}, onBranch: () => {},
           })))
         expect(html).toContain('已启动调研。')
+        expect(html.includes('role="note"')).toBe(progress)
+        expect(html).toContain(`data-response-kind="${progress ? 'progress' : 'response'}"`)
         for (const action of ['common.copy', 'chat.regenerate', '>Markdown<', 'turn-action-btn']) {
           expect(html.includes(action)).toBe(!progress)
         }
       }
     }
+  })
+
+  it('keeps saved plans as plan cards even when they follow a task start', () => {
+    const html = renderToStaticMarkup(React.createElement(ResponseCard, {
+      text: '规范计划', variant: 'plan', isStreaming: false, isTaskProgress: true,
+    }))
+    expect(html).toContain('data-response-kind="plan"')
+    expect(html).not.toContain('role="note"')
+    expect(html).toContain('common.copy')
   })
 
   it('renders full source and completed actions immediately for fresh and historical replies', () => {

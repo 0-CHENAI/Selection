@@ -1698,8 +1698,8 @@ export interface ResponseCardProps {
   resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
-  /** Hide the action row for task-start progress without changing the reply body. */
-  hideActions?: boolean
+  /** An asynchronous task-start update, presented as a note rather than a final reply. */
+  isTaskProgress?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1971,15 +1971,16 @@ export function ResponseCard({
   annotationInteractionMode = 'interactive',
   resolveAnnotationResult,
   isCommentary = false,
-  hideActions = false,
+  isTaskProgress = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const reduceArtifactMotion = useReducedMotion()
+  const isProgress = variant === 'response' && isTaskProgress
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
-  const canCollectSources = variant === 'response' && !isCommentary && !isAnswerPreview
+  const canCollectSources = variant === 'response' && !isProgress && !isCommentary && !isAnswerPreview
   const showArtifacts = canCollectSources
     && !isStreaming && (isTurnComplete ?? true)
   const turnSources = useMemo(() => {
@@ -2049,7 +2050,7 @@ export function ResponseCard({
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
   const actionsVisible = useCompletionActions(
-    !hideActions && (((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan'),
+    !isProgress && (((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan'),
     contentRef,
     responseText,
   )
@@ -2808,11 +2809,11 @@ export function ResponseCard({
   const bodyText = paced.text
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
-  const showCompletedChrome = !hideActions && ((isCompleted && !isCommentary)
+  const showCompletedChrome = !isProgress && ((isCompleted && !isCommentary)
     || variant === 'plan')
   // Hold the action-row height while the body is still arriving so the card
   // bottom does not jump when regenerate / copy / Markdown mount.
-  const reserveDesktopFooter = !hideActions && !compactMode && !isCommentary
+  const reserveDesktopFooter = !isProgress && !compactMode && !isCommentary
     && (showCompletedChrome || (isStreaming && variant === 'response'))
 
   // Keep one content tree throughout streaming and completion. Only chrome
@@ -2822,7 +2823,13 @@ export function ResponseCard({
 
     return (
       <>
-        <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
+        <div
+          role={isProgress ? 'note' : undefined}
+          data-response-kind={isProgress ? 'progress' : variant}
+          className={cn("relative group transition-colors duration-200",
+            !isProgress && "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
+        >
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-0 top-5 size-3.5 text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
@@ -2844,7 +2851,7 @@ export function ResponseCard({
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
-            className="pl-[22px] pr-[16px] py-3 text-sm"
+            className={cn("pl-[22px] pr-[16px]", isProgress ? "py-2 text-[13px] text-foreground/70" : "py-3 text-sm")}
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
@@ -3162,7 +3169,7 @@ export const TurnCard = React.memo(function TurnCard({
     isComplete,
     hasRunningTools,
   )
-  const hideResponseActions = !response?.isPlan && isTaskStartAcknowledgment(activities)
+  const isTaskProgress = !response?.isPlan && isTaskStartAcknowledgment(activities)
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -3645,7 +3652,7 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
-                hideActions={hideResponseActions}
+                isTaskProgress={isTaskProgress}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3703,7 +3710,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
-            hideActions={hideResponseActions}
+            isTaskProgress={isTaskProgress}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
