@@ -304,6 +304,8 @@ interface ChatDisplayProps {
   enableFocusZone?: boolean
   /** Hide the composer (used by read-only child previews). */
   hideComposer?: boolean
+  /** Give read-only task output a separate assignment / result hierarchy. */
+  taskPreview?: boolean
 }
 
 import {
@@ -573,6 +575,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onPreviewSession,
   enableFocusZone = true,
   hideComposer = false,
+  taskPreview = false,
 }, ref) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
@@ -2055,6 +2058,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         onOpenUrl={onOpenUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
+                        taskPreview={taskPreview}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
                         resolveAnnotationResult={resolveAnnotationResult}

@@ -14,7 +14,7 @@ import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, FolderOpen, X } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { useOrchestrationRuns } from '@/hooks/useOrchestrationRuns'
-import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { canPreviewOrchestrationChild, nodeStateForSession } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
@@ -754,6 +754,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     <ChildSessionPreviewDialog
       container={childPreviewContainer}
       sessionId={previewChildSessionId}
+      nodeState={nodeStateForSession(orchestration.runs, previewChildSessionId)}
       open={previewChildSessionId !== null}
       onOpenChange={(open) => {
         if (!open) setPreviewChildSessionId(null)

@@ -1,9 +1,13 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { UsersRound, X } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { ChatDisplay } from '@/components/app-shell/ChatDisplay'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -23,12 +27,14 @@ import {
 import { deriveSessionMessagesLoadState } from '@/lib/session-load'
 import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
 import { resolveBackgroundTaskChipLabel } from './background-task-chip'
+import { resolveNodeStatePill } from './kanban/node-state-pill'
 import type { Session } from '../../../shared/types'
 
 export interface ChildSessionPreviewDialogProps {
   sessionId: string | null
   container: HTMLElement | null
   open: boolean
+  nodeState?: string
   onOpenChange: (open: boolean) => void
 }
 
@@ -36,9 +42,13 @@ export function ChildSessionPreviewDialog({
   sessionId,
   container,
   open,
+  nodeState,
   onOpenChange,
 }: ChildSessionPreviewDialogProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
+  const visible = open && !!sessionId && !!container
+  const status = nodeState ? resolveNodeStatePill(nodeState) : null
   const previewFocus = React.useRef<{ content: HTMLElement; previous: HTMLElement | null } | null>(null)
   const session = useSession(sessionId ?? '')
   const sessionMeta = useAtomValue(sessionMetaMapAtom).get(sessionId ?? '')
@@ -47,9 +57,23 @@ export function ChildSessionPreviewDialog({
     : t('chat.taskTypeAgent')
 
   return (
-    <Dialog open={open && !!sessionId && !!container} onOpenChange={onOpenChange} modal={false}>
+    <Dialog open={visible} onOpenChange={onOpenChange} modal={false}>
+      {container && createPortal(
+        <AnimatePresence>
+          {visible && <motion.div
+            key="child-preview-backdrop"
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-10 bg-foreground/[0.06] dark:bg-black/25 backdrop-blur-[1.5px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.2 }}
+          />}
+        </AnimatePresence>, container,
+      )}
       <DialogContent
         overlay={false}
+        showCloseButton={false}
         portalContainer={container}
         onEscapeKeyDown={(event) => event.stopPropagation()}
         onOpenAutoFocus={(event) => {
@@ -69,9 +93,21 @@ export function ChildSessionPreviewDialog({
         onInteractOutside={(event) => event.preventDefault()}
         className="absolute inset-y-3 left-auto right-3 z-20 translate-x-0 translate-y-0 max-w-none sm:max-w-none w-[min(32rem,calc(100%-1.5rem))] p-0 gap-0 flex flex-col overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-right-2"
       >
-        <DialogHeader className="px-4 py-3 border-b border-border/50 shrink-0">
-          <DialogTitle className="truncate pr-8 text-sm leading-6">{title}</DialogTitle>
+        <DialogHeader className="relative px-6 py-5 border-b border-border/60 shrink-0 text-left">
+          <div className="flex items-start gap-3 pr-8">
+            <UsersRound className="mt-1 size-5 shrink-0 text-accent" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-base leading-6 [overflow-wrap:anywhere]">{title}</DialogTitle>
+              {status?.labelKey && <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
+                {t(status.labelKey)}
+              </span>}
+            </div>
+          </div>
           <DialogDescription className="sr-only">{t('chat.viewOutput')}</DialogDescription>
+          <DialogClose className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full text-foreground/50 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
+            <X className="size-4" aria-hidden="true" />
+            <span className="sr-only">{t('common.close')}</span>
+          </DialogClose>
         </DialogHeader>
         <div className="flex-1 min-h-0">
           {sessionId && <ChildSessionPreviewContent sessionId={sessionId} />}
@@ -156,6 +192,7 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
       pendingCredential={pendingCredential}
       onRespondToCredential={onRespondToCredential}
       compactMode
+      taskPreview
       disableSend
       hideComposer
       showRecordNavigation={false}

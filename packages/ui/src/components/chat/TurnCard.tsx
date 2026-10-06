@@ -416,6 +416,8 @@ export interface TurnCardProps {
    *  auto-compact / WebUI mobile. Hides Copy / Markdown / Branch actions; keeps the
    *  Accept Plan dropdown when a plan is the last response. */
   compactMode?: boolean
+  /** Read-only task preview with a quieter assignment and labeled output. */
+  taskPreview?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
   /** Callback to regenerate the last assistant response */
@@ -3130,6 +3132,7 @@ export const TurnCard = React.memo(function TurnCard({
   displayMode = 'detailed',
   animateResponse = false,
   compactMode = false,
+  taskPreview = false,
   onBranch,
   onRegenerate,
   onAddAnnotation,
@@ -3378,12 +3381,18 @@ export const TurnCard = React.memo(function TurnCard({
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
     <div>
-      {assignmentSummary && <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
+      {assignmentSummary && (taskPreview ? <section className="mb-5 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/60">
+          <CornerDownRight className="size-4 shrink-0 text-accent" aria-hidden="true" />
+          {i18n.t('chat.taskContext.assignment.fromParent')}
+        </h3>
+        <p className="mt-2 text-foreground/75">{assignmentSummary}</p>
+      </section> : <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
         <CornerDownRight className="mt-1 size-4 shrink-0 text-accent" aria-hidden="true" />
         <span className="min-w-0 flex-1">
           <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
         </span>
-      </p>}
+      </p>)}
       {/* One header chrome for thinking and numbered work — no standalone swap. */}
       <AnimatePresence>
       {showWorkChrome && (
@@ -3596,6 +3605,9 @@ export const TurnCard = React.memo(function TurnCard({
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
               className={cn("select-text", showWorkChrome && "mt-3")}
             >
+              {taskPreview && <h3 className="mb-3 mt-5 flex items-center gap-2 text-xs font-medium text-foreground/60" data-task-output-heading>
+                <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+              </h3>}
               <ResponseCard
                 text={response.text}
             artifactVersions={response.artifactVersions}
@@ -3650,6 +3662,9 @@ export const TurnCard = React.memo(function TurnCard({
           {/* Gap lives inside the tween; border-box padding on the tweened
               element would floor the collapsed height at the padding. */}
           <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
+          {taskPreview && <h3 className="mb-3 mt-5 flex items-center gap-2 text-xs font-medium text-foreground/60" data-task-output-heading>
+            <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+          </h3>}
           <ResponseCard
             text={response.text}
             artifactVersions={response.artifactVersions}
@@ -3716,6 +3731,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if compactMode changed (affects ResponseCard footer rendering)
   if (prev.compactMode !== next.compactMode) return false
+  if (prev.taskPreview !== next.taskPreview) return false
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
   if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false

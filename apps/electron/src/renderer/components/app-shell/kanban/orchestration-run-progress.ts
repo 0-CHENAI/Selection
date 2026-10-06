@@ -73,6 +73,20 @@ export function sessionIdForProgressRow(nodes: TaskNodeRunStateDto[], nodeId: st
   return nodes.find(node => node.id === nodeId)?.sessionId
 }
 
+/** A historical worker keeps its own attempt state, not the latest retry's. */
+export function nodeStateForSession(runs: TaskRunSnapshotDto[], sessionId: string | null): string | undefined {
+  if (!sessionId) return undefined
+  for (let index = runs.length - 1; index >= 0; index--) {
+    // An actor can reuse one worker session for successive tasks.
+    for (const node of runs[index]!.nodes.toSorted((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))) {
+      if (node.sessionId === sessionId) return node.state
+      const attempt = node.attempts?.find(item => item.sessionId === sessionId)
+      if (attempt) return attempt.state
+    }
+  }
+  return undefined
+}
+
 export function buildOrchestrationProgressRows(
   specNodes: SpecProgressNode[] | undefined,
   liveRun: TaskRunSnapshotDto | null | undefined,

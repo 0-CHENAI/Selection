@@ -7,6 +7,7 @@ import {
   isActiveTaskRunStatus,
   isTaskRunEventForProgress,
   pickStoppableTaskRun,
+  nodeStateForSession,
   sessionIdForProgressRow,
   withOrchestrationProgress,
 } from '../orchestration-run-progress'
@@ -33,6 +34,21 @@ function node(partial: Partial<TaskNodeRunStateDto> & Pick<TaskNodeRunStateDto, 
 }
 
 describe('inline orchestration progress', () => {
+  it('shows the selected worker state without mistaking a previous attempt for a completed retry', () => {
+    const runs = [snapshot({ nodes: [node({ id: 'research', state: 'done', sessionId: 'latest', attempts: [
+      { attempt: 1, sessionId: 'previous', state: 'invalid' },
+      { attempt: 2, sessionId: 'latest', state: 'running' },
+    ] })] })]
+    expect(nodeStateForSession(runs, 'latest')).toBe('done')
+    expect(nodeStateForSession(runs, 'previous')).toBe('invalid')
+    expect(nodeStateForSession(runs, 'unknown')).toBeUndefined()
+    expect(nodeStateForSession(runs, null)).toBeUndefined()
+    expect(nodeStateForSession([...runs, snapshot({ nodes: [node({ id: 'research', state: 'running', sessionId: 'latest' })] })], 'latest')).toBe('running')
+    expect(nodeStateForSession([snapshot({ nodes: [
+      node({ id: 'earlier', state: 'done', sessionId: 'reused', startedAt: 10 }),
+      node({ id: 'later', state: 'running', sessionId: 'reused', startedAt: 20 }),
+    ] })], 'reused')).toBe('running')
+  })
   it('uses dispatch times across operations and keeps undispatched or legacy nodes last without fabricated times', () => {
     const turn: Turn = { type: 'assistant', taskRunId: 'run-1', turnId: 'root', timestamp: 10,
       isComplete: false, isStreaming: true, activities: [

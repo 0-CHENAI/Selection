@@ -25,7 +25,7 @@ import type { FileAttachment, Session } from '../../../shared/types'
 import type { SessionOptions } from '@/hooks/useSessionOptions'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { nodeStateForSession, withOrchestrationProgress } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { TurnCard, groupMessagesByTurn, withTaskMessagePresentation } from '@craft-agent/ui'
 
 const previewWorkerInstructions = [
@@ -112,7 +112,7 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
           </div>
         </main>
       </div>
-      <ChildSessionPreviewDialog sessionId={previewId} container={previewContainer} open={!!previewId} onOpenChange={open => { if (!open) setPreviewId(null) }} />
+      <ChildSessionPreviewDialog sessionId={previewId} nodeState={nodeStateForSession([run], previewId)} container={previewContainer} open={!!previewId} onOpenChange={open => { if (!open) setPreviewId(null) }} />
     </div>
   </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider>
 }

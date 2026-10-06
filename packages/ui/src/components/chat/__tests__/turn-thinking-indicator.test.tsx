@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -59,6 +59,8 @@ async function renderTurn(
         defaultExpanded={options.expanded ?? true}
         onOpenActivityDetails={options.onOpenActivityDetails}
         workControls={options.workControls}
+        taskPreview={options.taskPreview}
+        response={options.response}
         renderActionsMenu={() => null}
       />
       </TooltipProvider>
@@ -71,6 +73,23 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it.each(['en', 'zh-Hans'] as const)('separates the task assignment, folded process and output only in task previews in %s', async language => {
+    const activities: ActivityItem[] = [{ id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1,
+      taskContext: { kind: 'assignment', instruction: '独立核对原始金额。' },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }]
+    const options = { isComplete: true, isStreaming: false, expanded: false,
+      response: { text: '核对结果：原始金额为 100 万元。', isStreaming: false } }
+    const html = await renderTurn(language, activities, { ...options, taskPreview: true })
+    expect(html).toContain('<section')
+    expect(html).toContain('独立核对原始金额。')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html.indexOf('data-task-assignment-summary')).toBeLessThan(html.indexOf('aria-expanded="false"'))
+    expect(html.indexOf('aria-expanded="false"')).toBeLessThan(html.indexOf('data-task-output-heading'))
+    expect(html.indexOf('data-task-output-heading')).toBeLessThan(html.indexOf('data-search-root="response"'))
+    expect(html).toContain(resources[language].translation['tasks.nodeOutputs'])
+    expect(await renderTurn(language, activities, options)).not.toContain('data-task-output-heading')
+    expect(await renderTurn(language, activities, { ...options, response: undefined, taskPreview: true })).not.toContain('data-task-output-heading')
+  })
   it('keeps retry controls inside the work chain without a nested attempt history', async () => {
     const activities: ActivityItem[] = [{ id: 'node', type: 'status', status: 'error', timestamp: 1,
       taskNode: { title: '核对成本', sessionId: 'current', stateLabel: '失败' } }]
