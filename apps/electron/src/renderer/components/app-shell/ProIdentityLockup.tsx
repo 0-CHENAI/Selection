@@ -4,6 +4,7 @@ import { gsap } from 'gsap'
 import { CustomEase } from 'gsap/CustomEase'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { usePlatform } from '@craft-agent/ui'
 import swan from '@/assets/selection-swan-trimmed.svg'
 import wordmark from '@/assets/selection-wordmark.svg'
 
@@ -15,11 +16,18 @@ const edgeOrbitEase = (progress: number) =>
 
 export default function ProIdentityLockup({ open }: { open: boolean }) {
   const { t } = useTranslation()
+  const { onSetTrafficLightsVisible } = usePlatform()
   const root = useRef<HTMLDivElement>(null)
   const isOpen = useRef(open)
   const animation = useRef<gsap.core.Timeline | null>(null)
   const light = useRef<gsap.core.Tween | null>(null)
   const glassId = useId()
+
+  // Native window controls sit above HTML; restore them after the portal's exit.
+  useLayoutEffect(() => {
+    onSetTrafficLightsVisible?.(false)
+    return () => onSetTrafficLightsVisible?.(true)
+  }, [onSetTrafficLightsVisible])
 
   useLayoutEffect(() => {
     const media = gsap.matchMedia()

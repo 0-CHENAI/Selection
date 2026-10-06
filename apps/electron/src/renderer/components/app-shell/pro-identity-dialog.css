@@ -1,7 +1,14 @@
+/* Blur the composed app once, including transparent chrome; the portal stays sharp. */
+body:has(> .pro-identity-backdrop) > #root {
+  filter: blur(12px);
+  animation: pro-identity-background-in 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
+  animation: pro-identity-background-out 240ms ease-out both;
+}
 .pro-identity-backdrop {
   background: rgb(8 10 15 / 10%);
-  backdrop-filter: blur(12px);
-  animation: pro-identity-focus 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: pro-identity-fade 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .dark .pro-identity-backdrop { background: rgb(4 5 9 / 24%); }
 .pro-identity-brand { gap: clamp(16px, 2vw, 24px); }
@@ -43,13 +50,21 @@
   opacity: 0;
   filter: drop-shadow(0 0.5px 0.7px var(--pro-accent));
 }
-.pro-identity-backdrop[data-state="closed"],
-.pro-identity-content[data-state="closed"] {
-  animation: pro-identity-exit 240ms ease-out both;
+/* Radix needs a named open animation to retain content through the exit. */
+.pro-identity-content[role="dialog"][data-state="open"] {
+  animation: pro-identity-fade 1ms both !important;
 }
-@keyframes pro-identity-focus {
-  from { opacity: 0; backdrop-filter: blur(0); }
-  to { opacity: 1; backdrop-filter: blur(12px); }
+.pro-identity-backdrop[data-state="closed"],
+.pro-identity-content[role="dialog"][data-state="closed"] {
+  animation: pro-identity-exit 240ms ease-out both !important;
+}
+@keyframes pro-identity-background-in {
+  from { filter: blur(0); }
+  to { filter: blur(12px); }
+}
+@keyframes pro-identity-background-out {
+  from { filter: blur(12px); }
+  to { filter: blur(0); }
 }
 @keyframes pro-identity-brand {
   from { opacity: 0; filter: blur(8px); transform: translateY(8px); }
@@ -58,7 +73,8 @@
 @keyframes pro-identity-exit { from { opacity: 1; } to { opacity: 0; } }
 @keyframes pro-identity-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .pro-identity-backdrop { backdrop-filter: none; animation: pro-identity-fade 150ms both; }
+  body:has(> .pro-identity-backdrop) > #root { animation: none; }
+  .pro-identity-backdrop { animation: pro-identity-fade 150ms both; }
   .pro-identity-mark, .pro-identity-wordmark { animation: pro-identity-fade 150ms both; }
-  .pro-identity-backdrop[data-state="closed"], .pro-identity-content[data-state="closed"] { animation-duration: 150ms; }
+  .pro-identity-backdrop[data-state="closed"], .pro-identity-content[role="dialog"][data-state="closed"] { animation-duration: 150ms !important; }
 }
