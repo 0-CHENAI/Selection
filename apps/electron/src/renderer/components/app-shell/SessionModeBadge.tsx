@@ -12,6 +12,7 @@ function ProModeBadge() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
+  const restoringFocus = useRef(false)
   const clicks = useRef({ count: 0, at: 0 })
   const reveal = () => {
     const at = performance.now()
@@ -25,7 +26,7 @@ function ProModeBadge() {
   return (
     <>
       <Tooltip open={open ? false : undefined}>
-        <TooltipTrigger asChild>
+        <TooltipTrigger asChild onFocus={event => { if (restoringFocus.current) event.preventDefault() }}>
           <button
             ref={trigger}
             type="button"
@@ -41,7 +42,12 @@ function ProModeBadge() {
         </TooltipTrigger>
         {!open && <TooltipContent side="top">{t('session.currentProMode')}</TooltipContent>}
       </Tooltip>
-      <ProIdentityDialog open={open} onOpenChange={setOpen} trigger={trigger} />
+      <ProIdentityDialog open={open} onOpenChange={setOpen} onRestoreFocus={() => {
+        // Returning from the easter egg must not reopen the focus tooltip.
+        restoringFocus.current = true
+        trigger.current?.focus({ preventScroll: true })
+        restoringFocus.current = false
+      }} />
     </>
   )
 }

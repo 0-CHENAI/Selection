@@ -1,14 +1,14 @@
-import { lazy, Suspense, type RefObject } from 'react'
+import { lazy, Suspense } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useTranslation } from 'react-i18next'
 import './pro-identity-dialog.css'
 
 const ProIdentityLockup = lazy(() => import('./ProIdentityLockup'))
 
-export function ProIdentityDialog({ open, onOpenChange, trigger }: {
+export function ProIdentityDialog({ open, onOpenChange, onRestoreFocus }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  trigger: RefObject<HTMLButtonElement>
+  onRestoreFocus: () => void
 }) {
   const { t } = useTranslation()
   return (
@@ -19,7 +19,7 @@ export function ProIdentityDialog({ open, onOpenChange, trigger }: {
           className="pro-identity-content fixed inset-0 z-modal flex select-none items-center justify-center p-6 outline-none"
           onEscapeKeyDown={event => event.preventDefault()}
           onInteractOutside={event => event.preventDefault()}
-          onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }}
+          onCloseAutoFocus={event => { event.preventDefault(); onRestoreFocus() }}
         >
           <Dialog.Title className="sr-only">Selection PRO</Dialog.Title>
           <Dialog.Description className="sr-only">{t('session.currentProMode')}</Dialog.Description>
