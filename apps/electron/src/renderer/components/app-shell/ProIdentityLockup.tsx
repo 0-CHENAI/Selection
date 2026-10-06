@@ -32,12 +32,12 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           '--pro-ink-progress': '100%',
           duration: reduced ? 0.15 : 1.1,
           ease: microScaleEase,
-        }, reduced ? 0.65 : 1.5)
+        }, reduced ? 0.4 : 1.25)
         .fromTo('.pro-identity-close', { autoAlpha: 0 }, {
           autoAlpha: 1,
           duration: reduced ? 0.15 : 0.2,
           ease: 'power2.out',
-        }, '+=0.25')
+        }, '+=0.5')
     }, root)
     return () => {
       media.revert()
