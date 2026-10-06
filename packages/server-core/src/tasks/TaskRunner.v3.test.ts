@@ -301,6 +301,27 @@ describe('TaskRunner v3 quality/efficiency', () => {
     return request.checkpointId;
   }
 
+  it('settles an unresolved invalid node instead of entering an unfinishable verification after replacement work', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A', outputs: [{ name: 'finding', kind: 'param', type: 'json', required: true }] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const decide = (decisionId: string, action: 'continue' | 'patch', extra: Record<string, unknown> = {}) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId,
+      decisionId, baseRevision: r.getRunState('v3demo', 'r1')!.revision ?? 0, action, ...extra,
+    });
+    decide('start', 'continue'); await tick();
+    expect(host.sent.find(call => call.sessionId === 'sess-a')?.message).toContain('Declared node outputs: [{"name":"finding"');
+    host.complete('a', { finalText: 'Findings without the required output' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes[0]?.state).toBe('invalid');
+    decide('replacement', 'patch', { rationale: 'Try a replacement', add: [{ id: 'b', prompt: 'B' }] }); await tick();
+    host.complete('b', { finalText: 'Replacement findings' }); await tick();
+    decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    const log = readRunLog(root, 'v3demo', 'r1');
+    expect(log.some(event => event.kind === 'run-verifying')).toBe(false);
+    expect(log.filter(event => event.kind === 'run-failed')).toHaveLength(1);
+    expect(host.sent.findLast(call => call.sessionId === 'orch')?.message).toContain('completed without submit_task_output');
+  });
+
   it('persists human feedback without releasing the gate, deduplicates feedback, and resumes only on approval', async () => {
     saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
       { id: 'gate', kind: 'approval', prompt: 'Review the plan' },

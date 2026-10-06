@@ -2465,6 +2465,9 @@ class ActiveRun {
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
       text = `${text}\n\nJudge the assigned inspection contract. An audit of supplied historical material may complete successfully with defect findings; report those defects so the coordinator can schedule correction. It does not certify that material as correct. A deliverable approval fails only when a completed producing dependency needs rework. Call submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. For a fail verdict, nodes must name completed producing dependencies; never submit an empty nodes list or a pending node. If a tool rejects the verdict, correct it before ending. Chat text is not a verdict.`;
     }
+    if (this.sourceVersion >= 2 && node.outputs?.length) {
+      text += `\n\nDeclared node outputs: ${JSON.stringify(node.outputs)}. Before ending, call submit_task_output with values keyed by these exact output names and include every required output. Chat text and submit_task_node_verdict do not submit these outputs. Correct rejected submissions before ending.`;
+    }
     // Research workers already receive their role/line-specific frozen context
     // in dispatch. Repeating the global context wastes input and leaks unrelated
     // line records back into an otherwise scoped assignment.
@@ -2831,6 +2834,12 @@ class ActiveRun {
 
   /** Enter the non-terminal `verifying` state and ask the orchestrator for a verdict. Does NOT finalize. */
   private enterVerifying(options: { skipGate?: boolean } = {}): void {
+    // A drained coordinator gate can bypass maybeFinish; terminal failures still
+    // prevent verification, even if a replacement node produced a valid result.
+    if (this.originalFailed || [...this.state.values(), ...this.instances.values()].some(state => ['failed', 'invalid', 'cancelled'].includes(state.state))) {
+      this.finish('failed');
+      return;
+    }
     if (!options.skipGate && this.enterCoordinatorGate('before-verify')) return;
     this.verdictLocked = false;
     if (!options.skipGate) this.coordinatorCheckpoint('before-verify');
