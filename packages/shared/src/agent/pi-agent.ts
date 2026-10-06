@@ -57,7 +57,7 @@ import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
 // System prompt for Selection context
-import { ANSWER_DELIVERY_PROMPT } from '../prompts/answer-delivery.ts';
+import { ANSWER_DELIVERY_PROMPT, COORDINATION_TURN_PROMPT } from '../prompts/answer-delivery.ts';
 import { answerToolBlock, isSubmitAnswer } from './answer-delivery.ts';
 import type { AnswerDeliveryControl } from './backend/types.ts';
 import { getSystemPrompt } from '../prompts/system.ts';
@@ -2717,7 +2717,7 @@ export class PiAgent extends BaseAgent {
       const fullSystemPrompt = [
         systemPrompt,
         ...stableParts,
-        this.answerDelivery ? ANSWER_DELIVERY_PROMPT : this.config.presentationProtocol === 'marker-v1' ? MARKER_ANSWER_PROMPT : undefined,
+        this.answerDelivery?.coordinationOnly ? COORDINATION_TURN_PROMPT : this.answerDelivery ? ANSWER_DELIVERY_PROMPT : this.config.presentationProtocol === 'marker-v1' ? MARKER_ANSWER_PROMPT : undefined,
       ].filter(Boolean).join('\n\n');
 
       // User message: volatile context + attachments + the actual message

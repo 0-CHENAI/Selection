@@ -83,6 +83,32 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(stored.messages.find(message => message.type === 'user')).toMatchObject({ content, taskContext })
   })
 
+  it('ends an internal coordinator turn without answer recovery and restores delivery for final verification', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'running'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status }) }) as never)
+    install(async function* () {
+      expect(control?.coordinationOnly).toBe(true)
+      await expect(control!.submit(submission)).rejects.toThrow('Internal coordinator turns')
+      // A checkpoint can finish after its decision already settled the run.
+      status = 'completed'
+      yield { type: 'text_complete', text: '已消费检查点。', isIntermediate: false }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '内部协调检查点', undefined, undefined, { hidden: true, taskContext: { kind: 'coordination', runId: 'canonical-run' } })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.some(message => message.answerCommitted || message.role === 'error')).toBe(false)
+    expect(events.some(event => event.type === 'text_complete')).toBe(false)
+    install(async function* () {
+      expect(control?.coordinationOnly).toBe(false)
+      await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '最终验收交付', undefined, undefined, { hidden: true, taskContext: { kind: 'verification', runId: 'canonical-run' } })
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+  })
+
   it('does not recover or publish a final answer from an unfinished canonical checkpoint', async () => {
     managed.workMode = 'PRO'
     managed.taskSlug = 'canonical-plan'

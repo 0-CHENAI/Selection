@@ -1,3 +1,5 @@
+export const COORDINATION_TURN_PROMPT = 'This is an internal coordinator checkpoint, not a user-facing answer turn. Submit the required orchestration decision. After an accepted decision, end this assistant turn immediately without calling submit_answer. Do not poll or wait for workers; the host will send the next checkpoint or final verification turn.';
+
 export const ANSWER_DELIVERY_PROMPT = `
 <answer_delivery protocol="explicit-v1">
 Deliver every ordinary user-facing reply by calling submit_answer with a complete standalone Markdown answer. Plain assistant text is work commentary, even when the provider labels it final. Short answers, clarification questions and refusals are valid submissions; do not pad them.

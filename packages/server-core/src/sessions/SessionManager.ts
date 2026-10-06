@@ -8915,9 +8915,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
     const state = managed.answerDelivery!
+    const owner = managed.messages.find(message => message.id === state.userMessageId)
     return {
       runId: state.runId,
       recovery: state.recovery,
+      coordinationOnly: !!owner?.hidden && owner.taskContext?.kind === 'coordination',
       isActive: () => managed.answerDelivery === state && managed.isProcessing
         && !state.persistenceFailed && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
       submit: submission => this.acceptAnswer(managed, state, submission),
@@ -8933,6 +8935,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages[userIndex]?.hidden && managed.messages[userIndex]?.taskContext?.kind === 'coordination') {
+      throw new Error('Internal coordinator turns cannot deliver an answer. End the assistant turn after the accepted decision; final verification has a separate delivery turn.')
+    }
     if (managed.messages[userIndex]?.hidden && this.isCanonicalCoordinatorWaiting(managed)) {
       throw new Error('Consume the canonical run checkpoint and finish its acceptance before submitting the final answer.')
     }
@@ -9225,7 +9230,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const owner = managed.messages.find(m => m.id === state.userMessageId)
     const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
     const waiting = (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')
-      || (owner?.hidden && this.isCanonicalCoordinatorWaiting(managed))
+      || (owner?.hidden && (owner.taskContext?.kind === 'coordination' || this.isCanonicalCoordinatorWaiting(managed)))
     if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
       && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
       && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {

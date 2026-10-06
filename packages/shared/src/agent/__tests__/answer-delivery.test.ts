@@ -58,6 +58,14 @@ describe('answer delivery execution bridge', () => {
     expect(sent.at(-1).result.isError).toBe(true)
     expect(answerToolBlock(control, false, 'Bash', 'run')).toBeUndefined()
   })
+  it('keeps internal coordination tools active without allowing final answer delivery', async () => {
+    control.coordinationOnly = true
+    expect(answerToolBlock(control, false, 'mcp__session__submit_orchestration_decision', 'run')).toBeUndefined()
+    expect(answerToolBlock(control, false, 'submit_answer', 'run')).toContain('end the assistant turn')
+    await (agent as any).handleToolExecuteRequest(request)
+    expect(sent.at(-1).result.isError).toBe(true)
+    expect(submitted).toHaveLength(0)
+  })
   it('limits recovery to answer submission and fails closed after cancellation', () => {
     control.recovery = true
     expect(answerToolBlock(control, false, 'Bash', 'run')).toContain('Only submit_answer')

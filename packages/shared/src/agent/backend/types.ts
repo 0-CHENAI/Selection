@@ -176,6 +176,8 @@ export interface AnswerSubmission {
 export interface AnswerDeliveryControl {
   runId: string;
   recovery: boolean;
+  /** Host-owned internal scheduling turn; it must not deliver a user answer. */
+  coordinationOnly?: boolean;
   isActive: () => boolean;
   submit: (submission: AnswerSubmission) => Promise<void>;
 }
