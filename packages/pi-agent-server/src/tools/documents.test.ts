@@ -45,13 +45,23 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
     expect(frozen.every(source => !source.unavailableReason)).toBe(true);
     expect(frozen[0]!.units![1]!.kind).toBe('page');
     expect(readResearchSources(directory, 'task', 'run')[0]!.text).toContain('1000000');
+    const snapshotConfig = ResearchConfigSchema.parse({ ...config, sources: indexes.map((snapshot, index) => ({ id: `indexed-${index}`, path: snapshot.textPath })) });
+    const fromSnapshots = freezeResearchSources(directory, 'task', 'snapshot-run', snapshotConfig, directory);
+    expect(fromSnapshots.map(source => source.version)).toEqual(indexes.map(snapshot => snapshot.version));
+    expect(fromSnapshots.map(source => source.indexedPath)).toEqual(indexes.map(snapshot => snapshot.textPath));
+    expect(fromSnapshots.map(source => source.units)).toEqual(indexes.map(snapshot => snapshot.units));
     const old = indexes[1]!.version;
     writeFileSync(join(directory, 'cost.pdf'), minimalPdf(['TEST ONLY', 'A cost is 2000000 yuan']));
     expect((await indexOriginalDocument(directory, 'cost.pdf')).version).not.toBe(old);
+    expect(freezeResearchSources(directory, 'task', 'changed-original', snapshotConfig, directory)[1]!.unavailableReason).toContain('unavailable or corrupt');
+    expect(readResearchSources(directory, 'task', 'snapshot-run')[1]!.version).toBe(old);
+    expect(readResearchSources(directory, 'task', 'snapshot-run')[1]!.text).toContain('1000000');
+    writeFileSync(indexes[3]!.textPath, 'tampered snapshot');
+    expect(freezeResearchSources(directory, 'task', 'corrupt-snapshot', snapshotConfig, directory)[3]!.unavailableReason).toContain('unavailable or corrupt');
     expect(readResearchSources(directory, 'task', 'run')[0]!.text).toContain('1000000'); // frozen, never rewritten
     writeFileSync(join(directory, 'broken.pdf'), 'broken');
     await expect(indexOriginalDocument(directory, 'broken.pdf')).rejects.toThrow();
-    expect(readFileSync(indexes[3]!.textPath, 'utf8')).toBe('100万元');
+    expect(readFileSync(fromSnapshots[3]!.snapshotPath!, 'utf8')).toBe('100万元');
     await expect(indexOriginalDocument(directory, '/etc/passwd')).rejects.toThrow('authorized');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

@@ -66,6 +66,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Indexed research snapshots** — Research plans can use the text snapshot returned by document navigation directly while retaining original-file versions and native page/cell locations. Changed originals and corrupt snapshots remain unavailable. Issues #460 and #464.
+
 - **Chat composer with run history** — Long reports and task progress no longer push the composer below the window; its model and send controls remain visible.
 
 - **Independent review and verified context** — Verify and judge nodes always start a fresh context. Actor reuse requires a completed execution, known outcomes, matching model and authorization, and unchanged inputs. A confirmed native write cannot conceal an intervening external file change.

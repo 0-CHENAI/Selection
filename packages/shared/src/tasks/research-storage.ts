@@ -28,8 +28,8 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Source must be inside the authorized task directory');
       const bytes = readFileSync(path);
       const hash = createHash('sha256').update(bytes).digest('hex');
-      const webSnapshot = readSourceSnapshot(join(dirname(path), 'index.json'), base);
-      const indexed = webSnapshot?.textPath === path && webSnapshot.acquisition ? webSnapshot : readSourceSnapshot(sourceIndexPath(base, path), base);
+      const adjacentSnapshot = readSourceSnapshot(join(dirname(path), 'index.json'), base);
+      const indexed = adjacentSnapshot?.textPath === path ? adjacentSnapshot : readSourceSnapshot(sourceIndexPath(base, path), base);
       if (indexed) {
         const extracted = readFileSync(indexed.textPath), snapshotPath = join(target, `source-${index}.txt`);
         writeFileSync(snapshotPath, extracted);
@@ -38,7 +38,7 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
           snapshotPath: realpathSync(snapshotPath), indexedPath: indexed.textPath, text: extracted.toString('utf8'),
           units: indexed.units, limitations: indexed.limitations, acquisition: indexed.acquisition };
       }
-      if (webSnapshot || basename(path) === 'snapshot.txt' && path.split(sep).includes('.selection-sources')) throw new Error('Original source snapshot is unavailable or corrupt');
+      if (adjacentSnapshot || basename(path) === 'snapshot.txt' && path.split(sep).includes('.selection-sources')) throw new Error('Original source snapshot is unavailable or corrupt');
       if (bytes.includes(0)) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
       const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
       const snapshotPath = join(target, `source-${index}.txt`); writeFileSync(snapshotPath, bytes);
