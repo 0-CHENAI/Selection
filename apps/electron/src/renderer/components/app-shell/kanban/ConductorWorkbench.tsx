@@ -260,7 +260,7 @@ function WorkbenchInner({ spec: authoredSpec, liveRun: currentRun, workspaceId, 
         <div className="mt-2 space-y-2 rounded-md border border-border p-3">
           <p>{t('tasks.explain.frontier')}: {preflight.frontier.map(node => `${node.id}${node.conditional ? ' ?' : ''}`).join(', ') || '—'}</p>
           <p className="text-muted-foreground">{t('tasks.explain.limits')}</p>
-          <ul className="space-y-1">{preflight.permissions.map(node => <li key={node.id}>{node.id} · {node.mode} · {t(node.capabilities === 'read-only' ? 'tasks.explain.readOnly' : 'tasks.explain.writes')} {node.approval ? `· ${t('tasks.nodeApproval')}` : ''}</li>)}</ul>
+          <ul className="space-y-1">{preflight.permissions.map(node => <li key={node.id}>{node.id} · {node.mode} · {t(node.capabilities === 'read-only' ? 'tasks.explain.readOnly' : 'tasks.explain.writes')} {node.approval ? `· ${t('tasks.nodeKindApproval')}` : ''}</li>)}</ul>
           {preflight.unknown.length > 0 && <p>{t('tasks.explain.unknown')}: {preflight.unknown.join(', ')}</p>}
           {preflight.errors.map((error, index) => <p key={`error-${index}`} role="alert" className="text-destructive">{error.path}: {error.message}</p>)}
           {preflight.warnings.map((warning, index) => <p key={`warning-${index}`} className="text-muted-foreground">{warning.path}: {warning.message}</p>)}

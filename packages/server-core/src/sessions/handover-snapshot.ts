@@ -44,9 +44,24 @@ export function handoverOperationHash(tool: string, input: unknown): string {
   return handoverHash(JSON.stringify([name, canonical(args)]))
 }
 
-/** Download destinations are receipt metadata, not part of fetched document content. */
+/** Compare document content across legacy wrappers and current frozen-source receipts. */
+const WEB_SOURCE_RECEIPT = /\n\nSource: (https?:\/\/[^\n]+)\nFrozen original: [^\n]+\nVersion: ([a-f0-9]{64})\nReturned lines: \d+–\d+\/\d+(?:\n\[Content truncated: use Read on the frozen snapshot for the remaining lines\.\])?(?:\nLimitations: [^\n]*)?$/
 export function handoverWebHash(text: string): string {
+  const receipt = text.match(WEB_SOURCE_RECEIPT)
+  const legacy = text.match(/^Content from (https?:\/\/\S+?)(?: \(asked: [^\n]*\))?:\r?\n\r?\n/)
+  if (receipt || legacy) {
+    const source = receipt?.[1] ?? legacy![1]
+    const content = receipt ? text.slice(0, receipt.index) : text.slice(legacy![0].length)
+    text = `Content from ${source}:\n\n${content}`
+  }
   return handoverHash(text.replace(/\(saved to [^)]+\)/g, '(saved to [snapshot])').replace(/Saved to: [^\n]+/g, 'Saved to: [snapshot]'))
+}
+
+export function handoverWebSourcesMatch(current: string, original: string): boolean {
+  const originalVersion = original.match(WEB_SOURCE_RECEIPT)?.[2]
+  // The full-source version also catches changes beyond a truncated excerpt.
+  return (!originalVersion || current.match(WEB_SOURCE_RECEIPT)?.[2] === originalVersion)
+    && handoverWebHash(current) === handoverWebHash(original)
 }
 
 /** Tool UI fields have display-relative paths; only unambiguous SDK calls can identify their input. */

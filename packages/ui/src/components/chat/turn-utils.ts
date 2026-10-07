@@ -742,6 +742,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.presentationProtocol === 'marker-v1') activeRunId = undefined
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
+    // A historical commit may contain only the tool's receipt. It cannot
+    // replace the draft or close the run, even when marked answerCommitted.
+    if (message.role === 'assistant' && message.answerProtocol === 'explicit-v1'
+      && message.answerCommitted && isAnswerDeliveryReceipt(message.content)) return []
     const structured = !!runId && structuredRuns.has(runId)
     if (structured && message.answerRoutingVersion !== 1) message = { ...message, answerRoutingVersion: 1 }
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []

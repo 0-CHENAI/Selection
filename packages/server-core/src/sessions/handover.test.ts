@@ -658,17 +658,45 @@ test('actual SDK arguments override display-relative read paths and completed op
 
 test('URL changes are checked explicitly without replacing its frozen response', async () => {
   const f = await fixture()
-  const url = 'https://example.com/selection-handover-test'
-  const fetcher = spyOn(globalThis,'fetch').mockImplementation(Object.assign(async () => new Response('changed web content', { headers: { 'Content-Type': 'text/plain' } }), { preconnect: () => {} }))
+  const url = 'https://1.1.1.1/selection-handover-test'
+  let content = 'original web content', status = 200
+  const fetcher = spyOn(globalThis,'fetch').mockImplementation(Object.assign(async () => new Response(content, { status, headers: { 'Content-Type': 'text/plain' } }), { preconnect: () => {} }))
   try {
     f.source.messages.push({ id: 'web', role: 'tool', toolUseId: 'fetch', toolName: 'WebFetch', toolInput: { url }, toolStatus: 'completed', content: 'read page', toolResult: `Content from ${url}:\n\noriginal web content`, timestamp: 4 })
     const record = (await f.manager.handoverSession(f.source.id,{type:'create',handoverId:'web-source',targetMode:'PRO'})).records[0]!
     expect(fetcher).not.toHaveBeenCalled()
     const web = record.snapshot!.files.find(file => file.sourceUrl === url)!
     expect(web).toBeDefined()
-    const checked = await f.manager.handoverSession(record.targetSessionId!,{type:'get',handoverId:'web-source',checkSources:true})
-    expect(checked.changes?.find(change=>change.ref===web.ref)?.state).toBe('changed')
+    const check = async () => (await f.manager.handoverSession(record.targetSessionId!,{type:'get',handoverId:'web-source',checkSources:true})).changes?.find(change=>change.ref===web.ref)?.state
+    expect(await check()).toBe('unchanged')
+    content = 'changed web content'
+    expect(await check()).toBe('changed')
+    status = 403
+    expect(await check()).toBe('unavailable')
+    expect(fetcher).toHaveBeenCalledTimes(3)
     expect(readFileSync(join(getSessionPath(f.root,record.targetSessionId!),'data','handover','web-source',web.snapshotPath),'utf8')).toContain('original web content')
+    expect(f.store.read('web-source')?.snapshot).toEqual(record.snapshot)
+  } finally { fetcher.mockRestore(); await f.cleanup() }
+})
+
+test('frozen web-source checks ignore cache paths but detect changes beyond the displayed excerpt', async () => {
+  const f = await fixture()
+  const url = 'https://1.1.1.1/selection-handover-test'
+  let content = 'original web content\n' + 'x'.repeat(50_000)
+  const fetcher = spyOn(globalThis,'fetch').mockImplementation(Object.assign(async () => new Response(content, { headers: { 'Content-Type': 'text/plain' } }), { preconnect: () => {} }))
+  try {
+    const { createWebFetchTool } = await import('../../../pi-agent-server/src/tools/web-fetch')
+    const result = await createWebFetchTool(() => getSessionPath(f.root, f.source.id)).execute('fetch', { url }, undefined, undefined, undefined as never)
+    const original = result.content.filter(part => part.type === 'text').map(part => part.text).join('')
+    expect(original).toContain('Content truncated')
+    f.source.messages.push({ id: 'web', role: 'tool', toolUseId: 'fetch', toolName: 'WebFetch', toolInput: { url }, toolStatus: 'completed', content: original, timestamp: 4 })
+    const record = (await f.manager.handoverSession(f.source.id,{type:'create',handoverId:'web-source',targetMode:'PRO'})).records[0]!
+    const web = record.snapshot!.files.find(file => file.sourceUrl === url)!
+    const check = async () => (await f.manager.handoverSession(record.targetSessionId!,{type:'get',handoverId:'web-source',checkSources:true})).changes?.find(change=>change.ref===web.ref)?.state
+    expect(await check()).toBe('unchanged')
+    content += 'changed after the displayed excerpt'
+    expect(await check()).toBe('changed')
+    expect(f.store.snapshotBytes(record.handoverId, web.snapshotPath, web.hash).toString('utf8')).toBe(original)
     expect(f.store.read('web-source')?.snapshot).toEqual(record.snapshot)
   } finally { fetcher.mockRestore(); await f.cleanup() }
 })

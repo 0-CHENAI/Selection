@@ -6,7 +6,7 @@ import type { CreateTaskInput } from '@craft-agent/session-tools-core'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveSessionName } from '@craft-agent/shared/display-titles'
 import { HandoverStore, handoverHash } from '../reliability/handover-store'
-import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverToolExecutions, handoverOperationEvidence, handoverWebHash, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
+import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverToolExecutions, handoverOperationEvidence, handoverWebHash, handoverWebSourcesMatch, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
 import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
@@ -11062,10 +11062,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           if (file.sourceUrl) {
             if (operation.type !== 'get' || !operation.checkSources) return { ref: file.ref, state: 'unavailable' as const }
             const { createWebFetchTool } = await import('../../../pi-agent-server/src/tools/web-fetch')
-            const result = await createWebFetchTool(() => null).execute('handover-source-check', { url: file.sourceUrl, prompt: file.urlPrompt }, undefined, undefined, undefined as never)
+            const result = await createWebFetchTool(() => getSessionStoragePath(current.workspace.rootPath, current.id)).execute('handover-source-check', { url: file.sourceUrl, prompt: file.urlPrompt }, undefined, undefined, undefined as never)
             if (result.details && typeof result.details === 'object' && 'isError' in result.details && result.details.isError) return { ref: file.ref, state: 'unavailable' as const }
             const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('')
-            return { ref: file.ref, state: handoverWebHash(text) === file.originalHash ? 'unchanged' as const : 'changed' as const }
+            const original = store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash).toString('utf8')
+            return { ref: file.ref, state: handoverWebSourcesMatch(text, original) ? 'unchanged' as const : 'changed' as const }
           }
           return { ref: file.ref, state: existsSync(file.originalPath) ? handoverHash(loadIsolationFile(file.originalPath)) === file.originalHash ? 'unchanged' as const : 'changed' as const : 'missing' as const }
         } catch { return { ref: file.ref, state: 'unavailable' as const } }

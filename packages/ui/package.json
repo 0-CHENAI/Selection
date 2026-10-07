@@ -12,6 +12,7 @@
     "./chat/SessionViewer": "./src/components/chat/SessionViewer.tsx",
     "./chat/TurnCard": "./src/components/chat/TurnCard.tsx",
     "./chat/turn-utils": "./src/components/chat/turn-utils.ts",
+    "./chat/source-metadata": "./src/components/chat/source-metadata.ts",
     "./chat/task-message-presentation": "./src/components/chat/task-message-presentation.ts",
     "./markdown": "./src/components/markdown/index.ts",
     "./annotations/follow-up-state": "./src/components/annotations/follow-up-state.ts",

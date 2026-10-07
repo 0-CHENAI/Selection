@@ -295,6 +295,7 @@ const EXPECTED_CHANNELS: string[] = [
   'tasks:getOutput',
   'tasks:getResults',
   'tasks:getTemplate',
+  'tasks:inspectRun',
   'tasks:list',
   'tasks:listRuns',
   'tasks:listTemplates',
