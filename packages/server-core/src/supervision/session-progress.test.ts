@@ -27,6 +27,7 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
     async *chat(prompt: string) {
       prompts.push(prompt); calls++
       yield { type: 'model_call_start' as const }
+      yield { type: 'model_activity' as const, reasoningBytes: 32, textBytes: 0 }
       if (calls === 1) {
         yield { type: 'tool_start' as const, toolUseId: 'read', toolName: 'Read', input: {} }
         yield { type: 'tool_result' as const, toolUseId: 'read', toolName: 'Read', result: '约束已经明确', isError: false }
@@ -50,6 +51,41 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
   return { root, manager, managed, agent, entered, interrupted, prompts }
 }
 describe('SessionManager progress integration', () => {
+  it('observes content-free runtime activity independently of the renderer and unsubscribes', async () => {
+    const f = setup()
+    f.managed.executionRootSessionId = 'root'
+    f.managed.taskRunId = 'run'
+    const events: unknown[] = []
+    f.manager.setEventSink(() => {})
+    const unsubscribe = f.manager.onRuntimeActivity(activity => {
+      if (activity.rootSessionId === 'root') events.push(activity)
+    })
+    const run = f.manager.sendMessage(f.managed.id, '敏感目标')
+    await f.entered.promise
+    expect(events).toContainEqual(expect.objectContaining({ sessionId: 'progress', rootSessionId: 'root', runId: 'run', type: 'model_activity', reasoningBytes: 32, textBytes: 0 }))
+    expect(JSON.stringify(events)).not.toContain('敏感目标')
+    expect(JSON.stringify(events)).not.toContain('约束已经明确')
+    const count = events.length
+    unsubscribe(); unsubscribe()
+    f.interrupted.resolve(); await run
+    expect(events).toHaveLength(count)
+    await f.manager.flushSession(f.managed.id)
+  })
+
+  it('does not publish late activity from a replaced processing generation', async () => {
+    const f = setup()
+    const events: unknown[] = []
+    const unsubscribe = f.manager.onRuntimeActivity(activity => events.push(activity))
+    const run = f.manager.sendMessage(f.managed.id, '画图')
+    await f.entered.promise
+    const count = events.length
+    f.managed.processingGeneration++
+    f.interrupted.resolve(); await run
+    expect(events).toHaveLength(count)
+    unsubscribe()
+    await f.manager.flushSession(f.managed.id)
+  })
+
   it('executes a claimed source continuation while retaining duplicate-request protection', async () => {
     const f = setup()
     f.managed.messages.push({ id: 'original', role: 'user', content: '查询数据库', timestamp: Date.now() })

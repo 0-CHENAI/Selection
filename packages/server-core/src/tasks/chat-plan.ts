@@ -21,6 +21,9 @@ export function buildChatPlan(input: CreateTaskInput, root: {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('A structured task spec is required')
   const candidate = raw as Partial<TaskSpec>
+  if (candidate.research && candidate.runner === 'conduct') {
+    throw new Error('Chat research uses judgmentVersion: 1 and requires runner: orchestrate for same-line repairs and branch dispositions. Resubmit the research plan with runner: orchestrate; ordinary conduct plans remain supported.')
+  }
   for (const node of candidate.nodes ?? []) {
     const parsed = TaskNodeSchema.parse(node)
     const unknown = Object.keys(node).filter(key => !(key in parsed) && key !== 'type')

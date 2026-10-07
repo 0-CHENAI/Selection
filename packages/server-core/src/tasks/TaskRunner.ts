@@ -2090,6 +2090,15 @@ class ActiveRun {
     return { ok: true };
   }
 
+  hasAcceptedOutput(sessionId: string, generation: number): boolean {
+    const nodeId = this.sessionToNode.get(sessionId);
+    const state = nodeId ? this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId)) : undefined;
+    if (!nodeId || !state || state.state !== 'running' || state.sessionId !== sessionId
+      || state.generation !== undefined && state.generation !== generation) return false;
+    const output = this.submittedOutputs.get(nodeId);
+    return !!output && (!!output.text?.trim() || Object.keys(output.params ?? {}).length > 0);
+  }
+
   submitStructuredVerdict(payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[] }): RunSnapshot {
     if (this.runStatus !== 'verifying') {
       throw new TaskControlError(this.runStatus, 'Run is not waiting for a verdict');
@@ -4468,6 +4477,10 @@ export class TaskRunner {
     const run = this.findRunBySession(sessionId);
     if (!run) return { ok: false as const, error: 'No active run owns this session' };
     return run.acceptOutput(sessionId, payload);
+  }
+
+  hasAcceptedNodeOutput(sessionId: string, generation: number): boolean {
+    return this.findRunBySession(sessionId)?.hasAcceptedOutput(sessionId, generation) ?? false;
   }
 
   recordSourceRead(sessionId: string, proof: SourceReadProof, toolUseId: string, result: string): boolean {

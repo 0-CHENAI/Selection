@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path'
 import { getWorkspaces, getLlmConnections, getDefaultLlmConnection, ensureConfigDir } from '@craft-agent/shared/config'
 import { loadTaskResults, readRunLog } from '@craft-agent/shared/tasks'
 import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
-import { SessionManager, setSessionPlatform } from '@craft-agent/server-core/sessions'
+import { SessionManager, setSessionPlatform, type SessionRuntimeActivity } from '@craft-agent/server-core/sessions'
 import { createHeadlessPlatform } from '@craft-agent/server-core/runtime'
 import { TaskRunner } from '@craft-agent/server-core/tasks'
 import { setBackendModelRequestLimiter } from '../packages/shared/src/agent/backend/index'
@@ -43,10 +43,18 @@ setBundledAssetsRoot(join(repo, 'apps/electron'))
 ensureConfigDir()
 setSessionPlatform(createHeadlessPlatform())
 const manager = new SessionManager()
+const evidencePath = help ? '/tmp/selection-pro-chat-help-acceptance.json' : judgment ? '/tmp/selection-pro-chat-judgment-acceptance.json' : concurrency ? '/tmp/selection-pro-chat-concurrency-acceptance.json' : errata ? '/tmp/selection-pro-chat-errata-acceptance.json' : research ? '/tmp/selection-pro-chat-research-acceptance.json' : repair ? '/tmp/selection-pro-chat-repair-acceptance.json' : '/tmp/selection-pro-chat-acceptance.json'
+let rootId: string | undefined
 let lastActivity = Date.now()
-manager.setEventSink(event => {
-  lastActivity = Date.now()
-  if (event.type === 'error') console.error(JSON.stringify(event))
+let latestActivity: SessionRuntimeActivity | undefined
+const startedAt = Date.now()
+const unsubscribe = manager.onRuntimeActivity(activity => {
+  if (activity.rootSessionId !== rootId) return
+  lastActivity = activity.at
+  latestActivity = activity
+})
+manager.setEventSink((_channel, _target, event) => {
+  if (event?.type === 'error' && event.sessionId === rootId) console.error(JSON.stringify(event))
 })
 const runner = new TaskRunner({ host: manager, workspaceId: workspace.id, workspaceRoot: workspace.rootPath })
 manager.setTaskRunnerLookup(id => id === workspace.id ? runner : null)
@@ -55,8 +63,9 @@ try {
   const root = await manager.createSession(workspace.id, { workMode: 'PRO', hidden: true, permissionMode: 'safe',
     model: connection.defaultModel, llmConnection: connection.slug, name: 'PRO 聊天规划验收',
     workingDirectory: join(repo, 'scripts/fixtures/selection-3.0') })
+  rootId = root.id
+  lastActivity = Date.now()
   console.log(`Acceptance root: ${root.id}`)
-  const startedAt = Date.now()
   const goal = `请建立并执行计划，对本地成本资料 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/costs.txt'))} 完成读取、独立核验、报告三个步骤。先给我简要说明计划，随后在当前只读授权内自行推进，无需再次询问是否执行。报告必须区分A的可确认两年成本、B尚未核实的口径及风险缺口，不得捏造事实，不得写文件或改变权限。请使用现有规范计划和真实工具完成，不要只回复规划建议。`
   const researchGoal = `${goal} 请使用内置深度研究能力，提供可追溯的结论版本、原文证据与独立来源审查记录，并在来源包中保留实际查阅范围。成本和风险分别判断覆盖与限制，研究完成不能只看执行完成。`
   await manager.sendMessage(root.id, help ? `${goal} 为验证自主协作，读取资料的 worker 请在读完原文后使用 task_help 向根协调者求助，说明已经尝试的读取步骤并询问方案 B 是否允许估算。根协调者应依据本次只读目标回答：B 口径未核实，保留限制，不估算、不扩大权限。得到答复后 worker 在原会话继续提交成果，无需询问用户；无关任务照常推进。最终报告说明该问题的处置。` : judgment ? `${researchGoal} 重要结论必须记录证伪条件，并由独立审查明确批判本线前提。请审视“把两年总额直接当作单年成本”这一替代前提，记录一个真正不同前提的歧路候选，并说明是否采用及原因：本次原目标仅解释资料写明的两年总额，不能把年均换算与单年实测混同；不扩大到新调查。事实错误或缺失证据留在原线修补。最终报告披露候选处置、竞争解释与限制。` : concurrency ? `${goal} 请把金额与口径分析、风险资料覆盖分析作为两个独立任务并行执行（max_parallel 至少为 2），随后由独立审查和报告节点汇合各自的真实成果。` : errata ? `${researchGoal} 另外，既存草稿 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/draft.txt'))} 也属于冻结原文。先保留草稿中的 A 金额为待核实结论版本，不能把它当作已确认事实；安排独立来源核验，发现错误后追加针对该精确版本的勘误。在原研究线产生修订版本和新的独立审查，最终报告引用勘误并说明历史结论的失效与修正。不建立替代前提分支，不覆盖任何原文件。` : research ? researchGoal : repair ? `${goal} 另外，本次有既存草稿 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/draft.txt'))}。请先读取并保留该草稿作为初稿，安排独立核验节点检验它；遇到错误后按核验结果返修并再次独立核验，交付纠正后的报告和修正说明。通过现有动态编排持续推进，只读产生文本成果即可。` : goal)
@@ -79,9 +88,9 @@ try {
   const events = readRunLog(workspace.rootPath, session.taskSlug, start.runId)
   const record = { rootId: root.id, slug: session.taskSlug, runId: start.runId, model: connection.defaultModel,
     permissionMode: session.permissionMode, status: terminal.status, elapsedMs: Date.now() - startedAt,
-    manualPlanEdits: 0, result, events: events.length, finalText: manager.getSessionFinalText(root.id),
+    manualPlanEdits: 0, lastActivity, latestActivity, result, events: events.length, finalText: manager.getSessionFinalText(root.id),
     requestMetrics: concurrency ? { ...requestMetrics, owners: [...requestMetrics.owners] } : undefined }
-  writeFileSync(help ? '/tmp/selection-pro-chat-help-acceptance.json' : judgment ? '/tmp/selection-pro-chat-judgment-acceptance.json' : concurrency ? '/tmp/selection-pro-chat-concurrency-acceptance.json' : errata ? '/tmp/selection-pro-chat-errata-acceptance.json' : research ? '/tmp/selection-pro-chat-research-acceptance.json' : repair ? '/tmp/selection-pro-chat-repair-acceptance.json' : '/tmp/selection-pro-chat-acceptance.json', JSON.stringify(record, null, 2))
+  writeFileSync(evidencePath, JSON.stringify(record, null, 2))
   assert.equal(terminal.status, 'completed', JSON.stringify(terminal.blockers))
   assert.equal(terminal.orchestratorSessionId, root.id)
   assert.equal(session.permissionMode, 'safe')
@@ -132,4 +141,23 @@ try {
   }
   if (repair) assert(events.some(event => event.kind === 'orchestration-patch') || events.some(event => event.kind === 'node-verdict' && event.result === 'fail'), 'The erroneous draft must trigger a recorded correction or result-driven plan revision')
   console.log(JSON.stringify({ ...record, result: undefined }, null, 2))
-} finally { await manager.flushAllSessions(); manager.cleanup() }
+} catch (error) {
+  // Snapshot before cleanup: cancellation caused by the harness is not the initial failure.
+  const session = rootId ? await manager.getSession(rootId) : undefined
+  const run = session?.taskSlug ? runner.getLatestRun(session.taskSlug) : undefined
+  const state = session?.taskSlug && run ? runner.getRunState(session.taskSlug, run.runId) : undefined
+  const result = session?.taskSlug && run ? loadTaskResults(workspace.rootPath, session.taskSlug, run.runId) : undefined
+  const events = session?.taskSlug && run ? readRunLog(workspace.rootPath, session.taskSlug, run.runId) : []
+  writeFileSync(evidencePath, JSON.stringify({ rootId, slug: session?.taskSlug, runId: run?.runId,
+    model: connection.defaultModel, permissionMode: session?.permissionMode, status: state?.status,
+    acceptance: 'failed', error: error instanceof Error ? error.message : String(error),
+    elapsedMs: Date.now() - startedAt, lastActivity, latestActivity, state, result, events: events.length,
+    finalText: rootId ? manager.getSessionFinalText(rootId) : undefined,
+    requestMetrics: concurrency ? { ...requestMetrics, owners: [...requestMetrics.owners] } : undefined,
+  }, null, 2))
+  throw error
+} finally {
+  unsubscribe()
+  await manager.flushAllSessions()
+  manager.cleanup()
+}

@@ -2,6 +2,8 @@
 
 父 Issue：[Selection V3.1 九项增强 #449](https://github.com/0-CHENAI/Selection/issues/449)。以下阶段采用 [#448](https://github.com/0-CHENAI/Selection/issues/448) 的方式：先确认可运行框架，再逐项填充功能。V3.0 的正式构建收尾仍归 [#457](https://github.com/0-CHENAI/Selection/issues/457)，V3.1 增强不反向扩大 V3.0 范围。
 
+2026-10-07 后端核验发现的增量整改归 [#468](https://github.com/0-CHENAI/Selection/issues/468)，详见 [整改阶段与入口](./PRO-BACKEND-REMEDIATION.md)。先处理实际运行观测和并发反馈，长材料、执行解释与联验继续填充既有阶段，不重复建单。
+
 ## 阶段与收尾
 
 | 阶段 | 原生子 Issue | 填充内容 | 本阶段交付 |

@@ -63,3 +63,53 @@ it('A8 releases a throttled request before Retry-After, reduces the cap, and rec
   expect(retryAfterMs('Mon, 05 Oct 2026 09:00:10 GMT', Date.parse('2026-10-05T09:00:00Z'))).toBe(10_000);
   expect(retryAfterMs('invalid')).toBeUndefined();
 });
+
+it('isolates old batch failures and successes while honoring late Retry-After', async () => {
+  const pool = new LlmConnectionPool(4);
+  const batch = await Promise.all([0, 1, 2, 3].map(n => pool.acquireRequest('quota', `run-${n}`)));
+  batch[0]!.release({ status: 429, retryAfter: '0' });
+  expect(pool.requestState('quota').cap).toBe(2);
+  batch[1]!.release({ status: 503, retryAfter: '0.03' });
+  expect(pool.requestState('quota').cap).toBe(2);
+  expect(pool.requestState('quota').retryAt).toBeGreaterThan(Date.now());
+  batch[2]!.release({ status: 200 }); batch[3]!.release({ status: 200 });
+  expect(pool.requestState('quota')).toMatchObject({ active: 0, cap: 2, queued: 0 });
+  let granted = false;
+  const waiting = pool.acquireRequest('quota', 'next').then(lease => { granted = true; return lease; });
+  await new Promise(resolve => setTimeout(resolve, 5)); expect(granted).toBe(false);
+  (await waiting).release({ status: 200 });
+  expect(pool.requestState('quota').cap).toBe(2);
+  const recovering = await pool.acquireRequest('quota', 'next');
+  const oldProbe = await pool.acquireRequest('quota', 'next');
+  recovering.release({ status: 200 });
+  expect(pool.requestState('quota').cap).toBe(3);
+  oldProbe.release({ status: 200 });
+  const next = await Promise.all([0, 1].map(() => pool.acquireRequest('quota', 'next')));
+  next.forEach(lease => lease.release({ status: 200 }));
+  expect(pool.requestState('quota').cap).toBe(3);
+  (await pool.acquireRequest('quota', 'next')).release({ status: 200 });
+  expect(pool.requestState('quota')).toMatchObject({ active: 0, cap: 4, queued: 0 });
+});
+
+it('a new admission epoch can throttle again and duplicate release stays harmless', async () => {
+  const pool = new LlmConnectionPool(4);
+  const first = await pool.acquireRequest('quota', 'a');
+  first.release({ status: 429, retryAfter: '0' });
+  const second = await pool.acquireRequest('quota', 'a');
+  second.release({ status: 503, retryAfter: '0' });
+  first.release({ status: 429, retryAfter: '600' });
+  expect(pool.requestState('quota')).toMatchObject({ active: 0, cap: 1, queued: 0 });
+  expect(pool.requestState('quota').retryAt).toBeLessThanOrEqual(Date.now());
+});
+
+it('late throttling retains the minimum cooldown after fresh success resets backoff', async () => {
+  const pool = new LlmConnectionPool(4);
+  const batch = await Promise.all([0, 1, 2, 3].map(() => pool.acquireRequest('quota', 'a')));
+  batch[0]!.release({ status: 429, retryAfter: '0' });
+  batch[1]!.release(); batch[2]!.release();
+  (await pool.acquireRequest('quota', 'b')).release({ status: 200 });
+  const now = Date.now();
+  batch[3]!.release({ status: 429 });
+  expect(pool.requestState('quota')).toMatchObject({ cap: 2, active: 0, queued: 0 });
+  expect(pool.requestState('quota').retryAt).toBeGreaterThanOrEqual(now + 1000);
+});

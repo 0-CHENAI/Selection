@@ -1,6 +1,6 @@
 import type { ModelRequestFeedback, ModelRequestLease } from '@craft-agent/shared/model-request-gate';
 type Waiter = { owner: string; resolve: (lease: ModelRequestLease) => void; reject: (error: unknown) => void; signal?: AbortSignal; cancel: () => void };
-type RequestQuota = { active: number; cap: number; successes: number; throttles: number; retryAt: number; owners: Map<string, Waiter[]>; lastOwner?: string; timer?: ReturnType<typeof setTimeout> };
+type RequestQuota = { active: number; cap: number; epoch: number; successes: number; throttles: number; retryAt: number; owners: Map<string, Waiter[]>; lastOwner?: string; timer?: ReturnType<typeof setTimeout> };
 
 export function retryAfterMs(value: string | undefined, now = Date.now()): number | undefined {
   if (!value?.trim()) return undefined;
@@ -27,7 +27,7 @@ export class LlmConnectionPool {
     signal?.throwIfAborted();
     let state = this.quotas.get(quota);
     if (!state) {
-      state = { active: 0, cap: Math.max(1, this.defaultLimit), successes: 0, throttles: 0, retryAt: 0, owners: new Map() };
+      state = { active: 0, cap: Math.max(1, this.defaultLimit), epoch: 0, successes: 0, throttles: 0, retryAt: 0, owners: new Map() };
       this.quotas.set(quota, state);
     }
     const current = state;
@@ -63,17 +63,25 @@ export class LlmConnectionPool {
       if (!queue.length) state.owners.delete(owner);
       waiter.signal?.removeEventListener('abort', waiter.cancel);
       state.lastOwner = owner; state.active++;
+      const admittedEpoch = state.epoch;
       let released = false;
       const release = (feedback?: ModelRequestFeedback) => {
         if (released) return;
         released = true; waiter.signal?.removeEventListener('abort', cancel); state.active--;
         if (feedback?.status === 429 || feedback?.status === 503) {
-          state.cap = Math.max(1, Math.floor(state.cap / 2)); state.successes = 0; state.throttles++;
-          const retry = retryAfterMs(feedback.retryAfter) ?? Math.min(60_000, 1000 * 2 ** Math.min(6, state.throttles - 1));
+          // Adjust once per admission epoch; late failures still extend server cooldown.
+          if (admittedEpoch === state.epoch) {
+            state.cap = Math.max(1, Math.floor(state.cap / 2)); state.successes = 0; state.throttles++; state.epoch++;
+          }
+          const retry = retryAfterMs(feedback.retryAfter) ?? Math.min(60_000, 1000 * 2 ** Math.min(6, Math.max(0, state.throttles - 1)));
           state.retryAt = Math.max(state.retryAt, Date.now() + retry);
-        } else if (feedback?.status && feedback.status < 400) {
+        } else if (admittedEpoch === state.epoch && feedback?.status && feedback.status < 400) {
           state.throttles = 0;
-          if (++state.successes >= state.cap && Date.now() >= state.retryAt) { state.cap = Math.min(this.defaultLimit, state.cap + 1); state.successes = 0; }
+          if (++state.successes >= state.cap && Date.now() >= state.retryAt) {
+            const cap = Math.min(this.defaultLimit, state.cap + 1);
+            if (cap !== state.cap) { state.cap = cap; state.epoch++; }
+            state.successes = 0;
+          }
         }
         this.pump(state);
       };

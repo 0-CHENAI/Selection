@@ -16,6 +16,13 @@ test('chat creation binds one canonical plan and recovers an interrupted bind wi
   manager.applyTaskLabel = async () => ({ labelId: 'task' })
   manager.setEventSink(() => {})
   try {
+    await expect(internal.createChatTask(root, { requestId: 'static-research', spec: {
+      title: 'Research', goal: 'Verify cost', runner: 'conduct',
+      research: { line: { id: 'main', question: 'Cost' }, dimensions: [{ id: 'cost', requirement: 'Verify cost' }], sources: [{ id: 'cost', path: 'cost.txt' }] },
+      nodes: [{ id: 'work', prompt: 'Read originals', researchRole: 'researcher', outputs: [{ name: 'research', kind: 'param', type: 'json', required: true }] }],
+    } })).rejects.toThrow('requires runner: orchestrate')
+    expect(listTaskSlugs(directory)).toHaveLength(0)
+    expect(root.taskSlug).toBeUndefined()
     root.isProcessing = true
     const input = { requestId: 'create-1', title: 'Compare costs', description: 'Read and compare the supplied costs' }
     await expect(internal.createChatTask(root, input)).rejects.toThrow('settle')

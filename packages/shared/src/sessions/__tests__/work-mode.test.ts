@@ -10,10 +10,14 @@ test('Pi registry advertises only tools allowed by the persisted execution scope
   const pro = names({ id: 'pro', workMode: 'PRO' });
   expect(pro).toContain('run_task');
   expect(pro).toContain('spawn_session');
-  const worker = names({ id: 'worker', workMode: 'PRO', parentSessionId: 'pro', taskNodeId: 'a' });
+  const worker = names({ id: 'worker', workMode: 'PRO', parentSessionId: 'pro', taskRunId: 'run', taskNodeId: 'a' });
   expect(worker).toContain('mcp__session__submit_task_output');
   expect(worker).not.toContain('mcp__session__update_task_list');
   expect(worker.some(name => !!complexToolCapability(name))).toBe(false);
+  const unbound = names({ id: 'worker', workMode: 'PRO', parentSessionId: 'pro', taskNodeId: 'a' });
+  for (const tool of ['submit_task_output', 'submit_task_node_verdict', 'task_help']) {
+    expect(unbound.some(name => name.endsWith(tool))).toBe(false);
+  }
 });
 
 test('all historical cases migrate idempotently without changing permissions or ownership', () => {

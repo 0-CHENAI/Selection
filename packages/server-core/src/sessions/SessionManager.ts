@@ -1487,6 +1487,18 @@ interface PendingDelta {
   turnId?: string
 }
 
+/** Content-free, generation-fenced model/tool activity for host diagnostics. */
+export interface SessionRuntimeActivity {
+  sessionId: string
+  rootSessionId: string
+  runId?: string
+  generation: number
+  type: AgentEvent['type']
+  at: number
+  reasoningBytes?: number
+  textBytes?: number
+}
+
 /**
  * In-process session-completion signal for the Tasks Conductor.
  *
@@ -1686,9 +1698,32 @@ export class SessionManager implements ISessionManager {
   private handoverCapturing = new Set<string>()
   private projectValidationControllers = new Map<string, AbortController>()
   private eventSink: EventSink | null = null
+  private runtimeActivityListeners = new Set<(activity: SessionRuntimeActivity) => void>()
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
+  }
+
+  /** Host diagnostics only: no model content and no renderer events. */
+  onRuntimeActivity(listener: (activity: SessionRuntimeActivity) => void): () => void {
+    this.runtimeActivityListeners.add(listener)
+    return () => { this.runtimeActivityListeners.delete(listener) }
+  }
+
+  private recordRuntimeActivity(managed: ManagedSession, event: AgentEvent): void {
+    if (!this.runtimeActivityListeners.size) return
+    const activity: SessionRuntimeActivity = {
+      sessionId: managed.id,
+      rootSessionId: managed.executionRootSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? managed.id,
+      runId: managed.taskRunId,
+      generation: managed.processingGeneration,
+      type: event.type,
+      at: Date.now(),
+      ...(event.type === 'model_activity' ? { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes } : {}),
+    }
+    for (const listener of this.runtimeActivityListeners) {
+      try { listener(activity) } catch (error) { sessionLog.warn('Runtime activity observer failed', error) }
+    }
   }
 
   setBrowserPaneManager(bpm: IBrowserPaneManager): void {
@@ -7685,6 +7720,7 @@ export class SessionManager implements ISessionManager {
 
         if (managed.processingGeneration !== myGeneration) break
         if (managed.stopRequested && event.type !== 'complete') continue
+        this.recordRuntimeActivity(managed, event)
         // Persist unknown in-flight effects before accepting further events.
         if (event.type === 'tool_start' && managed.executionCheckpoint) {
           managed.executionCheckpoint.pendingTools[event.toolUseId] ??= { name: event.toolName, recovery: toolRecoveryClass(event.toolName) }
@@ -7789,8 +7825,6 @@ export class SessionManager implements ISessionManager {
             && lastUserMsg
             && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)
           ) {
-            sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
-
             // Check if there's a captured API error that explains the silent failure.
             // Pass explicit session path to avoid reading from the wrong session
             // (_sessionDir singleton can be clobbered by concurrent sessions).
@@ -7800,6 +7834,8 @@ export class SessionManager implements ISessionManager {
             // Never replace a current error with a cached HTTP failure or a generic fallback.
             const turnMessages = managed.messages.slice(managed.messages.indexOf(lastUserMsg) + 1)
             const hasCurrentTurnError = turnMessages.some(message => message.role === 'error' && !message.hidden)
+            const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
+            const hasAcceptedNodeOutput = this.taskRunnerLookup?.(managed.workspace.id)?.hasAcceptedNodeOutput(sessionId, myGeneration) ?? false
             if (hasCurrentTurnError) {
               sessionLog.warn('Empty response preserved terminal error', {
                 sessionId,
@@ -7807,9 +7843,9 @@ export class SessionManager implements ISessionManager {
                 code: turnMessages.findLast(message => message.role === 'error')?.errorCode ?? 'unclassified',
               })
             }
-            if (!hasCurrentTurnError) {
+            if (!hasCurrentTurnError && (!hasAcceptedNodeOutput || currentApiError)) {
+              sessionLog.warn(`Session ${sessionId} completed without assistant response or accepted task output`)
               const hasToolActivity = turnMessages.some(message => message.role === 'tool')
-              const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
               const typedError = currentApiError
                 ? parseError(new Error(`HTTP ${currentApiError.status}: ${currentApiError.message}`))
                 : createTypedError(hasToolActivity ? 'tool_only_response' : 'no_response')
@@ -14807,6 +14843,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     this.progressArbiters.clear()
     this.progressBudgets.clear()
+    this.runtimeActivityListeners.clear()
     this.spawnCompletionUnsub?.()
     this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')

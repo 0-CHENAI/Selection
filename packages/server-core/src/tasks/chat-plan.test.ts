@@ -32,6 +32,10 @@ test('new chat research plans require host-owned original-read receipts', () => 
   } }, root)
   expect(plan.research?.assuranceVersion).toBe(2)
   expect(plan.research?.judgmentVersion).toBe(1)
+  expect(plan.runner).toBe('orchestrate')
+  expect(() => buildChatPlan({ requestId: 'static-research', spec: { ...plan, runner: 'conduct' } }, root)).toThrow('requires runner: orchestrate')
+  const ordinary = { ...plan, runner: 'conduct', research: undefined, nodes: [{ id: 'work', prompt: 'Read originals' }] }
+  expect(buildChatPlan({ requestId: 'static', spec: ordinary }, root).runner).toBe('conduct')
 })
 
 test('web discovery cannot start a frozen research protocol without original sources', () => {
