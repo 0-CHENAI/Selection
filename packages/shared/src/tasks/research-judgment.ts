@@ -19,7 +19,12 @@ export function validateResearchJudgment(config: ResearchConfig, previous: Resea
   for (const critique of payload.premiseReviews ?? []) {
     if (oldCritiques.some(old => old.id === critique.id)) errors.push(`Premise critique ${critique.id} is immutable`);
     const line = lines.find(line => line.id === critique.lineId);
-    if (!line || planValueKey(line.premises) !== planValueKey(critique.premises)) errors.push(`Premise critique must preserve the exact premises of ${critique.lineId}; expected ${JSON.stringify(line?.premises ?? [])}. Copy the canonical line premises, do not paraphrase them.`);
+    if (!line) errors.push(`Unknown premise line ${critique.lineId}`);
+    else if (planValueKey(line.premises) !== planValueKey(critique.premises)) {
+      const index = Array.from({ length: Math.max(line.premises.length, critique.premises.length) }, (_, i) => i)
+        .find(i => line.premises[i] !== critique.premises[i])!;
+      errors.push(`Premise critique must preserve the exact premises of ${critique.lineId}; premises[${index}] received ${JSON.stringify(critique.premises[index] ?? null)}; expected ${JSON.stringify(line.premises[index] ?? null)}. Replace this exact entry with the canonical text; do not paraphrase it.`);
+    }
     for (const ref of critique.claimRefs) {
       const target = authored.find(claim => refKey(claim) === refKey(ref));
       if (!target || !linesOf(target, config).includes(critique.lineId)) errors.push(`Unknown premise input ${refKey(ref)} in ${critique.lineId}`);

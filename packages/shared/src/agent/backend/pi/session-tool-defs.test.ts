@@ -36,11 +36,22 @@ describe('getSessionToolProxyDefs', () => {
     const root = { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan' };
     const rootNames = getSessionToolProxyDefs({ executionSession: root }).map(def => def.name);
     const nodeNames = getSessionToolProxyDefs({ executionSession: { ...root, id: 'worker', parentSessionId: 'root', taskRunId: 'run', taskNodeId: 'review' } }).map(def => def.name);
-    for (const name of ['submit_task_output', 'submit_task_node_verdict', 'task_help']) {
+    for (const name of ['submit_task_output', 'submit_task_node_verdict']) {
       expect(rootNames).not.toContain(`mcp__session__${name}`);
       expect(nodeNames).toContain(`mcp__session__${name}`);
     }
+    expect(rootNames).toContain('mcp__session__task_help');
+    expect(nodeNames).toContain('mcp__session__task_help');
     expect(rootNames).toContain('mcp__session__submit_task_verdict');
+  });
+  it('limits root help replies to eligible workflow coordinators', () => {
+    for (const session of [
+      { id: 'root', workMode: 'PRO' as const },
+      { id: 'norm', workMode: 'NORM' as const, taskSlug: 'plan' },
+      { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan', workModeNeedsReview: true },
+      { id: 'worker', workMode: 'PRO' as const, taskSlug: 'plan', parentSessionId: 'root' },
+      { id: 'worker', workMode: 'PRO' as const, taskSlug: 'plan', executionRootSessionId: 'root' },
+    ]) expect(getSessionToolProxyDefs({ executionSession: session }).map(def => def.name)).not.toContain('mcp__session__task_help');
   });
   it('exposes the managed artifact version tool to the model', () => {
     expect(getSessionToolProxyDefs().map(def => def.name)).toContain('mcp__session__artifact_versions');

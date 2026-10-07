@@ -16,6 +16,18 @@ const critique = { id: 'premise-main-v1', lineId: 'main', premises: ['two years'
 const reviewed = record('reviewer', 'independent', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'supported', finding: 'Exact original range' }], premiseReviews: [critique] });
 const report = record('reporter', 'report', { report: { claimRefs: [{ id: 'cost', version: 1 }], limitations: ['Test data, not a market claim'], unresolved: [] } });
 
+test('premise rejection identifies the exact changed entry without rewriting submitted or frozen text', () => {
+  const premises = ['one', 'two', 'three', 'four', 'five', 'six', '初审后按精确原文追加勘误'];
+  const scoped = { ...config, line: { ...config.line, premises } };
+  const changed = record('reviewer', 'independent', { premiseReviews: [{ ...critique, premises: [...premises.slice(0, 6), '初审后按精确勘误追加'] }] });
+  const before = JSON.stringify({ scoped, changed });
+  const errors = validateResearchRecord(scoped, sources, [authored], changed);
+  expect(errors.join(' ')).toContain('premises[6] received "初审后按精确勘误追加"; expected "初审后按精确原文追加勘误"');
+  expect(JSON.stringify({ scoped, changed })).toBe(before);
+  const corrected = record('reviewer', 'independent', { premiseReviews: [{ ...critique, premises }] });
+  expect(validateResearchRecord(scoped, sources, [authored], corrected)).toEqual([]);
+});
+
 test('B2 requires independent exact-version premise critique and falsification, retaining legacy readability', () => {
   expect(validateResearchRecord(config, sources, [authored], reviewed)).toEqual([]);
   expect(validateResearchRecord(config, sources, [authored], { ...reviewed, producedBy: authored.producedBy }).join(' ')).toContain('not independent');
