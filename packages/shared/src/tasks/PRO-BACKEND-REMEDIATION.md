@@ -44,18 +44,32 @@
 
 | Issue | 实现入口与本批证据 | 尚待收尾 |
 | --- | --- | --- |
-| [#460](https://github.com/0-CHENAI/Selection/issues/460) | 原生 `web_fetch` 将成功获取的实际字节、确定性提取文本、来源版本和返回行范围冻结；`source-snapshot` → `freezeResearchSources` → 现有读取凭据 / 来源包。失败、索引和搜索摘要不能登记原文查阅。沿用既有精确版本勘误、审查失效与报告约束。 | 新格式与网页输入的 GPT-6-luna 勘误、重新独立审查及最终报告闭环。 |
+| [#460](https://github.com/0-CHENAI/Selection/issues/460) | 原生 `web_fetch` 将成功获取的实际字节、确定性提取文本、来源版本和返回行范围冻结；`source-snapshot` → `freezeResearchSources` → 现有读取凭据 / 来源包。失败、索引和搜索摘要不能登记原文查阅。沿用既有精确版本勘误、审查失效与报告约束。 | GPT-6-luna 勘误、重新独立审查及最终报告闭环已通过；网页标题仍按冻结快照限制披露。代码按用户选择保留本地。 |
 | [#464](https://github.com/0-CHENAI/Selection/issues/464) | `document_index` → `document_read` 接通目录、定位、原文返回及字面引文核验；真实 20 页 PDF 的第 17 页、XLSX `Costs!B2`、DOCX 第 204 段、PPTX 第 2 张均定位到 1000000。文件 hash 变化使旧索引失效，冻结研究输入保持原字节。原生 Office / PDF Skills 保留，安全模式可读取完整 OfficeCLI 原生指南。 | 解析只覆盖结构 / 文本；OCR、图表、版面和公式重算继续使用原生 Skills，不作为索引已验证内容。 |
-| [#471](https://github.com/0-CHENAI/Selection/issues/471) | `session_history` 从当前 JSONL 分支派生层级摘要、版本、parent / child 和原文展开；原文变化使祖先摘要版本失效。项目设置显式授权后，`project_history` 仅按明确查询检索本项目并按精确消息版本展开，排除兄弟执行上下文；源变更、删除和撤权立即生效。无第二份记忆数据库，无新会话自动背景注入。 | GPT-6-luna worker 按需项目历史回查；根节点实际查询与展开已发生，不能替代 worker 验收。 |
+| [#471](https://github.com/0-CHENAI/Selection/issues/471) | `session_history` 从当前 JSONL 分支派生层级摘要、版本、parent / child 和原文展开；原文变化使祖先摘要版本失效。项目设置显式授权后，`project_history` 仅按明确查询检索本项目并按精确消息版本展开，排除兄弟执行上下文；源变更、删除和撤权立即生效。无第二份记忆数据库，无新会话自动背景注入。 | 同一 GPT-6-luna / 只读权限下，根与独立 worker 均完成按需检索及精确版本展开。历史版本哈希已稳定，修复前的版本差异作为审计限制保留。 |
 | [#465](https://github.com/0-CHENAI/Selection/issues/465) | 同一规范计划派生任务 / 数据 / 控制 / actor / 研究五视图，复用既有校验、权限模式和原子 revision；影响预览覆盖修订前后依赖及下游。新的只读 `inspectTaskRun` RPC 直接读取已提交事件和精确 revision，不创建 TaskRunner。 | 普通安装包联验仍归 #466；缺精确历史快照时显示限制，不借当前可变计划补造历史。 |
 
-最终源码回归 **1039 通过 / 0 失败**（130 文件、5021 断言、45.58 秒）；全工作区类型检查、lint、i18n parity、renderer 构建、独立服务端构建均通过。lint 的既存警告和 renderer 的既存大块提示保留。服务端包的交接 / 项目历史 / 回放模块实际导入通过；桌面资源与服务端包均复制最后生产构建的原生工具，三份 bundle hash 一致。独立服务端补齐了项目历史依赖的 Pi 源码助手及原生 bundle 打包。
+最终源码回归 **1045 通过 / 0 失败**（130 文件、5171 断言、44.20 秒，包含本次全部恢复和检查点修复）；全工作区类型检查、lint、i18n parity、renderer 构建、独立服务端构建均通过。lint 的既存警告和 renderer 的既存大块提示保留。服务端包的交接 / 项目历史 / 回放模块实际导入通过；桌面资源与服务端包均复制最后生产构建的原生工具，三份生产 bundle hash 一致（`495a396fde43ca95154e1cb22a3658399d84f19c8c558ab27b5259771f9cab51`），与本轮实际模型所用原生 bundle 相同。独立服务端补齐了项目历史依赖的 Pi 源码助手及原生 bundle 打包。
 
 真实 GPT-6-luna 运行 `261007-ready-opal` 的根节点完成 2 次项目历史工具操作、6 次文档索引、27 次文档原文读取和 1 次实际网页获取，冻结 PDF、XLSX、DOCX 和网页内容。随后研究 worker 及重试 worker 收到 `network_error / Connection error`，运行暂停，718903 ms。第二次运行 `261007-still-lagoon` 同样连接失败，未建立规范计划。失败快照在清理前保存；研究 worker 查阅凭据为 0，不能把根节点的成功读取当作独立审查，也不能把本轮标为完整通过。
 
 对 `ready-opal` 的实际已提交 38 条事件进行只读回放：r0 → r1 的真实修订及影响可见，五视图保留相同规范节点；400 个工作区文件的 hash 前后完全相同，根节点工具调用记录保持 61 → 61，新读取进程重启后结果一致。独立 RPC 测试另验证管理器尚未初始化时也能只读查询，模型 / 创建会话调用计数为 0。浅色与深色 UI 验证覆盖视图、历史游标及返回实时；该 UI 使用展示 fixture，不冒充真实后端 / 模型证据。
 
-证据：[结构化记录](../../../../scripts/fixtures/selection-3.1/backend-batch2-acceptance.json)、[浅色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-light.png)、[深色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-dark.png)。GitHub API 当前返回 EOF，故远端证据回填和 Issue 关闭尚未执行。网络恢复后继续上述真实模型收尾，再按完成条件更新 Issue；普通包九项联验与受控三方对照继续保留在 #466。
+证据：[结构化记录](../../../../scripts/fixtures/selection-3.1/backend-batch2-acceptance.json)、[浅色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-light.png)、[深色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-dark.png)。上述网络失败记录保留为历史尝试，不作为通过证据；普通包九项联验与受控三方对照继续保留在 #466。
+
+### 网络恢复后的补验
+
+用户切换节点后，GitHub 与 GPT-6-luna 连接均恢复。已用 gh CLI 发布并重新读取核对 [#460](https://github.com/0-CHENAI/Selection/issues/460#issuecomment-6035759255)、[#464](https://github.com/0-CHENAI/Selection/issues/464#issuecomment-6035759585)、[#471](https://github.com/0-CHENAI/Selection/issues/471#issuecomment-6035759927)、[#465](https://github.com/0-CHENAI/Selection/issues/465#issuecomment-6035760163) 的证据评论。按用户明确选择，代码保留在本地 version-3.0，不推送完整分支；证据回填与远端代码发布分开记录。
+
+运行 `261007-deep-nebula` 的根与 worker `261007-new-gold` 完成了项目历史检索及精确版本展开，但发现文档提取快照作为来源路径时，冻结入口只接受带网页获取身份的相邻索引，导致四个文档来源不可用。已在停止前保存完整现场，不更改这次运行的冻结输入。提交 `dd62d4d54` 使经过完整性和授权验证的文档快照也能直接冻结；真实五个失败输入复验均保留版本及原始定位。62 项相关回归、489 断言通过，原件变化与快照篡改继续拒绝，既有冻结输入字节保持不变；全工作区类型检查、lint、桌面主进程和独立服务端构建再次通过。
+
+修复后运行 `261007-broad-ripple` 经标准恢复入口完成真实 GPT-6-luna 闭环：revision **5**、终态 **completed**、父节点最终结构化 **PASS**；8 个当前规范节点完成，5 个冻结来源可用，71 项实际原文读取凭据，0 个当前研究 blockers。`a-cost@1` 的旧 100000 元精确关联追加勘误，修正为 `a-cost@2` 的 1000000 元并重新独立审查；最新报告引用已解决勘误且由全新上下文验证。B 不比较、风险缺口不外推；网页标题主张仍为 partial，报告明确冻结提取无法核实标题，不断言原网页没有标题。全部金额仅限 TEST FIXTURE ONLY。
+
+本轮实际发现并修复求助入口与重启恢复缺陷（`80e4fd3d3`、`0201ea7e3`、`399ef8d3a`）、消息 JSON 字段顺序导致版本漂移与已取消节点残留（`f7f4539a1`），以及父节点检查点重复注入大量研究凭据导致压缩后超时（`4e2278f89`）。检查点从实际 127676 字符降到 17610 字符，改为当前版本、审查状态、勘误与限制摘要，完整规范凭据按需查询。100 次读取的回归确认缩短提示没有丢失凭据。各缺陷的失败快照保留，未改写冻结输入或注入模型输出；最终一次恢复保留先前 6 个完成节点及全部既有业务记录。模型通过有效原子修订退休原 pending 复核节点，并自行增加报告更正与独立验证，最终闭环不是未经中断的首次成功。
+
+项目历史验收中，根以及读取、勘误、审查和最终验证 worker 均实际使用 `project_history` 查询 BATCH2_SCOPE 并按各次精确命中版本展开。历史记录保留修复前的 `52e855…` 与原 / 当前 `a5a9e…` 差异；原口径文本未改变，模型最终报告明确披露该审计版本限制，未把历史摘要当作成本证据。字段顺序变更不再引起新版本；正文变更、删除及撤权仍失效。
+
+对这次完成运行的 **194** 条事件再做只读回放：r0 → r5 的实际修订与影响可追溯，五视图使用相同规范节点；**562** 个工作区文件 hash 前后相同，实际工具记录 **305 → 305**，重复读取一致，新 Bun 进程的 JSON / RPC 回放结果也一致。只读入口没有调度模型或执行写入。旧取消节点的历史事件保留，不属于当前规范待执行工作。类型检查、lint、桌面主进程及独立服务端构建再次通过；最终完整回归 1045 项通过。普通安装包九项联验与受控 Misaka / ZCode 效果对照仍归 #466，当前不宣称整包交付或三方性能优势。
 
 ## 复验入口
 
