@@ -945,8 +945,10 @@ class ActiveRun {
         else st.state = 'pending';
       } else if (st.state === 'waiting-help') {
         this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
-        st.state = 'interrupted'; st.lastFailure = 'progress-paused';
-        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'progress-paused' });
+        // A lost tool waiter has no progress continuation. Retire its attempt
+        // and use normal retry safety checks before creating a fresh context.
+        st.state = 'interrupted'; st.lastFailure = 'startup-scan';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
       } else if (st.state === 'running' || st.state === 'retry-wait') {
         if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
           st.state = 'interrupted';
@@ -960,8 +962,8 @@ class ActiveRun {
     for (const [nodeId, st] of this.instances) {
       if (st.state === 'waiting-help') {
         this.cancelNodeHelp(nodeId, 'Runtime restarted; recover retained tool results before requesting again');
-        st.state = 'interrupted'; st.lastFailure = 'progress-paused';
-        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'progress-paused' });
+        st.state = 'interrupted'; st.lastFailure = 'startup-scan';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
         continue;
       }
       if (st.state !== 'running' && st.state !== 'retry-wait') continue;

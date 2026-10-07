@@ -119,3 +119,32 @@ test('B9 restart preserves the question history and fences replies to lost conte
   expect(() => recovered.taskHelp('root', 0, answer())).toThrow('retired attempt');
   await runner.stop('help', 'r'); await stopped;
 });
+
+test('B9 continuing after restart retries lost help in a fresh context and preserves completed siblings', async () => {
+  const waiting = runner.taskHelp('session-a', 0, request) as Promise<unknown>;
+  const stopped = waiting.catch(error => error.message);
+  await tick(); await complete('b');
+  const completed = loadTaskResults(root, 'help', 'r').nodes.find(node => node.id === 'b')!.output;
+  listeners.clear();
+  const restoredHost = host();
+  const progress = spyOn(restoredHost, 'sendMessage');
+  const created: string[] = [];
+  restoredHost.createSession = async (_ws, options) => { created.push(options.taskNodeId!); return { id: `recovered-${options.taskNodeId}` }; };
+  restoredHost.continueProgress = async () => { throw new Error('Help never created a progress checkpoint'); };
+  let safe = false;
+  restoredHost.assertTaskSafePoint = () => { if (!safe) throw new Error('Unknown side effects require review'); };
+  const recovered = new TaskRunner({ host: restoredHost, workspaceId: 'ws', workspaceRoot: root });
+  recovered.scanUnfinished();
+  expect(() => recovered.continue('help', 'r')).toThrow('Unknown side effects');
+  expect(created).toHaveLength(0);
+  safe = true; recovered.continue('help', 'r'); await tick();
+  expect(created).toEqual(['a']);
+  expect(progress.mock.calls.map(call => call[0])).toEqual(['recovered-a']);
+  expect(recovered.getRunState('help', 'r')!.nodes[0]).toMatchObject({ state: 'running', attempt: 2, sessionId: 'recovered-a' });
+  expect(loadTaskResults(root, 'help', 'r').nodes.find(node => node.id === 'b')!.output).toEqual(completed);
+  expect(() => recovered.taskHelp('root', 0, answer())).toThrow('retired attempt');
+  for (const listener of listeners) listener({ workspaceId: 'ws', sessionId: 'recovered-a', generation: 0, reason: 'complete', finalText: 'A confirmed' });
+  await tick(); expect(recovered.getRunState('help', 'r')!.nodes.every(node => node.state === 'done')).toBe(true);
+  expect(recovered.submitVerdict('root', { runId: 'r', result: 'pass' }).status).toBe('completed');
+  await runner.stop('help', 'r'); await stopped;
+});
