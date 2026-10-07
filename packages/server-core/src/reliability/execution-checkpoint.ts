@@ -133,6 +133,13 @@ export function readExecutionCheckpoint(sessionPath: string): CheckpointRead {
       || !Array.isArray(c.completedTools) || c.completedTools.some((id: unknown) => typeof id !== 'string')
       || Object.values(c.pendingTools).some((v: any) => !v || typeof v.name !== 'string'
         || !['read-only', 'idempotent', 'file-verifiable', 'unknown'].includes(v.recovery))) return { kind: 'corrupt' }
+    // Older Pi proxy definitions marked this host-owned, identity-fenced wait
+    // as unknown. Upgrade only bound task help; never external/native effects.
+    if (c.taskIdentity?.taskRunId && c.taskIdentity.taskNodeId) {
+      for (const tool of Object.values(c.pendingTools) as Array<{ name: string; recovery: ToolRecoveryClass }>) {
+        if (/^(?:mcp__session__|session__)?task_help$/.test(tool.name) && tool.recovery === 'unknown') tool.recovery = 'read-only'
+      }
+    }
     return { kind: 'ok', checkpoint: c }
   } catch { return { kind: 'corrupt' } }
 }

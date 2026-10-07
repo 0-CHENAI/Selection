@@ -1156,7 +1156,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
 
   return proxyToolDefs.map<ToolDefinition<any, any>>(def => {
     const executionName = resolveSessionToolProxyName(def.name);
-    return {
+    return registerRecoveryClass({
       name: def.name,
       label: def.name
         .replace(/^mcp__.*?__/, '')
@@ -1199,7 +1199,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           details: proxyToolDetails(result),
         };
       },
-    };
+    }, executionName === 'mcp__session__task_help' ? 'read-only' : 'unknown');
   });
 }
 
