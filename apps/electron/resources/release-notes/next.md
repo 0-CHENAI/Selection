@@ -70,6 +70,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Help restart recovery** — Lost worker help waits now use normal retry safety checks and a fresh execution attempt, preserving completed sibling results and retiring late replies. They no longer try to resume a progress checkpoint that was never created.
 
+- **Stable project history versions** — Re-saving an unchanged message with a different JSON field order no longer invalidates its history reference. Content, role and original identity changes still require a new search.
+
+- **Cancelled plan nodes** — Coordinator removal of pending work now retires its execution state along with the canonical node, so an obsolete node cannot block final verification. Unresolved live failures remain blocking.
+
 - **Indexed research snapshots** — Research plans can use the text snapshot returned by document navigation directly while retaining original-file versions and native page/cell locations. Changed originals and corrupt snapshots remain unavailable. Issues #460 and #464.
 
 - **Chat composer with run history** — Long reports and task progress no longer push the composer below the window; its model and send controls remain visible.

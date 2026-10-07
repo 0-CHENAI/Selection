@@ -28,7 +28,10 @@ export function projectHistory(root: string, requester: Pick<StoredSession, 'id'
     && (session.id === requester.id || (session.executionRootSessionId ?? session.id) !== (requester.executionRootSessionId ?? requester.id)));
   const safeMessage = (session: StoredSession, message: StoredSession['messages'][number]) => {
     if (!['user', 'assistant'].includes(message.type) || message.isIntermediate || !message.content.trim()) return undefined;
-    const version = createHash('sha256').update(JSON.stringify(message)).digest('hex');
+    // Hash the original fields exposed by expansion in a fixed order. Session
+    // persistence may reorder JSON keys without changing the original message.
+    const version = createHash('sha256').update(JSON.stringify({ id: message.id, type: message.type,
+      timestamp: message.timestamp, content: message.content })).digest('hex');
     return { sessionId: session.id, messageId: message.id, version, role: message.type,
       text: redactHandoverText(message.content), parentSessionId: session.parentSessionId, timestamp: message.timestamp };
   };

@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProject, updateProject } from '@craft-agent/shared/projects';
@@ -33,6 +33,12 @@ test('G memory authorization, cross-workspace isolation, sibling independence, e
     expect(readdirSync(join(root, 'sessions', 'past'))).toContain('orphan.tmp');
     // A new callback invocation is the restart path; no in-memory index survives.
     expect(projectHistory(root, requester, { query: 'COST_SCOPE_TEST' })).toEqual(result);
+    const historyPath = join(root, 'sessions', 'past', 'session.jsonl');
+    const [header, original] = readFileSync(historyPath, 'utf8').trim().split('\n');
+    const message = JSON.parse(original!);
+    writeFileSync(historyPath, `${header}\n${JSON.stringify({ content: message.content, timestamp: message.timestamp, type: message.type, id: message.id })}\n`);
+    expect(projectHistory(root, requester, { query: 'COST_SCOPE_TEST' })).toEqual(result);
+    expect(projectHistory(root, requester, input)).toMatchObject({ version: hit.version, text: expect.stringContaining('人民币两年总额') });
     write('past', 'COST_SCOPE_TEST: 已更正');
     expect(() => projectHistory(root, requester, input)).toThrow('changed/deleted');
     rmSync(join(root, 'sessions', 'past'), { recursive: true });

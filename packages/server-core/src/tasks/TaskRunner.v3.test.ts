@@ -322,6 +322,26 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(host.sent.findLast(call => call.sessionId === 'orch')?.message).toContain('completed without submit_task_output');
   });
 
+  it('retires a canonically cancelled pending node without blocking final verification', async () => {
+    saveTaskSpec(root, v3Spec({ acceptance_criteria: 'A supplies the finding', nodes: [{ id: 'a', prompt: 'A' }, { id: 'b', prompt: 'Unneeded work', depends_on: ['a'] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const decide = (decisionId: string, action: 'continue' | 'patch', extra: Record<string, unknown> = {}) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId,
+      decisionId, baseRevision: r.getRunState('v3demo', 'r1')!.revision ?? 0, action, ...extra,
+    });
+    decide('retire-unused', 'patch', { rationale: 'A alone satisfies the current goal', cancel: ['b'] }); await tick();
+    expect(host.dispatchedNames()).toEqual(['a']);
+    host.complete('a', { finalText: 'A findings' }); await tick();
+    decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')!.status).toBe('verifying');
+    expect(r.getRunState('v3demo', 'r1')!.nodes.map(node => node.id)).toEqual(['a']);
+    expect(readRunLog(root, 'v3demo', 'r1').some(e => e.kind === 'orchestration-patch' && e.cancelled?.includes('b'))).toBe(true);
+    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    const restored = runner().getLatestRun('v3demo')!;
+    expect(restored.status).toBe('completed');
+    expect(restored.nodes.map(node => node.id)).toEqual(['a']);
+  });
+
   it('persists human feedback without releasing the gate, deduplicates feedback, and resumes only on approval', async () => {
     saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
       { id: 'gate', kind: 'approval', prompt: 'Review the plan' },

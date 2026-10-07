@@ -3253,7 +3253,9 @@ class ActiveRun {
       this.plannerPhase = patch.plannerPhase ?? (result ? 'active' : this.allNodesSettled() ? 'draining' : this.plannerPhase);
       this.edges = materializeDeps(this.spec); this.dependents = undefined;
       for (const node of this.spec.nodes) if (!this.state.has(node.id)) this.state.set(node.id, { state: 'pending', attempt: 0 });
-      for (const id of result?.cancelled ?? []) { const state = this.state.get(id); if (state) state.state = 'cancelled'; }
+      // Validated cancellation removes only pending/ready nodes from the
+      // canonical plan. Keep their audit event, not an orphan execution state.
+      for (const id of result?.cancelled ?? []) this.state.delete(id);
       // Append both facts, then atomically checkpoint revision + decision identity once.
       const t = this.deps.now ? this.deps.now() : new Date().toISOString();
       const change = result ? { revision: this.revision, decisionId: patch.decisionId, kind: patch.changeKind ?? 'structure' as const, reason: patch.rationale,
