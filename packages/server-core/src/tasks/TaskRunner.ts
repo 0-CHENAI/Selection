@@ -2496,6 +2496,20 @@ class ActiveRun {
     ].join('\n');
   }
 
+  private coordinatorContext(): string {
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    return [this.planContext(false), ...(research ? [
+      `Research status (summary, not source evidence): ${JSON.stringify({
+        coverage: research.coverage, blockers: research.blockers,
+        claims: research.claims.map(claim => ({ id: claim.id, version: claim.version, text: claim.text, support: claim.review?.support })),
+        issues: research.issues.map(issue => ({ id: issue.id, claimRef: issue.claimRef, state: issue.state, finding: issue.finding })),
+        errata: research.errata.map(erratum => ({ id: erratum.id, target: erratum.target, state: erratum.state })),
+        report: research.report,
+      })}`,
+      'Use get_task_results for the exact canonical research payloads, source versions, locators and read receipts before making an evidence judgment. This summary cannot replace original-source reading or independent review.',
+    ] : [])].join('\n');
+  }
+
   // --- completion ---
 
   private onSessionComplete(evt: SessionCompletionEvent): void {
@@ -2920,7 +2934,7 @@ class ActiveRun {
     const sections = this.spec.nodes.map((n) => {
       const out = this.outputs[n.id];
       const structured = this.sourceVersion >= 2 && out
-        ? `\nDeclared outputs: ${JSON.stringify(n.outputs ?? [])}\nRuntime-validated values: ${JSON.stringify(out.params ?? {})}\nRun: ${this.runId}; revision: ${this.revision}` : '';
+        ? `\nDeclared outputs: ${JSON.stringify(n.outputs ?? [])}\nRuntime-validated values: ${JSON.stringify(n.researchRole ? { ...out.params, research: '(canonical research payload: use get_task_results)' } : out.params ?? {})}\nRun: ${this.runId}; revision: ${this.revision}` : '';
       return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}${structured}`;
     });
     const rubric = this.spec.acceptance_criteria
@@ -2932,7 +2946,7 @@ class ActiveRun {
       `Frozen plan: ${JSON.stringify(this.spec)}`,
       '',
       rubric,
-      this.planContext(),
+      this.coordinatorContext(),
       '',
       'Node outputs:',
       ...sections,
@@ -3390,7 +3404,7 @@ class ActiveRun {
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, or pause.',
           'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
-          this.planContext(),
+          this.coordinatorContext(),
           `Task slug=${this.slug}; runId=${this.runId}. Frozen plan: ${JSON.stringify(this.spec)}`,
           `New results for this checkpoint: ${JSON.stringify(this.pendingPlannerResults().filter(event => this.coordinatorGate?.resultEventIds?.includes(event.id)))}`,
           'Consume the checkpoint results by a valid continue/patch decision. Add work for new evidence, failures or unresolved gaps. A final continue declares draining only when no planned work remains; exhausted then proceeds to independent final verification. Pause preserves unconsumed results. Never change locked contents, live nodes, permissions or goal scope.',

@@ -283,6 +283,34 @@ function readRange(sessionId: string, startLine = 2, endLine = 2, runId = 'r') {
   return { proof, text, record: () => runner.recordSourceRead(sessionId, proof, `read-${startLine}-${endLine}`, text) };
 }
 
+test('coordinator checkpoints and final verification reference repeated read receipts without reinjecting them', async () => {
+  runner.run('research', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); decide(); await tick();
+  const read = readRange('session-a');
+  for (let index = 0; index < 100; index++) expect(runner.recordSourceRead('session-a', read.proof, `actual-read-${index}`, read.text)).toBe(true);
+  const version = loadTaskResults(root, 'research', 'r').research!.sources[0]!.version;
+  await complete('a', { evidence: [{ id: 'e', sourceId: 's', sourceVersion: version, locator: { startLine: 2, endLine: 2 }, excerpt: read.text }],
+    claims: [{ id: 'cost', version: 1, type: 'fact', text: read.text, dimensionIds: ['cost'], evidenceIds: ['e'], critical: true }] });
+  const checkpoint = sent.filter(send => send.id === 'orch').at(-1)!.message;
+  expect(checkpoint.length).toBeLessThan(9000);
+  expect(checkpoint).toContain('get_task_results');
+  expect(checkpoint).toContain('"version":1');
+  expect(checkpoint).not.toContain('returnedTextHash');
+  const receipts = loadTaskResults(root, 'research', 'r').research!.reads;
+  expect(receipts).toHaveLength(100);
+  decide(); await tick();
+  await complete('review', { reviews: [{ claimRef: { id: 'cost', version: 1 }, citationExists: true, support: 'supported', finding: 'Read original source' }] });
+  decide(); await tick();
+  await complete('report', { report: { claimRefs: [{ id: 'cost', version: 1 }], limitations: ['Risk unavailable'], unresolved: ['Need risk material'] } });
+  decide(); await tick();
+  const verification = sent.filter(send => send.id === 'orch').at(-1)!.message;
+  expect(verification.length).toBeLessThan(9000);
+  expect(verification).toContain('1,000,000');
+  expect(verification).toContain('"support":"supported"');
+  expect(verification).not.toContain('returnedTextHash');
+  expect(loadTaskResults(root, 'research', 'r').research!.reads).toEqual(receipts);
+  expect(runner.submitVerdict('orch', { runId: 'r', result: 'pass' }).status).toBe('completed');
+});
+
 test('A1 validates host-owned reads, survives restart, and blocks delivery until the reviewer reads independently', async () => {
   const parsed = loadTaskSpec(root, 'research');
   if (!parsed?.spec) throw new Error('Missing fixture');

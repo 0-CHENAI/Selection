@@ -72,6 +72,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Stable project history versions** — Re-saving an unchanged message with a different JSON field order no longer invalidates its history reference. Content, role and original identity changes still require a new search.
 
+- **Compact coordinator checkpoints** — Research checkpoints and final verification carry current claim versions, review status and unresolved limits while referring to canonical receipts on demand. Repeated read histories no longer overwhelm the parent context; complete receipts remain available for independent verification.
+
 - **Cancelled plan nodes** — Coordinator removal of pending work now retires its execution state along with the canonical node, so an obsolete node cannot block final verification. Unresolved live failures remain blocking.
 
 - **Indexed research snapshots** — Research plans can use the text snapshot returned by document navigation directly while retaining original-file versions and native page/cell locations. Changed originals and corrupt snapshots remain unavailable. Issues #460 and #464.
