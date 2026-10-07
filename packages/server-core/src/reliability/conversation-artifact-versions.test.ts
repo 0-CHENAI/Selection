@@ -3,9 +3,33 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
+import { readSourceSnapshot, saveSourceSnapshot } from '@craft-agent/shared/source-snapshot'
 import { messageToStored, storedToMessage, type Message } from '@craft-agent/core'
 import { ArtifactVersions } from './artifact-versions'
+import { ArtifactCandidateInventory } from './artifact-candidate-inventory'
 import { artifactVersionTitle, ConversationArtifactVersions, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from './conversation-artifact-versions'
+
+test('web source snapshots stay readable evidence without becoming deliverables or artifact versions', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-source-cache-'))
+  try {
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
+    const inventory = new ArtifactCandidateInventory([root])
+    const snapshot = saveSourceSnapshot(root, Buffer.from('<p>Original source</p>'), 'https://example.com', 'text/html',
+      [{ id: 'content', label: 'Source', kind: 'section', text: 'Original source' }], [],
+      { toolCallId: 'fetch-1', sessionId: 'session', requestedUrl: 'https://example.com', finalUrl: 'https://example.com', contentType: 'text/html' })
+    const userFile = join(root, 'snapshot.txt')
+    writeFileSync(userFile, 'User-requested text report')
+    expect(inventory.changed()).toEqual([userFile])
+    const cacheLink = `[source](<${snapshot.textPath}>)`
+    await turn.track(cacheLink)
+    const refs = await turn.capture(cacheLink, 'session/user-1', undefined, [snapshot.textPath, userFile])
+    expect(refs.map(ref => ref.path)).toEqual([userFile])
+    expect(store.findByPath(snapshot.textPath)).toBeUndefined()
+    expect(readSourceSnapshot(join(root, '.selection-sources', snapshot.version, 'index.json'), root)).toEqual(snapshot)
+    expect(readFileSync(snapshot.textPath, 'utf8')).toBe('Original source')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 
 test('the same file keeps shared snapshots but each chat sees its own version numbers across a rename', () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-session-versions-'))

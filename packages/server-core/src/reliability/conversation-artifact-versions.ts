@@ -127,6 +127,7 @@ export class ConversationArtifactVersions {
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
       try {
         const safe = await this.authorize(candidate)
+        if (isSessionScratchPath(safe)) continue
         if (this.paths.has(safe)) return
         if (!existsSync(safe)) { this.pendingWrites.add(safe); continue }
         if (!lstatSync(safe).isFile()) continue
@@ -153,6 +154,7 @@ export class ConversationArtifactVersions {
       for (const candidate of candidates) {
         try {
           const safe = await this.authorize(candidate)
+          if (isSessionScratchPath(safe)) continue
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
           const changedPath = writtenPaths.find(path => sameArtifactLocation(path, safe))
