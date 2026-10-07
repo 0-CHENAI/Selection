@@ -56,6 +56,8 @@ import {
   listTaskSlugs,
   listRunIds,
   loadTaskResults,
+  inspectTaskRun,
+  revisionImpact,
   TaskEtagConflictError,
   definitionDiff,
   mergeRunDefinition,
@@ -101,6 +103,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.PATCH_RUN,
   RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
+  RPC_CHANNELS.tasks.INSPECT_RUN,
 ] as const
 
 /** Map a shared ValidationResult (+ parsed spec) onto the wire DTO. */
@@ -581,6 +584,10 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:getResults — storage-backed read of a run's outcome (verdict + per-node output).
   // Reads the durable artifacts (run-log.jsonl, nodes/<id>.json, per-run spec.json snapshot), so it
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
+  server.handle(RPC_CHANNELS.tasks.INSPECT_RUN, async (_ctx, workspaceId: string, slug: string, runId: string, cursor?: number, patch?: import('@craft-agent/shared/tasks').OrchestrationPatch) => {
+    return inspectTaskRun(workspaceOrThrow(workspaceId).rootPath, slug, runId, cursor, patch)
+  })
+
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
     return loadTaskResults(workspaceOrThrow(workspaceId).rootPath, slug, runId)
   })
@@ -644,6 +651,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     ]
     const resultBase = {
       diff,
+      impact: revisionImpact(live.spec, merged),
       validation,
       yaml,
       runRevision: runRevision.revision,

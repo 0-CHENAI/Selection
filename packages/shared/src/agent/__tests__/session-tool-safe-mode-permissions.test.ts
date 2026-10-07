@@ -69,7 +69,11 @@ describe('session tool safe-mode classification', () => {
       expect(shouldAllowToolInMode('Bash', {
         command: 'officecli view "OfficeCLI 调研.docx" outline --json',
       }, 'safe', options).allowed).toBe(true);
+      expect(shouldAllowToolInMode('Bash', { command: 'officecli load_skill excel' }, 'safe', options).allowed).toBe(true);
+      expect(shouldAllowToolInMode('Bash', { command: 'officecli load_skill financial-model' }, 'safe', options).allowed).toBe(true);
       for (const command of [
+        'officecli load_skill excel --output /tmp/guide.txt',
+        'officecli load_skill excel; officecli add x.docx /body --type paragraph',
         'officecli view "OfficeCLI 调研.docx" screenshot --out /tmp/grid.png',
         'officecli view "OfficeCLI 调研.docx" html --out /tmp/report.html',
         'officecli query "OfficeCLI 调研.docx" /body --output /tmp/result.json',

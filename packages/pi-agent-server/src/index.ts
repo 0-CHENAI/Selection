@@ -104,6 +104,7 @@ import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
+import { createDocumentTools } from './tools/documents.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
@@ -752,7 +753,8 @@ async function ensureSession(): Promise<AgentSession> {
     requestAnySearchApiKey(send, pendingAnySearchApiKeys),
   ));
   const webFetchTool = createWebFetchTool(() =>
-    initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
+    initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null,
+    () => cwd,
   );
   const webTools = [searchTool, webFetchTool];
 
@@ -781,6 +783,7 @@ async function ensureSession(): Promise<AgentSession> {
   ];
   confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
   confinedBashDirectory = isolatedShell?.directory;
+  builtinDefs.push(...createDocumentTools(() => cwd).map(tool => registerRecoveryClass(tool, 'read-only')));
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral

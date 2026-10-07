@@ -119,6 +119,7 @@ export {
 // Context interface
 export type {
   SessionToolContext,
+  ProjectHistoryInput,
   TaskHelpInput,
   SessionToolCallbacks,
   FileSystemInterface,

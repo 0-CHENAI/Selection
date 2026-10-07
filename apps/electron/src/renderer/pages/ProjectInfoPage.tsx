@@ -52,6 +52,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editDescription, setEditDescription] = useState('')
   const [editWorkingDir, setEditWorkingDir] = useState('')
   const [editDetails, setEditDetails] = useState('')
+  const [editHistorySearch, setEditHistorySearch] = useState(false)
   const [editColor, setEditColor] = useState<string>('')
   const [saving, setSaving] = useState(false)
 
@@ -73,6 +74,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       setEditDescription(loaded.config.description ?? '')
       setEditWorkingDir(loaded.config.workingDirectory ?? '')
       setEditDetails(loaded.config.details ?? '')
+      setEditHistorySearch(loaded.config.historySearchEnabled === true)
       setEditColor(loaded.config.color ?? '')
     } catch (err) {
       console.error('[ProjectInfoPage] Failed to load project:', err)
@@ -155,6 +157,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         description: editDescription.trim() || undefined,
         workingDirectory: editWorkingDir.trim() || undefined,
         details: editDetails.trim() || undefined,
+        historySearchEnabled: editHistorySearch,
         color: editColor.trim() || undefined,
       })
       toast.success(t('projectInfo.saved'))
@@ -164,7 +167,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     } finally {
       setSaving(false)
     }
-  }, [workspaceId, project, editName, editDescription, editWorkingDir, editDetails, editColor, t])
+  }, [workspaceId, project, editName, editDescription, editWorkingDir, editDetails, editHistorySearch, editColor, t])
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -375,6 +378,9 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     rows={6}
                     placeholder={t('projectInfo.detailsPlaceholder')}
                   />
+                </Field>
+                <Field label={t('projectInfo.historySearch')} hint={t('projectInfo.historySearchHint')}>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-primary" checked={editHistorySearch} onChange={event => setEditHistorySearch(event.target.checked)} />{t('projectInfo.historySearchEnable')}</label>
                 </Field>
                 <div className="flex justify-between pt-2">
                   <Button

@@ -4,6 +4,12 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
+
+- **Authorized project history** — Projects can explicitly enable PRO history search with exact message/version expansion and native compaction lineage. Changed or deleted history is invalidated; fresh conversations do not automatically inherit other chats, and sibling execution contexts remain isolated. Issue #471.
+
+- **Plan explanation and history replay** — The existing workbench adds task, data, control, actor and research views, static preflight, revision impact and read-only event history. Replay uses frozen revisions without dispatching models or applying changes. Issue #465.
+
 - **Coordinator-first task help** — A blocked worker records its problem, attempted steps and needed decision, yields only its task slot, then continues the same execution after the root replies. Replies retain the current authority; Stop and restart retire lost waiting instances while preserving history. Issue #449.
 
 - **Research corrections** — Append-only errata invalidate exact claim/source versions, dependent reasoning and historical reports until independently reviewed corrections are available. Frozen handovers disclose later associated corrections without rewriting their snapshots. Part of #449.

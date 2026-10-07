@@ -2018,7 +2018,7 @@ class ActiveRun {
     const nodeId = this.sessionToNode.get(sessionId), state = nodeId ? this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId)) : undefined;
     if (!this.spec.research || !nodeId || !state || state.state !== 'running' || state.sessionId !== sessionId) return false;
     const previous = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
-    const sources = previous?.sources.filter(source => source.hash === proof.contentHash && [source.snapshotPath, source.originalPath].includes(proof.path)) ?? [];
+    const sources = previous?.sources.filter(source => (source.textHash ?? source.hash) === proof.contentHash && [source.snapshotPath, source.originalPath, source.indexedPath].includes(proof.path)) ?? [];
     let recorded = false;
     for (const source of sources) {
       if (!source.text || source.unavailableReason || !Number.isInteger(proof.startLine) || !Number.isInteger(proof.endLine)

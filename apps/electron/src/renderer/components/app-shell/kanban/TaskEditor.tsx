@@ -1539,7 +1539,7 @@ function ExistingTaskEditor({
         </div>
       )}
       {tab === 'canvas' && (
-        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} onOpenChildSession={onOpenChildSession} />
+        <ConductorWorkbench workspaceId={workspaceId} spec={currentSpec()} liveRun={liveRun} onOpenChildSession={onOpenChildSession} />
       )}
       {/* Keep authoring mounted so tabs retain the conversation and form focus state. */}
       <div hidden={tab !== 'definition'} className="task-editor-authoring grid min-h-0 min-w-0 flex-1 gap-4">

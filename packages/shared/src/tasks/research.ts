@@ -1,5 +1,6 @@
 /** Research business records reference execution receipts; they never schedule work. */
 import { z } from 'zod';
+import type { SourceSnapshot, SourceUnit } from '@craft-agent/shared/source-snapshot';
 import { validateResearchJudgment, summarizeResearchJudgment } from './research-judgment';
 const id = z.string().min(1);
 const version = z.number().int().positive();
@@ -66,7 +67,8 @@ export const ResearchConfigSchema = z.object({
 export type ResearchConfig = z.infer<typeof ResearchConfigSchema>;
 export interface ResearchSource {
   id: string; ref: string; version: string; hash?: string; acquiredAt: string;
-  originalPath?: string; snapshotPath?: string; text?: string; unavailableReason?: string;
+  originalPath?: string; snapshotPath?: string; indexedPath?: string; text?: string; unavailableReason?: string;
+  textHash?: string; units?: SourceUnit[]; limitations?: string[]; acquisition?: SourceSnapshot['acquisition'];
 }
 export const ResearchReadReceiptSchema = z.object({ id, sourceId: id, sourceVersion: id, toolUseId: id,
   path: id, contentHash: id, startLine: version, endLine: version, returnedTextHash: id,

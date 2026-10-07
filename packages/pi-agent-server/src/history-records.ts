@@ -13,7 +13,7 @@ export function textContent(content: unknown): string {
 }
 
 /** Only the active branch is visible: edited/regenerated sibling turns must not leak. */
-export interface HistoryRecord { id: string; role: string; text: string; userText?: string; toolCallId?: string }
+export interface HistoryRecord { id: string; role: string; text: string; userText?: string; toolCallId?: string; version?: string; childIds?: string[]; parentId?: string; limitation?: string }
 export function historyRecords(entries: SessionEntry[]): HistoryRecord[] {
   const offsets = new Map<string, number>();
   const committed = committedTaskSnapshots(entries);
@@ -63,4 +63,24 @@ export function committedTaskSnapshots(entries: SessionEntry[]) {
     }
   }
   return committed;
+}
+
+/** Native compaction lineage, derived on demand from the active JSONL branch. No second memory database. */
+export function historyTree(entries: SessionEntry[]): HistoryRecord[] {
+  const originals = historyRecords(entries);
+  const records: HistoryRecord[] = originals.map(record => ({ ...record, version: createHash('sha256').update(record.text).digest('hex') }));
+  let roots: string[] = []; let previousKept = 0;
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    if (entry.type !== 'compaction') continue;
+    const kept = entries.findIndex(item => item.id === entry.firstKeptEntryId);
+    const known = kept >= 0 && kept <= index;
+    const children = known ? [...new Set([...roots, ...entries.slice(previousKept, kept).flatMap(item => originals.some(record => record.id === item.id) ? [item.id] : [])])] : [];
+    const lineage = children.map(id => [id, records.find(record => record.id === id)?.version]);
+    records.push({ id: entry.id, role: 'summary', text: entry.summary, version: createHash('sha256').update(JSON.stringify([entry.summary, entry.firstKeptEntryId, lineage])).digest('hex'),
+      childIds: children, ...(known ? {} : { limitation: 'Original range unavailable in this legacy compaction; no lineage was invented.' }) });
+    for (const child of children) { const record = records.find(record => record.id === child); if (record) record.parentId = entry.id; }
+    roots = [entry.id]; if (known) previousKept = kept;
+  }
+  return records;
 }

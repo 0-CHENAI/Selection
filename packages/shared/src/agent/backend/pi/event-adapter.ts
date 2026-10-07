@@ -747,8 +747,8 @@ export class PiEventAdapter extends BaseEventAdapter {
         }
 
         const toolResult = this.createToolResult(toolCallId, resolvedToolName, result, isError, undefined, content);
-        // Only the native read implementation owns this metadata; MCP or Bash summaries cannot assert it.
-        if (toolResult.type === 'tool_result' && event.toolName === 'read' && !isError && !blockReason) {
+        // Only native original-reading implementations own this metadata; MCP or Bash summaries cannot assert it.
+        if (toolResult.type === 'tool_result' && ['read', 'web_fetch', 'document_read'].includes(event.toolName) && !isError && !blockReason) {
           toolResult.sourceRead = resultDetails?.sourceRead;
         }
         yield toolResult;

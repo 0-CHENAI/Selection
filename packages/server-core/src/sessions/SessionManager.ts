@@ -1,3 +1,4 @@
+import { projectHistory } from './project-history'
 import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
 import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
 import { finishTaskOrchestrator } from '../tasks/create-task'
@@ -5272,6 +5273,7 @@ export class SessionManager implements ISessionManager {
             } } : {}),
           }
         },
+        projectHistoryFn: input => projectHistory(managed.workspace.rootPath, managed, input),
         listSessionsFn: (options) => {
           const DEFAULT_LIMIT = 20
           const MAX_LIMIT = 100

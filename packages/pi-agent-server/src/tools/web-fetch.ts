@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
+import { saveSourceSnapshot, sourceHash } from '@craft-agent/shared/source-snapshot';
 
 const schema = Type.Object({
   url: Type.String({ description: 'URL to fetch' }),
@@ -143,11 +144,6 @@ async function readResponseBytes(response: Response, maxSize: number): Promise<B
 /**
  * Read the full response body as text while enforcing a byte-size limit.
  */
-async function readResponseText(response: Response, maxSize: number): Promise<string> {
-  const buffer = await readResponseBytes(response, maxSize);
-  return buffer.toString('utf-8');
-}
-
 // ============================================================
 // Helpers
 // ============================================================
@@ -202,7 +198,7 @@ function ensurePdfjsPolyfills(): void {
   }
 }
 
-async function extractPdfText(buffer: Buffer): Promise<string> {
+export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
   ensurePdfjsPolyfills();
   // Pre-load worker on the main thread so pdfjs-dist doesn't try to resolve
   // pdf.worker.mjs from disk (fails when externalized via bun build).
@@ -219,9 +215,10 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
       .filter((item: any) => 'str' in item)
       .map((item: any) => item.str)
       .join(' ');
-    if (text.trim()) pages.push(`--- Page ${i} ---\n${text}`);
+    pages.push(text);
   }
-  return pages.join('\n\n');
+  await doc.destroy();
+  return pages;
 }
 
 async function handlePdf(
@@ -237,8 +234,9 @@ async function handlePdf(
   }
 
   try {
-    const text = await extractPdfText(buffer);
-    if (!text.trim()) {
+    const pages = await extractPdfPages(buffer);
+    const text = pages.map((text, i) => `--- Page ${i + 1} ---\n${text}`).join('\n\n');
+    if (!pages.some(page => page.trim())) {
       return result(
         `PDF from ${url} (saved to ${savedPath})\n\nNo extractable text (likely scanned/image-based).`,
       );
@@ -268,57 +266,13 @@ async function handleImage(
   );
 }
 
-function handleHtml(
-  html: string,
-  url: string,
-  prompt: string | undefined,
-): AgentToolResult<{ isError?: boolean }> {
-  const root = parseHtml(html);
-  // Strip noise elements from the DOM before selecting mainContent.
-  root
-    .querySelectorAll(NOISE_ELEMENTS.join(', '))
-    .forEach((el) => el.remove());
-
-  const mainContent =
-    root.querySelector('main, article, [role="main"], .content, #content') ||
-    root.querySelector('body') ||
-    root;
-
-  const markdown = turndown.turndown(mainContent.innerHTML);
-
-  const prefix = prompt
-    ? `Content from ${url} (asked: "${prompt}"):\n\n`
-    : `Content from ${url}:\n\n`;
-
-  return result(prefix + truncate(markdown));
-}
-
-function handleJson(
-  raw: string,
-  url: string,
-): AgentToolResult<{ isError?: boolean }> {
-  let formatted: string;
-  try {
-    formatted = JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    formatted = raw;
-  }
-  return result(`JSON from ${url}:\n\n${truncate(formatted)}`);
-}
-
-function handleText(
-  raw: string,
-  url: string,
-): AgentToolResult<{ isError?: boolean }> {
-  return result(`Content from ${url}:\n\n${truncate(raw)}`);
-}
-
 // ============================================================
 // Factory
 // ============================================================
 
 export function createWebFetchTool(
   getSessionPath: () => string | null,
+  getSourceDirectory: () => string | null = getSessionPath,
 ): ToolDefinition<typeof schema> {
   async function saveBinary(buffer: Buffer, url: string, ext: string): Promise<string> {
     const sessionPath = getSessionPath();
@@ -343,8 +297,8 @@ export function createWebFetchTool(
     promptSnippet:
       'Use web_fetch to retrieve and extract content from a URL. Supports HTML (converted to markdown), PDF (text extraction), images (saved to disk), JSON (pretty-printed), and plain text. Pass url (required) and optional prompt to focus extraction.',
     parameters: schema,
-    async execute(toolCallId, params) {
-      const { url, prompt } = params;
+    async execute(toolCallId, params, signal) {
+      const { url } = params;
 
       // SSRF protection: block non-HTTP schemes and private/reserved IPs
       try {
@@ -358,15 +312,25 @@ export function createWebFetchTool(
 
       let response: Response;
       try {
-        response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; CraftAgent/1.0)',
-            Accept:
-              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(30_000),
-        });
+        let currentUrl = url;
+        const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
+        for (let redirects = 0; ; redirects++) {
+          await validateUrl(currentUrl);
+          response = await fetch(currentUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; CraftAgent/1.0)',
+              Accept:
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            redirect: 'manual',
+            signal: requestSignal,
+          });
+          if (![301, 302, 303, 307, 308].includes(response.status)) break;
+          const location = response.headers.get('location');
+          await response.body?.cancel();
+          if (!location || redirects >= 5) throw new Error('Invalid or excessive redirect');
+          currentUrl = new URL(location, currentUrl).href;
+        }
       } catch (err) {
         return result(
           `Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
@@ -400,21 +364,39 @@ export function createWebFetchTool(
         return handleImage(buffer, finalUrl, contentType, saveBinary);
       }
 
-      // Text content types — stream with size limit then decode
-      const text = await readResponseText(response, MAX_DOWNLOAD_SIZE);
-
+      // Freeze actual bytes and the complete deterministic extraction before truncating display.
+      const raw = await readResponseBytes(response, MAX_DOWNLOAD_SIZE);
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+      let extracted = text;
+      const limitations: string[] = [];
       if (contentType.includes('html')) {
-        return handleHtml(text, finalUrl, prompt);
+        const root = parseHtml(text);
+        root.querySelectorAll(NOISE_ELEMENTS.join(', ')).forEach(el => el.remove());
+        const main = root.querySelector('main, article, [role="main"], .content, #content') || root.querySelector('body') || root;
+        extracted = turndown.turndown(main.innerHTML);
+        limitations.push('HTML text extraction excludes navigation, scripts and embedded media; layout and JavaScript content are not verified.');
       }
-
-      if (
-        contentType === 'application/json' ||
-        contentType.endsWith('+json')
-      ) {
-        return handleJson(text, finalUrl);
+      if (contentType.includes('json')) { try { extracted = JSON.stringify(JSON.parse(text), null, 2); } catch { limitations.push('Invalid JSON retained as text.'); } }
+      if (!extracted.trim()) return result(`No readable original content from ${finalUrl}.`, true);
+      const directory = getSourceDirectory();
+      if (!directory) return result(`Cannot retain original content from ${finalUrl}: no authorized source directory.`, true);
+      const snapshot = saveSourceSnapshot(directory, raw, finalUrl, contentType || 'text/plain',
+        [{ id: 'content', label: finalUrl, kind: 'section', text: extracted }], limitations,
+        { toolCallId, sessionId: getSessionPath()?.split('/').pop() ?? 'unknown', requestedUrl: url, finalUrl, contentType });
+      const lines = extracted.split('\n');
+      let delivered = ''; let endLine = 0;
+      for (const line of lines) {
+        const next = endLine ? `${delivered}\n${line}` : line;
+        if (next.length > MAX_TEXT_LENGTH) break;
+        delivered = next; endLine++;
       }
-
-      return handleText(text, finalUrl);
+      const footer = `\n\nSource: ${finalUrl}\nFrozen original: ${snapshot.textPath}\nVersion: ${snapshot.version}\nReturned lines: 1–${endLine}/${lines.length}`
+        + (endLine < lines.length ? '\n[Content truncated: use Read on the frozen snapshot for the remaining lines.]' : '')
+        + (limitations.length ? `\nLimitations: ${limitations.join(' ')}` : '');
+      return { content: [{ type: 'text', text: delivered + footer }], details: {
+        ...(endLine && delivered ? { sourceRead: { path: snapshot.textPath, contentHash: snapshot.textHash,
+          startLine: 1, endLine, returnedTextHash: sourceHash(delivered) } } : {}),
+      } };
     },
   };
 }

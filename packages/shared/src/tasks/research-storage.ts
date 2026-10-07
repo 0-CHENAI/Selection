@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import { readSourceSnapshot, sourceIndexPath } from '@craft-agent/shared/source-snapshot';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute, sep } from 'node:path';
+import { basename, dirname, join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { atomicWriteFileSync } from '../utils/files.ts';
 import { committedRunLog, readRunLog, readRunState, readNodeAttempt, listRunIds, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
@@ -27,6 +28,17 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Source must be inside the authorized task directory');
       const bytes = readFileSync(path);
       const hash = createHash('sha256').update(bytes).digest('hex');
+      const webSnapshot = readSourceSnapshot(join(dirname(path), 'index.json'), base);
+      const indexed = webSnapshot?.textPath === path && webSnapshot.acquisition ? webSnapshot : readSourceSnapshot(sourceIndexPath(base, path), base);
+      if (indexed) {
+        const extracted = readFileSync(indexed.textPath), snapshotPath = join(target, `source-${index}.txt`);
+        writeFileSync(snapshotPath, extracted);
+        return { id: source.id, ref: source.ref ?? indexed.origin, version: indexed.version, hash: indexed.originalHash,
+          textHash: indexed.textHash, acquiredAt: indexed.acquiredAt, originalPath: indexed.originalPath,
+          snapshotPath: realpathSync(snapshotPath), indexedPath: indexed.textPath, text: extracted.toString('utf8'),
+          units: indexed.units, limitations: indexed.limitations, acquisition: indexed.acquisition };
+      }
+      if (webSnapshot || basename(path) === 'snapshot.txt' && path.split(sep).includes('.selection-sources')) throw new Error('Original source snapshot is unavailable or corrupt');
       if (bytes.includes(0)) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
       const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
       const snapshotPath = join(target, `source-${index}.txt`); writeFileSync(snapshotPath, bytes);
@@ -48,17 +60,18 @@ export function readResearchSources(root: string, slug: string, runId: string, e
       const path = realpathSync(source.snapshotPath), rel = relative(directory, path);
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Snapshot leaves its owning research run');
       const bytes = readFileSync(path);
-      if (createHash('sha256').update(bytes).digest('hex') !== source.hash) throw new Error('Source snapshot version changed');
+      if (createHash('sha256').update(bytes).digest('hex') !== (source.textHash ?? source.hash)) throw new Error('Source snapshot version changed');
       return { ...source, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
     } catch (error) { return { ...source, text: undefined, unavailableReason: String(error) }; }
   });
 }
 
-export function loadResearchResults(root: string, slug: string, runId: string, visited = new Set<string>()): ResearchSummary | undefined {
+export function loadResearchResults(root: string, slug: string, runId: string, visited = new Set<string>(), eventCount?: number): ResearchSummary | undefined {
   if (visited.has(runId)) throw new Error('Cyclic research predecessor receipt');
   visited.add(runId);
-  const state = readRunState(root, slug, runId), log = committedRunLog(readRunLog(root, slug, runId), state);
-  const revision = state?.revision ?? log.reduce((latest, entry) => Math.max(latest, entry.revision ?? 0), 0);
+  const state = readRunState(root, slug, runId), durable = committedRunLog(readRunLog(root, slug, runId), state);
+  const log = eventCount === undefined ? durable : durable.slice(0, eventCount);
+  const revision = (eventCount === undefined ? state?.revision : undefined) ?? log.reduce((latest, entry) => Math.max(latest, entry.revision ?? 0), 0);
   const currentSpec = readSpecRevision(root, slug, runId, revision);
   const config = currentSpec?.research;
   if (!config) return undefined;
@@ -105,8 +118,8 @@ export function loadResearchResults(root: string, slug: string, runId: string, v
       const parsed = ResearchReadReceiptSchema.safeParse(entry.receipt);
       if (!parsed.success || parsed.data.producedBy.runId !== runId) return [];
       const read = parsed.data, source = sources.find(source => source.id === read.sourceId && source.version === read.sourceVersion);
-      if (!source?.text || source.unavailableReason || source.hash !== read.contentHash || read.startLine > read.endLine
-        || read.endLine > source.text.split('\n').length || ![source.snapshotPath, source.originalPath].includes(read.path)) return [];
+      if (!source?.text || source.unavailableReason || (source.textHash ?? source.hash) !== read.contentHash || read.startLine > read.endLine
+        || read.endLine > source.text.split('\n').length || ![source.snapshotPath, source.originalPath, source.indexedPath].includes(read.path)) return [];
       const returned = researchReadRangeTexts(source, read);
       const spawn = spawns.get(read.producedBy.nodeId);
       return returned.some(text => createHash('sha256').update(text).digest('hex') === read.returnedTextHash)

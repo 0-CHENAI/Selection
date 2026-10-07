@@ -41,6 +41,7 @@
     "./skills": "./src/skills/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
+    "./source-snapshot": "./src/utils/source-snapshot.ts",
     "./utils/artifact-links": "./src/utils/artifact-links.ts",
     "./utils/artifact-restore-message": "./src/utils/artifact-restore-message.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
@@ -80,7 +81,8 @@
     "./tasks/version": "./src/tasks/version.ts",
     "./i18n": "./src/i18n/index.ts",
     "./resources": "./src/resources/index.ts",
-    "./skills/install": "./src/skills/install.ts"
+    "./skills/install": "./src/skills/install.ts",
+    "./tasks/explain": "./src/tasks/explain.ts"
   },
   "dependencies": {
     "@craft-agent/core": "workspace:*",

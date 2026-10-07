@@ -50,6 +50,8 @@ export interface ProjectConfig {
   updatedAt: number;
   /** Set when project is archived (hidden from sidebar but kept on disk) */
   archivedAt?: number;
+  /** User opt-in for on-demand PRO search of project conversation logs. No prompt injection. */
+  historySearchEnabled?: boolean;
   /** Per-project Kanban columns. Absent → the board uses the default 3 columns. */
   kanbanColumns?: KanbanColumnDef[];
 }

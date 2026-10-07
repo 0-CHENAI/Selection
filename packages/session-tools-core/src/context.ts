@@ -346,6 +346,8 @@ export interface SessionToolContext {
   /** Get detailed info about a session. Defaults to current session if no ID given. Injected by backend. */
   getSessionInfo?(sessionId?: string): SessionInfo | null;
 
+  projectHistory?(input: ProjectHistoryInput): unknown | Promise<unknown>;
+
   /** List sessions in the workspace with pagination. Injected by backend. */
   listSessions?(options?: ListSessionsOptions): ListSessionsResult;
 
@@ -853,3 +855,5 @@ export function createNodeFileSystem(): FileSystemInterface {
     },
   };
 }
+
+export interface ProjectHistoryInput { query?: string; sessionId?: string; messageId?: string; expectedVersion?: string; offset?: number }

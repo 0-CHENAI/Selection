@@ -68,6 +68,8 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'projectHistory', { get() { return getSessionScopedToolCallbacks(sessionId)?.projectHistoryFn; }, configurable: true, enumerable: true });
+
   Object.defineProperty(context, 'listSessions', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.listSessionsFn;

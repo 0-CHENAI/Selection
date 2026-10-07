@@ -10,6 +10,7 @@ import type { ComponentEntry } from './types'
 import { mockElectronAPI } from '../mock-utils'
 import { researchPreview, researchLinesPreview, researchJudgmentPreview } from './research-preview'
 import { renderResearchReport } from '../../../../../../packages/shared/src/tasks/research'
+import { explainPreflight, projectTaskView, TASK_VIEWS } from '@craft-agent/shared/tasks/explain'
 
 const initial = {
   schema_version: 3, id: 'research-report', title: '资料研究与报告', goal: '收集、分析并输出报告', acceptance_criteria: '报告引用收集资料，并说明资料限制。', runner: 'conduct',
@@ -66,6 +67,14 @@ function TaskEditorLive({ mode = 'edit', response = 'normal', scenario = 'curren
     Object.assign(window.electronAPI, {
       getProjects: async () => [], onProjectsChanged: () => () => {}, onTaskRunChanged: () => () => {},
       getTask: async () => ({ slug: initial.id, spec: definition, yaml: JSON.stringify(definition), etag: 'preview-v1', sourceVersion: scenario === 'legacy' ? 2 : 3, ...(scenario === 'active' || scenario === 'dynamic' || research ? { latestRun: live } : {}) }),
+      // Display-only transport fixture; actual read-only storage/RPC replay is verified separately.
+      inspectTaskRun: async (_ws: string, _slug: string, _run: string, cursor = 3) => {
+        const position = Math.min(cursor, 3), snapshot = { ...live, status: position === 3 ? live.status : 'running' as const, nodes: live.nodes.map(node => ({ ...node, state: position === 3 ? node.state : position === 0 ? 'pending' as const : 'running' as const })) }
+        return { readOnly: true, cursor: position, total: 3, spec: definition, snapshot,
+          history: ['run-started', 'node-spawned', 'node-finished'].map((kind, i) => ({ cursor: i + 1, seq: i + 1, revision: live.revision ?? 0, time: '2026-10-07T00:00:00Z', kind })),
+          changes: [], preflight: { ...explainPreflight(definition), ...validateTaskSpec(definition) },
+          views: Object.fromEntries(TASK_VIEWS.map(view => [view, projectTaskView(definition, view, snapshot.research)])), limitations: ['Display fixture; no workflow is executed.'] }
+      },
       getTaskResults: async () => ({ slug: initial.id, runId: research ? 'preview-active' : 'preview-run', runIds: [research ? 'preview-active' : 'preview-run'], runStatus: 'completed', research: research?.summary, nodes: definition.nodes.map(node => ({ id: node.id, title: node.title, state: 'done', output: research && node.id === 'report' ? renderResearchReport(research.summary) : '成果已核对。'.repeat(20) })) }),
       applyTaskRunRevision: async () => ({ diff: { added: Array.from({ length: 30 }, (_, i) => `revision-node-${i}`), removed: [], changed: ['analyze'] }, validation: { valid: true, errors: [], warnings: [] }, runRevision: 2, runSpecHash: 'preview-hash', yaml: JSON.stringify(initial), sourceVersion: 3 }),
       patchTaskRun: async (_ws: string, req: { baseRevision: number }) => { if (req.baseRevision !== live.revision) return { snapshot: live, conflict: { code: 'conflict', message: 'stale revision' } }; await new Promise(resolve => setTimeout(resolve, 500)); live = { ...live, revision: live.revision + 1 }; return { snapshot: live } },

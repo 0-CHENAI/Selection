@@ -563,6 +563,7 @@ export interface TaskApplyRunRevisionRequest {
 }
 
 export interface TaskApplyRunRevisionResult {
+  impact?: ReturnType<typeof import('../tasks/explain').revisionImpact>
   diff: { added: string[]; removed: string[]; changed: string[] }
   applied?: boolean
   validation: TaskValidationResultDto

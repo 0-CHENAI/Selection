@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import { getCurrentTools, normalizeContext, type Context } from '@earendil-works/pi-ai';
 import type { SessionEntry, SessionManager, ToolDefinition } from '@earendil-works/pi-coding-agent';
 
-import { historyRecords, textContent } from './history-records.ts';
+import { historyRecords, historyTree, textContent } from './history-records.ts';
 import { taskContextItems, taskRecoveryContext } from './task-context.ts';
 
 const MAX_ANCHOR_CHARS = 6000;
@@ -87,6 +87,8 @@ export function projectRetainedContext<T extends Context>(context: T, entries: S
 }
 
 const historySchema = Type.Object({
+  view: Type.Optional(Type.Union([Type.Literal('messages'), Type.Literal('summaries')], { description: 'List compaction hierarchy or original messages. Summary children can be expanded by entry_id. Summaries are navigation, not verified evidence.' })),
+  expected_version: Type.Optional(Type.String({ description: 'Version from a previous search; reject expansion if the original changed.' })),
   entry_id: Type.Optional(Type.String({ description: 'Exact message ID. Omit to search the active session branch.' })),
   query: Type.Optional(Type.String({ description: 'Literal case-insensitive text search; omit to list recent messages.' })),
   offset: Type.Optional(Type.Integer({ minimum: 0, description: 'Character offset for an exact message, or result offset for search/list pagination.' })),
@@ -101,23 +103,24 @@ export function createSessionHistoryTool(getManager: () => Pick<SessionManager, 
       signal?.throwIfAborted();
       const manager = getManager();
       if (!manager) throw new Error('Session history is not available.');
-      const records = historyRecords(manager.getBranch());
+      const records = historyTree(manager.getBranch());
       let result: unknown;
       if (params.entry_id) {
         const record = records.find(record => record.id === params.entry_id);
         if (!record) throw new Error('Message not found in the active session branch.');
+        if (params.expected_version && params.expected_version !== record.version) throw new Error('Original history version changed; search again.');
         const offset = params.offset ?? 0;
         const end = Math.min(record.text.length, offset + 8000);
-        result = { id: record.id, role: record.role, toolCallId: record.toolCallId, text: record.text.slice(offset, end), next_offset: end < record.text.length ? end : null,
+        result = { id: record.id, version: record.version, parentId: record.parentId, childIds: record.childIds, limitation: record.limitation, verifiedEvidence: false, role: record.role, toolCallId: record.toolCallId, text: record.text.slice(offset, end), next_offset: end < record.text.length ? end : null,
           total_characters: record.text.length, note: 'Text only; original image/audio payloads are not returned.' };
       } else {
         const query = params.query?.toLowerCase();
-        const matches = records.filter(record => !query || record.text.toLowerCase().includes(query)).reverse();
+        const matches = records.filter(record => (params.view === 'summaries' ? record.role === 'summary' : record.role !== 'summary') && (!query || record.text.toLowerCase().includes(query))).reverse();
         const offset = params.offset ?? 0;
         result = { total: matches.length, next_offset: offset + 12 < matches.length ? offset + 12 : null,
           messages: matches.slice(offset, offset + 12).map(record => {
           const start = query ? Math.max(0, record.text.toLowerCase().indexOf(query) - 100) : 0;
-          return { id: record.id, role: record.role, excerpt: record.text.slice(start, start + 400) };
+          return { id: record.id, version: record.version, parentId: record.parentId, childIds: record.childIds, role: record.role, excerpt: record.text.slice(start, start + 400) };
         }) };
       }
       return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };

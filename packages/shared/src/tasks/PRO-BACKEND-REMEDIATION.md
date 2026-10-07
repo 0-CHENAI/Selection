@@ -38,6 +38,25 @@
 - 最新代码 GPT-6-luna 并发重跑 `261007-eager-mountain` 完整通过（474664 ms）：5 节点 done，42 次真实请求取得 / 42 次释放、最终 active=0、并发峰值 3、统一根 owner。无人工计划改写或输出注入。
 - 所有失败样本、通过样本和工具拒绝都保存在 [本批证据](../../../../scripts/fixtures/selection-3.0/pro-backend-remediation-acceptance.json)。研究维度的 covered 表示其约定问题有依据，并不表示现实风险已全面覆盖；最终报告明确现有风险资料的局限。普通安装包九项联验、受控三方效果对照与远端交付尚未完成；阶段 03–05 未实现内容继续留在相应 Issue。
 
+## 第二批实现与验证（2026-10-07）
+
+按阶段 03 → 04 → 05 接通入口，再填充当前验收所需内容。代码、本地验证、真实模型闭环和远端交付分开记录。
+
+| Issue | 实现入口与本批证据 | 尚待收尾 |
+| --- | --- | --- |
+| [#460](https://github.com/0-CHENAI/Selection/issues/460) | 原生 `web_fetch` 将成功获取的实际字节、确定性提取文本、来源版本和返回行范围冻结；`source-snapshot` → `freezeResearchSources` → 现有读取凭据 / 来源包。失败、索引和搜索摘要不能登记原文查阅。沿用既有精确版本勘误、审查失效与报告约束。 | 新格式与网页输入的 GPT-6-luna 勘误、重新独立审查及最终报告闭环。 |
+| [#464](https://github.com/0-CHENAI/Selection/issues/464) | `document_index` → `document_read` 接通目录、定位、原文返回及字面引文核验；真实 20 页 PDF 的第 17 页、XLSX `Costs!B2`、DOCX 第 204 段、PPTX 第 2 张均定位到 1000000。文件 hash 变化使旧索引失效，冻结研究输入保持原字节。原生 Office / PDF Skills 保留，安全模式可读取完整 OfficeCLI 原生指南。 | 解析只覆盖结构 / 文本；OCR、图表、版面和公式重算继续使用原生 Skills，不作为索引已验证内容。 |
+| [#471](https://github.com/0-CHENAI/Selection/issues/471) | `session_history` 从当前 JSONL 分支派生层级摘要、版本、parent / child 和原文展开；原文变化使祖先摘要版本失效。项目设置显式授权后，`project_history` 仅按明确查询检索本项目并按精确消息版本展开，排除兄弟执行上下文；源变更、删除和撤权立即生效。无第二份记忆数据库，无新会话自动背景注入。 | GPT-6-luna worker 按需项目历史回查；根节点实际查询与展开已发生，不能替代 worker 验收。 |
+| [#465](https://github.com/0-CHENAI/Selection/issues/465) | 同一规范计划派生任务 / 数据 / 控制 / actor / 研究五视图，复用既有校验、权限模式和原子 revision；影响预览覆盖修订前后依赖及下游。新的只读 `inspectTaskRun` RPC 直接读取已提交事件和精确 revision，不创建 TaskRunner。 | 普通安装包联验仍归 #466；缺精确历史快照时显示限制，不借当前可变计划补造历史。 |
+
+最终源码回归 **1039 通过 / 0 失败**（130 文件、5021 断言、45.58 秒）；全工作区类型检查、lint、i18n parity、renderer 构建、独立服务端构建均通过。lint 的既存警告和 renderer 的既存大块提示保留。服务端包的交接 / 项目历史 / 回放模块实际导入通过；桌面资源与服务端包均复制最后生产构建的原生工具，三份 bundle hash 一致。独立服务端补齐了项目历史依赖的 Pi 源码助手及原生 bundle 打包。
+
+真实 GPT-6-luna 运行 `261007-ready-opal` 的根节点完成 2 次项目历史工具操作、6 次文档索引、27 次文档原文读取和 1 次实际网页获取，冻结 PDF、XLSX、DOCX 和网页内容。随后研究 worker 及重试 worker 收到 `network_error / Connection error`，运行暂停，718903 ms。第二次运行 `261007-still-lagoon` 同样连接失败，未建立规范计划。失败快照在清理前保存；研究 worker 查阅凭据为 0，不能把根节点的成功读取当作独立审查，也不能把本轮标为完整通过。
+
+对 `ready-opal` 的实际已提交 38 条事件进行只读回放：r0 → r1 的真实修订及影响可见，五视图保留相同规范节点；400 个工作区文件的 hash 前后完全相同，根节点工具调用记录保持 61 → 61，新读取进程重启后结果一致。独立 RPC 测试另验证管理器尚未初始化时也能只读查询，模型 / 创建会话调用计数为 0。浅色与深色 UI 验证覆盖视图、历史游标及返回实时；该 UI 使用展示 fixture，不冒充真实后端 / 模型证据。
+
+证据：[结构化记录](../../../../scripts/fixtures/selection-3.1/backend-batch2-acceptance.json)、[浅色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-light.png)、[深色界面](../../../../scripts/fixtures/selection-3.1/backend-batch2-dark.png)。GitHub API 当前返回 EOF，故远端证据回填和 Issue 关闭尚未执行。网络恢复后继续上述真实模型收尾，再按完成条件更新 Issue；普通包九项联验与受控三方对照继续保留在 #466。
+
 ## 复验入口
 
 ```sh
@@ -50,3 +69,5 @@ bun run server:build
 ```
 
 真实模型使用配置了 GPT-6-luna 的独立测试工作区运行 `bun scripts/selection-pro-chat-acceptance.ts --research` 和 `--concurrency`。前者验证原文读取、来源独立审查、限制和报告，后者验证真实请求槽位、并发峰值、统一根身份与释放。来源资料固定为 `scripts/fixtures/selection-3.0/costs.txt`；模型输出由实际工具提交，不在脚本预制计划或注入最终判定。
+
+第二批使用 `create-documents.py /tmp/selection-batch2-originals` 生成真实格式输入（需要 python-docx、openpyxl、reportlab 和 python-pptx），再在隔离的已配置测试工作区运行 `bun scripts/selection-pro-chat-acceptance.ts --batch2`。项目历史口径消息是明确标识的验收输入；规范计划、勘误、审查和报告均须由实际模型工具提交。确定性格式、层级历史和回放验证分别见 `documents.test.ts`、`history-tree.test.ts`、`project-history.test.ts`、`replay.test.ts` 和 `tasks.replay.test.ts`。

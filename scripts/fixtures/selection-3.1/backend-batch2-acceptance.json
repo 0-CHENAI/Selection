@@ -1,0 +1,297 @@
+{
+  "recordedAt": "2026-10-07T09:34:16.021Z",
+  "baseCommit": "38799def49602fb59ab1f44e3b5776d24a89b16c",
+  "issues": [
+    460,
+    464,
+    471,
+    465
+  ],
+  "delivery": "local implementation and validation; remote update and independent model closure pending connection recovery",
+  "validation": {
+    "regression": {
+      "passed": 1039,
+      "failed": 0,
+      "files": 130,
+      "log": "/tmp/selection-batch2-final-regression.log",
+      "assertions": 5021,
+      "durationMs": 45580
+    },
+    "typecheck": "all workspace packages passed",
+    "lint": "passed with existing warnings",
+    "i18nParity": "passed",
+    "rendererBuild": "passed",
+    "standaloneServerBuild": "passed",
+    "packagedHistoryReplayImports": "passed",
+    "officeNativeGuide": {
+      "command": "apps/electron/resources/bin/officecli load_skill excel",
+      "passed": true
+    },
+    "nativeBundleHash": "5af07caa9b2f7e700d4bdf56fdcda879fc626fb2493662e055053a47b2dff650",
+    "packageLimitations": [
+      "Standalone server and copied desktop resources were verified. Ordinary installer joint acceptance remains #466.",
+      "Current Pi bundle contains no koffi external import; the existing optional-copy warning is retained."
+    ],
+    "nativeBundleCopiesIdentical": true
+  },
+  "nativeFormats": [
+    {
+      "file": "cost.pdf",
+      "unit": "page-17",
+      "sourceVersion": "5d0d6d00bdfa85c72c1599b1fab34220cf971bce78247eba32d4474224fd07e4",
+      "originalHash": "78622a434b6f3bb75eae86f63c26bff8d9897c7aab67130afdb59c31f00fb31a",
+      "totalUnits": 20,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/5d0d6d00bdfa85c72c1599b1fab34220cf971bce78247eba32d4474224fd07e4/snapshot.txt",
+        "contentHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+        "startLine": 17,
+        "endLine": 17,
+        "returnedTextHash": "7c22da3abdac317047ee5c3f4c1153910a6f676fb7a241b7c6fda850dba1ccc1"
+      },
+      "limitations": [
+        "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.xlsx",
+      "unit": "Costs!B2",
+      "sourceVersion": "31f3b4f24252321f9841d5c7135646bed4e51b251991981fcbcbbfd82b716f29",
+      "originalHash": "a55777f7e6438f075c1ec6168b27b2d3ded01e2126efbb0de868da0c8f16a32f",
+      "totalUnits": 5,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/31f3b4f24252321f9841d5c7135646bed4e51b251991981fcbcbbfd82b716f29/snapshot.txt",
+        "contentHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+        "startLine": 3,
+        "endLine": 3,
+        "returnedTextHash": "6cce36d9f8a9e151b100234af75cca89d55bcb94c153f51847debdf1f39cae45"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.docx",
+      "unit": "paragraph-204",
+      "sourceVersion": "5132a19bbbd115ee04b95d3764b16f7a68c3f10a893bb105ceef695cff95cf8e",
+      "originalHash": "ce202bccbe06e250a49025b9119981e0b9f8e97f3d4cebb9043706f2e851a0e4",
+      "totalUnits": 204,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/5132a19bbbd115ee04b95d3764b16f7a68c3f10a893bb105ceef695cff95cf8e/snapshot.txt",
+        "contentHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+        "startLine": 204,
+        "endLine": 204,
+        "returnedTextHash": "e9774f2834714e7db529d7061f04b49d939eee60b2dc5c05780805806fb7c463"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+        "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.pptx",
+      "unit": "slide-2",
+      "sourceVersion": "31c1faa91f1056e32e2ba89a8ca2f95c6a84c175dc3e4d8e8aca01246c67b35a",
+      "originalHash": "36404e86c18059f9dd7ebb33d756021b956dc93693a926308802804a1c6303d7",
+      "totalUnits": 2,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/31c1faa91f1056e32e2ba89a8ca2f95c6a84c175dc3e4d8e8aca01246c67b35a/snapshot.txt",
+        "contentHash": "c9a72214113ea64979302b24726990caf495f9bcb9951f6247f398ac221df57b",
+        "startLine": 3,
+        "endLine": 4,
+        "returnedTextHash": "5f219259b17c1f8f82c8bbf97b924eff840e717a2082e26dfffe4c3fc83b93c9"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    }
+  ],
+  "realModel": {
+    "model": "gpt-6-luna",
+    "rootId": "261007-ready-opal",
+    "slug": "pro-846bea2fcd4490f4bab1f0a0",
+    "runId": "chat-c1d450c44949b7aa3d1e8df07bb01625cc5b36a03c29fdb51e05c81c87f44e4a",
+    "statusBeforeCleanup": "paused",
+    "elapsedMs": 718903,
+    "manualPlanEdits": 0,
+    "acceptance": "failed",
+    "cause": "Research workers received network_error / Connection error; independent errata review and final report did not complete.",
+    "successCounts": {
+      "read": 8,
+      "mcp__session__project_history": 2,
+      "document_index": 6,
+      "bash": 1,
+      "document_read": 27,
+      "web_fetch": 1,
+      "mcp__session__create_task": 1,
+      "mcp__session__run_task": 1,
+      "mcp__session__submit_answer": 1,
+      "mcp__session__submit_orchestration_decision": 3
+    },
+    "rootSourceReadCount": 36,
+    "workerResearchReadCount": 0,
+    "sources": [
+      {
+        "id": "cost-pdf",
+        "version": "db668496f0532c17879994078f077deda939a7a19fac8c905a16483c0c81b3fd",
+        "hash": "6c0b4ea739a20d75e9b1231715d7cc2cd14758860095bc40b115d98f3c9c400d",
+        "textHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+        "unitCount": 20,
+        "locationKinds": [
+          "page"
+        ],
+        "limitations": [
+          "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+        ]
+      },
+      {
+        "id": "cost-xlsx",
+        "version": "fa71530e22b1e1a90fead4a3701b0edef0c9ac2dd4a9cf7b5d8bd1d08591b733",
+        "hash": "c63839c7dd7ef8e7dec0a10cd7c200e703888393085afd1da1742e7c8713a82c",
+        "textHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+        "unitCount": 5,
+        "locationKinds": [
+          "cell"
+        ],
+        "limitations": [
+          "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+        ]
+      },
+      {
+        "id": "cost-docx",
+        "version": "bad1a1a18d08693ef20ede374edf5428c77add944836923ca468e9df95d6b1d9",
+        "hash": "d6fa9e7050bb4ae8e9c846dfadaa250fd717994277de71bbf5ae985dd1ed43c4",
+        "textHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+        "unitCount": 204,
+        "locationKinds": [
+          "paragraph"
+        ],
+        "limitations": [
+          "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+          "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+        ]
+      },
+      {
+        "id": "example-page-snapshot",
+        "version": "c5426d6e4608fb5dba78cd1256c6670c7a6fe8bfb2b87705fc4ae7a46e009e97",
+        "hash": "25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484",
+        "textHash": "0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f",
+        "unitCount": 1,
+        "locationKinds": [
+          "section"
+        ],
+        "acquisition": {
+          "toolCallId": "call_iCYKSTkghkJiGad2FBdzyVqm",
+          "sessionId": "261007-ready-opal",
+          "requestedUrl": "https://example.com",
+          "finalUrl": "https://example.com/",
+          "contentType": "text/html"
+        },
+        "limitations": [
+          "HTML text extraction excludes navigation, scripts and embedded media; layout and JavaScript content are not verified."
+        ]
+      }
+    ],
+    "fullFailureSnapshot": "/tmp/selection-batch2-network-failure.json",
+    "log": "/tmp/selection-batch2-network-failure.log",
+    "nextAttempt": {
+      "rootId": "261007-still-lagoon",
+      "elapsedMs": 5738,
+      "error": "The agent did not bind a canonical plan from the chat goal",
+      "networkLog": "/tmp/selection-batch2-network-root-failure.log"
+    },
+    "limitations": [
+      "Root tool receipts are not researcher/reviewer receipts and are not counted as independent evidence.",
+      "An earlier attempt used stale compiled native tools and is excluded from acceptance.",
+      "Native-format fixture draft path was corrected before the second attempt."
+    ]
+  },
+  "actualRunReplay": {
+    "passed": true,
+    "readOnly": true,
+    "cursor": 38,
+    "total": 38,
+    "revision": 1,
+    "status": "paused",
+    "views": [
+      "task",
+      "data",
+      "control",
+      "actor",
+      "research"
+    ],
+    "nodeIds": [
+      "research-seed",
+      "review-seed",
+      "correct-cost",
+      "review-correction",
+      "final-report",
+      "research-seed-retry"
+    ],
+    "initialCursor": 1,
+    "initialRevision": 0,
+    "revisionCursor": 21,
+    "changes": [
+      {
+        "revision": 1,
+        "reason": "初始研究节点三次尝试均以基础设施 network_error 失败，所有研究维度仍未覆盖且没有任何研究证据。为避免把失败当作完成，在原授权和范围内新增同职责只读重试节点，并将尚未执行的独立 seed 审查切换到重试节点输出；其后顺序保持不变。",
+        "impact": {
+          "added": [
+            "research-seed-retry"
+          ],
+          "changed": [
+            "review-seed"
+          ],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "research-seed-retry",
+            "review-seed",
+            "correct-cost",
+            "review-correction",
+            "final-report"
+          ],
+          "unaffected": [
+            "research-seed"
+          ]
+        }
+      }
+    ],
+    "modelToolCallsBefore": 61,
+    "modelToolCallsAfter": 61,
+    "fileCount": 400,
+    "workspaceHashBefore": "633ca7728a0094bb4a0b1cc003682869ed4eef6e20739716f70dd68654298555",
+    "workspaceHashAfter": "633ca7728a0094bb4a0b1cc003682869ed4eef6e20739716f70dd68654298555",
+    "repeatReadIdentical": true,
+    "limitations": [],
+    "freshProcessReadIdentical": true
+  },
+  "ui": {
+    "transport": "display-only playground fixture, not a real model/backend acceptance",
+    "light": "backend-batch2-light.png",
+    "dark": "backend-batch2-dark.png",
+    "checks": [
+      "five views and actor/research labels",
+      "historical cursor changes runtime overlay without changing task definition",
+      "return to live view",
+      "no Create/Save/Run calls"
+    ]
+  },
+  "pending": [
+    "GPT-6-luna independent correction and fresh review/report (#460)",
+    "GPT-6-luna researcher/worker project history lookup (#471)",
+    "GitHub evidence comments and verified remote delivery",
+    "Ordinary installer joint acceptance and controlled three-way benchmark remain #466"
+  ]
+}

@@ -64,6 +64,7 @@ function ResearchSourceBundle({ research, onOpenSession }: { research: ResearchS
   if (!bundle) return null
   const read = (receipt: ResearchSummary['reads'][number]) => <li key={receipt.id} className="space-y-1 border-l border-border pl-2">
     <p>{receipt.sourceId} · {t('tasks.research.readRange', { start: receipt.startLine, end: receipt.endLine })}</p>
+    <p>{research.sources.find(source => source.id === receipt.sourceId && source.version === receipt.sourceVersion)?.units?.filter(unit => unit.startLine <= receipt.endLine && unit.endLine >= receipt.startLine).map(unit => unit.label).join(' · ')}</p>
     <p className="font-mono text-muted-foreground">{receipt.producedBy.runId} / {receipt.producedBy.nodeId} · r{receipt.producedBy.revision} · {t('tasks.nodeAttempt')} {receipt.producedBy.attempt}</p>
     <p className="text-muted-foreground">{receipt.receivedAt}</p>
     {onOpenSession && <button type="button" className="text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onOpenSession(receipt.producedBy.sessionId)}>{t('tasks.openChildSession')}</button>}
@@ -76,6 +77,7 @@ function ResearchSourceBundle({ research, onOpenSession }: { research: ResearchS
       {bundle.cited.map(source => <details key={`${source.sourceId}@${source.sourceVersion}`} className="rounded-md border border-border p-2">
         <summary className="cursor-pointer">{research.sources.find(item => item.id === source.sourceId && item.version === source.sourceVersion)?.ref ?? source.sourceId} · {source.claimRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}</summary>
         <p className="mt-1 font-mono text-muted-foreground">{source.sourceVersion}</p>
+        {research.sources.filter(item => item.id === source.sourceId && item.version === source.sourceVersion).map(item => <div key={item.version} className="mt-1 space-y-1 text-muted-foreground">{item.acquisition && <p>{item.acquisition.finalUrl} · {item.acquiredAt}</p>}{item.limitations?.map((limit, index) => <p key={index}>{t('tasks.research.limits')}: {limit}</p>)}</div>)}
         {source.readIds.length ? <ul className="mt-2 space-y-2">{research.reads.filter(receipt => source.readIds.includes(receipt.id)).map(read)}</ul> : <p>{t('tasks.research.unrecordedReads')}</p>}
       </details>)}
       {!!bundle.readNotCited.length && <details><summary className="cursor-pointer">{t('tasks.research.readNotCited')} ({bundle.readNotCited.length})</summary><ul className="mt-2 space-y-2">{bundle.readNotCited.map(read)}</ul></details>}

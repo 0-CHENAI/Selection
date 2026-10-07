@@ -258,11 +258,13 @@
         "pi-agent-server": "./dist/index.js",
       },
       "dependencies": {
+        "@craft-agent/shared": "workspace:*",
         "@earendil-works/pi-agent-core": "0.87.1",
         "@earendil-works/pi-ai": "0.87.1",
         "@earendil-works/pi-coding-agent": "0.87.1",
         "@silvia-odwyer/photon-node": "0.3.4",
         "@sinclair/typebox": "^0.34.0",
+        "fflate": "^0.8.2",
         "node-html-parser": "^6.1.0",
         "pdfjs-dist": "^5.4.0",
         "turndown": "^7.2.0",

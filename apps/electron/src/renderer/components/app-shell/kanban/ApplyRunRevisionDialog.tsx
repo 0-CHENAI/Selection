@@ -96,6 +96,7 @@ export function ApplyRunRevisionDialog({
               <DiffGroup label={t('tasks.revisionChanged')} values={preview.diff.changed} />
             </div>
 
+            {preview.impact && <div className="space-y-1 text-xs text-foreground/70"><p>{t('tasks.explain.affected')}: {preview.impact.affected.join(', ') || '—'}</p><p>{t('tasks.explain.unaffected')}: {preview.impact.unaffected.join(', ') || '—'}</p></div>}
             {preview.diff.added.length === 0 && preview.diff.removed.length === 0 && preview.diff.changed.length === 0 && (
               <div role="note" className="text-[12px] text-foreground/55">{t('tasks.revisionNoChanges')}</div>
             )}

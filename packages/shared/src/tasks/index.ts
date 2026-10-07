@@ -36,3 +36,6 @@ export { addResearchTemplate } from './research-template.ts';
 
 export * from './research-expansion.ts';
 export * from './task-help.ts';
+
+export * from './replay.ts';
+export * from './explain.ts';
