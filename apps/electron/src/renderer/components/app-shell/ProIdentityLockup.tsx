@@ -113,7 +113,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
                 <use href={`#${glassId}-glyph`} fill="currentColor" className="pro-identity-base" />
                 <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
                 <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
-                <use href={`#${glassId}-glyph`} fill="none" stroke={`url(#${glassId}-light)`} strokeWidth="0.65" />
+                <use href={`#${glassId}-glyph`} className="pro-identity-rim" fill="none" stroke={`url(#${glassId}-light)`} />
               </g>
               <use href={`#${glassId}-glyph`} className="pro-identity-edge-trace" fill="none"
                 stroke="var(--pro-glass-reflection)" strokeWidth="1.1" strokeLinecap="round" strokeDasharray="18 78" />

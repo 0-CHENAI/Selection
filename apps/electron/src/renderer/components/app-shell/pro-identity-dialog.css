@@ -58,8 +58,17 @@ body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
 }
 .pro-identity-edge-trace {
   opacity: 0;
+  stroke: oklch(0.48 0.075 80);
+  stroke-width: 0.55;
+  filter: drop-shadow(0 0.35px 0.35px var(--pro-glass-ink));
+}
+.pro-identity-rim { stroke-width: 0.35; }
+.dark .pro-identity-edge-trace {
+  stroke: var(--pro-glass-reflection);
+  stroke-width: 1.1;
   filter: drop-shadow(0 0.5px 0.7px var(--pro-glass-ink));
 }
+.dark .pro-identity-rim { stroke-width: 0.65; }
 /* Radix needs a named open animation to retain content through the exit. */
 .pro-identity-content[role="dialog"][data-state="open"] {
   animation: pro-identity-fade 1ms both !important;
