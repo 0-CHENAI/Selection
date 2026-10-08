@@ -64,6 +64,23 @@ it('A8 releases a throttled request before Retry-After, reduces the cap, and rec
   expect(retryAfterMs('invalid')).toBeUndefined();
 });
 
+it('resumes Retry-After in a standalone process with no other active handles', async () => {
+  const code = `
+    import { LlmConnectionPool } from ${JSON.stringify(new URL('./connection-pool.ts', import.meta.url).href)};
+    const pool = new LlmConnectionPool(1);
+    (await pool.acquireRequest('quota', 'first')).release({ status: 429, retryAfter: '0.03' });
+    (await pool.acquireRequest('quota', 'next')).release();
+    console.log('resumed');
+  `;
+  const child = Bun.spawn([process.execPath, '--eval', code], { stdout: 'pipe', stderr: 'pipe' });
+  const timeout = setTimeout(() => child.kill(), 5000);
+  try {
+    const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(exit, stderr).toBe(0);
+    expect(stdout.trim()).toBe('resumed');
+  } finally { clearTimeout(timeout); child.kill(); }
+}, 10000);
+
 it('isolates old batch failures and successes while honoring late Retry-After', async () => {
   const pool = new LlmConnectionPool(4);
   const batch = await Promise.all([0, 1, 2, 3].map(n => pool.acquireRequest('quota', `run-${n}`)));

@@ -4,6 +4,9 @@ import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/ut
 
 type Fingerprint = { size: bigint; mtimeNs: bigint; ctimeNs: bigint }
 
+// Windows wall-clock ticks can lead NTFS timestamps by more than 2 ms.
+export const ARTIFACT_WRITE_CLOCK_SKEW_MS = process.platform === 'win32' ? 32 : 2
+
 /** A turn-local filesystem ledger. Names come from the filesystem, never answer prose. */
 export class ArtifactCandidateInventory {
   private before = new Map<string, Fingerprint>()

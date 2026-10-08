@@ -6,7 +6,7 @@ import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils
 import { readSourceSnapshot, saveSourceSnapshot } from '@craft-agent/shared/source-snapshot'
 import { messageToStored, storedToMessage, type Message } from '@craft-agent/core'
 import { ArtifactVersions } from './artifact-versions'
-import { ArtifactCandidateInventory } from './artifact-candidate-inventory'
+import { ArtifactCandidateInventory, ARTIFACT_WRITE_CLOCK_SKEW_MS } from './artifact-candidate-inventory'
 import { artifactVersionTitle, ConversationArtifactVersions, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from './conversation-artifact-versions'
 
 test('web source snapshots stay readable evidence without becoming deliverables or artifact versions', async () => {
@@ -146,9 +146,8 @@ test('a file created at the turn boundary survives small filesystem timestamp sk
     const file = join(root, 'report.txt')
     const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
     writeFileSync(file, 'new')
-    // Use the filesystem's reported timestamp so this checks the 1 ms boundary
-    // even when the Windows runner clock and file metadata have different precision.
-    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, statSync(file).birthtimeMs + 1)
+    // Exercise the platform's clock precision without depending on runner timing.
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, statSync(file).birthtimeMs + ARTIFACT_WRITE_CLOCK_SKEW_MS / 2)
     expect((await turn.capture('[报告](report.txt)', 'session/user-1')).map(ref => ref.change)).toEqual(['created'])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
@@ -161,7 +160,7 @@ test('only changed or new files receive answer artifact references', async () =>
     const created = join(root, 'created.docx')
     const untrackedOld = join(root, 'reference.docx')
     for (const file of [original, changed, untrackedOld]) writeFileSync(file, 'before')
-    await Bun.sleep(5)
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
     const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
     const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
     await turn.track('[原文](original.docx) [待修改](changed.docx)')
@@ -297,7 +296,7 @@ test('citing or opening an unchanged file does not publish a deliverable', async
     const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
     const first = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
     await first.capture('已交付领导版报告。\n\n[报告](report.docx)', 'session/user-1')
-    await Bun.sleep(20)
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
     const cited = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, Date.now())
     await cited.track('[报告](report.docx)')
     expect(await cited.capture('要我把这一节并进[上一份领导版报告](report.docx)，说一声就行。', 'session/user-2')).toEqual([])
@@ -310,9 +309,9 @@ test('an older untracked file that is only linked is not registered', async () =
   try {
     const file = join(root, 'report.docx')
     writeFileSync(file, 'old')
-    await Bun.sleep(20)
     const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
-    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, Date.now())
+    const timestamp = Math.max(statSync(file).birthtimeMs, statSync(file).mtimeMs)
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, timestamp + ARTIFACT_WRITE_CLOCK_SKEW_MS + 1)
     expect(await turn.capture('[旧稿](report.docx)', 'session/user-2')).toEqual([])
     expect(store.findByPath(file)).toBeUndefined()
   } finally { rmSync(root, { recursive: true, force: true }) }

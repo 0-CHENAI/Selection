@@ -1,15 +1,26 @@
-import { expect, test, spyOn } from 'bun:test';
+import { afterAll, expect, test, spyOn } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as config from '@craft-agent/shared/config';
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol';
-import { taskYamlPath, saveTaskDocument, listRunIds } from '@craft-agent/shared/tasks';
-import { getSessionFilePath, loadSession } from '@craft-agent/shared/sessions';
-import { SessionManager } from '../../sessions/SessionManager';
-import { registerTasksHandlers } from './tasks';
 import type { RpcServer } from '../../transport';
 import type { HandlerDeps } from '../handler-deps';
+
+const configRoot = mkdtempSync(join(tmpdir(), 'selection-root-plan-config-'));
+const previousConfigDir = process.env.CRAFT_CONFIG_DIR;
+process.env.CRAFT_CONFIG_DIR = configRoot;
+const config = await import('@craft-agent/shared/config');
+expect(config.CONFIG_DIR).toBe(configRoot);
+config.ensureConfigDir();
+const { taskYamlPath, saveTaskDocument, listRunIds } = await import('@craft-agent/shared/tasks');
+const { getSessionFilePath, loadSession } = await import('@craft-agent/shared/sessions');
+const { SessionManager } = await import('../../sessions/SessionManager');
+const { registerTasksHandlers } = await import('./tasks');
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env.CRAFT_CONFIG_DIR;
+  else process.env.CRAFT_CONFIG_DIR = previousConfigDir;
+  rmSync(configRoot, { recursive: true, force: true });
+});
 const yaml = 'schema_version: 3\nid: f7-plan\ntitle: F7\ngoal: 比较 A/B 两年成本与风险，只分析不部署\nnodes:\n  - id: one\n    prompt: Read\n';
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'selection-root-plan-')), workspace = { id: 'qa', slug: 'qa', name: 'QA', rootPath: root, createdAt: 1 };

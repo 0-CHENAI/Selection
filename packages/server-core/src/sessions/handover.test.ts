@@ -1,16 +1,30 @@
-import { expect, test, spyOn } from 'bun:test'
+import { afterAll, expect, test, spyOn } from 'bun:test'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import * as config from '@craft-agent/shared/config'
-import { getSessionPath, getSessionFilePath, loadSession } from '@craft-agent/shared/sessions'
-import { SessionManager, createManagedSession } from './SessionManager'
-import { ArtifactVersions } from '../reliability/artifact-versions'
-import { HandoverStore } from '../reliability/handover-store'
-import { writeExecutionCheckpoint } from '../reliability/execution-checkpoint'
-import { parseTaskSpec, saveTaskSpec, writeSpecRevision, freezeResearchSources, ResearchPayloadSchema, appendRunLog, writeNodeAttempt, writeNodeOutput, runDir, loadResearchResults, readRunLog, researchErrataAfter, type ResearchRecord } from '@craft-agent/shared/tasks'
-import { TaskRunner } from '../tasks/TaskRunner'
+import type { ResearchRecord } from '@craft-agent/shared/tasks'
+
+const configRoot = mkdtempSync(join(tmpdir(), 'selection-handover-config-'))
+const previousConfigDir = process.env.CRAFT_CONFIG_DIR
+process.env.CRAFT_CONFIG_DIR = configRoot
+const config = await import('@craft-agent/shared/config')
+expect(config.CONFIG_DIR).toBe(configRoot)
+config.ensureConfigDir()
+const { getSessionPath, getSessionFilePath, loadSession } = await import('@craft-agent/shared/sessions')
+const { SessionManager, createManagedSession } = await import('./SessionManager')
+type SessionManager = InstanceType<typeof SessionManager>
+const { ArtifactVersions } = await import('../reliability/artifact-versions')
+const { HandoverStore } = await import('../reliability/handover-store')
+const { writeExecutionCheckpoint } = await import('../reliability/execution-checkpoint')
+const { parseTaskSpec, saveTaskSpec, writeSpecRevision, freezeResearchSources, ResearchPayloadSchema, appendRunLog, writeNodeAttempt, writeNodeOutput, runDir, loadResearchResults, readRunLog, researchErrataAfter } = await import('@craft-agent/shared/tasks')
+const { TaskRunner } = await import('../tasks/TaskRunner')
+type TaskRunner = InstanceType<typeof TaskRunner>
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env.CRAFT_CONFIG_DIR
+  else process.env.CRAFT_CONFIG_DIR = previousConfigDir
+  rmSync(configRoot, { recursive: true, force: true })
+})
 
 async function fixture(mode: 'NORM' | 'PRO' = 'NORM') {
   const root = mkdtempSync(join(tmpdir(), 'selection-handover-'))

@@ -28,7 +28,7 @@ import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, artifactVersionTitle, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from '../reliability/conversation-artifact-versions'
-import { ArtifactCandidateInventory } from '../reliability/artifact-candidate-inventory'
+import { ArtifactCandidateInventory, ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
 import { isArtifactCardPath, localArtifactLinks } from '@craft-agent/shared/utils/artifact-links'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
@@ -9156,9 +9156,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           if (!isArtifactCardPath(safe) || inventory.covers(safe)
             || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
           const file = statSync(safe)
-          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - 2) {
+          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) {
             candidates.push(safe)
-            if (file.birthtimeMs < inventory.startedAt - 2) editedExistingFiles.push(safe)
+            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingFiles.push(safe)
           }
         } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }

@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PiAgent } from '../pi-agent'
 import type { AnswerDeliveryControl } from '../backend/types'
 import { answerToolBlock } from '../answer-delivery'
+import * as config from '../../config'
 
 const request = { requestId: 'req', toolName: 'mcp__session__submit_answer', args: { markdown: '完整答案。', featuredArtifacts: [] }, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry', answerRunId: 'run' }
 describe('answer delivery execution bridge', () => {
@@ -69,7 +70,9 @@ describe('answer delivery execution bridge', () => {
   it('registers answer delivery for a restored canonical root even when boot configuration disabled it', () => {
     ;(agent as any).config.explicitAnswerDelivery = false
     ;(agent as any).config.session.taskSlug = 'existing-plan'
-    ;(agent as any).registerSessionToolsWithSubprocess()
+    const browser = spyOn(config, 'getBrowserToolEnabled').mockReturnValue(false)
+    try { (agent as any).registerSessionToolsWithSubprocess() }
+    finally { browser.mockRestore() }
     const names = sent.at(-1).tools.map((tool: any) => tool.name)
     expect(names).toContain('mcp__session__submit_answer')
     expect(names).not.toContain('mcp__session__submit_task_output')

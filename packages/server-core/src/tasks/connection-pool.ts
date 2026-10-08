@@ -53,7 +53,8 @@ export class LlmConnectionPool {
     const delay = state.retryAt - Date.now();
     if (delay > 0) {
       state.timer = setTimeout(() => { state.timer = undefined; this.pump(state); }, Math.min(delay, 2_147_483_647));
-      state.timer.unref(); return;
+      // Queued model requests depend on this timer to resume after throttling.
+      return;
     }
     while (state.active < state.cap && state.owners.size) {
       const owners = [...state.owners.keys()];

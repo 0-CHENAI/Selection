@@ -10,6 +10,7 @@ import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/s
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
 import { ArtifactVersions, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
 const markdown = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -196,7 +197,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const input = join(root, 'input.pdf')
     writeFileSync(file, 'before')
     writeFileSync(input, 'source')
-    await Bun.sleep(5)
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
     install(async function* () {
       writeFileSync(file, 'after editing')
       await control!.submit({ ...submission, markdown: `已修改。[参考资料](${input})` })
@@ -235,7 +236,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     try {
       writeFileSync(edited, 'before')
       writeFileSync(source, 'input')
-      await Bun.sleep(5)
+      await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
       install(async function* () {
         writeFileSync(created, 'new')
         writeFileSync(edited, 'after')
