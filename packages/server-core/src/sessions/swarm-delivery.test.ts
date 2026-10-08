@@ -1,11 +1,16 @@
 import { execFileSync } from 'node:child_process'
-import { expect, test, spyOn } from 'bun:test'
+import { beforeAll, afterAll, expect, test, spyOn } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as config from '@craft-agent/shared/config'
 import * as configStorage from '@craft-agent/shared/config/storage'
 import { SessionManager, createManagedSession } from './SessionManager'
+
+// Historical standalone Swarm delivery; canonical delegation has separate host/runner coverage.
+const previousFlag = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE
+beforeAll(() => { process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = 'false' })
+afterAll(() => { if (previousFlag === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE; else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = previousFlag })
 
 for (const { conflict, mode, declared } of [
   { conflict: false, mode: 'wait' as const, declared: true },
@@ -26,7 +31,7 @@ for (const { conflict, mode, declared } of [
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   const enabled = spyOn(configStorage, 'getSwarmAgentsEnabled').mockReturnValue(true)
   const manager = new SessionManager(), internal = manager as any
-  const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
+  const parent = createManagedSession({ id: 'parent', workMode: 'PRO', permissionMode: 'allow-all', workingDirectory: project }, workspace as never, { messagesLoaded: true })
   parent.isProcessing = true
   internal.sessions.set(parent.id, parent)
   internal.persistSession = () => {}

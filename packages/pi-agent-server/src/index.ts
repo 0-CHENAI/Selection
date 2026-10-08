@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
-import { registerRecoveryClass, registeredRecoveryClass } from './tool-recovery';
+import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
 import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
@@ -24,10 +24,12 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
 import { createSessionHistoryTool } from './context-retention.ts';
+import { setModelRequestGate } from '../../shared/src/model-request-gate';
+import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-request-slots';
 import { createTaskContextTool } from './task-context.ts';
 import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
-import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
+import { answerExecutionError, isAnswerTool, answerTurnToolNames } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -102,6 +104,7 @@ import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
+import { createDocumentTools } from './tools/documents.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
@@ -155,6 +158,7 @@ interface InitMessage {
   authType?: string;
   workspaceId?: string;
   baseUrl?: string;
+  modelRequestSlots?: boolean;
   branchFromSdkSessionId?: string;
   branchFromSessionPath?: string;
   branchFromSdkTurnId?: string;
@@ -198,9 +202,10 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; answerCoordinationOnly?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
+  | { type: 'model_request_granted'; requestId: string; error?: string }
   | {
       type: 'pre_tool_use_response';
       requestId: string;
@@ -275,6 +280,7 @@ interface OutboundSourceGuideFailed extends Omit<OutboundSourceGuidePrepared, 't
   reason: string;
 }
 interface OutboundToolExecReq { answerRunId?: string; toolCallId?: string; sdkMessageId?: string; sdkTurnAnchor?: string; type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+interface OutboundRuntimeContextReq { type: 'runtime_context_request'; requestId: string; answerRunId?: string }
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
@@ -315,6 +321,7 @@ interface OutboundAnySearchApiKeyRequest { type: 'anysearch_api_key_request'; id
 interface OutboundError { type: 'error'; message: string; code?: string }
 
 type OutboundMessage =
+  | ModelRequestSlotMessage
   | { type: 'progress_interrupt_result'; id: string; error?: string }
   | OutboundReady
   | OutboundEvent
@@ -322,6 +329,7 @@ type OutboundMessage =
   | OutboundSourceGuidePrepared
   | OutboundSourceGuideFailed
   | OutboundToolExecReq
+  | OutboundRuntimeContextReq
   | OutboundSessionToolCompleted
   | OutboundMiniResult
   | OutboundLlmQueryResult
@@ -352,6 +360,7 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+const modelRequestSlots = createModelRequestSlots(message => send(message));
 
 function applyCompactionPolicy(model: { contextWindow?: number } | undefined, enabled: boolean): void {
   if (!piSettingsManager) return;
@@ -374,7 +383,7 @@ let answerSdkMessageId: string | undefined;
 let answerBatchSize = 0;
 const answerBatchGate = new AnswerBatchGate();
 let answerSubmissionSdkMessageId: string | undefined;
-let answerRecoveryToolNames: string[] | undefined;
+let unscopedToolNames: string[] | undefined;
 
 const sourceGuideEventGate = new SourceGuideEventGate<OutboundAgentEvent>();
 
@@ -744,7 +753,8 @@ async function ensureSession(): Promise<AgentSession> {
     requestAnySearchApiKey(send, pendingAnySearchApiKeys),
   ));
   const webFetchTool = createWebFetchTool(() =>
-    initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
+    initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null,
+    () => cwd,
   );
   const webTools = [searchTool, webFetchTool];
 
@@ -773,6 +783,7 @@ async function ensureSession(): Promise<AgentSession> {
   ];
   confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
   confinedBashDirectory = isolatedShell?.directory;
+  builtinDefs.push(...createDocumentTools(() => cwd).map(tool => registerRecoveryClass(tool, 'read-only')));
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral
@@ -855,6 +866,7 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
+  installToolExecutionOutcomeTracking(session.agent);
   installUnknownToolGuard(session);
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
   applyCompactionPolicy(session.model, true);
@@ -989,6 +1001,7 @@ function wrapSingleTool(
     onUpdate,
     ctx,
   ) => {
+    let executionStarted = false;
     try {
       let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
       // Extract intent before main process strips metadata (used for summarization)
@@ -1015,10 +1028,10 @@ function wrapSingleTool(
       // Send to main process for permission checking + transforms
       const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool), tool === confinedBashTool ? confinedBashDirectory : undefined);
       if (approval.action === 'prepare_source_guide') {
-        return {
+        return withExecutionOutcome({
           content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
           details: { isError: false },
-        };
+        }, 'not-performed');
       }
       inputObj = approval.input;
 
@@ -1034,12 +1047,14 @@ function wrapSingleTool(
         && (sdkToolName === 'Write' || sdkToolName === 'Edit');
       if (fileOperation && (!initConfig || !piSession?.sessionId)) throw new Error('Native file operation session identity is unavailable');
       const execute = () => originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
-      const result = fileOperation
+      executionStarted = true;
+      const executed = fileOperation
         ? await withToolFileOperation(getSessionPath(initConfig!.workspaceRootPath, initConfig!.sessionId), {
           sessionId: initConfig!.sessionId, sdkSessionId: piSession!.sessionId, answerRunId: executingRunId,
           toolCallId, toolName: sdkToolName,
         }, execute)
         : await execute();
+      const result = withExecutionOutcome(executed, executed.details?.isError === true ? 'unknown' : 'completed');
 
       // --- Post-execute: large response summarization ---
 
@@ -1090,6 +1105,9 @@ function wrapSingleTool(
       }
 
       return result;
+    } catch (error) {
+      return withExecutionOutcome({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], details: { isError: true } },
+        !executionStarted || error instanceof ToolNotPerformedError ? 'not-performed' : 'unknown');
     } finally {
       answerBatchGate.markDone(toolCallId, sdkToolName);
     }
@@ -1107,7 +1125,7 @@ function wrapSingleTool(
 // Proxy Tools (tools executed in main process)
 // ============================================================
 
-/** Reuse the existing read-only session-info bridge; do not cache live worker state in summaries. */
+/** Internal read-only context is independent of the model's answer-recovery tool restrictions. */
 async function readRuntimeContext(signal?: AbortSignal): Promise<string | undefined> {
   if (signal?.aborted || !proxyToolDefs.some(tool => resolveSessionToolProxyName(tool.name) === 'mcp__session__get_session_info')) return undefined;
   const requestId = `context-${randomUUID()}`;
@@ -1122,7 +1140,7 @@ async function readRuntimeContext(signal?: AbortSignal): Promise<string | undefi
     const timer = setTimeout(cancel, 2000);
     signal?.addEventListener('abort', cancel, { once: true });
     pendingToolExecutions.set(requestId, { resolve: finish });
-    send({ type: 'tool_execute_request', requestId, answerRunId, toolName: 'mcp__session__get_session_info', args: {} });
+    send({ type: 'runtime_context_request', requestId, answerRunId });
   });
   if (result.isError) return JSON.stringify({ unavailable: true, instruction: 'Live scheduler state unavailable. Do not infer completion from an old summary.' });
   try {
@@ -1138,7 +1156,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
 
   return proxyToolDefs.map<ToolDefinition<any, any>>(def => {
     const executionName = resolveSessionToolProxyName(def.name);
-    return {
+    return registerRecoveryClass({
       name: def.name,
       label: def.name
         .replace(/^mcp__.*?__/, '')
@@ -1181,7 +1199,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           details: proxyToolDetails(result),
         };
       },
-    };
+    }, executionName === 'mcp__session__task_help' ? 'read-only' : 'unknown');
   });
 }
 
@@ -1690,6 +1708,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // ============================================================
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
+  modelRequestSlots.close();
+  setModelRequestGate(msg.modelRequestSlots ? modelRequestSlots.acquire : undefined);
   runtimeConfigGeneration += 1;
   pendingSpawnFanOutQualifications.clear();
   activeSpawnTools = [];
@@ -1760,7 +1780,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // we create a fresh session via continueRecent() with all tools known upfront.
     if (toolsChanged && piSession) {
       debugLog('Recreating session due to tool changes');
-      answerRecoveryToolNames = undefined; // The rebuilt session has the newly registered tool set.
+      unscopedToolNames = undefined; // The rebuilt session has the newly registered tool set.
       if (unsubscribeEvents) {
         unsubscribeEvents();
         unsubscribeEvents = null;
@@ -1770,14 +1790,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
 
     const session = await ensureSession();
-    if (answerRecoveryToolNames) {
-      session.setActiveToolsByName(answerRecoveryToolNames);
-      answerRecoveryToolNames = undefined;
+    if (unscopedToolNames) {
+      session.setActiveToolsByName(unscopedToolNames);
+      unscopedToolNames = undefined;
     }
-    if (answerRecovery) {
-      answerRecoveryToolNames = session.getActiveToolNames();
-      session.setActiveToolsByName(answerRecoveryToolNames.filter(isAnswerTool));
-    }
+    unscopedToolNames = session.getActiveToolNames();
+    session.setActiveToolsByName(answerTurnToolNames(unscopedToolNames, {
+      runId: answerRunId, recovery: answerRecovery, coordinationOnly: msg.answerCoordinationOnly,
+    }));
     // Force the Craft-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
     // SDK (see system-prompt-override.ts).
@@ -2198,6 +2218,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'tool_execute_response':
       handleToolExecuteResponse(msg);
+      break;
+
+    case 'model_request_granted':
+      modelRequestSlots.granted(msg.requestId, msg.error);
       break;
 
     case 'pre_tool_use_response':

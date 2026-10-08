@@ -1,8 +1,14 @@
-import { List, PenLine } from 'lucide-react'
+import { createLucideIcon, MessageSquare } from 'lucide-react'
+import { useId } from 'react'
+import { LayoutGroup, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-export type BoardListValue = 'list' | 'board'
+export type BoardListValue = 'NORM' | 'PRO'
+
+const Lambda = createLucideIcon('Lambda', [
+  ['path', { d: 'M4 4h4l9 16h3M12 12l-7 8', key: 'lambda' }],
+])
 
 interface BoardListToggleProps {
   value: BoardListValue
@@ -11,26 +17,30 @@ interface BoardListToggleProps {
 }
 
 /**
- * List ⇄ New-orchestration switch. Desktop layouts keep one persistent TopBar
+ * NORM / PRO root conversation navigation. Desktop layouts keep one persistent TopBar
  * instance so changing views only updates the selected state and main content.
  */
 export function BoardListToggle({ value, onChange, className }: BoardListToggleProps) {
   const { t } = useTranslation()
+  const groupId = useId()
   return (
-    <div
-      className={cn(
-        'inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-0.5',
-        className
-      )}
-    >
-      <ToggleButton active={value === 'list'} icon={List} label={t('kanban.list')} onClick={() => onChange('list')} />
-      <ToggleButton
-        active={value === 'board'}
-        icon={PenLine}
-        label={t('kanban.board')}
-        onClick={() => onChange('board')}
-      />
-    </div>
+    <LayoutGroup id={groupId}>
+      <div
+        aria-label={t('session.workMode')}
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-0.5',
+          className
+        )}
+      >
+        <ToggleButton active={value === 'NORM'} icon={MessageSquare} label="NORM" onClick={() => onChange('NORM')} />
+        <ToggleButton
+          active={value === 'PRO'}
+          icon={Lambda}
+          label="PRO"
+          onClick={() => onChange('PRO')}
+        />
+      </div>
+    </LayoutGroup>
   )
 }
 
@@ -41,22 +51,30 @@ function ToggleButton({
   onClick,
 }: {
   active: boolean
-  icon: typeof List
+  icon: typeof MessageSquare
   label: string
   onClick: () => void
 }) {
+  const reduced = useReducedMotion()
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
-        active ? 'bg-card text-foreground shadow-xs' : 'text-foreground/50 hover:text-foreground/80'
+        'relative inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+        active ? 'text-foreground' : 'text-foreground/50 hover:text-foreground/80'
       )}
     >
-      <Icon className="h-3.5 w-3.5" strokeWidth={2} />
-      {label}
+      {active && <motion.span
+        data-work-mode-indicator
+        className="pointer-events-none absolute inset-0 rounded-md bg-card shadow-xs"
+        layoutId="work-mode-indicator"
+        initial={false}
+        transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 36, mass: 0.8 }}
+      />}
+      <Icon className="relative h-3.5 w-3.5" strokeWidth={2} />
+      <span className="relative">{label}</span>
     </button>
   )
 }

@@ -21,6 +21,7 @@ import type { NodeOutput } from './refs.ts';
 import type { ValidationResult } from '../config/validators.ts';
 import type { CoordinatorGateReason, TaskRunMetrics } from './metrics.ts';
 import type { CoordinatorGateState } from './orchestration-decision.ts';
+import type { PlannerPhase, PlannerResultEvent } from './planner.ts';
 
 const TASKS_DIR = 'tasks';
 const TASK_FILE = 'task.yaml';
@@ -48,6 +49,11 @@ export interface RunStateCheckpoint {
   completedCheckpointIds?: string[];
   coordinatorGate?: CoordinatorGateState;
   metrics?: TaskRunMetrics;
+  plannerPhase?: PlannerPhase;
+  plannerRequired?: boolean;
+  consumedResultIds?: string[];
+  /** Exact committed plan-event sequences; excludes an appended but uncommitted decision after a crash. */
+  decisionEventSeqs?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +67,7 @@ export type NodeRunState =
   | 'running'
   | 'retry-wait'
   | 'waiting-approval'
+  | 'waiting-help'
   | 'done'
   | 'failed'
   | 'invalid'
@@ -74,6 +81,7 @@ export const NODE_RUN_STATES = [
   'running',
   'retry-wait',
   'waiting-approval',
+  'waiting-help',
   'done',
   'failed',
   'invalid',
@@ -104,12 +112,22 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
 type RunLogPayload =
-  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string }
+  | { t: string; kind: 'task-help'; help: import('./task-help').TaskHelpRecord }
+  | { t: string; kind: 'node-help-resumed'; nodeId: string; requestId: string }
+  | { t: string; kind: 'source-read'; receipt: import('./research.ts').ResearchReadReceipt }
+  | { t: string; kind: 'task-worker'; worker: import('./planner').TaskWorkerRecord }
+  | { t: string; kind: 'node-awaiting-workers'; nodeId: string; sessionId: string; generation: number;
+      reason: 'complete' | 'interrupted' | 'error' | 'timeout'; finalText?: string; errorCode?: string; output?: import('./refs').NodeOutput;
+      artifacts?: Record<string, unknown>; inputTokens?: number; outputTokens?: number }
+  | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string; resumedFrom?: string; researchSourcesHash?: string; researchPredecessor?: { runId: string; recordsHash: string; readsHash?: string } }
+  | { t: string; kind: 'run-superseded'; supersededBy: string }
+  | { t: string; kind: 'execution-shutdown'; sessionId: string; confirmed: boolean; reason?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }
+  | { t: string; kind: 'artifact-availability'; nodeIds: string[]; reason: string }
   | { t: string; kind: 'artifact-results-invalidated'; completedRun?: boolean; nodeIds: string[]; reason: string }
   | { t: string; kind: 'node-artifact-inputs'; nodeId: string; sessionId: string; inputs: Record<string, import('./refs').NodeOutput> }
-  | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
-  | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
+  | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string; generation?: number; attempt?: number; attemptRevision?: number; actor?: { id: string; persona?: string }; reused?: boolean }
+  | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string; resultEvent?: PlannerResultEvent; researchRecord?: import('./research.ts').ResearchRecord }
   | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
   | { t: string; kind: 'approval-response'; nodeId: string; approved?: boolean; feedback: string }
   | { t: string; kind: 'approval-feedback-delivery'; nodeId: string; feedback: string; status: 'delivered' | 'failed' }
@@ -137,7 +155,7 @@ type RunLogPayload =
     }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; evidence?: string }
   | { t: string; kind: 'node-verdict'; nodeId: string; result: 'pass' | 'fail'; reason?: string; nodes?: string[]; evidence?: string }
-  | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; cancelled?: string[] }
+  | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; added?: string[]; updated?: string[]; cancelled?: string[]; consumedResults?: string[]; plannerPhase?: PlannerPhase; changeKind?: 'structure' | 'repair' | 'research' }
   | {
       t: string;
       kind: 'coordinator-request';
@@ -145,6 +163,7 @@ type RunLogPayload =
       reason: CoordinatorGateReason;
       revision: number;
       deadline: string;
+      resultEventIds?: string[];
     }
   | {
       t: string;
@@ -153,6 +172,8 @@ type RunLogPayload =
       decisionId: string;
       action: 'continue' | 'patch' | 'pause';
       baseRevision: number;
+      consumedResults?: string[];
+      plannerPhase?: PlannerPhase;
     }
   | { t: string; kind: 'coordinator-timeout'; checkpointId: string }
   | { t: string; kind: 'cache-hit'; nodeId: string; fingerprint: string; createdAt: string; sourceRunId: string }
@@ -294,6 +315,15 @@ export function readRunLog(workspaceRoot: string, slug: string, runId: string): 
   return out;
 }
 
+/** Worker facts survive a missing checkpoint; plan decisions require their atomic commit receipt. */
+export function committedRunLog(log: readonly RunLogEntry[], checkpoint: RunStateCheckpoint | null): RunLogEntry[] {
+  const revision = checkpoint?.revision ?? log.reduce((max, entry) => Math.max(max, entry.revision ?? 0), 0);
+  return log.filter(entry => (entry.revision ?? 0) <= revision
+    && (!checkpoint || (entry.kind !== 'coordinator-decision' && entry.kind !== 'orchestration-patch')
+      || (checkpoint.decisionEventSeqs ? entry.seq !== undefined && checkpoint.decisionEventSeqs.includes(entry.seq)
+        : checkpoint.seenDecisionIds.includes(entry.decisionId) && (entry.seq ?? 0) <= checkpoint.seq)));
+}
+
 const RUN_STATUS_EVENTS: Record<string, RunStatus> = {
   'run-started': 'running',
   'run-paused': 'paused',
@@ -316,6 +346,7 @@ export function deriveRunStatusFromLog(log: readonly RunLogEntry[]): RunStatus {
   for (const entry of log) {
     const next = RUN_STATUS_EVENTS[entry.kind];
     if (next) status = next;
+    if (entry.kind === 'coordinator-decision') status = entry.action === 'pause' ? 'paused' : 'running';
     if (entry.kind === 'artifact-results-invalidated' && entry.completedRun) status = 'failed';
   }
   return status;
@@ -395,6 +426,10 @@ function readJsonOutput(path: string): NodeOutput | null {
   } catch {
     return null;
   }
+}
+
+export function readNodeAttempt(workspaceRoot: string, slug: string, runId: string, nodeId: string, attempt: number): NodeOutput | null {
+  return readJsonOutput(join(runDir(workspaceRoot, slug, runId), NODES_DIR, nodeId, `attempt-${attempt}.json`));
 }
 
 export function readNodeOutput(

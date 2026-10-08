@@ -8,24 +8,46 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 
 export type ToolRecoveryClass = 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown'
-/** Native tool identities only. MCP tools must explicitly register a recovery contract. */
+/** Native identities and explicit host-owned contracts; other MCP effects remain unknown. */
 export function toolRecoveryClass(name: string): ToolRecoveryClass {
+  // Host-owned, identity-fenced coordination has no external effect; a crash
+  // cancels its waiting record before retained-tool recovery can request again.
+  if (/^(?:mcp__session__|session__)?task_help$/.test(name)) return 'read-only'
   return isNativeReadOnlyTool(name) ? 'read-only' : 'unknown'
 }
 export interface ExecutionTaskIdentity {
   taskSlug?: string
   taskRunId?: string
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   orchestrationId?: string
   parentSessionId?: string
 }
 /** Link to the existing coordinator state, without duplicating its node scheduler. */
 export function executionTaskIdentity(session: ExecutionTaskIdentity): ExecutionTaskIdentity | undefined {
-  const identity = Object.fromEntries(['taskSlug', 'taskRunId', 'taskNodeId', 'orchestrationId', 'parentSessionId']
+  const identity = Object.fromEntries(['taskSlug', 'taskRunId', 'taskNodeId', 'taskAttempt', 'taskRevision', 'taskActor', 'taskWorkerId', 'orchestrationId', 'parentSessionId']
     .flatMap(key => session[key as keyof ExecutionTaskIdentity] === undefined ? [] : [[key, session[key as keyof ExecutionTaskIdentity]]]))
   return Object.keys(identity).length ? identity : undefined
 }
+
+function validTaskIdentity(value: unknown): value is ExecutionTaskIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.entries(value).every(([key, field]) => {
+    if (['taskAttempt', 'taskRevision'].includes(key)) return Number.isSafeInteger(field) && field >= 0
+    if (key === 'taskActor') return !!field && typeof field === 'object' && !Array.isArray(field)
+      && typeof field.id === 'string' && !!field.id
+      && Object.keys(field).every(name => ['id', 'persona'].includes(name))
+      && (field.persona === undefined || typeof field.persona === 'string' && !!field.persona)
+    return ['taskSlug', 'taskRunId', 'taskNodeId', 'taskWorkerId', 'orchestrationId', 'parentSessionId'].includes(key)
+      && typeof field === 'string' && !!field
+  })
+}
 export interface ExecutionCheckpoint {
+  contextReads?: Record<string, { path: string; hash: string; complete: boolean; write?: boolean }>
+  contextUnverified?: boolean
   version: 1
   sessionId: string
   userMessageId: string
@@ -98,8 +120,11 @@ export function readExecutionCheckpoint(sessionPath: string): CheckpointRead {
     if (c?.version !== 1) return { kind: 'unsupported' }
     if (typeof c.sessionId !== 'string' || typeof c.userMessageId !== 'string'
       || ['sdkTurnAnchor', 'compactionMessageId'].some(key => c[key] !== undefined && (typeof c[key] !== 'string' || !c[key]))
-      || (c.taskIdentity !== undefined && (!c.taskIdentity || typeof c.taskIdentity !== 'object' || Array.isArray(c.taskIdentity)
-        || Object.entries(c.taskIdentity).some(([key, value]) => !['taskSlug', 'taskRunId', 'taskNodeId', 'orchestrationId', 'parentSessionId'].includes(key) || typeof value !== 'string' || !value)))
+      || (c.taskIdentity !== undefined && !validTaskIdentity(c.taskIdentity))
+      || (c.contextUnverified !== undefined && typeof c.contextUnverified !== 'boolean')
+      || (c.contextReads !== undefined && (!c.contextReads || typeof c.contextReads !== 'object' || Array.isArray(c.contextReads)
+        || Object.values(c.contextReads).some((read: any) => !read || typeof read.path !== 'string' || !read.path
+          || typeof read.hash !== 'string' || !/^[a-f0-9]{64}$/.test(read.hash) || typeof read.complete !== 'boolean' || read.write !== undefined && typeof read.write !== 'boolean')))
       || (c.waitingFor !== undefined && !['model', 'tool', 'user', 'recovery'].includes(c.waitingFor))
       || (c.sdkStateSize !== undefined && (!Number.isSafeInteger(c.sdkStateSize) || c.sdkStateSize <= 0))
       || !Number.isSafeInteger(c.generation) || c.generation < 0 || !Number.isFinite(c.updatedAt)
@@ -108,6 +133,13 @@ export function readExecutionCheckpoint(sessionPath: string): CheckpointRead {
       || !Array.isArray(c.completedTools) || c.completedTools.some((id: unknown) => typeof id !== 'string')
       || Object.values(c.pendingTools).some((v: any) => !v || typeof v.name !== 'string'
         || !['read-only', 'idempotent', 'file-verifiable', 'unknown'].includes(v.recovery))) return { kind: 'corrupt' }
+    // Older Pi proxy definitions marked this host-owned, identity-fenced wait
+    // as unknown. Upgrade only bound task help; never external/native effects.
+    if (c.taskIdentity?.taskRunId && c.taskIdentity.taskNodeId) {
+      for (const tool of Object.values(c.pendingTools) as Array<{ name: string; recovery: ToolRecoveryClass }>) {
+        if (/^(?:mcp__session__|session__)?task_help$/.test(tool.name) && tool.recovery === 'unknown') tool.recovery = 'read-only'
+      }
+    }
     return { kind: 'ok', checkpoint: c }
   } catch { return { kind: 'corrupt' } }
 }

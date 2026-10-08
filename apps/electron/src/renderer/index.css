@@ -92,8 +92,12 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.62 0.13 293);           /* purple - brand, Auto mode */
   --accent-rgb: 104, 78, 133;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.50178870 0.09392988 58.44502375); /* Binchael copper #8B5527 */
+  --pro-accent-rgb: 97, 60, 27;
   --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
+  --permission-ask: var(--info);
+  --permission-ask-rgb: var(--info-rgb);
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
@@ -104,6 +108,7 @@
   --shadow-blur-opacity: 0.06;              /* Blur/spread shadow opacity */
 
   /* === SHADOW VALUES (reusable across utility classes and component overrides) === */
+  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, var(--shadow-blur-opacity));
   --shadow-minimal:
     rgba(0, 0, 0, 0) 0px 0px 0px 0px,
     rgba(0, 0, 0, 0) 0px 0px 0px 0px,
@@ -260,6 +265,8 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.65 0.22 293);            /* brighter purple in dark */
   --accent-rgb: 130, 75, 185;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.76808414 0.08380584 76.89195147); /* Binchael champagne #D2AD76 */
+  --pro-accent-rgb: 147, 121, 83;
   --info: oklch(0.78 0.14 70);               /* amber */
   --info-rgb: 210, 155, 55;                  /* RGB for shadow-tinted */
   --success: oklch(0.60 0.17 145);           /* green */
@@ -310,6 +317,75 @@
   --md-bullets: var(--foreground-50);
   --md-counters: var(--foreground-50);
 }
+
+/* PRO accent: Binchael's light copper (#8B5527) and dark champagne (#D2AD76).
+   Higher specificity than preset :root overrides; NORM keeps the selected theme.
+   Shadow RGB follows the existing 70% brightness convention. */
+:root[data-work-mode="PRO"] {
+  --accent: var(--pro-accent);
+  --accent-rgb: var(--pro-accent-rgb);
+  --permission-ask: oklch(0.48819831 0.21716546 264.37630409); /* blue #1D4ED8 */
+  --permission-ask-rgb: 20, 55, 151;
+}
+
+:root.dark[data-work-mode="PRO"] {
+  --permission-ask: oklch(0.71374005 0.14338051 254.62402137); /* blue #60A5FA */
+  --permission-ask-rgb: 67, 115, 175;
+}
+
+/* Snapshot only the changing surfaces. Chrome and the selected mode indicator stay live. */
+html[data-work-mode-transition-phase] {
+  view-transition-name: none;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="list"] {
+  view-transition-name: work-mode-list;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="chat"] {
+  view-transition-name: work-mode-chat;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition] {
+  pointer-events: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(work-mode-list),
+::view-transition-group(work-mode-chat) {
+  animation: none;
+}
+::view-transition-old(work-mode-list),
+::view-transition-old(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-focus-out 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+::view-transition-new(work-mode-list),
+::view-transition-new(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-focus-in 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(work-mode-list),
+  ::view-transition-old(work-mode-chat) {
+    animation-name: work-mode-fade-out;
+    animation-duration: 150ms;
+  }
+  ::view-transition-new(work-mode-list),
+  ::view-transition-new(work-mode-chat) {
+    animation-name: work-mode-fade-in;
+    animation-duration: 150ms;
+  }
+}
+/* A shallow focus change softens overlapping text without moving the fixed frame. */
+@keyframes work-mode-focus-out {
+  from { opacity: 1; filter: blur(0px); }
+  to { opacity: 0; filter: blur(2px); }
+}
+@keyframes work-mode-focus-in {
+  from { opacity: 0; filter: blur(2px); }
+  to { opacity: 1; filter: blur(0px); }
+}
+@keyframes work-mode-fade-out { to { opacity: 0; } }
+@keyframes work-mode-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* Theme Override - Semi-transparent background to allow macOS vibrancy through.
    Only applied when ThemeContext sets data-theme-override (macOS desktop). */
@@ -437,6 +513,7 @@ html[data-font="inter"] {
   --color-foreground: var(--foreground);
   --color-accent: var(--accent);
   --color-info: var(--info);
+  --color-permission-ask: var(--permission-ask);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
 
@@ -1602,4 +1679,58 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 [data-compact] .turn-action-btn {
   min-height: 31px;
   padding: 6px 8px;
+}
+
+/* Task authoring follows its panel width, including side-by-side app panes. */
+.task-editor { container: task-editor / inline-size; }
+.task-editor [hidden] { display: none !important; }
+.task-editor-authoring { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); }
+.task-editor-tabs { order: 3; flex-basis: 100%; }
+.task-editor-dialog > [data-slot="dialog-header"] { flex-shrink: 0; text-align: left; padding-right: 1.5rem; }
+.task-editor-dialog .task-editor-dialog-footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+@container task-editor (min-width: 960px) {
+  .task-editor-tabs { order: 0; flex-basis: auto; margin-left: 1rem; }
+}
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-template-columns: minmax(0, 1fr); overflow-y: auto; align-content: start; }
+  .task-editor-definition, .task-editor-nodes { overflow: visible; }
+  .task-editor-node-list { overflow: visible; flex: auto; }
+  .task-editor-actions { gap: 0.5rem; }
+  .task-editor-divider { display: none; }
+}
+@container task-editor (max-width: 440px) {
+  .task-editor-actions { flex-basis: 100%; margin-left: 0; }
+  .task-editor-tabs { width: 100%; }
+  .task-editor-tabs > button { flex: 1; padding-inline: 0.5rem; }
+}
+.task-workbench { container: task-workbench / inline-size; }
+.task-workbench-grid { grid-template-columns: minmax(0, 1fr) 220px; }
+.task-workbench .react-flow {
+  --xy-background-color: var(--card);
+  --xy-controls-button-border-color: var(--border);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  --xy-node-background-color: var(--card);
+  --xy-node-color: var(--foreground);
+  --xy-node-border: 1px solid var(--border);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-color: var(--foreground);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-node-background-color: var(--muted);
+}
+@container task-workbench (max-width: 560px) {
+  .task-workbench-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
+}
+.task-editor-subview-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-auto-rows: max-content; }
+}
+@container task-workbench (max-width: 560px) {
+  .task-workbench .react-flow__minimap { display: none; }
 }

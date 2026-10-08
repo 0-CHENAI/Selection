@@ -26,6 +26,7 @@ import {
   Radio,
   Info,
   FolderKanban,
+  Workflow,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -68,6 +69,10 @@ import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
+import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
+import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
+import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
@@ -277,7 +282,16 @@ function AppShellContent({
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
+  const workModeView = useAtomValue(workModeViewAtom)
+  const setWorkModeView = useSetAtom(workModeViewAtom)
+  const modeNavigation = useAtomValue(workModeNavigationAtom)
+  const setModeNavigation = useSetAtom(workModeNavigationAtom)
+  const focusedWorkMode = sessionWorkModeView(focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined, sessionMetaMap)
+  useEffect(() => {
+    if (focusedWorkMode) setWorkModeView(focusedWorkMode)
+  }, [focusedSessionId, focusedWorkMode, setWorkModeView])
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -312,6 +326,9 @@ function AppShellContent({
   // so the navigator (and its resize handle) collapse to zero width while it's active.
   const { dagOrchestrationEnabled } = useAdvancedSettings()
   const isBoardView = dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board'
+  useEffect(() => {
+    if (isBoardView) setWorkModeView('PRO')
+  }, [isBoardView, setWorkModeView])
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
@@ -938,7 +955,6 @@ function AppShellContent({
 
   // Use session metadata from Jotai atom (lightweight, no messages)
   // This prevents closures from retaining full message arrays
-  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const setSessionMetaMap = useSetAtom(sessionMetaMapAtom)
 
   const hasPendingPrompt = React.useCallback((sessionId: string) => {
@@ -1030,11 +1046,29 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(isOrdinarySessionVisible)
+    if (!activeWorkspaceId) return metas.filter(s => isWorkModeRoot(s, workModeView))
     return metas.filter(s =>
-      isOrdinarySessionVisible(s) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
-  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
+
+  const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
+  const switchWorkModeView = useCallback(async (mode: WorkMode) => {
+    if (mode === workModeView && !isBoardView) { cancelWorkModeTransition(); return }
+    if (isBoardView && !(await leaveOrchestrationView())) return
+    const scope = activeWorkspaceId ?? ''
+    const remembered = modeNavigation.get(`${scope}:${mode}`)
+    const target = remembered && sessionMetaMap.get(remembered)?.workMode === mode ? remembered : undefined
+    await transitionWorkMode(() => {
+      setModeNavigation(previous => new Map(previous).set(`${scope}:${workModeView}`, focusedSessionId ?? null))
+      setWorkModeView(mode)
+      setSearchActive(false)
+      setSearchQuery('')
+      navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
+    })
+  }, [workModeView, isBoardView, leaveOrchestrationView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
+
+  useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
   // Classification metadata is retained for backward compatibility, but it no
   // longer removes sessions from the ordinary list (#180).
@@ -1316,6 +1350,12 @@ function AppShellContent({
   const handleSkillsClick = useCallback(() => {
     navigate(routes.view.skills())
   }, [])
+
+  const handleNewOrchestration = useCallback(async () => {
+    if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return
+    setKanbanEditorTarget(null)
+    navigate(routes.view.board())
+  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
 
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
@@ -1660,11 +1700,14 @@ function AppShellContent({
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+    if (workModeView === 'PRO' && dagOrchestrationEnabled) {
+      result.push({ id: 'nav:newOrchestration', type: 'nav', action: handleNewOrchestration })
+    }
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleNewOrchestration, workModeView, dagOrchestrationEnabled, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1849,19 +1892,8 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState) ? (
-            <div className="flex items-center gap-1.5">
-              <BoardListToggle
-                value={isBoardView ? 'board' : 'list'}
-                onChange={view => {
-                  if (view === 'list' && isBoardView) {
-                    leaveOrchestrationView()
-                  } else if (view === 'board' && !isBoardView) {
-                    navigate(routes.view.board())
-                  }
-                }}
-              />
-            </div>
+          afterWorkspace={isSessionsNavigation(navState) ? (
+            <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={isBoardView ? 'PRO' : workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
           isCompact={isAutoCompact}
         />
@@ -2017,6 +2049,13 @@ function AppShellContent({
                         onAddSkill: openAddSkill,
                       },
                     },
+                    ...(workModeView === 'PRO' && dagOrchestrationEnabled ? [{
+                      id: "nav:newOrchestration",
+                      title: t("tasks.newOrchestration"),
+                      icon: Workflow,
+                      variant: "ghost" as const,
+                      onClick: handleNewOrchestration,
+                    }] : []),
                     {
                       id: "nav:projects",
                       title: t("sidebar.projects"),
@@ -2102,6 +2141,7 @@ function AppShellContent({
           sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
           navigatorSlot={
             <div
+              data-work-mode-transition="list"
               style={{ width: isAutoCompact ? '100%' : sessionListWidth }}
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
@@ -2288,6 +2328,7 @@ function AppShellContent({
                 <SessionList
                   key={sessionFilter?.kind}
                   items={searchActive ? filterSessionsBySidebarProjectScope(workspaceSessionMetas, projectFilter) : filteredSessionMetas}
+                  childrenByRoot={workModeView === 'PRO' ? childrenByRoot : undefined}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}
@@ -2329,7 +2370,7 @@ function AppShellContent({
                   statusFilter={listFilter}
                   labelFilterMap={labelFilter}
                   projectFilter={projectFilter}
-                  focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
+                  focusedSessionId={focusedSessionId}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
                   activeChatMatchInfo={chatMatchInfo}

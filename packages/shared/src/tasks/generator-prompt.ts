@@ -1,3 +1,5 @@
+import type { TaskProposalTurn } from '../protocol/dto.ts'
+
 /**
  * Generator prompt for Generate mode (#2 / architecture §3a).
  *
@@ -6,7 +8,7 @@
  * prompt is legibility-first (#7): bias toward the simplest graph that achieves
  * the goal, with clear titles and explicit dependencies — not the cleverest one.
  */
-export function buildGeneratorPrompt(goal: string, title?: string): string {
+export function buildGeneratorPrompt(goal: string, title?: string, context?: { currentYaml?: string; conversation?: TaskProposalTurn[] }): string {
   return [
     'You are authoring a v3 task spec that decomposes a goal into a small DAG of subtasks.',
     'Each node becomes a child AI session; a `depends_on` edge passes the upstream node\'s output to the dependent.',
@@ -19,6 +21,11 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '- After submit_task_definition succeeds, reply only with a brief confirmation; the tool payload is the authored definition.',
     '- Keep runner as conduct unless the user asked for live orchestration. Do not set runner: orchestrate by default.',
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
+    '- Give EVERY node a short, descriptive title in the user\'s language. Titles describe the work (e.g. 核对成本资料), never repeat internal IDs such as cost or review.',
+    '- When revising, change only what the latest user request requires. Preserve every untouched node id, kind, prompt, model, connection, configuration, dependency and task field. Do not redesign or simplify an existing graph.',
+    '- The current definition below is authoritative and includes the latest manual edits. Earlier proposals (especially discarded ones) are conversation context, not instructions to restore old values. Preserve the existing task id.',
+    '- Never change or remove a node with locked: true, or change fields listed in locked_fields. Preserve constraints, decisions and every lock. If the requested change conflicts, explain the lock and leave it intact.',
+    context?.currentYaml && /["\s]research[":]/.test(context.currentYaml) ? '- Preserve the configured research question, premises, required dimensions and sources. Research roles use a required JSON param output named research; reviewers must remain independent. Only add research roles when the user explicitly selected Deep Research.' : '',
     '- Make nodes parallel (no `depends_on` between them) ONLY when the steps are genuinely independent.',
     '- Reference an upstream result inside a prompt with ${nodes.<id>.output}.',
     '- Every ${nodes.<id>.output} reference MUST point to an `id` that you actually declare under `nodes`. Never reference a node you did not create. Verify each reference resolves before emitting the YAML.',
@@ -52,6 +59,8 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '      depends_on: [audit]',
     '',
     title ? `Working title: ${title}` : '',
+    context?.conversation?.length ? `Previous conversation rounds (JSON, historical context only):\n${JSON.stringify(context.conversation)}` : '',
+    context?.currentYaml ? `Current editor definition (may be an incomplete unsaved draft):\n${context.currentYaml}` : '',
     `Goal: ${goal}`,
   ]
     .filter(Boolean)

@@ -15,6 +15,12 @@ export interface OrchestrationDecision {
   add?: OrchestrationPatch['add'];
   update?: OrchestrationPatch['update'];
   cancel?: OrchestrationPatch['cancel'];
+  constraints?: OrchestrationPatch['constraints'];
+  decisions?: OrchestrationPatch['decisions'];
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: OrchestrationPatch['changeKind'];
+  researchExpansion?: OrchestrationPatch['researchExpansion'];
 }
 
 export interface CoordinatorGateState {
@@ -22,6 +28,7 @@ export interface CoordinatorGateState {
   reason: CoordinatorGateReason;
   revision: number;
   deadline: string;
+  resultEventIds?: string[];
 }
 
 export interface DecisionContext {
@@ -30,6 +37,7 @@ export interface DecisionContext {
   gate: CoordinatorGateState | null;
   seenDecisionIds: ReadonlySet<string>;
   completedCheckpointIds: ReadonlySet<string>;
+  pendingResultIds?: ReadonlySet<string>;
 }
 
 export interface DecisionOk {
@@ -66,6 +74,9 @@ export function validateOrchestrationDecision(
   if (ctx.seenDecisionIds.has(decision.decisionId)) return { ok: false, error: 'decisionId replayed' };
   if (decision.baseRevision !== ctx.revision) return { ok: false, error: 'stale revision' };
   if (decision.baseRevision !== ctx.gate.revision) return { ok: false, error: 'stale revision' };
+  const consumed = decision.consumedResults ?? ctx.gate.resultEventIds ?? [];
+  if (consumed.some(id => !ctx.pendingResultIds?.has(id)) || new Set(consumed).size !== consumed.length) return { ok: false, error: 'Unknown, duplicate or already consumed result event' };
+  if (decision.plannerPhase !== undefined && !['active', 'draining'].includes(decision.plannerPhase)) return { ok: false, error: 'Invalid planner phase' };
 
   if (decision.action !== 'patch') {
     return { ok: true, action: decision.action };
@@ -83,6 +94,12 @@ export function validateOrchestrationDecision(
       add: decision.add,
       update: decision.update,
       cancel: decision.cancel,
+      constraints: decision.constraints,
+      decisions: decision.decisions,
+      consumedResults: consumed,
+      plannerPhase: decision.plannerPhase,
+      changeKind: decision.changeKind,
+      researchExpansion: decision.researchExpansion,
       action: 'continue',
     },
     patchCtx,

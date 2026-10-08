@@ -17,9 +17,10 @@ export async function handleSubmitOrchestrationDecision(
   }
   try {
     const result = await ctx.submitOrchestrationDecision(args);
-    return successResponse(JSON.stringify(result, null, 2));
+    return successResponse(JSON.stringify({ ...result, nextStep: args.action === 'pause' ? 'Wait for explicit human resume.' : 'End this assistant turn now. The host will send the next checkpoint or final verification request. Do not poll or reuse the previous checkpoint id.' }, null, 2));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return errorResponse(`Failed to submit orchestration decision: ${message}`);
+    const currentRun = error && typeof error === 'object' && 'currentRun' in error ? error.currentRun : undefined;
+    return errorResponse(`Failed to submit orchestration decision: ${message}${currentRun ? `\nCurrent canonical run (use this checkpoint, never an older id): ${JSON.stringify(currentRun)}` : ''}`);
   }
 }

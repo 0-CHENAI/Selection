@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, mkdirSync, readFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -8,6 +8,9 @@ import {
   parseTaskSpec,
   saveTaskSpec,
   readRunLog,
+  runDir,
+  readRunState,
+  readLatestSpecRevision,
   type TaskSpec,
   COORDINATOR_TIMEOUT_BLOCKER,
 } from '@craft-agent/shared/tasks';
@@ -84,12 +87,13 @@ class MockHost implements ConductorSessionHost {
   dispatchedNames(): string[] {
     return this.created.map((c) => c.options.name!).filter(Boolean);
   }
-  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
+  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
     const evt: SessionCompletionEvent = {
       sessionId: this.sessionIdFor(nodeId),
       workspaceId: 'ws',
       generation: 0,
       reason: opts.reason ?? 'complete',
+      errorCode: opts.errorCode,
       finalText: opts.finalText,
       tokenUsage: opts.tokenUsage,
     };
@@ -134,6 +138,110 @@ describe('TaskRunner v3 quality/efficiency', () => {
     else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prevFlag;
   });
 
+  it('retries a transient read-only request without replaying completed dependencies', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', execution: { verification: { required: false } }, nodes: [
+      { id: 'read', prompt: 'Read' }, { id: 'review', kind: 'verify', prompt: 'Review', depends_on: ['read'] },
+    ] }))
+    const r = runner(); r.run('v3demo', { runId: 'transient', verifyOnComplete: false }); await tick()
+    host.complete('read', { finalText: 'Confirmed source' }); await tick()
+    host.complete('review', { reason: 'error', errorCode: 'service_error' }); await tick()
+    expect(r.getRunState('v3demo', 'transient')?.nodes.find(node => node.id === 'review')?.state).toBe('retry-wait')
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(host.dispatchedNames().filter(name => name === 'read')).toHaveLength(1)
+    expect(r.getRunState('v3demo', 'transient')?.nodes.find(node => node.id === 'review')?.attempt).toBe(2)
+    expect(r.submitNodeVerdict('sess-review', { result: 'pass', reason: 'Source checked', evidence: 'Confirmed source' }).ok).toBe(true)
+    host.complete('review'); await tick()
+    expect(r.getRunState('v3demo', 'transient')?.status).toBe('completed')
+    expect(readRunLog(root, 'v3demo', 'transient').filter(event => event.kind === 'node-retry')).toHaveLength(1)
+  })
+
+  it.each([
+    ['explicit-off', { retry: { limit: 0 }, permissionMode: 'safe' }], ['write-mode', { permissionMode: 'ask' }],
+  ])('does not apply transient fallback to %s', async (runId, node) => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', defaults: { permissionMode: 'ask' }, nodes: [{ id: 'a', prompt: 'A', ...node }] }))
+    const r = runner(); r.run('v3demo', { runId, verifyOnComplete: false }); await tick()
+    host.complete('a', { reason: 'error', errorCode: 'service_error' }); await tick()
+    expect(r.getRunState('v3demo', runId)?.status).toBe('failed')
+    expect(readRunLog(root, 'v3demo', runId).some(event => event.kind === 'node-retry')).toBe(false)
+  })
+
+  it('refuses a transient retry whose previous operation outcome is unknown', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'a', prompt: 'A' }] }))
+    const r = runner(); r.run('v3demo', { runId: 'unknown', verifyOnComplete: false }); await tick()
+    ;(host as ConductorSessionHost).assertTaskSafePoint = () => { throw new Error('Unknown operation outcome') }
+    host.complete('a', { reason: 'error', errorCode: 'service_error' }); await tick()
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(host.dispatchedNames()).toEqual(['a'])
+    expect(r.getRunState('v3demo', 'unknown')?.status).toBe('failed')
+  })
+
+  it('F3 waits for both explicit and input-derived dependencies and keeps a later YAML save out of the frozen run', async () => {
+    const frozen = v3Spec({ runner: 'conduct', constraints: ['read only'], decisions: ['unknown risk stays unknown'], execution: { verification: { required: false } }, nodes: [
+      { id: 'a', prompt: 'A' }, { id: 'b', prompt: 'B' },
+      { id: 'c', prompt: 'Report from ${inputs.second}', depends_on: ['a'], inputs: { second: '${nodes.b.output}' } },
+    ] });
+    saveTaskSpec(root, frozen); const r = runner(); r.run('v3demo', { runId: 'f3', verifyOnComplete: false }); await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+    expect(host.sent.find(item => item.sessionId === 'sess-b')!.message).toContain('User constraints for every node: ["read only"]');
+    expect(host.sent.find(item => item.sessionId === 'sess-b')!.message).toContain('Confirmed plan decisions: ["unknown risk stays unknown"]');
+    const changed = structuredClone(frozen); changed.nodes[1]!.prompt = 'saved replacement'; saveTaskSpec(root, changed);
+    expect(r.currentRunSpec('v3demo', 'f3')!.nodes[1]!.prompt).toBe('B');
+    host.complete('a', { finalText: 'A cost 1000000' }); await tick(); expect(host.dispatchedNames()).not.toContain('c');
+    host.complete('b', { finalText: 'B basis unknown' }); await tick(); expect(host.dispatchedNames()).toContain('c');
+    expect(host.sent.find(item => item.sessionId === 'sess-c')!.message).toContain('B basis unknown');
+    host.complete('c', { finalText: 'Both inputs' }); await tick();
+    expect(r.getRunState('v3demo', 'f3')!.status).toBe('completed');
+  });
+
+  it('verifies typed values from the frozen plan rather than prose alone', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', constraints: ['read only'], nodes: [{ id: 'a', prompt: 'A', outputs: [
+      { name: 'cost', kind: 'param', type: 'number', required: true }, { name: 'unresolved', kind: 'param', type: 'boolean', required: true },
+    ] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'typed', orchestratorSessionId: 'orch' }); await tick();
+    expect(r.submitNodeOutput('sess-a', { text: 'cost is known; risk remains unknown', values: { cost: 1000000, unresolved: true } }).ok).toBe(true);
+    host.complete('a', { finalText: 'Submitted' }); await tick();
+    const review = host.sent.find(item => item.sessionId === 'orch')!.message;
+    expect(review).toContain('Runtime-validated values: {"cost":1000000,"unresolved":true}');
+    expect(review).toContain('User constraints for every node: ["read only"]');
+    expect(review).toContain('Task slug: v3demo; runId: typed; revision: 0.');
+    expect(review).toContain('Frozen plan: {');
+    expect(review).toContain('"type":"number"'); expect(review).toContain('Run: typed; revision: 0');
+    expect(() => r.submitVerdict('orch', { runId: 'typed', result: 'fail', reason: 'bad target', nodes: ['unknown'] })).toThrow('completed nodes');
+    expect(r.getRunState('v3demo', 'typed')!.nodes.find(node => node.id === 'a')!.state).toBe('done');
+    expect(r.submitVerdict('orch', { runId: 'typed', result: 'pass' }).status).toBe('completed');
+  });
+
+  it('accepts only one same-revision manual/planner commit and refuses to overwrite running nodes', async () => {
+    saveTaskSpec(root, v3Spec({ execution: { coordinator_gate: { mode: 'off' } }, nodes: [{ id: 'a', prompt: 'A' }, { id: 'c', prompt: 'C', depends_on: ['a'] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'race', verifyOnComplete: false, orchestrateAllowed: true }); await tick();
+    const first = { runId: 'race', decisionId: 'manual', baseRevision: 0, rationale: 'confirmed', update: [{ id: 'c', prompt: 'manual C' }] };
+    expect(r.applyManualPlanPatch('v3demo', 'race', first).revision).toBe(1);
+    expect(() => r.applyOrchestrationPatch('v3demo', 'race', { ...first, decisionId: 'planner', update: [{ id: 'c', prompt: 'stale C' }] })).toThrow('stale revision');
+    expect(r.currentRunSpec('v3demo', 'race')!.nodes[1]!.prompt).toBe('manual C');
+    expect(() => r.applyManualPlanPatch('v3demo', 'race', { ...first, decisionId: 'running', baseRevision: 1, update: [{ id: 'a', prompt: 'overwrite' }] })).toThrow('running');
+    expect(readRunState(root, 'v3demo', 'race')!.revision).toBe(1);
+    expect(readRunLog(root, 'v3demo', 'race').filter(entry => entry.kind === 'orchestration-patch')).toHaveLength(1);
+  });
+
+  it('rolls back memory and log on checkpoint failure and ignores the orphan revision after reload', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A' }] }));
+    const r = runner(); r.run('v3demo', { runId: 'disk', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const statePath = join(runDir(root, 'v3demo', 'disk'), 'run-state.json');
+    const beforeState = readFileSync(statePath, 'utf8'), beforeLog = JSON.stringify(readRunLog(root, 'v3demo', 'disk'));
+    const beforeSpec = structuredClone(r.currentRunSpec('v3demo', 'disk'));
+    unlinkSync(statePath); mkdirSync(statePath);
+    const patch = { runId: 'disk', decisionId: 'manual-disk', baseRevision: 0, rationale: 'add', add: [{ id: 'c', kind: 'session' as const, prompt: 'C' }] };
+    expect(() => r.applyManualPlanPatch('v3demo', 'disk', patch)).toThrow();
+    expect(r.currentRunSpec('v3demo', 'disk')).toEqual(beforeSpec);
+    expect(r.getRunState('v3demo', 'disk')!.revision).toBe(0);
+    expect(JSON.stringify(readRunLog(root, 'v3demo', 'disk'))).toBe(beforeLog);
+    rmSync(statePath, { recursive: true }); writeFileSync(statePath, beforeState);
+    expect(readLatestSpecRevision(root, 'v3demo', 'disk')!.revision).toBe(0);
+    const restored = runner(); restored.scanUnfinished(); expect(restored.getRunState('v3demo', 'disk')!.revision).toBe(0);
+    expect(r.applyManualPlanPatch('v3demo', 'disk', patch).revision).toBe(1);
+    expect(readRunLog(root, 'v3demo', 'disk').filter(entry => entry.kind === 'coordinator-decision')).toHaveLength(1);
+  });
+
   it.each([false, true])('requires a fresh reviewer verdict after transport failure (restart=%s)', async restart => {
     saveTaskSpec(root, v3Spec({ runner: 'conduct', execution: { verification: { required: false } }, nodes: [
       { id: 'work', prompt: 'work' }, { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
@@ -165,9 +273,11 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
     const snapshot = r.continue('v3demo', 'r1');
     expect(snapshot.status).toBe('waiting-coordinator');
+    expect(snapshot.nodes[0]?.blocker).toBeUndefined();
     expect(host.dispatchedNames()).toEqual(['a']);
     advance('retry'); await tick();
     expect(host.dispatchedNames()).toEqual(['a', 'a']);
+    expect(r.getRunState('v3demo', 'r1')?.nodes[0]?.blocker).toBeUndefined();
     await r.stop('v3demo', 'r1');
   });
 
@@ -190,6 +300,47 @@ describe('TaskRunner v3 quality/efficiency', () => {
     if (!request || request.kind !== 'coordinator-request') throw new Error('missing coordinator-request');
     return request.checkpointId;
   }
+
+  it('settles an unresolved invalid node instead of entering an unfinishable verification after replacement work', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A', outputs: [{ name: 'finding', kind: 'param', type: 'json', required: true }] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const decide = (decisionId: string, action: 'continue' | 'patch', extra: Record<string, unknown> = {}) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId,
+      decisionId, baseRevision: r.getRunState('v3demo', 'r1')!.revision ?? 0, action, ...extra,
+    });
+    decide('start', 'continue'); await tick();
+    expect(host.sent.find(call => call.sessionId === 'sess-a')?.message).toContain('Declared node outputs: [{"name":"finding"');
+    host.complete('a', { finalText: 'Findings without the required output' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes[0]?.state).toBe('invalid');
+    decide('replacement', 'patch', { rationale: 'Try a replacement', add: [{ id: 'b', prompt: 'B' }] }); await tick();
+    host.complete('b', { finalText: 'Replacement findings' }); await tick();
+    decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    const log = readRunLog(root, 'v3demo', 'r1');
+    expect(log.some(event => event.kind === 'run-verifying')).toBe(false);
+    expect(log.filter(event => event.kind === 'run-failed')).toHaveLength(1);
+    expect(host.sent.findLast(call => call.sessionId === 'orch')?.message).toContain('completed without submit_task_output');
+  });
+
+  it('retires a canonically cancelled pending node without blocking final verification', async () => {
+    saveTaskSpec(root, v3Spec({ acceptance_criteria: 'A supplies the finding', nodes: [{ id: 'a', prompt: 'A' }, { id: 'b', prompt: 'Unneeded work', depends_on: ['a'] }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const decide = (decisionId: string, action: 'continue' | 'patch', extra: Record<string, unknown> = {}) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId,
+      decisionId, baseRevision: r.getRunState('v3demo', 'r1')!.revision ?? 0, action, ...extra,
+    });
+    decide('retire-unused', 'patch', { rationale: 'A alone satisfies the current goal', cancel: ['b'] }); await tick();
+    expect(host.dispatchedNames()).toEqual(['a']);
+    host.complete('a', { finalText: 'A findings' }); await tick();
+    decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')!.status).toBe('verifying');
+    expect(r.getRunState('v3demo', 'r1')!.nodes.map(node => node.id)).toEqual(['a']);
+    expect(readRunLog(root, 'v3demo', 'r1').some(e => e.kind === 'orchestration-patch' && e.cancelled?.includes('b'))).toBe(true);
+    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    const restored = runner().getLatestRun('v3demo')!;
+    expect(restored.status).toBe('completed');
+    expect(restored.nodes.map(node => node.id)).toEqual(['a']);
+  });
 
   it('persists human feedback without releasing the gate, deduplicates feedback, and resumes only on approval', async () => {
     saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
@@ -383,6 +534,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
       nodes: [
         { id: 'work', prompt: 'work' },
         { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+        { id: 'future', prompt: 'future', depends_on: ['review'] },
       ],
     }));
     const r = runner();
@@ -392,6 +544,9 @@ describe('TaskRunner v3 quality/efficiency', () => {
     host.complete('work', { finalText: 'done', tokenUsage: tu(10, 5) });
     await tick();
     expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'fail', reason: 'bad' }).ok).toBe(false);
+    for (const id of ['future', 'unknown', 'review']) {
+      expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'fail', reason: 'bad', evidence: 'audit', nodes: [id] }).ok).toBe(false);
+    }
     expect(r.submitNodeVerdict(host.sessionIdFor('review'), {
       result: 'fail',
       reason: 'missing branch',
@@ -743,6 +898,19 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(after.status).toBe('waiting-coordinator');
     expect(after.blockers).toContain('approval');
   });
+  it('F4-f rejects a final PASS when a file changed after the verification context was frozen', async () => {
+    writeFileSync(join(root,'late.txt'),'original');
+    saveTaskSpec(root,v3Spec({ id: 'late-artifact', runner: 'conduct', nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const execution = runner(); execution.run('late-artifact',{runId:'r',orchestratorSessionId:'orch'}); await tick();
+    expect(execution.submitNodeOutput('sess-a',{values:{file:'late.txt'}}).ok).toBe(true);
+    host.complete('a'); await tick(); expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
+    writeFileSync(join(root,'late.txt'),'changed');
+    expect(() => execution.submitVerdict('orch',{runId:'r',result:'pass'})).toThrow('artifact validation is unsettled');
+    expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
+    expect(readRunLog(root,'late-artifact','r').some(event => event.kind === 'verdict' && event.result === 'pass')).toBe(false);
+    await execution.stop('late-artifact','r');
+  });
+
   it('rejects workspace cache receipts after the referenced artifact changes', async () => {
     writeFileSync(join(root, 'report.txt'), 'original');
     const spec = (id: string) => v3Spec({ id, runner: 'conduct',
@@ -761,8 +929,12 @@ describe('TaskRunner v3 quality/efficiency', () => {
     cachedRunner.run('cache-file-reused', { runId: 'cached', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false }); await tick();
     expect(cachedHost.dispatchedNames()).toHaveLength(0);
     expect(readRunLog(root, 'cache-file-reused', 'cached').some(event => event.kind === 'node-artifact-inputs' && event.nodeId === 'pure' && event.sessionId === '')).toBe(true);
+    expect(cachedRunner.getRunState('cache-file-reused', 'cached')?.status).toBe('verifying');
+    cachedRunner.submitVerdict('orch', { runId: 'cached', result: 'pass' });
     writeFileSync(join(root, 'report.txt'), 'external replacement');
-    expect(cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached').nodes.find(node => node.id === 'pure')?.state).toBe('invalid');
+    const previous = cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached');
+    expect(previous.nodes.find(node => node.id === 'pure')?.state).toBe('done');
+    expect(previous.artifactAvailability?.nodeIds).toContain('pure');
     saveTaskSpec(root, spec('cache-file-next'));
     const nextHost = new MockHost();
     const next = new TaskRunner({ host: nextHost, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });

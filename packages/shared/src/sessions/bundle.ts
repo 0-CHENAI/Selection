@@ -7,7 +7,7 @@
  * This is the foundation for session dispatch (move/fork), backup, and sharing.
  */
 
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import type { SessionHeader, StoredMessage, SessionConfig } from './types.ts'
 import type { StoredSession } from './types.ts'
 import { readSessionJsonl } from './jsonl.ts'
@@ -105,7 +105,7 @@ export function serializeSession(
   // Collect all files from session directory (except session.jsonl and tmp/)
   const files = collectDirectoryFiles(sessionDir, {
     skipDirs: SKIP_DIRS,
-    skipFiles: SKIP_SESSION_FILES,
+    skipFiles: new Set([...SKIP_SESSION_FILES, ...readdirSync(sessionDir).filter(name => name.startsWith('session.jsonl.') && name.endsWith('.tmp'))]),
   })
 
   // Validate total bundle size

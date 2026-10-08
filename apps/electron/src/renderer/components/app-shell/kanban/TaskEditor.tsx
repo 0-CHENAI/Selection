@@ -8,6 +8,12 @@ import { Spinner, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
 import { TaskYamlImport } from './TaskYamlImport'
 import { TaskProposal } from './TaskProposal'
+import { ResearchConfiguration } from './ResearchConfiguration'
+import { ResearchResults } from './ResearchResults'
+import { TaskHelpHistory } from './TaskHelpHistory'
+import type { ResearchConfig } from '@craft-agent/shared/tasks/research'
+import { addResearchTemplate } from '@craft-agent/shared/tasks/research-template'
+import type { TaskSpec } from '@craft-agent/shared/tasks'
 import { TaskApproval } from './TaskApproval'
 import { TaskTemplateLibrary } from './TaskTemplateLibrary'
 import { TaskTemplateSaveDialog } from './TaskTemplateSave'
@@ -29,9 +35,10 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
-import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
+import { ConductorWorkbench, ManagedTaskWorkers, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,16 +62,16 @@ import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run
 import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 
 
-function v3MigrationLines(spec: Record<string, unknown>): string[] {
+function v3MigrationLines(spec: Record<string, unknown>, translate: (key: string, values?: Record<string, string>) => string): string[] {
   const nodes = Array.isArray(spec.nodes) ? spec.nodes as Array<{ id?: string; cache?: string }> : []
   const cachePure = nodes.filter((node) => node.cache === 'pure').map((node) => node.id).filter(Boolean)
   const lines = [
-    'schema_version becomes 3. v1/v2 run logs are not rewritten.',
-    'Coordinator checkpoints wait for submit_orchestration_decision; timeout pauses with coordinator-timeout.',
-    'verify/judge nodes must call submit_task_node_verdict. Parent chat is never a run verdict.',
+    translate('tasks.migrationVersionEffect'),
+    translate('tasks.migrationCoordinatorEffect'),
+    translate('tasks.migrationVerificationEffect'),
   ]
   if (cachePure.length) {
-    lines.push(`cache: pure on ${cachePure.join(', ')} becomes run-pure (same-run only). workspace-pure is never implied.`)
+    lines.push(translate('tasks.migrationCacheEffect', { nodes: cachePure.join(', ') }))
   }
   return lines
 }
@@ -198,7 +205,7 @@ function ModelSelect({
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="task-editor-field flex flex-wrap items-center justify-between gap-3">
       <span className="text-[12.5px] font-medium text-foreground/55">{label}</span>
       <div className="shrink-0">{children}</div>
     </div>
@@ -409,6 +416,7 @@ function SubtaskCard({
   groups,
   fallbackModel,
   modelToConnection,
+  inferredDeps,
   onChange,
   onRemove,
 }: {
@@ -421,6 +429,7 @@ function SubtaskCard({
   fallbackModel: string
   /** model id → connection slug, so picking a model pins the connection that serves it. */
   modelToConnection: Map<string, string>
+  inferredDeps: string[]
   onChange: (patch: Partial<EditorSubtask>) => void
   onRemove: () => void
 }) {
@@ -461,6 +470,7 @@ function SubtaskCard({
               <option value="approval">{t('tasks.nodeKindApproval')}</option>
               {subtask.kind && !['session', 'approval'].includes(subtask.kind) && <option value={subtask.kind}>{subtask.kind}</option>}
             </select>
+            <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={subtask.extras?.locked === true} onChange={event => onChange({ extras: { ...subtask.extras, locked: event.target.checked } })} />{t('tasks.nodeLocked')}</label>
             <ModelSelect
               value={subtask.model ?? fallbackModel}
               onChange={(id) => onChange({ model: id, llmConnection: modelToConnection.get(id) })}
@@ -468,6 +478,7 @@ function SubtaskCard({
               width={128}
               size="sm"
             />
+            {inferredDeps.map(id => <span key={id} className="text-xs text-muted-foreground">{t('tasks.inferredDependency', { id })}</span>)}
             {subtask.dependsOn.map((depUid) => (
               <span
                 key={depUid}
@@ -478,7 +489,7 @@ function SubtaskCard({
                   type="button"
                   onClick={() => removeDep(depUid)}
                   aria-label={t('tasks.removeDependency')}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-foreground/40 hover:bg-foreground/10 hover:text-red-500"
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-foreground/40 transition-colors hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-none"
                 >
                   <X className="h-3 w-3" strokeWidth={2.5} />
                 </button>
@@ -509,7 +520,7 @@ function SubtaskCard({
           type="button"
           onClick={onRemove}
           aria-label={t('tasks.removeSubtask')}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded text-foreground/40 opacity-0 transition-all hover:bg-foreground/10 hover:text-red-500 group-hover:opacity-100"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded text-foreground/40 transition-opacity hover:text-red-500 focus-visible:text-red-500 focus-visible:opacity-100 focus-visible:outline-none opacity-60 group-hover:opacity-100"
         >
           <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
@@ -572,7 +583,7 @@ export function TaskEditor(props: TaskEditorProps) {
     />
   }
   return <ExistingTaskEditor
-    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : projectId ?? ''}`}
+    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : props.target?.rootSessionId ?? projectId ?? ''}`}
     {...props}
     onImport={() => setPane('import')}
     onOpenLibrary={() => setPane('library')}
@@ -610,12 +621,15 @@ function ExistingTaskEditor({
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
   const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
   const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
+  const draftVersion = React.useRef(0)
   const [dirty, setDirty] = useAtom(kanbanEditorDirtyAtom)
 
   React.useEffect(() => {
     return () => setDirty(false)
   }, [setDirty])
-  const [title, setTitle] = React.useState('')
+  const [constraintsText, setConstraintsText] = React.useState('')
+  const [decisionsText, setDecisionsText] = React.useState('')
+  const [title, setTitle] = React.useState(target.mode === 'create' ? target.initialTitle ?? '' : '')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
   // Empty string = "use the runner default"; a number pins the spec's max_iterations.
@@ -684,6 +698,7 @@ function ExistingTaskEditor({
   const [revisionError, setRevisionError] = React.useState<string | null>(null)
 
   const markFormChanged = React.useCallback(() => {
+    draftVersion.current++
     setDirty(true)
     setFormChangedSinceYaml(true)
   }, [setDirty])
@@ -691,6 +706,15 @@ function ExistingTaskEditor({
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
   const store = useStore()
+  const createRootId = target.mode === 'create' ? target.rootSessionId : undefined
+  React.useEffect(() => {
+    if (!createRootId) return
+    const root = store.get(sessionMetaMapAtom).get(createRootId)
+    if (root?.model) setOrchModel(root.model)
+    setOrchConnection(root?.llmConnection)
+    if (root?.permissionMode === 'safe' || root?.permissionMode === 'ask' || root?.permissionMode === 'allow-all') setPermissionMode(root.permissionMode)
+    setCwd(root?.workingDirectory ?? '')
+  }, [createRootId, store])
 
   /**
    * The tile's quick-add children as editor rows, so hand-spawned subtasks show up (and get
@@ -728,6 +752,7 @@ function ExistingTaskEditor({
   React.useEffect(() => {
     setTaskLoadError(null)
     setPreservedSpec(undefined)
+    setConstraintsText(''); setDecisionsText('')
     setEtag(null)
     setYamlHasLocalSource(false)
     setFormChangedSinceYaml(false)
@@ -756,6 +781,8 @@ function ExistingTaskEditor({
             return
           }
           setPreservedSpec(spec)
+          setConstraintsText((spec.constraints as string[] | undefined)?.join('\n') ?? '')
+          setDecisionsText((spec.decisions as string[] | undefined)?.join('\n') ?? '')
           setEtag(res.etag)
           if (res.latestRun) setLiveRun(res.latestRun)
           setSourceVersion(res.sourceVersion)
@@ -1035,13 +1062,13 @@ function ExistingTaskEditor({
         fixedId: editSlug,
         runner,
         layout,
-        preservedSpec,
+        preservedSpec: { ...preservedSpec, constraints: constraintsText.split('\n').filter(line => line.trim()), decisions: decisionsText.split('\n').filter(line => line.trim()) },
       },
       modelToConnection,
     ) as unknown as WorkbenchSpec
   }, [
     title, goal, acceptanceCriteria, maxRepairs, projectId, orchModel, orchConnection, permissionMode,
-    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, modelToConnection,
+    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, constraintsText, decisionsText, modelToConnection,
   ])
 
   const requestClose = React.useCallback(async () => {
@@ -1050,7 +1077,10 @@ function ExistingTaskEditor({
   }, [dirty, onClose, t])
 
   const applyWorkbenchSpec = React.useCallback((next: EditableTaskSpec, source: 'form' | 'yaml' = 'form') => {
+    draftVersion.current++
     setPreservedSpec(next)
+    setConstraintsText((next.constraints as string[] | undefined)?.join('\n') ?? '')
+    setDecisionsText((next.decisions as string[] | undefined)?.join('\n') ?? '')
     setDirty(true)
     setFormChangedSinceYaml(source === 'form')
     if (source === 'yaml') setYamlHasLocalSource(true)
@@ -1070,11 +1100,21 @@ function ExistingTaskEditor({
     setSubtasks(specToSubtasks(next.nodes ?? []))
   }, [setDirty])
 
+  const currentSpecRef = React.useRef(currentSpec)
+  currentSpecRef.current = currentSpec
   const validateYamlDraft = React.useCallback(async () => {
+    const version = draftVersion.current
     try {
       const res = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+      if (version !== draftVersion.current) return
       if (!res.valid) {
         setYamlDiagnostics(res.errors.map((e) => `${e.path}: ${e.message}`))
+        setYamlDraft(JSON.stringify(currentSpecRef.current(), null, 2))
+        return
+      }
+      if (editSlug && (res.spec as EditableTaskSpec | undefined)?.id !== editSlug) {
+        setYamlDiagnostics([t('tasks.taskIdImmutable', { id: editSlug })])
+        setYamlDraft(JSON.stringify(currentSpecRef.current(), null, 2))
         return
       }
       setYamlDiagnostics([])
@@ -1082,7 +1122,7 @@ function ExistingTaskEditor({
     } catch (err) {
       setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
     }
-  }, [workspaceId, yamlDraft, applyWorkbenchSpec])
+  }, [workspaceId, yamlDraft, applyWorkbenchSpec, editSlug, t])
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1116,6 +1156,7 @@ function ExistingTaskEditor({
         return
       }
     }
+    const submittedVersion = draftVersion.current
     submitLock.current = true
     setBusy(true)
     try {
@@ -1129,6 +1170,7 @@ function ExistingTaskEditor({
           toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
           return
         }
+        if (submittedVersion !== draftVersion.current) throw new Error(t('tasks.proposalStale'))
         spec = validation.spec as Record<string, unknown>
         if (isEdit && editSlug && spec.id !== editSlug) {
           const message = t('tasks.taskIdImmutable', { id: editSlug })
@@ -1162,7 +1204,7 @@ function ExistingTaskEditor({
             fixedId: editSlug,
             runner,
             layout,
-            preservedSpec,
+            preservedSpec: { ...preservedSpec, constraints: constraintsText.split('\n').filter(line => line.trim()), decisions: decisionsText.split('\n').filter(line => line.trim()) },
           },
           modelToConnection,
         )
@@ -1188,6 +1230,8 @@ function ExistingTaskEditor({
           return
         }
         setEtag(saved.etag ?? null)
+        if (submittedVersion !== draftVersion.current) { toast.success(t('tasks.savedEarlierDraft')); return }
+        draftVersion.current++
         setSourceVersion(saved.sourceVersion)
         setMigrationWarnings(saved.migrationWarnings ?? [])
         if (!run) {
@@ -1197,6 +1241,7 @@ function ExistingTaskEditor({
         }
         const runResult = await window.electronAPI.runTask(workspaceId, {
           slug: saved.slug,
+          expectedEtag: saved.etag,
           orchestratorSessionId: editSessionId,
         })
         toast.success(t('tasks.toastStarted'), {
@@ -1206,7 +1251,7 @@ function ExistingTaskEditor({
         return
       }
       if (!isEdit) {
-        const created = await window.electronAPI.createTask(workspaceId, { yaml })
+        const created = await window.electronAPI.createTask(workspaceId, { yaml, ...(createRootId ? {rootSessionId:createRootId} : {}) })
         if (!created.validation.valid) {
           setYamlDiagnostics(created.validation.errors.map(e => `${e.path}: ${e.message}`))
           toast.error(t('tasks.toastInvalid'), { description: created.validation.errors[0]?.message })
@@ -1279,20 +1324,22 @@ function ExistingTaskEditor({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 bg-background p-3 text-foreground">
+    <div className="task-editor flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden bg-background p-3 text-foreground">
       {/* Header */}
-      <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
+      <div className="task-editor-header flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-1 pb-3">
         <Btn variant="ghost" className="px-2" onClick={requestClose}>
           <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
         </Btn>
-        <span className="text-foreground/25">/</span>
-        <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
+        <span className="task-editor-divider text-foreground/25">/</span>
+        <span className="min-w-0 truncate text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
 
         {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
-        <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
+        <div className="task-editor-tabs inline-flex gap-1 rounded-lg bg-muted/60 p-1" role="tablist" aria-label={t('tasks.definition')}>
           {(isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
             <button
               key={tb}
+              role="tab"
+              aria-selected={tab === tb}
               onClick={() => {
                 if (tb === 'yaml' && shouldRefreshYamlDraft(yamlHasLocalSource, formChangedSinceYaml)) {
                   setYamlDraft(JSON.stringify(currentSpec(), null, 2))
@@ -1314,7 +1361,7 @@ function ExistingTaskEditor({
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="task-editor-actions ml-auto flex flex-wrap items-center justify-end gap-2">
           {isEdit && onOpenSession && (
             <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
               <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
@@ -1322,7 +1369,7 @@ function ExistingTaskEditor({
           )}
           {isEdit && liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
             <div className="flex items-center gap-1.5">
-              {(liveRun.status === 'running' || liveRun.status === 'verifying' || liveRun.status === 'repairing') && (
+              {['running', 'verifying', 'repairing', 'waiting-coordinator', 'waiting-approval', 'waiting-budget'].includes(liveRun.status) && (
                 <Btn variant="secondary" onClick={() => void controlRun('pause')}>{t('tasks.pauseRun')}</Btn>
               )}
               {(liveRun.status === 'paused' || liveRun.status === 'pausing') && (
@@ -1383,10 +1430,22 @@ function ExistingTaskEditor({
           )}
           {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
             <>
+              {hasActiveRun && liveRun && editSlug && <Btn variant="secondary" disabled={busy} onClick={async () => {
+                if (!await confirmAction(t('tasks.patchRunConfirm', { version: liveRun.revision ?? 0 }))) return
+                setBusy(true)
+                try {
+                  const result = await window.electronAPI.patchTaskRun(workspaceId, { slug: editSlug, runId: liveRun.runId, baseRevision: liveRun.revision ?? 0,
+                    yaml: tab === 'yaml' ? yamlDraft : JSON.stringify(currentSpec()), rationale: t('tasks.patchRunRationale') })
+                  if (result.conflict) throw new Error(result.conflict.message)
+                  if (result.snapshot) setLiveRun(result.snapshot)
+                  toast.success(t('tasks.patchRunApplied', { version: result.snapshot?.revision ?? 0 }))
+                } catch (error) { toast.error(t('tasks.patchRunFailed'), { description: error instanceof Error ? error.message : String(error) }) }
+                finally { setBusy(false) }
+              }}>{t('tasks.patchRun')}</Btn>}
               <Btn variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('common.cancel')}
               </Btn>
-              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
+              <Btn variant={isEdit ? "secondary" : "primary"} onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
                 {isEdit ? t('common.save') : t('common.create')}
               </Btn>
               {isEdit && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun}>
@@ -1414,27 +1473,6 @@ function ExistingTaskEditor({
         </div>
       )}
 
-      {tab === 'definition' && <TaskProposal
-        workspaceId={workspaceId}
-        draftIdentity={JSON.stringify(currentSpec())}
-        currentYaml={title.trim() && subtasks.length ? taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>) : undefined}
-        projectId={projectId}
-        model={orchModel}
-        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
-        disabled={busy || !!taskLoadError}
-        onApply={(spec) => {
-          const next = spec as EditableTaskSpec
-          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
-            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
-        }}
-      />}
-      {tab === 'definition' && (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
-          {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
-          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
-        </div>
-      )}
 
       {liveRun && ((liveRun.blockers?.length ?? 0) > 0 || liveRun.nodes.some((node) => node.blocker)) && (
         <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
@@ -1461,7 +1499,7 @@ function ExistingTaskEditor({
         </div>
       )}
 
-      {tab === 'results' ? (
+      {tab === 'results' && (
         <ResultsPanel
           results={results}
           loading={resultsLoading}
@@ -1474,12 +1512,14 @@ function ExistingTaskEditor({
           onApplyRunRevision={() => void previewRunRevision()}
           canApplyRunRevision={Boolean(editSlug && etag && (selectedRunId ?? results?.runId ?? liveRun?.runId))}
         />
-      ) : tab === 'yaml' ? (
+      )}
+      {tab === 'yaml' && (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           <textarea
-            className="min-h-[280px] flex-1 rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
+            className="min-h-0 flex-1 resize-none rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
             value={yamlDraft}
             onChange={(e) => {
+              draftVersion.current++
               setDirty(true)
               setYamlHasLocalSource(true)
               setFormChangedSinceYaml(false)
@@ -1497,14 +1537,51 @@ function ExistingTaskEditor({
             </ul>
           )}
         </div>
-      ) : tab === 'canvas' ? (
-        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} />
-      ) : (
-      /* Body */
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
+      )}
+      {tab === 'canvas' && (
+        <ConductorWorkbench workspaceId={workspaceId} spec={currentSpec()} liveRun={liveRun} onOpenChildSession={onOpenChildSession} />
+      )}
+      {/* Keep authoring mounted so tabs retain the conversation and form focus state. */}
+      <div hidden={tab !== 'definition'} className="task-editor-authoring grid min-h-0 min-w-0 flex-1 gap-4">
         {/* Left — definition */}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
-          <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
+        <div className="task-editor-definition flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4">
+          <div className="border-b border-border pb-4"><TaskProposal
+            workspaceId={workspaceId}
+            draftVersion={draftVersion.current}
+            draftIdentity={JSON.stringify(currentSpec())}
+            currentYaml={taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)}
+            projectId={projectId}
+            model={orchModel}
+            llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+            disabled={busy || !!taskLoadError}
+            onApply={(spec) => {
+              const next = spec as EditableTaskSpec
+              applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
+                defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
+            }}
+          /></div>
+          <div className="flex flex-wrap gap-1 border-b border-border pb-4">
+              {!createRootId && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>}
+              {!isEdit && !createRootId && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+              <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
+              {isTasksOrchestrateEnabled() && !preservedSpec?.research && <Button variant="ghost" disabled={busy} onClick={() => {
+                const question = goal.trim() || t('tasks.research.question')
+                applyWorkbenchSpec(addResearchTemplate(currentSpec() as unknown as TaskSpec, { line: { id: 'main', question, premises: [] }, dimensions: [{ id: 'core', requirement: question, required: true }], sources: [] }) as unknown as EditableTaskSpec)
+              }}>{t('tasks.research.addTemplate')}</Button>}
+            </div>
+
+          {!!preservedSpec?.research && <ResearchConfiguration value={preservedSpec.research as ResearchConfig} disabled={busy} onChange={research => { setPreservedSpec(previous => ({ ...previous, research })); markFormChanged() }} />}
+
+          <p className="text-xs text-muted-foreground" role="status">{t('tasks.draftVersion', { version: draftVersion.current })}{hasActiveRun && ` · ${t('tasks.savedDefinitionBoundary')}`}</p>
+          {(['constraints', 'decisions'] as const).map(field => <div key={field} className="space-y-1">
+            <label className="text-xs font-medium">{t(`tasks.plan${field === 'constraints' ? 'Constraints' : 'Decisions'}`)}</label>
+            <textarea aria-label={t(`tasks.plan${field === 'constraints' ? 'Constraints' : 'Decisions'}`)} rows={2} className="w-full rounded-md border bg-background p-2 text-xs"
+              value={field === 'constraints' ? constraintsText : decisionsText}
+              onChange={event => { (field === 'constraints' ? setConstraintsText : setDecisionsText)(event.target.value); markFormChanged() }} />
+            <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={(preservedSpec?.locked_fields as string[] | undefined)?.includes(field) ?? false}
+              onChange={event => { setPreservedSpec(previous => ({ ...previous, locked_fields: [...((previous?.locked_fields as string[] | undefined) ?? []).filter(key => key !== field), ...(event.target.checked ? [field] : [])] })); markFormChanged() }} />{t('tasks.lockField')}</label>
+          </div>)}
+          <div className="text-[15px] font-semibold">{t('tasks.definition')}</div>
 
 
           <div>
@@ -1672,7 +1749,7 @@ function ExistingTaskEditor({
         </div>
 
         {/* Right — editable nodes of the existing task */}
-        <div className="flex min-h-0 flex-col rounded-xl border border-border bg-card shadow-minimal">
+        <div className="task-editor-nodes flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-card">
             <>
               <div className="flex shrink-0 items-center gap-2 px-4 pt-4">
                 <span className="text-[15px] font-bold">{t('kanban.subtasks')}</span>
@@ -1684,12 +1761,13 @@ function ExistingTaskEditor({
                 </Btn>
               </div>
 
-              <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-4">
+              <div className="task-editor-node-list flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
                 {subtasks.map((st, i) => (
                   <SubtaskCard
                     key={st.uid}
                     index={i}
                     subtask={st}
+                    inferredDeps={effectiveNodeDeps(currentSpec().nodes[i]!).filter(id => !(currentSpec().nodes[i]?.depends_on ?? []).includes(id))}
                     allSubtasks={subtasks}
                     groups={groups}
                     fallbackModel={orchModel || fallbackModel}
@@ -1714,7 +1792,6 @@ function ExistingTaskEditor({
             </>
         </div>
       </div>
-      )}
       <ApplyRunRevisionDialog
         open={revisionDialogOpen}
         preview={revisionPreview}
@@ -1741,19 +1818,19 @@ function ExistingTaskEditor({
         onSubmit={(input) => void confirmTemplateSave(input)}
       />
       <Dialog open={v3Confirm !== null} onOpenChange={(open) => { if (!open) setV3Confirm(null) }}>
-        <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogContent className="task-editor-dialog flex max-h-[82dvh] flex-col overflow-hidden sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>{t('tasks.confirmV3Title')}</DialogTitle>
             <DialogDescription>{t('tasks.confirmV3Description')}</DialogDescription>
           </DialogHeader>
           {v3Confirm && (
-            <ul className="list-disc space-y-1 pl-5 text-[12.5px] text-foreground/75">
-              {v3MigrationLines(v3Confirm.spec).map((line) => (
+            <ul className="min-h-0 overflow-y-auto list-disc space-y-2 pl-5 text-sm text-foreground/75">
+              {v3MigrationLines(v3Confirm.spec, t).map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
           )}
-          <DialogFooter>
+          <DialogFooter className="task-editor-dialog-footer">
             <Button variant="outline" size="sm" onClick={() => setV3Confirm(null)}>
               {t('common.cancel')}
             </Button>
@@ -1841,6 +1918,12 @@ function ResultsPanel({
           )}
         </label>
       )}
+      {results.artifactAvailability && <p role="status" className="break-words text-[12px] text-warning">{t('tasks.artifactAvailability')}: {results.artifactAvailability.nodeIds.join(', ')} — {results.artifactAvailability.reason}</p>}
+      {results.resumedFrom && <p className="break-words text-[12px] text-foreground/70">{t('tasks.resumedFrom')}: {results.resumedFrom}</p>}
+      {results.supersededBy && <p className="break-words text-[12px] text-foreground/70">{t('tasks.supersededBy')}: {results.supersededBy}</p>}
+      <ManagedTaskWorkers workers={results.workers} runId={results.runId} onOpenSession={onOpenChildSession} />
+      <ResearchResults research={results.research} onOpenSession={onOpenChildSession} />
+      <TaskHelpHistory records={results.help} onOpenSession={onOpenChildSession} />
       <div className="flex justify-end">
         <Btn variant="secondary" onClick={onApplyRunRevision} disabled={!canApplyRunRevision}>
           {t('tasks.applyRunRevision')}

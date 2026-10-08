@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from './execution-checkpoint'
@@ -22,6 +22,11 @@ test('only a matching safe checkpoint can resume', () => {
     expect(recoveryBlocker({ ...checkpoint, pendingTools: { call: { name, recovery: 'unknown' } } }, current)).toBe('unknown-tool-result')
   }
   expect(toolRecoveryClass('mcp__external__Find')).toBe('unknown')
+  for (const name of ['task_help', 'session__task_help', 'mcp__session__task_help']) {
+    expect(toolRecoveryClass(name)).toBe('read-only')
+    expect(recoveryBlocker({ ...checkpoint, pendingTools: { help: { name, recovery: 'read-only' } }, completedTools: ['confirmed-write'] }, current)).toBeUndefined()
+  }
+  expect(toolRecoveryClass('mcp__external__task_help')).toBe('unknown')
 })
 test('checkpoint publication survives reload; unknown and damaged records never become fresh runs', () => {
   const root = mkdtempSync(join(tmpdir(), 'checkpoint-'))
@@ -33,6 +38,25 @@ test('checkpoint publication survives reload; unknown and damaged records never 
     expect(readExecutionCheckpoint(root).kind).toBe('unsupported')
     writeFileSync(join(root, 'data', 'execution-checkpoint.json'), '{')
     expect(readExecutionCheckpoint(root).kind).toBe('corrupt')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+test('bound legacy task help can recover without changing stored bytes or reclassifying other effects', () => {
+  const root = mkdtempSync(join(tmpdir(), 'checkpoint-help-'))
+  try {
+    const pendingTools = { help: { name: 'mcp__session__task_help', recovery: 'unknown' as const }, external: { name: 'mcp__external__task_help', recovery: 'unknown' as const }, read: { name: 'Read', recovery: 'unknown' as const } }
+    writeExecutionCheckpoint(root, { ...checkpoint, taskIdentity: { taskRunId: 'run', taskNodeId: 'review' }, pendingTools })
+    const path = join(root, 'data', 'execution-checkpoint.json'), before = readFileSync(path, 'utf8')
+    const saved = readExecutionCheckpoint(root)
+    expect(saved.kind).toBe('ok')
+    if (saved.kind !== 'ok') throw new Error('Checkpoint missing')
+    expect(saved.checkpoint.pendingTools.help?.recovery).toBe('read-only')
+    expect(saved.checkpoint.pendingTools.external?.recovery).toBe('unknown')
+    expect(saved.checkpoint.pendingTools.read?.recovery).toBe('unknown')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(recoveryBlocker(saved.checkpoint, { ...current, taskIdentity: saved.checkpoint.taskIdentity })).toBe('unknown-tool-result')
+    writeExecutionCheckpoint(root, { ...checkpoint, generation: 2, pendingTools: { help: pendingTools.help } })
+    const unbound = readExecutionCheckpoint(root)
+    expect(unbound.kind === 'ok' && unbound.checkpoint.pendingTools.help?.recovery).toBe('unknown')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 test('SDK fingerprint detects changed bytes even when the session ID is unchanged', async () => {
@@ -164,4 +188,23 @@ test('only exact runtime recovery tool rows may reconcile a saved transcript tai
   }
   expect(recoveryTranscriptMatches('/unused', c, [user, recovered, { ...recovered, id: 'duplicate' }])).toBe(false)
   expect(recoveryTranscriptMatches('/unused', c, [recovered])).toBe(false)
+})
+
+test('actor/worker attempt identity reloads and fences old task bindings', () => {
+  const root = mkdtempSync(join(tmpdir(), 'checkpoint-task-identity-'))
+  try {
+    const taskIdentity = executionTaskIdentity({ taskSlug: 'task', taskRunId: 'run', taskNodeId: 'a1', taskAttempt: 1, taskRevision: 0, taskActor: { id: 'analyst', persona: 'careful' }, taskWorkerId: 'worker' })
+    const saved = { ...checkpoint, taskIdentity }
+    writeExecutionCheckpoint(root, saved)
+    expect(readExecutionCheckpoint(root)).toEqual({ kind: 'ok', checkpoint: saved })
+    writeExecutionCheckpoint(root, { ...saved, status: 'completed' })
+    const next = { ...saved, generation: 2, userMessageId: 'a2-message', taskIdentity: { ...taskIdentity, taskNodeId: 'a2' } }
+    writeExecutionCheckpoint(root, next)
+    expect(readExecutionCheckpoint(root)).toEqual({ kind: 'ok', checkpoint: next })
+    expect(() => writeExecutionCheckpoint(root, saved)).toThrow('Stale')
+    for (const taskIdentity of [{ taskAttempt: -1 }, { taskRevision: 0.5 }, { taskActor: { id: '' } }, { taskActor: { id: 'actor', extra: 'untrusted' } }, { taskWorkerId: 3 }]) {
+      writeFileSync(join(root, 'data', 'execution-checkpoint.json'), JSON.stringify({ ...checkpoint, taskIdentity }))
+      expect(readExecutionCheckpoint(root).kind).toBe('corrupt')
+    }
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

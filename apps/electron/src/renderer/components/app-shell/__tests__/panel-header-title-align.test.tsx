@@ -38,7 +38,7 @@ describe('PanelHeader title alignment', () => {
       <PanelHeader title="Session name" actions={<button type="button">Close</button>} />,
     )
 
-    expect(html).toContain('grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]')
+    expect(html).toContain('grid-cols-[minmax(max-content,1fr)_minmax(0,2fr)_minmax(max-content,1fr)]')
     expect(html).toContain('justify-center')
     expect(html).toContain('padding-left:16px;padding-right:16px')
     expect(html).toContain('Close')

@@ -1,4 +1,17 @@
+import { projectHistory } from './project-history'
+import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
+import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
+import { finishTaskOrchestrator } from '../tasks/create-task'
+import type { CreateTaskInput } from '@craft-agent/session-tools-core'
+import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
+import { resolveSessionName } from '@craft-agent/shared/display-titles'
+import { HandoverStore, handoverHash } from '../reliability/handover-store'
+import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverToolExecutions, handoverOperationEvidence, handoverWebHash, handoverWebSourcesMatch, handoverBackground, handoverOperationHash, handoverToolName, redactHandoverText, isHandoverReadOrLocalTool } from './handover-snapshot'
+import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
+import { taskListAllowed } from '@craft-agent/session-tools-core'
+import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
+import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
@@ -15,7 +28,7 @@ import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, artifactVersionTitle, numberSessionArtifactRefs, sessionArtifactRecord, withArtifactIdentities, withDeliveredArtifactReferences, withHistoricalAnswerTitles, withSessionArtifactOrdinals } from '../reliability/conversation-artifact-versions'
-import { ArtifactCandidateInventory } from '../reliability/artifact-candidate-inventory'
+import { ArtifactCandidateInventory, ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
 import { isArtifactCardPath, localArtifactLinks } from '@craft-agent/shared/utils/artifact-links'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
@@ -36,8 +49,8 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
-import { basename, dirname, join, relative, resolve } from 'path'
-import { existsSync, statSync } from 'fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
+import { readFileSync, existsSync, statSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
@@ -46,11 +59,13 @@ import {
   createBackendFromConnection,
   resolveBackendContext,
   createBackendFromResolvedContext,
+  setBackendModelRequestLimiter,
   cleanupSourceRuntimeArtifacts,
   type AgentBackend,
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
+import { LlmConnectionPool } from '../tasks/connection-pool'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
@@ -120,7 +135,7 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { loadTaskResults, resolveArtifact } from '@craft-agent/shared/tasks'
+import { loadTaskResults, resolveArtifact, readSpecRevision, specRevisionPath, committedRunLog, readRunLog, readRunState, researchErrataAfter } from '@craft-agent/shared/tasks'
 import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
@@ -136,7 +151,6 @@ import {
   formatSpawnQualificationFailure,
   readCurrentTurnSpawnContext,
   recoverPersistedSwarmStatus,
-  resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
@@ -155,7 +169,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -897,7 +911,8 @@ interface RunningBackgroundTask {
   blocker?: string
 }
 
-interface ManagedSession {
+interface ManagedSession extends WorkModeMetadata {
+  handover?: HandoverLink
   conversationArtifactVersions?: ConversationArtifactVersions
   artifactCandidateInventory?: ArtifactCandidateInventory
   progressAdvisories?: Array<{ id: string; text: string }>
@@ -1021,6 +1036,10 @@ interface ManagedSession {
   taskRunId?: string
   // Tasks Conductor: id of the DAG node this child session executes (child nodes only)
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   // Tasks Conductor: total DAG node count (orchestrator only) — stable board progress denominator
   taskNodeCount?: number
   // Tasks Conductor: hidden generate-time orchestrator awaiting validated adoption (off the board)
@@ -1320,6 +1339,8 @@ export function createManagedSession(
     managed.branchSeedApplied = !!managed.sdkSessionId
   }
 
+  // Legacy Swarm choices are superseded by the explicit work-mode boundary.
+  managed.swarmEnabled = managed.workMode === 'PRO' && isTasksOrchestrateEnabled()
   return managed
 }
 
@@ -1331,6 +1352,17 @@ export function createManagedSession(
 export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig {
   return {
     id: managed.id,
+    workMode: managed.workMode,
+    workModeNeedsReview: managed.workModeNeedsReview,
+    executionRootSessionId: managed.executionRootSessionId,
+    parentSessionId: managed.parentSessionId,
+    taskSlug: managed.taskSlug,
+    taskRunId: managed.taskRunId,
+    taskNodeId: managed.taskNodeId,
+    taskAttempt: managed.taskAttempt,
+    taskRevision: managed.taskRevision,
+    taskActor: managed.taskActor,
+    taskWorkerId: managed.taskWorkerId,
     workspaceRootPath: managed.workspace.rootPath,
     sdkSessionId: managed.sdkSessionId,
     branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
@@ -1456,6 +1488,18 @@ interface PendingDelta {
   turnId?: string
 }
 
+/** Content-free, generation-fenced model/tool activity for host diagnostics. */
+export interface SessionRuntimeActivity {
+  sessionId: string
+  rootSessionId: string
+  runId?: string
+  generation: number
+  type: AgentEvent['type']
+  at: number
+  reasoningBytes?: number
+  textBytes?: number
+}
+
 /**
  * In-process session-completion signal for the Tasks Conductor.
  *
@@ -1520,6 +1564,9 @@ export function resolveMidStreamDeliveryOutcome(
     wasInterrupted: behavior === 'steer' && !steered,
   }
 }
+
+const hostModelRequestPool = new LlmConnectionPool()
+setBackendModelRequestLimiter((quota, owner, signal) => hostModelRequestPool.acquireRequest(quota, owner, signal))
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
@@ -1648,11 +1695,36 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private activeArtifactFeedback = new Set<string>()
+  private inlineFeedbackSessions = new Set<string>()
+  private handoverCapturing = new Set<string>()
   private projectValidationControllers = new Map<string, AbortController>()
   private eventSink: EventSink | null = null
+  private runtimeActivityListeners = new Set<(activity: SessionRuntimeActivity) => void>()
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
+  }
+
+  /** Host diagnostics only: no model content and no renderer events. */
+  onRuntimeActivity(listener: (activity: SessionRuntimeActivity) => void): () => void {
+    this.runtimeActivityListeners.add(listener)
+    return () => { this.runtimeActivityListeners.delete(listener) }
+  }
+
+  private recordRuntimeActivity(managed: ManagedSession, event: AgentEvent): void {
+    if (!this.runtimeActivityListeners.size) return
+    const activity: SessionRuntimeActivity = {
+      sessionId: managed.id,
+      rootSessionId: managed.executionRootSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? managed.id,
+      runId: managed.taskRunId,
+      generation: managed.processingGeneration,
+      type: event.type,
+      at: Date.now(),
+      ...(event.type === 'model_activity' ? { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes } : {}),
+    }
+    for (const listener of this.runtimeActivityListeners) {
+      try { listener(activity) } catch (error) { sessionLog.warn('Runtime activity observer failed', error) }
+    }
   }
 
   setBrowserPaneManager(bpm: IBrowserPaneManager): void {
@@ -2383,6 +2455,26 @@ export class SessionManager implements ISessionManager {
             }
           }
           this.sessions.set(meta.id, managed)
+          const feedbackOriginPath = join(getSessionStoragePath(workspaceRootPath, meta.id), 'data', 'feedback-origin.json')
+          if (existsSync(feedbackOriginPath)) {
+            try {
+              const origin = JSON.parse(loadIsolationFile(feedbackOriginPath, 'utf8'))
+              if (origin.version !== 1 || (origin.workingDirectory !== undefined && typeof origin.workingDirectory !== 'string')
+                || (origin.isolatedWorkspace !== undefined && (origin.isolatedWorkspace?.version !== 1 || typeof origin.isolatedWorkspace?.directory !== 'string' || typeof origin.isolatedWorkspace?.sourceRoot !== 'string'))) throw new Error('Invalid feedback origin')
+              managed.workingDirectory = origin.workingDirectory
+              managed.isolatedWorkspace = origin.isolatedWorkspace
+              if (origin.isolatedWorkspace) atomicWrite(isolationPath, JSON.stringify(origin.isolatedWorkspace))
+              else if (existsSync(isolationPath)) unlinkSync(isolationPath)
+              const interrupted = readExecutionCheckpoint(getSessionStoragePath(workspaceRootPath, meta.id))
+              if (interrupted.kind === 'ok') {
+                writeExecutionCheckpoint(getSessionStoragePath(workspaceRootPath, meta.id), { ...interrupted.checkpoint, status: 'blocked', reason: 'feedback-interrupted', updatedAt: Date.now() })
+              }
+              this.persistSession(managed)
+              void this.flushSession(meta.id).then(() => { if (existsSync(feedbackOriginPath)) unlinkSync(feedbackOriginPath) })
+                .catch(() => sessionLog.warn('Interrupted feedback origin retained', { sessionId: meta.id }))
+            } catch { /* Preserve the origin and stop recovery when it cannot be trusted. */ }
+            managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: 'unsupported', completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
+          }
 
           // Initialize session metadata in AutomationSystem for diffing
           const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -2400,6 +2492,16 @@ export class SessionManager implements ISessionManager {
         }
       }
 
+      for (const workspace of getWorkspaces()) {
+        const sessions = [...this.sessions.values()].filter(session => session.workspace.id === workspace.id)
+        for (const [id, mode] of migrateWorkModes(sessions)) {
+          const managed = this.sessions.get(id)!
+          if (managed.workMode === mode.workMode && managed.workModeNeedsReview === mode.workModeNeedsReview && managed.executionRootSessionId === mode.executionRootSessionId) continue
+          Object.assign(managed, mode)
+          this.setMetadataWriteGuard(managed)
+          this.persistSession(managed)
+        }
+      }
       this.recoverPersistedSwarmSessions()
       for (const managed of this.sessions.values()) {
         // An invalid isolation contract must never be replaced by a runnable checkpoint.
@@ -2426,7 +2528,7 @@ export class SessionManager implements ISessionManager {
     if (saved.checkpoint.sessionId === managed.id) {
       managed.processingGeneration = Math.max(managed.processingGeneration, saved.checkpoint.generation)
     }
-    const preparedSwarm = this.canAutoResumeTaskDelivery(managed.id) && !!managed.parentSessionId && !!managed.orchestrationId && !managed.taskRunId
+    const preparedSwarm = this.canAutoResumeTaskDelivery(managed.id) && !!managed.parentSessionId && !!managed.orchestrationId && (!managed.taskRunId || !!managed.taskWorkerId)
       && managed.orchestrationStatus === 'need-to-check' && saved.checkpoint.status !== 'cancelled'
     const interrupted = saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed'
     if (saved.checkpoint.status === 'claimed') this.startupRecoveryClaims.add(managed.id)
@@ -3156,11 +3258,24 @@ export class SessionManager implements ISessionManager {
     // announced to the renderer (see notifySessionCreated). Callers that register the session
     // themselves — the `sessions:create` RPC adds it from the return value — pass
     // `{ emitCreatedEvent: false }` to avoid a redundant hydrate.
-    internal?: { emitCreatedEvent?: boolean },
+    internal?: { emitCreatedEvent?: boolean; reservedSessionId?: string; handover?: HandoverLink },
   ): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
+    }
+
+    if (internal?.reservedSessionId) {
+      validateSessionId(internal.reservedSessionId)
+      const existing = loadStoredSession(workspace.rootPath, internal.reservedSessionId)
+      if (existing) {
+        if (existing.handover?.handoverId !== internal.handover?.handoverId || existing.workMode !== options?.workMode) throw new Error('Reserved handover target identity conflict')
+        if (!this.sessions.has(existing.id)) {
+          const { messages: _storedMessages, ...metadata } = existing
+          this.sessions.set(existing.id, createManagedSession(metadata, workspace, { messagesLoaded: false }))
+        }
+        return (await this.getSession(existing.id))!
+      }
     }
 
     // Get new session defaults from workspace config (with global fallback)
@@ -3243,19 +3358,7 @@ export class SessionManager implements ISessionManager {
     const branchSourceForSwarm = options?.branchFromSessionId
       ? this.sessions.get(options.branchFromSessionId)
       : undefined
-    if (options?.parentSessionId && options.swarmEnabled === true && !parentForInheritance?.swarmEnabled) {
-      throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
-    }
-    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
-    const swarmAgentsEnabled = getSwarmAgentsEnabled()
-    if (options?.swarmEnabled === true && !swarmAgentsEnabled) {
-      throw new Error('Swarm agents are disabled in Advanced settings')
-    }
-    const resolvedSwarmEnabled = !swarmAgentsEnabled ? false : resolveInheritedSwarmEnabled({
-      requested: options?.swarmEnabled,
-      parent: parentForInheritance?.swarmEnabled,
-      branchSource: branchSourceForSwarm?.swarmEnabled,
-    })
+    const resolvedSwarmEnabled = isTasksOrchestrateEnabled() && (options?.workMode === 'PRO' || !!options?.taskSlug || !!options?.taskDraft || parentForInheritance?.workMode === 'PRO' || branchSourceForSwarm?.workMode === 'PRO')
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     let validatedBranch: {
@@ -3473,9 +3576,28 @@ export class SessionManager implements ISessionManager {
       }
     }
 
+    const parentMode = options?.parentSessionId ? this.sessions.get(options.parentSessionId) : undefined
+    if (options?.workMode !== undefined && options.workMode !== 'NORM' && options.workMode !== 'PRO') throw new Error('Invalid work mode')
+    const workMode = options?.workMode ?? parentMode?.workMode
+      ?? (validatedBranch?.sourceSession.workMode)
+      ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM')
+    if (options?.parentSessionId && !parentMode) throw new Error('Parent execution session is unavailable')
+    if (parentMode) {
+      if (this.handoverCapturing.has(parentMode.id)) throw new Error('Source is committing a handover snapshot')
+      assertComplexCapability(parentMode, 'delegate')
+      const permissionRank = { safe: 0, ask: 1, 'allow-all': 2 }
+      if (permissionRank[defaultPermissionMode] > permissionRank[parentMode.permissionMode ?? 'safe']) throw new Error('Worker permission exceeds current root authorization')
+    }
+    if (workMode === 'NORM' && (options?.taskSlug || options?.taskDraft || options?.parentSessionId)) throw new Error('NORM cannot create a workflow or worker session')
+    if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Create a PRO conversation before enabling Swarm')
+
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
+      reservedSessionId: internal?.reservedSessionId,
+      handover: internal?.handover,
       name: options?.name,
+      workMode,
+      executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
@@ -3490,6 +3612,10 @@ export class SessionManager implements ISessionManager {
       taskSlug: options?.taskSlug,
       taskRunId: options?.taskRunId,
       taskNodeId: options?.taskNodeId,
+      taskAttempt: options?.taskAttempt,
+      taskRevision: options?.taskRevision,
+      taskActor: options?.taskActor,
+      taskWorkerId: options?.taskWorkerId,
       taskDraft: options?.taskDraft,
       swarmEnabled: resolvedSwarmEnabled,
       orchestrationId: options?.orchestrationId,
@@ -3532,7 +3658,7 @@ export class SessionManager implements ISessionManager {
         throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
       }
 
-      const sourceMessages = validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1)
+      const sourceMessages = withoutInheritedTaskLists(validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1))
 
       // Re-map embedded paths: source messages were loaded with expandSessionPath(sourceDir),
       // so they contain absolute paths to the *source* session directory. When saved to the
@@ -3607,6 +3733,9 @@ export class SessionManager implements ISessionManager {
     const isBranch = !!validatedBranch
 
     const managed = createManagedSession(storedSession, workspace, {
+      workMode,
+      workModeNeedsReview: false,
+      executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id ?? storedSession.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
@@ -4686,10 +4815,14 @@ export class SessionManager implements ISessionManager {
 
       // Set up permission handler to forward requests to renderer
       managed.agent.onBeforeToolExecution = (toolName, input, toolCallId, recoveryClass, confinedShellDirectory) => {
+        this.assertHandoverOperationAllowed(managed, toolName, input)
+        const capability = complexToolCapability(toolName)
+        if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
         if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
         const checkpoint = managed.executionCheckpoint
         if (checkpoint && toolCallId) {
+          if (managed.taskActor) this.captureTaskContextRead(managed, toolName, input, toolCallId)
           checkpoint.pendingTools[toolCallId] = { name: toolName, recovery: recoveryClass ?? toolRecoveryClass(toolName) }
           this.checkpointExecution(managed)
         }
@@ -4957,6 +5090,11 @@ export class SessionManager implements ISessionManager {
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
+        updateTaskListFn: async () => {
+          if (!taskListAllowed(managed)) throw new Error('Task List is only available in ordinary conversations.')
+          // Tool results are persisted by the normal activity pipeline. No task
+          // directory, session status, worker or runtime is created here.
+        },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
@@ -4983,10 +5121,12 @@ export class SessionManager implements ISessionManager {
             await this.unarchiveSession(sessionId)
           }
         },
-        createTaskFn: async () => {
-          throw new Error('Agent task creation is disabled. Import a V3 YAML definition in the application.')
+        createTaskFn: input => this.createChatTask(managed, input),
+        runTaskFn: async (input) => {
+          assertComplexCapability(managed, 'run-workflow')
+          if (input.orchestratorSessionId && input.orchestratorSessionId !== managed.id || input.slug && input.slug !== managed.taskSlug) throw new Error('run_task must use the current PRO root plan')
+          return this.runTaskFromTool(managed.workspace.id, { ...input, orchestratorSessionId: managed.id, slug: managed.taskSlug, waitForCompletion: false })
         },
-        runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
         submitTaskOutputFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
@@ -5000,6 +5140,7 @@ export class SessionManager implements ISessionManager {
           return { status: snap.status }
         },
         submitOrchestrationPatchFn: async (input) => {
+          assertComplexCapability(managed, 'change-plan')
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
           const snap = runner.applyOrchestrationPatchByRunId(managed.id, input.runId, {
@@ -5010,11 +5151,18 @@ export class SessionManager implements ISessionManager {
             add: input.add as never,
             update: input.update as never,
             cancel: input.cancel,
+            constraints: input.constraints,
+            decisions: input.decisions,
+            consumedResults: input.consumedResults,
+            plannerPhase: input.plannerPhase,
+            changeKind: input.changeKind,
+            researchExpansion: input.researchExpansion as never,
             action: input.action,
           })
-          return { status: snap.status, revision: snap.revision }
+          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner }
         },
         submitOrchestrationDecisionFn: async (input) => {
+          assertComplexCapability(managed, 'change-plan')
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
           const snap = runner.applyOrchestrationDecisionByRunId(managed.id, {
@@ -5027,15 +5175,32 @@ export class SessionManager implements ISessionManager {
             add: input.add as never,
             update: input.update as never,
             cancel: input.cancel,
+            constraints: input.constraints,
+            decisions: input.decisions,
+            consumedResults: input.consumedResults,
+            plannerPhase: input.plannerPhase,
+            changeKind: input.changeKind,
+            researchExpansion: input.researchExpansion as never,
           })
-          return { status: snap.status, revision: snap.revision }
+          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner }
         },
         submitTaskNodeVerdictFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) return { ok: false, error: 'Task runner is not available' }
           return runner.submitNodeVerdict(managed.id, input)
         },
+        taskHelpFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          if (input.action === 'request') {
+            if (Object.values(managed.executionCheckpoint?.pendingTools ?? {}).some(tool => toolRecoveryClass(tool.name) !== 'read-only')) {
+              throw new Error('Finish outstanding operations before requesting help; unknown effects cannot be suspended or replayed')
+            }
+          } else assertComplexCapability(managed, 'change-plan')
+          return runner.taskHelp(managed.id, managed.processingGeneration, input)
+        },
         submitTaskDefinitionFn: async (input) => {
+          assertComplexCapability(managed, 'create-workflow')
           if (!managed.taskDraft) return { valid: false, errors: ['Only an editor proposal session may submit a definition. Open the workflow editor.'] }
           const submitted = validateSubmittedDefinition(input.spec)
           if (!submitted.valid) return submitted
@@ -5065,6 +5230,7 @@ export class SessionManager implements ISessionManager {
             .filter(child => child.orchestrationId === session.orchestrationId)
           const aggregation = session.orchestrationAggregation?.orchestrationId === session.orchestrationId
             ? session.orchestrationAggregation : undefined
+          const canonical = this.taskRunnerLookup?.(session.workspace.id)?.progressContext(session.id)
           return {
             id: session.id,
             name: session.name ?? session.id,
@@ -5077,7 +5243,21 @@ export class SessionManager implements ISessionManager {
             llmConnection: session.llmConnection,
             model: session.model,
             isActive: session.agent != null,
-            ...(session.orchestrationId || children.length ? { orchestration: {
+            ...(canonical ? { orchestration: {
+              id: canonical.taskId,
+              taskSlug: canonical.slug,
+              runId: canonical.runId,
+              revision: canonical.revision,
+              status: canonical.status,
+              plannerPhase: canonical.planner?.phase,
+              pendingAggregation: !['completed', 'failed', 'stopped'].includes(canonical.status),
+              blockers: canonical.blockers,
+              nodes: canonical.nodes.slice(-24).map(node => ({ id: node.id, state: node.state, attempt: node.attempt })),
+              children: canonical.nodes.filter(node => node.sessionId).slice(-12).map(node => ({
+                id: node.sessionId!, status: node.state, isProcessing: node.state === 'running',
+              })),
+              omittedChildren: Math.max(0, canonical.nodes.filter(node => node.sessionId).length - 12),
+            } } : session.orchestrationId || children.length ? { orchestration: {
               id: session.orchestrationId,
               status: session.orchestrationStatus,
               pendingAggregation: !!aggregation,
@@ -5093,6 +5273,7 @@ export class SessionManager implements ISessionManager {
             } } : {}),
           }
         },
+        projectHistoryFn: input => projectHistory(managed.workspace.rootPath, managed, input),
         listSessionsFn: (options) => {
           const DEFAULT_LIMIT = 20
           const MAX_LIMIT = 100
@@ -5187,6 +5368,11 @@ export class SessionManager implements ISessionManager {
           return { resolved: null, available }
         },
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+          assertComplexCapability(managed, 'delegate')
+          const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+          if (!getSwarmAgentsEnabled()) throw new Error('PRO delegation is disabled by this build')
+          const target = this.sessions.get(sessionId)
+          if (!target || target.workspace.id !== managed.workspace.id || target.executionRootSessionId !== (managed.executionRootSessionId ?? managed.id)) throw new Error('Messages must stay within this execution root')
           // Build FileAttachment[] from paths (same pattern as spawn_session)
           let fileAttachments: FileAttachment[] | undefined
           if (attachments?.length) {
@@ -6697,6 +6883,10 @@ export class SessionManager implements ISessionManager {
   }
 
   async sendMessage(...args: Parameters<SessionManager['executeMessage']>): Promise<void> {
+    if (this.handoverCapturing.has(args[0])) throw new Error('This conversation is committing a handover snapshot; retry after it finishes.')
+    const target = this.sessions.get(args[0])
+    if (target?.handover && this.handoverStore(target).read(target.handover.handoverId)?.status !== 'applied') throw new Error('Handover background is not applied yet; retry the same handover first.')
+    if (this.inlineFeedbackSessions.has(args[0]) && !args[11]) throw new Error('This conversation is revising a file. Send the next message after the revision finishes.')
     return this.withSessionExecution(args[0], () => this.executeMessage(...args))
   }
 
@@ -6726,6 +6916,7 @@ export class SessionManager implements ISessionManager {
     /** Internal queue replay marker; never supplied by RPC callers. */
     _isSourceContinuationReplay = false,
     _isProgressContinuation = false,
+    _isInlineFeedback = false,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -6808,6 +6999,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         hidden: true,
       }
       managed.messages.push(userMessage)
@@ -6965,6 +7157,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -7018,6 +7211,7 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
         badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+        ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -7309,11 +7503,12 @@ export class SessionManager implements ISessionManager {
     }
     const answerConnection = managed.llmConnection ? getLlmConnection(managed.llmConnection) : null
     const nativeTextAnswers = usesStreamingAnswerDelivery(answerConnection)
+    const canonicalChatRoot = !!managed.taskSlug && !managed.taskNodeId && !managed.taskDraft && !managed.parentSessionId
     agent.configurePresentationProtocol?.(nativeTextAnswers && !managed.parentSessionId && !managed.taskSlug
       && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')
       ? (answerConnection?.presentationProtocol ?? 'legacy') : 'legacy')
-    if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
-      const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
+    if ((!nativeTextAnswers || canonicalChatRoot) && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskNodeId && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+      const continuingAnswer = isUserTaskContinuation || (options?.hidden && !canonicalChatRoot && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer
         ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
         : userMessage
@@ -7460,6 +7655,7 @@ export class SessionManager implements ISessionManager {
       if (checkpointOwner) {
         this.discardInheritedBranchCheckpoint(managed)
         managed.executionCheckpoint = { version: 1, sessionId, userMessageId: checkpointOwner.id,
+          ...(managed.taskActor ? { contextReads: managed.executionCheckpoint?.contextReads ?? {}, contextUnverified: managed.executionCheckpoint?.contextUnverified } : {}),
           generation: myGeneration, answerRunId: managed.answerDelivery?.runId, sdkSessionId: managed.sdkSessionId,
           taskIdentity: executionTaskIdentity(managed),
           transcriptTailId: managed.messages.at(-1)?.id, status: 'running', pendingTools: {},
@@ -7501,7 +7697,13 @@ export class SessionManager implements ISessionManager {
         continueUserTask: isUserTaskContinuation,
         userTaskMessage: checkpointOwner?.content ?? message,
       }
-      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
+      const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
+      const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
+      const currentInput = handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${message}` : message
+      const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
+        ? `${currentInput}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : currentInput
+      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false
@@ -7520,6 +7722,7 @@ export class SessionManager implements ISessionManager {
 
         if (managed.processingGeneration !== myGeneration) break
         if (managed.stopRequested && event.type !== 'complete') continue
+        this.recordRuntimeActivity(managed, event)
         // Persist unknown in-flight effects before accepting further events.
         if (event.type === 'tool_start' && managed.executionCheckpoint) {
           managed.executionCheckpoint.pendingTools[event.toolUseId] ??= { name: event.toolName, recovery: toolRecoveryClass(event.toolName) }
@@ -7533,6 +7736,7 @@ export class SessionManager implements ISessionManager {
         }
         await this.processEvent(managed, event)
         if (event.type === 'tool_result' && managed.executionCheckpoint) {
+          this.completeTaskContextAccess(managed, event.toolUseId, event.isError === true)
           delete managed.executionCheckpoint.pendingTools[event.toolUseId]
           if (!managed.executionCheckpoint.completedTools.includes(event.toolUseId)) managed.executionCheckpoint.completedTools.push(event.toolUseId)
         }
@@ -7541,6 +7745,9 @@ export class SessionManager implements ISessionManager {
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
+          if (event.type === 'tool_result' && event.sourceRead && !event.isError && managed.processingGeneration === myGeneration) {
+            this.taskRunnerLookup?.(managed.workspace.id)?.recordSourceRead(managed.id, event.sourceRead, event.toolUseId, event.result)
+          }
         }
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
@@ -7620,8 +7827,6 @@ export class SessionManager implements ISessionManager {
             && lastUserMsg
             && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)
           ) {
-            sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
-
             // Check if there's a captured API error that explains the silent failure.
             // Pass explicit session path to avoid reading from the wrong session
             // (_sessionDir singleton can be clobbered by concurrent sessions).
@@ -7631,6 +7836,8 @@ export class SessionManager implements ISessionManager {
             // Never replace a current error with a cached HTTP failure or a generic fallback.
             const turnMessages = managed.messages.slice(managed.messages.indexOf(lastUserMsg) + 1)
             const hasCurrentTurnError = turnMessages.some(message => message.role === 'error' && !message.hidden)
+            const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
+            const hasAcceptedNodeOutput = this.taskRunnerLookup?.(managed.workspace.id)?.hasAcceptedNodeOutput(sessionId, myGeneration) ?? false
             if (hasCurrentTurnError) {
               sessionLog.warn('Empty response preserved terminal error', {
                 sessionId,
@@ -7638,9 +7845,9 @@ export class SessionManager implements ISessionManager {
                 code: turnMessages.findLast(message => message.role === 'error')?.errorCode ?? 'unclassified',
               })
             }
-            if (!hasCurrentTurnError) {
+            if (!hasCurrentTurnError && (!hasAcceptedNodeOutput || currentApiError)) {
+              sessionLog.warn(`Session ${sessionId} completed without assistant response or accepted task output`)
               const hasToolActivity = turnMessages.some(message => message.role === 'tool')
-              const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
               const typedError = currentApiError
                 ? parseError(new Error(`HTTP ${currentApiError.status}: ${currentApiError.message}`))
                 : createTypedError(hasToolActivity ? 'tool_only_response' : 'no_response')
@@ -7809,7 +8016,7 @@ export class SessionManager implements ISessionManager {
 
   async prepareSwarmWorkspace(sessionId: string, sourceRoot: string, inputs: string[], outputs: Record<string, string>): Promise<{ directory: string }> {
     const managed = this.sessions.get(sessionId)
-    if (!managed?.orchestrationId || !managed.parentSessionId || managed.taskNodeId) throw new Error('Session is not a Swarm worker')
+    if (!managed?.orchestrationId || !managed.parentSessionId || managed.taskNodeId && !managed.taskWorkerId) throw new Error('Session is not a Swarm worker')
     if (this.preparingSwarmWorkspaces.has(sessionId)) throw new Error('Swarm workspace preparation is already running')
     this.preparingSwarmWorkspaces.add(sessionId)
     try {
@@ -8126,7 +8333,7 @@ export class SessionManager implements ISessionManager {
         store.save(record, () => {
           if (record.childSessionId) {
             const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
-            const applied = versions.reconcile(record.artifactId).versions.find(version => version.sourceRunId === record.childSessionId)
+            const applied = versions.reconcile(record.artifactId).versions.find(version => version.sourceRunId === (record.executionId ?? record.childSessionId))
             if (applied) {
               record.status = 'applied'; record.appliedVersion = applied.id; record.error = undefined
               applicationRecovered = true
@@ -8148,7 +8355,7 @@ export class SessionManager implements ISessionManager {
         try {
           const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
           const artifact = versions.reconcile(record.artifactId)
-          const applied = artifact.versions.find(v => record.childSessionId && v.sourceRunId === record.childSessionId)
+          const applied = artifact.versions.find(v => record.childSessionId && v.sourceRunId === (record.executionId ?? record.childSessionId))
           if (applied) { record.status = 'applied'; record.appliedVersion = applied.id }
           else { record.status = 'failed'; record.error = 'Revision was interrupted. The candidate and original versions are preserved; review before retrying.' }
           store.save(record)
@@ -8192,27 +8399,44 @@ export class SessionManager implements ISessionManager {
     } catch (error) { releaseFeedbackRun(); throw error }
     if (!result.created) { releaseFeedbackRun(); return result.record }
     const feedback = result.record
+    const inline = parent.workMode === 'NORM'
+    if (inline && (parent.isProcessing || this.inlineFeedbackSessions.has(parent.id))) {
+      feedback.status = 'failed'; feedback.error = 'Finish the current conversation work before revising a file.'; store.save(feedback)
+      releaseFeedbackRun(); return feedback
+    }
+    if (inline) this.inlineFeedbackSessions.add(parent.id)
     this.activeArtifactFeedback.add(feedback.id)
     // Run through the existing session host. No new scheduler or quality-model call.
     void (async () => {
       let cancellationWatch: ReturnType<typeof setInterval> | undefined
+      const originalDirectory = parent.workingDirectory
+      const originalIsolation = parent.isolatedWorkspace
+      const parentPath = getSessionStoragePath(parent.workspace.rootPath, parent.id)
+      const originPath = join(parentPath, 'data', 'feedback-origin.json')
+      let inlineStarted = false
       try {
         const feedbackCancelled = () => store.read(feedback.id).status === 'cancelled'
         if (feedbackCancelled()) return
-        const child = await this.createSession(parent.workspace.id, { parentSessionId: parent.id, hidden: true,
+        const child = inline ? { id: parent.id } : await this.createSession(parent.workspace.id, { parentSessionId: parent.id, hidden: true,
           name: feedbackBasename(artifact.path), permissionMode: parent.permissionMode ?? 'ask',
           model: parent.model, llmConnection: parent.llmConnection })
         const managed = this.sessions.get(child.id)!
         if (feedbackCancelled()) return
-        const directory = join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'candidate')
+        const directory = join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'candidate', feedback.id)
         makeFeedbackDirectory(directory, { recursive: true })
         const candidate = join(directory, feedbackBasename(artifact.path))
         saveFeedbackCandidate(candidate, bytes)
+        if (inline) {
+          if (existsSync(originPath)) throw new Error('An interrupted file revision needs review before starting another.')
+          atomicWrite(originPath, JSON.stringify({ version: 1, workingDirectory: originalDirectory, isolatedWorkspace: originalIsolation }))
+          inlineStarted = true
+          await this.disposeManagedAgentRuntime(parent, 'Preparing single-agent file revision')
+        }
         managed.workingDirectory = directory
         managed.isolatedWorkspace = { version: 1, id: feedback.id, sourceRoot: dirname(artifact.path), directory,
           kind: 'files', inputs: { [feedbackBasename(artifact.path)]: artifact.versions.find(v => v.id === artifact.currentVersion)!.hash }, status: 'ready' }
         atomicWrite(join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'data', 'isolated-workspace.json'), JSON.stringify(managed.isolatedWorkspace))
-        feedback.childSessionId = child.id; feedback.status = 'running'; store.save(feedback)
+        feedback.childSessionId = child.id; feedback.executionId = inline ? feedback.id : child.id; feedback.status = 'running'; store.save(feedback)
         this.persistSession(managed); await this.flushSession(child.id)
         // Another process can persist cancellation without owning this runtime.
         cancellationWatch = setInterval(() => {
@@ -8231,7 +8455,7 @@ export class SessionManager implements ISessionManager {
         await this.sendMessage(child.id, `Revise the file ${JSON.stringify(candidate)} according to this user feedback:
 ${feedback.instruction}
 ${feedback.anchor ? `Selected text: ${JSON.stringify(feedback.anchor.text)}` : ''}
-Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined)
+Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined, undefined, undefined, false, undefined, undefined, false, false, inline)
         const revisionCancelled = () => feedbackCancelled() || managed.stopRequested || managed.executionCheckpoint?.status === 'cancelled'
           || managed.runtimeRecovery?.phase === 'cancelled'
         const requireWriteAuthorization = () => {
@@ -8269,7 +8493,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Recheck after asynchronous validation: cancellation may have arrived while reading.
         requireWriteAuthorization()
         store.save(feedback, () => {
-          const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
+          const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, feedback.executionId ?? child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
           feedback.appliedVersion = applied.currentVersion; feedback.status = 'applied'
         })
         this.notifyArtifactApplied(parent.workspace.id)
@@ -8278,7 +8502,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Artifact publication may have succeeded before feedback persistence failed.
         // Reconcile its journal before deciding whether this revision failed.
         const reconciled = versions.reconcile(artifact.id)
-        const applied = reconciled.versions.find(version => current.childSessionId && version.sourceRunId === current.childSessionId)
+        const applied = reconciled.versions.find(version => current.childSessionId && version.sourceRunId === (current.executionId ?? current.childSessionId))
         if (applied) {
           current.status = 'applied'; current.appliedVersion = applied.id; current.error = undefined
           current.validation = feedback.validation ?? current.validation
@@ -8292,7 +8516,24 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         feedback.status = error instanceof Error && error.name === 'ArtifactConflict' ? 'conflict' : 'failed'
         feedback.error = error instanceof Error ? error.message : 'Revision failed'
         store.save(feedback)
-      } finally { clearInterval(cancellationWatch); this.activeArtifactFeedback.delete(feedback.id); releaseFeedbackRun() }
+      } finally {
+        clearInterval(cancellationWatch)
+        try {
+          if (inlineStarted) {
+            await this.disposeManagedAgentRuntime(parent, 'Restoring conversation after file revision')
+            parent.workingDirectory = originalDirectory; parent.isolatedWorkspace = originalIsolation
+            const isolationPath = join(parentPath, 'data', 'isolated-workspace.json')
+            if (originalIsolation) atomicWrite(isolationPath, JSON.stringify(originalIsolation))
+            else if (existsSync(isolationPath)) unlinkSync(isolationPath)
+            this.persistSession(parent); await this.flushSession(parent.id)
+            unlinkSync(originPath)
+          }
+        } finally {
+          if (inline) this.inlineFeedbackSessions.delete(parent.id)
+          this.activeArtifactFeedback.delete(feedback.id); releaseFeedbackRun()
+        }
+        if (inline) void this.processNextQueuedMessage(parent.id)
+      }
     })().catch(error => sessionLog.error('Feedback persistence failed', { feedbackId: feedback.id, reason: error instanceof Error ? error.name : 'unknown' }))
     return feedback
   }
@@ -8328,7 +8569,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     try {
       await this.withSessionExecution(sessionId, async () => {
         const managed = this.sessions.get(sessionId)
-        if (managed?.orchestrationId && managed.parentSessionId && !managed.taskRunId && this.canAutoResumeTaskDelivery(sessionId)) {
+        if (managed?.orchestrationId && managed.parentSessionId && (!managed.taskRunId || !!managed.taskWorkerId) && this.canAutoResumeTaskDelivery(sessionId)) {
           const generation = managed.processingGeneration
           await this.ensureMessagesLoaded(managed)
           if (!this.canAutoResumeTaskDelivery(sessionId) || generation !== managed.processingGeneration || managed.messageQueue.length) throw new Error('Prepared Swarm delivery is no longer current')
@@ -8712,9 +8953,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
     const state = managed.answerDelivery!
+    const owner = managed.messages.find(message => message.id === state.userMessageId)
+    const runner = this.taskRunnerLookup?.(managed.workspace.id)
+    const run = owner?.hidden && owner.taskContext?.kind === 'feedback'
+      ? runner?.progressContext(managed.id) ?? (managed.taskSlug ? runner?.getLatestRun(managed.taskSlug) : undefined) : undefined
+    const failedTaskFeedback = run?.status === 'failed' && run.runId === owner?.taskContext?.runId
+      && run.orchestratorSessionId === managed.id
     return {
       runId: state.runId,
-      recovery: state.recovery,
+      recovery: state.recovery || failedTaskFeedback,
+      coordinationOnly: !!owner?.hidden && owner.taskContext?.kind === 'coordination',
       isActive: () => managed.answerDelivery === state && managed.isProcessing
         && !state.persistenceFailed && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
       submit: submission => this.acceptAnswer(managed, state, submission),
@@ -8730,6 +8978,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages[userIndex]?.hidden && managed.messages[userIndex]?.taskContext?.kind === 'coordination') {
+      throw new Error('Internal coordinator turns cannot deliver an answer. End the assistant turn after the accepted decision; final verification has a separate delivery turn.')
+    }
+    if (managed.messages[userIndex]?.hidden && this.isCanonicalCoordinatorWaiting(managed)) {
+      throw new Error('Consume the canonical run checkpoint and finish its acceptance before submitting the final answer.')
+    }
     if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && (!toolCallId || m.toolUseId !== toolCallId) && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
       throw new Error('Finish all foreground tools before submitting the answer.')
     }
@@ -8902,9 +9156,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           if (!isArtifactCardPath(safe) || inventory.covers(safe)
             || candidates.some(candidate => sameArtifactLocation(candidate, safe))) continue
           const file = statSync(safe)
-          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - 2) {
+          if (file.isFile() && Math.max(file.birthtimeMs, file.mtimeMs) >= inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) {
             candidates.push(safe)
-            if (file.birthtimeMs < inventory.startedAt - 2) editedExistingFiles.push(safe)
+            if (file.birthtimeMs < inventory.startedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS) editedExistingFiles.push(safe)
           }
         } catch { /* A missing or inaccessible link is a citation, not a card. */ }
       }
@@ -8995,6 +9249,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return answer
   }
 
+  private isCanonicalCoordinatorWaiting(managed: ManagedSession): boolean {
+    const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+    // A human-action gate must be reportable. Refusing its explanation traps
+    // the coordinator in a final-answer retry loop without releasing the gate.
+    return run?.orchestratorSessionId === managed.id
+      && !['completed', 'failed', 'stopped', 'paused', 'interrupted', 'waiting-approval', 'waiting-budget'].includes(run.status)
+  }
+
   private async *runAnswerDelivery(
     managed: ManagedSession,
     agent: AgentInstance,
@@ -9010,7 +9272,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     const owner = managed.messages.find(m => m.id === state.userMessageId)
     const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
-    const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
+    const waiting = (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')
+      || (owner?.hidden && (owner.taskContext?.kind === 'coordination' || this.isCanonicalCoordinatorWaiting(managed)))
     if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
       && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
       && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
@@ -9536,7 +9799,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const children = Array.from(this.sessions.values()).filter(candidate =>
         candidate.parentSessionId === managed.id
         && candidate.orchestrationId === orchestrationId
-        && !candidate.taskNodeId
+        && (!candidate.taskNodeId || !!candidate.taskWorkerId)
       )
       for (const child of children) {
         if (child.orchestrationLifecycle === 'detached') {
@@ -9575,7 +9838,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const directChildren = Array.from(this.sessions.values()).filter(candidate =>
         candidate.parentSessionId === root.id
         && !!candidate.orchestrationId
-        && !candidate.taskNodeId
+        && (!candidate.taskNodeId || !!candidate.taskWorkerId)
       )
       for (const child of directChildren) {
         if (child.orchestrationLifecycle === 'detached') {
@@ -10220,7 +10483,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   private async processNextQueuedMessage(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.messageQueue.length === 0) return
+    if (!managed || this.inlineFeedbackSessions.has(sessionId) || this.handoverCapturing.has(sessionId) || managed.messageQueue.length === 0) return
 
     const next = managed.messageQueue[0]!
     try {
@@ -10482,7 +10745,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         candidate.id !== coordinator.id
         && candidate.orchestrationId === orchestrationId
         && candidate.orchestrationRootSessionId === rootSessionId
-        && !candidate.taskNodeId
+        && (!candidate.taskNodeId || !!candidate.taskWorkerId)
       )
     const lineageViolations = orchestrationCandidates.filter(candidate =>
       candidate.workspace.id !== coordinator.workspace.id
@@ -10604,6 +10867,463 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     this.taskRunnerLookup = lookup
   }
 
+  private handoverStore(managed: ManagedSession): HandoverStore {
+    return new HandoverStore(join(managed.workspace.rootPath, 'handovers'), managed.workspace.id)
+  }
+
+  private handoverMembers(source: ManagedSession): ManagedSession[] {
+    return [...this.sessions.values()].filter(session => session.id === source.id
+      || session.workspace.id === source.workspace.id && (session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId) === source.id)
+  }
+
+  private handoverRuns(source: ManagedSession): HandoverSnapshot['runs'] {
+    const slugs = [...new Set(this.handoverMembers(source).flatMap(session => session.taskSlug ? [session.taskSlug] : []))]
+    return slugs.flatMap(slug => {
+      const runner = this.taskRunnerLookup?.(source.workspace.id)
+      if (!runner) throw new Error('Source workflow state is unavailable; wait for its host to recover')
+      return runner.getRunHistory(slug, source.id).map(run => ({ slug, runId: run.runId, revision: run.revision ?? 0, status: run.status, retainedBy: source.id,
+        resumedFrom: run.resumedFrom, supersededBy: run.supersededBy,
+        logSequence: committedRunLog(readRunLog(source.workspace.rootPath, slug, run.runId), readRunState(source.workspace.rootPath, slug, run.runId)).reduce((seq, entry, index) => Math.max(seq, entry.seq ?? index + 1), 0) }))
+    })
+  }
+
+  private handoverResearchUpdates(managed: ManagedSession, records: HandoverRecord[]): NonNullable<HandoverResult['researchUpdates']> {
+    const updates: NonNullable<HandoverResult['researchUpdates']> = [];
+    const seen = new Set<string>();
+    for (const record of records) for (const run of record.snapshot?.runs ?? []) {
+      try {
+        for (const update of researchErrataAfter(managed.workspace.rootPath, run.slug, run, record.snapshot!.capturedAt)) {
+          const identity = `${record.handoverId}/${run.slug}/${update.runId}`;
+          if (!seen.has(identity)) { seen.add(identity); updates.push({ ...update, handoverId: record.handoverId, slug: run.slug }); }
+        }
+      } catch (error) { updates.push({ handoverId: record.handoverId, slug: run.slug, runId: run.runId, errata: [], unavailableReason: error instanceof Error ? error.message : 'Research history unavailable' }); }
+    }
+    return updates;
+  }
+
+  private handoverWaitReason(source: ManagedSession): string | undefined {
+    if (this.handoverMembers(source).some(session => session.isProcessing || this.inlineFeedbackSessions.has(session.id)
+      || this.handoverCapturing.has(session.id) || session.orchestrationStatus === 'running'
+      || [...session.backgroundTaskRegistry.values()].some(task => task.status === 'running'))) return 'Waiting for source work to reach a handover checkpoint'
+    if (this.handoverRuns(source).some(run => ['running','pausing','verifying','repairing','waiting-coordinator'].includes(run.status))) return 'Waiting for the source workflow and workers to settle'
+    return undefined
+  }
+
+  private assertHandoverOperationAllowed(managed: ManagedSession, toolName: string, input?: Record<string, unknown>): void {
+    const root = managed.handover ? managed : this.sessions.get(managed.executionRootSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? '')
+    if (!root?.handover) return
+    if (root.workspace.id !== managed.workspace.id) throw new Error('Invalid handover execution root')
+    const record = this.handoverStore(root).read(root.handover.handoverId)
+    if (!record || record.targetSessionId !== root.id || record.status !== 'applied') throw new Error('Handover input must be applied before execution')
+    if (record.snapshot!.runs.some(run => run.slug === input?.slug) && complexToolCapability(toolName) === 'run-workflow') throw new Error('Source workflow ownership stays with its original root; create a separate plan for new work')
+    const requestHash = handoverOperationHash(toolName, input)
+    if (record.snapshot!.actions.some(action => action.requestHash === requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed'))) throw new Error('This operation already completed in the handover source; use its recorded result instead of replaying it')
+    if (record.snapshot!.actions.some(action => !action.requestHash && (action.outcome === 'completed' || record.reviews[action.ref]?.outcome === 'completed')
+      && (handoverToolName(action.tool) === handoverToolName(toolName) || action.tool === 'unknown-execution')
+      && !isHandoverReadOrLocalTool(toolName))) throw new Error('The source operation completed but its request identity is unavailable; do not replay this tool')
+    const unknown = record.snapshot!.actions.filter(action => action.outcome === 'unknown' && !record.reviews[action.ref])
+    if (unknown.length && !isHandoverReadOrLocalTool(toolName)) {
+      throw new Error(`Handover contains ${unknown.length} operations with unknown outcomes. This tool was not executed. Use native Read on data/handover/${record.handoverId}/operations.json to inspect the evidence. Ask the user to open View handover from the conversation title menu and save each operation review. Allow All or a chat acknowledgement does not resolve this check; do not keep trying Bash, Python or delegation. Completed operations must not be replayed.`)
+    }
+  }
+
+  private handoverInput(managed: ManagedSession): string {
+    const record = this.handoverStore(managed).read(managed.handover!.handoverId)
+    if (!record?.snapshot || record.targetSessionId !== managed.id || record.status !== 'applied') throw new Error('Handover input is not ready')
+    const directory = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'handover', record.handoverId)
+    const copied = loadIsolationFile(join(directory, 'snapshot.json'), 'utf8')
+    const copiedHash = handoverHash(copied)
+    if (copiedHash !== handoverHash(JSON.stringify(record.snapshot, null, 2)) && copiedHash !== handoverHash(JSON.stringify(record.snapshot))) throw new Error('Handover background integrity check failed')
+    // Small, readable evidence index also repairs older one-line packages. The
+    // committed snapshot is unchanged; a modified index is rejected, not trusted.
+    const operationPath = join(directory, 'operations.json'), operationBytes = handoverOperationEvidence(record.snapshot)
+    if (!existsSync(operationPath)) atomicWrite(operationPath, operationBytes)
+    else {
+      const evidenceHash = handoverHash(loadIsolationFile(operationPath, 'utf8'))
+      if (evidenceHash !== handoverHash(operationBytes)) {
+        if (evidenceHash !== handoverHash(JSON.stringify(record.snapshot.actions, null, 2))) throw new Error('Handover operation evidence integrity check failed')
+        atomicWrite(operationPath, operationBytes)
+      }
+    }
+    for (const file of record.snapshot.files) {
+      if (handoverHash(loadIsolationFile(join(directory, file.snapshotPath))) !== file.hash) throw new Error('Handover input file integrity check failed')
+    }
+    return `${handoverBackground(record.snapshot, directory, record.reviews)}\nExplicit operation reviews: ${JSON.stringify(record.reviews)}\nReviews confirm outcomes only; normal target permissions still apply.\nLater associated research corrections: ${JSON.stringify(this.handoverResearchUpdates(managed, [record]))}\nThe snapshot remains frozen. Later corrections invalidate their affected historical claim/report versions; inspect current independent review before relying on them. Unavailable history does not establish that no correction exists.`
+  }
+
+  async handoverSession(sessionId: string, operation: HandoverOperation): Promise<HandoverResult> {
+    const current = this.sessions.get(sessionId)
+    if (!current) throw new Error('Session not found')
+    const store = this.handoverStore(current)
+    if (operation.type === 'list') { const records = store.list(sessionId); return { records, researchUpdates: this.handoverResearchUpdates(current, records) }; }
+    const release = store.tryClaim(operation.handoverId)
+    if (!release) {
+      const existing = store.read(operation.handoverId)
+      if ((operation.type === 'create' || operation.type === 'get') && existing
+        && (existing.sourceSessionId === sessionId || operation.type === 'get' && existing.targetSessionId === sessionId)
+        && (operation.type !== 'create' || existing.targetMode === operation.targetMode)) return { records: [existing], researchUpdates: this.handoverResearchUpdates(current, [existing]) }
+      throw new Error('This handover is being updated; retry after it settles')
+    }
+    try {
+      let record = store.read(operation.handoverId)
+      if (operation.type === 'create') {
+        if (current.parentSessionId || current.taskNodeId || current.executionRootSessionId && current.executionRootSessionId !== current.id || current.workModeNeedsReview) throw new Error('Handover requires a verified root conversation')
+        if (!['NORM','PRO'].includes(operation.targetMode) || operation.targetMode === current.workMode) throw new Error('Choose the opposite mode for a new handover conversation')
+        if (record && (record.sourceSessionId !== sessionId || record.targetMode !== operation.targetMode)) throw new Error('Handover identity was already used for a different request')
+        if (!record) {
+          record = { version: 1, handoverId: operation.handoverId, sourceSessionId: sessionId, workspaceId: current.workspace.id,
+            targetMode: operation.targetMode, snapshotVersion: 1, status: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), reviews: {} }
+          store.save(record)
+        }
+      }
+      if (!record || record.sourceSessionId !== sessionId && record.targetSessionId !== sessionId) throw new Error('Handover belongs to another conversation')
+      if (operation.type === 'cancel') {
+        if (record.status !== 'waiting' && record.status !== 'cancelled') throw new Error('Handover snapshot is already committed; open its target instead')
+        record.status = 'cancelled'; record.error = undefined; store.save(record)
+      } else if (operation.type === 'review') {
+        const action = record.snapshot?.actions.find(action => action.ref === operation.actionRef)
+        if (record.targetSessionId !== sessionId || record.status !== 'applied' || action?.outcome !== 'unknown'
+          || !['completed','not-performed'].includes(operation.outcome) || !operation.note.trim()) throw new Error('Review an unknown operation in its target and record your verification')
+        const previous = record.reviews[operation.actionRef]
+        if (previous && (previous.outcome !== operation.outcome || previous.note !== redactHandoverText(operation.note.trim()))) throw new Error('Operation review is already recorded')
+        record.reviews[operation.actionRef] = { outcome: operation.outcome, note: redactHandoverText(operation.note.trim()) }
+        store.save(record)
+      } else if (record.status !== 'cancelled' && record.status !== 'applied') {
+        const source = this.sessions.get(record.sourceSessionId)
+        if (record.status === 'waiting') {
+          if (!source) throw new Error('Source was removed before a snapshot was committed')
+          const reason = this.handoverWaitReason(source)
+          if (reason) { record.error = reason; store.save(record); return { records: [record] } }
+          const members = this.handoverMembers(source)
+          members.forEach(member => this.handoverCapturing.add(member.id))
+          const capture = async (index: number): Promise<void> => {
+            if (index < members.length) return this.withSessionExecution(members[index]!.id, () => capture(index + 1))
+            for (const member of members) { await this.ensureMessagesLoaded(member); await this.flushSession(member.id) }
+            const runs = this.handoverRuns(source)
+            if (members.some(member => member.isProcessing) || runs.some(run => ['running','pausing','verifying','repairing','waiting-coordinator'].includes(run.status))) throw new Error('Source became active; wait for the next checkpoint')
+            const pendingOperations = members.flatMap(member => {
+              const saved = readExecutionCheckpoint(getSessionStoragePath(member.workspace.rootPath, member.id))
+              if (saved.kind === 'unsupported' || saved.kind === 'corrupt') return [{ ref: `${member.id}:checkpoint`, tool: 'unknown-execution', sessionId: member.id }]
+              return saved.kind === 'ok' ? Object.entries(saved.checkpoint.pendingTools).filter(([, tool]) => tool.recovery !== 'read-only')
+                .map(([call, tool]) => ({ ref: `${member.id}:${call}`, tool: tool.name, sessionId: member.id })) : []
+            })
+            const sdk = sdkStateSnapshot(getSessionStoragePath(source.workspace.rootPath, source.id), source.sdkSessionId)
+            const checkpoint = handoverHash(JSON.stringify({ messages: members.map(member => member.messages), runs, sdk: sdk?.hash }))
+            const inheritedRecord = source.handover ? store.read(source.handover.handoverId) : undefined
+            const inherited = inheritedRecord?.snapshot ? { ...inheritedRecord.snapshot, actions: inheritedRecord.snapshot.actions.map(action => inheritedRecord.reviews[action.ref] ? { ...action, outcome: inheritedRecord.reviews[action.ref]!.outcome } : action) } : undefined
+            const snapshot = buildHandoverSnapshot({ workspaceId: source.workspace.id, sessionId: source.id, targetMode: record!.targetMode,
+              checkpoint, messages: source.messages, children: members.filter(member => member !== source).map(member => ({ id: member.id, messages: member.messages, branch: handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes) })),
+              branch: handoverBranch(sdk?.bytes), pendingOperations, runs, inherited })
+            const runFiles: Array<{ path: string; expectedHash: string; versionId?: string; artifactId?: string }> = []
+            for (const run of runs) {
+              if (run.revision > 0 && !existsSync(specRevisionPath(source.workspace.rootPath, run.slug, run.runId, run.revision))) throw new Error('The committed source revision is unavailable')
+              const plan = readSpecRevision(source.workspace.rootPath, run.slug, run.runId, run.revision)
+              if (!plan) throw new Error('The committed source plan is unavailable')
+              if (!run.supersededBy) {
+                snapshot.goal.push(redactHandoverText(plan.goal))
+                snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
+              }
+              const results = loadTaskResults(source.workspace.rootPath, run.slug, run.runId)
+              snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: run.supersededBy ? 'task-history' : 'task-result', text: redactHandoverText(JSON.stringify(results)) })
+              if (results.research) {
+                for (const researchSource of results.research.sources) {
+                  if (researchSource.snapshotPath && researchSource.hash && !researchSource.unavailableReason) runFiles.push({ path: researchSource.snapshotPath, expectedHash: researchSource.hash })
+                }
+                if (!run.supersededBy) {
+                  snapshot.openQuestions.push(...results.research.dimensions.filter(dimension => dimension.state !== 'covered').map(dimension => `Research ${dimension.lineId}/${dimension.id}: ${dimension.state}; ${dimension.requirement}`))
+                  snapshot.openQuestions.push(...results.research.issues.filter(issue => issue.state !== 'resolved').map(issue => `Research issue ${issue.id} on ${issue.claimRef.id}@${issue.claimRef.version}: ${issue.state}; ${issue.reason}`))
+                }
+              }
+              for (const artifact of results.nodes.flatMap(node => node.artifacts ?? [])) {
+                if (artifact && typeof artifact === 'object' && 'path' in artifact && typeof artifact.path === 'string' && 'hash' in artifact && typeof artifact.hash === 'string') runFiles.push({ path: resolve(source.workspace.rootPath, artifact.path), expectedHash: artifact.hash })
+              }
+              if (!run.supersededBy) snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
+            }
+            await this.captureHandoverFiles(source, members, store, record!, snapshot, runFiles)
+            record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection, permissionMode: source.permissionMode ?? 'ask' }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)
+            record!.status = 'prepared'; record!.error = undefined; store.save(record!)
+          }
+          try { await capture(0) }
+          finally { members.forEach(member => this.handoverCapturing.delete(member.id)) }
+        }
+        const sourceModel = record.creationConfig?.model ?? source?.model, sourceConnection = record.creationConfig?.llmConnection ?? source?.llmConnection
+        // Legacy prepared receipts retain their original safe default; retries never infer a newer source grant.
+        const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: record.creationConfig?.permissionMode ?? 'safe', model: sourceModel,
+          llmConnection: sourceConnection, name: source ? resolveSessionName(source) ?? record.sourceSessionId : record.sourceSessionId },
+          { emitCreatedEvent: false, reservedSessionId: record.targetSessionId!, handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId,
+            sourceMessageId: record.snapshot!.source.messageId, snapshotVersion: record.snapshotVersion } })
+        record.status = 'created'; store.save(record)
+        await this.applyHandoverInput(target.id, record, store)
+        record.status = 'applied'; record.error = undefined; store.save(record)
+        this.notifySessionCreated(current.workspace.id, record.targetSessionId!)
+      }
+      const changes: HandoverResult['changes'] = record.snapshot ? await Promise.all(record.snapshot.files.map(async file => {
+        try {
+          if (file.sourceUrl) {
+            if (operation.type !== 'get' || !operation.checkSources) return { ref: file.ref, state: 'unavailable' as const }
+            const { createWebFetchTool } = await import('../../../pi-agent-server/src/tools/web-fetch')
+            const result = await createWebFetchTool(() => getSessionStoragePath(current.workspace.rootPath, current.id)).execute('handover-source-check', { url: file.sourceUrl, prompt: file.urlPrompt }, undefined, undefined, undefined as never)
+            if (result.details && typeof result.details === 'object' && 'isError' in result.details && result.details.isError) return { ref: file.ref, state: 'unavailable' as const }
+            const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('')
+            const original = store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash).toString('utf8')
+            return { ref: file.ref, state: handoverWebSourcesMatch(text, original) ? 'unchanged' as const : 'changed' as const }
+          }
+          return { ref: file.ref, state: existsSync(file.originalPath) ? handoverHash(loadIsolationFile(file.originalPath)) === file.originalHash ? 'unchanged' as const : 'changed' as const : 'missing' as const }
+        } catch { return { ref: file.ref, state: 'unavailable' as const } }
+      })) : undefined
+      return { records: [record], changes, researchUpdates: this.handoverResearchUpdates(current, [record]) }
+    } catch (error) {
+      const record = store.read(operation.handoverId)
+      if (record && record.status !== 'applied' && record.status !== 'cancelled') { record.error = error instanceof Error ? error.message : 'Handover failed'; store.save(record) }
+      throw error
+    } finally { release() }
+  }
+
+  private async captureHandoverFiles(source: ManagedSession, members: ManagedSession[], store: HandoverStore, record: HandoverRecord, snapshot: HandoverSnapshot, runFiles: Array<{ path: string; expectedHash?: string; versionId?: string; artifactId?: string }> = []): Promise<void> {
+    const versions = new ArtifactVersions(join(source.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), source.workspace.id)
+    const candidates: Array<{ path: string; expectedHash?: string; versionId?: string; artifactId?: string }> = members.flatMap(member => {
+      const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
+      const toolInputs = handoverToolInputs(branch)
+      const executions = handoverToolExecutions(branch)
+      const downloads = executions.filter(call => call.tool === 'WebFetch' && call.outcome === 'completed').flatMap(call =>
+        [...call.evidence.matchAll(/\(saved to ([^)]+)\)|Saved to: ([^\n]+)/g)].map(match => match[1] ?? match[2]!).filter(path => isAbsolute(path)).map(path => ({ path })))
+      return [...downloads, ...member.messages.flatMap(message => {
+        const originalInput = message.toolUseId ? toolInputs.get(message.toolUseId) : undefined
+        const inputPath = originalInput?.file_path ?? originalInput?.path ?? message.toolInput?.file_path ?? message.toolInput?.path
+        const isRead = ['Read','read','read_file'].includes(message.toolName ?? '')
+        const canResolveRead = typeof inputPath === 'string' && (originalInput !== undefined || isAbsolute(inputPath))
+        if (isRead && typeof inputPath === 'string' && !canResolveRead) snapshot.warnings.push(`Input snapshot unavailable: ${inputPath} (original tool arguments unavailable; display-relative paths cannot identify file bytes)`)
+        return [
+          ...(message.attachments ?? []).map(attachment => ({ path: attachment.storedPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined })),
+          ...(message.artifactVersions ?? []).map(ref => ({ path: ref.path, versionId: ref.versionId, artifactId: ref.artifactId })),
+          ...(isRead && canResolveRead && typeof inputPath === 'string'
+            ? [{ path: expandPath(inputPath, expandPath(member.sdkCwd ?? member.workingDirectory ?? member.workspace.rootPath)), versionId: undefined, artifactId: undefined }] : []),
+        ]
+      })]
+    })
+    candidates.push(...runFiles)
+    const seen = new Set<string>()
+    for (const candidate of candidates) {
+      const identity = JSON.stringify(candidate)
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      try {
+        if (/(?:^|[\/\\])(?:\.env(?:\..*)?|credentials?[^\/\\]*|secrets?[^\/\\]*|[^\/\\]*\.(?:pem|key))$/i.test(candidate.path)) { snapshot.warnings.push(`Credential material omitted: ${feedbackBasename(candidate.path)}`); continue }
+        await validateWorkspaceFilePath(candidate.path, source.workspace.id)
+        if (candidate.expectedHash && !candidate.versionId) {
+          const registered = versions.findByPath(candidate.path)
+          const retainedVersion = registered?.versions.find(version => version.hash === candidate.expectedHash)
+          if (retainedVersion) { candidate.versionId = retainedVersion.id; candidate.artifactId = registered!.id }
+        }
+        const artifact = candidate.versionId ? candidate.artifactId ? versions.read(candidate.artifactId) : versions.findByVersionId(candidate.versionId) : undefined
+        if (candidate.versionId && !artifact) throw new Error('The cited artifact version is unavailable; current content cannot replace it')
+        const bytes = candidate.versionId && artifact ? versions.versionBytes(artifact.id, candidate.versionId) : loadIsolationFile(candidate.path)
+        if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(new TextDecoder().decode(bytes))) { snapshot.warnings.push('Private key material omitted'); continue }
+        const originalHash = handoverHash(bytes)
+        if (candidate.expectedHash && originalHash !== candidate.expectedHash) throw new Error('The original run artifact changed; current bytes cannot replace its recorded result')
+        const extension = /^\.[a-zA-Z0-9]{1,12}$/.test(feedbackExtension(candidate.path)) ? feedbackExtension(candidate.path) : ''
+        const isText = !bytes.includes(0) && new TextDecoder('utf-8', { fatal: false }).decode(bytes).indexOf('\uFFFD') === -1
+        const safeBytes = isText ? Buffer.from(redactHandoverText(new TextDecoder().decode(bytes))) : bytes
+        const hash = handoverHash(safeBytes), path = `files/${hash}${extension}`
+        atomicWrite(join(store.directory(record.handoverId), path), safeBytes)
+        snapshot.files.push({ ref: handoverHash(identity), originalPath: candidate.path, snapshotPath: path, hash, originalHash,
+          versionId: candidate.versionId, artifactId: artifact?.id, ...(originalHash !== hash ? { redacted: true } : {}) })
+        if (!candidate.versionId) snapshot.warnings.push(`Unversioned input captured at the handover checkpoint: ${candidate.path}. Earlier read excerpts remain preserved separately.`)
+      } catch (error) { snapshot.warnings.push(`Input snapshot unavailable: ${candidate.path} (${error instanceof Error ? error.message : 'unknown'}). Preserved original excerpts are not a substitute for verified file bytes.`) }
+    }
+    // Preserve the fetched response, never refresh a URL while committing the source snapshot.
+    for (const member of members) {
+      const branch = handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes)
+      const calls = handoverToolExecutions(branch).filter(call => call.tool === 'WebFetch')
+      const capturedIds = new Set(calls.map(call => call.callId))
+      const displayInputs = new Map(member.messages.filter(message => ['WebFetch','web_fetch'].includes(message.toolName ?? ''))
+        .map(message => [message.toolUseId, message.toolInput]))
+      const evidence = [...calls.filter(call => call.outcome === 'completed').map(call => ({ ref: `${member.id}:${call.ref}`, input: call.input ?? displayInputs.get(call.callId), text: call.evidence })),
+        ...member.messages.filter(message => ['WebFetch','web_fetch'].includes(message.toolName ?? '') && message.toolStatus === 'completed' && !message.isError
+          && !capturedIds.has(message.toolUseId ?? '')).map(message => ({ ref: `${member.id}:${message.toolUseId ?? message.id}`, input: message.toolInput, text: message.toolResult ?? message.content }))]
+      for (const { ref, input, text } of evidence) {
+        if (typeof input?.url !== 'string') continue
+        const url = new URL(input.url)
+        if (url.username || url.password || [...url.searchParams.keys()].some(key => /token|key|secret|password|auth/i.test(key))) { snapshot.warnings.push('Credential-bearing URL omitted'); continue }
+        const safeBytes = Buffer.from(redactHandoverText(text)), hash = handoverHash(safeBytes), path = `files/${hash}.txt`
+        atomicWrite(join(store.directory(record.handoverId), path), safeBytes)
+        snapshot.files.push({ ref, originalPath: input.url, sourceUrl: input.url, urlPrompt: typeof input.prompt === 'string' ? redactHandoverText(input.prompt) : undefined, snapshotPath: path, hash, originalHash: handoverWebHash(text) })
+      }
+    }
+    if (source.handover) {
+      const inherited = store.read(source.handover.handoverId)
+      for (const file of inherited?.snapshot?.files ?? []) {
+        const bytes = store.snapshotBytes(source.handover.handoverId, file.snapshotPath, file.hash)
+        atomicWrite(join(store.directory(record.handoverId), file.snapshotPath), bytes)
+        if (!snapshot.files.some(candidate => candidate.ref === file.ref)) snapshot.files.push(file)
+      }
+    }
+  }
+
+  private async applyHandoverInput(targetId: string, record: HandoverRecord, store: HandoverStore): Promise<void> {
+    const managed = this.sessions.get(targetId)!
+    await this.ensureMessagesLoaded(managed)
+    const directory = join(getSessionStoragePath(managed.workspace.rootPath, targetId), 'data', 'handover', record.handoverId)
+    atomicWrite(join(directory, 'snapshot.json'), JSON.stringify(record.snapshot, null, 2))
+    atomicWrite(join(directory, 'operations.json'), handoverOperationEvidence(record.snapshot!))
+    for (const file of record.snapshot!.files) atomicWrite(join(directory, file.snapshotPath), store.snapshotBytes(record.handoverId, file.snapshotPath, file.hash))
+    const messageId = `handover-${record.handoverId}`
+    if (!managed.messages.some(message => message.id === messageId)) {
+      managed.messages.push({ id: messageId, role: 'info', hidden: true, content: `Handover from ${record.sourceSessionId}, snapshot ${record.snapshotVersion}. Source history and run ownership are preserved. Background: ${directory}/snapshot.json`, timestamp: Date.now() })
+      this.persistSession(managed)
+    }
+    await this.flushSession(targetId)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: targetId, changes: { handover: managed.handover } }, managed.workspace.id)
+  }
+
+  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void {
+    const root = orchestratorSessionId ? this.sessions.get(orchestratorSessionId) : undefined
+    if (root?.workspace.id !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    if (this.handoverCapturing.has(root.id)) throw new Error('Source is committing a handover snapshot')
+    this.assertHandoverOperationAllowed(root, 'run_task', task)
+    if (!this.executionOwners.has(root.id)) {
+      const release = acquireProjectLock(join(getSessionStoragePath(root.workspace.rootPath, root.id), 'data', 'execution-owner'))
+      release()
+    }
+    assertComplexCapability(root, 'run-workflow')
+  }
+
+  async bindTaskSession(sessionId: string, binding: import('@craft-agent/shared/tasks').TaskSessionBinding): Promise<{ generation: number }> {
+    const managed = this.sessions.get(sessionId), root = this.sessions.get(binding.rootSessionId)
+    if (!managed || !root || managed.workspace.id !== root.workspace.id || managed.executionRootSessionId !== root.id
+      || managed.taskSlug !== binding.taskSlug || managed.taskRunId !== binding.taskRunId || managed.taskWorkerId) throw new Error('Task binding does not match its execution owner')
+    if (managed.isProcessing || managed.messageQueue.length || managed.deleting || this.hasPreparedTaskDelivery(sessionId)
+      || Object.keys(managed.executionCheckpoint?.pendingTools ?? {}).length) throw new Error('Task actor has not reached a safe binding point')
+    const fresh = managed.taskNodeId === binding.taskNodeId && managed.taskAttempt === binding.taskAttempt
+    if (!fresh && binding.model && managed.model !== binding.model || binding.llmConnection && managed.llmConnection !== binding.llmConnection
+      || managed.permissionMode !== binding.permissionMode || managed.taskActor?.id !== binding.taskActor?.id
+      || managed.taskActor?.persona !== binding.taskActor?.persona) throw new Error('Actor model, connection, persona or permission changed; use a new execution context')
+    this.assertTaskRunAllowed(managed.workspace.id, root.id, { slug: binding.taskSlug })
+    managed.taskNodeId = binding.taskNodeId; managed.taskAttempt = binding.taskAttempt; managed.taskRevision = binding.taskRevision
+    managed.taskActor = binding.taskActor ? { ...binding.taskActor } : undefined
+    managed.messages.push({ id: generateMessageId(), role: 'info', hidden: true, timestamp: Date.now(),
+      content: `Task execution binding: ${JSON.stringify({ taskSlug: binding.taskSlug, runId: binding.taskRunId, nodeId: binding.taskNodeId, attempt: binding.taskAttempt, revision: binding.taskRevision, actor: binding.taskActor })}` })
+    this.persistSession(managed); await this.flushSession(sessionId)
+    return { generation: managed.processingGeneration + 1 }
+  }
+
+  assertTaskSafePoint(sessionIds: string[]): void {
+    for (const sessionId of new Set(sessionIds)) {
+      const managed = this.sessions.get(sessionId)
+      if (!managed) throw new Error(`Execution owner ${sessionId} is unavailable; restore and inspect it before overlapping work`)
+      if (managed.isProcessing || managed.messageQueue.length || managed.agentCreation || managed.deleting || this.executionOwners.has(sessionId) || (this.pendingSwarmChildren.get(sessionId) ?? 0) > 0) throw new Error(`Execution ${sessionId} has not confirmed shutdown`)
+      const release = acquireProjectLock(join(getSessionStoragePath(managed.workspace.rootPath, sessionId), 'data', 'execution-owner'))
+      try {
+        const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, sessionId))
+        if (saved.kind === 'corrupt' || saved.kind === 'unsupported') throw new Error(`Execution ${sessionId} checkpoint requires inspection`)
+        if (saved.kind === 'ok' && Object.values(saved.checkpoint.pendingTools).some(tool => tool.recovery !== 'read-only' || toolRecoveryClass(tool.name) !== 'read-only')) throw new Error(`Execution ${sessionId} has unknown side effects; review the actual operation outcome before retry or successor execution`)
+        // A completed receipt freezes this context, but does not block a new
+        // attempt. Only delivery whose outcome is still unsettled blocks it.
+        const delivery = managed.isolatedWorkspace
+        if (delivery?.pendingDelivery || delivery?.delivery && delivery.status !== 'integrated') throw new Error(`Execution ${sessionId} has an unsettled artifact delivery`)
+      } finally { release() }
+    }
+  }
+
+  private captureTaskContextRead(managed: ManagedSession, toolName: string, input: Record<string, unknown>, toolCallId: string): void {
+    const checkpoint = managed.executionCheckpoint!
+    if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|task_help|session_history|session_search|context_stats)$/.test(toolName)) return
+    const write = ['Write', 'write', 'Edit', 'edit'].includes(toolName)
+    if (!write && !['Read', 'read'].includes(toolName)) { checkpoint.contextUnverified = true; return }
+    const requested = input.file_path ?? input.path
+    try {
+      if (typeof requested !== 'string') throw new Error('Read path is unavailable')
+      const requestedPath = expandPath(requested, managed.sdkCwd ?? managed.workingDirectory ?? managed.workspace.rootPath)
+      const path = existsSync(requestedPath) ? realpathSync(requestedPath) : join(realpathSync(dirname(requestedPath)), basename(requestedPath))
+      const directory = realpathSync(managed.workingDirectory ?? managed.workspace.rootPath)
+      if (!path.startsWith(`${directory}/`)) throw new Error('Read source has no task context proof')
+      const hash = createHash('sha256').update(existsSync(path) ? loadIsolationFile(path) : Buffer.alloc(0)).digest('hex')
+      if (write && Object.values(checkpoint.contextReads ?? {}).some(read => read.path === path && read.complete && read.hash !== hash)) checkpoint.contextUnverified = true
+      checkpoint.contextReads ??= {}; checkpoint.contextReads[toolCallId] = { path, hash, complete: false, ...(write ? { write: true } : {}) }
+    } catch { checkpoint.contextUnverified = true }
+  }
+
+  private completeTaskContextAccess(managed: ManagedSession, toolCallId: string, isError: boolean): void {
+    const read = managed.executionCheckpoint?.contextReads?.[toolCallId]
+    if (!read) return
+    try {
+      const currentHash = createHash('sha256').update(loadIsolationFile(read.path)).digest('hex')
+      read.complete = !isError && (read.write === true || currentHash === read.hash)
+      if (read.write && read.complete) {
+        // Confirmed native writes advance the actor's file view; external changes still invalidate it.
+        for (const prior of Object.values(managed.executionCheckpoint!.contextReads ?? {})) {
+          if (prior.path === read.path && prior.complete) prior.hash = currentHash
+        }
+        read.hash = currentHash
+      }
+    } catch { read.complete = false }
+  }
+
+  canReuseTaskSession(sessionId: string): boolean {
+    const managed = this.sessions.get(sessionId), checkpoint = managed?.executionCheckpoint
+    if (!managed || managed.isProcessing || managed.messageQueue.length || managed.enabledSourceSlugs?.length || managed.agentCreation || managed.deleting
+      || this.executionOwners.has(sessionId) || (this.pendingSwarmChildren.get(sessionId) ?? 0) > 0 || this.hasPreparedTaskDelivery(sessionId)
+      || Object.keys(checkpoint?.pendingTools ?? {}).length || !checkpoint || checkpoint.status !== 'completed' || checkpoint.contextUnverified || !checkpoint.contextReads) return false
+    return Object.values(checkpoint.contextReads).every(read => {
+      try { return read.complete && createHash('sha256').update(loadIsolationFile(read.path)).digest('hex') === read.hash }
+      catch { return false }
+    })
+  }
+
+  inspectTaskWorker(worker: import('@craft-agent/shared/tasks').TaskWorkerRecord): { state: 'done' | 'failed' | 'stopped'; output?: import('@craft-agent/shared/tasks').NodeOutput; reason?: string; tokensUsed?: number } | undefined {
+    const managed = worker.sessionId ? this.sessions.get(worker.sessionId) : undefined
+    if (!managed || managed.taskWorkerId !== worker.workerId || managed.executionRootSessionId !== worker.rootSessionId
+      || managed.taskNodeId !== worker.nodeId || managed.taskAttempt !== worker.attempt || managed.taskRevision !== worker.revision) return undefined
+    this.assertTaskSafePoint([managed.id])
+    // Without the canonical terminal receipt, an integrated artifact cannot be
+    // reconstructed from prose alone. Keep it blocked for delivery inspection.
+    if (managed.isolatedWorkspace?.autoDelivery) return undefined
+    const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id))
+    if (saved.kind !== 'ok' || saved.checkpoint.taskIdentity?.taskWorkerId !== worker.workerId
+      || saved.checkpoint.taskIdentity.taskRunId !== managed.taskRunId || saved.checkpoint.taskIdentity.taskAttempt !== worker.attempt) return undefined
+    if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
+    const text = this.getSessionFinalText(managed.id)
+    const tokensUsed = (managed.tokenUsage?.inputTokens ?? 0) + (managed.tokenUsage?.outputTokens ?? 0)
+    if (saved.checkpoint.status === 'completed' && managed.orchestrationStatus === 'completed' && text?.trim()) return { state: 'done', output: { text }, tokensUsed }
+    if (saved.checkpoint.status === 'cancelled') return { state: 'stopped', reason: 'Confirmed interrupted worker', tokensUsed }
+    if (saved.checkpoint.status === 'blocked') return { state: 'failed', reason: managed.orchestrationBlocker ?? saved.checkpoint.reason, tokensUsed }
+    return undefined
+  }
+
+  async settleTaskSessionStop(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Task execution owner is unavailable')
+    if (managed.isProcessing) await this.cancelProcessing(sessionId, true)
+    if (managed.stopRequested) {
+      await waitForRuntimeCleanup(Promise.allSettled([...(managed.agentInitializations ?? []), ...(managed.agentCreation ? [managed.agentCreation] : [])]), 'task initialization')
+      await this.disposeManagedAgentRuntime(managed, 'confirmed task stop', true)
+      await this.onProcessingStopped(sessionId, 'interrupted', managed.processingGeneration)
+    }
+    this.persistSession(managed); await this.flushSession(sessionId)
+    if (managed.isProcessing) throw new Error('Task execution did not stop')
+  }
+
+  nextTaskSessionGeneration(sessionId: string): number {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing) throw new Error('Task session is not idle')
+    return managed.processingGeneration + 1
+  }
+
+  async setSessionWorkMode(sessionId: string, workMode: 'NORM' | 'PRO'): Promise<void> {
+    if (workMode !== 'NORM' && workMode !== 'PRO') throw new Error('Invalid work mode')
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+    if (managed.messages.length || managed.isProcessing || managed.parentSessionId || managed.taskSlug || managed.taskDraft || managed.taskRunId || managed.orchestrationId || managed.workModeNeedsReview) throw new Error('Work mode is fixed after work starts; create a new conversation')
+    if (managed.workMode === workMode) return
+    managed.workMode = workMode
+    managed.swarmEnabled = workMode === 'PRO' && isTasksOrchestrateEnabled()
+    await this.disposeManagedAgentRuntime(managed, 'Work mode changed before first message')
+    this.persistSession(managed)
+    await this.flushSession(sessionId)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: managed.swarmEnabled } }, managed.workspace.id)
+  }
+
   private updateOrchestrationMetadata(
     managed: ManagedSession,
     changes: Partial<Pick<ManagedSession,
@@ -10651,7 +11371,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     userAuthorizedSpawn: boolean,
   ): void {
     this.spawnQualificationCredentials.delete(managed.id)
-    if (managed.swarmEnabled) {
+    if (complexCapabilityError(managed, 'delegate')) return
+    if (managed.workMode === 'PRO' && managed.swarmEnabled) {
       this.issueSpawnQualificationCredentials(managed, 'automatic')
     }
     if (userAuthorizedSpawn) {
@@ -10735,7 +11456,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   private getManagedSwarmChildren(parentSessionId: string): ManagedSession[] {
     return Array.from(this.sessions.values()).filter(session =>
       session.parentSessionId === parentSessionId
-      && !session.taskNodeId
+      && (!session.taskNodeId || !!session.taskWorkerId)
       && session.orchestrationLifecycle === 'managed'
     )
   }
@@ -10766,6 +11487,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   }
 
   private refreshSwarmSessionState(session: ManagedSession): void {
+    const canonical = this.taskRunnerLookup?.(session.workspace.id)?.progressContext(session.id)
+    if (canonical?.orchestratorSessionId === session.id && canonical.workers?.length) {
+      const status = canonical.status === 'completed' ? 'completed' : canonical.status === 'stopped' ? 'stopped'
+        : ['running', 'pausing', 'waiting-coordinator', 'verifying', 'repairing'].includes(canonical.status) ? 'running' : 'need-to-check'
+      this.updateOrchestrationMetadata(session, { orchestrationStatus: status,
+        orchestrationBlocker: status === 'need-to-check' ? canonical.blockers?.join('; ') || canonical.status : undefined })
+      return
+    }
     const turn = this.swarmTurnCompletions.get(session.id)
     const children = this.getManagedSwarmChildren(session.id)
       .filter(child => child.orchestrationId === session.orchestrationId)
@@ -10994,22 +11723,24 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    assertComplexCapability(managed, 'delegate')
     this.assertSpawnPermissionAndProject(managed, request)
+    const effectivePermission = request.permissionMode ?? (request.taskBinding ? 'safe' : managed.permissionMode ?? 'safe')
     const delivery = request.artifactDelivery
       ? workspaceDeliveryContract(request.artifactDelivery.inputs, request.artifactDelivery.outputs)
       : undefined
     const deliveryRoot = request.workingDirectory ?? managed.workingDirectory
-    const isolateWrites = (request.permissionMode ?? managed.permissionMode ?? 'safe') !== 'safe'
-    if ((delivery || isolateWrites) && (!deliveryRoot || !['ask', 'allow-all'].includes(request.permissionMode ?? managed.permissionMode ?? 'safe'))) {
+    const isolateWrites = effectivePermission !== 'safe'
+    if ((delivery || isolateWrites) && (!deliveryRoot || !['ask', 'allow-all'].includes(effectivePermission))) {
       throw new Error('Isolated file delivery requires a project directory and current write authorization')
     }
     const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getSwarmAgentsEnabled()) {
-      throw new Error('Swarm agents are disabled in Advanced settings')
+      throw new Error('PRO delegation is disabled by this build')
     }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
-    if (requestedSpawnReason === 'automatic' && !managed.swarmEnabled) {
-      throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
+    if (requestedSpawnReason === 'automatic' && !(managed.workMode === 'PRO' && managed.swarmEnabled)) {
+      throw new Error('Automatic delegation is unavailable in this session; use a PRO root')
     }
     let effectiveSpawnReason = requestedSpawnReason
     let qualificationCredential = this.resolveSpawnQualificationCredential(
@@ -11026,7 +11757,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       !qualificationCredential
       && !request.qualificationCredential
       && requestedSpawnReason === 'user-requested'
-      && managed.swarmEnabled
+      && managed.workMode === 'PRO' && managed.swarmEnabled
     ) {
       qualificationCredential = this.resolveSpawnQualificationCredential(managed, 'automatic')
       if (qualificationCredential) effectiveSpawnReason = 'automatic'
@@ -11067,6 +11798,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const lifecycle = request.lifecycle ?? 'managed'
     const role = request.role ?? 'worker'
+    const canonicalRunner = this.taskRunnerLookup?.(managed.workspace.id)
+    const canonicalRun = canonicalRunner?.progressContext(managed.id)
+    const hasActiveCanonicalRun = canonicalRun && !['completed', 'stopped', 'failed'].includes(canonicalRun.status)
+    if ((hasActiveCanonicalRun || isTasksOrchestrateEnabled()) && !request.taskBinding) throw new Error('Active task delegation requires taskBinding with runId and nodeId; commit missing logical work through the canonical plan first')
+    if (request.taskBinding && (lifecycle !== 'managed' || role === 'coordinator')) throw new Error('Canonical task workers must be managed workers or reviewers')
     const parentDepth = managed.orchestrationDepth ?? 0
     const spawnedAgent = isSpawnedSwarmAgent(managed)
     const budgetState = getSwarmAgentBudgetState(managed)
@@ -11118,7 +11854,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       orchestrationLifecycle: managed.orchestrationLifecycle ?? 'managed',
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
-      orchestrationAggregation,
+      orchestrationAggregation: request.taskBinding ? undefined : orchestrationAggregation,
       ...(startsNewRootRun
         ? {
             orchestrationTokensUsed: 0,
@@ -11151,14 +11887,23 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     this.consumeSpawnQualificationCredential(managed, qualificationCredential)
     const releaseReservation = this.reserveSwarmSpawn(managed.id, orchestrationId)
+    const taskWorkerId = request.taskBinding ? randomUUID() : undefined
+    let taskBinding: import('@craft-agent/shared/tasks').TaskSessionBinding | undefined
     let session: Session
+    let createdTaskWorkerSessionId: string | undefined
     try {
+      if (request.taskBinding) {
+        if (!canonicalRunner) throw new Error('Canonical task runner is unavailable')
+        taskBinding = canonicalRunner.reserveTaskWorker(managed.id, request.taskBinding, taskWorkerId!, role as 'worker' | 'reviewer', effectivePermission)
+      }
       session = await this.createSession(managed.workspace.id, {
+        ...(taskBinding ? { taskSlug: taskBinding.taskSlug, taskRunId: taskBinding.taskRunId, taskNodeId: taskBinding.taskNodeId,
+          taskAttempt: taskBinding.taskAttempt, taskRevision: taskBinding.taskRevision, taskActor: taskBinding.taskActor, taskWorkerId } : {}),
         name: request.name,
         llmConnection: request.llmConnection ?? managed.llmConnection,
         model: request.model ?? this.sessionExecutionModel(managed),
         enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-        permissionMode: request.permissionMode ?? managed.permissionMode ?? 'safe',
+        permissionMode: effectivePermission,
         thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
         labels: request.labels ?? managed.labels,
         workingDirectory: request.workingDirectory ?? managed.workingDirectory,
@@ -11176,6 +11921,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         orchestrationTokensUsed: 0,
         orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
       })
+      createdTaskWorkerSessionId = session.id
+      if (taskBinding) canonicalRunner!.bindTaskWorker(taskBinding, taskWorkerId!, session.id)
+    } catch (error) {
+      if (taskBinding && createdTaskWorkerSessionId) await this.settleTaskSessionStop(createdTaskWorkerSessionId)
+      if (taskBinding) canonicalRunner!.completeTaskWorker(taskBinding.taskSlug, taskBinding.taskRunId, taskWorkerId!, undefined, 'failed', undefined, error instanceof Error ? error.message : String(error))
+      throw error
     } finally {
       releaseReservation()
     }
@@ -11196,14 +11947,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             orchestrationStatus: 'need-to-check',
             orchestrationBlocker: error instanceof Error ? error.message : 'Workspace preparation failed',
           })
+          if (taskBinding) canonicalRunner!.completeTaskWorker(taskBinding.taskSlug, taskBinding.taskRunId, taskWorkerId!, childManaged.id, 'failed', undefined, childManaged.orchestrationBlocker)
         }
         throw error
       }
     }
 
+    const ownedPrompt = taskBinding ? `${request.prompt}\n\nFrozen owning task contract (do not expand its goal, permissions or locked constraints):\n${JSON.stringify(taskBinding.contract)}\nBinding: run=${taskBinding.taskRunId}, node=${taskBinding.taskNodeId}, attempt=${taskBinding.taskAttempt}, revision=${taskBinding.taskRevision}. Your result is a separate delegated result, not the primary node output. Do not call submit_task_output or plan tools.` : request.prompt
     const childPrompt = delivery
-      ? `${request.prompt}\n\nRuntime file delivery contract: work in the assigned isolated working directory. Produce these declared project-relative files: ${JSON.stringify(delivery.outputs)}. They are candidates until runtime validation and integration succeed. Do not claim that candidate paths are final project paths.`
-      : isolateWrites ? `${request.prompt}\n\nWork only in the assigned isolated working directory. The runtime discovers actual file changes, validates and integrates them before completion. Candidate paths are not final project paths. For non-Git projects, declare required input files with artifactDelivery before spawning.` : request.prompt
+      ? `${ownedPrompt}\n\nRuntime file delivery contract: work in the assigned isolated working directory. Produce these declared project-relative files: ${JSON.stringify(delivery.outputs)}. They are candidates until runtime validation and integration succeed. Do not claim that candidate paths are final project paths.`
+      : isolateWrites ? `${ownedPrompt}\n\nWork only in the assigned isolated working directory. The runtime discovers actual file changes, validates and integrates them before completion. Candidate paths are not final project paths. For non-Git projects, declare required input files with artifactDelivery before spawning.` : ownedPrompt
+
+    const childMessageOptions: SendMessageOptions | undefined = taskBinding
+      ? { taskContext: { kind: 'assignment', title: request.name, description: taskBinding.contract?.goal } }
+      : undefined
 
     // Build FileAttachment[] from paths (if any)
     let fileAttachments: FileAttachment[] | undefined
@@ -11294,7 +12051,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         },
         onAttach: (settle) => { settleWait = settle },
       })
-      this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
+      this.sendMessage(session.id, childPrompt, fileAttachments, undefined, childMessageOptions).catch(err => {
         sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
         if (childManaged) {
           this.surfaceSpawnedSessionCompletion({
@@ -11320,7 +12077,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       }
     }
 
-    this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
+    this.sendMessage(session.id, childPrompt, fileAttachments, undefined, childMessageOptions).catch(err => {
       sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
       if (childManaged) {
         this.surfaceSpawnedSessionCompletion({
@@ -11344,7 +12101,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       child.parentSessionId === managed.id
       && child.orchestrationId === orchestrationId
       && child.orchestrationLifecycle === 'managed'
-      && !child.taskNodeId
+      && (!child.taskNodeId || !!child.taskWorkerId)
     )
     if (children.length === 0 || children.some(child => child.orchestrationStatus === 'running')) return
     if (
@@ -11462,6 +12219,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       : child.orchestrationStatus === 'stopped'
         ? 'stopped'
         : 'failed'
+    if (child.taskWorkerId && child.taskRunId && child.taskSlug) {
+      this.taskRunnerLookup?.(child.workspace.id)?.completeTaskWorker(child.taskSlug, child.taskRunId, child.taskWorkerId, child.id,
+        status === 'completed' ? 'done' : status, status === 'completed' ? { text: finalText ?? '', params: completion?.artifacts as Record<string, unknown> | undefined } : undefined,
+        status === 'completed' ? undefined : child.orchestrationBlocker ?? finalText,
+        (child.tokenUsage?.inputTokens ?? 0) + (child.tokenUsage?.outputTokens ?? 0))
+    }
     const summary = status === 'completed'
       ? completion?.artifacts
         ? `${finalText ?? ''}\n\nRuntime-verified integrated artifacts:\n${JSON.stringify(completion.artifacts)}`
@@ -11470,6 +12233,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
     if (!this.finalizeSpawnBackgroundTask(parent, child.id, status, summary)) return
+    // Canonical workers are consumed by the node/planner and the run's final
+    // quality gate. Do not start a second Swarm aggregation conversation.
+    if (child.taskWorkerId) return
     if (child.orchestrationLifecycle === 'detached') return
 
     const siblings = this.getManagedSwarmChildren(parent.id)
@@ -11534,9 +12300,43 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return undefined
   }
 
+  private async createChatTask(managed: ManagedSession, input: CreateTaskInput) {
+    assertComplexCapability(managed, 'create-workflow')
+    if (!isTasksOrchestrateEnabled()) throw new Error('PRO orchestration is disabled in this build')
+    this.assertTaskRunAllowed(managed.workspace.id, managed.id)
+    const spec = buildChatPlan(input, { ...managed, originalRequest: managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)?.content })
+    const release = acquireProjectLock(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'chat-plan'))
+    try {
+      const path = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'chat-plan', `${chatRequestKey(managed.id, input.requestId!)}.json`)
+      const inputHash = chatInputHash(input)
+      let receipt: { inputHash: string; spec: typeof spec; result?: { slug: string; orchestratorSessionId: string; taskLabelId?: string; warnings: string[] } }
+      if (existsSync(path)) {
+        receipt = JSON.parse(readFileSync(path, 'utf8'))
+        if (receipt.inputHash !== inputHash) throw new Error('Creation requestId was already used for different inputs')
+        if (receipt.result) {
+          if (managed.taskSlug !== receipt.result.slug) throw new Error('Creation receipt no longer owns this root')
+          return receipt.result
+        }
+      } else {
+        if (managed.taskSlug) throw new Error('This root already owns a plan; revise the canonical plan instead')
+        if (this.getSessions(managed.workspace.id).some(child => child.id !== managed.id && child.executionRootSessionId === managed.id && child.isProcessing)) throw new Error('Wait for existing workers to settle before creating a plan')
+        receipt = { inputHash, spec }
+        atomicWrite(path, JSON.stringify(receipt))
+      }
+      const saved = loadTaskDocument(managed.workspace.rootPath, receipt.spec.id)
+      if (saved && (!saved.valid || planValueKey(saved.spec) !== planValueKey(receipt.spec))) throw new Error('An existing plan differs from the prepared creation; inspect it before retrying')
+      if (!saved) saveTaskDocument(managed.workspace.rootPath, serializeTaskYaml(receipt.spec), null)
+      if (!await this.bindExistingSessionToTask(managed.id, receipt.spec.id, undefined, managed.processingGeneration)) throw new Error('Cannot bind this PRO root')
+      const setup = await finishTaskOrchestrator(this, managed.id, receipt.spec)
+      receipt.result = { slug: receipt.spec.id, orchestratorSessionId: managed.id, ...setup }
+      atomicWrite(path, JSON.stringify(receipt))
+      return receipt.result
+    } finally { release() }
+  }
+
   private async runTaskFromTool(
     workspaceId: string,
-    input: { slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
+    input: { requestId?: string; slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
   ) {
     const runner = this.taskRunnerLookup?.(workspaceId)
     if (!runner) {
@@ -11557,13 +12357,29 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getDagOrchestrationEnabled()) {
-      throw new Error('DAG orchestration is disabled in Advanced settings')
+      throw new Error('PRO orchestration is disabled by this build')
     }
-    const snapshot = runner.run(slug, {
+    this.assertTaskRunAllowed(workspaceId, orchestratorSessionId, { slug })
+    const root = this.sessions.get(orchestratorSessionId!)!
+    const requestId = input.requestId?.trim()
+    if (input.requestId !== undefined && (!requestId || requestId.length > 128)) throw new Error('Invalid start requestId')
+    const reservedRunId = requestId ? `chat-${chatRequestKey(root.id, requestId)}` : undefined
+    const receiptPath = requestId ? join(getSessionStoragePath(root.workspace.rootPath, root.id), 'data', 'chat-starts', `${chatRequestKey(root.id, requestId)}.json`) : undefined
+    const requestHash = chatInputHash({ slug, params: input.params })
+    if (receiptPath) {
+      if (existsSync(receiptPath)) {
+        const saved = JSON.parse(readFileSync(receiptPath, 'utf8'))
+        if (saved.requestHash !== requestHash || saved.runId !== reservedRunId) throw new Error('Start requestId was already used for different inputs')
+      } else atomicWrite(receiptPath, JSON.stringify({ requestHash, runId: reservedRunId }))
+    }
+    const existing = reservedRunId ? runner.getRunState(slug, reservedRunId) : undefined
+    if (existing && existing.orchestratorSessionId !== root.id) throw new Error('Start receipt belongs to another root')
+    const snapshot = existing ?? runner.run(slug, {
+      runId: reservedRunId,
       orchestratorSessionId,
       params: input.params,
       orchestrateAllowed: orchestratorSessionId
-        ? this.sessions.get(orchestratorSessionId)?.swarmEnabled === true
+        ? this.sessions.get(orchestratorSessionId)?.workMode === 'PRO' && isTasksOrchestrateEnabled()
         : false,
     })
     const settled = input.waitForCompletion
@@ -11573,6 +12389,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       slug: settled.slug,
       runId: settled.runId,
       status: settled.status,
+      ...(['running', 'waiting-coordinator'].includes(settled.status) ? { nextAction: 'Finish this chat turn with a short plan/start acknowledgment. Do not poll or wait in a loop. The scheduler will send coordinator checkpoints and the final verification turn automatically.' } : {}),
       nodeCount: settled.nodes.filter((n) => n.state !== 'skipped').length,
       nodes: settled.nodes.map((n) => ({ id: n.id, state: n.state, sessionId: n.sessionId })),
       tokensUsed: settled.tokensUsed,
@@ -11910,50 +12727,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
   }
 
-  /**
-   * Toggle autonomous Swarm planning for exactly one session. Spawned children
-   * inherit the value at creation time; a child cannot opt in while its parent
-   * remains opted out.
-   */
-  async updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void> {
+  /** Older clients may send this setting; PRO owns the capability now. */
+  async updateSessionSwarmEnabled(sessionId: string, _enabled: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
-    if (enabled) {
-      const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
-      if (!getSwarmAgentsEnabled()) {
-        throw new Error('Swarm agents are disabled in Advanced settings')
-      }
-    }
-    if (enabled && managed.parentSessionId) {
-      const parent = this.sessions.get(managed.parentSessionId)
-      if (!parent?.swarmEnabled) {
-        throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
-      }
-    }
+    const enabled = managed.workMode === 'PRO' && isTasksOrchestrateEnabled()
     if ((managed.swarmEnabled ?? false) === enabled) return
-
     managed.swarmEnabled = enabled
-    if (enabled) managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
-    this.setMetadataWriteGuard(managed)
     this.persistSession(managed)
     await this.flushSession(managed.id)
-    this.sendEvent({
-      type: 'session_metadata_changed',
-      sessionId: managed.id,
-      changes: {
-        swarmEnabled: enabled,
-        ...(enabled ? { orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET } : {}),
-      },
-    }, managed.workspace.id)
-
-    // The backend system prompt and compaction policy are constructed from
-    // SessionConfig. Keep the active turn stable, but guarantee that the next
-    // queued or user turn recreates the runtime with the new setting.
-    if (managed.agent && (managed.isProcessing || managed.agent.isProcessing())) {
-      managed.swarmRuntimeRefreshPending = true
-    } else if (managed.agent) {
-      await this.disposeManagedAgentRuntime(managed, 'Swarm setting changed')
-    }
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id,
+      changes: { swarmEnabled: enabled } }, managed.workspace.id)
   }
 
   /** Kept for older clients; the technical-preview Swarm ceiling is immutable. */
@@ -12049,6 +12833,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     // Idempotency: already bound to this slug → no-op success. Bound to a different slug → refuse,
     // so a stale draft ref can't hijack an unrelated orchestrator.
+    assertComplexCapability(managed, 'create-workflow')
     if (managed.taskSlug) {
       if (managed.taskSlug === taskSlug) return true
       sessionLog.warn('adoptGeneratedTaskOrchestrator: slug mismatch, refusing to rebind', {
@@ -12136,12 +12921,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     sessionId: string,
     taskSlug: string,
     reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
+    currentGeneration?: number,
   ): Promise<boolean> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn('bindExistingSessionToTask: session not found', { sessionId, taskSlug })
       return false
     }
+    assertComplexCapability(managed, 'create-workflow')
     if (managed.taskSlug) {
       if (managed.taskSlug === taskSlug) return true
       sessionLog.warn('bindExistingSessionToTask: slug mismatch, refusing to rebind', {
@@ -12149,6 +12936,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       })
       return false
     }
+    if (managed.isProcessing && (currentGeneration !== managed.processingGeneration || !this.executionOwners.has(sessionId)) || this.handoverCapturing.has(sessionId)) throw new Error('Wait for the PRO root to settle before binding a plan')
 
     // What actually changes — so we fire canonical live-updates (agent + caches + per-field events)
     // only when needed. A quick-add tile is already live, so these keep its running agent in step.
@@ -12716,7 +13504,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           : rawFormattedResult
 
         // Some backends omit explicit isError but still prefix with [ERROR].
-        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
+        const inferredError = event.isError === true || !event.sourceRead && /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
 
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
@@ -12734,6 +13522,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           existingToolMsg.toolResult = formattedResult
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
+          existingToolMsg.sourceRead = inferredError ? undefined : event.sourceRead
           // If message doesn't have parent set, use event's parentToolUseId
           if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
             existingToolMsg.parentToolUseId = event.parentToolUseId
@@ -12758,6 +13547,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             toolPurpose,
             toolUseId: event.toolUseId,
             toolResult: formattedResult,
+            sourceRead: inferredError ? undefined : event.sourceRead,
             toolStatus: inferredError ? 'error' : 'completed',
             toolDisplayMeta: fallbackToolDisplayMeta,
             parentToolUseId,
@@ -14051,9 +14841,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.progressSupervisor?.stop()
       managed.progressReviewer?.destroy()
       managed.progressReviewer = undefined
+      managed.agent?.destroy()
+      managed.agent = null
     }
     this.progressArbiters.clear()
     this.progressBudgets.clear()
+    this.runtimeActivityListeners.clear()
     this.spawnCompletionUnsub?.()
     this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')

@@ -17,6 +17,40 @@ function user(manager: SessionManager, text: string) {
 const invoke = async (tool: any, params: unknown) => JSON.parse((await tool.execute('call', params)).content[0].text);
 
 describe('source-backed context retention', () => {
+  it('does not turn a fresh or fully visible conversation into a recovery request', () => {
+    const manager = SessionManager.inMemory();
+    const question = { role: 'user' as const, content: '你觉得你能做些什么？', timestamp: 1 };
+    manager.appendMessage(question);
+    const context: Context = { messages: [question], tools: [createSessionHistoryTool(() => manager)] };
+    expect(projectRetainedContext(context, manager.getBranch())).toBe(context);
+    const followUp = { role: 'user' as const, content: '用一句话介绍', timestamp: 2 };
+    manager.appendMessage(followUp);
+    context.messages.push(followUp);
+    expect(projectRetainedContext(context, manager.getBranch())).toBe(context);
+    expect(retainedUserContext(manager.getBranch())).toBe('');
+  });
+
+  it('still restores task notes and failed operations before the first compaction', () => {
+    for (const recovery of ['notes', 'error'] as const) {
+      const manager = SessionManager.inMemory();
+      const question = { role: 'user' as const, content: '检查文件，不要修改', timestamp: 1 };
+      const source = manager.appendMessage(question);
+      if (recovery === 'notes') {
+        manager.appendCustomEntry(TASK_CONTEXT_TYPE, updateTaskContext(manager.getBranch(), [{
+          key: 'scope', kind: 'constraint', text: '不要修改', source_id: source, quote: '不要修改', status: 'active',
+        }]));
+      } else {
+        manager.appendMessage({ role: 'toolResult', toolName: 'read', toolCallId: 'failed-read',
+          content: [{ type: 'text', text: 'file not found' }], isError: true, timestamp: 2 });
+      }
+      const projected = projectRetainedContext({ messages: [question] }, manager.getBranch());
+      expect(projected.messages).toHaveLength(2);
+      expect(projected.messages[0]?.content).toContain('Source recovery state');
+      expect(projected.messages[0]?.content).toContain(recovery === 'notes' ? '"notes":[{' : 'file not found');
+      expect(projected.messages.at(-1)).toBe(question);
+    }
+  });
+
   it('separates user intent from injected context without losing the original message', async () => {
     const manager = SessionManager.inMemory();
     const prefix = 'Runtime guide: deployment is available.\n';

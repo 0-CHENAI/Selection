@@ -14,6 +14,7 @@
  */
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type {
+  TaskPatchRunRequest,
   TaskGenerateRequest,
   TaskGenerateAck,
   TaskCreateRequest,
@@ -36,10 +37,14 @@ import type {
   TaskTemplateDetailDto,
   TaskCreateFromTemplateRequest,
 } from '@craft-agent/shared/protocol'
+import { assertComplexCapability } from '@craft-agent/shared/sessions/work-mode'
 import { createHash } from 'node:crypto'
 import { unlinkSync } from 'node:fs'
 import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
+  definitionToPatch,
+  planProtectionErrors,
+  planValueKey,
   buildGeneratorPrompt,
   buildRepairPrompt,
   parseTaskYaml,
@@ -51,6 +56,8 @@ import {
   listTaskSlugs,
   listRunIds,
   loadTaskResults,
+  inspectTaskRun,
+  revisionImpact,
   TaskEtagConflictError,
   definitionDiff,
   mergeRunDefinition,
@@ -66,7 +73,7 @@ import {
 } from '@craft-agent/shared/tasks'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, createTaskFromSpec, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
+import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
 
 import { createLogger } from '@craft-agent/shared/utils'
 const tasksLog = createLogger('tasks-generate')
@@ -93,8 +100,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.DELETE_TEMPLATE,
   RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE,
   RPC_CHANNELS.tasks.LIST_RUNS,
+  RPC_CHANNELS.tasks.PATCH_RUN,
   RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
+  RPC_CHANNELS.tasks.INSPECT_RUN,
 ] as const
 
 /** Map a shared ValidationResult (+ parsed spec) onto the wire DTO. */
@@ -203,7 +212,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return toValidationDto(parseTaskDocument(yaml))
   })
 
-  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean): Promise<TaskCreateResult> {
+  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean, rootSessionId?: string): Promise<TaskCreateResult> {
     const ws = workspaceOrThrow(workspaceId)
     const parsed = parseTaskImport(yaml)
     const validation = toValidationDto(parsed)
@@ -211,18 +220,38 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
+    const root = rootSessionId ? await deps.sessionManager.getSession(rootSessionId) : undefined
+    if (rootSessionId) {
+      if (!root || root.workspaceId !== workspaceId || root.hidden) throw new Error('Choose a visible PRO root in this workspace')
+      assertComplexCapability(root, 'create-workflow')
+      deps.sessionManager.assertTaskRunAllowed(workspaceId, rootSessionId, { slug: spec.id })
+      if (root.taskSlug && root.taskSlug !== spec.id) throw new Error('This root already owns a different plan')
+      if (root.isProcessing || deps.sessionManager.getSessions(workspaceId).some(session => session.id !== root.id
+        && (session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId) === root.id
+        && (session.isProcessing || session.orchestrationStatus === 'running'))) throw new Error('Wait for this root and its workers to settle before creating a plan')
+    }
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    if (existing) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
-    const saved = saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
+    if (existing && (!rootSessionId || !existing.valid || planValueKey(existing.spec) !== planValueKey(spec)
+      || deps.sessionManager.getSessions(workspaceId).some(session => session.taskSlug === spec.id && session.id !== rootSessionId)
+      || root?.taskSlug !== spec.id && listRunIds(ws.rootPath, spec.id).length)) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
+    // An identical unowned file may be the committed first half of an interrupted explicit creation.
+    const saved = existing ?? saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
 
     // YAML imports create a fresh orchestrator without adopting generation drafts.
     try {
+      if (rootSessionId) {
+        if (!await deps.sessionManager.bindExistingSessionToTask(rootSessionId, spec.id)) throw new Error('The chosen PRO root can no longer own this plan')
+        const setup = await finishTaskOrchestrator(deps.sessionManager, rootSessionId, spec)
+        validation.warnings.push(...setup.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+        return { slug: spec.id, orchestratorSessionId: rootSessionId, validation, taskLabelId: setup.taskLabelId }
+      }
       const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, saved.spec!, { save: false })
       validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
       return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
     } catch (error) {
       // Remove only this import's unchanged file, allowing retry after session creation fails.
-      if (loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag) {
+      if (!existing && loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag
+        && (!rootSessionId || (await deps.sessionManager.getSession(rootSessionId))?.taskSlug !== spec.id)) {
         unlinkSync(taskYamlPath(ws.rootPath, spec.id))
       }
       throw error
@@ -234,7 +263,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (req.attachToExistingSession || req.orchestratorSessionId) {
       throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
     }
-    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration)
+    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration, req.rootSessionId)
   })
 
   // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.
@@ -279,7 +308,13 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.tasks.GENERATE, async (_ctx, workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck> => {
     workspaceOrThrow(workspaceId)
     if (!req.goal?.trim() || req.goal.length > 50_000) throw new Error('A goal of 1–50000 characters is required')
+    if (req.baseDraftVersion !== undefined && (!Number.isSafeInteger(req.baseDraftVersion) || req.baseDraftVersion < 0)) throw new Error('Invalid draft version')
     if (req.currentYaml !== undefined && (typeof req.currentYaml !== 'string' || req.currentYaml.length > 1_000_000)) throw new Error('Invalid proposal input')
+    if (req.conversation !== undefined && (!Array.isArray(req.conversation) || req.conversation.some(turn =>
+      !turn || typeof turn.goal !== 'string' || turn.goal.length > 50_000 ||
+      !['proposed', 'applied', 'discarded', 'superseded', 'failed'].includes(turn.status) ||
+      (turn.yaml !== undefined && (typeof turn.yaml !== 'string' || turn.yaml.length > 1_000_000))
+    ))) throw new Error('Invalid proposal conversation')
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
       // Hidden and never adopted into a persistent task.
@@ -351,8 +386,10 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         // authored spec fails validation (commonly a ${nodes.X.output} ref to an undeclared
         // node) hand the concrete errors back and re-validate. Bounded so a model that can't
         // self-correct can't loop forever — the last attempt's validation is returned as-is.
-        let prompt = buildGeneratorPrompt(req.goal, req.title)
-        if (req.currentYaml) prompt += '\nRevise this existing definition according to the user goal. Preserve its id and untouched fields:\n' + req.currentYaml
+        const baseSpec = req.currentYaml ? parseTaskYaml(req.currentYaml).spec : undefined
+        const baseId = baseSpec?.id
+        // Canonical JSON keeps long prompt strings exact; folded YAML is ambiguous to copy into a tool payload.
+        let prompt = buildGeneratorPrompt(req.goal, req.title, { ...req, currentYaml: baseSpec ? JSON.stringify(baseSpec, null, 2) : req.currentYaml })
         let yaml = ''
         let parsed = parseTaskYaml(yaml)
         let attempts = 0
@@ -367,6 +404,13 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
             continue
           }
           parsed = parseTaskYaml(yaml)
+          if (baseId && parsed.spec && parsed.spec.id !== baseId) {
+            parsed = { ...parsed, valid: false, errors: [...parsed.errors, { file: 'task.yaml', path: 'id', message: `Preserve the existing task id: ${baseId}`, severity: 'error' }] }
+          }
+          if (baseSpec && parsed.spec) {
+            const protection = planProtectionErrors(baseSpec, parsed.spec)
+            if (protection.length) parsed = { ...parsed, valid: false, errors: [...parsed.errors, ...protection.map(message => ({ file: 'task.yaml', path: 'locks', message, severity: 'error' as const }))] }
+          }
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)
         }
@@ -382,6 +426,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
           slug: parsed.spec?.id ?? '',
         })
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
+          baseDraftVersion: req.baseDraftVersion,
           orchestratorSessionId: sessionId,
           slug: parsed.spec?.id ?? '',
           spec: parsed.spec,
@@ -393,6 +438,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         tasksLog.error('generate failed', { sessionId, elapsedMs: Date.now() - startedAt, error: message })
         // Preserve the caller's draft and report failure; cleanup runs in finally.
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
+          baseDraftVersion: req.baseDraftVersion,
           orchestratorSessionId: sessionId,
           slug: '',
           yaml: '',
@@ -412,16 +458,20 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
     const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getDagOrchestrationEnabled()) {
-      throw new Error('DAG orchestration is disabled in Advanced settings')
+      throw new Error('PRO orchestration is disabled by this build')
     }
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
       : null
+    if (orchestrator?.workspaceId !== workspaceId) throw new Error('Task run requires a PRO root in this workspace')
+    assertComplexCapability(orchestrator, 'run-workflow')
+    if (req.expectedEtag && loadTaskDocument(workspaceOrThrow(workspaceId).rootPath, req.slug)?.etag !== req.expectedEtag) throw new Error('Saved task changed before run; review and save again')
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
+      resumedFrom: req.resumedFrom,
       orchestratorSessionId: req.orchestratorSessionId,
       params: req.params,
-      orchestrateAllowed: orchestrator?.swarmEnabled === true,
+      orchestrateAllowed: orchestrator?.workMode === 'PRO',
     })
   })
 
@@ -534,8 +584,33 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:getResults — storage-backed read of a run's outcome (verdict + per-node output).
   // Reads the durable artifacts (run-log.jsonl, nodes/<id>.json, per-run spec.json snapshot), so it
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
+  server.handle(RPC_CHANNELS.tasks.INSPECT_RUN, async (_ctx, workspaceId: string, slug: string, runId: string, cursor?: number, patch?: import('@craft-agent/shared/tasks').OrchestrationPatch) => {
+    return inspectTaskRun(workspaceOrThrow(workspaceId).rootPath, slug, runId, cursor, patch)
+  })
+
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
     return loadTaskResults(workspaceOrThrow(workspaceId).rootPath, slug, runId)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.PATCH_RUN, async (_ctx, workspaceId: string, req: TaskPatchRunRequest): Promise<TaskControlResultDto> => {
+    const runner = runnerFor(workspaceId)
+    const snapshot = runner.getRunState(req.slug, req.runId)
+    if (!snapshot?.orchestratorSessionId) throw new Error('An active owned run is required')
+    const session = await deps.sessionManager.getSession(snapshot.orchestratorSessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Run workspace mismatch')
+    assertComplexCapability(session, 'change-plan')
+    const spec = runner.currentRunSpec(req.slug, req.runId)
+    if (!spec) throw new Error('No active run plan')
+    if (typeof req.yaml !== 'string' || !Number.isSafeInteger(req.baseRevision) || typeof req.rationale !== 'string' || !req.rationale.trim()) throw new Error('Invalid run patch')
+    const parsed = parseTaskYaml(req.yaml)
+    if (!parsed.valid || !parsed.spec) throw new Error(parsed.errors.map(error => error.message).join('; '))
+    const incoming = { ...parsed.spec, execution: { ...parsed.spec.execution, artifact_delivery: spec.execution?.artifact_delivery } }
+    const patch = definitionToPatch(spec, incoming, { runId: req.runId, baseRevision: req.baseRevision, decisionId: crypto.randomUUID(), rationale: req.rationale })
+    try { return { snapshot: runner.applyManualPlanPatch(req.slug, req.runId, patch) } }
+    catch (error) {
+      if (error instanceof TaskControlError) return { snapshot: runner.getRunState(req.slug, req.runId) ?? snapshot, conflict: { code: 'conflict', message: error.message } }
+      throw error
+    }
   })
 
   server.handle(RPC_CHANNELS.tasks.APPLY_RUN_REVISION, async (_ctx, workspaceId: string, req: TaskApplyRunRevisionRequest): Promise<TaskApplyRunRevisionResult> => {
@@ -576,6 +651,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     ]
     const resultBase = {
       diff,
+      impact: revisionImpact(live.spec, merged),
       validation,
       yaml,
       runRevision: runRevision.revision,

@@ -10,6 +10,7 @@ import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/s
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
 import { ArtifactVersions, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from '../reliability/artifact-candidate-inventory'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
 const markdown = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -52,6 +53,125 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
 
+  it('delivers a canonical PRO report on a new answer identity after its start acknowledgment', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    managed.orchestrationStatus = 'running'
+    const identities: string[] = []
+    install(async function* (index) {
+      expect(control).toBeDefined()
+      identities.push(control!.runId)
+      await control!.submit({ ...submission, markdown: index === 1 ? '计划已启动。' : '核验完成，成本为100万元。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '核验成本')
+    await manager.sendMessage(managed.id, '规范运行已结束，请验收并交付。', undefined, undefined, { hidden: true })
+    expect(new Set(identities).size).toBe(2)
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['计划已启动。', '核验完成，成本为100万元。'])
+    expect(managed.messages.findLast(message => message.role === 'user')?.hidden).toBe(true)
+  })
+
+  it('preserves readable task metadata while executing and persisting the complete model input', async () => {
+    install(async function* () { yield { type: 'complete' } })
+    const content = 'Canonical execution identity: {"claims":[],"sourceVersion":"hash"}'
+    const taskContext = { kind: 'assignment' as const, title: '核对成本资料', description: '比较成本与风险' }
+    await manager.sendMessage(managed.id, content, undefined, undefined, { taskContext })
+    expect(prompts[0]).toBe(content)
+    expect(managed.messages.find(message => message.role === 'user')).toMatchObject({ content, taskContext })
+    expect(events.find(event => event.type === 'user_message')?.message).toMatchObject({ content, taskContext })
+    await manager.flushSession(managed.id)
+    const stored = loadStoredSession(root, managed.id)!
+    expect(stored.messages.find(message => message.type === 'user')).toMatchObject({ content, taskContext })
+  })
+
+  it('ends an internal coordinator turn without answer recovery and restores delivery for final verification', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'running'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status }) }) as never)
+    install(async function* () {
+      expect(control?.coordinationOnly).toBe(true)
+      await expect(control!.submit(submission)).rejects.toThrow('Internal coordinator turns')
+      // A checkpoint can finish after its decision already settled the run.
+      status = 'completed'
+      yield { type: 'text_complete', text: '已消费检查点。', isIntermediate: false }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '内部协调检查点', undefined, undefined, { hidden: true, taskContext: { kind: 'coordination', runId: 'canonical-run' } })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.some(message => message.answerCommitted || message.role === 'error')).toBe(false)
+    expect(events.some(event => event.type === 'text_complete')).toBe(false)
+    install(async function* () {
+      expect(control?.coordinationOnly).toBe(false)
+      await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '最终验收交付', undefined, undefined, { hidden: true, taskContext: { kind: 'verification', runId: 'canonical-run' } })
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+  })
+
+  it('delivers a failed run explanation without offering more task submissions', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'failed'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => undefined,
+      getLatestRun: () => ({ orchestratorSessionId: managed.id, runId: 'canonical-run', status }) }) as never)
+    install(async function* () {
+      expect(control?.recovery).toBe(true)
+      await control!.submit({ ...submission, markdown: '研究节点失败，独立复核未完成；已完成的资料不重放。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '执行失败，请说明已知结果和未完成部分。', undefined, undefined,
+      { hidden: true, taskContext: { kind: 'feedback', runId: 'canonical-run' } })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+    status = 'waiting-approval'
+    install(async function* () {
+      expect(control?.recovery).toBe(false)
+      await control!.submit({ ...submission, markdown: '等待用户审批。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '审批反馈', undefined, undefined,
+      { hidden: true, taskContext: { kind: 'feedback', runId: 'canonical-run' } })
+  })
+
+  it('does not recover or publish a final answer from an unfinished canonical checkpoint', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    let status = 'waiting-coordinator'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status }) }) as never)
+    install(async function* () {
+      expect(control?.recovery).toBe(false)
+      await expect(control!.submit(submission)).rejects.toThrow('canonical run checkpoint')
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '消费检查点并继续待执行节点。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.some(message => message.answerCommitted || message.role === 'error')).toBe(false)
+    status = 'completed'
+    install(async function* (index) {
+      if (index === 2) await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    prompts = []
+    await manager.sendMessage(managed.id, '运行已验收，请交付。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(2)
+    expect(managed.messages.filter(message => message.answerCommitted)).toHaveLength(1)
+  })
+
+  it('can explain a paused canonical run without resuming or certifying it', async () => {
+    managed.workMode = 'PRO'
+    managed.taskSlug = 'canonical-plan'
+    manager.setTaskRunnerLookup(() => ({ progressContext: () => ({ orchestratorSessionId: managed.id, status: 'paused' }) }) as never)
+    install(async function* () {
+      await control!.submit({ ...submission, markdown: '计划修订已暂停，尚未完成验收。请检查处置后恢复。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '计划已在保护性检查中暂停，请说明问题。', undefined, undefined, { hidden: true })
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['计划修订已暂停，尚未完成验收。请检查处置后恢复。'])
+  })
+
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)
     const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',
@@ -77,7 +197,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const input = join(root, 'input.pdf')
     writeFileSync(file, 'before')
     writeFileSync(input, 'source')
-    await Bun.sleep(5)
+    await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
     install(async function* () {
       writeFileSync(file, 'after editing')
       await control!.submit({ ...submission, markdown: `已修改。[参考资料](${input})` })
@@ -116,7 +236,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     try {
       writeFileSync(edited, 'before')
       writeFileSync(source, 'input')
-      await Bun.sleep(5)
+      await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
       install(async function* () {
         writeFileSync(created, 'new')
         writeFileSync(edited, 'after')

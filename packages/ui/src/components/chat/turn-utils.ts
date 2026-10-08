@@ -9,6 +9,7 @@ import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
+import { parseTaskListResult } from '@craft-agent/shared/utils/task-list'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -76,6 +77,8 @@ export interface AssistantTurn {
   todos?: TodoItem[]
   /** Successful submit_answer. Delivery is not a work-chain row. */
   answerDelivered?: boolean
+  /** Canonical execution, distinct from each coordinator model turn's answerRunId. */
+  taskRunId?: string
 }
 
 /** Represents a user message */
@@ -234,7 +237,7 @@ export function demoteResponseToWorkChain(turn: AssistantTurn): void {
         type: 'intermediate',
         status: 'completed',
         content: response.text,
-        timestamp: turn.timestamp,
+        timestamp: response.timestamp ?? response.streamStartTime ?? turn.timestamp,
         depth: 0,
       })
     }
@@ -325,7 +328,7 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 
 /**
  * Determines whether the generic thinking row is needed in addition to the
- * visible work-chain activities. A running intermediate/thinking activity
+ * visible work-chain activities. A running prose/status activity
  * renders its own status, so mounting another row would duplicate it.
  */
 export function shouldShowGenericThinkingIndicator(
@@ -335,7 +338,7 @@ export function shouldShowGenericThinkingIndicator(
 ): boolean {
   return shouldShowThinkingIndicator(phase, isBuffering)
     && !renderedActivities.some(
-      activity => (activity.type === 'intermediate' || activity.type === 'thinking')
+      activity => (activity.type === 'intermediate' || activity.type === 'thinking' || activity.type === 'status')
         && activity.status === 'running',
     )
 }
@@ -383,12 +386,13 @@ export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
 ): string | undefined {
-  if (phase === 'complete') return undefined
+  // Completed orchestration chains still describe their last real operation.
+  if (phase === 'complete' && !activities.some(activity => activity.statusType === 'task_progress')) return undefined
 
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    if (isAnswerDeliveryTool(activity)) return
+    if (isAnswerDeliveryTool(activity) || activity.statusType === 'task_progress') return
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
       toolIntent = activity.intent?.trim()
@@ -534,33 +538,18 @@ function calculateActivityDepths(activities: ActivityItem[]): void {
  * Extract todos from TodoWrite tool results in activities.
  * Returns the latest todo state (from the most recent TodoWrite call).
  */
-function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
-  // Find all TodoWrite tool results, get the latest one
-  const todoWriteActivities = activities
-    .filter(a => a.toolName === 'TodoWrite' && a.status === 'completed' && a.content)
-    .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
-
-  const latestActivity = todoWriteActivities[0]
-  if (!latestActivity) return undefined
-
-  const latestResult = latestActivity.content
-  if (!latestResult) return undefined
-
-  try {
-    // TodoWrite result is typically a success message, but the input contains the todos
-    // We need to get the toolInput which has the todos array
-    const input = latestActivity.toolInput
-    if (input && Array.isArray(input.todos)) {
-      return input.todos.map((todo: { content: string; status: string; activeForm?: string }) => ({
-        content: todo.content,
-        status: todo.status as 'pending' | 'in_progress' | 'completed',
-        activeForm: todo.activeForm,
-      }))
+export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | undefined {
+  for (const activity of [...activities].sort((a, b) => b.timestamp - a.timestamp)) {
+    if (activity.status !== 'completed' || !activity.content) continue
+    const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+    if (name === 'update_task_list') {
+      const items = parseTaskListResult(activity.content)
+      if (items) return items
+    } else if (name === 'TodoWrite' && Array.isArray(activity.toolInput?.todos)) {
+      // Read old transcripts only; TodoWrite is not the public tool contract.
+      return activity.toolInput.todos as TodoItem[]
     }
-  } catch {
-    // Failed to parse, return undefined
   }
-
   return undefined
 }
 
@@ -569,6 +558,8 @@ function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | un
 // ============================================================================
 
 export interface GroupTurnsOptions {
+  /** Consolidate host checkpoints only in the owning root; never ordinary chats or workers. */
+  isTaskOrchestrationRoot?: boolean
   /**
    * Whether the session is still actively processing.
    *
@@ -638,6 +629,77 @@ function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
   latestAssistant.isStreaming = true
 }
 
+/** Keep coordinator acknowledgments/next steps in one work chain until a host-accepted result. */
+function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] {
+  const result: Turn[] = []
+  let execution: AssistantTurn | undefined
+  let outcome: 'process' | 'delivery' = 'process'
+  let legacyVerdict = false
+  for (const turn of turns) {
+    if (turn.type !== 'assistant') {
+      execution = undefined
+      result.push(turn)
+      continue
+    }
+    const context = turn.activities.find(activity => activity.type === 'task-context'
+      && ['coordination', 'verification'].includes(activity.taskContext?.kind ?? ''))
+    const runId = context?.taskContext?.runId
+      ?? context?.content?.match(/\brunId[=:]\s*"?([\w-]+)/)?.[1]
+    if (context) {
+      // A pause/failure report is a user-facing boundary. A new execution must
+      // also leave the preceding run's report intact, even with no human turn.
+      if (outcome === 'delivery' || runId && execution?.taskRunId && runId !== execution.taskRunId) execution = undefined
+      outcome = 'process'
+      legacyVerdict = context.taskContext?.kind === 'verification' && !!context.content?.includes('VERDICT: PASS')
+    }
+    if (!execution && !context) {
+      result.push(turn)
+      continue
+    }
+    if (!execution) {
+      execution = { ...turn, activities: [...turn.activities], taskRunId: runId }
+      result.push(execution)
+    } else {
+      demoteResponseToWorkChain(execution)
+      execution.activities.push(...turn.activities)
+      execution.response = turn.response
+      execution.isStreaming = turn.isStreaming
+      execution.isComplete = turn.isComplete
+      execution.todos = turn.todos ?? execution.todos
+      execution.taskRunId ??= runId
+    }
+    for (const activity of turn.activities) {
+      if (activity.type !== 'tool' || activity.status !== 'completed') continue
+      const name = normalizeCraftSessionToolName(activity.toolName ?? '')
+      if (!['submit_orchestration_decision', 'submit_orchestration_patch', 'submit_task_verdict'].includes(name)) continue
+      if (execution.taskRunId && activity.toolInput?.runId && activity.toolInput.runId !== execution.taskRunId) continue
+      try {
+        const receipt = JSON.parse(activity.content ?? '') as { status?: string }
+        if (['paused', 'failed', 'stopped', 'waiting-approval', 'waiting-help'].includes(receipt.status ?? '')
+          || receipt.status === 'completed') outcome = 'delivery'
+        else outcome = 'process'
+      } catch { /* An invalid receipt cannot certify a final result. */ }
+    }
+    // Historical v1 verification used an explicit verdict line instead of a tool receipt.
+    if (legacyVerdict && /^VERDICT: (?:PASS|FAIL\b.*)$/m.test(turn.response?.text ?? '')) outcome = 'delivery'
+    if (outcome === 'process') {
+      demoteResponseToWorkChain(execution)
+      execution.isComplete = !turn.isStreaming
+      execution.isStreaming = turn.isStreaming
+    } else if (execution.response) {
+      execution.isComplete = !execution.response.isStreaming && !execution.response.isCommentary
+      execution.isStreaming = !!execution.response.isStreaming
+    }
+  }
+  // Background worker activity keeps only the current chain open. Earlier
+  // stages separated by human messages/errors must not regain running chrome.
+  if (running && outcome === 'process' && execution && execution === result.at(-1)) {
+    execution.isComplete = false
+    execution.isStreaming = true
+  }
+  return result
+}
+
 /**
  * Groups messages into turns for TurnCard rendering
  *
@@ -680,6 +742,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.presentationProtocol === 'marker-v1') activeRunId = undefined
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
+    // A historical commit may contain only the tool's receipt. It cannot
+    // replace the draft or close the run, even when marked answerCommitted.
+    if (message.role === 'assistant' && message.answerProtocol === 'explicit-v1'
+      && message.answerCommitted && isAnswerDeliveryReceipt(message.content)) return []
     const structured = !!runId && structuredRuns.has(runId)
     if (structured && message.answerRoutingVersion !== 1) message = { ...message, answerRoutingVersion: 1 }
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
@@ -732,7 +798,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (isAuthoritativeCommit(normalized) && runId) deliveredRuns.add(runId)
     return [classifyForTurnGrouping(normalized)]
   })
-  const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
+  const visibleMessages = protocolMessages.filter(m => !m.isQueued && (!m.hidden
+    || options.isTaskOrchestrationRoot && m.role === 'user'
+      && ['coordination', 'verification'].includes(m.taskContext?.kind ?? '')))
   // message_end only closes a text segment, not the agent run. Keep its
   // unclassified draft on the card while waiting for the delivery boundary.
   // A subsequent tool/message naturally removes this tail-only reservation.
@@ -852,6 +920,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           currentTurn.response = {
             text: promotedText,
             isStreaming: false,
+            timestamp: lastTextActivity.timestamp,
             messageId: lastTextActivity.id,
           }
           // The same body has changed semantic roles from process commentary
@@ -893,6 +962,18 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // If there's a current turn, it's complete (something follows it)
       if (currentTurn) currentTurn.isComplete = true
       flushCurrentTurn()
+      if (message.taskContext) {
+        currentTurn = {
+          type: 'assistant', turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.id,
+          answerRunId: message.answerRunId, answerRoutingVersion: message.answerRoutingVersion,
+          presentationProtocol: message.presentationProtocol, timestamp: message.timestamp,
+          isStreaming: false, isComplete: false,
+          activities: [{ id: message.id, messageId: message.id, type: 'task-context', status: 'completed',
+            content: message.content, taskContext: message.taskContext, attachments: message.attachments,
+            timestamp: message.timestamp }],
+        }
+        continue
+      }
       turns.push({
         type: 'user',
         message,
@@ -1084,6 +1165,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         if (keepOnCard) {
           currentTurn.response = {
             text: message.content,
+            timestamp: message.timestamp,
             isStreaming: !!(message.isStreaming || message.isPending),
             isCommentary: false,
             streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
@@ -1127,6 +1209,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
+        timestamp: message.timestamp,
         isAnswerPreview: message.answerPreview,
         answerSalvaged: message.answerSalvaged,
         artifactVersions: message.artifactVersions,
@@ -1182,7 +1265,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 
-  return turns
+  return options.isTaskOrchestrationRoot
+    ? consolidateOrchestrationTurns(turns, !!options.isTaskOrchestrationRunning || !!options.isSessionProcessing)
+    : turns
 }
 
 /**
@@ -1493,6 +1578,17 @@ function parseOrchestrationResult(content: string): Record<string, unknown> | nu
     return null
   }
   return null
+}
+
+/** An asynchronous start acknowledgment is progress, even if its chat turn ended. */
+export function isTaskStartAcknowledgment(activities: ActivityItem[]): boolean {
+  const start = activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
+    && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
+  const result = start?.content ? parseOrchestrationResult(start.content) : null
+  return typeof result?.runId === 'string' && result.status === 'running'
+    && !activities.some(activity => activity.taskContext?.kind === 'verification' || activity.taskContext?.kind === 'feedback'
+      || activity.type === 'tool' && activity.status === 'completed'
+        && normalizeCraftSessionToolName(activity.toolName ?? '') === 'submit_task_verdict')
 }
 
 function truncateOneLine(text: string, max: number): string {

@@ -17,6 +17,7 @@ export async function handleRunTask(
 
   try {
     const result = await ctx.runTask({
+      requestId: args.requestId,
       slug: args.slug?.trim() || undefined,
       orchestratorSessionId: args.orchestratorSessionId?.trim() || undefined,
       params: args.params,

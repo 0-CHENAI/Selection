@@ -87,8 +87,9 @@ import {
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
 import { normalizeRemovedSessionClassification } from '../../shared/session-classification'
+import { workModeViewAtom } from '@/atoms/work-mode'
+import { isWorkModeRoot } from '@/lib/work-mode-navigation'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
-import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import {
@@ -186,6 +187,7 @@ export function NavigationProvider({
 
   // Read session metadata directly from atom (reactive to session changes)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
+  const workModeView = useAtomValue(workModeViewAtom)
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   const pushPanel = useSetAtom(pushPanelAtom)
 
@@ -563,9 +565,9 @@ export function NavigationProvider({
 
   // Keep the global session selection in sync with the focused panel
   useEffect(() => {
-    if (isSessionsNavigation(navigationState) && navigationState.details) {
-      setSession({ selected: navigationState.details.sessionId })
-      if (workspaceId) {
+    if (isSessionsNavigation(navigationState)) {
+      setSession({ selected: navigationState.details?.sessionId ?? null })
+      if (workspaceId && navigationState.details) {
         // Only persist if the session belongs to this workspace (prevents cross-workspace
         // pollution during workspace switch, when workspaceId changed but navigationState
         // still reflects the old workspace's focused panel)
@@ -587,12 +589,12 @@ export function NavigationProvider({
     (_filter: SessionFilter): SessionMeta[] => {
       // First filter out hidden sessions - they should never appear in any view
       const visibleSessions = sessionMetas.filter(
-        s => isOrdinarySessionVisible(s) && (!workspaceId || s.workspaceId === workspaceId)
+        s => isWorkModeRoot(s, workModeView) && (!workspaceId || s.workspaceId === workspaceId)
       )
 
       return visibleSessions
     },
-    [sessionMetas, workspaceId]
+    [sessionMetas, workspaceId, workModeView]
   )
 
   const getFirstSessionId = useCallback(
@@ -715,7 +717,7 @@ export function NavigationProvider({
 
       switch (parsed.name) {
         case 'new-session': {
-          const createOptions: import('../../shared/types').CreateSessionOptions = {}
+          const createOptions: import('../../shared/types').CreateSessionOptions = { workMode: workModeView }
           if (parsed.params.mode) {
             const parsedMode = parsePermissionMode(parsed.params.mode)
             if (parsedMode) {
@@ -853,7 +855,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, workModeView]
   )
 
   // =========================================================================

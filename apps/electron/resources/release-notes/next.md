@@ -4,11 +4,29 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
+
+- **Authorized project history** — Projects can explicitly enable PRO history search with exact message/version expansion and native compaction lineage. Changed or deleted history is invalidated; fresh conversations do not automatically inherit other chats, and sibling execution contexts remain isolated. Issue #471.
+
+- **Plan explanation and history replay** — The existing workbench adds task, data, control, actor and research views, static preflight, revision impact and read-only event history. Replay uses frozen revisions without dispatching models or applying changes. Issue #465.
+
+- **Coordinator-first task help** — A blocked worker records its problem, attempted steps and needed decision, yields only its task slot, then continues the same execution after the root replies. Replies retain the current authority; Stop and restart retire lost waiting instances while preserving history. Issue #449.
+
+- **Research corrections** — Append-only errata invalidate exact claim/source versions, dependent reasoning and historical reports until independently reviewed corrections are available. Frozen handovers disclose later associated corrections without rewriting their snapshots. Part of #449.
+
+- **Research source bundles** — Deep Research records successful original Read ranges with exact source and execution versions, and separates cited, uncited, unresolved and unrecorded material. New research plans require the author and independent reviewer to read the cited ranges themselves; compatible successors preserve verified history. Part of #449.
+
+- **PRO chat planning** — Complex goals can create one canonical plan on the current PRO conversation and start asynchronously within its existing authorization. Stable creation and start requests prevent duplicate plans and runs; saving in the editor remains separate from execution.
+
 - **Reliable task recovery** — Context admission checks cover subsequent tool-loop requests, and execution checkpoints retain confirmed progress. Restart recovery verifies execution ownership, permissions and tool receipts before continuing; uncertain writes pause with details in the existing error panel.
 
 - **Traceable revisions and collaboration** — Body feedback keeps its source, result and history. New writing tasks use isolated candidates, validation and runtime integration, preserving project edits and surfacing conflicts in the existing collaboration details.
 
 ## Improvements
+
+- **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
+
+- **Fair model request concurrency** — Conversations, coordinators, workers and utility calls now share host-owned request slots by provider account and endpoint. Queues rotate between runs, release slots during rate-limit backoff, honor Retry-After, and adapt concurrency after throttling. Waiting time is excluded from the active request timeout; cancellation returns queued and active slots. Codex uses its supported SSE transport so requests participate in the same accounting.
 
 - **Compact artifact history** — File changes requested in chat are recorded automatically. Version history shows version numbers, short identifiers, summaries and previews, without a separate edit form or explanatory paragraphs. Existing primary files retain their own history when alternative recovery paths refer to another file.
 
@@ -16,7 +34,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Safer Office document edits** — Bundled OfficeCLI is updated to v1.0.152. After a warned or failed write, the agent checks for partial changes before retrying so it does not duplicate document content. PR #417.
 
-- **Simpler settings** — The Input page, spell check, send-key choice, and project color highlight are removed. Connection icons are now labeled provider icons, and an empty default-sources section uses the same settings card as the other rows. A new Advanced section keeps DAG orchestration and Swarm agents off by default and stores an optional AnySearch API key locally without showing the saved value. Fixes #413.
+- **Simpler settings** — The Input page, spell check, send-key choice, and project color highlight are removed. Connection icons are now labeled provider icons, and an empty default-sources section uses the same settings card as the other rows. Advanced settings store an optional AnySearch API key locally without showing the saved value. PRO now provides orchestration in standard builds, with an explicit build override for disabling it. Fixes #413.
 
 - **Document previews** — HTML and Markdown inline cards show file identity and clear boundaries; full content opens in a scrollable preview dialog without expanding the conversation. Keyboard focus returns to the opener after closing. Fixes #409.
 
@@ -47,6 +65,24 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Unified work-chain header** — Thinking and numbered steps share one title row and enter or leave on the same height curve as the processing indicator. The collapsed title no longer appends an error count, and the chevron stays in document flow so the rounded chrome does not clip it. Fixes #405.
 
 ## Bug Fixes
+
+- **Coordinator help replies** — PRO workflow roots retain the structured help tool when a worker yields for guidance, and interrupted host-owned help waits can recover safely. Exact-premise rejections identify the differing entry so a worker can correct its submission without changing frozen research criteria.
+
+- **Help restart recovery** — Lost worker help waits now use normal retry safety checks and a fresh execution attempt, preserving completed sibling results and retiring late replies. They no longer try to resume a progress checkpoint that was never created.
+
+- **Stable project history versions** — Re-saving an unchanged message with a different JSON field order no longer invalidates its history reference. Content, role and original identity changes still require a new search.
+
+- **Compact coordinator checkpoints** — Research checkpoints and final verification carry current claim versions, review status and unresolved limits while referring to canonical receipts on demand. Repeated read histories no longer overwhelm the parent context; complete receipts remain available for independent verification.
+
+- **Cancelled plan nodes** — Coordinator removal of pending work now retires its execution state along with the canonical node, so an obsolete node cannot block final verification. Unresolved live failures remain blocking.
+
+- **Indexed research snapshots** — Research plans can use the text snapshot returned by document navigation directly while retaining original-file versions and native page/cell locations. Changed originals and corrupt snapshots remain unavailable. Issues #460 and #464.
+
+- **Chat composer with run history** — Long reports and task progress no longer push the composer below the window; its model and send controls remain visible.
+
+- **Independent review and verified context** — Verify and judge nodes always start a fresh context. Actor reuse requires a completed execution, known outcomes, matching model and authorization, and unchanged inputs. A confirmed native write cannot conceal an intervening external file change.
+
+- **Upstream service failures** — Proxy 500/502/503/504 responses mentioning authentication are classified as service errors, avoiding a misleading API-key refresh and preserving the recorded task state.
 
 - **Conversation navigation previews** — Hover previews on the left conversation rail now keep only one visual line of the user message, add an ellipsis when it overflows, and preserve the gray response summary. Fixes #397.
 

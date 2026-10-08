@@ -59,13 +59,13 @@ describe('system prompt guidance', () => {
       expect(prompt).toContain('Do not search the home directory, `~/.selection`')
       expect(prompt).not.toContain('Task tool with subagents')
     }
-    expect(off).toContain('explain this even when the toggle is off')
-    expect(off).toContain('Swarm** control in the chat input')
-    expect(off).toContain('session-level parallelism')
+    expect(off).toContain('available through PRO')
+    expect(off).not.toContain('Swarm** control in the chat input')
+    expect(off).toContain('Simple tasks stay in one agent')
     expect(off).toContain('persisted Task DAG')
   })
 
-  it('fails closed for autonomous delegation unless the per-session Swarm switch is on', () => {
+  it('fails closed for autonomous delegation unless the host enables PRO orchestration', () => {
     const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
     const on = getSystemPrompt(
       undefined,
@@ -80,10 +80,8 @@ describe('system prompt guidance', () => {
       true,
     )
 
-    expect(off).toContain('Swarm mode is OFF')
-    expect(off).toContain('Selection still has Swarm')
-    expect(off).toContain('this session will not split work autonomously')
-    expect(on).toContain('Swarm mode is ON')
+    expect(off).toContain('This session cannot delegate autonomously')
+    expect(on).toContain('This PRO root supports autonomous orchestration')
     expect(on).toContain('fail closed')
     expect(on).toContain('final aggregation or verification contract')
     expect(on).toContain('qualification')
@@ -181,8 +179,8 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
     expect(prompt).toContain('`control_task_run`')
-    expect(prompt).toContain('explicit user confirmation in the workflow editor')
-    expect(prompt).toContain('Only editor proposal sessions may call submit_task_definition')
+    expect(prompt).toContain('Do not ask for plan approval when the user already authorized the goal')
+    expect(prompt).toContain('Editor submit_task_definition still creates only an unsaved proposal')
     expect(prompt).not.toContain('mandatory when generating a new task')
     expect(prompt).toContain('`submit_task_output`')
     expect(prompt).toContain('`submit_task_verdict`')

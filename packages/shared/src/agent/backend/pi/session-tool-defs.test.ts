@@ -32,16 +32,35 @@ describe('resolveSessionToolProxyName', () => {
 });
 
 describe('getSessionToolProxyDefs', () => {
+  it('exposes node submissions only to assigned nodes, retaining root verification', () => {
+    const root = { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan' };
+    const rootNames = getSessionToolProxyDefs({ executionSession: root }).map(def => def.name);
+    const nodeNames = getSessionToolProxyDefs({ executionSession: { ...root, id: 'worker', parentSessionId: 'root', taskRunId: 'run', taskNodeId: 'review' } }).map(def => def.name);
+    for (const name of ['submit_task_output', 'submit_task_node_verdict']) {
+      expect(rootNames).not.toContain(`mcp__session__${name}`);
+      expect(nodeNames).toContain(`mcp__session__${name}`);
+    }
+    expect(rootNames).toContain('mcp__session__task_help');
+    expect(nodeNames).toContain('mcp__session__task_help');
+    expect(rootNames).toContain('mcp__session__submit_task_verdict');
+  });
+  it('limits root help replies to eligible workflow coordinators', () => {
+    for (const session of [
+      { id: 'root', workMode: 'PRO' as const },
+      { id: 'norm', workMode: 'NORM' as const, taskSlug: 'plan' },
+      { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan', workModeNeedsReview: true },
+      { id: 'worker', workMode: 'PRO' as const, taskSlug: 'plan', parentSessionId: 'root' },
+      { id: 'worker', workMode: 'PRO' as const, taskSlug: 'plan', executionRootSessionId: 'root' },
+    ]) expect(getSessionToolProxyDefs({ executionSession: session }).map(def => def.name)).not.toContain('mcp__session__task_help');
+  });
   it('exposes the managed artifact version tool to the model', () => {
     expect(getSessionToolProxyDefs().map(def => def.name)).toContain('mcp__session__artifact_versions');
   });
-  it('does not expose disabled task authoring tools through any proxy name', () => {
-    const names = getSessionToolProxyDefs().map(def => def.name);
-    for (const name of ['create_task']) {
-      expect(names).not.toContain(name);
-      expect(names).not.toContain(`${PI_SESSION_TOOL_PREFIX}${name}`);
-      expect(resolveSessionToolProxyName(name)).toBe(name);
-      expect(resolveSessionToolProxyName(`session__${name}`)).toBe(`session__${name}`);
+  it('advertises canonical creation only to eligible PRO roots', () => {
+    const pro = getSessionToolProxyDefs({ executionSession: { id: 'root', workMode: 'PRO' } }).map(def => def.name);
+    expect(pro).toContain('mcp__session__create_task');
+    for (const session of [{ id: 'norm', workMode: 'NORM' as const }, { id: 'worker', workMode: 'PRO' as const, parentSessionId: 'root' }]) {
+      expect(getSessionToolProxyDefs({ executionSession: session }).map(def => def.name)).not.toContain('mcp__session__create_task');
     }
   });
 

@@ -12,11 +12,13 @@
  */
 
 import { z } from 'zod';
+import { UpdateTaskListSchema, handleUpdateTaskList } from './handlers/update-task-list.ts';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
 
 // Handlers
+import { handleCreateTask } from './handlers/create-task.ts';
 import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer.ts';
 import { handleArtifactVersions } from './handlers/artifact-versions.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
@@ -40,6 +42,7 @@ import { handleSendDeveloperFeedback } from './handlers/send-developer-feedback.
 import { handleSetSessionLabels } from './handlers/set-session-labels.ts';
 import { handleSetSessionStatus } from './handlers/set-session-status.ts';
 import { handleGetSessionInfo } from './handlers/get-session-info.ts';
+import { handleProjectHistory } from './handlers/project-history.ts';
 import { handleListSessions } from './handlers/list-sessions.ts';
 import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
 import { handleRunTask } from './handlers/run-task.ts';
@@ -49,6 +52,7 @@ import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
 import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
 import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
+import { TaskHelpSchema, handleTaskHelp } from './handlers/task-help.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
@@ -195,6 +199,8 @@ export const BrowserToolSchema = z.object({
 });
 
 export const SpawnSessionSchema = z.object({
+  taskBinding: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }).optional()
+    .describe('Required for 3.0 task delegation, and whenever this root owns an active task run. Start the canonical plan first, then delegate to an already running logical node; results stay bound to its run, revision and attempt.'),
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
   name: z.string().optional().describe('Session name'),
@@ -263,9 +269,10 @@ export const ArchiveSessionSchema = z.object({
 });
 
 export const CreateTaskSchema = z.object({
+  requestId: z.string().min(1).max(128).describe('Stable creation identity. Reuse for retries, never for a different plan.'),
   title: z.string().optional().describe('Short task title shown on the board (also drives the slug)'),
   description: z.string().optional().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
-  spec: z.record(z.string(), z.unknown()).optional().describe('Full v2 task spec. Mutually exclusive with title+description.'),
+  spec: z.record(z.string(), z.unknown()).optional().describe('Full v3 task spec, exclusive with title/description. Required: title, goal, nodes. acceptance_criteria is one string; constraints and locked_fields are arrays. Unknown fields are rejected. Node ids use lowercase letters/numbers/hyphens. Each node: id, kind (session or verify), prompt, depends_on. Use runner: orchestrate for result-driven work. ${nodes.read.output} resolves only submitted text; ${nodes.read.output.full_text} resolves a declared named output. Include all evidence needed by downstream nodes, or explicit original source paths for independent re-reading. For open-web discovery, omit research and researchRole; use session nodes with WebSearch/WebFetch and a fresh independent verify node. Only enable traceable deep research after local originals exist: research: {line: {id, question, premises}, dimensions: [{id, requirement, required}], sources: [{id, path, ref}]} freezes those authorized files; empty research.sources is rejected. Source-backed nodes use researchRole: researcher, reviewer or reporter and outputs: [{name: research, kind: param, type: json, required: true}]. Native deep-research Skill supplies claim/evidence/review contracts; source-backed research requires host-recorded successful original Read ranges, not summary assertions.'),
   acceptanceCriteria: z.string().optional().describe('Freeform rubric the final result is verified against'),
   sources: z.array(z.string()).optional().describe('Source slugs to enable on the task sessions'),
   skills: z.array(z.string()).optional().describe('Skill slugs applied to dispatched task prompts'),
@@ -276,6 +283,7 @@ export const CreateTaskSchema = z.object({
 });
 
 export const RunTaskSchema = z.object({
+  requestId: z.string().min(1).max(128).optional().describe('Stable start identity. Reuse after a lost response to avoid a second run.'),
   slug: z.string().optional().describe('Task slug to run. Required unless orchestratorSessionId is set.'),
   orchestratorSessionId: z.string().optional().describe('Orchestrator session id of an existing board task. Used to find the slug when omitted.'),
   params: z.record(z.string(), z.unknown()).optional().describe('Optional task params forwarded to TaskRunner'),
@@ -302,7 +310,22 @@ export const ControlTaskRunSchema = z.object({
   action: z.enum(['pause', 'resume', 'stop', 'continue']),
 });
 
+// Expose the decision shape before the host transaction. Exact identities and
+// atomic line/task bindings remain validated by the canonical research schema.
+const ResearchExpansionToolSchema = z.object({
+  lines: z.array(z.record(z.string(), z.unknown())).optional(),
+  questions: z.array(z.record(z.string(), z.unknown())).optional(),
+  branchDispositions: z.array(z.discriminatedUnion('action', [
+    z.object({ candidateId: z.string().min(1), action: z.literal('not-adopt'), reason: z.string().trim().min(1) }).strict(),
+    z.object({ candidateId: z.string().min(1), action: z.literal('open'), reason: z.string().trim().min(1), lineId: z.string().min(1), taskRef: z.string().min(1) }).strict(),
+  ])).optional(),
+}).strict().describe('Append independently critiqued alternative-premise lines and compatible shared questions. Record each candidate as {candidateId,action:"not-adopt",reason} without lineId/taskRef, or {candidateId,action:"open",reason,lineId,taskRef} with its exact new line and canonical researcher task. Fact corrections stay on the original line.');
+
 export const SubmitOrchestrationPatchSchema = z.object({
+  consumedResults: z.array(z.string()).optional().describe('Stable result event ids consumed by this decision'),
+  plannerPhase: z.enum(['active', 'draining']).optional().describe('Keep planning active or propose draining; exhausted is derived by the runtime'),
+  changeKind: z.enum(['structure', 'repair', 'research']).optional(),
+  researchExpansion: ResearchExpansionToolSchema.optional(),
   runId: z.string().describe('Active run id'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this patch is based on'),
@@ -310,6 +333,8 @@ export const SubmitOrchestrationPatchSchema = z.object({
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
+  decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
   action: z.enum(['continue', 'pause']).optional(),
 });
 
@@ -321,6 +346,10 @@ export const SubmitTaskVerdictSchema = z.object({
 });
 
 export const SubmitOrchestrationDecisionSchema = z.object({
+  consumedResults: z.array(z.string()).optional().describe('Result event ids consumed; defaults to exactly the checkpoint events'),
+  plannerPhase: z.enum(['active', 'draining']).optional(),
+  changeKind: z.enum(['structure', 'repair', 'research']).optional(),
+  researchExpansion: ResearchExpansionToolSchema.optional(),
   runId: z.string().describe('Active run id'),
   checkpointId: z.string().describe('Checkpoint this decision answers'),
   decisionId: z.string().describe('Idempotency key for this decision'),
@@ -330,6 +359,8 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
+  decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
 }).superRefine((value, ctx) => {
   if (value.action === 'patch' && !value.rationale?.trim()) {
     ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });
@@ -633,17 +664,9 @@ IMPORTANT: never move a task into a closed status (such as "done" or "cancelled"
 Archiving removes a session from the active list and unread counts — it does NOT delete it (pass archived=false to restore). Use it to tidy up finished or superseded sessions.
 Requires an explicit sessionId and cannot target your own session. Use list_sessions / get_session_info to find the target session's ID.`,
 
-  create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
+  create_task: `Create and display the canonical V3 plan on this PRO root. Requires a stable requestId. Provide a full spec, or title/description for a single-node plan. Creation alone never runs it. The host preserves current authorization, model, sources, skills and constraints and prevents duplicate ownership. For complex user goals, explain the plan briefly, create it, then call run_task asynchronously within the existing authorization. Simple chat work needs no workflow. Pending changes use canonical revisions; never create a parallel hidden plan.`,
 
-Provide either title + description (single-node form) OR a full task spec (exclusive). New tasks default to schema_version 3. Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
-
-Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
-
-  run_task: `Start the Conductor DAG for an existing Selection Task on the kanban board.
-
-Provide slug (from the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
-
-Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must save a workflow in the editor or import YAML first. Use only when the user asked to run a board task.`,
+  run_task: `Start the saved canonical plan owned by this PRO root. Use a stable requestId for retries. Returns immediately. End the current chat turn with a short start acknowledgment; do not poll/wait in a loop or send reminders to workers. The scheduler automatically wakes the root for checkpoints and final verification. Existing permissions still govern every operation. Do not start a second run for a lost response; reuse the requestId. Saving in the editor never starts work.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
@@ -677,7 +700,7 @@ Requires runId, checkpointId, decisionId, and baseRevision. action continue uses
 
   submit_task_node_verdict: `Submit a structured pass/fail verdict for a verify or judge node.
 
-FAIL requires reason, evidence, and nodes to rework. PASS unblocks dependents. Chat text is not a verdict.`,
+FAIL requires reason, evidence, and completed producing dependency nodes to rework; pending, unknown and unrelated nodes are rejected. Judge the assigned node contract. An audit of supplied historical material can finish with defect findings for the coordinator to schedule correction; its completion does not certify that material as correct. A verdict does not submit declared outputs: also call submit_task_output with every required named value before ending. Dependents unblock only after successful node completion and a PASS verdict. Chat text is not a verdict.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
@@ -758,6 +781,7 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'update_task_list', description: 'Update the flat Task List for the current user request in an ordinary conversation. For work with multiple independently completable goals, write a short list before starting and update it as you progress. Each call replaces the entire list; preserve IDs. At most one item is in_progress. Simple questions, reading a file, a single command and text polishing do not need a list. This tool only records conversation progress; it never creates a workflow, starts a run or delegates. Proposal, orchestration and worker sessions cannot use it.', inputSchema: UpdateTaskListSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleUpdateTaskList },
   { name: 'artifact_versions', description: 'List complete saved versions of a managed file, or switch the current file back to a selected saved version without creating another version. For restore, first inspect the versions and pass artifactId, versionId and expectedVersion. Never copy snapshot files by shell command; this tool checks concurrent edits and preserves the other versions.', inputSchema: ArtifactVersionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleArtifactVersions },
   { name: 'submit_answer', description: 'Deliver the complete final Markdown answer to the user. Include all explanation and verification results; correct superseded claims. File cards are generated automatically from changed files in supported formats. When a delivered file changes, include artifactVersionTitle: a specific short change description. Call alone, after all work, and stop after success. For a large HTML/SVG file already written to disk, submit a short Markdown link and checks instead of inlining the whole file. Never just refer to an earlier explanation.', inputSchema: SubmitAnswerSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleSubmitAnswer },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
@@ -787,15 +811,18 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
   { name: 'archive_session', description: TOOL_DESCRIPTIONS.archive_session, inputSchema: ArchiveSessionSchema, executionMode: 'registry', safeMode: 'block', handler: handleArchiveSession },
-  { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
+  { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'allow', handler: handleCreateTask },
+  { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
   { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
   { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
+  { name: 'task_help', description: 'Structured coordinator-first help. A bound worker requests help with the problem, attempted steps, needed decision and exact claim/source references. This tool waits for the root response while only this node yields its execution slot; do not invoke unrelated operations in the same tool batch. The root answers within existing authority or records needs-user, then asks the user for the missing decision. Replies never grant permissions or change locked goals. Root replies must use the host-issued request identity and current run revision. Completed operations must not be replayed.', inputSchema: TaskHelpSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTaskHelp },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
+  { name: 'project_history', description: 'On-demand literal search and exact-version message expansion within a user-authorized project. Only use for a specific task need or a user request to recall earlier project work. Never use as routine preflight or automatic context in a fresh chat. Sibling execution contexts are isolated. Prior answers/summaries are conversation data, not verified source evidence, permission or independent review. Enabling access is a user project setting; do not edit it yourself.', inputSchema: z.object({ query: z.string().trim().min(1).optional(), sessionId: z.string().optional(), messageId: z.string().optional(), expectedVersion: z.string().optional(), offset: z.number().int().nonnegative().optional() }).strict(), executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleProjectHistory },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },
   // Inter-session messaging

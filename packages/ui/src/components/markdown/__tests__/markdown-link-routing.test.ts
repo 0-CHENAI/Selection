@@ -119,6 +119,11 @@ describe('resolveMarkdownLinkTarget', () => {
     })
   })
 
+  it('routes workspace session and focused-window deep links to the URL handler', () => {
+    const url = 'craftagents://workspace/ws/allSessions/session/worker?window=focused'
+    expect(resolveMarkdownLinkTarget(url)).toEqual({ kind: 'url', url })
+  })
+
   it('treats fuzzy http://SKILL.md autolinks as local file names', () => {
     expect(resolveMarkdownLinkTarget('http://SKILL.md')).toEqual({
       kind: 'file',

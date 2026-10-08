@@ -37,6 +37,7 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
 import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
 import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, resolveBundledSkillMdPath } from '../../skills/storage.ts';
@@ -633,6 +634,7 @@ export type PreToolUseCheckResult =
  * hook input. All fields needed for the pipeline are normalized here.
  */
 export interface PreToolUseInput {
+  executionSession?: WorkModeSession;
   /** SDK-normalized tool name (PascalCase for built-in, mcp__server__tool for MCP) */
   toolName: string;
   /** Tool input object */
@@ -726,6 +728,11 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 }
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
+  const capability = complexToolCapability(ctx.toolName);
+  if (capability) {
+    const reason = complexCapabilityError(ctx.executionSession, capability);
+    if (reason) return { type: 'block', reason };
+  }
   const {
     toolName,
     input,

@@ -8,6 +8,7 @@ import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ActivityItem } from '../TurnCard'
+import { TooltipProvider } from '../../tooltip'
 
 // TurnCard's pure preview helpers use the shared i18next singleton, so the
 // provider and helpers must use the same initialized instance and real locales.
@@ -37,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -49,14 +50,20 @@ async function renderTurn(
 
   return renderToStaticMarkup(
     <I18nextProvider i18n={testI18n}>
+      <TooltipProvider>
       <TurnCard
         turnId="issue-239"
         activities={activities}
         isStreaming={options.isStreaming ?? true}
         isComplete={options.isComplete ?? false}
-        defaultExpanded
+        defaultExpanded={options.expanded ?? true}
+        onOpenActivityDetails={options.onOpenActivityDetails}
+        workControls={options.workControls}
+        taskPreview={options.taskPreview}
+        response={options.response}
         renderActionsMenu={() => null}
       />
+      </TooltipProvider>
     </I18nextProvider>,
   )
 }
@@ -66,6 +73,138 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
+  it.each(['en', 'zh-Hans'] as const)('separates the task assignment, folded process and output only in task previews in %s', async language => {
+    const activities: ActivityItem[] = [{ id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1,
+      taskContext: { kind: 'assignment', instruction: '独立核对原始金额。' },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }]
+    const options = { isComplete: true, isStreaming: false, expanded: false,
+      response: { text: '核对结果：原始金额为 100 万元。', isStreaming: false } }
+    const html = await renderTurn(language, activities, { ...options, taskPreview: true })
+    expect(html).toContain('<section')
+    expect(html).toContain('独立核对原始金额。')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html.indexOf('data-task-assignment-summary')).toBeLessThan(html.indexOf('aria-expanded="false"'))
+    expect(html.indexOf('aria-expanded="false"')).toBeLessThan(html.indexOf('data-task-output-heading'))
+    expect(html.indexOf('data-task-output-heading')).toBeLessThan(html.indexOf('data-search-root="response"'))
+    expect(html).toContain(resources[language].translation['tasks.nodeOutputs'])
+    expect(await renderTurn(language, activities, options)).not.toContain('data-task-output-heading')
+    expect(await renderTurn(language, activities, { ...options, response: undefined, taskPreview: true })).not.toContain('data-task-output-heading')
+  })
+  it('keeps retry controls inside the work chain without a nested attempt history', async () => {
+    const activities: ActivityItem[] = [{ id: 'node', type: 'status', status: 'error', timestamp: 1,
+      taskNode: { title: '核对成本', sessionId: 'current', stateLabel: '失败' } }]
+    const options = { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {}, workControls: <button>重试失败节点</button> }
+    const html = await renderTurn('zh-Hans', activities, options)
+    expect(html).not.toContain('历史尝试')
+    expect(html).not.toContain('第 1 次尝试')
+    expect(html).toContain('重试失败节点')
+    const collapsed = await renderTurn('zh-Hans', activities, { ...options, expanded: false })
+    expect(collapsed).toMatch(/aria-hidden="true"[\s\S]*重试失败节点/)
+    expect(collapsed).toContain('grid-template-rows:0fr')
+  })
+  it.each(['en', 'zh-Hans'] as const)('interleaves child tasks and operations chronologically at the same row level in %s', async language => {
+    const html = await renderTurn(language, [
+      { id: 'last', type: 'intermediate', status: 'completed', timestamp: 5, content: '集中交付修订报告' },
+      { id: 'coordination', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1, displayName: '读取冻结资料' },
+      { id: 'revision', type: 'status', status: 'running', timestamp: 4,
+        taskNode: { title: '修订报告', sessionId: 'revision-worker', stateLabel: '运行中' } },
+      { id: 'node', type: 'status', status: 'completed', timestamp: 2,
+        taskNode: { title: '核对两年成本', description: '读取原始资料并核对金额。', sessionId: 'worker', stateLabel: '完成' } },
+      { id: 'decision', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 3, displayName: '复核金额差异' },
+    ], { isComplete: true, isStreaming: false, onOpenActivityDetails: () => {} })
+    expect(html).not.toContain('data-work-group')
+    expect(html).not.toContain('子代理工作')
+    expect(html).not.toContain('协调与复核')
+    expect(html).not.toContain('历史尝试')
+    expect(html).not.toContain('读取原始资料并核对金额。')
+    expect(html).toContain('lucide-users-round')
+    expect(html).toMatch(/<button[^>]*>[\s\S]*?核对两年成本/)
+    const ordered = ['读取冻结资料', '核对两年成本', '复核金额差异', '修订报告', '集中交付修订报告']
+    for (let index = 1; index < ordered.length; index++) {
+      expect(html.indexOf(ordered[index - 1]!)).toBeGreaterThan(-1)
+      expect(html.indexOf(ordered[index - 1]!)).toBeLessThan(html.indexOf(ordered[index]!))
+    }
+  })
+  it('keeps completed child results inspectable before a root response exists', async () => {
+    const html = await renderTurn('zh-Hans', [{ id: 'node', type: 'status', status: 'completed', timestamp: 1,
+      taskNode: { title: '核对成本', sessionId: 'worker', stateLabel: '完成' } }], { isComplete: true, isStreaming: false })
+    expect(html).toContain('核对成本')
+    expect(html).not.toContain('data-work-group="coordinator"')
+  })
+  it.each(['en', 'zh-Hans'] as const)('keeps the parent assignment visible above collapsed work in %s', async language => {
+    const html = await renderTurn(language, [{
+      id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1, content: 'internal-protocol',
+      taskContext: { kind: 'assignment', description: '比较成本与风险', instruction: '独立核对原始金额。发现差异后交回修正。提交 values.research。' },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }], { isComplete: true, isStreaming: false, expanded: false })
+    expect(html).toContain('data-task-assignment-summary')
+    expect(html).toContain(resources[language].translation['chat.taskContext.assignment.fromParent'])
+    expect(html).toContain('独立核对原始金额。 发现差异后交回修正。')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html.indexOf('data-task-assignment-summary')).toBeLessThan(html.indexOf('aria-expanded="false"'))
+    expect(html).not.toMatch(/internal-protocol|values\.research/)
+    expect(html.match(/<p[^>]*data-task-assignment-summary[^>]*>[\s\S]*?<\/p>/)?.[0]).not.toContain('比较成本与风险')
+  })
+  it('distinguishes pending, failed and completed subagent status rows', async () => {
+    const html = await renderTurn('zh-Hans', [
+      { id: 'pending', type: 'status', status: 'pending', content: '核验修订结果 · 待处理', timestamp: 1 },
+      { id: 'failed', type: 'status', status: 'error', content: '修正报告 · 失败', timestamp: 2 },
+      { id: 'done', type: 'status', status: 'completed', content: '读取资料 · 完成', timestamp: 3 },
+    ])
+    expect(html).toContain('lucide-circle ')
+    expect(html).toContain('lucide-circle-x')
+    expect(countOccurrences(html, 'lucide-circle-check')).toBe(1)
+  })
+  it.each(['en', 'zh-Hans'] as const)('keeps internal task context in a compact status row without raw protocol in %s', async language => {
+    const activity: ActivityItem = {
+      id: 'task-context', type: 'task-context', status: 'completed', timestamp: 1,
+      content: 'Conductor checkpoint (batch-complete). {"runId":"internal-run-123"}',
+      taskContext: { kind: 'coordination' },
+    }
+    const html = await renderTurn(language, [activity, {
+      id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read',
+    }], { isComplete: true, isStreaming: false })
+    expect(html).toContain(resources[language].translation['chat.taskContext.coordination.title'])
+    expect(html).toContain(resources[language].translation['chat.taskContext.coordination.description'])
+    expect(html).toContain('lucide-circle-check')
+    expect(html).not.toContain('Conductor checkpoint')
+    expect(html).not.toContain('internal-run-123')
+    expect(html).not.toContain('<details')
+    expect(html).not.toContain('<article')
+    expect(activity.type).toBe('task-context')
+    expect(activity.content).toContain('internal-run-123')
+  })
+
+  it.each(['en', 'zh-Hans'] as const)('provides a folded, fully readable assignment brief without raw fields in %s', async language => {
+    const html = await renderTurn(language, [{
+      id: 'assignment', type: 'task-context', status: 'completed', timestamp: 1,
+      content: 'Apply these skills: [skill:deep-research] {"hash":"internal-hash","depends_on":["cost"]}',
+      taskContext: { kind: 'assignment', description: '核对两年成本', briefing: {
+        requirements: ['关键金额须经独立审查'], sources: ['已冻结的原始成本资料'], limits: ['只读资料，不修改文件'],
+      } },
+    }, { id: 'read', type: 'tool', status: 'completed', timestamp: 2, toolName: 'Read' }], { isComplete: true, isStreaming: false })
+    expect(html).toContain('<details')
+    expect(html).not.toContain('<details open')
+    expect(html).toContain('<summary')
+    expect(html).toContain('lucide-circle-check')
+    for (const text of ['核对两年成本', '关键金额须经独立审查', '已冻结的原始成本资料', '只读资料，不修改文件']) expect(html).toContain(text)
+    expect(html).toContain(resources[language].translation['tasks.research.sources'])
+    expect(html).not.toMatch(/internal-hash|depends_on|Apply these skills|查看原始记录/)
+  })
+
+  it('keeps structured research submissions readable while preserving rejected verdicts', async () => {
+    const html = await renderTurn('zh-Hans', [
+      { id: 'output', type: 'tool', status: 'completed', timestamp: 1, toolName: 'mcp__session__submit_task_output',
+        displayName: '提交研究记录', intent: '登记核对后的成本与资料限制', toolInput: { values: { research: { claims: [{ id: 'cost', evidenceIds: ['e-cost'], sourceVersion: 'internal-hash' }] } } } },
+      { id: 'verdict', type: 'tool', status: 'error', timestamp: 2, toolName: 'mcp__session__submit_task_node_verdict',
+        displayName: '提交核验结果', intent: '核验成本记录', toolInput: { result: 'pass', runId: 'internal-run' }, error: '此会话没有验证运行' },
+    ], { isComplete: true, isStreaming: false })
+    expect(html).toContain('提交研究记录')
+    expect(html).toContain('登记核对后的成本与资料限制')
+    expect(html).toContain('data-slot="activity-error-badge"')
+    expect(html).toContain('错误')
+    expect(html).not.toMatch(/sourceVersion|internal-hash|internal-run|evidenceIds/)
+  })
+
   it('localizes the live header and renders one spinner for an intermediate row', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'intermediate-1',

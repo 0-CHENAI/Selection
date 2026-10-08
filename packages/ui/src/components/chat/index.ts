@@ -20,6 +20,7 @@ export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardAc
 export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from './SessionViewer'
 export { UserMessageBubble, formatUserMessageTime, type UserMessageBubbleProps } from './UserMessageBubble'
 export { SystemMessage, type SystemMessageProps, type SystemMessageType } from './SystemMessage'
+export { withTaskMessagePresentation } from './task-message-presentation'
 
 // Attachment helpers
 export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attachment-helpers'
@@ -28,3 +29,5 @@ export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attach
 export { AcceptPlanDropdown } from './AcceptPlanDropdown'
 
 export { ResponseSourcesLayout } from './ResponseSourcesLayout'
+export { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
+export type { ResponseSource } from './response-sources'

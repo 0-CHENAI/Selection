@@ -1,6 +1,7 @@
 import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
 import { ResponseSources } from './ResponseSources'
-import { extractResponseSources } from './response-sources'
+import { extractResponseSources, type ResponseSource } from './response-sources'
+import { taskAssignmentSummary } from './task-message-presentation'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
@@ -24,6 +25,8 @@ import {
   MessageCircleDashed,
   FileText,
   ArrowUpRight,
+  CornerDownRight,
+  UsersRound,
   Ban,
   Copy,
   Check,
@@ -64,6 +67,7 @@ import {
   getActiveTurnPreview,
   countWorkRecords,
   isVisibleCommentaryCard,
+  isTaskStartAcknowledgment,
   isMirroredCommentaryActivity,
   shouldShowGenericThinkingIndicator,
   shouldShowThinkingIndicator,
@@ -255,7 +259,7 @@ const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 // ============================================================================
 
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
-export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan'
+export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan' | 'task-context'
 export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 
 // ============================================================================
@@ -265,6 +269,7 @@ export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'interrupted'
 
 export interface TodoItem {
+  id?: string
   /** Task content/description */
   content: string
   /** Current status */
@@ -283,6 +288,11 @@ export interface ActivityItem {
   toolUseId?: string  // For matching parent-child relationships
   toolInput?: Record<string, unknown>
   content?: string
+  /** Readable internal task step; its protocol stays out of the response body. */
+  taskContext?: import('@craft-agent/core').Message['taskContext']
+  /** Child execution identity, kept separate from the coordinator's own tools. */
+  taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
+  attachments?: import('@craft-agent/core').Message['attachments']
   /** Live-only text/image blocks from a tool result. */
   toolResultContent?: AgentToolResultContent[]
   intent?: string
@@ -312,6 +322,8 @@ export interface ResponseContent {
   isAnswerPreview?: boolean
   text: string
   isStreaming: boolean
+  /** Original message time for retaining chronology if demoted into the work chain. */
+  timestamp?: number
   streamStartTime?: number
   /** Completion clock for the one-shot local reveal; old responses render immediately. */
   completedRevealStartTime?: number
@@ -348,6 +360,8 @@ export interface TurnCardProps {
   turnId: string
   /** All activities in this turn (tools, thinking, intermediate text) */
   activities: ActivityItem[]
+  /** Sources retrieved by workers belonging to this execution. */
+  researchSources?: ResponseSource[]
   /** Final response content (may be streaming) */
   response?: ResponseContent
   /** Primary intent/goal for this turn (shown in collapsed preview) */
@@ -378,6 +392,8 @@ export interface TurnCardProps {
   onOpenDetails?: () => void
   /** Callback to open individual activity details in Monaco */
   onOpenActivityDetails?: (activity: ActivityItem) => void
+  /** Contextual execution actions, visible only inside the expanded work chain. */
+  workControls?: React.ReactNode
   /** Callback to open all edits/writes in multi-file diff view */
   onOpenMultiFileDiff?: () => void
   /** Whether this turn has any Edit or Write activities */
@@ -402,6 +418,8 @@ export interface TurnCardProps {
    *  auto-compact / WebUI mobile. Hides Copy / Markdown / Branch actions; keeps the
    *  Accept Plan dropdown when a plan is the last response. */
   compactMode?: boolean
+  /** Read-only task preview with a quieter assignment and labeled output. */
+  taskPreview?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
   /** Callback to regenerate the last assistant response */
@@ -498,6 +516,12 @@ function formatToolInput(
 
   // For call_llm: model shown as badge, prompt duplicates intent
   if (toolName === 'mcp__session__call_llm') return ''
+
+  // Task protocol payloads are machine inputs. The row already shows the action
+  // and intent; keep full values in the existing tool inspector, not inline.
+  if (['submit_task_output', 'submit_task_verdict', 'submit_task_node_verdict',
+    'submit_orchestration_decision', 'submit_orchestration_patch', 'get_task_results']
+    .includes(normalizeCraftSessionToolName(toolName ?? ''))) return ''
 
   const parts: string[] = []
 
@@ -1062,6 +1086,59 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
+  if (activity.taskNode) {
+    const node = activity.taskNode
+    const content = <>
+      <UsersRound className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-accent')} aria-hidden="true" />
+      <span className="min-w-0 truncate text-foreground/75 group-focus-visible/child:text-foreground group-focus-visible/child:underline group-focus-visible/child:underline-offset-4">{node.title}</span>
+      <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
+        <ActivityStatusIcon status={activity.status} />{node.stateLabel}
+      </span>
+      {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'ml-auto shrink-0 text-muted-foreground')} aria-hidden="true" />}
+    </>
+    const className = cn('flex w-full min-w-0 items-center gap-2 rounded-md py-0.5 text-left', SIZE_CONFIG.fontSize)
+    return <div className="flex items-stretch">
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+      {node.sessionId && onOpenDetails
+        ? <button type="button" className={cn(className, 'group/child transition-colors hover:bg-foreground/5 focus-visible:outline-none')} onClick={onOpenDetails}>{content}</button>
+        : <div className={className}>{content}</div>}
+    </div>
+  }
+
+  if (activity.type === 'task-context' && activity.taskContext) {
+    const context = activity.taskContext
+    if (context.briefing) {
+      return <div className="flex min-w-0 items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <details className={cn('group/task min-w-0 flex-1 text-muted-foreground', SIZE_CONFIG.fontSize)}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-success')} aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words">{i18n.t('chat.taskContext.assignment.title')}{context.title && ` · ${context.title}`}</span>
+            <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'shrink-0 transition-transform group-open/task:rotate-90 motion-reduce:transition-none')} aria-hidden="true" />
+          </summary>
+          <div className="space-y-3 py-2 pl-6 text-foreground/75 [overflow-wrap:anywhere]">
+            {context.description && <div><p className="mb-1 font-medium text-foreground">{i18n.t('tasks.goal')}</p><p className="whitespace-pre-wrap">{context.description}</p></div>}
+            {([
+              ['tasks.research.scope.requirements', context.briefing.requirements],
+              ['tasks.research.sources', context.briefing.sources],
+              ['tasks.research.limits', context.briefing.limits],
+            ] as const).filter(([, items]) => items.length).map(([label, items]) => <div key={label}>
+              <p className="mb-1 font-medium text-foreground">{i18n.t(label)}</p>
+              <ul className="list-disc space-y-1 pl-4">{items.map((item, index) => <li key={index} className="whitespace-pre-wrap">{item}</li>)}</ul>
+            </div>)}
+          </div>
+        </details>
+      </div>
+    }
+    activity = {
+      ...activity,
+      type: 'status',
+      content: [i18n.t(`chat.taskContext.${context.kind}.title`), context.title,
+        context.description || i18n.t(`chat.taskContext.${context.kind}.description`)]
+        .filter(Boolean).join(' · '),
+    }
+  }
+
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
@@ -1144,11 +1221,15 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
             {isRunning ? (
               <Spinner className={SIZE_CONFIG.spinnerSizeSmall} />
+            ) : activity.status === 'error' ? (
+              <XCircle className={cn(SIZE_CONFIG.iconSize, 'text-destructive')} />
+            ) : activity.status === 'pending' || activity.status === 'backgrounded' ? (
+              <Circle className={SIZE_CONFIG.iconSize} />
             ) : (
               <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
             )}
           </div>
-          <span className="truncate">{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
+          <span className={activity.taskContext ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'truncate'}>{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
         </div>
       </div>
     )
@@ -1553,6 +1634,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 export interface ResponseCardProps {
   artifactVersions?: ResponseContent['artifactVersions']
   researchActivities?: ActivityItem[]
+  researchSources?: ResponseSource[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
@@ -1616,6 +1698,10 @@ export interface ResponseCardProps {
   resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
+  /** An asynchronous task-start update, presented as a note rather than a final reply. */
+  isTaskProgress?: boolean
+  /** Render child output directly on the preview surface instead of nesting a reply card. */
+  taskPreview?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1855,6 +1941,7 @@ function applyTextHighlightRange(
 export function ResponseCard({
   artifactVersions,
   researchActivities,
+  researchSources,
   text,
   isAnswerPreview = false,
   completedRevealStartTime,
@@ -1886,17 +1973,24 @@ export function ResponseCard({
   annotationInteractionMode = 'interactive',
   resolveAnnotationResult,
   isCommentary = false,
+  isTaskProgress = false,
+  taskPreview = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const reduceArtifactMotion = useReducedMotion()
+  const isProgress = variant === 'response' && isTaskProgress
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
-  const canCollectSources = variant === 'response' && !isCommentary && !isAnswerPreview
+  const canCollectSources = variant === 'response' && !isProgress && !isCommentary && !isAnswerPreview
   const showArtifacts = canCollectSources
     && !isStreaming && (isTurnComplete ?? true)
-  const turnSources = useMemo(() => collectTurnResearchSources(researchActivities ?? []), [researchActivities])
+  const turnSources = useMemo(() => {
+    const merged = new Map((researchSources ?? []).map(source => [sourceUrlKey(source.url), source]))
+    for (const source of collectTurnResearchSources(researchActivities ?? [])) merged.set(sourceUrlKey(source.url), source)
+    return [...merged.values()]
+  }, [researchActivities, researchSources])
   const sourceEvidence = useMemo(() => new Set(turnSources.map(source => sourceUrlKey(source.url))), [turnSources])
   const sourceSummary = useMemo(
     () => canCollectSources ? extractResponseSources(parsedSkillUsage.content, sourceEvidence, isStreaming) : { content: parsedSkillUsage.content, sources: [] },
@@ -1959,7 +2053,7 @@ export function ResponseCard({
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
   const actionsVisible = useCompletionActions(
-    ((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan',
+    !isProgress && (((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan'),
     contentRef,
     responseText,
   )
@@ -2718,11 +2812,11 @@ export function ResponseCard({
   const bodyText = paced.text
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
-  const showCompletedChrome = (isCompleted && !isCommentary)
-    || variant === 'plan'
+  const showCompletedChrome = !isProgress && ((isCompleted && !isCommentary)
+    || variant === 'plan')
   // Hold the action-row height while the body is still arriving so the card
   // bottom does not jump when regenerate / copy / Markdown mount.
-  const reserveDesktopFooter = !compactMode && !isCommentary
+  const reserveDesktopFooter = !isProgress && !compactMode && !isCommentary
     && (showCompletedChrome || (isStreaming && variant === 'response'))
 
   // Keep one content tree throughout streaming and completion. Only chrome
@@ -2732,7 +2826,13 @@ export function ResponseCard({
 
     return (
       <>
-        <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
+        <div
+          role={isProgress ? 'note' : undefined}
+          data-response-kind={isProgress ? 'progress' : variant}
+          className={cn("relative group transition-colors duration-200",
+            isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
+        >
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-0 top-5 size-3.5 text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
@@ -2754,7 +2854,7 @@ export function ResponseCard({
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
-            className="pl-[22px] pr-[16px] py-3 text-sm"
+            className={cn(isProgress ? "pl-[22px] pr-4 py-2 text-[13px] text-foreground/70" : taskPreview && !isPlan ? "px-4 py-1 text-sm" : "pl-[22px] pr-4 py-3 text-sm")}
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
@@ -2955,14 +3055,13 @@ function TodoRow({ todo }: { todo: TodoItem }) {
 
   return (
     <div className={cn(
-      "flex items-center gap-2 py-0.5 text-muted-foreground",
+      "flex items-start gap-2 py-1 text-muted-foreground",
       SIZE_CONFIG.fontSize,
-      todo.status === 'completed' && "opacity-50"
+      todo.status === 'completed' && "opacity-80"
     )}>
-      <TodoStatusIcon status={todo.status} />
+      <span aria-label={i18n.t(`taskList.status.${todo.status}`)} role="img" className="mt-0.5 shrink-0"><TodoStatusIcon status={todo.status} /></span>
       <span className={cn(
-        "truncate flex-1",
-        todo.status === 'completed' && "line-through"
+        "whitespace-pre-wrap break-words flex-1 min-w-0"
       )}>
         {displayText}
       </span>
@@ -2975,30 +3074,36 @@ interface TodoListProps {
 }
 
 /**
- * TodoList - Displays the current state of TodoWrite tool
- * Styled to blend with TurnCard activities
+ * Task List - independent conversation progress card.
+ * Legacy todo snapshots share this renderer.
  */
-function TodoList({ todos }: TodoListProps) {
+export function TodoList({ todos }: TodoListProps) {
+  const { t } = useTranslation()
+  const reduceMotion = !!useReducedMotion()
+  const allDone = todos.length > 0 && todos.every(todo => todo.status === 'completed')
+  const [expanded, setExpanded] = useState(!allDone)
+  const wasDone = useRef(allDone)
+  const panelId = React.useId()
+  useEffect(() => {
+    if (wasDone.current !== allDone) setExpanded(!allDone)
+    wasDone.current = allDone
+  }, [allDone])
+  const summary = allDone ? t('taskList.allCompleted') : (['in_progress', 'pending', 'completed', 'interrupted'] as const)
+    .filter(status => todos.some(todo => todo.status === status))
+    .map(status => t(`taskList.count.${status}`, { count: todos.filter(todo => todo.status === status).length })).join(' · ')
   if (todos.length === 0) return null
-
   return (
-    <div className="pl-4 pr-2 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[13px]">
-      {/* Header */}
-      <div className={cn("text-muted-foreground pb-1", SIZE_CONFIG.fontSize)}>
-        Todo List
+    <section className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-1" aria-label={t('taskList.title')}>
+      <button type="button" className="flex w-full items-center gap-2 py-2 text-left text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(value => !value)}>
+        <motion.span animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}><ChevronRight className="size-3.5" /></motion.span>
+        <span className="min-w-0 break-words">{t('taskList.title')} {summary}</span>
+      </button>
+      <div id={panelId}>
+        <ExpandableHeightPanel open={expanded} reduceMotion={reduceMotion}>
+          <div className="pb-2 pl-5">{todos.map((todo, index) => <TodoRow key={todo.id ?? `${todo.content}-${index}`} todo={todo} />)}</div>
+        </ExpandableHeightPanel>
       </div>
-      {/* Todo items */}
-      {todos.map((todo, index) => (
-        <motion.div
-          key={`${todo.content}-${index}`}
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: index * 0.03 }}
-        >
-          <TodoRow todo={todo} />
-        </motion.div>
-      ))}
-    </div>
+    </section>
   )
 }
 
@@ -3019,6 +3124,7 @@ export const TurnCard = React.memo(function TurnCard({
   sessionId,
   turnId,
   activities,
+  researchSources,
   response,
   intent,
   isComplete,
@@ -3033,6 +3139,7 @@ export const TurnCard = React.memo(function TurnCard({
   onPopOut,
   onOpenDetails,
   onOpenActivityDetails,
+  workControls,
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
@@ -3044,6 +3151,7 @@ export const TurnCard = React.memo(function TurnCard({
   displayMode = 'detailed',
   animateResponse = false,
   compactMode = false,
+  taskPreview = false,
   onBranch,
   onRegenerate,
   onAddAnnotation,
@@ -3064,6 +3172,7 @@ export const TurnCard = React.memo(function TurnCard({
     isComplete,
     hasRunningTools,
   )
+  const isTaskProgress = !response?.isPlan && isTaskStartAcknowledgment(activities)
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -3180,6 +3289,8 @@ export const TurnCard = React.memo(function TurnCard({
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
       activity => !isAnswerDeliveryTool(activity)
+        // Aggregate status is a fallback, not a work record or the latest step.
+        && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
         // The stable header/footer status owns their presentation.
         && !((activity.type === 'intermediate' || activity.type === 'thinking')
@@ -3189,9 +3300,10 @@ export const TurnCard = React.memo(function TurnCard({
     [sortedActivities, response, isComplete],
   )
 
-  // Check if we have any Task subagents - if so, use grouped view
+  // PRO workers share one chronological chain with coordinator operations.
+  // Keep the existing SDK Task tree only for turns without orchestration rows.
   const hasTaskSubagents = useMemo(
-    () => visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    () => !visibleActivities.some(a => a.taskNode) && visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
     [visibleActivities]
   )
 
@@ -3236,6 +3348,7 @@ export const TurnCard = React.memo(function TurnCard({
   const hasNoMeaningfulWork = isComplete
     && activities.length > 0
     && activities.every(a => {
+      if (a.taskNode) return false
       // Delivery is the card body, not a work record that should keep an empty turn.
       if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
@@ -3273,6 +3386,7 @@ export const TurnCard = React.memo(function TurnCard({
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
   const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
   // Keep one status slot across tool -> awaiting -> tool transitions. Toggling
   // its visibility must not repeatedly expand and collapse the work chain.
   const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
@@ -3286,6 +3400,18 @@ export const TurnCard = React.memo(function TurnCard({
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
     <div>
+      {assignmentSummary && (taskPreview ? <section className="mb-4 rounded-lg bg-foreground/[0.035] p-4 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/70">
+          <CornerDownRight className="size-4 shrink-0 text-accent" aria-hidden="true" />
+          {i18n.t('chat.taskContext.assignment.fromParent')}
+        </h3>
+        <p className="mt-2 text-foreground/80">{assignmentSummary}</p>
+      </section> : <p className="mb-3 flex items-start gap-3 rounded-xl bg-foreground/[0.035] px-4 py-3 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere]" data-task-assignment-summary>
+        <CornerDownRight className="mt-1 size-4 shrink-0 text-accent" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium text-foreground">{i18n.t('chat.taskContext.assignment.fromParent')} </span>{assignmentSummary}
+        </span>
+      </p>)}
       {/* One header chrome for thinking and numbered work — no standalone swap. */}
       <AnimatePresence>
       {showWorkChrome && (
@@ -3422,6 +3548,7 @@ export const TurnCard = React.memo(function TurnCard({
                       </WorkChainRow>
                     ))
                   )}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {reserveThinkingSlot && (
                     <WorkChainRow
@@ -3445,15 +3572,13 @@ export const TurnCard = React.memo(function TurnCard({
                   )}
                   </AnimatePresence>
                 </div>
-                {/* TodoList - inside expanded section */}
-                {todos && todos.length > 0 && (
-                  <TodoList todos={todos} />
-                )}
           </ExpandableHeightPanel>
           )}
         </WorkChrome>
       )}
       </AnimatePresence>
+
+      {todos && todos.length > 0 && <TodoList todos={todos} />}
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (
@@ -3499,10 +3624,14 @@ export const TurnCard = React.memo(function TurnCard({
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
               className={cn("select-text", showWorkChrome && "mt-3")}
             >
+              {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
+                <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+              </h3>}
               <ResponseCard
                 text={response.text}
             artifactVersions={response.artifactVersions}
                 researchActivities={activities}
+                researchSources={researchSources}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
                 isTurnComplete={isComplete}
@@ -3526,6 +3655,8 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
+                isTaskProgress={isTaskProgress}
+                taskPreview={taskPreview}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3552,10 +3683,14 @@ export const TurnCard = React.memo(function TurnCard({
           {/* Gap lives inside the tween; border-box padding on the tweened
               element would floor the collapsed height at the padding. */}
           <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
+          {taskPreview && <h3 className="mb-2 mt-4 flex items-center gap-2 px-4 text-sm font-medium text-foreground/80" data-task-output-heading>
+            <FileText className="size-4" aria-hidden="true" />{i18n.t('tasks.nodeOutputs')}
+          </h3>}
           <ResponseCard
             text={response.text}
             artifactVersions={response.artifactVersions}
             researchActivities={activities}
+            researchSources={researchSources}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
             isTurnComplete={isComplete}
@@ -3579,6 +3714,8 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
+            isTaskProgress={isTaskProgress}
+            taskPreview={taskPreview}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
@@ -3617,6 +3754,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if compactMode changed (affects ResponseCard footer rendering)
   if (prev.compactMode !== next.compactMode) return false
+  if (prev.taskPreview !== next.taskPreview) return false
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
   if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false
@@ -3624,6 +3762,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false
+  if (prev.researchSources !== next.researchSources) return false
+  if (prev.workControls !== next.workControls) return false
 
   // Re-render when response object changes (e.g., annotation updates)
   if (prev.response !== next.response) return false

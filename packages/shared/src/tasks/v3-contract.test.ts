@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { parseTaskSpec, computeVerifyReserve } from './schema.ts';
@@ -8,6 +8,7 @@ import { validateOrchestrationDecision } from './orchestration-decision.ts';
 import { validateTaskNodeVerdict } from './node-verdict.ts';
 import { criticalPathRemaining, sortReadyByCriticalPath } from './critical-path.ts';
 import {
+  workspaceCacheDir,
   fingerprintWorkspaceCache,
   readWorkspaceCache,
   writeWorkspaceCache,
@@ -238,6 +239,26 @@ describe('workspace cache', () => {
       skillContents: { s: 'skill' },
     });
     expect(readWorkspaceCache(root, 'conn', other, Date.parse('2026-01-02T00:00:00.000Z')).status).toBe('miss');
+  });
+
+  it('F4-f rejects incomplete or tampered reuse receipts and keys actor prefix and source conditions', () => {
+    const base = { prompt: 'p', inputs: {}, dependencyOutputs: {}, artifactHashes: [], connection: 'conn', skillContents: {},
+      context: { actor: { id: 'a', persona: 'original' }, prefix: ['first'], sourceVersion: 'v1' } };
+    const fingerprint = fingerprintWorkspaceCache(base);
+    for (const context of [ { ...base.context, actor: { id: 'a', persona: 'changed' } },
+      { ...base.context, prefix: ['second','first'] }, { ...base.context, sourceVersion: 'v2' } ]) {
+      expect(fingerprintWorkspaceCache({ ...base, context })).not.toBe(fingerprint);
+    }
+    writeWorkspaceCache(root, { fingerprint, createdAt: '2026-01-01T00:00:00.000Z', sourceRunId: 'old', sourceNodeId: 'a', connection: 'conn', output: { text: 'original' } });
+    const path = join(workspaceCacheDir(root,'conn'), `${fingerprint}.json`);
+    const original = JSON.parse(readFileSync(path,'utf8'));
+    for (const record of [{ ...original, version: undefined }, { ...original, sourceRunId: undefined },
+      { ...original, output: { text: 'tampered' } }]) {
+      writeFileSync(path,JSON.stringify(record));
+      expect(readWorkspaceCache(root,'conn',fingerprint,Date.parse('2026-01-02'))).toMatchObject({ status: 'bypass', reason: 'incomplete-or-changed-reuse-record' });
+    }
+    writeFileSync(path,'{ broken json');
+    expect(readWorkspaceCache(root,'conn',fingerprint,Date.parse('2026-01-02'))).toMatchObject({ status: 'bypass', reason: 'unreadable-reuse-record' });
   });
 
   it('expires after 7 days and bypasses forbidden kinds', () => {

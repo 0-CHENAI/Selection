@@ -19,6 +19,7 @@
  * deprecated alias normalized onto `kind`.
  */
 import { z } from 'zod';
+import { ResearchConfigSchema } from './research.ts';
 import type { PermissionMode } from '../agent/mode-types.ts';
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,13 @@ const TaskNodeObject = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional(),
   labels: z.array(z.string()).optional(),
   status: z.string().optional(),
+  researchRole: z.enum(['researcher', 'reviewer', 'reporter']).optional(),
+  researchLineIds: z.array(z.string().min(1)).min(1).optional(),
+  /** Logical actor, independent of a task node; definition order is its serial execution order. */
+  actor: z.object({ id: ident('actor id'), persona: z.string().min(1).optional() }).strict().optional(),
+
+  /** Explicit user protection against generated and runtime edits. */
+  locked: z.boolean().optional(),
 
   // Edges + data flow.
   depends_on: z.array(slug('depends_on entry')).optional(),
@@ -311,6 +319,10 @@ export const TaskSpecSchema = z
     goal: z.string().min(1),
     /** Freeform rubric the orchestrator grades the final result against (verification gate). Falls back to `goal`. */
     acceptance_criteria: z.string().min(1).optional(),
+    research: ResearchConfigSchema.optional(),
+    constraints: z.array(z.string().min(1)).optional(),
+    decisions: z.array(z.string().min(1)).optional(),
+    locked_fields: z.array(z.enum(['goal', 'acceptance_criteria', 'constraints', 'decisions'])).optional(),
     project: z.string().min(1).optional(),
     /** Working directory for the orchestrator and every child session. Absolute path; when
      *  omitted the orchestrator's own working directory (project/workspace default) is used and
@@ -339,6 +351,7 @@ export const TaskSpecSchema = z
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
     const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
+    const researchKinds = new Set(['session', 'orchestrator', 'synthesize', 'verify', 'judge', 'finally']);
     const structured = isStructuredSchemaVersion(spec.schema_version);
     if (spec.schema_version !== 3 && spec.execution) {
       ctx.addIssue({
@@ -347,7 +360,11 @@ export const TaskSpecSchema = z
         path: ['execution'],
       });
     }
+    if (spec.research && spec.schema_version !== 3) ctx.addIssue({ code: 'custom', path: ['research'], message: 'Research requires schema_version: 3' });
     spec.nodes.forEach((node, i) => {
+      if (node.researchRole && (!spec.research || spec.schema_version !== 3 || !researchKinds.has(node.kind) || (node.replicas ?? 1) > 1)) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'researchRole'], message: 'Research roles require an individual configured V3 model-backed task; add canonical nodes for additional research work' });
+      if (node.researchLineIds?.some(id => !spec.research || ![spec.research.line, ...(spec.research.lines ?? [])].some(line => line.id === id))) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'researchLineIds'], message: 'Unknown research line binding' });
+      if (node.researchRole && !node.outputs?.some(output => output.name === 'research' && output.type === 'json' && output.required && output.kind !== 'artifact')) ctx.addIssue({ code: 'custom', path: ['nodes', i, 'outputs'], message: 'Research role requires a required JSON param output named research' });
       if (seen.has(node.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -440,7 +457,7 @@ export type CacheMode = (typeof CACHE_MODES)[number];
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A node's materialized dependency list (never undefined). */
+/** Explicit authored edges. Use effectiveNodeDeps/planDependencies for graph or scheduling. */
 export function nodeDeps(node: TaskNode): string[] {
   return node.depends_on ?? [];
 }
@@ -448,6 +465,17 @@ export function nodeDeps(node: TaskNode): string[] {
 /** The board tile label for a node. */
 export function nodeTitle(node: TaskNode): string {
   return node.title ?? node.id;
+}
+
+/** Readable label for old plans whose authored title is missing or just repeats the node ID. */
+export function nodeDisplayTitle(node: TaskNode): string {
+  const title = node.title?.trim();
+  if (title && title !== node.id) return title;
+  const instruction = (node.prompt ?? '').replace(/\[skill:[^\]]+\]/g, '').trim()
+    .split(/[\n。]|\.\s|\$\{|[\[{]/, 1)[0]?.replace(/^[#*\s-]+/, '').trim();
+  if (!instruction) return node.id;
+  const chars = Array.from(instruction);
+  return chars.length > 42 ? `${chars.slice(0, 42).join('')}…` : instruction;
 }
 
 /** Parse an unknown value (parsed yaml/json) into a TaskSpec. */

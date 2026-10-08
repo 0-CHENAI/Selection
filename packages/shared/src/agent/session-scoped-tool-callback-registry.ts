@@ -20,6 +20,7 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  updateTaskListFn?: (items: import('@craft-agent/session-tools-core').TaskListItem[]) => Promise<void>;
   artifactVersionsFn?: (request: {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
@@ -64,6 +65,7 @@ export interface SessionScopedToolCallbacks {
   /** Get detailed info about a session (defaults to current). */
   getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
+  projectHistoryFn?: (input: import('@craft-agent/session-tools-core').ProjectHistoryInput) => unknown | Promise<unknown>;
   listSessionsFn?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
   /** List background tasks (running + terminal) for a session from the main-process registry. */
   listBackgroundTasksFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').BackgroundTaskInfo[];
@@ -113,6 +115,7 @@ export interface SessionScopedToolCallbacks {
   submitTaskNodeVerdictFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskNodeVerdictInput
   ) => Promise<{ ok: boolean; error?: string }>;
+  taskHelpFn?: (input: import('@craft-agent/session-tools-core').TaskHelpInput) => Promise<unknown>;
   submitTaskDefinitionFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskDefinitionInput
   ) => Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;

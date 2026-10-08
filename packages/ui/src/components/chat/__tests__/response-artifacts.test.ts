@@ -23,6 +23,19 @@ it('excludes unsupported formats, deleted files and session scratch', () => {
   expect(extractDeliveredResponseArtifacts()).toEqual([])
 })
 
+it('hides historical source-cache cards on every platform while keeping ordinary TXT outputs', () => {
+  const paths = [
+    '/work/.selection-sources/version/snapshot.txt',
+    '.selection-sources/version/snapshot.txt',
+    'C:\\work\\.selection-sources\\version\\snapshot.txt',
+    '/work/.selection-sources/version/extracted.md',
+    '/results/snapshot.txt',
+    '/work/.selection-sources-export/snapshot.txt',
+  ]
+  expect(extractDeliveredResponseArtifacts(paths.map(path => ({ path, ordinal: 1 }))).map(file => file.path))
+    .toEqual(paths.slice(4))
+})
+
 it('keeps distinct paths, deduplicates aliases and preserves restored versions', () => {
   expect(extractDeliveredResponseArtifacts([
     { path: 'C:/Reports/Final.DOCX', change: 'restored' },

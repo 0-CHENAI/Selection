@@ -153,15 +153,15 @@ describe('shared project memory storage', () => {
 })
 
 describe('advanced capability settings', () => {
-  it('stays off for configs written before the settings existed', () => {
+  it('provides PRO capabilities for legacy configs', () => {
     const { configDir } = setupWorkspaceConfigDir()
     const output = runEval(configDir, `
       console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
     `)
-    expect(output).toBe('false,false')
+    expect(output).toBe('true,true')
   })
 
-  it('persists both switches independently', () => {
+  it('keeps legacy fields compatible without a duplicate capability switch', () => {
     const { configDir, configPath } = setupWorkspaceConfigDir()
     runEval(configDir, 'setDagOrchestrationEnabled(true); setSwarmAgentsEnabled(false)')
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'))
@@ -169,6 +169,6 @@ describe('advanced capability settings', () => {
     expect(persisted.swarmAgentsEnabled).toBe(false)
     expect(runEval(configDir, `
       console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
-    `)).toBe('true,false')
+    `)).toBe('true,true')
   })
 })

@@ -1,3 +1,4 @@
+import type { HandoverLink, HandoverOperation } from './handover'
 /**
  * Server DTO types — data shapes used by RPC handlers and SessionManager.
  *
@@ -21,6 +22,7 @@ import type {
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
 import type { SessionTokenUsage, SwarmAggregationContract } from '../sessions/types'
+import type { WorkMode, WorkModeMetadata } from '../sessions/work-mode'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type {
   AuthRequest as SharedAuthRequest,
@@ -65,7 +67,8 @@ export interface RuntimeRecoveryView {
   canResume: boolean
 }
 
-export interface Session {
+export interface Session extends WorkModeMetadata {
+  handover?: HandoverLink
   runtimeRecovery?: RuntimeRecoveryView
   progressSupervision?: ProgressSupervisionView
   id: string
@@ -137,6 +140,10 @@ export interface Session {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: total DAG node count (orchestrator only) — stable board progress denominator. */
   taskNodeCount?: number
   /** Tasks Conductor: generate-time draft orchestrator, hidden from the board until adopted by createTask. */
@@ -156,6 +163,7 @@ export interface Session {
 }
 
 export interface CreateSessionOptions {
+  workMode?: WorkMode
   name?: string
   permissionMode?: PermissionMode
   /**
@@ -197,6 +205,10 @@ export interface CreateSessionOptions {
   taskRunId?: string
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string
+  taskAttempt?: number
+  taskRevision?: number
+  taskActor?: { id: string; persona?: string }
+  taskWorkerId?: string
   /** Tasks Conductor: mark the orchestrator as a generate-time draft (hidden until adopted by createTask). */
   taskDraft?: boolean
   swarmEnabled?: boolean
@@ -274,6 +286,8 @@ export interface TaskSaveResult {
 export interface TaskCreateRequest {
   /** task.yaml source text (authoritative). */
   yaml: string
+  /** Explicit user creation of a plan in this idle PRO root, preserving its history and permissions. */
+  rootSessionId?: string
   /**
    * Deprecated client field. CREATE rejects adoption; proposal sessions are temporary.
    */
@@ -300,7 +314,18 @@ export interface TaskCreateResult {
   taskLabelId?: string
 }
 
+/** Editor-local conversation; historical proposals are context, never saved definitions. */
+export interface TaskProposalTurn {
+  goal: string
+  yaml?: string
+  status: 'proposed' | 'applied' | 'discarded' | 'superseded' | 'failed'
+}
+
 export interface TaskGenerateRequest {
+  /** Monotonic editor version captured before generation. */
+  baseDraftVersion?: number
+  /** Previous rounds, including whether the user applied or discarded each proposal. */
+  conversation?: TaskProposalTurn[]
   /** Existing definition to revise; never saved without user confirmation. */
   currentYaml?: string
   /** Natural-language goal the orchestrator turns into a task.yaml DAG. */
@@ -337,6 +362,7 @@ export interface TaskGenerateAck {
 }
 
 export interface TaskGenerateResult {
+  baseDraftVersion?: number
   /** Temporary proposal session that authored the spec; not a saved task binding. */
   orchestratorSessionId: string
   /** Slug of the authored spec; empty when generation produced an invalid spec. */
@@ -351,6 +377,9 @@ export interface TaskGenerateResult {
 }
 
 export interface TaskRunRequest {
+  resumedFrom?: string
+  /** Save-and-run identity: reject if another editor saved after confirmation. */
+  expectedEtag?: string
   slug: string
   runId?: string
   orchestratorSessionId?: string
@@ -432,8 +461,13 @@ export interface SwarmRunDetailsDto {
 }
 
 export interface TaskNodeRunStateDto {
+  actor?: { id: string; persona?: string }
   title?: string
-  attempts?: { attempt: number; sessionId: string; state: string }[]
+  /** Frozen node assignment for display; never grants execution authority. */
+  instruction?: string
+  /** First dispatch time in Unix milliseconds; absent on legacy snapshots. */
+  startedAt?: number
+  attempts?: { attempt: number; sessionId: string; state: string; revision?: number }[]
   approvalFeedback?: string
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }
   id: string
@@ -457,6 +491,17 @@ export interface TaskNodeRunStateDto {
 }
 
 export interface TaskRunSnapshotDto {
+  help?: import('../tasks/task-help').TaskHelpRecord[]
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
+  research?: import('../tasks/research.ts').ResearchSummary
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  resumedFrom?: string
+  supersededBy?: string
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  planChanges?: import('../tasks/planner').PlanChange[]
+  planner?: { phase: import('../tasks/planner').PlannerPhase; pendingResults: import('../tasks/planner').PlannerResultEvent[]; consumedResults: number }
+  /** Owning workspace; optional for compatibility with older hosts. */
+  workspaceId?: string
   slug: string
   runId: string
   taskId: string
@@ -518,6 +563,7 @@ export interface TaskApplyRunRevisionRequest {
 }
 
 export interface TaskApplyRunRevisionResult {
+  impact?: ReturnType<typeof import('../tasks/explain').revisionImpact>
   diff: { added: string[]; removed: string[]; changed: string[] }
   applied?: boolean
   validation: TaskValidationResultDto
@@ -568,6 +614,8 @@ export interface TaskResultNodeDto {
   /** The node's recorded final output text (from nodes/<id>.json), when present. */
   output?: string
   attempt?: number
+  /** Frozen plan revision which dispatched this node's latest execution. */
+  revision?: number
   failureReason?: string
 }
 
@@ -577,6 +625,15 @@ export interface TaskResultNodeDto {
  * `TaskRunSnapshotDto` this survives restart and does not require an active in-memory run.
  */
 export interface TaskResultsDto {
+  help?: import('../tasks/task-help').TaskHelpRecord[]
+  coordinatorGate?: import('../tasks/orchestration-decision.ts').CoordinatorGateState
+  research?: import('../tasks/research.ts').ResearchSummary
+  artifactAvailability?: { nodeIds: string[]; reason: string }
+  workers?: import('../tasks/planner').TaskWorkerRecord[]
+  resumedFrom?: string
+  supersededBy?: string
+  taskId?: string
+  orchestratorSessionId?: string
   slug: string
   /** The run inspected; null when the task has never been run. */
   runId: string | null
@@ -652,7 +709,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -687,6 +744,8 @@ export interface SendMessageOptions {
    * surfacing) that should wake the agent without looking user-authored.
    */
   hidden?: boolean
+  /** Readable presentation of an internal task turn; never changes model input or authorization. */
+  taskContext?: Message['taskContext']
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +753,8 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'handover'; operation: HandoverOperation }
+  | { type: 'setWorkMode'; mode: WorkMode }
   | { type: 'setProgressSupervision'; enabled: boolean }
   | { type: 'continueProgress' }
   | { type: 'resumeExecution' }
@@ -1113,4 +1174,13 @@ export interface DeepLinkNavigation {
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
+}
+
+/** Explicitly apply the reviewed draft to pending/ready work; never writes task.yaml. */
+export interface TaskPatchRunRequest {
+  slug: string
+  runId: string
+  baseRevision: number
+  yaml: string
+  rationale: string
 }

@@ -1,6 +1,7 @@
 import { answerPreviewContext } from './answer-preview-context.ts';
 import { AnswerArgumentStream } from './answer-argument-stream.ts';
 import { beginRequestDiagnostic } from './request-diagnostics.ts';
+import { fetchWithModelRequestSlot } from './model-request-gate.ts';
 import { observeSseResponse } from './sse-diagnostics.ts';
 /**
  * Unified fetch interceptor for all AI API requests (Anthropic + OpenAI format).
@@ -2234,7 +2235,7 @@ async function interceptedFetch(
 
         debugLog(`[${adapter.name}] Intercepted request to ${url}`);
         requestSent = true;
-        const response = await originalFetch(url, finalInit);
+        const response = await fetchWithModelRequestSlot(originalFetch, url, finalInit);
         diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
 
         // Process SSE response through adapter's stream processor
@@ -2280,7 +2281,7 @@ async function interceptedFetch(
   const proxy = getProxyForUrl(url);
   const proxyInit = proxy ? { ...init, proxy } : init;
   try {
-    const response = await originalFetch(input, proxyInit);
+    const response = await fetchWithModelRequestSlot(originalFetch, input, proxyInit);
     diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
     return await logResponse(response, url, startTime);
   } catch (error) {

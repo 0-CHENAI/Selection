@@ -20,6 +20,8 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
       'mcp__session__get_task_results',
+      'mcp__session__create_task',
+      'mcp__session__run_task',
     ] as const;
 
     for (const toolName of allowedTools) {
@@ -33,7 +35,6 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__source_oauth_trigger',
       'mcp__session__source_credential_prompt',
       'mcp__session__spawn_session',
-      'mcp__session__run_task',
       'mcp__session__update_user_preferences',
     ] as const;
 
@@ -68,7 +69,11 @@ describe('session tool safe-mode classification', () => {
       expect(shouldAllowToolInMode('Bash', {
         command: 'officecli view "OfficeCLI 调研.docx" outline --json',
       }, 'safe', options).allowed).toBe(true);
+      expect(shouldAllowToolInMode('Bash', { command: 'officecli load_skill excel' }, 'safe', options).allowed).toBe(true);
+      expect(shouldAllowToolInMode('Bash', { command: 'officecli load_skill financial-model' }, 'safe', options).allowed).toBe(true);
       for (const command of [
+        'officecli load_skill excel --output /tmp/guide.txt',
+        'officecli load_skill excel; officecli add x.docx /body --type paragraph',
         'officecli view "OfficeCLI 调研.docx" screenshot --out /tmp/grid.png',
         'officecli view "OfficeCLI 调研.docx" html --out /tmp/report.html',
         'officecli query "OfficeCLI 调研.docx" /body --output /tmp/result.json',
@@ -108,14 +113,17 @@ describe('session tool safe-mode classification', () => {
       permissionManager,
       permissionsContext,
     )).toBeNull();
+    for (const toolName of ['mcp__session__create_task', 'mcp__session__run_task']) {
+      expect(shouldPromptInAskMode(toolName, { slug: 'demo' }, permissionManager, permissionsContext)).toBeNull();
+    }
     expect(shouldPromptInAskMode(
-      'mcp__session__run_task',
-      { slug: 'demo' },
+      'mcp__session__update_user_preferences',
+      {},
       permissionManager,
       permissionsContext,
     )).toMatchObject({
       promptType: 'mcp_mutation',
-      command: 'mcp__session__run_task',
+      command: 'mcp__session__update_user_preferences',
     });
   });
 });

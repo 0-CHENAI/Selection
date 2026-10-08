@@ -149,6 +149,7 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  updateTaskList?: (items: import('./handlers/update-task-list.ts').TaskListItem[]) => Promise<void>;
   /** Host-validated terminal answer delivery; never trust a subprocess-only callback. */
   submitAnswer?: (markdown: string, artifactVersionTitle?: string) => Promise<void>;
   /** Inspect or restore a managed file version in this session's workspace. */
@@ -345,6 +346,8 @@ export interface SessionToolContext {
   /** Get detailed info about a session. Defaults to current session if no ID given. Injected by backend. */
   getSessionInfo?(sessionId?: string): SessionInfo | null;
 
+  projectHistory?(input: ProjectHistoryInput): unknown | Promise<unknown>;
+
   /** List sessions in the workspace with pagination. Injected by backend. */
   listSessions?(options?: ListSessionsOptions): ListSessionsResult;
 
@@ -388,6 +391,8 @@ export interface SessionToolContext {
   submitOrchestrationDecision?(input: OrchestrationDecisionInput): Promise<{ status: string; revision?: number }>;
 
   submitTaskNodeVerdict?(input: SubmitTaskNodeVerdictInput): Promise<{ ok: boolean; error?: string }>;
+
+  taskHelp?(input: TaskHelpInput): Promise<unknown>;
 
   submitTaskDefinition?(input: SubmitTaskDefinitionInput): Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
 
@@ -459,6 +464,14 @@ export interface SessionToolContext {
   dataPath?: string;
 }
 
+export interface TaskHelpInput {
+  action: 'request' | 'answer' | 'needs-user'; requestId: string;
+  runId?: string; baseRevision?: number; responseId?: string; response?: string;
+  problem?: string; tried?: string[]; needed?: string;
+  claimRefs?: Array<{ id: string; version: number }>;
+  sourceRefs?: Array<{ id: string; version: string }>;
+}
+
 // ============================================================
 // Session Self-Management Types — Resolution
 // ============================================================
@@ -500,6 +513,8 @@ export interface ResolvedStatusResult {
 /** Full metadata for a single session (returned by get_session_info). */
 /** Input for create_task — structured fields, mapped onto a TaskSpec by the backend. */
 export interface CreateTaskInput {
+  /** Stable identity for this creation; reuse it after a lost response. */
+  requestId?: string;
   /** Short task title shown on the board (also drives the slug). */
   title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
@@ -533,6 +548,7 @@ export interface CreateTaskResult {
 
 /** Input for run_task — starts an existing board task's Conductor DAG. */
 export interface RunTaskInput {
+  requestId?: string;
   slug?: string;
   orchestratorSessionId?: string;
   params?: Record<string, unknown>;
@@ -570,6 +586,10 @@ export interface SubmitTaskVerdictInput {
 }
 
 export interface OrchestrationPatchInput {
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: 'structure' | 'repair' | 'research';
+  researchExpansion?: unknown;
   runId: string;
   decisionId: string;
   baseRevision: number;
@@ -577,10 +597,16 @@ export interface OrchestrationPatchInput {
   add?: unknown[];
   update?: unknown[];
   cancel?: string[];
+  constraints?: string[];
+  decisions?: string[];
   action?: 'continue' | 'pause';
 }
 
 export interface OrchestrationDecisionInput {
+  consumedResults?: string[];
+  plannerPhase?: 'active' | 'draining';
+  changeKind?: 'structure' | 'repair' | 'research';
+  researchExpansion?: unknown;
   runId: string;
   checkpointId: string;
   decisionId: string;
@@ -590,6 +616,8 @@ export interface OrchestrationDecisionInput {
   add?: unknown[];
   update?: unknown[];
   cancel?: string[];
+  constraints?: string[];
+  decisions?: string[];
 }
 
 export interface SubmitTaskNodeVerdictInput {
@@ -616,6 +644,7 @@ export interface GetTaskResultsInput {
 }
 
 export interface TaskResultsPayload {
+  coordinatorGate?: { checkpointId: string; revision: number; deadline: string; reason: string; resultEventIds?: string[] };
   slug: string;
   runId: string | null;
   runIds: string[];
@@ -653,6 +682,12 @@ export interface SessionInfo {
   orchestration?: {
     id?: string;
     status?: string;
+    taskSlug?: string;
+    runId?: string;
+    revision?: number;
+    plannerPhase?: string;
+    blockers?: string[];
+    nodes?: Array<{ id: string; state: string; attempt: number }>;
     pendingAggregation: boolean;
     finalAggregation?: string;
     finalAggregationTruncated?: boolean;
@@ -820,3 +855,5 @@ export function createNodeFileSystem(): FileSystemInterface {
     },
   };
 }
+
+export interface ProjectHistoryInput { query?: string; sessionId?: string; messageId?: string; expectedVersion?: string; offset?: number }

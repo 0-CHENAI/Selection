@@ -2,6 +2,12 @@ export function isAnswerTool(name: string): boolean {
   return name === 'submit_answer' || name === 'mcp__session__submit_answer' || name === 'session__submit_answer';
 }
 
+/** Scope model-visible tools for this turn; the caller restores the full set next turn. */
+export function answerTurnToolNames(names: string[], state: { runId?: string; recovery?: boolean; coordinationOnly?: boolean }): string[] {
+  return names.filter(name => state.recovery ? isAnswerTool(name)
+    : state.runId && !state.coordinationOnly ? true : !isAnswerTool(name));
+}
+
 /** Guard the entire SDK tool batch, before any permission or execution request. */
 export function answerExecutionError(state: {
   runId?: string

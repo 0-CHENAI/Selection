@@ -87,6 +87,19 @@ describe('session tool filtering helpers', () => {
       rationale: 'add a missing branch',
     }).success).toBe(true);
   });
+
+  it('exposes candidate disposition fields and rejects malformed branches before host mutation', () => {
+    const decision = { runId: 'r', checkpointId: 'cp', decisionId: 'd', baseRevision: 0, action: 'patch', rationale: 'Preserve the authorized scope' };
+    const parse = (value: unknown) => SubmitOrchestrationDecisionSchema.safeParse({ ...decision, researchExpansion: { branchDispositions: [value] } }).success;
+    expect(parse({ candidateId: 'candidate', disposition: 'not-adopt', rationale: 'Unsupported' })).toBe(false);
+    expect(parse({ candidateId: 'candidate', action: 'not-adopt', reason: 'Unsupported', lineId: 'original' })).toBe(false);
+    expect(parse({ candidateId: 'candidate', action: 'not-adopt', reason: 'Unsupported' })).toBe(true);
+    expect(parse({ candidateId: 'candidate', action: 'open', reason: 'Investigate' })).toBe(false);
+    expect(parse({ candidateId: 'candidate', action: 'open', reason: 'Investigate', lineId: 'alternative', taskRef: 'research-alternative' })).toBe(true);
+    const tool = getToolDefsAsJsonSchema().find(def => def.name === 'submit_orchestration_decision');
+    expect(JSON.stringify(tool)).toContain('branchDispositions');
+    expect(JSON.stringify(tool)).toContain('not-adopt');
+  });
 });
 
 it('does not expose answer delivery through JSON Schema when disabled', () => {

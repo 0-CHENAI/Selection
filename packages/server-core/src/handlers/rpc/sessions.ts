@@ -302,6 +302,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'handover':
+        if (!sessionManager.handoverSession) throw new Error('Handover is unavailable')
+        return sessionManager.handoverSession(sessionId, command.operation)
       case 'flag':
         return sessionManager.flagSession(sessionId)
       case 'unflag':
@@ -336,6 +339,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
           throw new Error(`Invalid thinking level: ${command.level}. Valid values: ${VALID_THINKING_LEVELS_LIST}`)
         }
         return sessionManager.setSessionThinkingLevel(sessionId, command.level)
+      case 'setWorkMode':
+        if (!sessionManager.setSessionWorkMode) throw new Error('Work mode selection is unavailable')
+        return sessionManager.setSessionWorkMode(sessionId, command.mode)
       case 'updateWorkingDirectory':
         return sessionManager.updateWorkingDirectory(sessionId, command.dir)
       case 'setSources':

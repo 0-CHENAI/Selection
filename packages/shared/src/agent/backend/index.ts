@@ -30,6 +30,7 @@ export { AbortReason } from './types.ts';
 // Factory
 export {
   createBackend,
+  setBackendModelRequestLimiter,
   createAgent,
   detectProvider,
   getAvailableProviders,

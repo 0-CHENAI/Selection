@@ -54,6 +54,7 @@ import { coerceInputText } from '@/lib/input-text'
 import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
+import { SessionModeBadge } from '../SessionModeBadge'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
 import { getModelShortName, getModelDisplayName } from '@config/models'
 import {
@@ -72,6 +73,7 @@ import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { type ThinkingLevel, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
@@ -259,6 +261,8 @@ export interface FreeFormInputProps {
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   // Advanced options
   permissionMode?: PermissionMode
+  /** Execution mode of this conversation or draft, independent of permissions. */
+  workMode?: WorkMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   /** Enabled permission modes for Shift+Tab cycling (min 2 modes) */
   enabledModes?: PermissionMode[]
@@ -373,6 +377,7 @@ export function FreeFormInput({
   thinkingLevel = 'medium',
   onThinkingLevelChange,
   permissionMode = 'ask',
+  workMode,
   onPermissionModeChange,
   enabledModes = ['safe', 'ask', 'allow-all'],
   inputValue,
@@ -1933,7 +1938,7 @@ export function FreeFormInput({
               anchored to the right (craft-agents-oss#798). overflow-hidden is safe — Radix Drawer /
               dropdowns inside render via portals, so they aren't clipped. */}
           {compactMode && (
-          <div className="flex items-center gap-1 min-w-0 shrink overflow-hidden">
+          <div className={cn("flex items-center gap-1 min-w-0 shrink overflow-hidden", workMode === 'PRO' && "gap-0.5")}>
           {onPermissionModeChange && (
             <CompactPermissionModeSelector
               permissionMode={permissionMode}
@@ -2056,7 +2061,7 @@ export function FreeFormInput({
 
           {/* Desktop: full badges row with labels and working directory */}
           {!compactMode && (
-          <div className="flex items-center gap-1 min-w-32 shrink overflow-hidden">
+          <div className={cn("flex items-center gap-1 shrink overflow-hidden", workMode === 'PRO' ? "min-w-0" : "min-w-32")}>
           {/* 1. Attach Files Badge */}
           <FreeFormInputContextBadge
             icon={<Paperclip className="h-4 w-4" />}
@@ -2161,6 +2166,8 @@ export function FreeFormInput({
           )}
           </div>
           )}
+
+          <SessionModeBadge mode={workMode} />
 
           {/* Spacer — doubles as a tap / hover target while the input is
               collapsed during processing in compact mode, so the user can

@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { TooltipProvider } from '../../tooltip'
+import type { ActivityItem } from '../TurnCard'
 
 // Match the Vite asset loader in the Bun test environment. Module mocks are
 // process-wide in Bun, so never null out shared UI modules (../../markdown,
@@ -8,7 +10,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.worker.mjs' }))
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 let ResponseCard: typeof import('../TurnCard').ResponseCard
-beforeAll(async () => { ({ ResponseCard } = await import('../TurnCard')) })
+let TurnCard: typeof import('../TurnCard').TurnCard
+beforeAll(async () => { ({ ResponseCard, TurnCard } = await import('../TurnCard')) })
 
 const document = '# 完整🙂\n\n[引用][ref]\n\n```ts\nconst value = 1\n```\n\n[ref]: https://example.com\n'
 
@@ -17,6 +20,38 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('completed response semantic reveal boundary', () => {
+  it('presents async start acknowledgments as notes while retaining final reply chrome', () => {
+    const start: ActivityItem = { id: 'start', type: 'tool', timestamp: 1, status: 'completed',
+      toolName: 'mcp__session__run_task', content: JSON.stringify({ runId: 'run', status: 'running' }) }
+    const verdict: ActivityItem = { id: 'verdict', type: 'tool', timestamp: 2, status: 'completed',
+      toolName: 'mcp__session__submit_task_verdict', content: JSON.stringify({ status: 'completed' }) }
+    for (const animateResponse of [false, true]) {
+      for (const [activities, progress] of [[[], false], [[start], true], [[{ ...start, status: 'error' }], false],
+        [[{ ...start, content: '{invalid' }], false], [[start, verdict], false]] as [ActivityItem[], boolean][]) {
+        const html = renderToStaticMarkup(React.createElement(TooltipProvider, null,
+          React.createElement(TurnCard, { turnId: 'start', activities, isStreaming: false, isComplete: true,
+            response: { text: '已启动调研。', isStreaming: false, messageId: 'reply' }, animateResponse,
+            onRegenerate: () => {}, onPopOut: () => {}, onBranch: () => {},
+          })))
+        expect(html).toContain('已启动调研。')
+        expect(html.includes('role="note"')).toBe(progress)
+        expect(html).toContain(`data-response-kind="${progress ? 'progress' : 'response'}"`)
+        for (const action of ['common.copy', 'chat.regenerate', '>Markdown<', 'turn-action-btn']) {
+          expect(html.includes(action)).toBe(!progress)
+        }
+      }
+    }
+  })
+
+  it('keeps saved plans as plan cards even when they follow a task start', () => {
+    const html = renderToStaticMarkup(React.createElement(ResponseCard, {
+      text: '规范计划', variant: 'plan', isStreaming: false, isTaskProgress: true,
+    }))
+    expect(html).toContain('data-response-kind="plan"')
+    expect(html).not.toContain('role="note"')
+    expect(html).toContain('common.copy')
+  })
+
   it('renders full source and completed actions immediately for fresh and historical replies', () => {
     for (const start of [undefined, 1, Date.now()]) {
       const html = renderToStaticMarkup(React.createElement(ResponseCard, {

@@ -84,9 +84,11 @@ export const RPC_CHANNELS = {
     DELETE_TEMPLATE: 'tasks:deleteTemplate',
     CREATE_FROM_TEMPLATE: 'tasks:createFromTemplate',
     LIST_RUNS: 'tasks:listRuns',
+    PATCH_RUN: 'tasks:patchRun',
     APPLY_RUN_REVISION: 'tasks:applyRunRevision',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.
     GET_RESULTS: 'tasks:getResults',
+    INSPECT_RUN: 'tasks:inspectRun',
     // Push: full typed snapshot after every run/node/budget/approval/repair change.
     RUN_CHANGED: 'tasks:runChanged',
   },

@@ -54,7 +54,9 @@ describe('bundled OfficeCLI skills', () => {
     }
 
     expect(existsSync(binary)).toBe(true)
-    const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe' })
+    const result = Bun.spawnSync([binary, '--version'], {
+      stdout: 'pipe', stderr: 'pipe', env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
+    })
     expect(result.exitCode).toBe(0)
     expect(result.stdout.toString()).toMatch(/\d+\.\d+/)
   })

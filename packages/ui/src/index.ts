@@ -36,6 +36,7 @@ export {
   UserMessageBubble,
   formatUserMessageTime,
   SystemMessage,
+  withTaskMessagePresentation,
   FileTypeIcon,
   getFileTypeLabel,
   asRecord,

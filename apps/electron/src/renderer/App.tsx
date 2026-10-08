@@ -1581,6 +1581,7 @@ export default function App() {
 
   // Write a debounced snapshot of the current ref entry to disk.
   const schedulePersistDraft = useCallback((sessionId: string) => {
+    if (isDraftSessionOptionsId(sessionId)) return
     const existingTimeout = draftSaveTimeoutRef.current.get(sessionId)
     if (existingTimeout) {
       clearTimeout(existingTimeout)

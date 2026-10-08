@@ -177,6 +177,11 @@ export function generateSessionId(workspaceRootPath: string): string {
 export async function createSession(
   workspaceRootPath: string,
   options?: {
+    /** Reserved by the host's durable handover receipt, never supplied by RPC options. */
+    reservedSessionId?: string;
+    handover?: SessionConfig['handover'];
+    workMode?: SessionConfig['workMode'];
+    executionRootSessionId?: string;
     name?: string;
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
@@ -193,6 +198,11 @@ export async function createSession(
     taskSlug?: string;
     taskRunId?: string;
     taskNodeId?: string;
+    taskAttempt?: number;
+    taskRevision?: number;
+    taskActor?: { id: string; persona?: string };
+    taskWorkerId?: string;
+
     taskDraft?: boolean;
     swarmEnabled?: boolean;
     orchestrationId?: string;
@@ -210,7 +220,9 @@ export async function createSession(
   ensureSessionsDir(workspaceRootPath);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath);
+  const sessionId = options?.reservedSessionId ?? generateSessionId(workspaceRootPath);
+  if (sanitizeSessionId(sessionId) !== sessionId || !sessionId) throw new Error('Invalid reserved session identity');
+  if (options?.reservedSessionId && existsSync(getSessionFilePath(workspaceRootPath, sessionId))) throw new Error('Reserved session already exists');
 
   // Create session directory with all subdirectories (plans, attachments)
   ensureSessionDir(workspaceRootPath, sessionId);
@@ -222,6 +234,10 @@ export async function createSession(
 
   const session: SessionConfig = {
     id: sessionId,
+    handover: options?.handover,
+    workMode: options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
+    workModeNeedsReview: false,
+    executionRootSessionId: options?.executionRootSessionId ?? sessionId,
     workspaceRootPath,
     name: options?.name,
     createdAt: now,
@@ -242,6 +258,10 @@ export async function createSession(
     taskSlug: options?.taskSlug,
     taskRunId: options?.taskRunId,
     taskNodeId: options?.taskNodeId,
+    taskAttempt: options?.taskAttempt,
+    taskRevision: options?.taskRevision,
+    taskActor: options?.taskActor,
+    taskWorkerId: options?.taskWorkerId,
     taskDraft: options?.taskDraft,
     swarmEnabled: options?.swarmEnabled ?? false,
     orchestrationId: options?.orchestrationId,

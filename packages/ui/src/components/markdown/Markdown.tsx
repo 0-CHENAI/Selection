@@ -4,6 +4,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import { remarkLiteralTildes } from './remark-literal-tildes'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
@@ -649,6 +650,7 @@ export function Markdown({
     [children]
   )
 
+  // Parse CJK punctuation beside emphasis markers without rewriting message text.
   // Conditionally include the collapsible sections plugin.
   const remarkPlugins = React.useMemo(
     () => {
@@ -657,8 +659,8 @@ export function Markdown({
         MARKDOWN_MATH_OPTIONS
       ]
       return collapsible
-        ? [remarkGfm, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections]
-        : [remarkGfm, remarkFileMentions, remarkLiteralTildes, mathPlugin]
+        ? [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections]
+        : [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin]
     },
     [collapsible]
   )

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const taskMenuSrc = readFileSync(join(__dirname, '../TaskActionMenu.tsx'), 'utf8')
+const sessionListSrc = readFileSync(join(__dirname, '../SessionList.tsx'), 'utf8')
 const sessionItemSrc = readFileSync(join(__dirname, '../SessionItem.tsx'), 'utf8')
 const chatPageSrc = readFileSync(join(__dirname, '../../../pages/ChatPage.tsx'), 'utf8')
 const chatDisplaySrc = readFileSync(join(__dirname, '../ChatDisplay.tsx'), 'utf8')
@@ -23,10 +24,12 @@ describe('swarm title chrome (#206)', () => {
     expect(chatPageSrc).not.toContain('setSwarmDetailsOpen')
   })
 
-  it('shows live task-run progress in the chat body after create-and-run', () => {
-    expect(chatPageSrc).toContain('OrchestrationRunProgress')
-    expect(chatPageSrc).toContain('runningHint={orchestrationStatus === \'running\'}')
-    expect(chatPageSrc).toContain('{orchestrationProgress}')
+  it('keeps child navigation in the work chain without a duplicate chat header trigger', () => {
+    expect(chatPageSrc).not.toContain('OrchestrationRunProgress')
+    expect(chatPageSrc).not.toContain('{orchestrationProgress}')
+    expect(chatPageSrc).toContain('useOrchestrationRuns')
+    expect(chatPageSrc).toContain('orchestrationRuns={orchestration.runs}')
+    expect(chatPageSrc).toContain('orchestrationWorkControls={orchestrationWorkControls}')
   })
 })
 
@@ -41,22 +44,29 @@ describe('running orchestration composer chrome', () => {
     expect(chatDisplaySrc).toContain('stopSessionSwarm')
     expect(chatDisplaySrc).toContain('pickStoppableTaskRun')
     expect(chatPageSrc).toContain('canPreviewOrchestrationChild')
-    expect(chatPageSrc).toContain('sessionId={sessionId}')
   })
 })
 
 describe('running child preview (#207)', () => {
+  it('keeps execution children out of the conversation sidebar, including legacy unowned executions', () => {
+    expect(sessionListSrc).not.toContain('ExecutionChildren')
+    expect(sessionListSrc).not.toContain('unownedExecutions')
+    expect(sessionListSrc).toContain('executionChildren.some(child => child.id === selectedId)')
+  })
+
   it('opens a preview overlay instead of navigating away from the parent', () => {
     expect(chatDisplaySrc).toContain('onPreviewSession')
     expect(chatDisplaySrc).toContain('shouldPreviewBackgroundTask')
     expect(chatPageSrc).toContain('ChildSessionPreviewDialog')
-    expect(chatPageSrc).toContain('onPreviewSession={setPreviewChildSessionId}')
+    expect(chatPageSrc).toContain('onPreviewSession={handlePreviewChildSession}')
   })
 
   it('keeps the parent task bar clickable and does not steal the chat focus zone', () => {
     const previewSrc = readFileSync(join(__dirname, '../ChildSessionPreviewDialog.tsx'), 'utf8')
     expect(previewSrc).toContain('modal={false}')
     expect(previewSrc).toContain('overlay={false}')
+    expect(previewSrc).toContain('portalContainer={container}')
+    expect(chatPageSrc).toContain('ref={setChildPreviewContainer}')
     expect(previewSrc).toContain('enableFocusZone={false}')
     expect(previewSrc).toContain('deriveSessionMessagesLoadState')
     expect(previewSrc).toContain('key={displaySession.id}')

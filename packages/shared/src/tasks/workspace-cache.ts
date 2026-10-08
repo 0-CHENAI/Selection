@@ -14,6 +14,7 @@ import {
 import type { NodeOutput } from './refs.ts';
 
 export interface WorkspaceCacheKeyInput {
+  context?: unknown;
   prompt: string;
   inputs: Record<string, unknown>;
   dependencyOutputs: Record<string, { text: string; params?: Record<string, unknown> }>;
@@ -26,9 +27,13 @@ export interface WorkspaceCacheKeyInput {
 }
 
 export interface WorkspaceCacheRecord {
+  /** Complete execution/output proof; old unversioned entries cannot be reused. */
+  version?: 2;
+  outputHash?: string;
   fingerprint: string;
   createdAt: string;
   sourceRunId: string;
+  sourceTaskSlug?: string;
   sourceNodeId: string;
   connection: string;
   output: NodeOutput;
@@ -49,6 +54,7 @@ export function workspaceCacheDir(workspaceRoot: string, connection: string): st
 
 export function fingerprintWorkspaceCache(input: WorkspaceCacheKeyInput): string {
   const payload = {
+    context: input.context,
     prompt: input.prompt,
     inputs: input.inputs,
     dependencyOutputs: input.dependencyOutputs,
@@ -93,6 +99,10 @@ export function readWorkspaceCache(
   if (!existsSync(path)) return { status: 'miss' };
   try {
     const record = JSON.parse(readFileSync(path, 'utf-8')) as WorkspaceCacheRecord;
+    if (record.version !== 2 || typeof record.outputHash !== 'string'
+      || !record.output || typeof record.output.text !== 'string' || record.connection !== connection
+      || typeof record.sourceRunId !== 'string' || !record.sourceRunId || typeof record.sourceNodeId !== 'string' || !record.sourceNodeId
+      || !Number.isFinite(Date.parse(record.createdAt)) || createHash('sha256').update(stableStringify(record.output)).digest('hex') !== record.outputHash) return { status: 'bypass', reason: 'incomplete-or-changed-reuse-record' };
     if (record.fingerprint !== fingerprint) return { status: 'miss' };
     if (Date.parse(record.createdAt) + WORKSPACE_CACHE_TTL_MS <= nowMs) {
       try {
@@ -104,7 +114,7 @@ export function readWorkspaceCache(
     }
     return { status: 'hit', record };
   } catch {
-    return { status: 'miss' };
+    return { status: 'bypass', reason: 'unreadable-reuse-record' };
   }
 }
 
@@ -114,7 +124,7 @@ export function writeWorkspaceCache(
 ): void {
   const dir = workspaceCacheDir(workspaceRoot, record.connection);
   mkdirSync(dir, { recursive: true });
-  atomicWriteFileSync(join(dir, `${record.fingerprint}.json`), JSON.stringify(record));
+  atomicWriteFileSync(join(dir, `${record.fingerprint}.json`), JSON.stringify({ ...record, version: 2, outputHash: createHash('sha256').update(stableStringify(record.output)).digest('hex') }));
 }
 
 export function pruneWorkspaceCache(workspaceRoot: string, nowMs: number): number {

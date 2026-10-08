@@ -1,5 +1,6 @@
 import type { TaskDeliveryReceipt } from './task-delivery-receipt'
 import type { WorkspaceDeliveryContract } from './workspace-delivery-contract'
+import { isNativeReadOnlyTool, PI_TOOL_NAME_MAP } from '../../../shared/src/agent/backend/pi/constants'
 import { execFileSync } from 'node:child_process'
 import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
@@ -92,9 +93,10 @@ export function prepareIsolatedWorkspace(sourceRoot: string, storage: string, de
 }
 /** This is a file-tool guard, not a shell sandbox. Unknown tools cannot claim confinement. */
 export function assertIsolatedTool(state: IsolatedWorkspace, toolName: string, input: Record<string, unknown>, confinedShellDirectory?: string): void {
-  const readers = ['Read', 'read', 'Grep', 'grep', 'Glob', 'glob', 'find', 'ls']
-  if (readers.includes(toolName)) return
-  if (['submit_answer', 'session__submit_answer', 'mcp__session__submit_answer', 'submit_task_output', 'session__submit_task_output', 'mcp__session__submit_task_output'].includes(toolName)) return
+  if (isNativeReadOnlyTool(toolName) || ['WebSearch', 'WebFetch'].includes(PI_TOOL_NAME_MAP[toolName] ?? toolName)) return
+  // These host-owned session tools validate their own run/attempt identity and
+  // cannot write project files. External tools with similar names stay blocked.
+  if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|task_help|get_session_info|get_task_results|session_history|task_context|update_task_list)$/.test(toolName)) return
   if (state.delivery || state.pendingDelivery) throw new Error('This candidate is frozen for delivery; create a new worker for further changes')
   if (['Bash', 'bash'].includes(toolName) && confinedShellDirectory === realpathSync(state.directory)) return
   if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit'].includes(toolName)) throw new Error('This isolated task requires a sandbox for shell or external write tools; the tool has not run.')

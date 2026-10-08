@@ -28,6 +28,8 @@ import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
+  handoverSession?(sessionId: string, operation: import('@craft-agent/shared/protocol').HandoverOperation): Promise<import('@craft-agent/shared/protocol').HandoverResult>
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -85,6 +87,7 @@ export interface ISessionManager {
   artifactFeedback?(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
   resumeExecution?(sessionId: string): Promise<void>
   continueProgress?(sessionId: string): Promise<void>
+  setSessionWorkMode?(sessionId: string, mode: 'NORM' | 'PRO'): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
@@ -110,6 +113,7 @@ export interface ISessionManager {
     taskSlug: string,
     reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
   ): Promise<boolean>
+  assertTaskRunAllowed(workspaceId: string, orchestratorSessionId?: string, task?: { slug: string }): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
   updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>

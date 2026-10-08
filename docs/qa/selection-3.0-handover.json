@@ -1,0 +1,114 @@
+{
+  "issue": 452,
+  "sourceSessionId": "261004-fresh-heath",
+  "proSessionId": "261004-coral-hawk",
+  "normSessionId": "261004-sunny-moon",
+  "model": "gpt-6-luna",
+  "workModes": [
+    "NORM",
+    "PRO",
+    "NORM"
+  ],
+  "permissionMode": "safe",
+  "sourceUnchangedAtHandover": true,
+  "backgroundAppliedOnce": true,
+  "snapshots": [
+    {
+      "handoverId": "4e55d770-16aa-43e0-b7ea-96a367aa8140",
+      "sourceSessionId": "261004-fresh-heath",
+      "targetSessionId": "261004-coral-hawk",
+      "targetMode": "PRO",
+      "status": "applied",
+      "snapshotVersion": 1,
+      "checkpoint": "e927b4d251d5b062cdf50f2b3fd65cf82b1c56fbb4d2d933264183009375b223",
+      "files": [
+        {
+          "ref": "6646c81e62ca8987f86fd2ec3da33a3981cfe4f85cfcb77ed4a10b5236c1ed29",
+          "originalPath": "/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt",
+          "snapshotPath": "files/4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6.txt",
+          "hash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+          "originalHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6"
+        }
+      ],
+      "constraints": [
+        "读取 \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\"。目标是比较 A/B 两年成本和风险。约束：只读约定资料，不部署、不执行外部操作。先给资料摘要，列出未决问题和下一步；不能核实的成本口径与风险资料明确标为未知。"
+      ],
+      "openQuestions": [
+        "- **方案 B：**成本口径待核对，**目前未知**，因此暂不能与方案 A 直接比较。",
+        "- **风险：****具体风险内容与程度未知**；资料只说明存在一个尚未补齐的缺口。",
+        "1. 方案 B 的成本范围、计算口径及两年金额是什么？是否与方案 A 使用相同口径？**未知。**",
+        "2. 风险缺口具体涉及什么事项、影响和可能性？**未知。**",
+        "3. A/B 是否还存在其他成本或风险资料？当前文件未说明，**未知。**",
+        "只读核对约定资料中方案 B 的成本明细及风险缺口说明；确认两方案采用一致的两年成本口径后，再做金额比较。补齐风险描述前，不对两方案风险高低作判断。本次不部署，也不执行外部操作。"
+      ]
+    },
+    {
+      "handoverId": "11726c7b-9874-4f7b-9562-75467348f040",
+      "sourceSessionId": "261004-coral-hawk",
+      "targetSessionId": "261004-sunny-moon",
+      "targetMode": "NORM",
+      "status": "applied",
+      "snapshotVersion": 1,
+      "checkpoint": "1226883ef5b29448216e11b1b255d13f42e0ad76ed45a943b2634ac8dd59982f",
+      "files": [
+        {
+          "ref": "b332276a49e41f3c5c57efbacb42d36b63a77d0d9586638b63b7cd183df0d57b",
+          "originalPath": "/Users/chenai/.selection/workspaces/my-workspace/sessions/261004-coral-hawk/data/handover/4e55d770-16aa-43e0-b7ea-96a367aa8140/snapshot.json",
+          "snapshotPath": "files/9e1455e634fa6cc9042ca8a93eacffa81c78f6851af162a1fcd45de77cb649aa.json",
+          "hash": "9e1455e634fa6cc9042ca8a93eacffa81c78f6851af162a1fcd45de77cb649aa",
+          "originalHash": "9e1455e634fa6cc9042ca8a93eacffa81c78f6851af162a1fcd45de77cb649aa"
+        },
+        {
+          "ref": "1944147d5cf3e65bbb5930cede17453cbbace5ceb99fe7f2b28db1d382f6ef7d",
+          "originalPath": "/Users/chenai/.selection/workspaces/my-workspace/sessions/261004-coral-hawk/data/handover/4e55d770-16aa-43e0-b7ea-96a367aa8140/files/4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6.txt",
+          "snapshotPath": "files/4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6.txt",
+          "hash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+          "originalHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6"
+        },
+        {
+          "ref": "6646c81e62ca8987f86fd2ec3da33a3981cfe4f85cfcb77ed4a10b5236c1ed29",
+          "originalPath": "/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt",
+          "snapshotPath": "files/4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6.txt",
+          "hash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+          "originalHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6"
+        }
+      ],
+      "constraints": [
+        "读取 \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\"。目标是比较 A/B 两年成本和风险。约束：只读约定资料，不部署、不执行外部操作。先给资料摘要，列出未决问题和下一步；不能核实的成本口径与风险资料明确标为未知。",
+        "请依据收到的交接背景继续原目标，读冻结快照后给一份简短报告。确认 A 两年成本，明确 B 口径与风险缺口的限制。不要重复已完成操作或继续源运行。仍然只读，不部署。"
+      ],
+      "openQuestions": [
+        "- **方案 B：**成本口径待核对，**目前未知**，因此暂不能与方案 A 直接比较。",
+        "- **风险：****具体风险内容与程度未知**；资料只说明存在一个尚未补齐的缺口。",
+        "1. 方案 B 的成本范围、计算口径及两年金额是什么？是否与方案 A 使用相同口径？**未知。**",
+        "2. 风险缺口具体涉及什么事项、影响和可能性？**未知。**",
+        "3. A/B 是否还存在其他成本或风险资料？当前文件未说明，**未知。**",
+        "只读核对约定资料中方案 B 的成本明细及风险缺口说明；确认两方案采用一致的两年成本口径后，再做金额比较。补齐风险描述前，不对两方案风险高低作判断。本次不部署，也不执行外部操作。",
+        "- **方案 B：**成本口径仍待核对，金额及是否与 A 同口径均**未知**，目前不能直接比较。",
+        "- **风险：**资料只指出有一个未补齐的缺口；缺口内容、影响和风险程度均**未知**，不能据此判断 A/B 风险高低。",
+        "**下一步：**只读核对 B 的成本明细和风险缺口说明；在口径一致且风险信息补齐前，不作成本或风险优劣结论。本次仅读取冻结快照，未部署、未执行外部操作。"
+      ]
+    }
+  ],
+  "proOutput": "## 简短报告\n\n- **方案 A：**两年总成本为 **100 万元（1,000,000 元）**。资料注明仅用于测试，不代表市场事实。\n- **方案 B：**成本口径仍待核对，金额及是否与 A 同口径均**未知**，目前不能直接比较。\n- **风险：**资料只指出有一个未补齐的缺口；缺口内容、影响和风险程度均**未知**，不能据此判断 A/B 风险高低。\n\n**下一步：**只读核对 B 的成本明细和风险缺口说明；在口径一致且风险信息补齐前，不作成本或风险优劣结论。本次仅读取冻结快照，未部署、未执行外部操作。",
+  "normOutput": "## 下一步最应核实的问题\n\n1. **先核实方案 B 的两年总金额及明细。**明确其成本范围、计算口径和时间范围，并确认是否与 A 一样按两年、同一口径计算；在此之前，A/B 金额不能直接比较。\n2. **查明风险缺口具体是什么。**补齐涉及事项、可能影响及发生可能性；目前资料只说存在未补齐的缺口，因此风险内容和程度都未知，不能判断哪方案风险更高。\n3. **确认资料是否完整。**现有记录没有说明 A/B 是否还有其他成本或风险项目，这一点也未知。\n\n**已知：**方案 A 两年总成本为 **100 万元（1,000,000 元）**。该数字来自标注为“仅用于测试、不代表市场事实”的资料，不应当作市场报价或实际成本结论。\n\n以上依据交接中的冻结资料；本次保持只读，未部署、未执行外部操作，也未重新读取源文件。",
+  "hostRegression": {
+    "tests": 167,
+    "failed": 0,
+    "files": 6,
+    "assertions": 894
+  },
+  "browserPreview": "Actual HandoverPanel with fixed transport, separate from real host/model F2",
+  "compactViewport": {
+    "width": 375,
+    "height": 700,
+    "allFooterButtonsVisible": true
+  },
+  "validation": {
+    "typecheckAll": "passed",
+    "lint": "0 errors; existing 86 electron and 8 shared warnings",
+    "i18nParity": "2295 keys per locale; sorted",
+    "electronBuild": "passed",
+    "diffCheck": "passed"
+  }
+}

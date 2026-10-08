@@ -1,3 +1,4 @@
+import { HandoverPanel } from '@/components/app-shell/HandoverPanel'
 import { PanelResizeHandle } from '@/components/app-shell/PanelResizeHandle'
 import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 /**
@@ -9,11 +10,11 @@ import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, FolderOpen, X } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
-import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
-import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
+import { useOrchestrationRuns } from '@/hooks/useOrchestrationRuns'
+import { canPreviewOrchestrationChild, nodeStateForSession } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
@@ -29,7 +30,7 @@ import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
-import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID } from '@/lib/draft-session'
+import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, draftSessionOptionsId } from '@/lib/draft-session'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
@@ -41,6 +42,8 @@ import {
   updateSessionAtom,
   updateSessionMetaAtom,
 } from '@/atoms/sessions'
+import { draftComposerAtomFamily, workModeViewAtom } from '@/atoms/work-mode'
+import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
@@ -60,7 +63,6 @@ export interface ChatPageProps {
 const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const { t } = useTranslation()
   const isDraft = sessionId == null
-  const optionsSessionId = sessionId ?? DRAFT_SESSION_OPTIONS_ID
   // Diagnostic: mark when component runs
   React.useLayoutEffect(() => {
     if (sessionId) rendererPerf.markSessionSwitch(sessionId, 'panel.mounted')
@@ -101,6 +103,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isFocusedPanel,
   } = useAppShellContext()
 
+  const draftStore = useStore()
+  const draftWorkMode = useAtomValue(workModeViewAtom)
+  const optionsSessionId = sessionId ?? draftSessionOptionsId(activeWorkspaceId ?? '', orchestrationProjectId ?? undefined, draftWorkMode)
+  const [draftComposer, setDraftComposer] = useAtom(draftComposerAtomFamily(optionsSessionId))
+
   // Use the unified session options hook for clean access
   const {
     options: sessionOpts,
@@ -126,6 +133,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [childPreviewContainer, setChildPreviewContainer] = React.useState<HTMLDivElement | null>(null)
   const [previewChildSessionId, setPreviewChildSessionId] = React.useState<string | null>(null)
   React.useEffect(() => {
     setPreviewChildSessionId(null)
@@ -242,25 +250,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const initialDraftConnection = llmConnections.find(c => c.slug === workspaceDefaultLlmConnection)
     ?? llmConnections.find(c => c.isDefault) ?? llmConnections[0]
-  const [draftModel, setDraftModel] = React.useState(initialDraftConnection?.defaultModel ?? '')
-  const [draftConnection, setDraftConnection] = React.useState(initialDraftConnection?.slug)
+  const draftModel = draftComposer.model
+  const draftConnection = draftComposer.connection
   const projects = useAtomValue(projectsAtom)
-  const [draftWorkingDirectoryOverride, setDraftWorkingDirectory] = React.useState<string | undefined>(undefined)
-  const [workspaceWorkingDirectory, setWorkspaceWorkingDirectory] = React.useState<string | undefined>(undefined)
+  const draftWorkingDirectoryOverride = draftComposer.workingDirectory
   const draftWorkingDirectory = resolveDraftWorkingDirectory(
     draftWorkingDirectoryOverride,
     projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory,
-    workspaceWorkingDirectory,
+    draftComposer.workspaceWorkingDirectory,
   )
-  const [draftSwarmEnabled, setDraftSwarmEnabled] = React.useState(false)
-  const [draftSourceSlugs, setDraftSourceSlugs] = React.useState<string[]>(
-    () => enabledSources?.map(source => source.config.slug) ?? [],
-  )
+  const draftSwarmEnabled = draftWorkMode === 'PRO' && draftComposer.swarmEnabled
+  const draftSourceSlugs = draftComposer.sourceSlugs
   const [draftBusy, setDraftBusy] = React.useState(false)
-  // Keep an explicit picker choice when asynchronous defaults finish loading.
-  const draftThinkingSelection = React.useRef<ThinkingLevel | undefined>(undefined)
+  const setDraftModel = React.useCallback((model: string) => setDraftComposer(previous => ({ ...previous, model })), [setDraftComposer])
+  const setDraftConnection = React.useCallback((connection: string | undefined) => setDraftComposer(previous => ({ ...previous, connection })), [setDraftComposer])
+  const setDraftWorkingDirectory = React.useCallback((workingDirectory: string | undefined) => setDraftComposer(previous => ({ ...previous, workingDirectory })), [setDraftComposer])
+  const setDraftSourceSlugs = React.useCallback((sourceSlugs: string[]) => setDraftComposer(previous => ({ ...previous, sourceSlugs, sourcesChosen: true })), [setDraftComposer])
   const draftCreateRef = React.useRef({
     onCreateSession,
+    workMode: draftWorkMode,
     activeWorkspaceId,
     projectId: orchestrationProjectId ?? undefined,
     model: draftModel,
@@ -273,6 +281,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   })
   draftCreateRef.current = {
     onCreateSession,
+    workMode: draftWorkMode,
     activeWorkspaceId,
     projectId: orchestrationProjectId ?? undefined,
     model: draftModel,
@@ -286,6 +295,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const submitDraftRef = React.useRef(createDraftSubmission<Session>(() => {
     const ctx = draftCreateRef.current
     return ctx.onCreateSession(ctx.activeWorkspaceId!, {
+      workMode: ctx.workMode,
       projectId: ctx.projectId,
       model: ctx.model || undefined,
       llmConnection: ctx.connection,
@@ -296,12 +306,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       enabledSourceSlugs: ctx.sourceSlugs,
     })
   }))
-  const settingsHydrated = React.useRef<string | null>(null)
   React.useEffect(() => {
     if (!isDraft) return
     submitDraftRef.current = createDraftSubmission<Session>(() => {
       const ctx = draftCreateRef.current
       return ctx.onCreateSession(ctx.activeWorkspaceId!, {
+        workMode: ctx.workMode,
         projectId: ctx.projectId,
         model: ctx.model || undefined,
         llmConnection: ctx.connection,
@@ -312,59 +322,61 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         enabledSourceSlugs: ctx.sourceSlugs,
       })
     })
-    const initial = llmConnections.find(c => c.slug === workspaceDefaultLlmConnection)
-      ?? llmConnections.find(c => c.isDefault) ?? llmConnections[0]
-    setDraftModel(initial?.defaultModel ?? '')
-    setDraftConnection(initial?.slug)
-    setDraftSwarmEnabled(false)
-    setDraftWorkingDirectory(undefined)
-    setWorkspaceWorkingDirectory(undefined)
-    setDraftSourceSlugs(enabledSources?.map(source => source.config.slug) ?? [])
     setDraftBusy(false)
-    draftThinkingSelection.current = undefined
-    setPermissionMode(defaultSessionOptions.permissionMode)
-    setOption('thinkingLevel', defaultSessionOptions.thinkingLevel)
-    settingsHydrated.current = null
-    // Connection catalogs must not reset in-progress draft composer choices.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only on draft entry / workspace
-  }, [isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption])
+  }, [isDraft, optionsSessionId])
 
   React.useEffect(() => {
-    if (!isDraft || !activeWorkspaceId || settingsHydrated.current === activeWorkspaceId) return
+    if (isDraft && draftComposer.initialized && !draftComposer.model && initialDraftConnection) {
+      setDraftComposer(previous => ({ ...previous, model: initialDraftConnection.defaultModel ?? '', connection: initialDraftConnection.slug }))
+    }
+  }, [isDraft, draftComposer.initialized, draftComposer.model, initialDraftConnection, setDraftComposer])
+
+  React.useEffect(() => {
+    if (!isDraft || draftComposer.initialized) return
+    setDraftComposer(previous => ({ ...previous, initialized: true,
+      model: initialDraftConnection?.defaultModel ?? '', connection: initialDraftConnection?.slug,
+      sourceSlugs: enabledSources?.map(source => source.config.slug) ?? [],
+    }))
+    setPermissionMode(defaultSessionOptions.permissionMode)
+    setOption('thinkingLevel', defaultSessionOptions.thinkingLevel)
+  }, [isDraft, draftComposer.initialized, initialDraftConnection, enabledSources, setDraftComposer, setPermissionMode, setOption])
+
+  React.useEffect(() => {
+    if (!isDraft || !activeWorkspaceId || draftComposer.hydrated) return
     let cancelled = false
     void Promise.allSettled([
       window.electronAPI.getDefaultThinkingLevel(),
       window.electronAPI.getWorkspaceSettings(activeWorkspaceId),
     ]).then(([defaultResult, workspaceResult]) => {
       if (cancelled) return
-      if (defaultResult.status === 'rejected') console.error('[ChatPage] Failed to load default thinking level:', defaultResult.reason)
-      if (workspaceResult.status === 'rejected') console.error('[ChatPage] Failed to load workspace settings:', workspaceResult.reason)
       const appDefault = defaultResult.status === 'fulfilled' ? defaultResult.value : defaultSessionOptions.thinkingLevel
       const settings = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null
-      settingsHydrated.current = activeWorkspaceId
-      setOption('thinkingLevel', draftThinkingSelection.current ?? settings?.thinkingLevel ?? appDefault)
-      if (!settings) return
-      if (settings.permissionMode) setPermissionMode(settings.permissionMode)
-      setWorkspaceWorkingDirectory(settings.workingDirectory)
-      if (settings.enabledSourceSlugs) setDraftSourceSlugs(settings.enabledSourceSlugs)
+      if (!draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection) setOption('thinkingLevel', settings?.thinkingLevel ?? appDefault)
+      setDraftComposer(previous => {
+        return { ...previous, hydrated: true, workspaceWorkingDirectory: settings?.workingDirectory,
+          sourceSlugs: previous.sourcesChosen ? previous.sourceSlugs : settings?.enabledSourceSlugs ?? previous.sourceSlugs }
+      })
+      if (settings?.permissionMode && sessionOpts.permissionMode === defaultSessionOptions.permissionMode) setPermissionMode(settings.permissionMode)
     })
     return () => { cancelled = true }
-  }, [isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption])
+  }, [isDraft, activeWorkspaceId, optionsSessionId, draftComposer.hydrated, setDraftComposer, setPermissionMode, setOption, sessionOpts.permissionMode, draftStore])
 
   const handleThinkingLevelChange = React.useCallback((level: ThinkingLevel) => {
-    if (isDraft) draftThinkingSelection.current = level
+    if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))
     setOption('thinkingLevel', level)
-  }, [isDraft, setOption])
+  }, [isDraft, setOption, setDraftComposer])
 
   // Track draft value for this session
-  const [inputValue, setInputValue] = React.useState(() => coerceInputText(sessionId ? getDraft(sessionId) : ''))
+  const [inputDraft, setInputDraft] = React.useState(() => ({ key: optionsSessionId, text: coerceInputText(getDraft(optionsSessionId)) }))
+  const inputValue = inputDraft.key === optionsSessionId ? inputDraft.text : coerceInputText(getDraft(optionsSessionId))
+  const setInputValue = React.useCallback((text: string) => setInputDraft({ key: optionsSessionId, text }), [optionsSessionId])
   const inputValueRef = React.useRef(inputValue)
   inputValueRef.current = inputValue
 
   // Re-sync from parent when session changes
   React.useEffect(() => {
-    setInputValue(coerceInputText(sessionId ? getDraft(sessionId) : ''))
-  }, [getDraft, sessionId])
+    setInputValue(coerceInputText(getDraft(optionsSessionId)))
+  }, [getDraft, optionsSessionId, setInputValue])
 
   // Sync when draft is set externally (e.g., from notifications or shortcuts)
   // PERFORMANCE NOTE: This bounded polling (max 10 attempts × 50ms = 500ms)
@@ -388,7 +400,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }, 50)
 
     return () => clearInterval(interval)
-  }, [sessionId, getDraft])
+  }, [sessionId, getDraft, setInputValue])
 
   // Listen for restore-input events (queued messages restored to input on abort)
   React.useEffect(() => {
@@ -402,34 +414,35 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
     window.addEventListener('craft:restore-input', handler)
     return () => window.removeEventListener('craft:restore-input', handler)
-  }, [sessionId])
+  }, [sessionId, setInputValue])
 
   const handleInputChange = React.useCallback((value: string) => {
     const nextText = coerceInputText(value)
     setInputValue(nextText)
     inputValueRef.current = nextText
-    if (sessionId) onInputChange(sessionId, nextText)
-  }, [sessionId, onInputChange])
+    onInputChange(optionsSessionId, nextText)
+  }, [optionsSessionId, onInputChange, setInputValue])
 
   // Attachments draft state — hydrated async from persisted refs on session switch.
   // `[]` is the safe default while hydration is in flight; FreeFormInput seeds its
   // local state from this prop and swaps in the restored list when ready.
-  const [attachmentsValue, setAttachmentsValue] = React.useState<import('../../shared/types').FileAttachment[]>([])
+  const [attachmentDraft, setAttachmentDraft] = React.useState<{ key: string; files: import('../../shared/types').FileAttachment[] }>({ key: optionsSessionId, files: [] })
+  const attachmentsValue = attachmentDraft.key === optionsSessionId ? attachmentDraft.files : []
+  const setAttachmentsValue = React.useCallback((files: import('../../shared/types').FileAttachment[]) => setAttachmentDraft({ key: optionsSessionId, files }), [optionsSessionId])
 
   React.useEffect(() => {
     let cancelled = false
     setAttachmentsValue([])
-    if (!sessionId) return () => { cancelled = true }
-    hydrateDraftAttachments(sessionId).then((atts) => {
+    hydrateDraftAttachments(optionsSessionId).then((atts) => {
       if (!cancelled) setAttachmentsValue(atts)
     })
     return () => { cancelled = true }
-  }, [sessionId, hydrateDraftAttachments])
+  }, [optionsSessionId, hydrateDraftAttachments, setAttachmentsValue])
 
   const handleAttachmentsChange = React.useCallback((attachments: import('../../shared/types').FileAttachment[]) => {
     setAttachmentsValue(attachments)
-    if (sessionId) onAttachmentsChange(sessionId, attachments)
-  }, [sessionId, onAttachmentsChange])
+    onAttachmentsChange(optionsSessionId, attachments)
+  }, [optionsSessionId, onAttachmentsChange, setAttachmentsValue])
 
   // Session model change handler - persists per-session model and connection
   const handleModelChange = React.useCallback((model: string, connection?: string) => {
@@ -446,7 +459,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         connection,
       )
     }
-  }, [sessionId, activeWorkspaceId])
+  }, [sessionId, activeWorkspaceId, setDraftModel, setDraftConnection])
 
   const handleConnectionChange = React.useCallback(async (connectionSlug: string) => {
     if (!sessionId) {
@@ -458,7 +471,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     } catch (error) {
       console.error('Failed to change connection:', error)
     }
-  }, [sessionId])
+  }, [sessionId, setDraftConnection])
 
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
@@ -508,7 +521,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
     if (!session) return
     await window.electronAPI.sessionCommand(session.id, { type: 'updateWorkingDirectory', dir: path })
-  }, [isDraft, session])
+  }, [isDraft, session, setDraftWorkingDirectory])
 
   const { openArtifact: handleOpenArtifact, openFile: handleOpenFile } = useGeneratedFileActions({
     sessionId: session?.id,
@@ -584,60 +597,49 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }, [sessionId, onMarkSessionUnread])
 
   const { dagOrchestrationEnabled, swarmAgentsEnabled } = useAdvancedSettings()
-  const swarmEnabled = swarmAgentsEnabled && (isDraft ? draftSwarmEnabled : (session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false))
+  const currentWorkMode = isDraft ? draftWorkMode : session?.workMode ?? sessionMeta?.workMode ?? 'NORM'
+  const capabilityError = complexCapabilityError(isDraft ? { workMode: draftWorkMode } : session ?? sessionMeta, 'delegate')
+  const swarmEnabled = !capabilityError && swarmAgentsEnabled
   const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
-  const swarmToggleDisabled = sessionMeta?.orchestrationRole === 'worker'
+  const swarmToggleDisabled = !!capabilityError || sessionMeta?.orchestrationRole === 'worker'
     || sessionMeta?.orchestrationRole === 'reviewer'
-  const handleSwarmEnabledChange = React.useCallback(async (enabled: boolean) => {
-    if (!sessionId) {
-      setDraftSwarmEnabled(enabled)
-      return
-    }
-    const previous = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
-    updateSession(sessionId, current => current ? { ...current, swarmEnabled: enabled } : current)
-    updateSessionMeta(sessionId, { swarmEnabled: enabled })
-    try {
-      await window.electronAPI.setSessionSwarmEnabled(sessionId, enabled)
-    } catch (error) {
-      updateSession(sessionId, current => current ? { ...current, swarmEnabled: previous } : current)
-      updateSessionMeta(sessionId, { swarmEnabled: previous })
-      console.error('[ChatPage] Failed to update Swarm mode:', error)
-      toast.error(t('common.error'))
-    }
-  }, [sessionId, session?.swarmEnabled, sessionMeta?.swarmEnabled, updateSession, updateSessionMeta, t])
 
-  // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
+  // Task orchestrator sessions with actual run history get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
   const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
+  const orchestration = useOrchestrationRuns(
+    dagOrchestrationEnabled && !isDraft && isTaskOrchestrator ? activeWorkspaceId : undefined,
+    taskSlug, sessionId,
+  )
+  const hasOrchestrationRun = !!sessionId && orchestration.runs.some(run => run.orchestratorSessionId === sessionId)
+  const orchestrationWorkControls = orchestration.retry ? <div className="flex flex-wrap items-center gap-2 px-2 py-2 text-xs">
+    <button type="button" disabled={orchestration.retrying} onClick={orchestration.retry}
+      className="rounded border border-border px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">{t('tasks.retryFailedNodes')}</button>
+    <span className="text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
+  </div> : undefined
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
-    if (!dagOrchestrationEnabled || !taskSlug || !sessionId) return
+    if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator || !hasOrchestrationRun) return
     setKanbanEditorTarget({
+      workspaceId: activeWorkspaceId ?? undefined,
       mode: 'edit',
       sessionId,
       taskSlug,
       initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined,
     })
     navigate(routes.view.board())
-  }, [dagOrchestrationEnabled, taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
+  }, [dagOrchestrationEnabled, taskSlug, isTaskOrchestrator, hasOrchestrationRun, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
 
-  const handlePreviewOrchestrationNode = React.useCallback((childSessionId: string) => {
-    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return
+  const handlePreviewChildSession = React.useCallback((childSessionId: string) => {
+    if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) {
+      toast.error(t('chat.sessionNoLongerExists'))
+      return
+    }
     setPreviewChildSessionId(childSessionId)
-  }, [sessionId, sessionMetaMap])
-
-  const orchestrationProgress = dagOrchestrationEnabled && !isDraft && isTaskOrchestrator && activeWorkspaceId && taskSlug && sessionId ? (
-    <OrchestrationRunProgress
-      workspaceId={activeWorkspaceId}
-      taskSlug={taskSlug}
-      sessionId={sessionId}
-      runningHint={orchestrationStatus === 'running'}
-      onPreviewSession={handlePreviewOrchestrationNode}
-    />
-  ) : null
+  }, [sessionId, sessionMetaMap, t])
 
   const handleDelete = React.useCallback(async () => {
     if (sessionId) await onDeleteSession(sessionId)
@@ -676,22 +678,35 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Topology action opens the definition editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
   const editTaskButton = React.useMemo(() => {
-    if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined
+    if (!dagOrchestrationEnabled || !isTaskOrchestrator || !hasOrchestrationRun) return undefined
     return (
       <TaskOrchestrationEditButton
         compact={!!isCompactMode}
         onEdit={handleEditTask}
       />
     )
-  }, [dagOrchestrationEnabled, isTaskOrchestrator, handleEditTask, isCompactMode])
+  }, [dagOrchestrationEnabled, isTaskOrchestrator, hasOrchestrationRun, handleEditTask, isCompactMode])
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
-  const headerActions = editTaskButton && primaryHeaderAction ? (
+  const sessionHeaderActions = editTaskButton && primaryHeaderAction ? (
     <div className="flex items-center gap-1.5">
       {editTaskButton}
       {primaryHeaderAction}
     </div>
   ) : (editTaskButton ?? primaryHeaderAction)
+
+  const canHandover = !!sessionId && !sessionMeta?.parentSessionId && !sessionMeta?.taskNodeId && !sessionMeta?.workModeNeedsReview
+    && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)
+  const headerActions = (
+    <div className="flex items-center gap-1.5">
+      {!canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
+        {currentWorkMode}
+      </span>}
+      {sessionHeaderActions}
+      {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
+        canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
+    </div>
+  )
 
   // Build title menu content for chat sessions using shared SessionMenu.
   // Desktop uses Radix DropdownMenu via PanelHeader; compact mode uses a
@@ -737,7 +752,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const childPreviewDialog = (
     <ChildSessionPreviewDialog
+      container={childPreviewContainer}
       sessionId={previewChildSessionId}
+      nodeState={nodeStateForSession(orchestration.runs, previewChildSessionId)}
       open={previewChildSessionId !== null}
       onOpenChange={(open) => {
         if (!open) setPreviewChildSessionId(null)
@@ -746,6 +763,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   )
 
   const draftSession = React.useMemo(() => createDraftDisplaySession({
+    id: optionsSessionId,
+    workMode: draftWorkMode,
     workspaceId: activeWorkspaceId ?? '',
     model: draftModel,
     llmConnection: draftConnection,
@@ -754,6 +773,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     swarmEnabled: draftSwarmEnabled,
     projectId: orchestrationProjectId ?? undefined,
   }), [
+    optionsSessionId,
+    draftWorkMode,
     activeWorkspaceId,
     draftModel,
     draftConnection,
@@ -771,6 +792,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       void submitDraftRef.current(async (created) => {
         pendingCreatedSessionRef.current = created
         onSendMessage(created.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
+        onInputChange(optionsSessionId, '')
+        onAttachmentsChange(optionsSessionId, [])
+        setDraftComposer(previous => ({ ...previous, initialized: false, hydrated: false }))
         navigate(routes.view.allSessions(created.id))
       }).catch((error: unknown) => {
         toast.error(error instanceof Error ? error.message : String(error))
@@ -780,7 +804,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       return
     }
     if (session) onSendMessage(session.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
-  }, [isDraft, activeWorkspaceId, draftBusy, onSendMessage, session])
+  }, [isDraft, activeWorkspaceId, draftBusy, onSendMessage, session, optionsSessionId, onInputChange, onAttachmentsChange, setDraftComposer])
 
   if (session && pendingCreatedSessionRef.current?.id === session.id) {
     pendingCreatedSessionRef.current = null
@@ -797,7 +821,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       return
     }
     onSessionSourcesChange?.(sessionId, slugs)
-  }, [sessionId, onSessionSourcesChange])
+  }, [sessionId, onSessionSourcesChange, setDraftSourceSlugs])
 
   // Handle missing session - loading or deleted
   if (!isDraft && !displaySession) {
@@ -805,6 +829,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       // Session exists in metadata but not loaded yet - show loading state
       const skeletonSession = {
         id: sessionMeta.id,
+        workMode: currentWorkMode,
         workspaceId: sessionMeta.workspaceId,
         workspaceName: '',
         name: sessionMeta.name,
@@ -831,54 +856,63 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         <>
           <div className="h-full flex flex-col">
             <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-            <div className="flex-1 flex flex-col min-h-0">
-              {orchestrationProgress}
-              <ChatDisplay
-                ref={chatDisplayRef}
-                session={skeletonSession}
-                onSendMessage={() => {}}
-                onOpenFile={handleOpenFile}
-                onOpenArtifact={handleOpenArtifact}
-                onOpenUrl={handleOpenUrl}
-                currentModel={effectiveModel}
-                onModelChange={handleModelChange}
-                onConnectionChange={handleConnectionChange}
-                pendingPermission={undefined}
-                onRespondToPermission={onRespondToPermission}
-                pendingCredential={undefined}
-                onRespondToCredential={onRespondToCredential}
-                thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
-                onThinkingLevelChange={handleThinkingLevelChange}
-                permissionMode={sessionOpts.permissionMode}
-                onPermissionModeChange={setPermissionMode}
-                enabledModes={enabledModes}
-                inputValue={inputValue}
-                onInputChange={handleInputChange}
-                attachmentsValue={attachmentsValue}
-                onAttachmentsChange={handleAttachmentsChange}
-                sources={enabledSources}
-                skills={skills}
-                swarmEnabled={swarmEnabled}
-                onSwarmEnabledChange={swarmAgentsEnabled ? handleSwarmEnabledChange : undefined}
-                swarmToggleDisabled={swarmToggleDisabled}
-                swarmRunning={orchestrationStatus === 'running'}
-                workspaceId={activeWorkspaceId || undefined}
-                onSourcesChange={handleSourcesChange}
-                workingDirectory={sessionMeta.workingDirectory}
-                composerSessionId={sessionId}
-                onWorkingDirectoryChange={handleWorkingDirectoryChange}
-                messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-                messagesLoadError={messageLoadState.error}
-                messagesRetrying={messagesRetrying}
-                onRetryMessagesLoad={handleRetryMessagesLoad}
-                searchQuery={sessionListSearchQuery}
-                isSearchModeActive={isSearchModeActive}
-                onMatchInfoChange={onChatMatchInfoChange}
-                connectionUnavailable={connectionUnavailable}
-                compactMode={!!isCompactMode}
-                enableCompactModelPicker={!!isCompactMode}
-                onPreviewSession={setPreviewChildSessionId}
-              />
+            <div className="relative flex-1 flex flex-col min-h-0">
+              {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
+                <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+                  {t('session.workModeNeedsReview')}
+                </div>
+              )}
+              <div ref={setChildPreviewContainer} className="relative min-h-0 flex-1">
+                <ChatDisplay
+                  ref={chatDisplayRef}
+                  session={skeletonSession}
+                  onSendMessage={() => {}}
+                  onOpenFile={handleOpenFile}
+                  onOpenArtifact={handleOpenArtifact}
+                  onOpenUrl={handleOpenUrl}
+                  currentModel={effectiveModel}
+                  onModelChange={handleModelChange}
+                  onConnectionChange={handleConnectionChange}
+                  pendingPermission={undefined}
+                  onRespondToPermission={onRespondToPermission}
+                  pendingCredential={undefined}
+                  onRespondToCredential={onRespondToCredential}
+                  thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+                  onThinkingLevelChange={handleThinkingLevelChange}
+                  permissionMode={sessionOpts.permissionMode}
+                  onPermissionModeChange={setPermissionMode}
+                  enabledModes={enabledModes}
+                  inputValue={inputValue}
+                  onInputChange={handleInputChange}
+                  attachmentsValue={attachmentsValue}
+                  onAttachmentsChange={handleAttachmentsChange}
+                  sources={enabledSources}
+                  skills={skills}
+                  swarmEnabled={swarmEnabled}
+                  onSwarmEnabledChange={undefined}
+                  swarmToggleDisabled={swarmToggleDisabled}
+                  swarmRunning={orchestrationStatus === 'running'}
+                  orchestrationRuns={orchestration.runs}
+                  orchestrationSources={orchestration.sourcesByRun}
+                  orchestrationWorkControls={orchestrationWorkControls}
+                  workspaceId={activeWorkspaceId || undefined}
+                  onSourcesChange={handleSourcesChange}
+                  workingDirectory={sessionMeta.workingDirectory}
+                  composerSessionId={sessionId}
+                  onWorkingDirectoryChange={handleWorkingDirectoryChange}
+                  messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+                  messagesLoadError={messageLoadState.error}
+                  messagesRetrying={messagesRetrying}
+                  onRetryMessagesLoad={handleRetryMessagesLoad}
+                  searchQuery={sessionListSearchQuery}
+                  isSearchModeActive={isSearchModeActive}
+                  onMatchInfoChange={onChatMatchInfoChange}
+                  connectionUnavailable={connectionUnavailable}
+                  compactMode={!!isCompactMode}
+                  enableCompactModelPicker={!!isCompactMode}
+                  onPreviewSession={handlePreviewChildSession}
+                />
+              </div>
             </div>
           </div>
           <RenameDialog
@@ -908,60 +942,69 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }
 
   return (
-    <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={sessionId ?? 'draft'} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
+    <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={optionsSessionId} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
       renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
-        <div className="flex-1 flex flex-col min-h-0">
-          {orchestrationProgress}
-          <ChatDisplay
-            ref={chatDisplayRef}
-            session={displaySession ?? draftSession}
-            onSendMessage={handleSendMessage}
-            onOpenFile={handleOpenFile}
-            onOpenArtifact={handleOpenArtifact}
-            onOpenUrl={handleOpenUrl}
-            currentModel={effectiveModel}
-            onModelChange={handleModelChange}
-            onConnectionChange={handleConnectionChange}
-            disabled={draftBusy}
-            pendingPermission={pendingPermission}
-            onRespondToPermission={onRespondToPermission}
-            pendingCredential={pendingCredential}
-            onRespondToCredential={onRespondToCredential}
-            thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
-            onThinkingLevelChange={handleThinkingLevelChange}
-            permissionMode={sessionOpts.permissionMode}
-            onPermissionModeChange={setPermissionMode}
-            enabledModes={enabledModes}
-            inputValue={inputValue}
-            onInputChange={handleInputChange}
-            attachmentsValue={attachmentsValue}
-            onAttachmentsChange={handleAttachmentsChange}
-            sources={enabledSources}
-            skills={skills}
-            swarmEnabled={swarmEnabled}
-            onSwarmEnabledChange={swarmAgentsEnabled ? handleSwarmEnabledChange : undefined}
-            swarmToggleDisabled={swarmToggleDisabled}
-            swarmRunning={orchestrationStatus === 'running'}
-            workspaceId={activeWorkspaceId || undefined}
-            onSourcesChange={handleSourcesChange}
-            workingDirectory={workingDirectory}
-            onWorkingDirectoryChange={handleWorkingDirectoryChange}
-            sessionFolderPath={session?.sessionFolderPath}
-            composerSessionId={sessionId}
-            messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
-            messagesLoadError={messageLoadState.error}
-            messagesRetrying={messagesRetrying}
-            onRetryMessagesLoad={handleRetryMessagesLoad}
-            searchQuery={sessionListSearchQuery}
-            isSearchModeActive={isSearchModeActive}
-            onMatchInfoChange={onChatMatchInfoChange}
-            connectionUnavailable={connectionUnavailable}
-            compactMode={!!isCompactMode}
-            enableCompactModelPicker={!!isCompactMode}
-            onPreviewSession={setPreviewChildSessionId}
-          />
+        <div className="relative flex-1 flex flex-col min-h-0">
+          {(session?.workModeNeedsReview || sessionMeta?.workModeNeedsReview) && (
+            <div role="status" className="mx-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+              {t('session.workModeNeedsReview')}
+            </div>
+          )}
+          <div ref={setChildPreviewContainer} className="relative min-h-0 flex-1">
+            <ChatDisplay
+              ref={chatDisplayRef}
+              session={displaySession ?? draftSession}
+              onSendMessage={handleSendMessage}
+              onOpenFile={handleOpenFile}
+              onOpenArtifact={handleOpenArtifact}
+              onOpenUrl={handleOpenUrl}
+              currentModel={effectiveModel}
+              onModelChange={handleModelChange}
+              onConnectionChange={handleConnectionChange}
+              disabled={draftBusy}
+              pendingPermission={pendingPermission}
+              onRespondToPermission={onRespondToPermission}
+              pendingCredential={pendingCredential}
+              onRespondToCredential={onRespondToCredential}
+              thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+              onThinkingLevelChange={handleThinkingLevelChange}
+              permissionMode={sessionOpts.permissionMode}
+              onPermissionModeChange={setPermissionMode}
+              enabledModes={enabledModes}
+              inputValue={inputValue}
+              onInputChange={handleInputChange}
+              attachmentsValue={attachmentsValue}
+              onAttachmentsChange={handleAttachmentsChange}
+              sources={enabledSources}
+              skills={skills}
+              swarmEnabled={swarmEnabled}
+              onSwarmEnabledChange={undefined}
+              swarmToggleDisabled={swarmToggleDisabled}
+              swarmRunning={orchestrationStatus === 'running'}
+              orchestrationRuns={orchestration.runs}
+              orchestrationSources={orchestration.sourcesByRun}
+              orchestrationWorkControls={orchestrationWorkControls}
+              workspaceId={activeWorkspaceId || undefined}
+              onSourcesChange={handleSourcesChange}
+              workingDirectory={workingDirectory}
+              onWorkingDirectoryChange={handleWorkingDirectoryChange}
+              sessionFolderPath={session?.sessionFolderPath}
+              composerSessionId={sessionId}
+              messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
+              messagesLoadError={messageLoadState.error}
+              messagesRetrying={messagesRetrying}
+              onRetryMessagesLoad={handleRetryMessagesLoad}
+              searchQuery={sessionListSearchQuery}
+              isSearchModeActive={isSearchModeActive}
+              onMatchInfoChange={onChatMatchInfoChange}
+              connectionUnavailable={connectionUnavailable}
+              compactMode={!!isCompactMode}
+              enableCompactModelPicker={!!isCompactMode}
+              onPreviewSession={handlePreviewChildSession}
+            />
+          </div>
         </div>
       </div>
       <RenameDialog

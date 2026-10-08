@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/ui",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "license": "Apache-2.0",
   "description": "Shared React UI components for Selection - session viewer, chat display, markdown rendering",
   "type": "module",
@@ -12,6 +12,8 @@
     "./chat/SessionViewer": "./src/components/chat/SessionViewer.tsx",
     "./chat/TurnCard": "./src/components/chat/TurnCard.tsx",
     "./chat/turn-utils": "./src/components/chat/turn-utils.ts",
+    "./chat/source-metadata": "./src/components/chat/source-metadata.ts",
+    "./chat/task-message-presentation": "./src/components/chat/task-message-presentation.ts",
     "./markdown": "./src/components/markdown/index.ts",
     "./annotations/follow-up-state": "./src/components/annotations/follow-up-state.ts",
     "./ui/drawer": "./src/components/ui/drawer.tsx",
@@ -29,9 +31,10 @@
     "fflate": "^0.8.2",
     "generative-loaders": "^0.1.1",
     "nice-ticks": "^1.0.2",
+    "remark-cjk-friendly": "2.3.2",
+    "remark-parse": "^11.0.0",
     "unified": "^11.0.0",
-    "unist-util-visit": "^5.0.0",
-    "remark-parse": "^11.0.0"
+    "unist-util-visit": "^5.0.0"
   },
   "peerDependencies": {
     "@radix-ui/react-context-menu": ">=2.0.0",

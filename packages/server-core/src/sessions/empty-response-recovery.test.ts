@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
+import { TaskRunner } from '../tasks/TaskRunner.ts'
+import { parseTaskSpec, saveTaskSpec } from '@craft-agent/shared/tasks'
 
 type Managed = ReturnType<typeof createManagedSession>
 
@@ -154,6 +156,41 @@ describe('empty response recovery (#182)', () => {
     expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
     expect(managed.messages.find(message => message.toolUseId === 'write-1')?.toolResult).toBe('File written')
     expect(managed.messages.at(-1)).toMatchObject({ errorCode: providerError ? 'service_error' : 'tool_only_response', errorCanRetry: false, errorActions: [] })
+  })
+
+  it.each(['accepted', 'rejected', 'provider-error', 'stale-generation'] as const)('settles a tool-only task from its validated output (%s)', async outcome => {
+    const parsed = parseTaskSpec({ schema_version: 3, id: 'output', title: 'Output', goal: 'Return count',
+      execution: { verification: { required: false } }, nodes: [{ id: 'count', prompt: 'Return count',
+        outputs: [{ name: 'count', kind: 'param', type: 'number', required: true }] }] })
+    if (!parsed.success) throw new Error(JSON.stringify(parsed.error))
+    saveTaskSpec(rootPath, parsed.data)
+    const runner = new TaskRunner({ workspaceId: managed.workspace.id, workspaceRoot: rootPath, host: {
+      async createSession() { return { id: managed.id } },
+      async bindTaskSession() { return { generation: outcome === 'stale-generation' ? 0 : 1 } },
+      sendMessage: (id, message) => manager.sendMessage(id, message),
+      async setSessionStatus() {}, async setKanbanColumn() {}, async setTaskNodeCount() {}, async cancelProcessing() {},
+      getSessionFinalText: id => manager.getSessionFinalText(id), getSessionWorkingDirectory: () => rootPath,
+      onSessionComplete: listener => manager.onSessionComplete(listener),
+    } })
+    manager.setTaskRunnerLookup(() => runner)
+    ;(manager as any).getOrCreateAgent = async () => ({
+      setAllSources() {}, getModel: () => 'test-model', getSessionId: () => 'sdk-session',
+      chat: () => (async function* () {
+        yield { type: 'tool_start', toolUseId: 'output', toolName: 'mcp__session__submit_task_output', input: {} }
+        const result = runner.submitNodeOutput(managed.id, { values: { count: outcome === 'rejected' ? 'bad' : 2 } })
+        expect(result.ok).toBe(outcome !== 'rejected')
+        expect(runner.hasAcceptedNodeOutput('another-session', managed.processingGeneration)).toBe(false)
+        yield { type: 'tool_result', toolUseId: 'output', toolName: 'mcp__session__submit_task_output', result: JSON.stringify(result), isError: !result.ok }
+        if (outcome === 'provider-error') yield { type: 'typed_error', error: { code: 'service_error', title: 'Service error', message: 'Unavailable', canRetry: false, actions: [] } }
+        yield { type: 'complete' }
+      })(),
+    })
+    runner.run('output', { runId: 'run', orchestratorSessionId: 'root', verifyOnComplete: false })
+    await waitUntil(() => runner.getRunState('output', 'run')!.nodes[0]!.state !== 'running', 'task completion')
+    expect(runner.getRunState('output', 'run')!.nodes[0]!.state).toBe(outcome === 'accepted' ? 'done' : outcome === 'provider-error' ? 'retry-wait' : 'failed')
+    expect(managed.messages.some(message => message.role === 'error')).toBe(outcome !== 'accepted')
+    expect(runner.hasAcceptedNodeOutput(managed.id, managed.processingGeneration)).toBe(false)
+    runner.stop('output', 'run')
   })
 
   it.each([

@@ -27,6 +27,7 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
     async *chat(prompt: string) {
       prompts.push(prompt); calls++
       yield { type: 'model_call_start' as const }
+      yield { type: 'model_activity' as const, reasoningBytes: 32, textBytes: 0 }
       if (calls === 1) {
         yield { type: 'tool_start' as const, toolUseId: 'read', toolName: 'Read', input: {} }
         yield { type: 'tool_result' as const, toolUseId: 'read', toolName: 'Read', result: '约束已经明确', isError: false }
@@ -50,6 +51,41 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
   return { root, manager, managed, agent, entered, interrupted, prompts }
 }
 describe('SessionManager progress integration', () => {
+  it('observes content-free runtime activity independently of the renderer and unsubscribes', async () => {
+    const f = setup()
+    f.managed.executionRootSessionId = 'root'
+    f.managed.taskRunId = 'run'
+    const events: unknown[] = []
+    f.manager.setEventSink(() => {})
+    const unsubscribe = f.manager.onRuntimeActivity(activity => {
+      if (activity.rootSessionId === 'root') events.push(activity)
+    })
+    const run = f.manager.sendMessage(f.managed.id, '敏感目标')
+    await f.entered.promise
+    expect(events).toContainEqual(expect.objectContaining({ sessionId: 'progress', rootSessionId: 'root', runId: 'run', type: 'model_activity', reasoningBytes: 32, textBytes: 0 }))
+    expect(JSON.stringify(events)).not.toContain('敏感目标')
+    expect(JSON.stringify(events)).not.toContain('约束已经明确')
+    const count = events.length
+    unsubscribe(); unsubscribe()
+    f.interrupted.resolve(); await run
+    expect(events).toHaveLength(count)
+    await f.manager.flushSession(f.managed.id)
+  })
+
+  it('does not publish late activity from a replaced processing generation', async () => {
+    const f = setup()
+    const events: unknown[] = []
+    const unsubscribe = f.manager.onRuntimeActivity(activity => events.push(activity))
+    const run = f.manager.sendMessage(f.managed.id, '画图')
+    await f.entered.promise
+    const count = events.length
+    f.managed.processingGeneration++
+    f.interrupted.resolve(); await run
+    expect(events).toHaveLength(count)
+    unsubscribe()
+    await f.manager.flushSession(f.managed.id)
+  })
+
   it('executes a claimed source continuation while retaining duplicate-request protection', async () => {
     const f = setup()
     f.managed.messages.push({ id: 'original', role: 'user', content: '查询数据库', timestamp: Date.now() })
@@ -102,6 +138,34 @@ describe('SessionManager progress integration', () => {
     expect(f.managed.messages.filter(m => m.role === 'user').map(m => m.id)).toEqual([user.id]);
     expect(f.managed.messages.find(m => m.answerCommitted)?.answerRunId).toBe(runId);
     await expect(f.manager.continueProgress(f.managed.id)).rejects.toThrow('No pending');
+    await f.manager.flushSession(f.managed.id);
+  });
+
+  it('continues an interrupted hidden coordinator checkpoint within the original user turn', async () => {
+    const f = setup('model_request_timeout');
+    f.managed.messages.push({id:'goal',role:'user',content:'只分析，不部署',timestamp:1});
+    const run=f.manager.sendMessage(f.managed.id,'Conductor verification checkpoint',undefined,undefined,{hidden:true});
+    await f.entered.promise;f.interrupted.resolve();await run;
+    const control=f.managed.messages.findLast(message=>message.role==='user')!;
+    expect(control.hidden).toBe(true);
+    const original=f.managed.messages.find(message=>message.id==='goal')!;
+    expect(readProgressCheckpoint(getSessionPath(f.root,f.managed.id))?.continuation?.userMessageId).toBe(original.id);
+    await f.manager.continueProgress(f.managed.id);
+    expect(f.prompts).toHaveLength(2);
+    expect(f.managed.messages.filter(message=>message.role==='user').map(message=>message.id)).toEqual(['goal',control.id]);
+    expect(f.managed.messages.find(message=>message.answerCommitted)?.answerRunId).toBe(original.answerRunId);
+    await f.manager.flushSession(f.managed.id);
+  });
+
+  it('a later user request cannot resume the earlier coordinator progress checkpoint', async () => {
+    const f=setup('model_request_timeout');
+    f.managed.messages.push({id:'goal',role:'user',content:'只分析，不部署',timestamp:1});
+    const run=f.manager.sendMessage(f.managed.id,'Conductor verification checkpoint',undefined,undefined,{hidden:true});
+    await f.entered.promise;f.interrupted.resolve();await run;
+    f.managed.messages.push({id:'later',role:'user',content:'New request',timestamp:Date.now()});
+    await expect(f.manager.continueProgress(f.managed.id)).rejects.toThrow('older task');
+    expect(readProgressCheckpoint(getSessionPath(f.root,f.managed.id))?.continuation?.consumed).toBe(false);
+    expect(f.prompts).toHaveLength(1);
     await f.manager.flushSession(f.managed.id);
   });
 

@@ -9,6 +9,7 @@ export async function* boundedModelStream<T>(
   start: (signal: AbortSignal) => AsyncIterable<T>,
   parentSignal?: AbortSignal,
   timeoutMs = MODEL_REQUEST_TIMEOUT_MS,
+  subscribeQueue?: (listener: (queued: boolean) => void) => () => void,
 ): AsyncGenerator<T> {
   const controller = new AbortController();
   const abort = () => {
@@ -23,10 +24,12 @@ export async function* boundedModelStream<T>(
   };
   parentSignal?.addEventListener('abort', abort, { once: true });
   let timer = setTimeout(expire, timeoutMs);
+  let queued = false;
   const bumpIdle = () => {
     clearTimeout(timer);
-    if (!controller.signal.aborted) timer = setTimeout(expire, timeoutMs);
+    if (!controller.signal.aborted && !queued) timer = setTimeout(expire, timeoutMs);
   };
+  const unsubscribeQueue = subscribeQueue?.(waiting => { queued = waiting; bumpIdle(); });
   let iterator: AsyncIterator<T> | undefined;
   try {
     if (parentSignal?.aborted) abort();
@@ -51,6 +54,7 @@ export async function* boundedModelStream<T>(
     }
   } finally {
     clearTimeout(timer);
+    unsubscribeQueue?.();
     parentSignal?.removeEventListener('abort', abort);
     // Also cancel when the consumer stops early (e.g. a terminal event).
     // Do not await iterator.return(): a broken provider may never resolve it.

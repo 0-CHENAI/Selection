@@ -68,6 +68,8 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'projectHistory', { get() { return getSessionScopedToolCallbacks(sessionId)?.projectHistoryFn; }, configurable: true, enumerable: true });
+
   Object.defineProperty(context, 'listSessions', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.listSessionsFn;
@@ -164,6 +166,11 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'updateTaskList', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.updateTaskListFn; },
+    configurable: true,
+    enumerable: true,
+  });
   Object.defineProperty(context, 'submitTaskOutput', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.submitTaskOutputFn;
@@ -200,6 +207,12 @@ export function attachSessionSelfManagementBindings(
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.submitTaskNodeVerdictFn;
     },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'taskHelp', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.taskHelpFn; },
     configurable: true,
     enumerable: true,
   });

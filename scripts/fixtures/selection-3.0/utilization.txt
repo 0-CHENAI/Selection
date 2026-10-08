@@ -1,0 +1,6 @@
+Selection F6 fixed utilization and cost basis
+Region: X. Year: 2025. Currency: CNY. All quoted amounts include tax.
+A annual fixed cost: 90000 yuan. A electricity consumption: 1 kWh per operating hour.
+B annual all-inclusive cost: 20 yuan per operating hour; no additional electricity cost.
+High utilization: 9000 operating hours per year. Low utilization: 1000 operating hours per year.
+Other performance, lifetime and financing inputs are held equal. No market-demand or reliability evidence is provided.

@@ -23,7 +23,10 @@ import { containerTransitionsComponents } from './container-transitions'
 import { apiKeyInputComponents } from './api-key-input'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
+import { handoverComponents } from './handover'
+import { workModeComponents } from './work-mode'
 import { taskEditorComponents } from './task-editor'
+import { taskEditorLiveComponents } from './task-editor-live'
 
 export * from './types'
 
@@ -43,7 +46,10 @@ export const componentRegistry: ComponentEntry[] = [
   ...iconComponents,
   ...oauthComponents,
   ...sessionListComponents,
+  ...workModeComponents,
+  ...handoverComponents,
   ...taskEditorComponents,
+  ...taskEditorLiveComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,
   ...automationComponents,

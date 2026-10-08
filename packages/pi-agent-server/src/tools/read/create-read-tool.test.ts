@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ImageOptimizationResult } from './image-resize-types.ts'
@@ -136,4 +137,59 @@ describe('Selection Pi read tool', () => {
 
     expect(text?.type === 'text' ? text.text : '').toBe('line two')
   })
+})
+
+const sha = (text: string | Buffer) => createHash('sha256').update(text).digest('hex')
+
+it('records only delivered lines with the original byte identity and concurrent invocation isolation', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-read-proof-'))
+  tempDirs.push(cwd)
+  writeFileSync(join(cwd, 'a.txt'), 'first\nsecond\nthird')
+  writeFileSync(join(cwd, 'b.txt'), '\ufeffother\r\nnext')
+  const tool = createSelectionReadToolDefinition(cwd)
+  const [a, b] = await Promise.all([
+    tool.execute('a', { path: 'a.txt', offset: 2, limit: 1 }, undefined, undefined, imageContext()),
+    tool.execute('b', { path: 'b.txt' }, undefined, undefined, imageContext()),
+  ])
+  expect(a.details.sourceRead).toEqual({ path: realpathSync(join(cwd, 'a.txt')), contentHash: sha('first\nsecond\nthird'),
+    startLine: 2, endLine: 2, returnedTextHash: sha('second') })
+  expect(b.details.sourceRead).toEqual({ path: realpathSync(join(cwd, 'b.txt')), contentHash: sha('\ufeffother\r\nnext'),
+    startLine: 1, endLine: 2, returnedTextHash: sha('\ufeffother\r\nnext') })
+})
+
+it('records the actual truncated prefix, never the unread rest of a long source', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-read-proof-'))
+  tempDirs.push(cwd)
+  const text = Array.from({ length: 3000 }, (_, index) => `line ${index + 1}`).join('\n')
+  writeFileSync(join(cwd, 'long.txt'), text)
+  const tool = createSelectionReadToolDefinition(cwd)
+  const result = await tool.execute('long', { path: 'long.txt' }, undefined, undefined, imageContext())
+  expect(result.details.sourceRead.endLine).toBe(2000)
+  expect(result.details.sourceRead.returnedTextHash).toBe(sha(text.split('\n').slice(0, 2000).join('\n')))
+  expect(result.content[0].text).toContain('Showing lines 1-2000')
+})
+
+it('does not certify image, binary, empty, invalid UTF-8 or an undelivered oversized first line', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-read-proof-'))
+  tempDirs.push(cwd)
+  const files = { 'image.png': png, 'binary.txt': Buffer.from([0, 65]), 'invalid.txt': Buffer.from([0xff]),
+    'empty.txt': '', 'huge.txt': 'x'.repeat(60000) }
+  const tool = createSelectionReadToolDefinition(cwd)
+  for (const [path, bytes] of Object.entries(files)) {
+    writeFileSync(join(cwd, path), bytes)
+    const result = await tool.execute(path, { path }, undefined, undefined, imageContext())
+    expect(result.details?.sourceRead).toBeUndefined()
+  }
+  expect(tool.execute('missing', { path: 'missing.txt' }, undefined, undefined, imageContext())).rejects.toThrow()
+  expect(tool.execute('range', { path: 'binary.txt', offset: 9 }, undefined, undefined, imageContext())).rejects.toThrow()
+})
+
+it('preserves an actually returned EOF newline with the SDK content-line count', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-read-proof-'))
+  tempDirs.push(cwd)
+  const text = 'first\nsecond\n'
+  writeFileSync(join(cwd, 'eof.txt'), text)
+  const result = await createSelectionReadToolDefinition(cwd).execute('eof', { path: 'eof.txt' }, undefined, undefined, imageContext())
+  expect(result.details.sourceRead).toMatchObject({ startLine: 1, endLine: 2, returnedTextHash: sha(text) })
+  expect(result.content[0].text).toBe(text)
 })
