@@ -30,6 +30,9 @@ it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', a
   const review = { ...activities[0]!, id: 'review', intent: '核验关键事实与来源', timestamp: 30 }
   for (const phase of ['awaiting', 'tool_active', 'complete'] as const) {
     expect(getPreviewText([review, research, progress], progress.content, phase)).toBe('核验关键事实与来源')
+    expect(getPreviewText([review, research, progress, { ...research, id: 'future-gate',
+      statusType: 'task_node', status: 'pending', content: '交付门槛 · 待处理', timestamp: 1001 }], progress.content, phase))
+      .toBe('核验关键事实与来源')
   }
   expect(getPreviewText([review, research, progress, { ...research, id: 'revision', status: 'running',
     content: '修订报告 · 运行中', timestamp: 40 }], progress.content, 'tool_active')).toBe('修订报告 · 运行中')

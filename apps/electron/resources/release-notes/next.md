@@ -68,6 +68,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Live work previews** — Collapsed work headers follow the latest actual activity instead of a pending downstream task whose status arrived later.
+
 - **Async research progress** — Start acknowledgments keep their lightweight transcript style while waiting for the coordinator, verifying or repairing. They no longer show final-answer actions or a dashed bubble; completed answers retain their normal cards and controls.
 
 - **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.

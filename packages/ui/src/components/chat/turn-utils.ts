@@ -393,6 +393,7 @@ export function getActiveTurnPreview(
 
   activities.forEach((activity, index) => {
     if (isAnswerDeliveryTool(activity) || activity.statusType === 'task_progress') return
+    if (activity.statusType === 'task_node' && activity.status === 'pending') return
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
       toolIntent = activity.intent?.trim()
