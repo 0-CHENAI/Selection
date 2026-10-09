@@ -1585,7 +1585,8 @@ export function isTaskStartAcknowledgment(activities: ActivityItem[]): boolean {
   const start = activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
     && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
   const result = start?.content ? parseOrchestrationResult(start.content) : null
-  return typeof result?.runId === 'string' && result.status === 'running'
+  return typeof result?.runId === 'string'
+    && ['running', 'waiting-coordinator', 'verifying', 'repairing'].includes(String(result.status))
     && !activities.some(activity => activity.taskContext?.kind === 'verification' || activity.taskContext?.kind === 'feedback'
       || activity.type === 'tool' && activity.status === 'completed'
         && normalizeCraftSessionToolName(activity.toolName ?? '') === 'submit_task_verdict')

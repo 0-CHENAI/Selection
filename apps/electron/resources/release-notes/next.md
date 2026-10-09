@@ -68,6 +68,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Async research progress** — Start acknowledgments keep their lightweight transcript style while waiting for the coordinator, verifying or repairing. They no longer show final-answer actions or a dashed bubble; completed answers retain their normal cards and controls.
+
 - **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.
 
 - **Coordinator checkpoint progress** — Actual model output and tool progress renew the coordinator inactivity lease. Accepted decisions yield to the next host checkpoint, and fresh PRO roots can answer worker help requests without restarting the conversation. Issue #466.

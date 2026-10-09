@@ -20,6 +20,8 @@
 
 ## 验证范围与执行
 
+- 异步启动的真实回执是 `waiting-coordinator`，原有 UI 仅识别 `running` 导致启动说明误用最终回答卡片。补齐活动状态识别，沿用轻量文字样式、去除虚线气泡与 Copy / Markdown / 分支操作栏。使用普通 arm64 包回放 `261009-grand-delta` 的原始聊天记录，未复制运行任务、未发送模型请求；此 UI 回放不计为模型联合验收。[中间进展截图](pro-interim-progress.png)。相关 20 项测试 / 265 assertions 通过，同时覆盖最终回答、失败/暂停与计划卡片保持原操作。
+
 - Git 跟踪的 730 个源码测试入口已执行。首轮在外部 GitHub MCP OAuth 5 秒网络超时停止：已跑 509 个入口，4505 pass / 1 fail；该文件单独复跑通过，再补完其余 221 入口（3284 pass / 0 fail）。不是一次干净的全套运行，不将重复发现的测试双算。
 - 本次提交前对改动及相邻入口执行 207 tests / 1148 assertions，全部通过。模式门禁、创建广播、TaskRunner 活动租约、原失败节点恢复与 SDK 交付保护均有相邻回归。
 - 最终 typecheck、lint、Electron build 退出 0。lint 仍有 Electron 87 / shared 8 既有 warnings，无 errors。
