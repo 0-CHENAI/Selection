@@ -79,8 +79,8 @@ export function localArtifactLinks(markdown: string): string[] {
 export function isSessionScratchPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
   return /(?:^|\/)\.selection-sources(?:\/|$)/.test(normalized)
-    || /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans)(?:\/|$)/.test(normalized)
-    || /(?:^|\/)sessions\/[^/]+\/(?:data|plans)(?:\/|$)/.test(normalized)
+    || /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans|long_responses)(?:\/|$)/.test(normalized)
+    || /(?:^|\/)sessions\/[^/]+\/(?:data|plans|long_responses)(?:\/|$)/.test(normalized)
 }
 
 /** Formats shown on the conversation's changed-file shelf. */

@@ -66,6 +66,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.
+
 - **Coordinator help replies** — PRO workflow roots retain the structured help tool when a worker yields for guidance, and interrupted host-owned help waits can recover safely. Exact-premise rejections identify the differing entry so a worker can correct its submission without changing frozen research criteria.
 
 - **Help restart recovery** — Lost worker help waits now use normal retry safety checks and a fresh execution attempt, preserving completed sibling results and retiring late replies. They no longer try to resume a progress checkpoint that was never created.
