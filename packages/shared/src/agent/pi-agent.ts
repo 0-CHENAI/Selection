@@ -734,6 +734,7 @@ export class PiAgent extends BaseAgent {
       resumeSdkSessionId: this.config.session?.sdkSessionId,
       toolResultRecovery: this.config.toolResultRecovery,
       isolatedShellDirectory: this.config.isolatedShellDirectory,
+      documentSourceDirectory: this.config.documentSourceDirectory,
       forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
