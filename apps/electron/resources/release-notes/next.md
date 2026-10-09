@@ -68,11 +68,11 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Original failed-node recovery** — Coordinators can explicitly retry the original failed nodes after workers settle, then correct their pending definitions at the next checkpoint. Unrelated successes and failure history are preserved; replacement work cannot silently erase an original failure. Issue #466.
+- **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.
 
 - **Coordinator checkpoint progress** — Actual model output and tool progress renew the coordinator inactivity lease. Accepted decisions yield to the next host checkpoint, and fresh PRO roots can answer worker help requests without restarting the conversation. Issue #466.
 
-- **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.
+- **Original failed-node recovery** — Coordinators can explicitly retry the original failed nodes after workers settle, then correct their pending definitions at the next checkpoint. Unrelated successes and failure history are preserved; replacement work cannot silently erase an original failure. Issue #466.
 
 - **Coordinator help replies** — PRO workflow roots retain the structured help tool when a worker yields for guidance, and interrupted host-owned help waits can recover safely. Exact-premise rejections identify the differing entry so a worker can correct its submission without changing frozen research criteria.
 
