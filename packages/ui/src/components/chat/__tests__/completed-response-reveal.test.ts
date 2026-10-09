@@ -39,7 +39,7 @@ describe('completed response semantic reveal boundary', () => {
         expect(html).toContain('已启动调研。')
         expect(html.includes('role="note"')).toBe(progress)
         expect(html).toContain(`data-response-kind="${progress ? 'progress' : 'response'}"`)
-        if (progress) expect(html).not.toContain('lucide-message-circle-dashed')
+        if (progress) expect(html).toContain('lucide-message-circle-dashed')
         for (const action of ['common.copy', 'chat.regenerate', '>Markdown<', 'turn-action-btn']) {
           expect(html.includes(action)).toBe(!progress)
         }
