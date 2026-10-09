@@ -26,6 +26,10 @@
 
 - 用户明确保留虚线气泡图标，本轮只恢复并对齐折叠图标列。普通包 13 重开上述已完成会话确认图标与轻量文字出现，中间内容没有 Copy / Markdown / 分支操作；最终回答仍有正常操作。[实际界面](pro-progress-icon.png)。相关 36 tests / 360 assertions、全工作区类型检查、修改文件 lint、普通构建与目录包装通过。此前无图标的截图保留为历史，不能作为当前样式。
 
+- 普通包 13 点击“历史回放”复现 `Invalid replay cursor`：JSON 数组将缺省位置编码为 null。RPC 边界仅归一化缺省值，零位置仍有效，负数 / 非整数 / 字符串仍拒绝，测试确认不写文件或调用模型。修复 `35dd2c08b`，2 tests / 29 assertions、全工作区类型、修改文件 lint 与普通构建通过；普通包 14 原生重开末帧 14/14、浏览历史 13/14 并返回当前运行成功，无游标错误；重载前后仍是 28 工具 / 14 事件、六份原件 hash 不变，没有新模型调用。见 [history-replay.json](history-replay.json) 与 [原生回放截图](pro-history-replay.png)。
+
+- 完整 G7 `261010-refined-quasar` 发现另一衔接问题：计划在原生 document_index 前冻结四份二进制来源，成功的后续读取不能对应已冻结版本。模型通过父节点求助保留此限制，不将版本不匹配计作支持。修复 `60e4a512e` 沿用现有索引 / 快照 / 冻结入口，在协调者和 run_task / 原生 Skill 的契约中明确先索引后启动；PDF 原始字节不作为纯文本冻结。28 tests / 192 assertions 确认四格式版本一致、晚到索引不修改旧清单及独立研究 / 勘误 / 阶段门邻近回归；类型、修改文件 lint、普通构建通过。该 G7 确认冻结限制后人工停放：stopped、1508180 ms、139 次工具、5 workers、72 事件，0 人工改图 / 输出 / 判定，输入不变；不计为产品自发失败或性能比较。见 [g7-unindexed-stopped.json](g7-unindexed-stopped.json)。新普通包 14 的根 `261010-plain-dawn` 先索引后启动，六份来源都具有冻结快照，四格式原生单位进入清单（PDF 20 页 / DOCX 204 段 / XLSX 5 单元格 / PPTX 2 幻灯片），无 unavailable 来源。见 [native-source-acquisition.json](native-source-acquisition.json)，这仅证明采集与冻结衔接，不替代完整报告 / 勘误 / 独立审查。该根现为 stopped，992407 ms、103 次工具、3 workers、83 事件，未完成报告；停止原因尚未据证据归类，不计成功或性能对照；后续三方对照未启动。
+
 - G7 三方案例使用各自目录中的六份等字节原件，避免之前交付的报告被下一例当作输入。记录原始 promptHash 与仅归一化材料目录的 normalizedPromptHash；模型、目标和完全接管权限一致。这个固定案例核对正确性与实际调用，不据此推断普遍性能优势。
 
 - 折叠工作区简介跳过尚未开始的下游节点，继续按时间取最后一项实际活动。相关 20 项测试 / 268 assertions、全工作区类型检查、修改文件 lint 与普通 Electron 构建通过。原生实时确认随本轮完全接管联验完成。
@@ -41,3 +45,9 @@
 - 原生 PRO 时间线截图仅证明所示视口，不能代替所有后端路径的验收。
 
 复跑：`bun scripts/selection-pro-joint-package-acceptance.ts <隔离配置目录> <label> <PRO|NORM> <冻结资料目录> [既有根ID|-] [定向目标文件]`；既有 ID 只观察不重发目标。连接配置只在本机读取，不归档 token/API key。
+
+## 2026-10-10：按用户要求改用最小案例
+
+复杂 G7 已停止，见 [g7-indexed-stopped.json](g7-indexed-stopped.json)，不计通过。当前验收缩为唯一三行文本、读取和独立 verify 两节点、父节点三句话交付；普通包 14、GPT-6-luna、PRO / allow-all 从创建即固定。模型自行创建计划、执行两个上下文的 Read、提交输出和判定、完成最终交付。根 `261010-tall-tiger` completed，159800 ms（2 分 40 秒）、15 次工具、2 workers；两节点均 done，最终 verdict=pass；两个 worker 都实际 Read 同一原件。输入 hash 前后不变，0 人工改图 / 输出 / 判定。见 [minimal-pro.json](minimal-pro.json)。这证明当前协调与交付链路，四格式及研究契约沿用既有专项证据；不以此宣称完整 G7 或九项能力全面对齐，也不宣称普遍性能优势。
+
+复跑最小案例：`bun scripts/selection-pro-minimal-package-acceptance.ts <运行中的普通包隔离配置目录> <新的空资料目录>`。脚本仅生成合成输入、通过正式 RPC 发目标与观察结果；真实计划、输出和 verdict 都由模型提交。资料目录每次新建，已有 input.txt 不覆盖。用户没有要求再次扩展本轮样本。
