@@ -56,7 +56,7 @@ export function getSessionToolProxyDefs(options?: { executionSession?: WorkModeS
     if (['submit_task_output', 'submit_task_node_verdict'].includes(name)
       && !(options.executionSession?.taskRunId && options.executionSession.taskNodeId)) return false;
     if (name === 'task_help' && !(options.executionSession?.taskRunId && options.executionSession.taskNodeId)
-      && !(options.executionSession?.taskSlug && !complexCapabilityError(options.executionSession, 'run-workflow'))) return false;
+      && complexCapabilityError(options.executionSession, 'run-workflow')) return false;
     const capability = complexToolCapability(def.name);
     if (capability && (!FEATURE_FLAGS.tasksOrchestrate || complexCapabilityError(options.executionSession, capability))) return false;
     return !def.name.endsWith('update_task_list') || (!!options.executionSession && taskListAllowed(options.executionSession));

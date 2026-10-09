@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import type { SourceReadProof } from '@craft-agent/core/types';
 import type { TaskHelpInput } from '@craft-agent/session-tools-core';
 import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
-import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import type { SessionCompletionEvent, SessionRuntimeActivity } from '../sessions/SessionManager';
 import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
 import {
   type TaskSpec,
@@ -154,6 +154,7 @@ export interface ConductorSessionHost {
   /** Explicitly stop managed spawn_session descendants owned by a DAG worker. */
   stopSwarm?(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>;
   onSessionComplete(listener: (evt: SessionCompletionEvent) => void): () => void;
+  onRuntimeActivity?(listener: (activity: SessionRuntimeActivity) => void): () => void;
   getSessionFinalText(sessionId: string): string | undefined;
   /** Resolved working directory of a session, so children inherit the orchestrator's cwd. */
   getSessionWorkingDirectory(sessionId: string): string | undefined;
@@ -500,7 +501,7 @@ class ActiveRun {
       ? loadResearchResults(this.deps.workspaceRoot,this.slug,this.resumedFrom) : undefined;
     for (const question of this.spec.research?.questions ?? []) if (!this.spec.nodes.some(node => node.id === question.sharedTaskRef && node.researchRole === 'researcher') && !predecessor?.records.some(record => record.role === 'researcher' && record.producedBy.nodeId === question.sharedTaskRef)) throw new Error(`Unknown canonical shared research task ${question.sharedTaskRef}`);
     const researchPredecessor = predecessor ? {runId:this.resumedFrom!,recordsHash:createHash('sha256').update(JSON.stringify(predecessor.records)).digest('hex'),readsHash:createHash('sha256').update(JSON.stringify(predecessor.reads)).digest('hex')} : undefined;
-    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
+    this.unsubscribe = this.subscribe();
     this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId, resumedFrom: this.resumedFrom, ...(researchPredecessor ? {researchPredecessor} : {}), ...(sources ? { researchSourcesHash: createHash('sha256').update(JSON.stringify(sources)).digest('hex') } : {}) });
     beforeDispatch?.();
     this.runStatus = 'running';
@@ -672,7 +673,7 @@ class ActiveRun {
     this.settled = false;
     this.verdictLocked = false;
     this.unsubscribe?.();
-    this.unsubscribe = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
+    this.unsubscribe = this.subscribe();
     this.runStatus = 'running';
     this.restorePreparedDeliveries();
     // Recovery does not bypass a V3 coordinator checkpoint.
@@ -865,6 +866,8 @@ class ActiveRun {
         this.seenDecisionIds.add(e.decisionId);
         this.completedCheckpointIds.add(e.checkpointId);
         if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate = null;
+      } else if (e.kind === 'coordinator-progress') {
+        if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate.deadline = e.deadline;
       } else if (e.kind === 'progress-parent-paused') {
         this.progressParentResume = e.phase; this.coordinatorGate = null;
       } else if (e.kind === 'run-resumed') {
@@ -985,7 +988,7 @@ class ActiveRun {
       this.log({ kind: 'run-interrupted' });
     }
     this.suppressSchedule = false;
-    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
+    this.unsubscribe = this.subscribe();
     this.emitChanged();
   }
 
@@ -2901,6 +2904,34 @@ class ActiveRun {
         'This run is terminal: do not call node output, node verdict, run verdict or scheduling tools. Deliver the failure explanation with submit_answer, then stop.',
       ].join('\n'), 'feedback');
     }
+  }
+
+  private coordinatorActivity = { generation: -1, reasoningBytes: 0, textBytes: 0 };
+
+  private subscribe(): () => void {
+    const completion = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
+    const activity = this.deps.host.onRuntimeActivity?.(evt => {
+      if (!this.coordinatorGate || this.runStatus !== 'waiting-coordinator'
+        || evt.sessionId !== this.opts.orchestratorSessionId || evt.runId && evt.runId !== this.runId) return;
+      if (evt.generation !== this.coordinatorActivity.generation || evt.type === 'model_call_start') {
+        this.coordinatorActivity = { generation: evt.generation, reasoningBytes: 0, textBytes: 0 };
+      }
+      if (evt.type === 'model_activity') {
+        const reasoningBytes = evt.reasoningBytes ?? 0, textBytes = evt.textBytes ?? 0;
+        if (reasoningBytes <= this.coordinatorActivity.reasoningBytes && textBytes <= this.coordinatorActivity.textBytes) return;
+        this.coordinatorActivity = { generation: evt.generation, reasoningBytes, textBytes };
+      } else if (!['text_delta', 'tool_start', 'tool_result'].includes(evt.type)) return;
+      // This is an inactivity lease: real model output or tool progress extends it,
+      // while unchanged heartbeats and a merely pending model call do not.
+      const deadline = this.nowMs() + COORDINATOR_GATE_TIMEOUT_SECONDS * 1000;
+      if (deadline - Date.parse(this.coordinatorGate.deadline) < 10_000) return;
+      this.coordinatorGate.deadline = new Date(deadline).toISOString();
+      this.log({ kind: 'coordinator-progress', checkpointId: this.coordinatorGate.checkpointId, deadline: this.coordinatorGate.deadline });
+      for (const timer of this.coordinatorTimers) clearTimeout(timer);
+      this.coordinatorTimers.clear();
+      this.restoreCoordinatorTimer();
+    });
+    return () => { completion(); activity?.(); };
   }
 
   private finalize(): void {

@@ -14,7 +14,7 @@ import {
   type TaskSpec,
   COORDINATOR_TIMEOUT_BLOCKER,
 } from '@craft-agent/shared/tasks';
-import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import type { SessionCompletionEvent, SessionRuntimeActivity } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 import { LlmConnectionPool } from './connection-pool';
 
@@ -32,6 +32,12 @@ function specOf(raw: unknown): TaskSpec {
 
 class MockHost implements ConductorSessionHost {
   private readonly listeners = new Set<(evt: SessionCompletionEvent) => void>();
+  readonly activityListeners = new Set<(evt: SessionRuntimeActivity) => void>();
+  onRuntimeActivity(listener: (evt: SessionRuntimeActivity) => void): () => void {
+    this.activityListeners.add(listener);
+    return () => { this.activityListeners.delete(listener); };
+  }
+  activity(evt: SessionRuntimeActivity): void { for (const listener of this.activityListeners) listener(evt); }
   readonly created: { id: string; options: CreateSessionOptions }[] = [];
   readonly sent: { sessionId: string; message: string }[] = [];
   readonly statuses: { sessionId: string; status: string }[] = [];
@@ -470,6 +476,27 @@ describe('TaskRunner v3 quality/efficiency', () => {
     const snap = r.expireCoordinatorGate('v3demo', 'r1', '2026-06-07T00:03:00.000Z');
     expect(snap.status).toBe('paused');
     expect(snap.blockers).toContain(COORDINATOR_TIMEOUT_BLOCKER);
+    expect(host.dispatchedNames()).toEqual([]);
+  });
+
+  it('retains a progressing coordinator across the original deadline and restart, but still expires inactivity', () => {
+    saveTaskSpec(root, v3Spec());
+    let now = '2026-06-07T00:00:00.000Z';
+    const r = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    now = '2026-06-07T00:01:59.000Z';
+    const activity: SessionRuntimeActivity = { sessionId: 'orch', rootSessionId: 'orch', generation: 1, type: 'model_activity', at: Date.parse(now), reasoningBytes: 32, textBytes: 0 };
+    host.activity(activity);
+    now = '2026-06-07T00:02:30.000Z';
+    host.activity({ ...activity, at: Date.parse(now) }); // Unchanged heartbeat is not progress.
+    host.activity({ ...activity, sessionId: 'worker', reasoningBytes: 64 });
+    host.activity({ ...activity, runId: 'obsolete', reasoningBytes: 64 });
+    host.activity({ ...activity, type: 'model_call_start' }); // A pending API request is not output.
+    expect(r.expireCoordinatorGate('v3demo', 'r1', now).status).toBe('waiting-coordinator');
+    expect(readRunLog(root, 'v3demo', 'r1').filter(event => event.kind === 'coordinator-progress')).toHaveLength(1);
+    const restored = new TaskRunner({ host: new MockHost(), workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    expect(restored.getLatestRun('v3demo')?.status).toBe('waiting-coordinator');
+    expect(restored.expireCoordinatorGate('v3demo', 'r1', '2026-06-07T00:04:00.000Z').status).toBe('paused');
     expect(host.dispatchedNames()).toEqual([]);
   });
 

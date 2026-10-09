@@ -10,6 +10,9 @@ test('Pi registry advertises only tools allowed by the persisted execution scope
   const pro = names({ id: 'pro', workMode: 'PRO' });
   expect(pro).toContain('run_task');
   expect(pro).toContain('spawn_session');
+  // A root can start a DAG in this turn; registration must already include its help reply tool.
+  expect(pro).toContain('mcp__session__task_help');
+  expect(ordinary).not.toContain('mcp__session__task_help');
   const worker = names({ id: 'worker', workMode: 'PRO', parentSessionId: 'pro', taskRunId: 'run', taskNodeId: 'a' });
   expect(worker).toContain('mcp__session__submit_task_output');
   expect(worker).not.toContain('mcp__session__update_task_list');

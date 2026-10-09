@@ -176,6 +176,7 @@ type RunLogPayload =
       plannerPhase?: PlannerPhase;
     }
   | { t: string; kind: 'coordinator-timeout'; checkpointId: string }
+  | { t: string; kind: 'coordinator-progress'; checkpointId: string; deadline: string }
   | { t: string; kind: 'cache-hit'; nodeId: string; fingerprint: string; createdAt: string; sourceRunId: string }
   | { t: string; kind: 'cache-bypass'; nodeId: string; reason: string }
   | { t: string; kind: 'metrics'; metrics: TaskRunMetrics }

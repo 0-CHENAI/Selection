@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { answerExecutionError, answerTurnToolNames } from './answer-delivery-guard'
+import { answerExecutionError, answerTurnToolNames, isTurnCompletionTool } from './answer-delivery-guard'
 
 describe('SDK answer delivery boundary', () => {
   const normal = { runId: 'run', accepted: false, recovery: false, batchSize: 1 }
@@ -36,5 +36,15 @@ describe('SDK answer delivery boundary', () => {
   it('permits only the answer tool during recovery', () => {
     expect(answerExecutionError({ ...normal, recovery: true }, 'Read')).toContain('Only submit_answer')
     expect(answerExecutionError({ ...normal, recovery: true }, 'submit_answer')).toBeUndefined()
+  })
+  it('yields only after a standalone accepted coordinator decision, including aliases', () => {
+    for (const name of ['submit_orchestration_decision', 'mcp__session__submit_orchestration_decision', 'session__submit_orchestration_patch']) {
+      expect(isTurnCompletionTool(name)).toBe(true)
+      expect(answerExecutionError(normal, name)).toBeUndefined()
+      expect(answerExecutionError({ ...normal, batchSize: 2 }, name)).toContain('alone')
+      expect(answerExecutionError({ ...normal, accepted: true }, name)).toBeDefined()
+    }
+    expect(isTurnCompletionTool('get_task_results')).toBe(false)
+    expect(isTurnCompletionTool('mcp__session__submit_task_node_verdict')).toBe(false)
   })
 })

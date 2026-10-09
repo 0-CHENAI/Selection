@@ -15,7 +15,7 @@ Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上�
 ## conduct 与 orchestrate
 
 - **conduct**：启动时冻结 revision 0，只按该图跑。新建任务默认仍用 conduct，避免一开跑就停在协调器门。
-- **orchestrate**（技术预览）：协调器可补丁尚未执行的节点，v3 在关键点等待 `submit_orchestration_decision`。普通构建默认关闭，需显式开启 `CRAFT_FEATURE_TASKS_ORCHESTRATE=1`，且父会话开启 Swarm；独立预览构建保留原有开放条件。
+- **orchestrate**：协调器可补丁尚未执行的节点，v3 在关键点等待 `submit_orchestration_decision`。普通 V3 构建默认可用；PRO 根可在既有授权内使用，NORM 拒绝编排和子代理。显式 `CRAFT_FEATURE_TASKS_ORCHESTRATE=0` 可禁用；下面的独立技术预览包仅保留兼容入口，不是日常 PRO 的前置条件。
 
 `runner` 是运行策略，不是节点种类。任务父会话是系统 Coordinator。
 
@@ -48,7 +48,7 @@ v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache:
 
 - orchestrate v3 在首次调度、节点失败、审批响应、预算恢复、无 ready 节点和最终验证前进入 `waiting-coordinator`。
 - 协调器必须调用 `submit_orchestration_decision`（continue / patch / pause）。过期、重复或错误 revision 会被拒绝。
-- 等待上限 120 秒；超时后暂停并显示 `coordinator-timeout`，不会自动继续。
+- 协调器连续 120 秒没有实际模型输出或工具进展时暂停，并显示 `coordinator-timeout`，不会自动继续。真实进展会延长等待期限并持久化；不增长的心跳、仅等待 API 的状态和其他子节点的活动不会延长期限。
 - verify/judge 必须 `submit_task_node_verdict`。最终 run verdict 仍由父 Coordinator 的 `submit_task_verdict` 提交，普通聊天文本不是 verdict。
 
 ## 补丁边界（orchestrate）

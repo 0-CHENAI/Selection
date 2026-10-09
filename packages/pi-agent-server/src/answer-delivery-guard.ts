@@ -2,6 +2,15 @@ export function isAnswerTool(name: string): boolean {
   return name === 'submit_answer' || name === 'mcp__session__submit_answer' || name === 'session__submit_answer';
 }
 
+/** A successful coordinator decision hands the current turn back to the host. */
+export function isCoordinatorDecisionTool(name: string): boolean {
+  return /^(?:mcp__session__|session__)?submit_orchestration_(?:decision|patch)$/.test(name);
+}
+
+export function isTurnCompletionTool(name: string): boolean {
+  return isAnswerTool(name) || isCoordinatorDecisionTool(name);
+}
+
 /** Scope model-visible tools for this turn; the caller restores the full set next turn. */
 export function answerTurnToolNames(names: string[], state: { runId?: string; recovery?: boolean; coordinationOnly?: boolean }): string[] {
   return names.filter(name => state.recovery ? isAnswerTool(name)
@@ -19,6 +28,7 @@ export function answerExecutionError(state: {
 }, toolName: string): string | undefined {
   if (state.accepted) return 'Answer already delivered. No further tools may execute.';
   if (state.recovery && !isAnswerTool(toolName)) return 'Only submit_answer is allowed during answer recovery.';
+  if (isCoordinatorDecisionTool(toolName) && state.batchSize !== 1) return 'Call the coordinator decision alone, after all other tools have finished.';
   if (isAnswerTool(toolName) && !canAcceptAnswer(state)) {
     return 'Call submit_answer alone, after all other tools have finished.';
   }
