@@ -1,5 +1,5 @@
 {
-  "version": "1.0.152",
+  "version": "1.0.155",
   "guides": {
     "word": {
       "directory": "officecli-docx",
@@ -1286,8 +1286,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "38cf745bb04cb7005cd089e6e87073509f190e46e035707528a5d0b01b2dafd0",
-          "sizeBytes": 29873
+          "sha256": "e05a3718e4d4f93c9df4d699006e5294158a91c40e1ee087d848d50d1b4d0af0",
+          "sizeBytes": 29886
         }
       ]
     },
@@ -1992,8 +1992,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "c4cc673eccbf4b66e8d0051617d05761ddb005da030c3d1a2aeb7506b1f437d1",
-          "sizeBytes": 47000
+          "sha256": "6c6154954089d8b6363a7a49263c986c3795cd438092ff3b0aacf0b32017d039",
+          "sizeBytes": 46994
         }
       ]
     },
