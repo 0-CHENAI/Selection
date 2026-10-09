@@ -25,6 +25,14 @@ test('history inspection RPC uses exact durable revisions without starting recov
     const before = files(root)
     const result = await handlers.get(RPC_CHANNELS.tasks.INSPECT_RUN)!({}, 'ws', 'history', 'run', 1)
     expect(result).toMatchObject({ readOnly: true, cursor: 1, total: 1, spec: { title: 'History' } })
+    for (const args of [['ws', 'history', 'run'], JSON.parse(JSON.stringify(['ws', 'history', 'run', undefined]))]) {
+      const latest = await handlers.get(RPC_CHANNELS.tasks.INSPECT_RUN)!({}, ...args)
+      expect(latest).toMatchObject({ readOnly: true, cursor: 1, total: 1, spec: { title: 'History' } })
+    }
+    expect((await handlers.get(RPC_CHANNELS.tasks.INSPECT_RUN)!({}, 'ws', 'history', 'run', 0)).cursor).toBe(0)
+    for (const cursor of [-1, 0.5, '1']) {
+      await expect(handlers.get(RPC_CHANNELS.tasks.INSPECT_RUN)!({}, 'ws', 'history', 'run', cursor)).rejects.toThrow('Invalid replay cursor')
+    }
     expect(files(root)).toEqual(before); expect(modelCalls).toBe(0)
     await expect(handlers.get(RPC_CHANNELS.tasks.INSPECT_RUN)!({}, 'ws', '../escape', 'run')).rejects.toThrow()
     expect(files(root)).toEqual(before)

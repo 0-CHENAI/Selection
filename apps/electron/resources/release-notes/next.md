@@ -68,6 +68,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **History replay entry** — Opening the latest durable frame accepts the JSON transport's empty cursor while retaining validation for invalid numeric cursors. Inspection remains read-only and never restarts models. Issue #474.
+
 - **Isolated document reads** — Task workers can index and read originals in their host-authorized source directory while keeping Shell and file writes inside their isolated candidate directory. Native page, paragraph, cell and slide receipts remain version-bound. Issue #474.
 
 - **Live work previews** — Collapsed work headers follow the latest actual activity instead of a pending downstream task whose status arrived later.
