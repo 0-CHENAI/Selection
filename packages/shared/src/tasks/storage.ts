@@ -170,12 +170,13 @@ type RunLogPayload =
       kind: 'coordinator-decision';
       checkpointId: string;
       decisionId: string;
-      action: 'continue' | 'patch' | 'pause';
+      action: 'continue' | 'patch' | 'pause' | 'retry';
       baseRevision: number;
       consumedResults?: string[];
       plannerPhase?: PlannerPhase;
     }
   | { t: string; kind: 'coordinator-timeout'; checkpointId: string }
+  | { t: string; kind: 'coordinator-progress'; checkpointId: string; deadline: string }
   | { t: string; kind: 'cache-hit'; nodeId: string; fingerprint: string; createdAt: string; sourceRunId: string }
   | { t: string; kind: 'cache-bypass'; nodeId: string; reason: string }
   | { t: string; kind: 'metrics'; metrics: TaskRunMetrics }

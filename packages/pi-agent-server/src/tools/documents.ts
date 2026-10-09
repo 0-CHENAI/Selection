@@ -82,9 +82,16 @@ export async function indexOriginalDocument(directory: string, file: string): Pr
 const indexSchema = Type.Object({ path: Type.String(), query: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) });
 const readSchema = Type.Object({ path: Type.String(), unit_id: Type.String({ description: 'Exact unit ID from document_index (chapter/paragraph, page or worksheet!cell).' }),
   offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1 })), quote: Type.Optional(Type.String({ description: 'Optional exact literal quotation to check inside the returned original range.' })) });
-export function createDocumentTools(getDirectory: () => string): ToolDefinition<any, any>[] {
+export function createDocumentTools(getDirectory: () => string, getSourceDirectory?: () => string | undefined): ToolDefinition<any, any>[] {
+  const indexDocument = (file: string) => {
+    const directory = getDirectory(), path = realpathSync(resolve(directory, file));
+    const sourceDirectory = getSourceDirectory?.();
+    const readDirectory = !insideSourceDirectory(path, directory) && sourceDirectory && insideSourceDirectory(path, sourceDirectory)
+      ? sourceDirectory : directory;
+    return indexOriginalDocument(readDirectory, path);
+  };
   return [{ name: 'document_index', label: '定位文档', description: 'Index native original structure by file version, search headings/pages/cells, then use document_read for original text. Index results are navigation, not proof of reading or semantic verification. Existing Office/PDF Skills remain available for full editing, OCR and visual QA.', parameters: indexSchema,
-    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof indexSchema>; signal?.throwIfAborted(); const snapshot = await indexOriginalDocument(getDirectory(), params.path);
+    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof indexSchema>; signal?.throwIfAborted(); const snapshot = await indexDocument(params.path);
       const textLines = readFileSync(snapshot.textPath, 'utf8').split('\n');
       const query = params.query?.toLowerCase();
       const matches = snapshot.units.filter(unit => !query || unit.label.toLowerCase().includes(query) || textLines.slice(unit.startLine - 1, unit.endLine).join('\n').toLowerCase().includes(query));
@@ -92,7 +99,7 @@ export function createDocumentTools(getDirectory: () => string): ToolDefinition<
       return { content: [{ type: 'text', text: JSON.stringify({ path: snapshot.originalPath, sourceVersion: snapshot.version, snapshotPath: snapshot.textPath,
         total: matches.length, units: matches.slice(offset, offset + 100), next_offset: offset + 100 < matches.length ? offset + 100 : null, limitations: snapshot.limitations, readEvidence: false }) }], details: {} };
     } }, { name: 'document_read', label: '读取文档原文', description: 'Read a located unit from the current original version. Returns original lines, physical page/cell/paragraph location, limits and an exact read receipt. Quote check is literal only; semantic support and visual layout need independent review.', parameters: readSchema,
-    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof readSchema>; signal?.throwIfAborted(); const snapshot = await indexOriginalDocument(getDirectory(), params.path);
+    async execute(_id, rawParams, signal) { const params = rawParams as Static<typeof readSchema>; signal?.throwIfAborted(); const snapshot = await indexDocument(params.path);
       const unit = snapshot.units.find(unit => unit.id === params.unit_id); if (!unit) throw new Error('Unit not found in the current file version; refresh document_index.');
       const startLine = unit.startLine + (params.offset ?? 0); if (startLine > unit.endLine) throw new Error('Offset leaves the original unit.');
       const lines = readFileSync(snapshot.textPath, 'utf8').split('\n').slice(startLine - 1, Math.min(unit.endLine, startLine + (params.limit ?? unit.endLine) - 1));

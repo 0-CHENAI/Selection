@@ -187,9 +187,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@craft-agent/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
-    // The renderer adds the session synchronously from this return value (App.tsx handleCreateSession),
-    // so suppress the broadcast to avoid a redundant hydrate round-trip.
-    const session = await sessionManager.createSession(workspaceId, options, { emitCreatedEvent: false })
+    // Other windows and RPC clients need the same metadata before processing events arrive.
+    // The creating renderer already deduplicates session_created against its returned session.
+    const session = await sessionManager.createSession(workspaceId, options)
     end()
     return session
   })

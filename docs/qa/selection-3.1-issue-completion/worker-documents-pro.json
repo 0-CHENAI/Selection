@@ -1,0 +1,397 @@
+{
+  "label": "worker-documents-pro",
+  "rootId": "261010-neat-elk",
+  "model": "gpt-6-luna",
+  "workMode": "PRO",
+  "permissionMode": "allow-all",
+  "status": "completed",
+  "promptHash": "e27ef4d1e166cc17d8417c0658d4826467bb243b4c7ccd4b426739550c45fb14",
+  "inputHashesBefore": {
+    "costs.txt": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+    "draft.txt": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+    "cost.pdf": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+    "cost.docx": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+    "cost.xlsx": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+    "cost.pptx": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc"
+  },
+  "inputHashes": {
+    "costs.txt": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+    "draft.txt": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+    "cost.pdf": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+    "cost.docx": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+    "cost.xlsx": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+    "cost.pptx": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc"
+  },
+  "elapsedMs": 331602,
+  "toolCalls": 28,
+  "workers": 2,
+  "manualPlanEdits": 0,
+  "manualOutputs": 0,
+  "result": {
+    "help": [],
+    "taskId": "pro-a544b8bd8bbbc07289d3f000",
+    "orchestratorSessionId": "261010-neat-elk",
+    "slug": "pro-a544b8bd8bbbc07289d3f000",
+    "runId": "chat-5b1b0c9561a758b86c2b783a1af097d4c3a59891315b5c3868c20aeaa158e6fb",
+    "runIds": [
+      "chat-5b1b0c9561a758b86c2b783a1af097d4c3a59891315b5c3868c20aeaa158e6fb"
+    ],
+    "verdict": {
+      "result": "pass"
+    },
+    "verdicts": [
+      {
+        "result": "pass"
+      }
+    ],
+    "repair": {
+      "used": 0,
+      "max": 3
+    },
+    "runStatus": "completed",
+    "tokensUsed": 77890,
+    "acceptanceCriteria": "四个原件均有独立的 document_index 尝试记录；每个能定位到包含 1000000 的原生位置均有对应 document_read 实际返回范围和来源版本/读取回执；任何失败均逐字准确报告原始工具错误且不重试、不替代；最终报告只总结检查证据，并明确金额仅为 TEST FIXTURE ONLY、A 两年总成本 100 万元 / 1000000 元、B 成本口径待核对、风险资料缺口仍未知。",
+    "nodes": [
+      {
+        "id": "native-check",
+        "title": "逐份定位原生资料",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-swift-meadow",
+        "output": "已分别对 cost.pdf、cost.docx、cost.xlsx、cost.pptx 执行原生 document_index 与命中位置 document_read。四份均命中并读取到包含 1000000 的位置，均提供来源版本、原生位置、实际返回范围、回执与工具限制。源文件未修改。报告已写入隔离工作目录。金额结论仅限 TEST FIXTURE ONLY：A 两年总成本 100 万元 / 1000000 元；B 成本口径待核对；风险资料缺口仍未知。",
+        "outputs": {
+          "report_path": "/tmp/selection-joint-aligned-clean/workspaces/.isolated-tasks/b995a086-7e38-4743-aae6-926843479637/work/native-check.md",
+          "all_four_indexed_and_read": true,
+          "source_files_modified": false,
+          "amount_scope": "TEST FIXTURE ONLY; A 两年总成本 100 万元 / 1000000 元；B 成本口径待核对；风险资料缺口仍未知",
+          "native-check.md": {
+            "path": "/private/tmp/selection-3.1-qa-documents/native-check.md",
+            "mime": "text/markdown",
+            "size": 3334,
+            "hash": "bf1783ade2a3d6a6a64707b880ef0eaf54f1b9b35af387f6e7579ee718751b9b",
+            "artifactDeliveryVersion": 1
+          }
+        },
+        "artifacts": [
+          {
+            "path": "/private/tmp/selection-3.1-qa-documents/native-check.md",
+            "mime": "text/markdown",
+            "size": 3334,
+            "hash": "bf1783ade2a3d6a6a64707b880ef0eaf54f1b9b35af387f6e7579ee718751b9b",
+            "artifactDeliveryVersion": 1
+          }
+        ]
+      },
+      {
+        "id": "evidence-review",
+        "title": "核对证据与报告范围",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-amber-harbor",
+        "output": "独立核验通过：上游报告为四份原件分别提供了 `document_index` 尝试及命中位置对应的 `document_read` 内容、来源版本、实际返回范围和读取回执；四份均报告命中，`quoteMatched=true`。报告未记载读取失败、重试、替代文本提取或原件修改。\n\n金额仅限 **TEST FIXTURE ONLY**：A 两年总成本 100 万元 / 1000000 元；B 成本口径待核对；风险资料缺口仍未知。",
+        "outputs": {}
+      }
+    ],
+    "workers": [],
+    "revision": 0
+  },
+  "events": [
+    {
+      "kind": "run-started",
+      "taskId": "pro-a544b8bd8bbbc07289d3f000",
+      "runId": "chat-5b1b0c9561a758b86c2b783a1af097d4c3a59891315b5c3868c20aeaa158e6fb",
+      "orchestratorSessionId": "261010-neat-elk",
+      "t": "2026-10-09T16:09:42.874Z",
+      "seq": 1,
+      "revision": 0
+    },
+    {
+      "kind": "node-scheduled",
+      "nodeId": "native-check",
+      "t": "2026-10-09T16:09:42.876Z",
+      "seq": 2,
+      "revision": 0
+    },
+    {
+      "kind": "node-spawned",
+      "nodeId": "native-check",
+      "sessionId": "261010-swift-meadow",
+      "generation": 1,
+      "attempt": 1,
+      "attemptRevision": 0,
+      "reused": false,
+      "t": "2026-10-09T16:09:42.914Z",
+      "seq": 3,
+      "revision": 0
+    },
+    {
+      "kind": "node-artifact-inputs",
+      "nodeId": "native-check",
+      "sessionId": "261010-swift-meadow",
+      "inputs": {},
+      "t": "2026-10-09T16:09:42.941Z",
+      "seq": 4,
+      "revision": 0
+    },
+    {
+      "kind": "node-finished",
+      "nodeId": "native-check",
+      "sessionId": "261010-swift-meadow",
+      "state": "done",
+      "t": "2026-10-09T16:11:13.406Z",
+      "seq": 5,
+      "revision": 0
+    },
+    {
+      "kind": "node-scheduled",
+      "nodeId": "evidence-review",
+      "t": "2026-10-09T16:11:13.408Z",
+      "seq": 6,
+      "revision": 0
+    },
+    {
+      "kind": "node-spawned",
+      "nodeId": "evidence-review",
+      "sessionId": "261010-amber-harbor",
+      "generation": 1,
+      "attempt": 1,
+      "attemptRevision": 0,
+      "reused": false,
+      "t": "2026-10-09T16:11:13.429Z",
+      "seq": 7,
+      "revision": 0
+    },
+    {
+      "kind": "node-artifact-inputs",
+      "nodeId": "evidence-review",
+      "sessionId": "261010-amber-harbor",
+      "inputs": {
+        "native-check": {
+          "text": "",
+          "params": {
+            "native-check.md": {
+              "path": "/private/tmp/selection-3.1-qa-documents/native-check.md",
+              "hash": "bf1783ade2a3d6a6a64707b880ef0eaf54f1b9b35af387f6e7579ee718751b9b",
+              "size": 3334,
+              "artifactDeliveryVersion": 1
+            }
+          }
+        }
+      },
+      "t": "2026-10-09T16:11:13.455Z",
+      "seq": 8,
+      "revision": 0
+    },
+    {
+      "kind": "node-verdict",
+      "nodeId": "evidence-review",
+      "result": "pass",
+      "reason": "上游检查报告为四份指定原件分别记录了 document_index 来源版本、命中原生位置，以及对应 document_read 的实际内容、返回范围和读取回执；四份均命中且 quoteMatched=true，无失败或重试记录。报告明确只读，并将金额限定为 TEST FIXTURE ONLY，且仅陈述 A 两年总成本 100 万元 / 1000000 元、B 成本口径待核对、风险资料缺口仍未知。",
+      "evidence": "已审阅上游节点输出的 native-check.md：PDF page-17（来源版本 fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a，读取范围 17–17，quoteMatched=true）；DOCX paragraph-204（655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b，范围 204–204，quoteMatched=true）；XLSX Costs!B2（976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee，范围 3–3，quoteMatched=true）；PPTX slide-2（1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34，范围 3–4，quoteMatched=true）。报告记录四份均索引命中、均已读取，未报告错误、重试或替代文本提取；没有本节点读取原件或调用 Bash 转换。",
+      "t": "2026-10-09T16:12:19.060Z",
+      "seq": 9,
+      "revision": 0
+    },
+    {
+      "kind": "node-finished",
+      "nodeId": "evidence-review",
+      "sessionId": "261010-amber-harbor",
+      "state": "done",
+      "t": "2026-10-09T16:12:23.939Z",
+      "seq": 10,
+      "revision": 0
+    },
+    {
+      "kind": "run-verifying",
+      "t": "2026-10-09T16:12:23.941Z",
+      "seq": 11,
+      "revision": 0
+    },
+    {
+      "kind": "verdict",
+      "result": "pass",
+      "t": "2026-10-09T16:12:57.866Z",
+      "seq": 12,
+      "revision": 0
+    },
+    {
+      "kind": "run-completed",
+      "tokensUsed": 77890,
+      "t": "2026-10-09T16:12:57.867Z",
+      "seq": 13,
+      "revision": 0
+    },
+    {
+      "kind": "metrics",
+      "metrics": {
+        "elapsedMs": 194994,
+        "queueMs": 113,
+        "modelMs": 160949,
+        "tokensUsed": 77890,
+        "retries": 0,
+        "repairs": 0,
+        "coordinatorWaitMs": 0,
+        "coordinatorWaits": 0,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "cacheBypasses": 0,
+        "criticalPathNodeIds": []
+      },
+      "t": "2026-10-09T16:12:57.867Z",
+      "seq": 14,
+      "revision": 0
+    }
+  ],
+  "finalText": "## 检查结论\n\n隔离检查会话分别对四份原件执行了 `document_index`，随后对命中位置执行 `document_read`。四份均命中并读取到含 `1000000` 的内容；检查报告记录四次 `quoteMatched=true`、`more=false`，来源版本与对应索引一致。独立核验节点通过。报告称原件未修改；没有记录读取失败、重试或替代文本提取。\n\n| 原件 | 来源版本 | 原生位置 | `document_read` 实际返回范围与内容 |\n|---|---|---|---|\n| [`cost.pdf`](/tmp/selection-3.1-qa-documents/cost.pdf) | `fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a` | 第 17 页（`page-17`，kind=`page`） | 行范围 `17–17`；返回：`TEST FIXTURE ONLY. Physical page 17. Plan A two-year cost: CNY 1000000 (100 wan yuan). Plan B basis is pending; do not compare directly. Risk information has one unresolved gap; details are unavailable.` 回执位置为第 17 页。 |\n| [`cost.docx`](/tmp/selection-3.1-qa-documents/cost.docx) | `655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b` | `paragraph-204`（“Cost source · 段落 204”，kind=`paragraph`） | 行范围 `204–204`；返回：`Plan A two-year cost: CNY 1000000.` 回执位置为段落 204。工具限制说明物理页码无法从此结构/文本读取中取得，因此不推断页码。 |\n| [`cost.xlsx`](/tmp/selection-3.1-qa-documents/cost.xlsx) | `976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee` | `Costs!B2`（kind=`cell`） | 行范围 `3–3`；返回：`1000000`。回执位置为 `Costs!B2`。 |\n| [`cost.pptx`](/tmp/selection-3.1-qa-documents/cost.pptx) | `1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34` | 第 2 张幻灯片（`slide-2`，kind=`slide`） | 行范围 `3–4`；返回：`Cost source\\nPlan A two-year cost: CNY 1000000.` 回执位置为第 2 张幻灯片。 |\n\n报告注明各格式的读取边界：PDF 结果是文本层内容，不含视觉布局/OCR；DOCX 的结构/文本读取不覆盖页眉、脚注和修订内容；XLSX 与 PPTX 的结构/文本读取不覆盖渲染布局，且 XLSX 报告还注明公式、图表与格式不在读取范围内。\n\n**金额信息仅为 TEST FIXTURE ONLY：A 两年总成本 100 万元 / 1000000 元；B 成本口径待核对；风险资料缺口仍未知。**",
+  "issue": 474,
+  "sourceCommit": "eeaf9b49c",
+  "packageMainSha256": "083496148e20d2539beab03565d8d887003d917286f3fef4042ed33b4d88d7b9",
+  "packagePiSha256": "eb57c3729f123565673e24d2b96e5218b450896e48834ffe8316b4051caf1ba8",
+  "workerId": "261010-swift-meadow",
+  "workerPermissionMode": "allow-all",
+  "isolatedWorkspace": {
+    "version": 1,
+    "sourceRoot": "/private/tmp/selection-3.1-qa-documents",
+    "directory": "/tmp/selection-joint-aligned-clean/workspaces/.isolated-tasks/b995a086-7e38-4743-aae6-926843479637/work",
+    "id": "b995a086-7e38-4743-aae6-926843479637"
+  },
+  "nativeEvidence": [
+    {
+      "id": "msg-1791562205909-yyy8uk",
+      "toolUseId": "call_sbLwMr207YHRM07MiIU6aTN0",
+      "toolName": "document_index",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.pdf",
+        "query": "1000000"
+      },
+      "toolResult": "{\"path\":\"/private/tmp/selection-3.1-qa-documents/cost.pdf\",\"sourceVersion\":\"fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a\",\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a/snapshot.txt\",\"total\":1,\"units\":[{\"id\":\"page-17\",\"label\":\"第 17 页\",\"kind\":\"page\",\"startLine\":17,\"endLine\":17}],\"next_offset\":null,\"limitations\":[\"PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied.\"],\"readEvidence\":false}",
+      "timestamp": 1791562205909
+    },
+    {
+      "id": "msg-1791562210502-6trdh6",
+      "toolUseId": "call_sb6i3fGhNw5OVZlSdTPc008e",
+      "toolName": "document_read",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.pdf",
+        "unit_id": "page-17",
+        "quote": "1000000"
+      },
+      "toolResult": "TEST FIXTURE ONLY. Physical page 17. Plan A two-year cost: CNY 1000000 (100 wan yuan). Plan B basis is pending; do not compare directly. Risk information has one unresolved gap; details are unavailable.\n\n{\"location\":\"第 17 页\",\"sourceVersion\":\"fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a\",\"startLine\":17,\"endLine\":17,\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a/snapshot.txt\",\"limitations\":[\"PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied.\"],\"quoteMatched\":true,\"more\":false}",
+      "timestamp": 1791562210502
+    },
+    {
+      "id": "msg-1791562215625-dfvr0t",
+      "toolUseId": "call_MutZMt2Ae86dwwcxlZYepdGe",
+      "toolName": "document_index",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.docx",
+        "query": "1000000"
+      },
+      "toolResult": "{\"path\":\"/private/tmp/selection-3.1-qa-documents/cost.docx\",\"sourceVersion\":\"655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b\",\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b/snapshot.txt\",\"total\":1,\"units\":[{\"id\":\"paragraph-204\",\"label\":\"Cost source · 段落 204\",\"kind\":\"paragraph\",\"startLine\":204,\"endLine\":204}],\"next_offset\":null,\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\",\"DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered.\"],\"readEvidence\":false}",
+      "timestamp": 1791562215625
+    },
+    {
+      "id": "msg-1791562220840-mztyfb",
+      "toolUseId": "call_jvCc6hNxWrEBtw6HkWzVUF9i",
+      "toolName": "document_read",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.docx",
+        "unit_id": "paragraph-204",
+        "quote": "1000000"
+      },
+      "toolResult": "Plan A two-year cost: CNY 1000000.\n\n{\"location\":\"Cost source · 段落 204\",\"sourceVersion\":\"655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b\",\"startLine\":204,\"endLine\":204,\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b/snapshot.txt\",\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\",\"DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered.\"],\"quoteMatched\":true,\"more\":false}",
+      "timestamp": 1791562220840
+    },
+    {
+      "id": "msg-1791562224847-r144h5",
+      "toolUseId": "call_iL1OrW3yuAZLZqGSBX3I0pxs",
+      "toolName": "document_index",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.xlsx",
+        "query": "1000000"
+      },
+      "toolResult": "{\"path\":\"/private/tmp/selection-3.1-qa-documents/cost.xlsx\",\"sourceVersion\":\"976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee\",\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee/snapshot.txt\",\"total\":1,\"units\":[{\"id\":\"Costs!B2\",\"label\":\"Costs!B2\",\"kind\":\"cell\",\"startLine\":3,\"endLine\":3}],\"next_offset\":null,\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\"],\"readEvidence\":false}",
+      "timestamp": 1791562224847
+    },
+    {
+      "id": "msg-1791562229727-ivumc4",
+      "toolUseId": "call_YcGRFHuPQeybqPXMU805lh6T",
+      "toolName": "document_read",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.xlsx",
+        "unit_id": "Costs!B2",
+        "quote": "1000000"
+      },
+      "toolResult": "1000000\n\n{\"location\":\"Costs!B2\",\"sourceVersion\":\"976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee\",\"startLine\":3,\"endLine\":3,\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee/snapshot.txt\",\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\"],\"quoteMatched\":true,\"more\":false}",
+      "timestamp": 1791562229727
+    },
+    {
+      "id": "msg-1791562233689-6z5sf7",
+      "toolUseId": "call_VmRxreX6liPyFr8WTpBzt1P4",
+      "toolName": "document_index",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.pptx",
+        "query": "1000000"
+      },
+      "toolResult": "{\"path\":\"/private/tmp/selection-3.1-qa-documents/cost.pptx\",\"sourceVersion\":\"1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34\",\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34/snapshot.txt\",\"total\":1,\"units\":[{\"id\":\"slide-2\",\"label\":\"幻灯片 2\",\"kind\":\"slide\",\"startLine\":3,\"endLine\":4}],\"next_offset\":null,\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\"],\"readEvidence\":false}",
+      "timestamp": 1791562233689
+    },
+    {
+      "id": "msg-1791562237436-pfrisu",
+      "toolUseId": "call_964ycFWAvWUdrRx2f1IuXsLQ",
+      "toolName": "document_read",
+      "toolStatus": "completed",
+      "toolInput": {
+        "path": "/tmp/selection-3.1-qa-documents/cost.pptx",
+        "unit_id": "slide-2",
+        "quote": "1000000"
+      },
+      "toolResult": "Cost source\nPlan A two-year cost: CNY 1000000.\n\n{\"location\":\"幻灯片 2\",\"sourceVersion\":\"1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34\",\"startLine\":3,\"endLine\":4,\"snapshotPath\":\"/private/tmp/selection-3.1-qa-documents/.selection-sources/1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34/snapshot.txt\",\"limitations\":[\"Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.\"],\"quoteMatched\":true,\"more\":false}",
+      "timestamp": 1791562237436
+    }
+  ],
+  "sourceManifests": [
+    {
+      "version": "fa8589f11a1a1d8faeeb17ac224336d68452d51b214625967ba8021d6c48487a",
+      "extractor": "selection-original-v1",
+      "originalHash": "1cce72b607d065970cd9804bdfe1135f5ae27a26007c640abc9e1af1ab0bb9d0",
+      "textHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+      "origin": "/private/tmp/selection-3.1-qa-documents/cost.pdf"
+    },
+    {
+      "version": "655d5fe7ca8201f298deed628a5d2eba63f55f7743325d944916e25376ab807b",
+      "extractor": "selection-original-v1",
+      "originalHash": "e714eac6c1d98d2e5c08c0ebd0abe3cab3ca88c96fc8b9796ab61e48f052eaba",
+      "textHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+      "origin": "/private/tmp/selection-3.1-qa-documents/cost.docx"
+    },
+    {
+      "version": "976cb746a6cc5d83b3f3432aa8be2af5b746f5d1ce897ea1dee3f5770c04e3ee",
+      "extractor": "selection-original-v1",
+      "originalHash": "f1c11e092de077d468cc3fd8e8d0a3440ec4f7f7b6ac8d20d7c8ce0e540bdfe3",
+      "textHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+      "origin": "/private/tmp/selection-3.1-qa-documents/cost.xlsx"
+    },
+    {
+      "version": "1b4540384933b29e08f8199166bea363b149fef8d607c7a34616085c19529b34",
+      "extractor": "selection-original-v1",
+      "originalHash": "7b36bd4bed7e5c529bd1c4e6df6853442a67077faf27f2af98cb8b720812d9cc",
+      "textHash": "c9a72214113ea64979302b24726990caf495f9bcb9951f6247f398ac221df57b",
+      "origin": "/private/tmp/selection-3.1-qa-documents/cost.pptx"
+    }
+  ],
+  "review": {
+    "sessionId": "261010-amber-harbor",
+    "scope": "Independent report and receipt-range completeness check; full original-source semantic review belongs to G7",
+    "finalText": "独立核验通过：上游报告为四份原件分别提供了 `document_index` 尝试及命中位置对应的 `document_read` 内容、来源版本、实际返回范围和读取回执；四份均报告命中，`quoteMatched=true`。报告未记载读取失败、重试、替代文本提取或原件修改。\n\n金额仅限 **TEST FIXTURE ONLY**：A 两年总成本 100 万元 / 1000000 元；B 成本口径待核对；风险资料缺口仍未知。"
+  }
+}

@@ -45,8 +45,10 @@ describe('getSessionToolProxyDefs', () => {
     expect(rootNames).toContain('mcp__session__submit_task_verdict');
   });
   it('limits root help replies to eligible workflow coordinators', () => {
+    // A root can create a plan during this turn; its advertised tools must
+    // already include help replies before the task binding is persisted.
+    expect(getSessionToolProxyDefs({ executionSession: { id: 'root', workMode: 'PRO' } }).map(def => def.name)).toContain('mcp__session__task_help');
     for (const session of [
-      { id: 'root', workMode: 'PRO' as const },
       { id: 'norm', workMode: 'NORM' as const, taskSlug: 'plan' },
       { id: 'root', workMode: 'PRO' as const, taskSlug: 'plan', workModeNeedsReview: true },
       { id: 'worker', workMode: 'PRO' as const, taskSlug: 'plan', parentSessionId: 'root' },

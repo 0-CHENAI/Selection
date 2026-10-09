@@ -187,6 +187,8 @@ export interface CoreBackendConfig {
   modelRequestLimiter?: (quota: string, owner: string, signal?: AbortSignal) => Promise<import('../../model-request-gate').ModelRequestLease>;
   /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
   isolatedShellDirectory?: string;
+  /** Host-validated original project directory; document navigation reads it without changing the worker's write directory. */
+  documentSourceDirectory?: string;
   /** Trusted runtime-only recovery data; never provided by model arguments. */
   toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
   explicitAnswerDelivery?: boolean;

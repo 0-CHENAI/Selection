@@ -16,6 +16,9 @@ it('excludes unsupported formats, deleted files and session scratch', () => {
     { path: '/results/raw.json', change: 'created' as const },
     { path: '/results/old.docx', change: 'deleted' as const },
     { path: '{{SESSION_PATH}}/data/draft.md', change: 'created' as const },
+    { path: '{{SESSION_PATH}}/long_responses/read.txt', change: 'created' as const },
+    { path: '/work/sessions/current/long_responses/tool.txt', change: 'created' as const },
+    { path: 'C:\\work\\sessions\\current\\long_responses\\tool.txt', change: 'created' as const },
   ]
   expect(extractDeliveredResponseArtifacts(versions)).toEqual([
     { path: '/results/report.pdf', name: 'report.pdf', extension: 'pdf', change: 'modified' },

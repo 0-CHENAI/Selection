@@ -14,7 +14,7 @@ import {
   type TaskSpec,
   COORDINATOR_TIMEOUT_BLOCKER,
 } from '@craft-agent/shared/tasks';
-import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import type { SessionCompletionEvent, SessionRuntimeActivity } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 import { LlmConnectionPool } from './connection-pool';
 
@@ -32,6 +32,12 @@ function specOf(raw: unknown): TaskSpec {
 
 class MockHost implements ConductorSessionHost {
   private readonly listeners = new Set<(evt: SessionCompletionEvent) => void>();
+  readonly activityListeners = new Set<(evt: SessionRuntimeActivity) => void>();
+  onRuntimeActivity(listener: (evt: SessionRuntimeActivity) => void): () => void {
+    this.activityListeners.add(listener);
+    return () => { this.activityListeners.delete(listener); };
+  }
+  activity(evt: SessionRuntimeActivity): void { for (const listener of this.activityListeners) listener(evt); }
   readonly created: { id: string; options: CreateSessionOptions }[] = [];
   readonly sent: { sessionId: string; message: string }[] = [];
   readonly statuses: { sessionId: string; status: string }[] = [];
@@ -322,6 +328,36 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(host.sent.findLast(call => call.sessionId === 'orch')?.message).toContain('completed without submit_task_output');
   });
 
+  it('retries the original failure at a checkpoint, preserves other results and recovers the retry after restart', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A' }, { id: 'b', prompt: 'B', depends_on: ['a'] }] }));
+    let r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const decide = (decisionId: string, action: 'continue' | 'patch' | 'retry', extra: Record<string, unknown> = {}) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId,
+      decisionId, baseRevision: r.getRunState('v3demo', 'r1')!.revision ?? 0, action, ...extra,
+    });
+    expect(() => decide('no-failure', 'retry', { rationale: 'retry' })).toThrow('No failed execution nodes');
+    decide('start', 'continue'); await tick(); host.complete('a', { finalText: 'Preserved input' }); await tick();
+    decide('dispatch-b', 'continue'); await tick(); host.complete('b', { reason: 'error' }); await tick();
+    expect(() => decide('no-reason', 'retry')).toThrow('rationale');
+    expect(() => decide('overwrite', 'retry', { rationale: 'fix', update: [{ id: 'b', prompt: 'unsafe overwrite' }] })).toThrow('next checkpoint');
+    decide('retry-b', 'retry', { rationale: 'Correct the failed input at the next checkpoint' });
+    expect(r.getRunState('v3demo', 'r1')!.status).toBe('waiting-coordinator');
+    expect(r.getRunState('v3demo', 'r1')!.nodes.map(n => n.state)).toEqual(['done', 'pending']);
+    const checkpoint = r.getRunState('v3demo', 'r1')!.coordinatorGate!.checkpointId;
+    r = runner();
+    expect(r.getLatestRun('v3demo')!.coordinatorGate!.checkpointId).toBe(checkpoint);
+    decide('fix-b', 'patch', { rationale: 'Supply corrected instructions', update: [{ id: 'b', prompt: 'Corrected B' }] }); await tick();
+    expect(host.dispatchedNames().filter(id => id === 'a')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(id => id === 'b')).toHaveLength(2);
+    host.complete('b', { finalText: 'Corrected result' }); await tick();
+    decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')!.status).toBe('verifying');
+    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    const log = readRunLog(root, 'v3demo', 'r1');
+    expect(log.some(e => e.kind === 'node-finished' && e.nodeId === 'b' && e.state === 'failed')).toBe(true);
+    expect(log.some(e => e.kind === 'run-resumed' && e.retryNodeIds?.includes('b'))).toBe(true);
+  });
+
   it('retires a canonically cancelled pending node without blocking final verification', async () => {
     saveTaskSpec(root, v3Spec({ acceptance_criteria: 'A supplies the finding', nodes: [{ id: 'a', prompt: 'A' }, { id: 'b', prompt: 'Unneeded work', depends_on: ['a'] }] }));
     const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
@@ -470,6 +506,27 @@ describe('TaskRunner v3 quality/efficiency', () => {
     const snap = r.expireCoordinatorGate('v3demo', 'r1', '2026-06-07T00:03:00.000Z');
     expect(snap.status).toBe('paused');
     expect(snap.blockers).toContain(COORDINATOR_TIMEOUT_BLOCKER);
+    expect(host.dispatchedNames()).toEqual([]);
+  });
+
+  it('retains a progressing coordinator across the original deadline and restart, but still expires inactivity', () => {
+    saveTaskSpec(root, v3Spec());
+    let now = '2026-06-07T00:00:00.000Z';
+    const r = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    now = '2026-06-07T00:01:59.000Z';
+    const activity: SessionRuntimeActivity = { sessionId: 'orch', rootSessionId: 'orch', generation: 1, type: 'model_activity', at: Date.parse(now), reasoningBytes: 32, textBytes: 0 };
+    host.activity(activity);
+    now = '2026-06-07T00:02:30.000Z';
+    host.activity({ ...activity, at: Date.parse(now) }); // Unchanged heartbeat is not progress.
+    host.activity({ ...activity, sessionId: 'worker', reasoningBytes: 64 });
+    host.activity({ ...activity, runId: 'obsolete', reasoningBytes: 64 });
+    host.activity({ ...activity, type: 'model_call_start' }); // A pending API request is not output.
+    expect(r.expireCoordinatorGate('v3demo', 'r1', now).status).toBe('waiting-coordinator');
+    expect(readRunLog(root, 'v3demo', 'r1').filter(event => event.kind === 'coordinator-progress')).toHaveLength(1);
+    const restored = new TaskRunner({ host: new MockHost(), workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    expect(restored.getLatestRun('v3demo')?.status).toBe('waiting-coordinator');
+    expect(restored.expireCoordinatorGate('v3demo', 'r1', '2026-06-07T00:04:00.000Z').status).toBe('paused');
     expect(host.dispatchedNames()).toEqual([]);
   });
 

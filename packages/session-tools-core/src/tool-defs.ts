@@ -354,16 +354,16 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   checkpointId: z.string().describe('Checkpoint this decision answers'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this decision is based on'),
-  action: z.enum(['continue', 'patch', 'pause']).describe('continue the graph, patch pending nodes, or pause for review'),
-  rationale: z.string().optional().describe('Required when action is patch'),
+  action: z.enum(['continue', 'patch', 'pause', 'retry']).describe('continue the graph, patch pending nodes, pause for review, or retry failed/invalid nodes and affected dependents after workers settle; unrelated successful work is preserved'),
+  rationale: z.string().optional().describe('Required when action is patch or retry'),
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
   constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
   decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
 }).superRefine((value, ctx) => {
-  if (value.action === 'patch' && !value.rationale?.trim()) {
-    ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });
+  if (['patch', 'retry'].includes(value.action) && !value.rationale?.trim()) {
+    ctx.addIssue({ code: 'custom', path: ['rationale'], message: `${value.action} requires a rationale` });
   }
 });
 
@@ -666,7 +666,7 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create and display the canonical V3 plan on this PRO root. Requires a stable requestId. Provide a full spec, or title/description for a single-node plan. Creation alone never runs it. The host preserves current authorization, model, sources, skills and constraints and prevents duplicate ownership. For complex user goals, explain the plan briefly, create it, then call run_task asynchronously within the existing authorization. Simple chat work needs no workflow. Pending changes use canonical revisions; never create a parallel hidden plan.`,
 
-  run_task: `Start the saved canonical plan owned by this PRO root. Use a stable requestId for retries. Returns immediately. End the current chat turn with a short start acknowledgment; do not poll/wait in a loop or send reminders to workers. The scheduler automatically wakes the root for checkpoints and final verification. Existing permissions still govern every operation. Do not start a second run for a lost response; reuse the requestId. Saving in the editor never starts work.`,
+  run_task: `Start the saved canonical plan owned by this PRO root. For source-backed research, first use document_index on every native PDF/DOCX/XLSX/PPTX original in research.sources so this start can freeze its version-bound text snapshot. Indexing is acquisition/navigation, not the author's or reviewer's original reading. A later index cannot repair an already frozen run; unreadable sources retain explicit limitations. Use a stable requestId for retries. Returns immediately. End the current chat turn with a short start acknowledgment; do not poll/wait in a loop or send reminders to workers. The scheduler automatically wakes the root for checkpoints and final verification. Existing permissions still govern every operation. Do not start a second run for a lost response; reuse the requestId. Saving in the editor never starts work.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 

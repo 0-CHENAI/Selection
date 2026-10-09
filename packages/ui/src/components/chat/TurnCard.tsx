@@ -2832,7 +2832,7 @@ export function ResponseCard({
           className={cn("relative group transition-colors duration-200",
             isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
         >
-          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-0 top-5 size-3.5 text-muted-foreground" />}
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-4 size-3 text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div

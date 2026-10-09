@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readSourceSnapshot, sourceIndexPath } from '@craft-agent/shared/source-snapshot';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve, relative, isAbsolute, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { atomicWriteFileSync } from '../utils/files.ts';
 import { committedRunLog, readRunLog, readRunState, readNodeAttempt, listRunIds, runDir } from './storage.ts';
 import { readSpecRevision } from './revisions.ts';
@@ -39,7 +39,7 @@ export function freezeResearchSources(root: string, slug: string, runId: string,
           units: indexed.units, limitations: indexed.limitations, acquisition: indexed.acquisition };
       }
       if (adjacentSnapshot || basename(path) === 'snapshot.txt' && path.split(sep).includes('.selection-sources')) throw new Error('Original source snapshot is unavailable or corrupt');
-      if (bytes.includes(0)) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
+      if (bytes.includes(0) || ['.pdf', '.docx', '.xlsx', '.pptx'].includes(extname(path).toLowerCase())) return { id: source.id, ref, version: hash, hash, acquiredAt, unavailableReason: 'Binary source needs a native reader and a locatable text snapshot' };
       const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
       const snapshotPath = join(target, `source-${index}.txt`); writeFileSync(snapshotPath, bytes);
       return { id: source.id, ref, version: hash, hash, acquiredAt, originalPath: path, snapshotPath: realpathSync(snapshotPath), text };

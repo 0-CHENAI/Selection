@@ -4370,6 +4370,7 @@ export class SessionManager implements ISessionManager {
         session: sessionConfig,
         toolResultRecovery: managed.toolResultRecovery,
         isolatedShellDirectory: managed.isolatedWorkspace?.directory,
+        documentSourceDirectory: managed.isolatedWorkspace?.sourceRoot,
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,

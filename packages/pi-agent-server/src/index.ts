@@ -29,7 +29,7 @@ import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-r
 import { createTaskContextTool } from './task-context.ts';
 import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
-import { answerExecutionError, isAnswerTool, answerTurnToolNames } from './answer-delivery-guard.ts';
+import { answerExecutionError, isAnswerTool, isTurnCompletionTool, answerTurnToolNames } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -164,6 +164,7 @@ interface InitMessage {
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
   isolatedShellDirectory?: string;
+  documentSourceDirectory?: string;
   toolResultRecovery?: import('../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan;
   forceFreshSession?: boolean;
   /** Swarm sessions enable an earlier auto-compaction policy. */
@@ -783,7 +784,7 @@ async function ensureSession(): Promise<AgentSession> {
   ];
   confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
   confinedBashDirectory = isolatedShell?.directory;
-  builtinDefs.push(...createDocumentTools(() => cwd).map(tool => registerRecoveryClass(tool, 'read-only')));
+  builtinDefs.push(...createDocumentTools(() => cwd, () => initConfig?.documentSourceDirectory).map(tool => registerRecoveryClass(tool, 'read-only')));
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral
@@ -1177,7 +1178,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         _toolCallId: string,
         params: any,
       ): Promise<AgentToolResult<any>> => {
-        if (isAnswerTool(executionName)) answerSubmissionSdkMessageId = answerSdkMessageId ?? piSession?.sessionManager.getLeafId() ?? undefined;
+        if (isTurnCompletionTool(executionName)) answerSubmissionSdkMessageId = answerSdkMessageId ?? piSession?.sessionManager.getLeafId() ?? undefined;
         const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         send({
           type: 'tool_execute_request',
@@ -1193,7 +1194,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           pendingToolExecutions.set(requestId, { resolve });
         });
 
-        if (isAnswerTool(executionName) && !result.isError) answerAccepted = true;
+        if (isTurnCompletionTool(executionName) && !result.isError) answerAccepted = true;
         return {
           content: normalizeProxyToolContent(result.content),
           details: proxyToolDetails(result),
@@ -1519,7 +1520,11 @@ function extractToolExecutionMetadata(args: Record<string, unknown> | undefined)
 
 function handleSessionEvent(event: AgentSessionEvent): void {
   let forwardedEvent: OutboundAgentEvent = event;
-  if (event.type === 'message_end' && event.message.role === 'toolResult' && answerAccepted && isAnswerTool(event.message.toolName)) {
+  // abort() is how the SDK yields after the accepted tool receipt. Its empty
+  // aborted assistant stub is not a provider interruption or another answer.
+  // Keep genuine error/truncation events and all unaccepted aborts visible.
+  if (answerAccepted && event.type === 'message_end' && event.message.role === 'assistant' && event.message.stopReason === 'aborted') return;
+  if (event.type === 'message_end' && event.message.role === 'toolResult' && answerAccepted && isTurnCompletionTool(event.message.toolName)) {
     const currentSession = piSession;
     const correlation = answerSubmissionSdkMessageId;
     // Run after the SDK appends the successful tool result. A branch at this

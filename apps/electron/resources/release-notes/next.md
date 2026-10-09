@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.
+
 - **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
 
 - **Authorized project history** — Projects can explicitly enable PRO history search with exact message/version expansion and native compaction lineage. Changed or deleted history is invalidated; fresh conversations do not automatically inherit other chats, and sibling execution contexts remain isolated. Issue #471.
@@ -65,6 +67,22 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Unified work-chain header** — Thinking and numbered steps share one title row and enter or leave on the same height curve as the processing indicator. The collapsed title no longer appends an error count, and the chevron stays in document flow so the rounded chrome does not clip it. Fixes #405.
 
 ## Bug Fixes
+
+- **Research source acquisition** — Source-backed plans index native documents before freezing their extracted versions; PDF bytes cannot be mistaken for plain text. Authors and independent reviewers still need their own original read receipts, and a late index never rewrites frozen history. Issue #474.
+
+- **History replay entry** — Opening the latest durable frame accepts the JSON transport's empty cursor while retaining validation for invalid numeric cursors. Inspection remains read-only and never restarts models. Issue #474.
+
+- **Isolated document reads** — Task workers can index and read originals in their host-authorized source directory while keeping Shell and file writes inside their isolated candidate directory. Native page, paragraph, cell and slide receipts remain version-bound. Issue #474.
+
+- **Live work previews** — Collapsed work headers follow the latest actual activity instead of a pending downstream task whose status arrived later.
+
+- **Async research progress** — Start acknowledgments keep their lightweight transcript style while waiting for the coordinator, verifying or repairing. Their dashed speech icon aligns with the work-chain icon column; final-answer actions appear only on completed answers, which retain their normal cards and controls.
+
+- **Internal tool snapshots** — Long tool-response snapshots stay in session scratch storage and no longer appear as delivered TXT files in the conversation.
+
+- **Coordinator checkpoint progress** — Actual model output and tool progress renew the coordinator inactivity lease. Accepted decisions yield to the next host checkpoint, and fresh PRO roots can answer worker help requests without restarting the conversation. Issue #466.
+
+- **Original failed-node recovery** — Coordinators can explicitly retry the original failed nodes after workers settle, then correct their pending definitions at the next checkpoint. Unrelated successes and failure history are preserved; replacement work cannot silently erase an original failure. Issue #466.
 
 - **Coordinator help replies** — PRO workflow roots retain the structured help tool when a worker yields for guidance, and interrupted host-owned help waits can recover safely. Exact-premise rejections identify the differing entry so a worker can correct its submission without changing frozen research criteria.
 

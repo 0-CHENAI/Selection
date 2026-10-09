@@ -26,7 +26,10 @@ describe('completed response semantic reveal boundary', () => {
     const verdict: ActivityItem = { id: 'verdict', type: 'tool', timestamp: 2, status: 'completed',
       toolName: 'mcp__session__submit_task_verdict', content: JSON.stringify({ status: 'completed' }) }
     for (const animateResponse of [false, true]) {
-      for (const [activities, progress] of [[[], false], [[start], true], [[{ ...start, status: 'error' }], false],
+      for (const [activities, progress] of [[[], false], [[start], true],
+        ...['waiting-coordinator', 'verifying', 'repairing'].map(status => [[{ ...start, content: JSON.stringify({ runId: 'run', status }) }], true]),
+        ...['completed', 'failed', 'paused', 'stopped'].map(status => [[{ ...start, content: JSON.stringify({ runId: 'run', status }) }], false]),
+        [[{ ...start, status: 'error' }], false],
         [[{ ...start, content: '{invalid' }], false], [[start, verdict], false]] as [ActivityItem[], boolean][]) {
         const html = renderToStaticMarkup(React.createElement(TooltipProvider, null,
           React.createElement(TurnCard, { turnId: 'start', activities, isStreaming: false, isComplete: true,
@@ -36,6 +39,7 @@ describe('completed response semantic reveal boundary', () => {
         expect(html).toContain('已启动调研。')
         expect(html.includes('role="note"')).toBe(progress)
         expect(html).toContain(`data-response-kind="${progress ? 'progress' : 'response'}"`)
+        if (progress) expect(html).toContain('lucide-message-circle-dashed')
         for (const action of ['common.copy', 'chat.regenerate', '>Markdown<', 'turn-action-btn']) {
           expect(html.includes(action)).toBe(!progress)
         }

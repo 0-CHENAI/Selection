@@ -584,8 +584,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:getResults — storage-backed read of a run's outcome (verdict + per-node output).
   // Reads the durable artifacts (run-log.jsonl, nodes/<id>.json, per-run spec.json snapshot), so it
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
-  server.handle(RPC_CHANNELS.tasks.INSPECT_RUN, async (_ctx, workspaceId: string, slug: string, runId: string, cursor?: number, patch?: import('@craft-agent/shared/tasks').OrchestrationPatch) => {
-    return inspectTaskRun(workspaceOrThrow(workspaceId).rootPath, slug, runId, cursor, patch)
+  server.handle(RPC_CHANNELS.tasks.INSPECT_RUN, async (_ctx, workspaceId: string, slug: string, runId: string, cursor?: number | null, patch?: import('@craft-agent/shared/tasks').OrchestrationPatch) => {
+    // JSON transports serialize an omitted positional argument as null.
+    return inspectTaskRun(workspaceOrThrow(workspaceId).rootPath, slug, runId, cursor ?? undefined, patch)
   })
 
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
