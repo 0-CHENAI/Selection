@@ -68,6 +68,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Research source acquisition** — Source-backed plans index native documents before freezing their extracted versions; PDF bytes cannot be mistaken for plain text. Authors and independent reviewers still need their own original read receipts, and a late index never rewrites frozen history. Issue #474.
+
 - **History replay entry** — Opening the latest durable frame accepts the JSON transport's empty cursor while retaining validation for invalid numeric cursors. Inspection remains read-only and never restarts models. Issue #474.
 
 - **Isolated document reads** — Task workers can index and read originals in their host-authorized source directory while keeping Shell and file writes inside their isolated candidate directory. Native page, paragraph, cell and slide receipts remain version-bound. Issue #474.

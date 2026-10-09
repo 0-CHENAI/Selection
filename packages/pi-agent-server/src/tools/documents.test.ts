@@ -26,6 +26,9 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
       'ppt/slides/slide1.xml': '<p:sld><a:p><a:r><a:t>100万元</a:t></a:r></a:p></p:sld>',
       'ppt/slides/slide2.xml': '<p:sld><a:p><a:r><a:t>测试范围</a:t></a:r></a:p></p:sld>',
     }));
+    const nativeConfig = ResearchConfigSchema.parse({ line: { id: 'main', question: '核对成本' }, dimensions: [{ id: 'cost', requirement: '实际原文' }], sources: ['cost.pdf', 'cost.docx', 'cost.xlsx', 'cost.pptx'].map((path, index) => ({ id: `native-${index}`, path })) });
+    const unindexed = freezeResearchSources(directory, 'task', 'before-index', nativeConfig, directory);
+    expect(unindexed.every(source => !!source.unavailableReason)).toBe(true);
     const [indexTool, readTool] = createDocumentTools(() => directory);
     const indexes = await Promise.all(['long.md', 'cost.pdf', 'cost.docx', 'cost.xlsx', 'cost.pptx'].map(path => indexOriginalDocument(directory, path)));
     expect(indexes[0]!.units.length).toBeGreaterThan(200);
@@ -66,9 +69,12 @@ test('G5 actual PDF pages, DOCX headings and XLSX cells enter frozen research; c
     expect(result.details.sourceRead).toMatchObject({ path: indexes[1]!.textPath, startLine: 2, endLine: 2 });
     const nav = await indexTool!.execute('nav', { path: 'cost.xlsx', query: 'B2' }, undefined, undefined, {} as any);
     expect(nav.details.sourceRead).toBeUndefined();
-    const config = ResearchConfigSchema.parse({ line: { id: 'main', question: '核对成本' }, dimensions: [{ id: 'cost', requirement: '实际原文' }], sources: [{ id: 'pdf', path: 'cost.pdf' }, { id: 'sheet', path: 'cost.xlsx' }] });
+    const config = nativeConfig;
     const frozen = freezeResearchSources(directory, 'task', 'run', config, directory);
     expect(frozen.every(source => !source.unavailableReason)).toBe(true);
+    expect(frozen.map(source => source.version)).toEqual(indexes.slice(1).map(snapshot => snapshot.version));
+    expect(frozen.map(source => source.indexedPath)).toEqual(indexes.slice(1).map(snapshot => snapshot.textPath));
+    expect(readResearchSources(directory, 'task', 'before-index')).toEqual(unindexed); // a late index never repairs frozen history
     expect(frozen[0]!.units![1]!.kind).toBe('page');
     expect(readResearchSources(directory, 'task', 'run')[0]!.text).toContain('1000000');
     const snapshotConfig = ResearchConfigSchema.parse({ ...config, sources: indexes.map((snapshot, index) => ({ id: `indexed-${index}`, path: snapshot.textPath })) });
