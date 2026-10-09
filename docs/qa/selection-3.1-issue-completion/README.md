@@ -20,11 +20,19 @@
 
 ## 验证范围与执行
 
+- 后续按 [#474 收尾执行单](https://github.com/0-CHENAI/Selection/issues/474) 推进，已原生关联为 #466 子 Issue：固定框架 → 首个阻断 → 定向普通包验证 → G7 / 同条件对照 → 远端交付。完全接管旧 test 样本 `261009-fair-sapphire` 复现隔离 worker 原生入口拒绝已提供的 PDF / DOCX / XLSX / PPTX；用户要求等待后先暂停调度、再停放运行。归档为 stopped，720391 ms、97 次工具、3 个 worker、47 条事件，不能作为未经干预的对照或产品自发失败。
+
+- #474 的定向修复沿用宿主已校验并持久化的 `isolatedWorkspace.sourceRoot`，仅提供给文档索引与读取；worker 的 cwd / Shell / Write 保持隔离。当前相关 3 文件 **9 项测试 / 85 assertions**、全工作区类型检查、修改文件 lint 和普通 Electron 构建通过；测试同时覆盖四种原生位置、worker 自有文档、无来源绑定、目录越界、符号链接逃逸、原件变化与既有写入隔离。普通包根 `261010-neat-elk` completed，331602 ms、28 次工具、2 个 worker、14 条事件。隔离检查 worker `261010-swift-meadow` 的四次 document_index 和四次 document_read 全部成功：PDF 第 17 页、DOCX 段落 204、XLSX Costs!B2、PPTX 幻灯片 2；来源 manifest 的 originalHash 与冻结原件一致，返回文字与 snapshot 的实际范围一致。另一独立上下文核对报告与回执范围完整性；它没有重新核验原件语义，后者仍由 G7 验证。六份输入 hash 前后不变，0 人工改图 / 输出 / 判定。见 [worker-documents-pro.json](worker-documents-pro.json)。
+
+- 用户明确保留虚线气泡图标，本轮只恢复并对齐折叠图标列。普通包 13 重开上述已完成会话确认图标与轻量文字出现，中间内容没有 Copy / Markdown / 分支操作；最终回答仍有正常操作。[实际界面](pro-progress-icon.png)。相关 36 tests / 360 assertions、全工作区类型检查、修改文件 lint、普通构建与目录包装通过。此前无图标的截图保留为历史，不能作为当前样式。
+
+- G7 三方案例使用各自目录中的六份等字节原件，避免之前交付的报告被下一例当作输入。记录原始 promptHash 与仅归一化材料目录的 normalizedPromptHash；模型、目标和完全接管权限一致。这个固定案例核对正确性与实际调用，不据此推断普遍性能优势。
+
 - 折叠工作区简介跳过尚未开始的下游节点，继续按时间取最后一项实际活动。相关 20 项测试 / 268 assertions、全工作区类型检查、修改文件 lint 与普通 Electron 构建通过。原生实时确认随本轮完全接管联验完成。
 
 - 按用户最新要求，受控验收从新建时使用 `PRO / allow-all`，对应 UI 的“完全接管”；NORM 仅保留为同权限对照。六份冻结原文件在开始前及结束后分别计算 hash。此前 `261009-grand-delta` 只读样本被关闭隔离回放窗口时误退出宿主打断，终态 stopped，1313717 ms、153 次工具、8 个 worker，不计为成功、性能对照或后端自发中断。
 
-- 异步启动的真实回执是 `waiting-coordinator`，原有 UI 仅识别 `running` 导致启动说明误用最终回答卡片。补齐活动状态识别，沿用轻量文字样式、去除虚线气泡与 Copy / Markdown / 分支操作栏。使用普通 arm64 包回放 `261009-grand-delta` 的原始聊天记录，未复制运行任务、未发送模型请求；此 UI 回放不计为模型联合验收。[中间进展截图](pro-interim-progress.png)。相关 20 项测试 / 265 assertions 通过，同时覆盖最终回答、失败/暂停与计划卡片保持原操作。
+- 异步启动的真实回执是 `waiting-coordinator`，原有 UI 仅识别 `running` 导致启动说明误用最终回答卡片。补齐活动状态识别，沿用轻量文字样式、去除 Copy / Markdown / 分支操作栏。此前误移除了虚线气泡图标，现已按用户要求恢复并调整位置。使用普通 arm64 包回放 `261009-grand-delta` 的原始聊天记录，未复制运行任务、未发送模型请求；此 UI 回放不计为模型联合验收。[早期中间进展截图](pro-interim-progress.png)。相关 20 项测试 / 265 assertions 通过，同时覆盖最终回答、失败/暂停与计划卡片保持原操作。
 
 - Git 跟踪的 730 个源码测试入口已执行。首轮在外部 GitHub MCP OAuth 5 秒网络超时停止：已跑 509 个入口，4505 pass / 1 fail；该文件单独复跑通过，再补完其余 221 入口（3284 pass / 0 fail）。不是一次干净的全套运行，不将重复发现的测试双算。
 - 本次提交前对改动及相邻入口执行 207 tests / 1148 assertions，全部通过。模式门禁、创建广播、TaskRunner 活动租约、原失败节点恢复与 SDK 交付保护均有相邻回归。
@@ -32,4 +40,4 @@
 - 普通 arm64 目录包装使用本地 ad-hoc 签名。首次自动选择 `Lin` 身份在 codesign 失败；重新关闭身份自动发现后打包成功。未声称正式证书签名或公证发布。
 - 原生 PRO 时间线截图仅证明所示视口，不能代替所有后端路径的验收。
 
-复跑：`bun scripts/selection-pro-joint-package-acceptance.ts <隔离配置目录> <label> <PRO|NORM> <冻结资料目录> [既有根ID]`；既有 ID 只观察不重发目标。连接配置只在本机读取，不归档 token/API key。
+复跑：`bun scripts/selection-pro-joint-package-acceptance.ts <隔离配置目录> <label> <PRO|NORM> <冻结资料目录> [既有根ID|-] [定向目标文件]`；既有 ID 只观察不重发目标。连接配置只在本机读取，不归档 token/API key。

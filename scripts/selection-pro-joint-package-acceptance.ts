@@ -8,8 +8,9 @@ import { WsRpcClient } from '@craft-agent/server-core/transport'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { readRunLog } from '@craft-agent/shared/tasks'
 
-const [directory, label, workMode, materials, existingId] = process.argv.slice(2)
-assert(directory && label && ['PRO', 'NORM'].includes(workMode!) && materials, 'Usage: <config> <label> <PRO|NORM> <materials> [existing-session]')
+const [directory, label, workMode, materials, existingSession, promptPath] = process.argv.slice(2)
+const existingId = existingSession === '-' ? undefined : existingSession
+assert(directory && label && ['PRO', 'NORM'].includes(workMode!) && materials, 'Usage: <config> <label> <PRO|NORM> <materials> [existing-session|-] [prompt-file]')
 const config = JSON.parse(readFileSync(join(directory, 'config.json'), 'utf8'))
 const workspace = config.workspaces[0], connection = config.llmConnections.find((item: { slug: string }) => item.slug === 'pi-api-key-2')
 assert.equal(connection.defaultModel, 'gpt-6-luna')
@@ -31,7 +32,7 @@ try {
   assert.equal(root.permissionMode, permissionMode)
   const began = existingId ? root.createdAt : Date.now()
   console.log(JSON.stringify({ label, rootId: root.id, workMode, permissionMode }))
-  if (!existingId) await client.invoke(RPC_CHANNELS.sessions.SEND_MESSAGE, root.id,
+  if (!existingId) await client.invoke(RPC_CHANNELS.sessions.SEND_MESSAGE, root.id, promptPath ? readFileSync(promptPath, 'utf8') :
     `请调研并完整交付本地冻结测试资料中的两年成本与风险报告。目录 ${JSON.stringify(resolve(materials))} 中 costs.txt 是测试资料，draft.txt 是需要证伪和更正的既存初稿；cost.pdf、cost.docx、cost.xlsx、cost.pptx 是相同成本事实的原生长材料，需先索引定位再读取原文核对。不得修改原文件，任何金额都仅限 TEST FIXTURE ONLY。
 在完全接管授权内持续完成，同时遵守不修改上述测试原文件的约束；若本模式支持任务编排，建立并执行计划，由独立上下文审查关键引用、原文读取、金额勘误及最终报告；并行读取独立材料。记录初稿错误的版本、精确勘误及修正版的独立复核，不覆盖旧记录。为重要结论记录可证伪条件与前提，检查将两年总额作为单年成本这一替代前提是否成立并说明采用与否，按局部阶段门决定是否交付。B 的成本口径待核对、风险缺口不得推测补齐；如节点需要决策，应向当前父节点求助并在原上下文继续，回复不扩大权限。遇到不可验证内容应注明限制而不是反复重试。最后给出简体中文报告与来源，区分确认事实、不同前提和未知项；如本模式无法独立复核，直接说明这一限制。开始前简述计划，然后持续执行到交付，不需要再次确认。`)
   let session, result, blocked = false
@@ -62,10 +63,13 @@ try {
   const transcripts = [session, ...await Promise.all(children.map((child: { id: string }) => client.invoke(RPC_CHANNELS.sessions.GET_MESSAGES, child.id)))]
   const calls = transcripts.flatMap(item => item.messages.filter((message: { role: string }) => message.role === 'tool'))
   const events = result?.runId ? readRunLog(workspace.rootPath, session.taskSlug, result.runId) : []
-  const promptHash = digest(session.messages.find((message: { role: string }) => message.role === 'user')?.content ?? '')
+  const prompt = session.messages.find((message: { role: string }) => message.role === 'user')?.content ?? ''
+  const promptHash = digest(prompt)
+  // Each case uses byte-identical originals in its own directory so earlier outputs cannot become later inputs.
+  const normalizedPromptHash = digest(prompt.replaceAll(resolve(materials), '<frozen-materials>'))
   const inputHashes = hashInputs()
   const record = { label, rootId: root.id, model: connection.defaultModel, requestedPermissionMode: permissionMode, permissionMode: session.permissionMode, workMode: session.workMode, status: blocked ? 'blocked-awaiting-help' : result?.runStatus ?? (session.messages.some((message: { role: string }) => message.role === 'error') ? 'failed' : 'completed'),
-    promptHash, inputHashesBefore, inputHashes, elapsedMs: Date.now() - began, toolCalls: calls.length, workers: children.length, manualPlanEdits: 0, manualOutputs: 0, result, events,
+    promptHash, normalizedPromptHash, inputHashesBefore, inputHashes, elapsedMs: Date.now() - began, toolCalls: calls.length, workers: children.length, manualPlanEdits: 0, manualOutputs: 0, result, events,
     finalText: session.messages.findLast((message: { role: string; answerCommitted?: boolean }) => message.role === 'assistant' && message.answerCommitted)?.content ?? '',
     calls: calls.map((message: { toolName: string; toolUseId: string; toolStatus: string }) => ({ name: message.toolName, id: message.toolUseId, status: message.toolStatus })),
   }
