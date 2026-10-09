@@ -3,7 +3,7 @@ import type { CoordinatorGateReason } from './metrics.ts';
 
 export const COORDINATOR_TIMEOUT_BLOCKER = 'coordinator-timeout';
 
-export type OrchestrationDecisionAction = 'continue' | 'patch' | 'pause';
+export type OrchestrationDecisionAction = 'continue' | 'patch' | 'pause' | 'retry';
 
 export interface OrchestrationDecision {
   runId: string;
@@ -63,8 +63,8 @@ export function validateOrchestrationDecision(
   if (decision.runId !== ctx.runId) return { ok: false, error: 'runId does not match' };
   if (!decision.checkpointId?.trim()) return { ok: false, error: 'checkpointId is required' };
   if (!decision.decisionId?.trim()) return { ok: false, error: 'decisionId is required' };
-  if (decision.action !== 'continue' && decision.action !== 'patch' && decision.action !== 'pause') {
-    return { ok: false, error: 'action must be continue, patch, or pause' };
+  if (!['continue', 'patch', 'pause', 'retry'].includes(decision.action)) {
+    return { ok: false, error: 'action must be continue, patch, pause, or retry' };
   }
   if (!ctx.gate) return { ok: false, error: 'run is not waiting for a coordinator decision' };
   if (decision.checkpointId !== ctx.gate.checkpointId) return { ok: false, error: 'checkpointId does not match' };
@@ -77,6 +77,12 @@ export function validateOrchestrationDecision(
   const consumed = decision.consumedResults ?? ctx.gate.resultEventIds ?? [];
   if (consumed.some(id => !ctx.pendingResultIds?.has(id)) || new Set(consumed).size !== consumed.length) return { ok: false, error: 'Unknown, duplicate or already consumed result event' };
   if (decision.plannerPhase !== undefined && !['active', 'draining'].includes(decision.plannerPhase)) return { ok: false, error: 'Invalid planner phase' };
+
+  if (decision.action === 'retry') {
+    if (!decision.rationale?.trim()) return { ok: false, error: 'retry requires a rationale' };
+    if (!patchCtx || !Object.values(patchCtx.nodeStates).some(state => state === 'failed' || state === 'invalid')) return { ok: false, error: 'No failed execution nodes to retry' };
+    if (decision.add || decision.update || decision.cancel || decision.constraints || decision.decisions || decision.researchExpansion) return { ok: false, error: 'Retry resets failed nodes; patch their pending definitions at the next checkpoint' };
+  }
 
   if (decision.action !== 'patch') {
     return { ok: true, action: decision.action };

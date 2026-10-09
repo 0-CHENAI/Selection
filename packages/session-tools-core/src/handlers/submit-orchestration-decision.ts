@@ -12,8 +12,8 @@ export async function handleSubmitOrchestrationDecision(
   if (!args.runId?.trim() || !args.checkpointId?.trim() || !args.decisionId?.trim() || args.baseRevision == null) {
     return errorResponse('runId, checkpointId, decisionId, and baseRevision are required.');
   }
-  if (args.action !== 'continue' && args.action !== 'patch' && args.action !== 'pause') {
-    return errorResponse('action must be continue, patch, or pause.');
+  if (!['continue', 'patch', 'pause', 'retry'].includes(args.action)) {
+    return errorResponse('action must be continue, patch, pause, or retry.');
   }
   try {
     const result = await ctx.submitOrchestrationDecision(args);

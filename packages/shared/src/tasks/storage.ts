@@ -170,7 +170,7 @@ type RunLogPayload =
       kind: 'coordinator-decision';
       checkpointId: string;
       decisionId: string;
-      action: 'continue' | 'patch' | 'pause';
+      action: 'continue' | 'patch' | 'pause' | 'retry';
       baseRevision: number;
       consumedResults?: string[];
       plannerPhase?: PlannerPhase;

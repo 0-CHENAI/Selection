@@ -354,16 +354,16 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   checkpointId: z.string().describe('Checkpoint this decision answers'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this decision is based on'),
-  action: z.enum(['continue', 'patch', 'pause']).describe('continue the graph, patch pending nodes, or pause for review'),
-  rationale: z.string().optional().describe('Required when action is patch'),
+  action: z.enum(['continue', 'patch', 'pause', 'retry']).describe('continue the graph, patch pending nodes, pause for review, or retry failed/invalid nodes and affected dependents after workers settle; unrelated successful work is preserved'),
+  rationale: z.string().optional().describe('Required when action is patch or retry'),
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
   constraints: z.array(z.string().min(1)).optional().describe('Updated constraints; locked constraints cannot change'),
   decisions: z.array(z.string().min(1)).optional().describe('Updated decisions; locked decisions cannot change'),
 }).superRefine((value, ctx) => {
-  if (value.action === 'patch' && !value.rationale?.trim()) {
-    ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });
+  if (['patch', 'retry'].includes(value.action) && !value.rationale?.trim()) {
+    ctx.addIssue({ code: 'custom', path: ['rationale'], message: `${value.action} requires a rationale` });
   }
 });
 

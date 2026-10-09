@@ -611,7 +611,7 @@ export interface OrchestrationDecisionInput {
   checkpointId: string;
   decisionId: string;
   baseRevision: number;
-  action: 'continue' | 'patch' | 'pause';
+  action: 'continue' | 'patch' | 'pause' | 'retry';
   rationale?: string;
   add?: unknown[];
   update?: unknown[];

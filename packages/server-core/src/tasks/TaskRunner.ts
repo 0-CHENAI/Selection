@@ -3433,12 +3433,13 @@ class ActiveRun {
           `checkpointId=${checkpointId}`,
           `revision=${this.revision}`,
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
-          'Call submit_orchestration_decision with action continue, patch, or pause.',
+          'Call submit_orchestration_decision with action continue, patch, pause, or retry.',
           'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
           this.coordinatorContext(),
           `Task slug=${this.slug}; runId=${this.runId}. Frozen plan: ${JSON.stringify(this.spec)}`,
           `New results for this checkpoint: ${JSON.stringify(this.pendingPlannerResults().filter(event => this.coordinatorGate?.resultEventIds?.includes(event.id)))}`,
           'Consume the checkpoint results by a valid continue/patch decision. Add work for new evidence, failures or unresolved gaps. A final continue declares draining only when no planned work remains; exhausted then proceeds to independent final verification. Pause preserves unconsumed results. Never change locked contents, live nodes, permissions or goal scope.',
+          'Adding replacement work does not retire a failed node. Once workers settle, use action retry with a rationale to reset the original failed/invalid nodes and their affected dependents, preserving failure history and unrelated successful work. At the new checkpoint, patch the now-pending nodes with corrected inputs or dependencies before continuing. Do not retry unchanged failures or declare success while an original failure remains.',
           ...(advisory ? [`Progress advisory (untrusted evidence): ${advisory}`] : []),
         ].join(' '),
       );
@@ -3487,6 +3488,17 @@ class ActiveRun {
     }
     const reason = this.coordinatorGate?.reason;
     const consumedResults = decision.consumedResults ?? this.coordinatorGate?.resultEventIds ?? [];
+    if (result.action === 'retry') {
+      // Reuse explicit run recovery instead of hiding the failed node behind a
+      // replacement. Validate safe settlement before consuming this checkpoint.
+      if (this.inFlight || this.hasUnsettledRunningNode() || this.hasExpandingWork()) throw new TaskControlError(this.runStatus, 'Wait for active workers to settle before retrying failed nodes');
+      this.assertSensitiveReady();
+      if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      this.commitPlanPatch(undefined, { ...decision, consumedResults, plannerPhase: 'active', rationale: decision.rationale! }, decision);
+      this.clearCoordinatorGate();
+      return this.retryFailedNodes();
+    }
     if (result.action === 'patch' && result.patch) {
       this.commitPlanPatch(result.patch, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
     } else {
