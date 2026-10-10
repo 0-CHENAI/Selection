@@ -1,12 +1,16 @@
-import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import { afterEach, beforeEach, expect, it, spyOn } from 'bun:test';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseTaskSpec, saveTaskSpec, readRunState, readRunLog, appendRunLog, writeRunState, loadTaskResults, runDir, type OrchestrationDecision } from '@craft-agent/shared/tasks';
+import { parseTaskSpec, saveTaskSpec, readRunState, readRunLog, appendRunLog, writeRunState, loadTaskResults, loadTaskDocument, runDir, type OrchestrationDecision } from '@craft-agent/shared/tasks';
 import { TaskRunner, type ConductorSessionHost } from './TaskRunner';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import { handleSubmitOrchestrationDecision } from '../../../session-tools-core/src/handlers/submit-orchestration-decision';
 import type { SessionToolContext } from '../../../session-tools-core/src/context';
+import { SessionManager, createManagedSession } from '../sessions/SessionManager';
+import { prepareIsolatedWorkspace } from '../reliability/isolated-workspace';
+import { saveSourceSnapshot, readSourceSnapshot } from '@craft-agent/shared/source-snapshot';
+import * as config from '@craft-agent/shared/config';
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 let root: string, runner: TaskRunner, host: ReturnType<typeof makeHost>;
@@ -36,6 +40,112 @@ function decide(extra: Partial<OrchestrationDecision> = {}) {
   return runner.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId, baseRevision: state.revision, decisionId: `decision-${state.seq}`, action: 'continue', ...extra });
 }
 async function start() { runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); decide(); await tick(); }
+
+it('minimal automatic DAG joins two workers, delivers only the real report, and requires final acceptance', async () => {
+  const plan = loadTaskDocument(root, 'dynamic')!.spec!;
+  saveTaskSpec(root, { ...plan, execution: { coordinator_gate: { mode: 'adaptive' }, artifact_delivery: 1 },
+    defaults: { permissionMode: 'allow-all' }, nodes: plan.nodes.map(node => node.id === 'c' ? { ...node, kind: 'verify' } : node) });
+  const workspace = { id: 'ws', name: 'Minimal', rootPath: root };
+  const source = join(root, 'project'); mkdirSync(source);
+  const manager = new SessionManager(), sessions = new Map<string, ReturnType<typeof createManagedSession>>();
+  const deliveries = new Map<string, Promise<Record<string, unknown>>>();
+  const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never);
+  const create = host.createSession.bind(host);
+  host.createSession = async (ws, options) => {
+    const result = await create(ws, options);
+    const managed = createManagedSession({ id: result.id, permissionMode: 'allow-all' }, workspace as never, { messagesLoaded: true });
+    managed.isolatedWorkspace = prepareIsolatedWorkspace(source, join(root, 'isolated'), []);
+    sessions.set(result.id, managed); (manager as any).sessions.set(result.id, managed);
+    return result;
+  };
+  runner = new TaskRunner({ host: { ...host,
+    async prepareTaskWorkspace(id) { return { directory: sessions.get(id)!.isolatedWorkspace!.directory }; },
+    finalizeTaskWorkspace(id, outputs, ensureCurrent, verifyInputs) {
+      const delivery = manager.finalizeTaskWorkspace(id, outputs, ensureCurrent, verifyInputs);
+      deliveries.set(id, delivery);
+      return delivery;
+    },
+  }, workspaceId: 'ws', workspaceRoot: root });
+  // Integration is real filesystem work. Wait for completion events, not model time or a long fixture.
+  const settled = async (id: string) => {
+    expect(deliveries.has(`session-${id}`)).toBe(true);
+    await deliveries.get(`session-${id}`)!;
+    await tick();
+    expect(runner.getRunState('dynamic', 'r')!.nodes.find(node => node.id === id)!.state).toBe('done');
+  };
+  try {
+    runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); await tick();
+    expect(host.created).toEqual(['session-a', 'session-b']); expect(host.sent.some(item => item.id === 'orch')).toBe(false);
+    const a = sessions.get('session-a')!.isolatedWorkspace!;
+    const snapshot = saveSourceSnapshot(a.directory, Buffer.from('<p>Evidence</p>'), 'https://example.com', 'text/html',
+      [{ id: 'content', label: 'Evidence', kind: 'section', text: 'Evidence' }], []);
+    host.complete('a', 'A evidence'); await settled('a');
+    expect(runner.getRunState('dynamic', 'r')!.status).toBe('running');
+    expect(host.created).toHaveLength(2);
+    writeFileSync(join(sessions.get('session-b')!.isolatedWorkspace!.directory, 'report.md'), 'B report');
+    host.complete('b', 'B report'); await settled('b'); await tick();
+    expect(host.created).toEqual(['session-a', 'session-b', 'session-c']);
+    expect(host.sent.find(item => item.id === 'session-c')!.message).toContain('B report');
+    expect(readFileSync(join(source, 'report.md'), 'utf8')).toBe('B report');
+    expect(existsSync(join(source, '.selection-sources'))).toBe(false);
+    expect(readSourceSnapshot(join(a.directory, '.selection-sources', snapshot.version, 'index.json'), a.directory)).toEqual(snapshot);
+    expect(runner.submitNodeVerdict('session-c', { result: 'pass', reason: 'Both results checked', evidence: 'A evidence and B report' }).ok).toBe(true);
+    host.complete('c', 'Checked'); await settled('c');
+    const before = runner.getRunState('dynamic', 'r')!;
+    expect(before.coordinatorGate!.reason).toBe('before-verify');
+    expect(before.planner!.pendingResults).toHaveLength(3);
+    const receipt = decide(); expect(receipt.status).toBe('verifying');
+    runner.submitVerdict('orch', { runId: 'r', result: 'pass' });
+    expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
+    expect(readRunLog(root, 'dynamic', 'r').filter(event => event.kind === 'coordinator-request')).toHaveLength(1);
+    const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root });
+    recovered.scanUnfinished(); expect(recoveredHost.created).toEqual([]);
+  } finally { lookup.mockRestore(); manager.cleanup(); }
+});
+
+it('adaptive failure recovery preserves the successful branch and cannot bypass live-worker shutdown', async () => {
+  const plan = loadTaskDocument(root, 'dynamic')!.spec!;
+  saveTaskSpec(root, { ...plan, execution: { coordinator_gate: { mode: 'adaptive' } } });
+  let unsafe = true;
+  runner = new TaskRunner({ host: { ...host, assertTaskSafePoint() { if (unsafe) throw new Error('Execution has not confirmed shutdown'); } }, workspaceId: 'ws', workspaceRoot: root });
+  runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); await tick();
+  const binding = runner.reserveTaskWorker('orch', { runId: 'r', nodeId: 'a' }, 'bad-worker', 'worker');
+  runner.bindTaskWorker(binding, 'bad-worker', 'failed-session');
+  host.complete('a', 'primary response');
+  runner.completeTaskWorker('dynamic', 'r', 'bad-worker', 'failed-session', 'failed', undefined, 'source missing');
+  host.complete('b', 'successful B'); await tick();
+  expect(runner.getRunState('dynamic', 'r')!.coordinatorGate!.reason).toBe('node-failed');
+  expect(() => decide({ action: 'retry', rationale: 'Correct missing source' })).toThrow('shutdown');
+  unsafe = false; decide({ action: 'retry', rationale: 'Correct missing source' }); decide(); await tick();
+  expect(host.created.filter(id => id === 'session-b')).toHaveLength(1);
+  expect(runner.getRunState('dynamic', 'r')!.nodes.find(node => node.id === 'b')!.state).toBe('done');
+  host.complete('a', 'repaired A'); await tick();
+  expect(host.created.filter(id => id === 'session-c')).toHaveLength(1);
+  host.complete('c', 'report'); await tick(); decide();
+  runner.submitVerdict('orch', { runId: 'r', result: 'pass' });
+  expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
+});
+
+it('adaptive recovery retains completed branches and waits for explicit human resume', async () => {
+  const plan = loadTaskDocument(root, 'dynamic')!.spec!;
+  saveTaskSpec(root, { ...plan, execution: { coordinator_gate: { mode: 'adaptive' } } });
+  runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); await tick();
+  host.complete('a', 'A'); await tick(); runner.pause('dynamic', 'r');
+  host.complete('b', 'B'); await tick();
+  expect(runner.getRunState('dynamic', 'r')!.status).toBe('paused');
+  const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root });
+  recovered.scanUnfinished();
+  expect(recoveredHost.created).toEqual([]);
+  expect(recovered.getRunState('dynamic', 'r')!.planner!.pendingResults).toHaveLength(2);
+  recovered.resume('dynamic', 'r'); await tick();
+  expect(recoveredHost.created).toEqual(['session-c']);
+  recoveredHost.complete('c', 'report'); await tick();
+  const state = readRunState(root, 'dynamic', 'r')!;
+  recovered.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId,
+    decisionId: 'accept-recovered-results', baseRevision: state.revision, action: 'continue' });
+  recovered.submitVerdict('orch', { runId: 'r', result: 'pass' });
+  expect(recovered.getRunState('dynamic', 'r')!.status).toBe('completed');
+});
 
 it('returns an unapplied checkpoint conflict and starts the graph only after a fresh exact decision', async () => {
   runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-10-10T00:00:00.000Z' });

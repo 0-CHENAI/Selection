@@ -50,7 +50,7 @@ export const CACHE_MODES_V2 = ['pure', 'off'] as const;
 export const CACHE_MODES_V3 = ['none', 'run-pure', 'workspace-pure'] as const;
 export const CACHE_MODES = [...CACHE_MODES_V2, ...CACHE_MODES_V3] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
-export const COORDINATOR_GATE_MODES = ['required', 'off'] as const;
+export const COORDINATOR_GATE_MODES = ['required', 'adaptive', 'off'] as const;
 
 /** DAG worker concurrency defaults/caps for the technical preview. */
 export const DEFAULT_DAG_MAX_PARALLEL = 4;
@@ -221,6 +221,7 @@ export const TaskDefaultsSchema = z.object({
 
 export const CoordinatorGateSchema = z
   .object({
+    /** Adaptive advances known healthy dependencies; omitted policy keeps persisted plans on required review. */
     mode: z.enum(COORDINATOR_GATE_MODES).default('required'),
     timeout_seconds: z.literal(COORDINATOR_GATE_TIMEOUT_SECONDS).optional(),
   })

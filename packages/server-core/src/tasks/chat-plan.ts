@@ -40,6 +40,10 @@ export function buildChatPlan(input: CreateTaskInput, root: {
     ...candidate, id, goal: root.originalRequest ?? candidate.goal, schema_version: 3, runner: candidate.runner ?? 'orchestrate',
     ...(candidate.research ? { research: { ...candidate.research, assuranceVersion: 2, judgmentVersion: 1 } } : {}),
     project: root.projectId, cwd: root.workingDirectory,
+    execution: {
+      ...candidate.execution,
+      coordinator_gate: candidate.execution?.coordinator_gate ?? { mode: candidate.research ? 'required' : 'adaptive' },
+    },
     locked_fields: [...new Set([...(candidate.locked_fields ?? []), 'goal' as const, 'acceptance_criteria' as const])],
     sources: candidate.sources ?? root.enabledSourceSlugs,
     defaults: { ...candidate.defaults, model: root.model, llmConnection: root.llmConnection, permissionMode: candidate.defaults?.permissionMode ?? permission },
