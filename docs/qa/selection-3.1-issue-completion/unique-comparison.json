@@ -1,0 +1,196 @@
+{
+  "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+  "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+  "performanceComparisonValid": false,
+  "records": [
+    {
+      "label": "baseline",
+      "rootId": "261010-nimble-rainbow",
+      "taskSlug": "pro-508fb41d4b48b94731f0faf8",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "model": "gpt-6-luna",
+      "elapsedMs": 2241518,
+      "status": "stopped",
+      "inputHashBefore": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+      "manualPlanEdits": 0,
+      "manualOutputs": 0,
+      "manualVerdicts": 0,
+      "toolCalls": 115,
+      "workers": 12,
+      "checks": {
+        "inputUnchanged": true,
+        "modeAndPermission": true,
+        "correctCost": false,
+        "limitsDisclosed": false,
+        "completed": false,
+        "structuredResearch": true,
+        "exactErrataResolved": true,
+        "correctedIndependentSupport": true,
+        "originalReadsAndBundle": true,
+        "freshPremiseAndGate": true,
+        "noResearchBlockers": true
+      },
+      "finalText": "已启动现有 PRO 五步研究流程，并保留独立验收节点。只读取指定冻结原文；不联网、不修改原件、不新增结果文件。旧稿若被证伪，将作为预期查错结果登记，与流程节点是否完成分开判断。调度器将在检查点继续推进。",
+      "runId": "chat-a7335f6419f2d266d7afe2026b18008e1495a500c4b09da75dc738263996b345",
+      "nodes": [
+        {
+          "id": "draft",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-onyx-orchid"
+        },
+        {
+          "id": "error-check",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-broad-cedar"
+        },
+        {
+          "id": "correction",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-wide-elk"
+        },
+        {
+          "id": "independent-review",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-vital-trout"
+        },
+        {
+          "id": "report",
+          "state": "done",
+          "attempt": 4,
+          "sessionId": "261010-silver-topaz"
+        },
+        {
+          "id": "verify",
+          "state": "cancelled",
+          "attempt": 4,
+          "sessionId": "261010-alert-spruce"
+        }
+      ],
+      "conclusion": "not accepted as completed independent research",
+      "termination": "externally stopped; not a natural completion or backend failure result"
+    },
+    {
+      "label": "current",
+      "rootId": "261010-still-cobble",
+      "taskSlug": "pro-b37905fab32133bd3537d857",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "model": "gpt-6-luna",
+      "elapsedMs": 817000,
+      "status": "blocked-awaiting-help",
+      "inputHashBefore": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+      "manualPlanEdits": 0,
+      "manualOutputs": 0,
+      "manualVerdicts": 0,
+      "toolCalls": 69,
+      "workers": 5,
+      "checks": {
+        "inputUnchanged": true,
+        "modeAndPermission": true,
+        "correctCost": false,
+        "limitsDisclosed": false,
+        "completed": false,
+        "structuredResearch": true,
+        "exactErrataResolved": false,
+        "correctedIndependentSupport": false,
+        "originalReadsAndBundle": true,
+        "freshPremiseAndGate": false,
+        "noResearchBlockers": false
+      },
+      "finalText": "五阶段结构化研究计划已创建并启动，包含旧稿登记、独立查错、版本化勘误、新上下文独立复核和中文报告。当前调度器状态是**等待首轮编排检查点**；这只确认任务已启动，不代表各阶段或研究结论已经验收。调度器将继续推进并在检查点唤醒协调者。",
+      "runId": "chat-a893cddb9bab4ca8474cfae56e9104864137515b0c79aebafd5570539c269c1a",
+      "nodes": [
+        {
+          "id": "old-draft",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-rapid-seal"
+        },
+        {
+          "id": "check-old",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-ivory-fern"
+        },
+        {
+          "id": "correct-cost",
+          "state": "done",
+          "attempt": 1,
+          "sessionId": "261010-strong-geyser"
+        },
+        {
+          "id": "review-correction",
+          "state": "waiting-help",
+          "attempt": 1,
+          "sessionId": "261010-deft-glade"
+        },
+        {
+          "id": "report",
+          "state": "waiting-help",
+          "attempt": 1,
+          "sessionId": "261010-ready-tiger"
+        }
+      ],
+      "conclusion": "not accepted as completed independent research",
+      "recovery": {
+        "runStatus": "interrupted",
+        "coordinatorPrompts": [
+          {
+            "timestamp": 1791604774460,
+            "content": "继续原任务，不扩大范围。先读取当前规范 get_task_results，再处理仍等待的 task_help 请求。前置成果若已提交，按实际精确版本回答并恢复原 worker；不得伪造结果、改写原件或增加替代节点。完成既定独立复核和最终交付。"
+          },
+          {
+            "timestamp": 1791604863544,
+            "content": "继续原任务。宿主已经更新并重启，使用现有运行恢复入口处理丢失的等待上下文，只恢复中断的独立复核与报告；保留已完成的旧稿、查错和更正成果。先读取当前规范状态，继续原件复核和最终报告，不补造输出或判定，不扩展范围。"
+          }
+        ],
+        "hostRestarts": 1,
+        "manualPlanEdits": 0,
+        "manualOutputs": 0,
+        "manualVerdicts": 0,
+        "diagnosticCoordinatorCancelledAfterObservation": true,
+        "newIndependentReviewCompleted": false,
+        "reportCompleted": false
+      }
+    },
+    {
+      "label": "norm",
+      "rootId": "261010-prime-jasper",
+      "workMode": "NORM",
+      "permissionMode": "allow-all",
+      "model": "gpt-6-luna",
+      "elapsedMs": 24083,
+      "status": "no-run",
+      "inputHashBefore": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+      "manualPlanEdits": 0,
+      "manualOutputs": 0,
+      "manualVerdicts": 0,
+      "toolCalls": 3,
+      "workers": 0,
+      "checks": {
+        "inputUnchanged": true,
+        "modeAndPermission": true,
+        "originalRead": true,
+        "correctCost": true,
+        "limitsDisclosed": true,
+        "noDelegation": true,
+        "finalDelivery": true
+      },
+      "finalText": "## 核验报告\n\n**金额均为 TEST FIXTURE ONLY。**\n\n旧草稿将方案 A 两年总成本记为人民币 100,000 元（10 万元），原文记载则为人民币 1,000,000 元（100 万元）。因此，旧草稿金额有误；保留该旧结论作为待核实的历史记录，不将其当作当前结论。\n\n**勘误后的结论：**方案 A 两年总成本为人民币 1,000,000 元（100 万元）。本次只更正这一事实，不扩展或推演其他前提。\n\n方案 B 的成本口径仍待核对，暂不能与方案 A 直接比较。风险资料只表明存在未补齐的缺口，具体内容未知；目前不能据此判断风险性质或程度。若后续原文依据显示方案 A 金额或两年期间记录有误，应重新核验并修订。\n\n本次为单一上下文直接查阅原文，没有执行独立研究者、独立查错或独立 reviewer 复核；也没有建立结构化研究记录或阶段门，因此不能声称完成独立复核。本模式下按用户指定的直接交付路径完成。\n\n**唯一来源：**[input.txt](file:///tmp/selection-unique-norm-20261010/input.txt)",
+      "runId": null,
+      "nodes": [],
+      "conclusion": "direct delivery passed; no delegation"
+    }
+  ]
+}
