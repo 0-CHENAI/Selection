@@ -1,0 +1,3047 @@
+{
+  "label": "current",
+  "rootId": "261010-deft-ripple",
+  "taskSlug": "pro-410e73252dbc5676137c56ab",
+  "workMode": "PRO",
+  "permissionMode": "allow-all",
+  "model": "gpt-6-luna",
+  "elapsedMs": 654635,
+  "status": "completed",
+  "inputHashBefore": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+  "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+  "prompt": "这是最小成本研究验收，唯一输入是 /tmp/selection-unique-fixed-20261010/input.txt。不得修改原件、不联网、不增加资料或结果文件；所有金额仅为 TEST FIXTURE ONLY。读取并保留旧草稿金额为待核实的历史结论，独立查阅原文发现错误，精确更正该结论版本，新的独立上下文复核修订版，最后交付简明中文报告与来源；保留 B 口径和风险未知边界。若本模式允许编排与结构化研究，使用现有 PRO 和内置 deep-research 契约，采用旧草稿、独立查错、纠正、新的独立复核、报告这五个必要步骤；研究者和两次 reviewer 都必须亲自 Read 冻结原文的相关行。将错误结论、精确版本勘误、修订版、独立审查、证伪条件、当前前提批判、来源包、局部阶段门和报告登记到现有研究记录，不用普通文本假冒结构化提交。原文证伪旧草稿是预期检查结果，区分节点完成与结论支持状态。只修事实不扩展前提分支，保留旧记录。若本模式不允许编排，则直接读取并交付同一问题的报告，明确独立上下文核验的限制，不尝试调用子代理。开始后持续推进至最终交付，无需再次确认；完全接管已授权。",
+  "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+  "manualPlanEdits": 0,
+  "manualOutputs": 0,
+  "manualVerdicts": 0,
+  "result": {
+    "help": [],
+    "taskId": "pro-410e73252dbc5676137c56ab",
+    "orchestratorSessionId": "261010-deft-ripple",
+    "slug": "pro-410e73252dbc5676137c56ab",
+    "research": {
+      "assuranceVersion": 2,
+      "line": {
+        "id": "main",
+        "question": "在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？",
+        "premises": [
+          "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+          "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+          "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+          "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+          "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+        ]
+      },
+      "lines": [
+        {
+          "id": "main",
+          "question": "在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？",
+          "premises": [
+            "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+            "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+            "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+            "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+            "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+          ],
+          "claimRefs": [
+            {
+              "id": "a-cost",
+              "version": 2
+            },
+            {
+              "id": "basis-b",
+              "version": 1
+            },
+            {
+              "id": "risk-boundary",
+              "version": 1
+            },
+            {
+              "id": "fixture-status",
+              "version": 1
+            }
+          ],
+          "issueIds": [
+            "a-cost-amount-error"
+          ],
+          "taskRefs": [
+            "record-draft",
+            "check-draft",
+            "correct-claim",
+            "review-revision",
+            "deliver-report"
+          ],
+          "sourceIds": [
+            "fixture-source"
+          ]
+        }
+      ],
+      "questions": [],
+      "relations": [],
+      "sources": [
+        {
+          "id": "fixture-source",
+          "ref": "指定唯一输入文件；行号以本次运行冻结的文本快照为准",
+          "version": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "hash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "acquiredAt": "2026-10-10T04:23:47.182Z",
+          "originalPath": "/private/tmp/selection-unique-fixed-20261010/input.txt",
+          "snapshotPath": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "text": "TEST FIXTURE ONLY\n原文：方案 A 两年总成本为人民币 1,000,000 元（100 万元）。\n旧草稿：方案 A 两年总成本为人民币 100,000 元（10 万元），尚未核实。\n方案 B 成本口径待核对，暂不能与方案 A 直接比较。\n风险资料仅说明存在未补齐的缺口，具体内容未知。\n"
+        }
+      ],
+      "records": [
+        {
+          "role": "researcher",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "record-draft",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "b42e31fabf6974f31704a309a3c24962717cc97e66c1c0e7a9248d9bc7be4c8a",
+            "sessionId": "261010-still-waterfall"
+          },
+          "payload": {
+            "evidence": [
+              {
+                "id": "draft-record-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 3,
+                  "endLine": 3
+                },
+                "excerpt": "旧草稿：方案 A 两年总成本为人民币 100,000 元（10 万元），尚未核实。"
+              },
+              {
+                "id": "fixture-marker-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 1,
+                  "endLine": 1
+                },
+                "excerpt": "TEST FIXTURE ONLY"
+              }
+            ],
+            "claims": [
+              {
+                "id": "a-cost",
+                "version": 1,
+                "type": "fact",
+                "text": "旧草稿声称方案 A 两年总成本为人民币 100,000 元（10 万元）；这是 TEST FIXTURE ONLY 的待核实历史结论，不代表已证实成本。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "amount-a"
+                ],
+                "evidenceIds": [
+                  "draft-record-e1",
+                  "fixture-marker-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": true,
+                "conditions": [
+                  "仅记录旧草稿对方案 A 两年总成本的历史声称；金额为 TEST FIXTURE ONLY。",
+                  "该版本保持待核实，不应作为经原文支持的金额结论。"
+                ],
+                "falsificationConditions": [
+                  "亲自核读本次冻结文本快照第 3 行，若其实际不包含旧草稿声称人民币 100,000 元（10 万元）的文字，或明确记载为其他金额，则此关于旧草稿记载内容的主张应被推翻。"
+                ]
+              }
+            ],
+            "reviews": [],
+            "issues": []
+          }
+        },
+        {
+          "role": "reviewer",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "check-draft",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "3e12a4c9eee4afe8f169f61c1c93ae81911f17167d2637a614b5f9d0b1b9ceb3",
+            "sessionId": "261010-nimble-basalt"
+          },
+          "payload": {
+            "evidence": [],
+            "claims": [],
+            "reviews": [
+              {
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "contradicted",
+                "finding": "冻结原文第3行确实记载旧草稿提出人民币100,000元（10万元），但同一原文第2行明确写明方案A两年总成本为人民币1,000,000元（100万元），故100,000元不能作为实际成本结论，旧金额被原文反证。分开判断：旧草稿曾写下该金额这一历史记录有第3行支持；该金额作为方案A两年总成本则被第2行反驳。第3行还明确标注尚未核实。",
+                "limitations": [
+                  "定位存在且第3行语义仅证明旧草稿记录了该数额及其未核实状态，不证明该数额正确。",
+                  "所有金额仅为 TEST FIXTURE ONLY。",
+                  "原文第4行说明B口径待核对、暂不能与A直接比较；第5行只说明风险资料有未补齐缺口，具体内容未知。"
+                ]
+              }
+            ],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "旧稿100,000元作为方案A两年总成本被冻结原文第2行1,000,000元明确反证；第3行仅支持其为尚未核实的历史草稿记录。",
+                "disposition": "followup-task",
+                "reason": "需要在不改动研究前提的情况下，依原文第2行精确更正为新的 claim version，并以不可变 erratum 保留勘误及旧版本历史。",
+                "followupTaskRef": "correct-claim"
+              }
+            ],
+            "premiseReviews": [
+              {
+                "id": "premise-main-a-cost-v1-review",
+                "lineId": "main",
+                "premises": [
+                  "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                  "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                  "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                  "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                ],
+                "claimRefs": [
+                  {
+                    "id": "a-cost",
+                    "version": 1
+                  }
+                ],
+                "classification": "fact-error",
+                "finding": "维持原研究问题与范围，不提出 alternative premise 或新分支；a-cost@1 中的100,000元作为成本事实错误。第2行的1,000,000元反证旧数额，第3行只将100,000元记为尚未核实的旧稿。原主张的可证伪条件仅能核验“旧稿是否写了100,000元”这一历史记录；它不能证伪或确认该金额是否为实际成本。对成本金额的语义核验应以第2行原文为准。",
+                "changeEvidence": [
+                  "冻结原文第2行：方案A两年总成本为人民币1,000,000元（100万元）。",
+                  "冻结原文第3行：旧草稿写人民币100,000元（10万元），并注明尚未核实。",
+                  "若经认证的同一原文快照修订改变第2行金额或两年范围，需重新审查金额结论；本节点没有提出更改冻结来源或研究前提。"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "role": "researcher",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "payload": {
+            "evidence": [
+              {
+                "id": "a-cost-v2-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 2,
+                  "endLine": 2
+                },
+                "excerpt": "原文：方案 A 两年总成本为人民币 1,000,000 元（100 万元）。"
+              },
+              {
+                "id": "basis-b-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 4,
+                  "endLine": 4
+                },
+                "excerpt": "方案 B 成本口径待核对，暂不能与方案 A 直接比较。"
+              },
+              {
+                "id": "risk-boundary-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 5,
+                  "endLine": 5
+                },
+                "excerpt": "风险资料仅说明存在未补齐的缺口，具体内容未知。"
+              },
+              {
+                "id": "fixture-status-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 1,
+                  "endLine": 1
+                },
+                "excerpt": "TEST FIXTURE ONLY"
+              }
+            ],
+            "claims": [
+              {
+                "id": "a-cost",
+                "version": 2,
+                "type": "fact",
+                "text": "在本研究唯一冻结测试原文中，方案 A 两年总成本为人民币 1,000,000 元（100 万元）；此金额仅为 TEST FIXTURE ONLY。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "amount-a"
+                ],
+                "evidenceIds": [
+                  "a-cost-v2-e1",
+                  "fixture-status-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": true,
+                "conditions": [
+                  "仅陈述原文所载方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "所有金额仅为 TEST FIXTURE ONLY。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文快照修订了第2行，且该行不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），则此金额主张应重新核验并可能被推翻。"
+                ]
+              },
+              {
+                "id": "basis-b",
+                "version": 1,
+                "type": "fact",
+                "text": "本运行冻结原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本研究不推定 B 的金额或可比性。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "basis-b"
+                ],
+                "evidenceIds": [
+                  "basis-b-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "仅报告冻结原文对 B 口径与比较限制的表述，不补造口径、金额或比较结论。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第4行，使其不再称 B 成本口径待核对或明确允许与 A 直接比较，则本主张应重新核验并相应修正。"
+                ]
+              },
+              {
+                "id": "risk-boundary",
+                "version": 1,
+                "type": "fact",
+                "text": "本运行冻结原文仅说明风险资料存在未补齐的缺口，并明确具体内容未知；不能据此断言任何具体风险。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "risk-boundary"
+                ],
+                "evidenceIds": [
+                  "risk-boundary-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "只保留原文明确的风险资料边界；不推断或补造具体风险内容。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第5行并列明具体风险内容，或不再记载存在未补齐缺口，则当前风险边界主张应重新核验并修正。"
+                ]
+              },
+              {
+                "id": "fixture-status",
+                "version": 1,
+                "type": "fact",
+                "text": "冻结原文标注“TEST FIXTURE ONLY”；本研究中的金额仅按测试夹具处理，不代表现实报价、市场判断或建议。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "fixture-status"
+                ],
+                "evidenceIds": [
+                  "fixture-status-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "仅适用于本次唯一冻结测试原文及其金额；不得外推为真实价格或建议。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第1行并移除“TEST FIXTURE ONLY”标记，或明确说明该标记不适用于本研究引用的金额，则该测试夹具状态主张应重新核验。"
+                ]
+              }
+            ],
+            "reviews": [],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "冻结原文第2行记载人民币1,000,000元（100万元），证伪旧版100,000元作为方案A两年总成本的结论；第3行仅证明100,000元曾出现在尚未核实的旧稿中。已在同一研究前提下提交a-cost v2精确更正。",
+                "disposition": "correct",
+                "reason": "按既有纠错任务correct-claim在原研究线更正金额，保留a-cost v1作为历史版本；修订金额须由后续独立reviewer重新审查。",
+                "revisedClaimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "followupTaskRef": "correct-claim"
+              }
+            ],
+            "errata": [
+              {
+                "id": "erratum-a-cost-v1-to-v2",
+                "reason": "原文第2行明确记载方案A两年总成本为人民币1,000,000元（100万元）；旧版a-cost v1的100,000元是被第2行反证的旧稿金额。现以新版本精确更正，保留v1及其审查历史，不将其视为受支持的成本结论。",
+                "target": {
+                  "kind": "claim",
+                  "claimRef": {
+                    "id": "a-cost",
+                    "version": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "role": "reviewer",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          },
+          "payload": {
+            "evidence": [],
+            "claims": [],
+            "reviews": [
+              {
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了本运行冻结快照第2行。该行明确记载“方案 A 两年总成本为人民币 1,000,000 元（100 万元）”，与 a-cost@2 的金额和两年范围精确一致。旧稿100,000元出现在第3行且标注尚未核实，不能作为受支持的成本结论。",
+                "limitations": [
+                  "证据仅支持这份冻结测试原文所载的方案 A 两年总成本；不证明现实价格、其他期限或未说明的费用范围。",
+                  "第1行标有 TEST FIXTURE ONLY，必须显著保留该限制。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "basis-b",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第4行。原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；该主张忠实保留了原文，不推定 B 金额或可比性。",
+                "limitations": [
+                  "原文没有提供 B 的金额或可比口径；不能形成 A/B 数值比较或决策结论。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "risk-boundary",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第5行。原文仅称风险资料存在未补齐缺口，并明确具体内容未知；该主张没有把未知内容扩写为具体风险。",
+                "limitations": [
+                  "无法据此识别、评估或排除任何具体风险；风险内容仍未知。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "fixture-status",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第1行，其中标注 TEST FIXTURE ONLY。将本研究所涉金额限定为测试夹具、不代表现实报价或建议，与原文标记及既定范围一致。",
+                "limitations": [
+                  "该标记只支持将本次材料及其中金额按测试夹具处理；不得外推为真实价格、市场判断或建议。"
+                ]
+              }
+            ],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "独立复核确认冻结原文第2行记载方案 A 两年总成本人民币1,000,000元（100万元），第3行仅将100,000元记为尚未核实的旧稿。a-cost@1 的100,000元成本结论被证伪；a-cost@2 已按第2行精确更正并获本节点独立支持。现有不可变勘误 erratum-a-cost-v1-to-v2 精确指向 a-cost@1，保留旧版本及审查历史。",
+                "disposition": "correct",
+                "reason": "纠错 issue 可依既有 correct-claim 节点产出的 a-cost@2 和精确勘误记录更新；本独立 reviewer 已读取冻结原文并支持修订版本。issue 更新不表示旧版金额获得支持。",
+                "revisedClaimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "followupTaskRef": "correct-claim"
+              }
+            ],
+            "premiseReviews": [
+              {
+                "id": "premise-main-a-cost-v2-review",
+                "lineId": "main",
+                "premises": [
+                  "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                  "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                  "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                  "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                ],
+                "claimRefs": [
+                  {
+                    "id": "a-cost",
+                    "version": 2
+                  },
+                  {
+                    "id": "basis-b",
+                    "version": 1
+                  },
+                  {
+                    "id": "risk-boundary",
+                    "version": 1
+                  },
+                  {
+                    "id": "fixture-status",
+                    "version": 1
+                  }
+                ],
+                "classification": "retained",
+                "finding": "前提保持原样：本节点只审查指定冻结快照及原研究范围，不引入外部来源、不扩展期限或费用范围，也不新增前提分支。第2行支持 a-cost@2 的测试原文金额；第3行把100,000元限定为尚未核实的旧稿记录。B 口径与风险缺口分别按第4、5行作有限陈述，第1行限制所有金额为 TEST FIXTURE ONLY。未发现需要改换研究前提的证据。",
+                "changeEvidence": [
+                  "冻结快照第2行若经认证修订且不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                  "冻结快照第4行若经认证修订并改变 B 口径待核对或不可直接比较的表述，应重新审查 basis-b@1。",
+                  "冻结快照第5行若经认证修订并改变风险缺口或具体内容未知的表述，应重新审查 risk-boundary@1。",
+                  "冻结快照第1行若经认证修订并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "role": "reporter",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "deliver-report",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "c2b6dae7ce06c9e8bfe1f25f2d69e8f1c70b83cb555fd6ce79dfecb289fc566c",
+            "sessionId": "261010-airy-summit"
+          },
+          "payload": {
+            "evidence": [],
+            "claims": [],
+            "reviews": [],
+            "issues": [],
+            "report": {
+              "claimRefs": [
+                {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                {
+                  "id": "basis-b",
+                  "version": 1
+                },
+                {
+                  "id": "risk-boundary",
+                  "version": 1
+                },
+                {
+                  "id": "fixture-status",
+                  "version": 1
+                }
+              ],
+              "limitations": [
+                "唯一来源是指定 input.txt 的本运行冻结文本快照 fixture-source，版本 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2；金额定位第2行，旧稿历史记录第3行，B 口径第4行，风险边界第5行，TEST FIXTURE ONLY 标记第1行。",
+                "方案 A 结论仅描述原文所载两年总成本；不外推至其他期限、费用范围或现实价格。",
+                "方案 B 成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。",
+                "风险资料的具体内容未知；不能据此识别、评估或排除具体风险。",
+                "旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。"
+              ],
+              "unresolved": [
+                "方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。",
+                "风险资料未补齐，具体内容仍未知。"
+              ],
+              "changeEvidence": [
+                "若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                "若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。",
+                "若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。",
+                "若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+              ],
+              "erratumIds": [
+                "erratum-a-cost-v1-to-v2"
+              ],
+              "lineIds": [
+                "main"
+              ]
+            }
+          }
+        }
+      ],
+      "reads": [
+        {
+          "id": "ff28ec51ad70361872527441d5d05a5fc001d0f4a987769176a964630a5b44ce",
+          "sourceId": "fixture-source",
+          "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "toolUseId": "call_2OGW3BwkxtClxeHyOSAo932E",
+          "path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "contentHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "startLine": 1,
+          "endLine": 5,
+          "returnedTextHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "record-draft",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261010-still-waterfall",
+            "generation": 1
+          },
+          "receivedAt": "2026-10-10T04:24:14.586Z"
+        },
+        {
+          "id": "731cdba753b62898450f228cf61d0739658949f75cf26e83f036cd11c4a97d22",
+          "sourceId": "fixture-source",
+          "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "toolUseId": "call_yi5hyFafiyqL335eGIJzo6lH",
+          "path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "contentHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "startLine": 1,
+          "endLine": 5,
+          "returnedTextHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "check-draft",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261010-nimble-basalt",
+            "generation": 1
+          },
+          "receivedAt": "2026-10-10T04:25:04.984Z"
+        },
+        {
+          "id": "0ce8af1e06308c612ef4758cb8d83df28f9108379984fa48d6507bcbd8669b41",
+          "sourceId": "fixture-source",
+          "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "toolUseId": "call_dvNc5D8hR9tNm1GMDaMC8yFY",
+          "path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "contentHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "startLine": 1,
+          "endLine": 5,
+          "returnedTextHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261010-keen-finch",
+            "generation": 1
+          },
+          "receivedAt": "2026-10-10T04:26:25.216Z"
+        },
+        {
+          "id": "9f364961be717c2d22b9e19c044dd702eeeb7ba3e435c3334c26605fd21bb438",
+          "sourceId": "fixture-source",
+          "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "toolUseId": "call_tctwGBIw2mc1Oyk6yDLgPiW7",
+          "path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "contentHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "startLine": 1,
+          "endLine": 5,
+          "returnedTextHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261010-still-hazel",
+            "generation": 1
+          },
+          "receivedAt": "2026-10-10T04:28:14.485Z"
+        },
+        {
+          "id": "5e09d054382cb38f4936703f7fbaefce47d65544ded47e93c7860e3e79611320",
+          "sourceId": "fixture-source",
+          "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "toolUseId": "call_qyAfyb4g97Xy8DkDAEOtG6W9",
+          "path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt",
+          "contentHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+          "startLine": 1,
+          "endLine": 5,
+          "returnedTextHash": "d35fce69b3fad748977c7bf2c7f7d95f45633f4af1d0c3d58f27093f4631bc0a",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "deliver-report",
+            "attempt": 1,
+            "revision": 0,
+            "sessionId": "261010-airy-summit",
+            "generation": 1
+          },
+          "receivedAt": "2026-10-10T04:29:36.594Z"
+        }
+      ],
+      "sourceBundle": {
+        "cited": [
+          {
+            "sourceId": "fixture-source",
+            "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+            "claimRefs": [
+              {
+                "id": "a-cost",
+                "version": 2
+              },
+              {
+                "id": "basis-b",
+                "version": 1
+              },
+              {
+                "id": "risk-boundary",
+                "version": 1
+              },
+              {
+                "id": "fixture-status",
+                "version": 1
+              }
+            ],
+            "readIds": [
+              "ff28ec51ad70361872527441d5d05a5fc001d0f4a987769176a964630a5b44ce",
+              "731cdba753b62898450f228cf61d0739658949f75cf26e83f036cd11c4a97d22",
+              "0ce8af1e06308c612ef4758cb8d83df28f9108379984fa48d6507bcbd8669b41",
+              "9f364961be717c2d22b9e19c044dd702eeeb7ba3e435c3334c26605fd21bb438",
+              "5e09d054382cb38f4936703f7fbaefce47d65544ded47e93c7860e3e79611320"
+            ]
+          }
+        ],
+        "readNotCited": [],
+        "unresolved": [],
+        "unrecorded": []
+      },
+      "dimensions": [
+        {
+          "id": "amount-a",
+          "requirement": "核实并报告方案 A 两年总成本；保留旧稿 100,000 元为待核实历史结论，依据原文精确更正版本；金额标为 TEST FIXTURE ONLY。",
+          "required": true,
+          "lineId": "main",
+          "state": "covered",
+          "claimRefs": [
+            {
+              "id": "a-cost",
+              "version": 2
+            }
+          ]
+        },
+        {
+          "id": "basis-b",
+          "requirement": "保留方案 B 成本口径待核对、不可直接与 A 比较的原文边界；不得补造 B 金额或比较结论。",
+          "required": true,
+          "lineId": "main",
+          "state": "covered",
+          "claimRefs": [
+            {
+              "id": "basis-b",
+              "version": 1
+            }
+          ]
+        },
+        {
+          "id": "risk-boundary",
+          "requirement": "报告风险资料仅说明存在缺口，具体内容未知；不得推断风险内容。",
+          "required": true,
+          "lineId": "main",
+          "state": "covered",
+          "claimRefs": [
+            {
+              "id": "risk-boundary",
+              "version": 1
+            }
+          ]
+        },
+        {
+          "id": "fixture-status",
+          "requirement": "明确本资料中所有金额为 TEST FIXTURE ONLY，不作现实报价、市场判断或建议。",
+          "required": true,
+          "lineId": "main",
+          "state": "covered",
+          "claimRefs": [
+            {
+              "id": "fixture-status",
+              "version": 1
+            }
+          ]
+        }
+      ],
+      "coverage": {
+        "covered": 4,
+        "limited": 0,
+        "uncovered": 0,
+        "total": 4
+      },
+      "claims": [
+        {
+          "id": "a-cost",
+          "version": 2,
+          "type": "fact",
+          "text": "在本研究唯一冻结测试原文中，方案 A 两年总成本为人民币 1,000,000 元（100 万元）；此金额仅为 TEST FIXTURE ONLY。",
+          "lineIds": [
+            "main"
+          ],
+          "dimensionIds": [
+            "amount-a"
+          ],
+          "evidenceIds": [
+            "a-cost-v2-e1",
+            "fixture-status-e1"
+          ],
+          "critical": true,
+          "recommendation": false,
+          "keyNumber": true,
+          "conditions": [
+            "仅陈述原文所载方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+            "所有金额仅为 TEST FIXTURE ONLY。"
+          ],
+          "falsificationConditions": [
+            "若经认证的本运行冻结原文快照修订了第2行，且该行不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），则此金额主张应重新核验并可能被推翻。"
+          ],
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "review": {
+            "claimRef": {
+              "id": "a-cost",
+              "version": 2
+            },
+            "citationExists": true,
+            "support": "supported",
+            "finding": "我亲自读取了本运行冻结快照第2行。该行明确记载“方案 A 两年总成本为人民币 1,000,000 元（100 万元）”，与 a-cost@2 的金额和两年范围精确一致。旧稿100,000元出现在第3行且标注尚未核实，不能作为受支持的成本结论。",
+            "limitations": [
+              "证据仅支持这份冻结测试原文所载的方案 A 两年总成本；不证明现实价格、其他期限或未说明的费用范围。",
+              "第1行标有 TEST FIXTURE ONLY，必须显著保留该限制。"
+            ]
+          },
+          "reviewer": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          }
+        },
+        {
+          "id": "basis-b",
+          "version": 1,
+          "type": "fact",
+          "text": "本运行冻结原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本研究不推定 B 的金额或可比性。",
+          "lineIds": [
+            "main"
+          ],
+          "dimensionIds": [
+            "basis-b"
+          ],
+          "evidenceIds": [
+            "basis-b-e1"
+          ],
+          "critical": true,
+          "recommendation": false,
+          "keyNumber": false,
+          "conditions": [
+            "仅报告冻结原文对 B 口径与比较限制的表述，不补造口径、金额或比较结论。"
+          ],
+          "falsificationConditions": [
+            "若经认证的本运行冻结原文修订了第4行，使其不再称 B 成本口径待核对或明确允许与 A 直接比较，则本主张应重新核验并相应修正。"
+          ],
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "review": {
+            "claimRef": {
+              "id": "basis-b",
+              "version": 1
+            },
+            "citationExists": true,
+            "support": "supported",
+            "finding": "我亲自读取了冻结快照第4行。原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；该主张忠实保留了原文，不推定 B 金额或可比性。",
+            "limitations": [
+              "原文没有提供 B 的金额或可比口径；不能形成 A/B 数值比较或决策结论。"
+            ]
+          },
+          "reviewer": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          }
+        },
+        {
+          "id": "risk-boundary",
+          "version": 1,
+          "type": "fact",
+          "text": "本运行冻结原文仅说明风险资料存在未补齐的缺口，并明确具体内容未知；不能据此断言任何具体风险。",
+          "lineIds": [
+            "main"
+          ],
+          "dimensionIds": [
+            "risk-boundary"
+          ],
+          "evidenceIds": [
+            "risk-boundary-e1"
+          ],
+          "critical": true,
+          "recommendation": false,
+          "keyNumber": false,
+          "conditions": [
+            "只保留原文明确的风险资料边界；不推断或补造具体风险内容。"
+          ],
+          "falsificationConditions": [
+            "若经认证的本运行冻结原文修订了第5行并列明具体风险内容，或不再记载存在未补齐缺口，则当前风险边界主张应重新核验并修正。"
+          ],
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "review": {
+            "claimRef": {
+              "id": "risk-boundary",
+              "version": 1
+            },
+            "citationExists": true,
+            "support": "supported",
+            "finding": "我亲自读取了冻结快照第5行。原文仅称风险资料存在未补齐缺口，并明确具体内容未知；该主张没有把未知内容扩写为具体风险。",
+            "limitations": [
+              "无法据此识别、评估或排除任何具体风险；风险内容仍未知。"
+            ]
+          },
+          "reviewer": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          }
+        },
+        {
+          "id": "fixture-status",
+          "version": 1,
+          "type": "fact",
+          "text": "冻结原文标注“TEST FIXTURE ONLY”；本研究中的金额仅按测试夹具处理，不代表现实报价、市场判断或建议。",
+          "lineIds": [
+            "main"
+          ],
+          "dimensionIds": [
+            "fixture-status"
+          ],
+          "evidenceIds": [
+            "fixture-status-e1"
+          ],
+          "critical": true,
+          "recommendation": false,
+          "keyNumber": false,
+          "conditions": [
+            "仅适用于本次唯一冻结测试原文及其金额；不得外推为真实价格或建议。"
+          ],
+          "falsificationConditions": [
+            "若经认证的本运行冻结原文修订了第1行并移除“TEST FIXTURE ONLY”标记，或明确说明该标记不适用于本研究引用的金额，则该测试夹具状态主张应重新核验。"
+          ],
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "review": {
+            "claimRef": {
+              "id": "fixture-status",
+              "version": 1
+            },
+            "citationExists": true,
+            "support": "supported",
+            "finding": "我亲自读取了冻结快照第1行，其中标注 TEST FIXTURE ONLY。将本研究所涉金额限定为测试夹具、不代表现实报价或建议，与原文标记及既定范围一致。",
+            "limitations": [
+              "该标记只支持将本次材料及其中金额按测试夹具处理；不得外推为真实价格、市场判断或建议。"
+            ]
+          },
+          "reviewer": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          }
+        }
+      ],
+      "issues": [
+        {
+          "id": "a-cost-amount-error",
+          "claimRef": {
+            "id": "a-cost",
+            "version": 1
+          },
+          "finding": "独立复核确认冻结原文第2行记载方案 A 两年总成本人民币1,000,000元（100万元），第3行仅将100,000元记为尚未核实的旧稿。a-cost@1 的100,000元成本结论被证伪；a-cost@2 已按第2行精确更正并获本节点独立支持。现有不可变勘误 erratum-a-cost-v1-to-v2 精确指向 a-cost@1，保留旧版本及审查历史。",
+          "disposition": "correct",
+          "reason": "纠错 issue 可依既有 correct-claim 节点产出的 a-cost@2 和精确勘误记录更新；本独立 reviewer 已读取冻结原文并支持修订版本。issue 更新不表示旧版金额获得支持。",
+          "revisedClaimRef": {
+            "id": "a-cost",
+            "version": 2
+          },
+          "followupTaskRef": "correct-claim",
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "review-revision",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+            "sessionId": "261010-still-hazel"
+          },
+          "state": "resolved"
+        }
+      ],
+      "errata": [
+        {
+          "id": "erratum-a-cost-v1-to-v2",
+          "reason": "原文第2行明确记载方案A两年总成本为人民币1,000,000元（100万元）；旧版a-cost v1的100,000元是被第2行反证的旧稿金额。现以新版本精确更正，保留v1及其审查历史，不将其视为受支持的成本结论。",
+          "target": {
+            "kind": "claim",
+            "claimRef": {
+              "id": "a-cost",
+              "version": 1
+            }
+          },
+          "producedBy": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "nodeId": "correct-claim",
+            "attempt": 1,
+            "revision": 0,
+            "artifactVersion": "08c542d396fba1f47c90da05da0fc72b6cf82c241167c138c29bfbf155878695",
+            "sessionId": "261010-keen-finch"
+          },
+          "affectedClaimRefs": [
+            {
+              "id": "a-cost",
+              "version": 1
+            }
+          ],
+          "state": "resolved",
+          "affectedReports": []
+        }
+      ],
+      "report": {
+        "claimRefs": [
+          {
+            "id": "a-cost",
+            "version": 2
+          },
+          {
+            "id": "basis-b",
+            "version": 1
+          },
+          {
+            "id": "risk-boundary",
+            "version": 1
+          },
+          {
+            "id": "fixture-status",
+            "version": 1
+          }
+        ],
+        "limitations": [
+          "唯一来源是指定 input.txt 的本运行冻结文本快照 fixture-source，版本 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2；金额定位第2行，旧稿历史记录第3行，B 口径第4行，风险边界第5行，TEST FIXTURE ONLY 标记第1行。",
+          "方案 A 结论仅描述原文所载两年总成本；不外推至其他期限、费用范围或现实价格。",
+          "方案 B 成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。",
+          "风险资料的具体内容未知；不能据此识别、评估或排除具体风险。",
+          "旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。"
+        ],
+        "unresolved": [
+          "方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。",
+          "风险资料未补齐，具体内容仍未知。"
+        ],
+        "changeEvidence": [
+          "若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+          "若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。",
+          "若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。",
+          "若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+        ],
+        "erratumIds": [
+          "erratum-a-cost-v1-to-v2"
+        ],
+        "lineIds": [
+          "main"
+        ],
+        "producedBy": {
+          "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+          "nodeId": "deliver-report",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "c2b6dae7ce06c9e8bfe1f25f2d69e8f1c70b83cb555fd6ce79dfecb289fc566c",
+          "sessionId": "261010-airy-summit"
+        }
+      },
+      "judgment": {
+        "version": 1,
+        "critiques": [
+          {
+            "id": "premise-main-a-cost-v1-review",
+            "lineId": "main",
+            "premises": [
+              "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+              "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+              "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+              "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+              "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+            ],
+            "claimRefs": [
+              {
+                "id": "a-cost",
+                "version": 1
+              }
+            ],
+            "classification": "fact-error",
+            "finding": "维持原研究问题与范围，不提出 alternative premise 或新分支；a-cost@1 中的100,000元作为成本事实错误。第2行的1,000,000元反证旧数额，第3行只将100,000元记为尚未核实的旧稿。原主张的可证伪条件仅能核验“旧稿是否写了100,000元”这一历史记录；它不能证伪或确认该金额是否为实际成本。对成本金额的语义核验应以第2行原文为准。",
+            "changeEvidence": [
+              "冻结原文第2行：方案A两年总成本为人民币1,000,000元（100万元）。",
+              "冻结原文第3行：旧草稿写人民币100,000元（10万元），并注明尚未核实。",
+              "若经认证的同一原文快照修订改变第2行金额或两年范围，需重新审查金额结论；本节点没有提出更改冻结来源或研究前提。"
+            ],
+            "producedBy": {
+              "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+              "nodeId": "check-draft",
+              "attempt": 1,
+              "revision": 0,
+              "artifactVersion": "3e12a4c9eee4afe8f169f61c1c93ae81911f17167d2637a614b5f9d0b1b9ceb3",
+              "sessionId": "261010-nimble-basalt"
+            },
+            "current": false
+          },
+          {
+            "id": "premise-main-a-cost-v2-review",
+            "lineId": "main",
+            "premises": [
+              "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+              "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+              "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+              "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+              "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+            ],
+            "claimRefs": [
+              {
+                "id": "a-cost",
+                "version": 2
+              },
+              {
+                "id": "basis-b",
+                "version": 1
+              },
+              {
+                "id": "risk-boundary",
+                "version": 1
+              },
+              {
+                "id": "fixture-status",
+                "version": 1
+              }
+            ],
+            "classification": "retained",
+            "finding": "前提保持原样：本节点只审查指定冻结快照及原研究范围，不引入外部来源、不扩展期限或费用范围，也不新增前提分支。第2行支持 a-cost@2 的测试原文金额；第3行把100,000元限定为尚未核实的旧稿记录。B 口径与风险缺口分别按第4、5行作有限陈述，第1行限制所有金额为 TEST FIXTURE ONLY。未发现需要改换研究前提的证据。",
+            "changeEvidence": [
+              "冻结快照第2行若经认证修订且不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+              "冻结快照第4行若经认证修订并改变 B 口径待核对或不可直接比较的表述，应重新审查 basis-b@1。",
+              "冻结快照第5行若经认证修订并改变风险缺口或具体内容未知的表述，应重新审查 risk-boundary@1。",
+              "冻结快照第1行若经认证修订并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+            ],
+            "producedBy": {
+              "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+              "nodeId": "review-revision",
+              "attempt": 1,
+              "revision": 0,
+              "artifactVersion": "0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b",
+              "sessionId": "261010-still-hazel"
+            },
+            "current": true
+          }
+        ],
+        "candidates": [],
+        "stages": [
+          {
+            "lineId": "main",
+            "state": "deliverable",
+            "pendingClaimRefs": [],
+            "pendingCandidateIds": [],
+            "issueIds": []
+          }
+        ],
+        "blockers": []
+      },
+      "blockers": []
+    },
+    "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+    "runIds": [
+      "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+    ],
+    "verdict": {
+      "result": "pass",
+      "reason": "五阶段结构化任务全部完成；旧稿金额被独立核实为 contradicted 并以 a-cost@2 和 erratum-a-cost-v1-to-v2 精确更正，旧版保留；两名独立 reviewer 均亲自读取同一冻结快照第1–5行，修订金额、B口径、风险边界、TEST FIXTURE ONLY 及前提均经独立审查；四项必需维度覆盖、main 阶段 deliverable、无 blocker，报告已结构化登记来源、行号、限制、未决事项与可证伪条件。"
+    },
+    "verdicts": [
+      {
+        "result": "pass",
+        "reason": "五阶段结构化任务全部完成；旧稿金额被独立核实为 contradicted 并以 a-cost@2 和 erratum-a-cost-v1-to-v2 精确更正，旧版保留；两名独立 reviewer 均亲自读取同一冻结快照第1–5行，修订金额、B口径、风险边界、TEST FIXTURE ONLY 及前提均经独立审查；四项必需维度覆盖、main 阶段 deliverable、无 blocker，报告已结构化登记来源、行号、限制、未决事项与可证伪条件。"
+      }
+    ],
+    "repair": {
+      "used": 0,
+      "max": 3
+    },
+    "runStatus": "completed",
+    "tokensUsed": 143520,
+    "acceptanceCriteria": "五个阶段按依赖顺序完成且分别提交结构化研究记录；旧版 100,000 元作为有记录但被证伪的待核实历史结论保留，不得当作结论支持；修订版精确更正为原文所载两年总成本人民币 1,000,000 元，并以新 claim version 与不可变 erratum 记录勘误；独立第一 reviewer 和独立第二 reviewer 均须亲自使用 Read 工具读取本次冻结的原文快照相关行，第一 reviewer 明确核实旧版错误，第二 reviewer 对修订金额、B 口径、风险未知边界及重要前提逐项审查当前版本；局部阶段门由结构化 records/reviews 驱动，不把 worker 完成误作结论支持；来源包引用冻结原文版本和精确行号；提交简明中文最终报告，所有金额显著标记 TEST FIXTURE ONLY，保留 B 口径不可直接比较及风险具体内容未知；不得增加前提分支、外部来源、原件变更或结果文件。",
+    "nodes": [
+      {
+        "id": "record-draft",
+        "title": "登记旧稿待核金额",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-still-waterfall",
+        "outputs": {
+          "research": {
+            "evidence": [
+              {
+                "id": "draft-record-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 3,
+                  "endLine": 3
+                },
+                "excerpt": "旧草稿：方案 A 两年总成本为人民币 100,000 元（10 万元），尚未核实。"
+              },
+              {
+                "id": "fixture-marker-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 1,
+                  "endLine": 1
+                },
+                "excerpt": "TEST FIXTURE ONLY"
+              }
+            ],
+            "claims": [
+              {
+                "id": "a-cost",
+                "version": 1,
+                "type": "fact",
+                "text": "旧草稿声称方案 A 两年总成本为人民币 100,000 元（10 万元）；这是 TEST FIXTURE ONLY 的待核实历史结论，不代表已证实成本。",
+                "dimensionIds": [
+                  "amount-a"
+                ],
+                "lineIds": [
+                  "main"
+                ],
+                "evidenceIds": [
+                  "draft-record-e1",
+                  "fixture-marker-e1"
+                ],
+                "critical": true,
+                "keyNumber": true,
+                "recommendation": false,
+                "conditions": [
+                  "仅记录旧草稿对方案 A 两年总成本的历史声称；金额为 TEST FIXTURE ONLY。",
+                  "该版本保持待核实，不应作为经原文支持的金额结论。"
+                ],
+                "falsificationConditions": [
+                  "亲自核读本次冻结文本快照第 3 行，若其实际不包含旧草稿声称人民币 100,000 元（10 万元）的文字，或明确记载为其他金额，则此关于旧草稿记载内容的主张应被推翻。"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "check-draft",
+        "title": "独立核对旧稿错误",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-nimble-basalt",
+        "outputs": {
+          "research": {
+            "reviews": [
+              {
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "contradicted",
+                "finding": "冻结原文第3行确实记载旧草稿提出人民币100,000元（10万元），但同一原文第2行明确写明方案A两年总成本为人民币1,000,000元（100万元），故100,000元不能作为实际成本结论，旧金额被原文反证。分开判断：旧草稿曾写下该金额这一历史记录有第3行支持；该金额作为方案A两年总成本则被第2行反驳。第3行还明确标注尚未核实。",
+                "limitations": [
+                  "定位存在且第3行语义仅证明旧草稿记录了该数额及其未核实状态，不证明该数额正确。",
+                  "所有金额仅为 TEST FIXTURE ONLY。",
+                  "原文第4行说明B口径待核对、暂不能与A直接比较；第5行只说明风险资料有未补齐缺口，具体内容未知。"
+                ]
+              }
+            ],
+            "premiseReviews": [
+              {
+                "id": "premise-main-a-cost-v1-review",
+                "lineId": "main",
+                "premises": [
+                  "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                  "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                  "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                  "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                ],
+                "claimRefs": [
+                  {
+                    "id": "a-cost",
+                    "version": 1
+                  }
+                ],
+                "classification": "fact-error",
+                "finding": "维持原研究问题与范围，不提出 alternative premise 或新分支；a-cost@1 中的100,000元作为成本事实错误。第2行的1,000,000元反证旧数额，第3行只将100,000元记为尚未核实的旧稿。原主张的可证伪条件仅能核验“旧稿是否写了100,000元”这一历史记录；它不能证伪或确认该金额是否为实际成本。对成本金额的语义核验应以第2行原文为准。",
+                "changeEvidence": [
+                  "冻结原文第2行：方案A两年总成本为人民币1,000,000元（100万元）。",
+                  "冻结原文第3行：旧草稿写人民币100,000元（10万元），并注明尚未核实。",
+                  "若经认证的同一原文快照修订改变第2行金额或两年范围，需重新审查金额结论；本节点没有提出更改冻结来源或研究前提。"
+                ]
+              }
+            ],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "旧稿100,000元作为方案A两年总成本被冻结原文第2行1,000,000元明确反证；第3行仅支持其为尚未核实的历史草稿记录。",
+                "disposition": "followup-task",
+                "reason": "需要在不改动研究前提的情况下，依原文第2行精确更正为新的 claim version，并以不可变 erratum 保留勘误及旧版本历史。",
+                "followupTaskRef": "correct-claim"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "correct-claim",
+        "title": "更正金额并登记勘误",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-keen-finch",
+        "output": "已亲自读取本运行冻结快照第1–5行。原文第2行将方案A两年总成本记为人民币1,000,000元；第3行的100,000元仅是注明尚未核实的旧稿记录。按任务范围仅更正事实，保留旧版本与原前提，并登记B口径、风险未知边界及测试夹具限制。",
+        "outputs": {
+          "research": {
+            "evidence": [
+              {
+                "id": "a-cost-v2-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 2,
+                  "endLine": 2
+                },
+                "excerpt": "原文：方案 A 两年总成本为人民币 1,000,000 元（100 万元）。"
+              },
+              {
+                "id": "basis-b-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 4,
+                  "endLine": 4
+                },
+                "excerpt": "方案 B 成本口径待核对，暂不能与方案 A 直接比较。"
+              },
+              {
+                "id": "risk-boundary-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 5,
+                  "endLine": 5
+                },
+                "excerpt": "风险资料仅说明存在未补齐的缺口，具体内容未知。"
+              },
+              {
+                "id": "fixture-status-e1",
+                "sourceId": "fixture-source",
+                "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                "locator": {
+                  "startLine": 1,
+                  "endLine": 1
+                },
+                "excerpt": "TEST FIXTURE ONLY"
+              }
+            ],
+            "claims": [
+              {
+                "id": "a-cost",
+                "version": 2,
+                "type": "fact",
+                "text": "在本研究唯一冻结测试原文中，方案 A 两年总成本为人民币 1,000,000 元（100 万元）；此金额仅为 TEST FIXTURE ONLY。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "amount-a"
+                ],
+                "evidenceIds": [
+                  "a-cost-v2-e1",
+                  "fixture-status-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": true,
+                "conditions": [
+                  "仅陈述原文所载方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "所有金额仅为 TEST FIXTURE ONLY。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文快照修订了第2行，且该行不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），则此金额主张应重新核验并可能被推翻。"
+                ]
+              },
+              {
+                "id": "basis-b",
+                "version": 1,
+                "type": "fact",
+                "text": "本运行冻结原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本研究不推定 B 的金额或可比性。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "basis-b"
+                ],
+                "evidenceIds": [
+                  "basis-b-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "仅报告冻结原文对 B 口径与比较限制的表述，不补造口径、金额或比较结论。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第4行，使其不再称 B 成本口径待核对或明确允许与 A 直接比较，则本主张应重新核验并相应修正。"
+                ]
+              },
+              {
+                "id": "risk-boundary",
+                "version": 1,
+                "type": "fact",
+                "text": "本运行冻结原文仅说明风险资料存在未补齐的缺口，并明确具体内容未知；不能据此断言任何具体风险。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "risk-boundary"
+                ],
+                "evidenceIds": [
+                  "risk-boundary-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "只保留原文明确的风险资料边界；不推断或补造具体风险内容。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第5行并列明具体风险内容，或不再记载存在未补齐缺口，则当前风险边界主张应重新核验并修正。"
+                ]
+              },
+              {
+                "id": "fixture-status",
+                "version": 1,
+                "type": "fact",
+                "text": "冻结原文标注“TEST FIXTURE ONLY”；本研究中的金额仅按测试夹具处理，不代表现实报价、市场判断或建议。",
+                "lineIds": [
+                  "main"
+                ],
+                "dimensionIds": [
+                  "fixture-status"
+                ],
+                "evidenceIds": [
+                  "fixture-status-e1"
+                ],
+                "critical": true,
+                "recommendation": false,
+                "keyNumber": false,
+                "conditions": [
+                  "仅适用于本次唯一冻结测试原文及其金额；不得外推为真实价格或建议。"
+                ],
+                "falsificationConditions": [
+                  "若经认证的本运行冻结原文修订了第1行并移除“TEST FIXTURE ONLY”标记，或明确说明该标记不适用于本研究引用的金额，则该测试夹具状态主张应重新核验。"
+                ]
+              }
+            ],
+            "errata": [
+              {
+                "id": "erratum-a-cost-v1-to-v2",
+                "reason": "原文第2行明确记载方案A两年总成本为人民币1,000,000元（100万元）；旧版a-cost v1的100,000元是被第2行反证的旧稿金额。现以新版本精确更正，保留v1及其审查历史，不将其视为受支持的成本结论。",
+                "target": {
+                  "kind": "claim",
+                  "claimRef": {
+                    "id": "a-cost",
+                    "version": 1
+                  }
+                }
+              }
+            ],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "冻结原文第2行记载人民币1,000,000元（100万元），证伪旧版100,000元作为方案A两年总成本的结论；第3行仅证明100,000元曾出现在尚未核实的旧稿中。已在同一研究前提下提交a-cost v2精确更正。",
+                "disposition": "correct",
+                "reason": "按既有纠错任务correct-claim在原研究线更正金额，保留a-cost v1作为历史版本；修订金额须由后续独立reviewer重新审查。",
+                "revisedClaimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "followupTaskRef": "correct-claim"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "review-revision",
+        "title": "独立复核修订版本",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-still-hazel",
+        "outputs": {
+          "research": {
+            "reviews": [
+              {
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了本运行冻结快照第2行。该行明确记载“方案 A 两年总成本为人民币 1,000,000 元（100 万元）”，与 a-cost@2 的金额和两年范围精确一致。旧稿100,000元出现在第3行且标注尚未核实，不能作为受支持的成本结论。",
+                "limitations": [
+                  "证据仅支持这份冻结测试原文所载的方案 A 两年总成本；不证明现实价格、其他期限或未说明的费用范围。",
+                  "第1行标有 TEST FIXTURE ONLY，必须显著保留该限制。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "basis-b",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第4行。原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；该主张忠实保留了原文，不推定 B 金额或可比性。",
+                "limitations": [
+                  "原文没有提供 B 的金额或可比口径；不能形成 A/B 数值比较或决策结论。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "risk-boundary",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第5行。原文仅称风险资料存在未补齐缺口，并明确具体内容未知；该主张没有把未知内容扩写为具体风险。",
+                "limitations": [
+                  "无法据此识别、评估或排除任何具体风险；风险内容仍未知。"
+                ]
+              },
+              {
+                "claimRef": {
+                  "id": "fixture-status",
+                  "version": 1
+                },
+                "citationExists": true,
+                "support": "supported",
+                "finding": "我亲自读取了冻结快照第1行，其中标注 TEST FIXTURE ONLY。将本研究所涉金额限定为测试夹具、不代表现实报价或建议，与原文标记及既定范围一致。",
+                "limitations": [
+                  "该标记只支持将本次材料及其中金额按测试夹具处理；不得外推为真实价格、市场判断或建议。"
+                ]
+              }
+            ],
+            "premiseReviews": [
+              {
+                "id": "premise-main-a-cost-v2-review",
+                "lineId": "main",
+                "premises": [
+                  "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                  "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                  "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                  "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                  "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                ],
+                "claimRefs": [
+                  {
+                    "id": "a-cost",
+                    "version": 2
+                  },
+                  {
+                    "id": "basis-b",
+                    "version": 1
+                  },
+                  {
+                    "id": "risk-boundary",
+                    "version": 1
+                  },
+                  {
+                    "id": "fixture-status",
+                    "version": 1
+                  }
+                ],
+                "classification": "retained",
+                "finding": "前提保持原样：本节点只审查指定冻结快照及原研究范围，不引入外部来源、不扩展期限或费用范围，也不新增前提分支。第2行支持 a-cost@2 的测试原文金额；第3行把100,000元限定为尚未核实的旧稿记录。B 口径与风险缺口分别按第4、5行作有限陈述，第1行限制所有金额为 TEST FIXTURE ONLY。未发现需要改换研究前提的证据。",
+                "changeEvidence": [
+                  "冻结快照第2行若经认证修订且不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                  "冻结快照第4行若经认证修订并改变 B 口径待核对或不可直接比较的表述，应重新审查 basis-b@1。",
+                  "冻结快照第5行若经认证修订并改变风险缺口或具体内容未知的表述，应重新审查 risk-boundary@1。",
+                  "冻结快照第1行若经认证修订并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+                ]
+              }
+            ],
+            "issues": [
+              {
+                "id": "a-cost-amount-error",
+                "claimRef": {
+                  "id": "a-cost",
+                  "version": 1
+                },
+                "finding": "独立复核确认冻结原文第2行记载方案 A 两年总成本人民币1,000,000元（100万元），第3行仅将100,000元记为尚未核实的旧稿。a-cost@1 的100,000元成本结论被证伪；a-cost@2 已按第2行精确更正并获本节点独立支持。现有不可变勘误 erratum-a-cost-v1-to-v2 精确指向 a-cost@1，保留旧版本及审查历史。",
+                "disposition": "correct",
+                "reason": "纠错 issue 可依既有 correct-claim 节点产出的 a-cost@2 和精确勘误记录更新；本独立 reviewer 已读取冻结原文并支持修订版本。issue 更新不表示旧版金额获得支持。",
+                "revisedClaimRef": {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                "followupTaskRef": "correct-claim"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "deliver-report",
+        "title": "登记简明中文报告",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261010-airy-summit",
+        "output": "在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？\n成立前提：本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。\n成立前提：研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n成立前提：方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。\n成立前提：风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。\n成立前提：事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。\n\n研究线：main · 在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？\n成立前提：本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。\n成立前提：研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n成立前提：方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。\n成立前提：风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。\n成立前提：事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。\n在本研究唯一冻结测试原文中，方案 A 两年总成本为人民币 1,000,000 元（100 万元）；此金额仅为 TEST FIXTURE ONLY。\n适用条件：仅陈述原文所载方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n适用条件：所有金额仅为 TEST FIXTURE ONLY。\n证伪条件：若经认证的本运行冻结原文快照修订了第2行，且该行不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），则此金额主张应重新核验并可能被推翻。\n来源：指定唯一输入文件；行号以本次运行冻结的文本快照为准 @ 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2，行 2–2：原文：方案 A 两年总成本为人民币 1,000,000 元（100 万元）。\n来源：指定唯一输入文件；行号以本次运行冻结的文本快照为准 @ 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2，行 1–1：TEST FIXTURE ONLY\n独立审查：a-cost@2 · 我亲自读取了本运行冻结快照第2行。该行明确记载“方案 A 两年总成本为人民币 1,000,000 元（100 万元）”，与 a-cost@2 的金额和两年范围精确一致。旧稿100,000元出现在第3行且标注尚未核实，不能作为受支持的成本结论。；记录 chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/review-revision@0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b\n来源限制：证据仅支持这份冻结测试原文所载的方案 A 两年总成本；不证明现实价格、其他期限或未说明的费用范围。\n来源限制：第1行标有 TEST FIXTURE ONLY，必须显著保留该限制。\n\n研究线：main · 在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？\n成立前提：本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。\n成立前提：研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n成立前提：方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。\n成立前提：风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。\n成立前提：事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。\n本运行冻结原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本研究不推定 B 的金额或可比性。\n适用条件：仅报告冻结原文对 B 口径与比较限制的表述，不补造口径、金额或比较结论。\n证伪条件：若经认证的本运行冻结原文修订了第4行，使其不再称 B 成本口径待核对或明确允许与 A 直接比较，则本主张应重新核验并相应修正。\n来源：指定唯一输入文件；行号以本次运行冻结的文本快照为准 @ 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2，行 4–4：方案 B 成本口径待核对，暂不能与方案 A 直接比较。\n独立审查：basis-b@1 · 我亲自读取了冻结快照第4行。原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；该主张忠实保留了原文，不推定 B 金额或可比性。；记录 chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/review-revision@0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b\n来源限制：原文没有提供 B 的金额或可比口径；不能形成 A/B 数值比较或决策结论。\n\n研究线：main · 在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？\n成立前提：本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。\n成立前提：研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n成立前提：方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。\n成立前提：风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。\n成立前提：事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。\n本运行冻结原文仅说明风险资料存在未补齐的缺口，并明确具体内容未知；不能据此断言任何具体风险。\n适用条件：只保留原文明确的风险资料边界；不推断或补造具体风险内容。\n证伪条件：若经认证的本运行冻结原文修订了第5行并列明具体风险内容，或不再记载存在未补齐缺口，则当前风险边界主张应重新核验并修正。\n来源：指定唯一输入文件；行号以本次运行冻结的文本快照为准 @ 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2，行 5–5：风险资料仅说明存在未补齐的缺口，具体内容未知。\n独立审查：risk-boundary@1 · 我亲自读取了冻结快照第5行。原文仅称风险资料存在未补齐缺口，并明确具体内容未知；该主张没有把未知内容扩写为具体风险。；记录 chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/review-revision@0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b\n来源限制：无法据此识别、评估或排除任何具体风险；风险内容仍未知。\n\n研究线：main · 在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？\n成立前提：本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。\n成立前提：研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。\n成立前提：方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。\n成立前提：风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。\n成立前提：事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。\n冻结原文标注“TEST FIXTURE ONLY”；本研究中的金额仅按测试夹具处理，不代表现实报价、市场判断或建议。\n适用条件：仅适用于本次唯一冻结测试原文及其金额；不得外推为真实价格或建议。\n证伪条件：若经认证的本运行冻结原文修订了第1行并移除“TEST FIXTURE ONLY”标记，或明确说明该标记不适用于本研究引用的金额，则该测试夹具状态主张应重新核验。\n来源：指定唯一输入文件；行号以本次运行冻结的文本快照为准 @ 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2，行 1–1：TEST FIXTURE ONLY\n独立审查：fixture-status@1 · 我亲自读取了冻结快照第1行，其中标注 TEST FIXTURE ONLY。将本研究所涉金额限定为测试夹具、不代表现实报价或建议，与原文标记及既定范围一致。；记录 chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/review-revision@0fe22616100d11264fbc58b6bc58d4661de43dbf9ba5e5689fdebd580880497b\n来源限制：该标记只支持将本次材料及其中金额按测试夹具处理；不得外推为真实价格、市场判断或建议。\n\nmain/amount-a：covered\nmain/basis-b：covered\nmain/risk-boundary：covered\nmain/fixture-status：covered\n限制：唯一来源是指定 input.txt 的本运行冻结文本快照 fixture-source，版本 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2；金额定位第2行，旧稿历史记录第3行，B 口径第4行，风险边界第5行，TEST FIXTURE ONLY 标记第1行。\n限制：方案 A 结论仅描述原文所载两年总成本；不外推至其他期限、费用范围或现实价格。\n限制：方案 B 成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。\n限制：风险资料的具体内容未知；不能据此识别、评估或排除具体风险。\n限制：旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。\n可能改变结论的证据：若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。\n可能改变结论的证据：若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。\n可能改变结论的证据：若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。\n可能改变结论的证据：若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。\n追加勘误：erratum-a-cost-v1-to-v2 · a-cost@1 · 原文第2行明确记载方案A两年总成本为人民币1,000,000元（100万元）；旧版a-cost v1的100,000元是被第2行反证的旧稿金额。现以新版本精确更正，保留v1及其审查历史，不将其视为受支持的成本结论。；影响 a-cost@1；resolved\n未决问题：方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。\n未决问题：风险资料未补齐，具体内容仍未知。\n可追溯版本：a-cost@2, basis-b@1, risk-boundary@1, fixture-status@1",
+        "outputs": {
+          "research": {
+            "report": {
+              "lineIds": [
+                "main"
+              ],
+              "claimRefs": [
+                {
+                  "id": "a-cost",
+                  "version": 2
+                },
+                {
+                  "id": "basis-b",
+                  "version": 1
+                },
+                {
+                  "id": "risk-boundary",
+                  "version": 1
+                },
+                {
+                  "id": "fixture-status",
+                  "version": 1
+                }
+              ],
+              "erratumIds": [
+                "erratum-a-cost-v1-to-v2"
+              ],
+              "limitations": [
+                "唯一来源是指定 input.txt 的本运行冻结文本快照 fixture-source，版本 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2；金额定位第2行，旧稿历史记录第3行，B 口径第4行，风险边界第5行，TEST FIXTURE ONLY 标记第1行。",
+                "方案 A 结论仅描述原文所载两年总成本；不外推至其他期限、费用范围或现实价格。",
+                "方案 B 成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。",
+                "风险资料的具体内容未知；不能据此识别、评估或排除具体风险。",
+                "旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。"
+              ],
+              "unresolved": [
+                "方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。",
+                "风险资料未补齐，具体内容仍未知。"
+              ],
+              "changeEvidence": [
+                "若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                "若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。",
+                "若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。",
+                "若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "workers": [],
+    "revision": 0
+  },
+  "finalText": "## 研究结论\n\n**方案 A 两年总成本：人民币 1,000,000 元（100 万元），仅为 TEST FIXTURE ONLY。** 唯一冻结原文第 2 行如此记载。旧稿的 **100,000 元（10 万元）**见第 3 行，原文明确注明“尚未核实”；独立查错确认该金额作为成本结论被第 2 行证伪，但它仍保留为历史草稿记录。\n\n已将 `a-cost@1` 更正为 `a-cost@2`，登记不可变勘误 `erratum-a-cost-v1-to-v2`，旧版本和审查历史均保留。另一独立 reviewer 亲自重读冻结原文，并支持修订金额及其范围。两次 reviewer 均以独立上下文读取了同一冻结快照第 1–5 行；研究前提未扩展，未新增分支。\n\n- **方案 B：**成本口径待核对，暂不能与 A 直接比较；没有依据给出 B 金额或比较结论。\n- **风险：**仅知资料存在未补齐缺口，具体内容未知；不能据此识别、评估或排除具体风险。\n- **边界：**原文标注 **TEST FIXTURE ONLY**。所有金额仅属测试夹具，不代表现实报价、市场判断或建议；A 的结论只适用于原文所述两年总成本，不外推至其他期限或费用范围。\n\n**来源：**唯一输入 `input.txt` 的本次冻结快照，版本/哈希 `2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2`：第 1 行为测试夹具标记，第 2 行为 A 金额，第 3 行为旧稿记录，第 4 行为 B 口径，第 5 行为风险边界。报告及勘误已登记到结构化研究记录；最终验收通过。",
+  "sessions": [
+    {
+      "id": "261010-deft-ripple",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/tmp/selection-unique-fixed-20261010/input.txt"
+          }
+        },
+        {
+          "name": "mcp__session__create_task",
+          "status": "error",
+          "input": {
+            "requestId": "min-cost-research-20261010-v1",
+            "spec": {
+              "schema_version": 3,
+              "title": "最小成本研究验收",
+              "goal": "仅依据 /tmp/selection-unique-fixed-20261010/input.txt 完成结构化、可追溯的 TEST FIXTURE ONLY 金额研究：旧稿金额作为待核实历史结论保留；独立查错并提交精确版本勘误；新独立上下文复核修订版；保持 B 口径与风险未知边界；交付简明中文报告及来源。不得联网、使用其他资料、修改原件或创建结果文件。",
+              "runner": "orchestrate",
+              "acceptance_criteria": "五个阶段按依赖顺序完成且分别提交结构化研究记录；旧版 100,000 元作为有记录但被证伪的待核实历史结论保留，不得当作结论支持；修订版精确更正为原文所载两年总成本人民币 1,000,000 元，并以新 claim version 与不可变 erratum 记录勘误；独立第一 reviewer 和独立第二 reviewer 均须亲自使用 Read 工具读取本次冻结的原文快照相关行，第一 reviewer 明确核实旧版错误，第二 reviewer 对修订金额、B 口径、风险未知边界及重要前提逐项审查当前版本；局部阶段门由结构化 records/reviews 驱动，不把 worker 完成误作结论支持；来源包引用冻结原文版本和精确行号；提交简明中文最终报告，所有金额显著标记 TEST FIXTURE ONLY，保留 B 口径不可直接比较及风险具体内容未知；不得增加前提分支、外部来源、原件变更或结果文件。",
+              "constraints": [
+                "唯一研究来源是 /tmp/selection-unique-fixed-20261010/input.txt；仅使用研究运行冻结的该文本快照。",
+                "不联网，不读取或引入其他资料，不修改原件，不创建研究结果文件。",
+                "所有金额均为 TEST FIXTURE ONLY，不得外推为真实价格或建议。",
+                "保留方案 B 成本口径未核对、不能直接与 A 比较的边界。",
+                "风险资料仅说明存在未补齐缺口，风险具体内容未知；不得补造风险内容。",
+                "纠正事实但不扩展前提分支；保留旧草稿主张、审查历史和报告版本历史。",
+                "按任务定义的五阶段依赖串行执行；研究阶段、review 阶段及报告登记均使用 deep-research 结构化输出，而非普通文本替代。"
+              ],
+              "locked_fields": [
+                "goal",
+                "constraints",
+                "research.sources",
+                "research.line",
+                "research.dimensions"
+              ],
+              "research": {
+                "line": {
+                  "id": "main",
+                  "question": "在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？",
+                  "premises": [
+                    "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                    "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                    "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                    "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                    "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                  ]
+                },
+                "dimensions": [
+                  {
+                    "id": "amount-a",
+                    "requirement": "核实并报告方案 A 两年总成本；保留旧稿 100,000 元为待核实历史结论，依据原文精确更正版本；金额标为 TEST FIXTURE ONLY。",
+                    "required": true
+                  },
+                  {
+                    "id": "basis-b",
+                    "requirement": "保留方案 B 成本口径待核对、不可直接与 A 比较的原文边界；不得补造 B 金额或比较结论。",
+                    "required": true
+                  },
+                  {
+                    "id": "risk-boundary",
+                    "requirement": "报告风险资料仅说明存在缺口，具体内容未知；不得推断风险内容。",
+                    "required": true
+                  },
+                  {
+                    "id": "fixture-status",
+                    "requirement": "明确本资料中所有金额为 TEST FIXTURE ONLY，不作现实报价、市场判断或建议。",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "id": "fixture-source",
+                    "path": "/tmp/selection-unique-fixed-20261010/input.txt",
+                    "ref": "指定唯一输入文件；行号以本次运行冻结的文本快照为准"
+                  }
+                ]
+              },
+              "nodes": [
+                {
+                  "id": "record-draft",
+                  "kind": "session",
+                  "title": "登记旧稿待核金额",
+                  "depends_on": [],
+                  "researchRole": "researcher",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 1 阶段：只读取本运行冻结的 fixture-source 原文快照，使用 Read 工具亲自读取并取得旧草稿所在的原文行及必要上下文。将旧稿中的“方案 A 两年总成本人民币 100,000 元（10 万元）”如实保留为待核实的历史结论，不要把它写成已证实事实，也不要提前改成原文其他金额。结构化提交：一条 critical/keyNumber 的主张 a-cost，version 1，dimension amount-a，清楚表述这是旧稿声称且尚未核实的金额；附精确原文摘录、冻结 sourceVersion 和 locator，evidence 仅证明旧稿确实如此记载。写明 TEST FIXTURE ONLY 与待核实状态，给出具体 falsificationConditions。不得新增其他来源。通过 submit_task_output 的 values.research 提交，不可只在普通文本中汇报。"
+                },
+                {
+                  "id": "check-draft",
+                  "kind": "session",
+                  "title": "独立核对旧稿错误",
+                  "depends_on": [
+                    "record-draft"
+                  ],
+                  "researchRole": "reviewer",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 2 阶段：这是独立 reviewer 上下文。你必须亲自用 Read 工具读取本运行冻结的 fixture-source 原文快照中方案 A 两年金额及旧草稿的相关行；不能依赖上游摘要或结论。独立审查 a-cost v1 的 locator、原文语义与主张含义，分别说明 citationExists、support、finding、limitations；若原文对旧稿构成反证，明确 support=contradicted，并以同一 issue id 记录待纠正事实，disposition=followup-task，followupTaskRef 指向既存节点 correct-claim。为全部重要当前版本提交独立 reviews；提交 main 前提的 premiseReview，premises 数组必须逐字复制任务研究上下文；将其分类为 retained 或 fact-error（不要仅因金额错误制造 alternative-premise/branch）。对可证伪条件作语义核验。只提交本 reviewer 的新 reviews、premiseReviews 和 issue 更新；不得重交研究者 claims/evidence，也不得仅用普通文本代替结构化提交。"
+                },
+                {
+                  "id": "correct-claim",
+                  "kind": "session",
+                  "title": "更正金额并登记勘误",
+                  "depends_on": [
+                    "check-draft"
+                  ],
+                  "researchRole": "researcher",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 3 阶段：亲自 Read 本运行冻结的唯一原文快照，核实金额和 B/风险边界。保留 a-cost v1 历史记录，不覆盖或删除；提交同一 claim id a-cost 的 version 2，准确表述原文所载方案 A 两年总成本人民币 1,000,000 元（100 万元），并明确 TEST FIXTURE ONLY。附精确原文行的全新 evidence id、原文摘录及宿主冻结 sourceVersion；新增不可变 erratum，target 精确指向 a-cost v1，说明 100,000 元更正为 1,000,000 元，并更新既存纠错 issue 指向新 claim version 与既存 followupTaskRef correct-claim。另提交必要的当前主张以覆盖 basis-b、risk-boundary、fixture-status，逐条附精确原文 evidence 与具体 falsificationConditions：B 口径待核对、不能直接比较；风险仅知有缺口而具体内容未知；金额为测试夹具。不要扩展前提或新建分支。全部通过 values.research 结构化提交。"
+                },
+                {
+                  "id": "review-revision",
+                  "kind": "session",
+                  "title": "独立复核修订版本",
+                  "depends_on": [
+                    "correct-claim"
+                  ],
+                  "researchRole": "reviewer",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 4 阶段：新的独立 reviewer 上下文。必须亲自用 Read 工具读取本运行冻结的 fixture-source 原文快照中金额、旧稿、B 口径及风险缺口的相关行；不得依赖前一 reviewer 或作者的概述。核验修订版 a-cost v2 是否被精确原文支持，并分别审查 B 不可直接比较、风险具体未知、TEST FIXTURE ONLY 限定等当前重要主张的定位、语义和限制。为每条重要当前 claimRef 提交独立 review（精确到版本），并为 main 提交独立 premiseReview，premises 数组逐字复制冻结研究上下文；分类 retained/fact-error/evidence-gap，事实错误和证据缺口留在原 line，不开 alternative branch。验证并引用 a-cost v1 的精确 erratum 记录及纠错 issue 的状态；任何未解决缺口要明确披露，不可因节点完成而判定研究通过。使用 submit_task_output 的 values.research 结构化提交。"
+                },
+                {
+                  "id": "deliver-report",
+                  "kind": "session",
+                  "title": "登记简明中文报告",
+                  "depends_on": [
+                    "review-revision"
+                  ],
+                  "researchRole": "reporter",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 5 阶段：待相关 claims 与独立 reviews 达到 main 线局部阶段门后，基于结构化研究记录登记一份简明中文报告；通过 values.research 的 report 字段与 submit_task_output.text 提交，不能以普通文本假冒记录。仅引用当前受支持的 claim versions；report.lineIds 包含 main，列出精确 claimRefs、source locator/冻结版本、erratumIds、limitations、unresolved 和 changeEvidence。报告明确记载：旧稿 100,000 元（10 万元）是待核实历史结论，已被原文证伪且仍保留历史版本；现修订为原文所载 1,000,000 元（100 万元），两者均为 TEST FIXTURE ONLY；B 成本口径未核对、不能直接比较；风险缺口具体内容未知。简洁、中文、不给现实成本建议。指出可证伪/改变结论的具体条件，披露审查和来源范围限制。不存在 alternative branch，不要伪造候选分支。"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "mcp__session__create_task",
+          "status": "completed",
+          "input": {
+            "requestId": "min-cost-research-20261010-v1",
+            "spec": {
+              "schema_version": 3,
+              "title": "最小成本研究验收",
+              "goal": "仅依据 /tmp/selection-unique-fixed-20261010/input.txt 完成结构化、可追溯的 TEST FIXTURE ONLY 金额研究：旧稿金额作为待核实历史结论保留；独立查错并提交精确版本勘误；新独立上下文复核修订版；保持 B 口径与风险未知边界；交付简明中文报告与来源。不得联网、使用其他资料、修改原件或创建结果文件。",
+              "runner": "orchestrate",
+              "acceptance_criteria": "五个阶段按依赖顺序完成且分别提交结构化研究记录；旧版 100,000 元作为有记录但被证伪的待核实历史结论保留，不得当作结论支持；修订版精确更正为原文所载两年总成本人民币 1,000,000 元，并以新 claim version 与不可变 erratum 记录勘误；独立第一 reviewer 和独立第二 reviewer 均须亲自使用 Read 工具读取本次冻结的原文快照相关行，第一 reviewer 明确核实旧版错误，第二 reviewer 对修订金额、B 口径、风险未知边界及重要前提逐项审查当前版本；局部阶段门由结构化 records/reviews 驱动，不把 worker 完成误作结论支持；来源包引用冻结原文版本和精确行号；提交简明中文最终报告，所有金额显著标记 TEST FIXTURE ONLY，保留 B 口径不可直接比较及风险具体内容未知；不得增加前提分支、外部来源、原件变更或结果文件。",
+              "constraints": [
+                "唯一研究来源是 /tmp/selection-unique-fixed-20261010/input.txt；仅使用研究运行冻结的该文本快照。",
+                "不联网，不读取或引入其他资料，不修改原件，不创建研究结果文件。",
+                "所有金额均为 TEST FIXTURE ONLY，不得外推为真实价格或建议。",
+                "保留方案 B 成本口径未核对、不能直接与 A 比较的边界。",
+                "风险资料仅说明存在未补齐缺口，风险具体内容未知；不得补造风险内容。",
+                "纠正事实但不扩展前提分支；保留旧草稿主张、审查历史和报告版本历史。",
+                "按任务定义的五阶段依赖串行执行；研究阶段、review 阶段及报告登记均使用 deep-research 结构化输出，而非普通文本替代。"
+              ],
+              "decisions": [
+                "只修正经原文证实的事实错误，不新增或切换研究前提；旧稿主张与纠正历史均保留。",
+                "必须分别完成旧稿记录、第一独立查错、金额纠正、第二独立复核、最终报告登记五个必要步骤。"
+              ],
+              "locked_fields": [
+                "goal",
+                "acceptance_criteria",
+                "constraints",
+                "decisions"
+              ],
+              "research": {
+                "line": {
+                  "id": "main",
+                  "question": "在唯一测试原文中，方案 A 两年总成本的旧草稿金额是否准确？精确勘误后，可对方案 B 成本口径和风险资料作出哪些有限结论？",
+                  "premises": [
+                    "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                    "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                    "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                    "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                    "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                  ]
+                },
+                "dimensions": [
+                  {
+                    "id": "amount-a",
+                    "requirement": "核实并报告方案 A 两年总成本；保留旧稿 100,000 元为待核实历史结论，依据原文精确更正版本；金额标为 TEST FIXTURE ONLY。",
+                    "required": true
+                  },
+                  {
+                    "id": "basis-b",
+                    "requirement": "保留方案 B 成本口径待核对、不可直接与 A 比较的原文边界；不得补造 B 金额或比较结论。",
+                    "required": true
+                  },
+                  {
+                    "id": "risk-boundary",
+                    "requirement": "报告风险资料仅说明存在缺口，具体内容未知；不得推断风险内容。",
+                    "required": true
+                  },
+                  {
+                    "id": "fixture-status",
+                    "requirement": "明确本资料中所有金额为 TEST FIXTURE ONLY，不作现实报价、市场判断或建议。",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "id": "fixture-source",
+                    "path": "/tmp/selection-unique-fixed-20261010/input.txt",
+                    "ref": "指定唯一输入文件；行号以本次运行冻结的文本快照为准"
+                  }
+                ]
+              },
+              "nodes": [
+                {
+                  "id": "record-draft",
+                  "kind": "session",
+                  "title": "登记旧稿待核金额",
+                  "depends_on": [],
+                  "researchRole": "researcher",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 1 阶段：只读取本运行冻结的 fixture-source 原文快照，使用 Read 工具亲自读取并取得旧草稿所在的原文行及必要上下文。将旧稿中的“方案 A 两年总成本人民币 100,000 元（10 万元）”如实保留为待核实的历史结论，不要把它写成已证实事实，也不要提前改成原文其他金额。结构化提交：一条 critical/keyNumber 的主张 a-cost，version 1，dimension amount-a，清楚表述这是旧稿声称且尚未核实的金额；附精确原文摘录、冻结 sourceVersion 和 locator，evidence 仅证明旧稿确实如此记载。写明 TEST FIXTURE ONLY 与待核实状态，给出具体 falsificationConditions。不得新增其他来源。通过 submit_task_output 的 values.research 提交，不可只在普通文本中汇报。"
+                },
+                {
+                  "id": "check-draft",
+                  "kind": "session",
+                  "title": "独立核对旧稿错误",
+                  "depends_on": [
+                    "record-draft"
+                  ],
+                  "researchRole": "reviewer",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 2 阶段：这是独立 reviewer 上下文。你必须亲自用 Read 工具读取本运行冻结的 fixture-source 原文快照中方案 A 两年金额及旧草稿的相关行；不能依赖上游摘要或结论。独立审查 a-cost v1 的 locator、原文语义与主张含义，分别说明 citationExists、support、finding、limitations；若原文对旧稿构成反证，明确 support=contradicted，并以同一 issue id 记录待纠正事实，disposition=followup-task，followupTaskRef 指向既存节点 correct-claim。为全部重要当前版本提交独立 reviews；提交 main 前提的 premiseReview，premises 数组必须逐字复制任务研究上下文；将其分类为 retained 或 fact-error（不要仅因金额错误制造 alternative-premise/branch）。对可证伪条件作语义核验。只提交本 reviewer 的新 reviews、premiseReviews 和 issue 更新；不得重交研究者 claims/evidence，也不得仅用普通文本代替结构化提交。"
+                },
+                {
+                  "id": "correct-claim",
+                  "kind": "session",
+                  "title": "更正金额并登记勘误",
+                  "depends_on": [
+                    "check-draft"
+                  ],
+                  "researchRole": "researcher",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 3 阶段：亲自 Read 本运行冻结的唯一原文快照，核实金额和 B/风险边界。保留 a-cost v1 历史记录，不覆盖或删除；提交同一 claim id a-cost 的 version 2，准确表述原文所载方案 A 两年总成本人民币 1,000,000 元（100 万元），并明确 TEST FIXTURE ONLY。附精确原文行的全新 evidence id、原文摘录及宿主冻结 sourceVersion；新增不可变 erratum，target 精确指向 a-cost v1，说明 100,000 元更正为 1,000,000 元，并更新既存纠错 issue 指向新 claim version 与既存 followupTaskRef correct-claim。另提交必要的当前主张以覆盖 basis-b、risk-boundary、fixture-status，逐条附精确原文 evidence 与具体 falsificationConditions：B 口径待核对、不能直接比较；风险仅知有缺口而具体内容未知；金额为测试夹具。不要扩展前提或新建分支。全部通过 values.research 结构化提交。"
+                },
+                {
+                  "id": "review-revision",
+                  "kind": "session",
+                  "title": "独立复核修订版本",
+                  "depends_on": [
+                    "correct-claim"
+                  ],
+                  "researchRole": "reviewer",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 4 阶段：新的独立 reviewer 上下文。必须亲自用 Read 工具读取本运行冻结的 fixture-source 原文快照中金额、旧稿、B 口径及风险缺口的相关行；不得依赖前一 reviewer 或作者的概述。核验修订版 a-cost v2 是否被精确原文支持，并分别审查 B 不可直接比较、风险具体未知、TEST FIXTURE ONLY 限定等当前重要主张的定位、语义和限制。为每条重要当前 claimRef 提交独立 review（精确到版本），并为 main 提交独立 premiseReview，premises 数组逐字复制冻结研究上下文；分类 retained/fact-error/evidence-gap，事实错误和证据缺口留在原 line，不开 alternative branch。验证并引用 a-cost v1 的精确 erratum 记录及纠错 issue 的状态；任何未解决缺口要明确披露，不可因节点完成而判定研究通过。使用 submit_task_output 的 values.research 结构化提交。"
+                },
+                {
+                  "id": "deliver-report",
+                  "kind": "session",
+                  "title": "登记简明中文报告",
+                  "depends_on": [
+                    "review-revision"
+                  ],
+                  "researchRole": "reporter",
+                  "researchLineIds": [
+                    "main"
+                  ],
+                  "outputs": [
+                    {
+                      "name": "research",
+                      "kind": "param",
+                      "type": "json",
+                      "required": true
+                    }
+                  ],
+                  "prompt": "执行第 5 阶段：待相关 claims 与独立 reviews 达到 main 线局部阶段门后，基于结构化研究记录登记一份简明中文报告；通过 values.research 的 report 字段与 submit_task_output.text 提交，不能以普通文本假冒记录。仅引用当前受支持的 claim versions；report.lineIds 包含 main，列出精确 claimRefs、source locator/冻结版本、erratumIds、limitations、unresolved 和 changeEvidence。报告明确记载：旧稿 100,000 元（10 万元）是待核实历史结论，已被原文证伪且仍保留历史版本；现修订为原文所载 1,000,000 元（100 万元），两者均为 TEST FIXTURE ONLY；B 成本口径未核对、不能直接比较；风险缺口具体内容未知。简洁、中文、不给现实成本建议。指出可证伪/改变结论的具体条件，披露审查和来源范围限制。不存在 alternative branch，不要伪造候选分支。"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "mcp__session__run_task",
+          "status": "completed",
+          "input": {
+            "requestId": "min-cost-research-run-20261010-v1",
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "waitForCompletion": false
+          }
+        },
+        {
+          "name": "mcp__session__submit_answer",
+          "status": "completed",
+          "input": {}
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-first-schedule-2",
+            "decisionId": "min-cost-first-schedule-continue-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "active"
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-new-result-12",
+            "decisionId": "min-cost-review-draft-continue-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "active",
+            "consumedResults": [
+              "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25:record-draft:1:0:done"
+            ]
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-new-result-21",
+            "decisionId": "min-cost-correct-continue-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "active",
+            "consumedResults": [
+              "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25:check-draft:1:0:done"
+            ]
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "offset": 1,
+            "limit": 220,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-27-24-964_mcp_session_get_task_results__367324e2-b166-4ef8-8714-8e634206cb61.txt"
+          }
+        },
+        {
+          "name": "Grep",
+          "status": "completed",
+          "input": {
+            "pattern": "\"nodeId\": \"correct-claim\"|\"id\": \"a-cost-amount-error\"|\"id\": \"erratum-a-cost-v1-to-v2\"|\"reads\":|\"state\": \"pending\"",
+            "context": 2,
+            "limit": 20,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-27-24-964_mcp_session_get_task_results__367324e2-b166-4ef8-8714-8e634206cb61.txt"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "offset": 398,
+            "limit": 115,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-27-24-964_mcp_session_get_task_results__367324e2-b166-4ef8-8714-8e634206cb61.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-new-result-30",
+            "decisionId": "min-cost-review-revision-continue-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "active",
+            "consumedResults": [
+              "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25:correct-claim:1:0:done"
+            ]
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "offset": 480,
+            "limit": 150,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-29-01-711_mcp_session_get_task_results__058ff8d6-30fb-4e97-8b76-d94246266db2.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-new-result-42",
+            "decisionId": "min-cost-deliver-report-continue-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "active",
+            "consumedResults": [
+              "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25:review-revision:1:0:done"
+            ]
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "Grep",
+          "status": "completed",
+          "input": {
+            "pattern": "\"blockers\"|\"id\": \"deliver-report\"|\"state\": \"done\"|\"report\": \\{|\"sourceBundle\"|\"reports\"|\"state\": \"resolved\"",
+            "context": 1,
+            "limit": 50,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-30-55-065_mcp_session_get_task_results__f76cbf79-8864-4284-83b5-fa72e47dba30.txt"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "offset": 1048,
+            "limit": 145,
+            "file_path": "/tmp/selection-joint-baseline-clean/workspaces/comparison/sessions/261010-deft-ripple/long_responses/2026-10-10T04-30-55-065_mcp_session_get_task_results__f76cbf79-8864-4284-83b5-fa72e47dba30.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_orchestration_decision",
+          "status": "completed",
+          "input": {
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25",
+            "checkpointId": "cp-chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25-0-before-verify-52",
+            "decisionId": "min-cost-final-verification-gate-v1",
+            "baseRevision": 0,
+            "action": "continue",
+            "plannerPhase": "draining",
+            "consumedResults": [
+              "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25:deliver-report:1:0:done"
+            ]
+          }
+        },
+        {
+          "name": "mcp__session__get_task_results",
+          "status": "completed",
+          "input": {
+            "slug": "pro-410e73252dbc5676137c56ab",
+            "runId": "chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_verdict",
+          "status": "completed",
+          "input": {
+            "result": "pass",
+            "reason": "五阶段结构化任务全部完成；旧稿金额被独立核实为 contradicted 并以 a-cost@2 和 erratum-a-cost-v1-to-v2 精确更正，旧版保留；两名独立 reviewer 均亲自读取同一冻结快照第1–5行，修订金额、B口径、风险边界、TEST FIXTURE ONLY 及前提均经独立审查；四项必需维度覆盖、main 阶段 deliverable、无 blocker，报告已结构化登记来源、行号、限制、未决事项与可证伪条件。"
+          }
+        },
+        {
+          "name": "mcp__session__submit_answer",
+          "status": "completed",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "id": "261010-airy-summit",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "offset": 1,
+            "limit": 5,
+            "file_path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "error",
+          "input": {
+            "text": "结论（均为 TEST FIXTURE ONLY）：冻结原文第2行记载方案 A 两年总成本为人民币 1,000,000 元（100 万元）。旧稿中的人民币 100,000 元（10 万元）仅作为尚未核实的历史结论保留；它与原文第2行不符，已被证伪，不是当前受支持的成本结论。已通过不可变勘误 erratum-a-cost-v1-to-v2 更正，并保留旧版本及审查历史。方案 B 成本口径仍待核对，暂不能与 A 直接比较；风险资料只说明存在未补齐缺口，具体内容未知。所有金额仅是测试夹具内容，不代表现实价格、报价或建议。",
+            "values": {
+              "research": {
+                "report": {
+                  "id": "final-report-main",
+                  "lineIds": [
+                    "main"
+                  ],
+                  "claimRefs": [
+                    {
+                      "id": "a-cost",
+                      "version": 2
+                    },
+                    {
+                      "id": "basis-b",
+                      "version": 1
+                    },
+                    {
+                      "id": "risk-boundary",
+                      "version": 1
+                    },
+                    {
+                      "id": "fixture-status",
+                      "version": 1
+                    }
+                  ],
+                  "text": "**结论（所有金额均为 TEST FIXTURE ONLY）**\n\n本运行唯一冻结原文第2行记载：方案 A 两年总成本为人民币 **1,000,000 元（100 万元）**。旧稿中的人民币 **100,000 元（10 万元）**作为尚未核实的历史结论保留；该金额与原文第2行不符，已被证伪，不是当前受支持的成本结论。已用不可变勘误 `erratum-a-cost-v1-to-v2` 精确更正，且保留旧版本及审查历史。\n\n原文第4行称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本报告不推定 B 的金额或可比性。第5行仅说明风险资料存在未补齐缺口，具体内容未知；不能据此断言任何具体风险。第1行标注 TEST FIXTURE ONLY，因此这里的金额不代表现实价格、报价、市场判断或建议。",
+                  "sources": [
+                    {
+                      "sourceId": "fixture-source",
+                      "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                      "locators": [
+                        {
+                          "startLine": 1,
+                          "endLine": 1,
+                          "supportsClaimRefs": [
+                            {
+                              "id": "fixture-status",
+                              "version": 1
+                            }
+                          ]
+                        },
+                        {
+                          "startLine": 2,
+                          "endLine": 2,
+                          "supportsClaimRefs": [
+                            {
+                              "id": "a-cost",
+                              "version": 2
+                            }
+                          ]
+                        },
+                        {
+                          "startLine": 3,
+                          "endLine": 3,
+                          "supportsHistoricalContext": "旧稿金额仅作为被证伪、尚未核实的历史记录；不作为当前受支持主张。"
+                        },
+                        {
+                          "startLine": 4,
+                          "endLine": 4,
+                          "supportsClaimRefs": [
+                            {
+                              "id": "basis-b",
+                              "version": 1
+                            }
+                          ]
+                        },
+                        {
+                          "startLine": 5,
+                          "endLine": 5,
+                          "supportsClaimRefs": [
+                            {
+                              "id": "risk-boundary",
+                              "version": 1
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  "erratumIds": [
+                    "erratum-a-cost-v1-to-v2"
+                  ],
+                  "limitations": [
+                    "来源仅限指定的 input.txt 本运行冻结文本快照；文本读取范围为第1至第5行，冻结版本为 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2。",
+                    "方案 A 结论仅描述原文所载两年总成本；不外推到其他期限、费用范围或现实价格。",
+                    "方案 B 的成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。",
+                    "风险资料的具体内容未知；不能据此识别、评估或排除具体风险。",
+                    "旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。"
+                  ],
+                  "unresolved": [
+                    "方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。",
+                    "风险资料未补齐，具体内容仍未知。"
+                  ],
+                  "changeEvidence": [
+                    "若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                    "若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。",
+                    "若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。",
+                    "若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "completed",
+          "input": {
+            "text": "**结论（所有金额均为 TEST FIXTURE ONLY）**\n\n本运行唯一冻结原文第2行记载：方案 A 两年总成本为人民币 **1,000,000 元（100 万元）**。旧稿中的人民币 **100,000 元（10 万元）**作为尚未核实的历史结论保留；该金额与原文第2行不符，已被证伪，不是当前受支持的成本结论。已用不可变勘误 `erratum-a-cost-v1-to-v2` 精确更正，且保留旧版本及审查历史。\n\n原文第4行称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本报告不推定 B 的金额或可比性。第5行仅说明风险资料存在未补齐缺口，具体内容未知；不能据此断言任何具体风险。第1行标注 TEST FIXTURE ONLY，因此这里的金额不代表现实价格、报价、市场判断或建议。来源为本运行冻结文本快照 `fixture-source`（版本 `2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2`）：金额与旧稿记录见第2–3行，B 口径见第4行，风险边界见第5行，测试标记见第1行。\n\n**限制与结论变更条件：**结论仅适用于该唯一冻结文本及其所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。B 口径仍未核对、不能直接比较；风险具体内容仍未知。若经认证的冻结来源修订第2行且不再记载人民币 1,000,000 元（100 万元），应重新审查 `a-cost@2`；第4、5或1行若相应改变 B 口径、风险缺口或 TEST FIXTURE ONLY 标记，也应分别重新审查 `basis-b@1`、`risk-boundary@1` 或 `fixture-status@1`。",
+            "values": {
+              "research": {
+                "report": {
+                  "lineIds": [
+                    "main"
+                  ],
+                  "claimRefs": [
+                    {
+                      "id": "a-cost",
+                      "version": 2
+                    },
+                    {
+                      "id": "basis-b",
+                      "version": 1
+                    },
+                    {
+                      "id": "risk-boundary",
+                      "version": 1
+                    },
+                    {
+                      "id": "fixture-status",
+                      "version": 1
+                    }
+                  ],
+                  "erratumIds": [
+                    "erratum-a-cost-v1-to-v2"
+                  ],
+                  "limitations": [
+                    "唯一来源是指定 input.txt 的本运行冻结文本快照 fixture-source，版本 2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2；金额定位第2行，旧稿历史记录第3行，B 口径第4行，风险边界第5行，TEST FIXTURE ONLY 标记第1行。",
+                    "方案 A 结论仅描述原文所载两年总成本；不外推至其他期限、费用范围或现实价格。",
+                    "方案 B 成本口径未核对，不能与方案 A 直接比较；原文未提供可用于比较的 B 金额或口径。",
+                    "风险资料的具体内容未知；不能据此识别、评估或排除具体风险。",
+                    "旧稿的 100,000 元为尚未核实的历史记录且已被原文证伪；不得将旧金额作为结论支持。"
+                  ],
+                  "unresolved": [
+                    "方案 B 的成本口径仍待核对；本报告不能给出 A/B 直接比较结论。",
+                    "风险资料未补齐，具体内容仍未知。"
+                  ],
+                  "changeEvidence": [
+                    "若经认证的本运行冻结来源版本修订第2行，且该行不再记载方案 A 两年总成本为人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                    "若经认证的冻结来源版本修订第4行并改变方案 B 口径待核对或暂不能直接比较的内容，应重新审查 basis-b@1。",
+                    "若经认证的冻结来源版本修订第5行并改变风险缺口或明确具体内容，应重新审查 risk-boundary@1。",
+                    "若经认证的冻结来源版本修订第1行并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "261010-still-hazel",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "completed",
+          "input": {
+            "values": {
+              "research": {
+                "reviews": [
+                  {
+                    "claimRef": {
+                      "id": "a-cost",
+                      "version": 2
+                    },
+                    "citationExists": true,
+                    "support": "supported",
+                    "finding": "我亲自读取了本运行冻结快照第2行。该行明确记载“方案 A 两年总成本为人民币 1,000,000 元（100 万元）”，与 a-cost@2 的金额和两年范围精确一致。旧稿100,000元出现在第3行且标注尚未核实，不能作为受支持的成本结论。",
+                    "limitations": [
+                      "证据仅支持这份冻结测试原文所载的方案 A 两年总成本；不证明现实价格、其他期限或未说明的费用范围。",
+                      "第1行标有 TEST FIXTURE ONLY，必须显著保留该限制。"
+                    ]
+                  },
+                  {
+                    "claimRef": {
+                      "id": "basis-b",
+                      "version": 1
+                    },
+                    "citationExists": true,
+                    "support": "supported",
+                    "finding": "我亲自读取了冻结快照第4行。原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；该主张忠实保留了原文，不推定 B 金额或可比性。",
+                    "limitations": [
+                      "原文没有提供 B 的金额或可比口径；不能形成 A/B 数值比较或决策结论。"
+                    ]
+                  },
+                  {
+                    "claimRef": {
+                      "id": "risk-boundary",
+                      "version": 1
+                    },
+                    "citationExists": true,
+                    "support": "supported",
+                    "finding": "我亲自读取了冻结快照第5行。原文仅称风险资料存在未补齐缺口，并明确具体内容未知；该主张没有把未知内容扩写为具体风险。",
+                    "limitations": [
+                      "无法据此识别、评估或排除任何具体风险；风险内容仍未知。"
+                    ]
+                  },
+                  {
+                    "claimRef": {
+                      "id": "fixture-status",
+                      "version": 1
+                    },
+                    "citationExists": true,
+                    "support": "supported",
+                    "finding": "我亲自读取了冻结快照第1行，其中标注 TEST FIXTURE ONLY。将本研究所涉金额限定为测试夹具、不代表现实报价或建议，与原文标记及既定范围一致。",
+                    "limitations": [
+                      "该标记只支持将本次材料及其中金额按测试夹具处理；不得外推为真实价格、市场判断或建议。"
+                    ]
+                  }
+                ],
+                "premiseReviews": [
+                  {
+                    "id": "premise-main-a-cost-v2-review",
+                    "lineId": "main",
+                    "premises": [
+                      "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                      "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                      "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                      "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                      "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                    ],
+                    "claimRefs": [
+                      {
+                        "id": "a-cost",
+                        "version": 2
+                      },
+                      {
+                        "id": "basis-b",
+                        "version": 1
+                      },
+                      {
+                        "id": "risk-boundary",
+                        "version": 1
+                      },
+                      {
+                        "id": "fixture-status",
+                        "version": 1
+                      }
+                    ],
+                    "classification": "retained",
+                    "finding": "前提保持原样：本节点只审查指定冻结快照及原研究范围，不引入外部来源、不扩展期限或费用范围，也不新增前提分支。第2行支持 a-cost@2 的测试原文金额；第3行把100,000元限定为尚未核实的旧稿记录。B 口径与风险缺口分别按第4、5行作有限陈述，第1行限制所有金额为 TEST FIXTURE ONLY。未发现需要改换研究前提的证据。",
+                    "changeEvidence": [
+                      "冻结快照第2行若经认证修订且不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），应重新审查 a-cost@2。",
+                      "冻结快照第4行若经认证修订并改变 B 口径待核对或不可直接比较的表述，应重新审查 basis-b@1。",
+                      "冻结快照第5行若经认证修订并改变风险缺口或具体内容未知的表述，应重新审查 risk-boundary@1。",
+                      "冻结快照第1行若经认证修订并移除或限定 TEST FIXTURE ONLY 标记，应重新审查 fixture-status@1。"
+                    ]
+                  }
+                ],
+                "issues": [
+                  {
+                    "id": "a-cost-amount-error",
+                    "claimRef": {
+                      "id": "a-cost",
+                      "version": 1
+                    },
+                    "finding": "独立复核确认冻结原文第2行记载方案 A 两年总成本人民币1,000,000元（100万元），第3行仅将100,000元记为尚未核实的旧稿。a-cost@1 的100,000元成本结论被证伪；a-cost@2 已按第2行精确更正并获本节点独立支持。现有不可变勘误 erratum-a-cost-v1-to-v2 精确指向 a-cost@1，保留旧版本及审查历史。",
+                    "disposition": "correct",
+                    "reason": "纠错 issue 可依既有 correct-claim 节点产出的 a-cost@2 和精确勘误记录更新；本独立 reviewer 已读取冻结原文并支持修订版本。issue 更新不表示旧版金额获得支持。",
+                    "revisedClaimRef": {
+                      "id": "a-cost",
+                      "version": 2
+                    },
+                    "followupTaskRef": "correct-claim"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "261010-keen-finch",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "completed",
+          "input": {
+            "text": "已亲自读取本运行冻结快照第1–5行。原文第2行将方案A两年总成本记为人民币1,000,000元；第3行的100,000元仅是注明尚未核实的旧稿记录。按任务范围仅更正事实，保留旧版本与原前提，并登记B口径、风险未知边界及测试夹具限制。",
+            "values": {
+              "research": {
+                "evidence": [
+                  {
+                    "id": "a-cost-v2-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 2,
+                      "endLine": 2
+                    },
+                    "excerpt": "原文：方案 A 两年总成本为人民币 1,000,000 元（100 万元）。"
+                  },
+                  {
+                    "id": "basis-b-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 4,
+                      "endLine": 4
+                    },
+                    "excerpt": "方案 B 成本口径待核对，暂不能与方案 A 直接比较。"
+                  },
+                  {
+                    "id": "risk-boundary-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 5,
+                      "endLine": 5
+                    },
+                    "excerpt": "风险资料仅说明存在未补齐的缺口，具体内容未知。"
+                  },
+                  {
+                    "id": "fixture-status-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 1,
+                      "endLine": 1
+                    },
+                    "excerpt": "TEST FIXTURE ONLY"
+                  }
+                ],
+                "claims": [
+                  {
+                    "id": "a-cost",
+                    "version": 2,
+                    "type": "fact",
+                    "text": "在本研究唯一冻结测试原文中，方案 A 两年总成本为人民币 1,000,000 元（100 万元）；此金额仅为 TEST FIXTURE ONLY。",
+                    "lineIds": [
+                      "main"
+                    ],
+                    "dimensionIds": [
+                      "amount-a"
+                    ],
+                    "evidenceIds": [
+                      "a-cost-v2-e1",
+                      "fixture-status-e1"
+                    ],
+                    "critical": true,
+                    "recommendation": false,
+                    "keyNumber": true,
+                    "conditions": [
+                      "仅陈述原文所载方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                      "所有金额仅为 TEST FIXTURE ONLY。"
+                    ],
+                    "falsificationConditions": [
+                      "若经认证的本运行冻结原文快照修订了第2行，且该行不再记载方案 A 两年总成本人民币 1,000,000 元（100 万元），则此金额主张应重新核验并可能被推翻。"
+                    ]
+                  },
+                  {
+                    "id": "basis-b",
+                    "version": 1,
+                    "type": "fact",
+                    "text": "本运行冻结原文称方案 B 成本口径待核对，暂不能与方案 A 直接比较；本研究不推定 B 的金额或可比性。",
+                    "lineIds": [
+                      "main"
+                    ],
+                    "dimensionIds": [
+                      "basis-b"
+                    ],
+                    "evidenceIds": [
+                      "basis-b-e1"
+                    ],
+                    "critical": true,
+                    "recommendation": false,
+                    "keyNumber": false,
+                    "conditions": [
+                      "仅报告冻结原文对 B 口径与比较限制的表述，不补造口径、金额或比较结论。"
+                    ],
+                    "falsificationConditions": [
+                      "若经认证的本运行冻结原文修订了第4行，使其不再称 B 成本口径待核对或明确允许与 A 直接比较，则本主张应重新核验并相应修正。"
+                    ]
+                  },
+                  {
+                    "id": "risk-boundary",
+                    "version": 1,
+                    "type": "fact",
+                    "text": "本运行冻结原文仅说明风险资料存在未补齐的缺口，并明确具体内容未知；不能据此断言任何具体风险。",
+                    "lineIds": [
+                      "main"
+                    ],
+                    "dimensionIds": [
+                      "risk-boundary"
+                    ],
+                    "evidenceIds": [
+                      "risk-boundary-e1"
+                    ],
+                    "critical": true,
+                    "recommendation": false,
+                    "keyNumber": false,
+                    "conditions": [
+                      "只保留原文明确的风险资料边界；不推断或补造具体风险内容。"
+                    ],
+                    "falsificationConditions": [
+                      "若经认证的本运行冻结原文修订了第5行并列明具体风险内容，或不再记载存在未补齐缺口，则当前风险边界主张应重新核验并修正。"
+                    ]
+                  },
+                  {
+                    "id": "fixture-status",
+                    "version": 1,
+                    "type": "fact",
+                    "text": "冻结原文标注“TEST FIXTURE ONLY”；本研究中的金额仅按测试夹具处理，不代表现实报价、市场判断或建议。",
+                    "lineIds": [
+                      "main"
+                    ],
+                    "dimensionIds": [
+                      "fixture-status"
+                    ],
+                    "evidenceIds": [
+                      "fixture-status-e1"
+                    ],
+                    "critical": true,
+                    "recommendation": false,
+                    "keyNumber": false,
+                    "conditions": [
+                      "仅适用于本次唯一冻结测试原文及其金额；不得外推为真实价格或建议。"
+                    ],
+                    "falsificationConditions": [
+                      "若经认证的本运行冻结原文修订了第1行并移除“TEST FIXTURE ONLY”标记，或明确说明该标记不适用于本研究引用的金额，则该测试夹具状态主张应重新核验。"
+                    ]
+                  }
+                ],
+                "errata": [
+                  {
+                    "id": "erratum-a-cost-v1-to-v2",
+                    "reason": "原文第2行明确记载方案A两年总成本为人民币1,000,000元（100万元）；旧版a-cost v1的100,000元是被第2行反证的旧稿金额。现以新版本精确更正，保留v1及其审查历史，不将其视为受支持的成本结论。",
+                    "target": {
+                      "kind": "claim",
+                      "claimRef": {
+                        "id": "a-cost",
+                        "version": 1
+                      }
+                    }
+                  }
+                ],
+                "issues": [
+                  {
+                    "id": "a-cost-amount-error",
+                    "claimRef": {
+                      "id": "a-cost",
+                      "version": 1
+                    },
+                    "finding": "冻结原文第2行记载人民币1,000,000元（100万元），证伪旧版100,000元作为方案A两年总成本的结论；第3行仅证明100,000元曾出现在尚未核实的旧稿中。已在同一研究前提下提交a-cost v2精确更正。",
+                    "disposition": "correct",
+                    "reason": "按既有纠错任务correct-claim在原研究线更正金额，保留a-cost v1作为历史版本；修订金额须由后续独立reviewer重新审查。",
+                    "revisedClaimRef": {
+                      "id": "a-cost",
+                      "version": 2
+                    },
+                    "followupTaskRef": "correct-claim"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "261010-nimble-basalt",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "completed",
+          "input": {
+            "values": {
+              "research": {
+                "reviews": [
+                  {
+                    "claimRef": {
+                      "id": "a-cost",
+                      "version": 1
+                    },
+                    "citationExists": true,
+                    "support": "contradicted",
+                    "finding": "冻结原文第3行确实记载旧草稿提出人民币100,000元（10万元），但同一原文第2行明确写明方案A两年总成本为人民币1,000,000元（100万元），故100,000元不能作为实际成本结论，旧金额被原文反证。分开判断：旧草稿曾写下该金额这一历史记录有第3行支持；该金额作为方案A两年总成本则被第2行反驳。第3行还明确标注尚未核实。",
+                    "limitations": [
+                      "定位存在且第3行语义仅证明旧草稿记录了该数额及其未核实状态，不证明该数额正确。",
+                      "所有金额仅为 TEST FIXTURE ONLY。",
+                      "原文第4行说明B口径待核对、暂不能与A直接比较；第5行只说明风险资料有未补齐缺口，具体内容未知。"
+                    ]
+                  }
+                ],
+                "premiseReviews": [
+                  {
+                    "id": "premise-main-a-cost-v1-review",
+                    "lineId": "main",
+                    "premises": [
+                      "本研究唯一资料是用户指定的 input.txt 冻结文本快照；所有金额仅为 TEST FIXTURE ONLY。",
+                      "研究范围为原文所述方案 A 两年总成本，不外推至其他期限、费用范围或现实价格。",
+                      "方案 B 的成本口径待核对，现阶段不能与方案 A 直接比较。",
+                      "风险资料只说明存在未补齐缺口；具体风险内容未知，不得推断或补造。",
+                      "事实错误应在同一研究前提下以新主张版本和精确勘误更正；旧版本保留为历史记录。"
+                    ],
+                    "claimRefs": [
+                      {
+                        "id": "a-cost",
+                        "version": 1
+                      }
+                    ],
+                    "classification": "fact-error",
+                    "finding": "维持原研究问题与范围，不提出 alternative premise 或新分支；a-cost@1 中的100,000元作为成本事实错误。第2行的1,000,000元反证旧数额，第3行只将100,000元记为尚未核实的旧稿。原主张的可证伪条件仅能核验“旧稿是否写了100,000元”这一历史记录；它不能证伪或确认该金额是否为实际成本。对成本金额的语义核验应以第2行原文为准。",
+                    "changeEvidence": [
+                      "冻结原文第2行：方案A两年总成本为人民币1,000,000元（100万元）。",
+                      "冻结原文第3行：旧草稿写人民币100,000元（10万元），并注明尚未核实。",
+                      "若经认证的同一原文快照修订改变第2行金额或两年范围，需重新审查金额结论；本节点没有提出更改冻结来源或研究前提。"
+                    ]
+                  }
+                ],
+                "issues": [
+                  {
+                    "id": "a-cost-amount-error",
+                    "claimRef": {
+                      "id": "a-cost",
+                      "version": 1
+                    },
+                    "finding": "旧稿100,000元作为方案A两年总成本被冻结原文第2行1,000,000元明确反证；第3行仅支持其为尚未核实的历史草稿记录。",
+                    "disposition": "followup-task",
+                    "reason": "需要在不改动研究前提的情况下，依原文第2行精确更正为新的 claim version，并以不可变 erratum 保留勘误及旧版本历史。",
+                    "followupTaskRef": "correct-claim"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "261010-still-waterfall",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "calls": [
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-mode-fixed-package/mac-arm64/Selection.app/Contents/Resources/app/dist/resources/skills/deep-research/SKILL.md"
+          }
+        },
+        {
+          "name": "Read",
+          "status": "completed",
+          "input": {
+            "file_path": "/private/tmp/selection-joint-baseline-clean/workspaces/comparison/tasks/pro-410e73252dbc5676137c56ab/runs/chat-cb347c8950130cae64acf180a6dd328f6d48a7b3276659a53c01d5704868da25/research/source-0.txt"
+          }
+        },
+        {
+          "name": "mcp__session__submit_task_output",
+          "status": "completed",
+          "input": {
+            "values": {
+              "research": {
+                "evidence": [
+                  {
+                    "id": "draft-record-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 3,
+                      "endLine": 3
+                    },
+                    "excerpt": "旧草稿：方案 A 两年总成本为人民币 100,000 元（10 万元），尚未核实。"
+                  },
+                  {
+                    "id": "fixture-marker-e1",
+                    "sourceId": "fixture-source",
+                    "sourceVersion": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+                    "locator": {
+                      "startLine": 1,
+                      "endLine": 1
+                    },
+                    "excerpt": "TEST FIXTURE ONLY"
+                  }
+                ],
+                "claims": [
+                  {
+                    "id": "a-cost",
+                    "version": 1,
+                    "type": "fact",
+                    "text": "旧草稿声称方案 A 两年总成本为人民币 100,000 元（10 万元）；这是 TEST FIXTURE ONLY 的待核实历史结论，不代表已证实成本。",
+                    "dimensionIds": [
+                      "amount-a"
+                    ],
+                    "lineIds": [
+                      "main"
+                    ],
+                    "evidenceIds": [
+                      "draft-record-e1",
+                      "fixture-marker-e1"
+                    ],
+                    "critical": true,
+                    "keyNumber": true,
+                    "recommendation": false,
+                    "conditions": [
+                      "仅记录旧草稿对方案 A 两年总成本的历史声称；金额为 TEST FIXTURE ONLY。",
+                      "该版本保持待核实，不应作为经原文支持的金额结论。"
+                    ],
+                    "falsificationConditions": [
+                      "亲自核读本次冻结文本快照第 3 行，若其实际不包含旧草稿声称人民币 100,000 元（10 万元）的文字，或明确记载为其他金额，则此关于旧草稿记载内容的主张应被推翻。"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "toolCalls": 42,
+  "workers": 5,
+  "checks": {
+    "inputUnchanged": true,
+    "modeAndPermission": true,
+    "originalRead": true,
+    "correctCost": true,
+    "limitsDisclosed": true,
+    "completed": true,
+    "structuredResearch": true,
+    "exactErrataResolved": true,
+    "correctedIndependentSupport": true,
+    "originalReadsAndBundle": true,
+    "freshPremiseAndGate": true,
+    "noResearchBlockers": true
+  },
+  "provenance": {
+    "runtimeSourceCommit": "6862f9afe0ce4deb238d53f86ffed2c06b7f7fa5",
+    "equivalentProductTestCommit": "ff5721ca52c3b9942db9ee6fb52093e8650d30fa",
+    "ordinaryPackage": "/tmp/selection-mode-fixed-package/mac-arm64/Selection.app",
+    "configDirectory": "/tmp/selection-joint-baseline-clean",
+    "mainSha256": "f42c1328c2abcb2de7609b0b4aae73c398357a076a392d3f068f8001edb3e61b",
+    "followupPrompts": 0,
+    "hostRestarts": 0,
+    "rawResultSha256": "f7fb5492aea98caa0455f20c75eee8a19a75cef840966e6faebca3ac8b87b855"
+  }
+}
