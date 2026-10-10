@@ -1222,6 +1222,14 @@ export const chatComponents: ComponentEntry[] = [
     props: [],
     variants: [
       { name: 'Default', props: {} },
+      {
+        name: '中间进度气泡对齐',
+        props: {
+          activities: [{ id: 'progress-fixture', type: 'tool', toolName: 'run_task', status: 'completed', timestamp: 1,
+            content: JSON.stringify({ runId: 'ui-fixture', status: 'running' }) }],
+          response: { text: '已启动调研，包含近期官方信息与社区反馈检索，并安排独立核验关键结论和引用。完成后我会整理成简体中文摘要，区分官方确认、社区体验与尚未证实的推断。', isStreaming: false },
+        },
+      },
     ],
     mockData: () => ({
       activities: flatActivities,

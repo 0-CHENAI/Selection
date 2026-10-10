@@ -2817,7 +2817,8 @@ export function ResponseCard({
           className={cn("relative group transition-colors duration-200",
             isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
         >
-          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-4 size-3 text-muted-foreground" />}
+          {/* Center the marker in the first line after the body padding and paragraph margin. */}
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-[calc(1rem+0.5lh-0.375rem)] size-3 text-[13px] leading-relaxed text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
