@@ -215,7 +215,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     }])
 
     expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
     expect(html).not.toContain('Thinking...')
   })
 
@@ -229,14 +229,14 @@ describe('TurnCard thinking indicator (#239)', () => {
     }])
 
     expect(countOccurrences(html, 'Thinking...')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   })
 
   it('keeps one standalone status before the first visible activity', async () => {
     const html = await renderTurn('zh-Hans', [])
 
     expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   })
 
   it('shows the latest step in the header with one gap spinner after a tool completes', async () => {
@@ -250,7 +250,7 @@ describe('TurnCard thinking indicator (#239)', () => {
 
     expect(html).toContain('读取文件')
     expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   })
 
   it('does not add a second status below a visible running thinking row', async () => {
@@ -262,7 +262,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     }])
 
     expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
     expect(html).not.toContain('Thinking...')
   })
 
@@ -352,7 +352,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).toContain('shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums')
     expect(html).toMatch(/>1<\/span>/)
     expect(countOccurrences(html, '思考中…')).toBe(0)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(0)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(0)
   })
 
   it('still hides a completed interrupted turn with no meaningful work', async () => {
@@ -392,7 +392,7 @@ it('renders one thinking label after tools even when multiple SDK placeholders o
   for (const rows of [[tool], [tool, placeholders[0]!], [tool, ...placeholders], [tool, placeholders[1]!]]) {
     const html = await renderTurn('zh-Hans', rows)
     expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   }
 })
 

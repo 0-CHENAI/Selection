@@ -1,11 +1,13 @@
 import { modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import {
   Paperclip,
   ArrowUp,
+  ArrowLeft,
+  ChevronRight,
   Square,
   Check,
   DatabaseZap,
@@ -107,6 +109,7 @@ import {
 } from './model-picker-helpers'
 import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
 import { ContextUsageIndicator, type ContextStatus } from './ContextUsageIndicator'
+import { PromptSparks, PromptThinkingSettings } from './PromptBarEffects'
 import {
   ModelPickerEmptyResults,
   ModelPickerOverflowHint,
@@ -117,18 +120,51 @@ import {
   useVisiblePickerModels,
 } from './ModelPickerSearch'
 
+const MODEL_PICKER_DURATION = 0.3
+const MODEL_PICKER_EASE = [0.32, 0.72, 0, 1] as const
+const MODEL_PICKER_VARIANTS = {
+  enter: ({ direction, reduced }: { direction: number; reduced: boolean }) => ({
+    opacity: 0,
+    x: reduced ? 0 : direction * 12,
+  }),
+  visible: { opacity: 1, x: 0 },
+  exit: ({ direction, reduced }: { direction: number; reduced: boolean }) => ({
+    opacity: 0,
+    x: reduced ? 0 : -direction * 8,
+    transition: { duration: reduced ? 0.08 : 0.12, ease: 'easeOut' as const },
+  }),
+}
+
+function ModelPickerPageContent({ children }: { children: React.ReactNode }) {
+  const isPresent = useIsPresent()
+  return (
+    <div
+      className="contents"
+      data-model-picker-active={isPresent}
+      aria-hidden={!isPresent || undefined}
+      {...(!isPresent ? { inert: '' } : {})}
+    >
+      {children}
+    </div>
+  )
+}
+
 function SwitcherConnectionModels({
   conn,
   liveOpenRouterModels,
   currentModel,
   isCurrentConnection,
   onPick,
+  onBack,
+  thinkingSettings,
 }: {
-  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string }
+  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string; name: string }
   liveOpenRouterModels: Parameters<typeof resolvePickerModelsWithLive>[1]
   currentModel: string
   isCurrentConnection: boolean
   onPick: (modelId: string, connectionSlug: string) => void
+  onBack: () => void
+  thinkingSettings?: React.ReactNode
 }) {
   const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
@@ -145,60 +181,78 @@ function SwitcherConnectionModels({
   const showSearch = shouldShowPickerSearch(models.length, query)
 
   return (
-    <StyledDropdownMenuSubContent className="min-w-[220px] max-h-80 overflow-y-auto">
-      {showSearch && (
-        <ModelPickerSearchField value={query} onChange={setQuery} className="px-1 pt-1" />
-      )}
-      {visibleCatalog.visible.length === 0 ? (
-        <ModelPickerEmptyResults />
-      ) : (
-        visibleCatalog.visible.map((model) => {
-          const modelId = pickerModelId(model)
-          const modelName = typeof model === 'string'
-            ? stripPiPrefixForDisplay(getModelShortName(model))
-            : (model.name ?? stripPiPrefixForDisplay(model.id))
-          const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-          const unavailable = isUnavailablePickerModel(catalog, modelId)
-          const limitCaption = unavailable
-            ? t('chat.modelPicker.unavailable')
-            : pickerModelLimitCaption(model, t)
-          return (
-            <StyledDropdownMenuItem
-              key={modelId}
-              onSelect={() => {
-                const next = chosenPickerModelId(
-                  modelId,
-                  isCurrentConnection ? currentModel : '',
-                  catalog,
-                )
-                if (next === undefined) return
-                onPick(next, conn.slug)
-              }}
-              className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
-            >
-              <div className="min-w-0 text-left">
-                <div className="font-medium text-sm">{modelName}</div>
-                {limitCaption && (
-                  <div className={cn(
-                    'text-xs tabular-nums',
-                    unavailable ? 'text-destructive/80' : 'text-muted-foreground',
-                  )}>
-                    {limitCaption}
-                  </div>
+    <>
+      <StyledDropdownMenuItem
+        data-model-picker-back
+        aria-label={t('chat.modelPicker.backToProviders')}
+        onSelect={event => { event.preventDefault(); onBack() }}
+        className="shrink-0 flex items-center gap-2 px-2 py-2 rounded-lg"
+      >
+        <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate font-medium text-sm">{conn.name}</span>
+      </StyledDropdownMenuItem>
+      <StyledDropdownMenuSeparator className="my-1 shrink-0" />
+      <div className="min-h-0 overflow-y-auto">
+        {showSearch && (
+          <ModelPickerSearchField value={query} onChange={setQuery} className="px-1 pt-1" />
+        )}
+        {visibleCatalog.visible.length === 0 ? (
+          <ModelPickerEmptyResults />
+        ) : (
+          visibleCatalog.visible.map((model) => {
+            const modelId = pickerModelId(model)
+            const modelName = typeof model === 'string'
+              ? stripPiPrefixForDisplay(getModelShortName(model))
+              : (model.name ?? stripPiPrefixForDisplay(model.id))
+            const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+            const unavailable = isUnavailablePickerModel(catalog, modelId)
+            const limitCaption = unavailable
+              ? t('chat.modelPicker.unavailable')
+              : pickerModelLimitCaption(model, t)
+            return (
+              <StyledDropdownMenuItem
+                key={modelId}
+                onSelect={() => {
+                  const next = chosenPickerModelId(
+                    modelId,
+                    isCurrentConnection ? currentModel : '',
+                    catalog,
+                  )
+                  if (next === undefined) return
+                  onPick(next, conn.slug)
+                }}
+                className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+              >
+                <div className="min-w-0 text-left">
+                  <div className="font-medium text-sm">{modelName}</div>
+                  {limitCaption && (
+                    <div className={cn(
+                      'text-xs tabular-nums',
+                      unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                    )}>
+                      {limitCaption}
+                    </div>
+                  )}
+                </div>
+                {isSelectedModel && (
+                  <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
                 )}
-              </div>
-              {isSelectedModel && (
-                <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
-              )}
-            </StyledDropdownMenuItem>
-          )
-        })
+              </StyledDropdownMenuItem>
+            )
+          })
+        )}
+        <ModelPickerOverflowHint
+          hiddenCount={visibleCatalog.hiddenCount}
+          searching={query.trim().length > 0}
+        />
+      </div>
+      {thinkingSettings && (
+        <div className="shrink-0">
+          <StyledDropdownMenuSeparator className="my-1" />
+          {thinkingSettings}
+        </div>
       )}
-      <ModelPickerOverflowHint
-        hiddenCount={visibleCatalog.hiddenCount}
-        searching={query.trim().length > 0}
-      />
-    </StyledDropdownMenuSubContent>
+    </>
   )
 }
 
@@ -277,6 +331,8 @@ export interface FreeFormInputProps {
   onAttachmentsChange?: (attachments: FileAttachment[]) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
+  /** PromptBar visual treatment; behavior still belongs to this composer. */
+  appearance?: 'classic' | 'prompt'
   /** Callback when component height changes (for external animation sync) */
   onHeightChange?: (height: number) => void
   /** Callback when focus state changes */
@@ -385,6 +441,7 @@ export function FreeFormInput({
   attachmentsValue,
   onAttachmentsChange,
   unstyled = false,
+  appearance = 'classic',
   onHeightChange,
   onFocusChange,
   sources = [],
@@ -416,6 +473,8 @@ export function FreeFormInput({
   onRequestExpand,
 }: FreeFormInputProps) {
   const reduceMotion = useReducedMotion()
+  const usePromptAppearance = appearance === 'prompt' && !compactMode
+  const typingEnergy = React.useRef(0)
   const { t } = useTranslation()
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
@@ -476,6 +535,8 @@ export function FreeFormInput({
     )
     return typeof model !== 'string' && model?.supportsThinking === false
   }, [availableModels, currentModel])
+  const promptMaxed = usePromptAppearance && !thinkingDisabled && availableThinkingLevels.length > 1
+    && thinkingLevel === availableThinkingLevels.at(-1)?.id
 
   const currentModelDisplayName = React.useMemo(() => {
     const model = availableModels.find(m =>
@@ -654,6 +715,77 @@ export function FreeFormInput({
   const [isFocused, setIsFocused] = React.useState(false)
   const [inputMaxHeight, setInputMaxHeight] = React.useState(540)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
+  const [modelPickerPage, setModelPickerPage] = React.useState<{
+    connectionSlug: string | null
+    direction: 'forward' | 'back' | null
+  }>({ connectionSlug: null, direction: null })
+  const browsedConnectionSlug = modelPickerPage.connectionSlug
+  const browsedConnection = llmConnections.find(conn => conn.slug === browsedConnectionSlug)
+  const modelPickerReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const modelPickerMotion = {
+    direction: modelPickerPage.direction === 'back' ? -1 : 1,
+    reduced: modelPickerReducedMotion,
+  }
+  const modelMenuRef = React.useRef<HTMLDivElement>(null)
+  const modelMenuPreviousBoundsRef = React.useRef<{ height: number; edge: number; side: string } | null>(null)
+  const navigateModelPicker = React.useCallback((connectionSlug: string | null) => {
+    const menu = modelMenuRef.current
+    if (menu) {
+      const rect = menu.getBoundingClientRect()
+      const side = menu.dataset.side ?? 'top'
+      modelMenuPreviousBoundsRef.current = {
+        height: parseFloat(getComputedStyle(menu).height),
+        edge: side === 'top' ? rect.bottom : rect.top,
+        side,
+      }
+    }
+    setModelPickerPage({ connectionSlug, direction: connectionSlug ? 'forward' : 'back' })
+  }, [])
+  React.useLayoutEffect(() => {
+    const menu = modelMenuRef.current
+    const previous = modelMenuPreviousBoundsRef.current
+    modelMenuPreviousBoundsRef.current = null
+    if (!modelDropdownOpen || !menu || !previous
+      || modelPickerReducedMotion) return
+    const nextHeight = parseFloat(getComputedStyle(menu).height)
+    if (Math.abs(nextHeight - previous.height) < 1) return
+    // Keep text at its natural size. Popper repositions after a resize; compensate
+    // before paint so its delayed update cannot make the anchored edge wobble.
+    const animation = menu.animate(
+      [{ height: `${previous.height}px` }, { height: `${nextHeight}px` }],
+      { duration: MODEL_PICKER_DURATION * 1000, easing: `cubic-bezier(${MODEL_PICKER_EASE.join(',')})` },
+    )
+    animation.id = 'model-picker-height'
+    const originalTranslate = menu.style.translate
+    let offset = 0
+    let finished = false
+    let disposed = false
+    const dispose = () => {
+      disposed = true
+      resizeObserver.disconnect()
+      positionObserver.disconnect()
+      menu.style.translate = originalTranslate
+    }
+    const syncEdge = () => {
+      if (disposed) return
+      if (menu.dataset.side !== previous.side) {
+        dispose()
+        animation.cancel()
+        return
+      }
+      const rect = menu.getBoundingClientRect()
+      offset += previous.edge - (previous.side === 'top' ? rect.bottom : rect.top)
+      menu.style.translate = `0 ${offset}px`
+      if (finished && Math.abs(offset) < 0.5) dispose()
+    }
+    const resizeObserver = new ResizeObserver(syncEdge)
+    const positionObserver = new MutationObserver(syncEdge)
+    resizeObserver.observe(menu)
+    if (menu.parentElement) positionObserver.observe(menu.parentElement, { attributes: true, attributeFilter: ['style'] })
+    syncEdge()
+    void animation.finished.then(() => { finished = true; syncEdge() }, () => {})
+    return () => { dispose(); animation.cancel() }
+  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode, modelPickerReducedMotion])
   const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(modelDropdownOpen)
   const modelSearchInputRef = React.useRef<HTMLInputElement>(null)
   const visibleCatalog = useVisiblePickerModels(
@@ -713,18 +845,32 @@ export function FreeFormInput({
 
   const handleModelDropdownOpenChange = React.useCallback((open: boolean) => {
     setModelDropdownOpen(open)
+    setModelPickerPage({
+      connectionSlug: open && pickerMode === 'switcher' && currentModel && effectiveConnectionDetails?.isAuthenticated
+        ? effectiveConnectionDetails.slug : null,
+      direction: null,
+    })
     if (!open) focusComposerAfterPicker()
-  }, [focusComposerAfterPicker])
+  }, [focusComposerAfterPicker, pickerMode, currentModel, effectiveConnectionDetails])
+
+  // The two pages share one menu. Move focus to the new page's first item.
+  React.useEffect(() => {
+    if (!modelDropdownOpen || pickerMode !== 'switcher') return
+    const frame = requestAnimationFrame(() => {
+      modelMenuRef.current?.querySelector<HTMLElement>('[data-model-picker-active="true"] [role="menuitem"]:not([data-disabled])')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode])
 
   React.useEffect(() => {
     const openPicker = (event: CustomEvent<{ sessionId?: string }>) => {
       if (disabled || !isFocusedPanel || (compactMode && !enableCompactModelPicker)
         || !shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId: event.detail?.sessionId })) return
-      setModelDropdownOpen(true)
+      handleModelDropdownOpenChange(true)
     }
     window.addEventListener('craft:open-model-picker', openPicker as EventListener)
     return () => window.removeEventListener('craft:open-model-picker', openPicker as EventListener)
-  }, [sessionId, isFocusedPanel, disabled, compactMode, enableCompactModelPicker])
+  }, [sessionId, isFocusedPanel, disabled, compactMode, enableCompactModelPicker, handleModelDropdownOpenChange])
 
   // Track last caret position for focus restoration (e.g., after permission mode popover closes)
   const lastCaretPositionRef = React.useRef<number | null>(null)
@@ -1564,6 +1710,7 @@ export function FreeFormInput({
     const nextValue = coerceInputText(value)
     // Get previous input value before updating state
     const prevValue = inputRef.current
+    if (nextValue !== prevValue) typingEnergy.current = Math.min(1.2, typingEnergy.current + 0.18)
 
     setInput(nextValue)
     syncToParent(nextValue) // Debounced sync to parent for draft persistence
@@ -1706,6 +1853,15 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
+  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && !thinkingDisabled && availableThinkingLevels.length > 0 ? (
+    <PromptThinkingSettings
+      value={thinkingLevel}
+      levels={availableThinkingLevels}
+      workMode={workMode}
+      disabled={disabled}
+      onChange={onThinkingLevelChange}
+    />
+  ) : null
 
   return (
     <form onSubmit={handleSubmit}>
@@ -1713,16 +1869,20 @@ export function FreeFormInput({
         ref={containerRef}
         className={cn(
           'overflow-hidden transition-all',
+          usePromptAppearance && 'prompt-field',
           // Container styling - only when not wrapped by InputContainer
           !unstyled && 'rounded-[16px] shadow-middle',
           !unstyled && 'bg-background',
           isDraggingOver && 'ring-2 ring-foreground ring-offset-2 ring-offset-background bg-foreground/5'
         )}
+        data-max={promptMaxed || undefined}
+        data-work-mode={workMode}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
+        {usePromptAppearance && <PromptSparks active={promptMaxed && !disabled && !isProcessing} energy={typingEnergy} />}
         {/* Inline Slash Command Autocomplete (skills, commands, folders) */}
         <InlineSlashCommand
           open={inlineSlash.isOpen}
@@ -1908,7 +2068,7 @@ export function FreeFormInput({
           skills={skills}
           sources={sources}
           workspaceId={workspaceSlug}
-          className="pl-5 pr-4 pt-4 pb-3 overflow-y-auto min-h-[88px]"
+          className={cn('overflow-y-auto', usePromptAppearance ? 'px-4 pt-4 pb-2 min-h-[60px]' : 'pl-5 pr-4 pt-4 pb-3 min-h-[88px]')}
           style={{ maxHeight: inputMaxHeight }}
           data-tutorial="chat-input"
           spellCheck={spellCheck}
@@ -1923,7 +2083,7 @@ export function FreeFormInput({
             sessionId={sessionId}
           />
 
-          <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && "border-t border-border/50")}>
+          <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && !usePromptAppearance && "border-t border-border/50")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
           <input
             ref={fileInputRef}
@@ -2187,7 +2347,7 @@ export function FreeFormInput({
           )}
 
           {/* Right side: Model + Send - never shrink so they're always visible */}
-          <div className="flex items-center shrink-0">
+          <div className={cn('flex items-center', usePromptAppearance ? 'min-w-0 shrink' : 'shrink-0')}>
           {/* 5. Model/Connection Selector - Hidden in compact mode (EditPopover embedding) */}
           {!compactMode && (
           <DropdownMenu open={modelDropdownOpen} onOpenChange={handleModelDropdownOpenChange}>
@@ -2198,7 +2358,8 @@ export function FreeFormInput({
                     type="button"
                     disabled={disabled}
                     className={cn(
-                      "input-toolbar-btn inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
+                      "input-toolbar-btn inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
+                      usePromptAppearance ? 'min-w-0 shrink' : 'shrink-0',
                       modelDropdownOpen && "bg-foreground/5",
                       connectionUnavailable && "text-destructive",
                     )}
@@ -2211,7 +2372,7 @@ export function FreeFormInput({
                     ) : (
                       <>
                         {effectiveConnectionDetails && llmConnections.length > 1 && storage.get(storage.KEYS.showConnectionIcons, true) && <ConnectionIcon connection={effectiveConnectionDetails} size={14} showTooltip />}
-                        {currentModelDisplayName}
+                        <span className="truncate">{currentModelDisplayName}</span>
                         <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                       </>
                     )}
@@ -2226,7 +2387,14 @@ export function FreeFormInput({
               side="top"
               align="end"
               sideOffset={8}
-              className="min-w-[260px] max-h-[min(24rem,70vh)] overflow-y-auto"
+              ref={modelMenuRef}
+              className="relative min-w-[260px] max-w-[calc(100vw-24px)] max-h-[min(24rem,70vh)] flex flex-col overflow-hidden"
+              onKeyDown={event => {
+                if (event.key !== 'ArrowLeft' || !browsedConnection) return
+                if ((event.target as HTMLElement).closest('input, [role="slider"]')) return
+                event.preventDefault()
+                navigateModelPicker(null)
+              }}
               // Radix hands focus back to the trigger when the exit animation
               // unmounts this menu - after focusComposerAfterPicker already moved
               // the caret, so the late focus would pull typing out of the input
@@ -2234,180 +2402,206 @@ export function FreeFormInput({
               // close it (#332).
               onCloseAutoFocus={keepComposerFocusOnPickerClose}
               onOpenAutoFocus={(event) => {
-                if (!showModelSearch) return
+                if (pickerMode !== 'flat' || !showModelSearch) return
                 event.preventDefault()
                 modelSearchInputRef.current?.focus()
               }}
             >
-              {/* Connection unavailable message */}
-              {pickerMode === 'unavailable' ? (
-                <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
-                  <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-                  <div className="font-medium text-sm mb-1">{t('chat.connectionUnavailable')}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {t('chat.connectionUnavailableDescription')}
-                  </div>
-                </div>
-              ) : pickerMode === 'switcher' ? (
-                /* Hierarchical view: Provider → Connection → Models (every added provider stays selectable) */
-                connectionsByProvider.map(([providerName, connections], index) => (
-                  <React.Fragment key={providerName}>
-                    {/* Provider group label */}
-                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide select-none">
-                      {providerName}
+              <AnimatePresence initial={false} mode="popLayout" custom={modelPickerMotion}>
+              <motion.div
+                key={browsedConnectionSlug ?? pickerMode}
+                className="model-picker-page flex min-h-0 min-w-0 flex-col gap-0.5"
+                data-direction={modelPickerPage.direction ?? undefined}
+                custom={modelPickerMotion}
+                variants={MODEL_PICKER_VARIANTS}
+                initial="enter"
+                animate="visible"
+                exit="exit"
+                transition={{
+                  duration: modelPickerReducedMotion ? 0.08 : MODEL_PICKER_DURATION,
+                  ease: MODEL_PICKER_EASE,
+                }}
+              >
+                <ModelPickerPageContent>
+                <div className={pickerMode === 'switcher' && browsedConnection ? 'contents' : 'min-h-0 overflow-y-auto'}>
+                {/* Connection unavailable message */}
+                {pickerMode === 'unavailable' ? (
+                  <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                    <AlertCircle className="h-8 w-8 text-destructive mb-2" />
+                    <div className="font-medium text-sm mb-1">{t('chat.connectionUnavailable')}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t('chat.connectionUnavailableDescription')}
                     </div>
-                    {connections.map((conn) => {
-                      const isCurrentConnection = effectiveConnection === conn.slug
-                      const isAuthenticated = conn.isAuthenticated
-                      return (
-                        <DropdownMenuSub key={conn.slug}>
-                          <StyledDropdownMenuSubTrigger
-                            disabled={!isAuthenticated}
-                            className={cn(
-                              "flex items-center justify-between px-2 py-2 rounded-lg",
-                              isCurrentConnection && "bg-foreground/5"
-                            )}
-                          >
-                            <div className="text-left flex-1">
-                              <div className="font-medium text-sm flex items-center gap-1.5">
-                                <ConnectionIcon connection={conn} size={14} />
-                                {conn.name}
-                                {isCurrentConnection && <Check className="h-3 w-3 text-foreground" />}
-                              </div>
-                              {!isAuthenticated && (
-                                <div className="text-xs text-muted-foreground">{t('settings.ai.notAuthenticated')}</div>
-                              )}
-                            </div>
-                          </StyledDropdownMenuSubTrigger>
-                          {isAuthenticated && (
-                            <SwitcherConnectionModels
-                              conn={conn}
-                              liveOpenRouterModels={liveOpenRouterModels}
-                              currentModel={currentModel}
-                              isCurrentConnection={isCurrentConnection}
-                              onPick={(modelId, connectionSlug) => {
-                                if (!isCurrentConnection && onConnectionChange) {
-                                  onConnectionChange(connectionSlug)
-                                }
-                                onModelChange(modelId, connectionSlug)
-                              }}
-                            />
-                          )}
-                        </DropdownMenuSub>
-                      )
-                    })}
-                    {index < connectionsByProvider.length - 1 && (
-                      <StyledDropdownMenuSeparator className="my-1" />
-                    )}
-                  </React.Fragment>
-                ))
-              ) : (
-                /* Flat model list (single connection or session started) */
-                <>
-                  {/* Indicator showing which connection is being used */}
-                  {!isEmptySession && currentConnectionDetails && llmConnections.length > 1 && (
-                    <>
-                      <div className="flex items-center gap-2 px-2 py-1.5 text-xs select-none text-muted-foreground">
-                        <span>{t('chat.usingConnection', { name: currentConnectionDetails.name })}</span>
-                      </div>
-                      <StyledDropdownMenuSeparator className="my-1" />
-                    </>
-                  )}
-                  {showModelSearch && (
-                    <ModelPickerSearchField
-                      value={modelSearchQuery}
-                      onChange={setModelSearchQuery}
-                      inputRef={modelSearchInputRef}
-                      className="px-1 pt-1"
+                  </div>
+                ) : pickerMode === 'switcher' ? (
+                  browsedConnection ? (
+                    <SwitcherConnectionModels
+                      key={browsedConnection.slug}
+                      conn={browsedConnection}
+                      liveOpenRouterModels={liveOpenRouterModels}
+                      currentModel={currentModel}
+                      isCurrentConnection={effectiveConnection === browsedConnection.slug}
+                      thinkingSettings={effectiveConnection === browsedConnection.slug ? promptThinkingSettings : undefined}
+                      onBack={() => navigateModelPicker(null)}
+                      onPick={(modelId, connectionSlug) => {
+                        if (effectiveConnection !== connectionSlug) onConnectionChange?.(connectionSlug)
+                        onModelChange(modelId, connectionSlug)
+                      }}
                     />
-                  )}
-                  {visibleCatalog.visible.length === 0 ? (
-                    <ModelPickerEmptyResults />
-                  ) : (
-                    visibleCatalog.visible.map((model) => {
-                    const modelId = pickerModelId(model)
-                    const modelName = typeof model === 'string'
-                      ? stripPiPrefixForDisplay(getModelShortName(model))
-                      : (model.name ?? stripPiPrefixForDisplay(model.id))
-                    const isSelected = isPickerModelSelected(currentModel, modelId)
-                    const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
-                    const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
-                    const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
-                    const limitCaption = pickerModelLimitCaption(model, t)
-                    const secondary = unavailable
-                      ? t('chat.modelPicker.unavailable')
-                      : [description, limitCaption].filter(Boolean).join(' · ')
-                    return (
-                      <StyledDropdownMenuItem
-                        key={modelId}
-                        onSelect={() => {
-                          const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
-                          if (next === undefined) return
-                          onModelChange(next, effectiveConnection)
-                        }}
-                        className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
-                      >
-                        <div className="text-left">
-                          <div className="font-medium text-sm">{modelName}</div>
-                          {secondary && (
-                            <div className={cn(
-                              'text-xs',
-                              unavailable ? 'text-destructive/80' : 'text-muted-foreground',
-                            )}>
-                              {secondary}
-                            </div>
-                          )}
-                        </div>
-                        {isSelected && (
-                          <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
-                        )}
-                      </StyledDropdownMenuItem>
-                    )
-                  })
-                  )}
-                  <ModelPickerOverflowHint
-                    hiddenCount={visibleCatalog.hiddenCount}
-                    searching={modelSearchQuery.trim().length > 0}
-                  />
-                </>
-              )}
-
-              {/* Thinking level selector — only shown when thinking levels are available
-                  (Claude supports extended thinking, OpenAI backends may not) */}
-              {availableThinkingLevels.length > 0 && (
-                <>
-                  <StyledDropdownMenuSeparator className="my-1" />
-
-                  <DropdownMenuSub>
-                    <StyledDropdownMenuSubTrigger disabled={thinkingDisabled} className={cn("flex items-center justify-between px-2 py-2 rounded-lg", thinkingDisabled && "opacity-50 cursor-not-allowed")}>
-                      <div className="text-left flex-1">
-                        <div className="font-medium text-sm">{t(getThinkingLevelNameKey(thinkingLevel))}</div>
-                        <div className="text-xs text-muted-foreground">{thinkingDisabled ? t('thinking.notSupported') : t('thinking.extendedDesc')}</div>
+                  ) : connectionsByProvider.map(([providerName, connections], index) => (
+                    <React.Fragment key={providerName}>
+                      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide select-none">
+                        {providerName}
                       </div>
-                    </StyledDropdownMenuSubTrigger>
-                    <StyledDropdownMenuSubContent className="min-w-[220px]">
-                      {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
-                        const isSelected = thinkingLevel === id
-                        return (
-                          <StyledDropdownMenuItem
-                            key={id}
-                            onSelect={() => onThinkingLevelChange?.(id)}
-                            className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
-                          >
-                            <div className="text-left">
-                              <div className="font-medium text-sm">{t(nameKey)}</div>
-                              <div className="text-xs text-muted-foreground">{t(descriptionKey)}</div>
+                      {connections.map(conn => (
+                        <StyledDropdownMenuItem
+                          key={conn.slug}
+                          disabled={!conn.isAuthenticated}
+                          onSelect={event => {
+                            event.preventDefault()
+                            navigateModelPicker(conn.slug)
+                          }}
+                          className={cn(
+                            'flex items-center justify-between px-2 py-2 rounded-lg',
+                            effectiveConnection === conn.slug && 'bg-foreground/5',
+                          )}
+                        >
+                          <div className="min-w-0 text-left flex-1">
+                            <div className="font-medium text-sm flex items-center gap-1.5">
+                              <ConnectionIcon connection={conn} size={14} />
+                              <span className="truncate">{conn.name}</span>
+                              {effectiveConnection === conn.slug && <Check className="h-3 w-3 shrink-0 text-foreground" />}
                             </div>
-                            {isSelected && (
-                              <Check className="h-3 w-3 text-foreground shrink-0 ml-3" />
+                            {!conn.isAuthenticated && (
+                              <div className="text-xs text-muted-foreground">{t('settings.ai.notAuthenticated')}</div>
                             )}
-                          </StyledDropdownMenuItem>
-                        )
-                      })}
-                    </StyledDropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </>
-              )}
+                          </div>
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 ml-3 text-muted-foreground" />
+                        </StyledDropdownMenuItem>
+                      ))}
+                      {index < connectionsByProvider.length - 1 && (
+                        <StyledDropdownMenuSeparator className="my-1" />
+                      )}
+                    </React.Fragment>
+                  ))
+                ) : (
+                  /* Flat model list (single connection or session started) */
+                  <>
+                    {/* Indicator showing which connection is being used */}
+                    {!isEmptySession && currentConnectionDetails && llmConnections.length > 1 && (
+                      <>
+                        <div className="flex items-center gap-2 px-2 py-1.5 text-xs select-none text-muted-foreground">
+                          <span>{t('chat.usingConnection', { name: currentConnectionDetails.name })}</span>
+                        </div>
+                        <StyledDropdownMenuSeparator className="my-1" />
+                      </>
+                    )}
+                    {showModelSearch && (
+                      <ModelPickerSearchField
+                        value={modelSearchQuery}
+                        onChange={setModelSearchQuery}
+                        inputRef={modelSearchInputRef}
+                        className="px-1 pt-1"
+                      />
+                    )}
+                    {visibleCatalog.visible.length === 0 ? (
+                      <ModelPickerEmptyResults />
+                    ) : (
+                      visibleCatalog.visible.map((model) => {
+                      const modelId = pickerModelId(model)
+                      const modelName = typeof model === 'string'
+                        ? stripPiPrefixForDisplay(getModelShortName(model))
+                        : (model.name ?? stripPiPrefixForDisplay(model.id))
+                      const isSelected = isPickerModelSelected(currentModel, modelId)
+                      const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
+                      const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
+                      const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
+                      const limitCaption = pickerModelLimitCaption(model, t)
+                      const secondary = unavailable
+                        ? t('chat.modelPicker.unavailable')
+                        : [description, limitCaption].filter(Boolean).join(' · ')
+                      return (
+                        <StyledDropdownMenuItem
+                          key={modelId}
+                          onSelect={() => {
+                            const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                            if (next === undefined) return
+                            onModelChange(next, effectiveConnection)
+                          }}
+                          className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+                        >
+                          <div className="text-left">
+                            <div className="font-medium text-sm">{modelName}</div>
+                            {secondary && (
+                              <div className={cn(
+                                'text-xs',
+                                unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                              )}>
+                                {secondary}
+                              </div>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+                          )}
+                        </StyledDropdownMenuItem>
+                      )
+                    })
+                    )}
+                    <ModelPickerOverflowHint
+                      hiddenCount={visibleCatalog.hiddenCount}
+                      searching={modelSearchQuery.trim().length > 0}
+                    />
+                  </>
+                )}
+
+                </div>
+                {pickerMode === 'flat' && promptThinkingSettings && (
+                  <div className="shrink-0">
+                    <StyledDropdownMenuSeparator className="my-1" />
+                    {promptThinkingSettings}
+                  </div>
+                )}
+
+                {/* Thinking level selector — only shown when thinking levels are available
+                    (Claude supports extended thinking, OpenAI backends may not) */}
+                {availableThinkingLevels.length > 0 && (!usePromptAppearance || !onThinkingLevelChange) && (
+                  <>
+                    <StyledDropdownMenuSeparator className="my-1" />
+
+                    <DropdownMenuSub>
+                      <StyledDropdownMenuSubTrigger disabled={thinkingDisabled} className={cn("flex items-center justify-between px-2 py-2 rounded-lg", thinkingDisabled && "opacity-50 cursor-not-allowed")}>
+                        <div className="text-left flex-1">
+                          <div className="font-medium text-sm">{t(getThinkingLevelNameKey(thinkingLevel))}</div>
+                          <div className="text-xs text-muted-foreground">{thinkingDisabled ? t('thinking.notSupported') : t('thinking.extendedDesc')}</div>
+                        </div>
+                      </StyledDropdownMenuSubTrigger>
+                      <StyledDropdownMenuSubContent className="min-w-[220px]">
+                        {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
+                          const isSelected = thinkingLevel === id
+                          return (
+                            <StyledDropdownMenuItem
+                              key={id}
+                              onSelect={() => onThinkingLevelChange?.(id)}
+                              className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+                            >
+                              <div className="text-left">
+                                <div className="font-medium text-sm">{t(nameKey)}</div>
+                                <div className="text-xs text-muted-foreground">{t(descriptionKey)}</div>
+                              </div>
+                              {isSelected && (
+                                <Check className="h-3 w-3 text-foreground shrink-0 ml-3" />
+                              )}
+                            </StyledDropdownMenuItem>
+                          )
+                        })}
+                      </StyledDropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </>
+                )}
+                </ModelPickerPageContent>
+              </motion.div>
+              </AnimatePresence>
             </StyledDropdownMenuContent>
           </DropdownMenu>
           )}

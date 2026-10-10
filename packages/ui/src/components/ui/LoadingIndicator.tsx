@@ -1,6 +1,7 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "../../lib/utils"
+import LatticeLoader, { type LatticeStatus } from './LatticeLoader'
 
 /**
  * Format duration in human-readable form
@@ -18,16 +19,17 @@ function formatDuration(ms: number): string {
 export interface SpinnerProps {
   /** Additional className */
   className?: string
+  status?: LatticeStatus
 }
 
 /**
- * Spinner - 3x3 grid spinner based on SpinKit Grid
+ * Compact LatticeLoader. Keeps existing em sizing and adjacent status text.
  *
  * Features:
- * - Uses currentColor (inherits text color from parent)
+ * - Uses the active theme's foreground, success and error colors
  * - Uses em sizing (scales with font-size)
- * - 3x3 grid of cubes with staggered scale animation
- * - Pure CSS animation (no JS state)
+ * - 3x3 orbit wave, dissolving into a check or cross
+ * - CSS animation with no per-icon timer
  *
  * Usage:
  * ```tsx
@@ -40,24 +42,23 @@ export interface SpinnerProps {
  * <Spinner className="text-amber-500 text-lg" />
  * ```
  */
-export function Spinner({ className }: SpinnerProps) {
+export function Spinner({ className, status = 'working' }: SpinnerProps) {
   const { t } = useTranslation()
   return (
-    <span
-      className={cn("spinner", className)}
-      role="status"
-      aria-label={t("common.loading")}
-    >
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-      <span className="spinner-cube" />
-    </span>
+    <LatticeLoader
+      className={cn('lattice-loader--compact leading-none', className)}
+      status={status}
+      label={t('common.loading')}
+      doneLabel={t('common.done')}
+      errorLabel={t('common.failed')}
+      color="currentColor"
+      cellSize="0.28em"
+      gap="0.08em"
+      fontSize="1em"
+      idleOpacity={0.16}
+      showLabel={false}
+      showTimer={false}
+    />
   )
 }
 

@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { parseTaskSpec, saveTaskSpec, readRunState, readRunLog, appendRunLog, writeRunState, loadTaskResults, runDir, type OrchestrationDecision } from '@craft-agent/shared/tasks';
 import { TaskRunner, type ConductorSessionHost } from './TaskRunner';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
+import { handleSubmitOrchestrationDecision } from '../../../session-tools-core/src/handlers/submit-orchestration-decision';
+import type { SessionToolContext } from '../../../session-tools-core/src/context';
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 let root: string, runner: TaskRunner, host: ReturnType<typeof makeHost>;
@@ -34,6 +36,51 @@ function decide(extra: Partial<OrchestrationDecision> = {}) {
   return runner.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId, baseRevision: state.revision, decisionId: `decision-${state.seq}`, action: 'continue', ...extra });
 }
 async function start() { runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); decide(); await tick(); }
+
+it('returns an unapplied checkpoint conflict and starts the graph only after a fresh exact decision', async () => {
+  runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-10-10T00:00:00.000Z' });
+  runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+  const before = runner.getRunState('dynamic', 'r')!;
+  const context = { submitOrchestrationDecision: async (input: OrchestrationDecision) => runner.applyOrchestrationDecisionByRunId('orch', input) } as unknown as SessionToolContext;
+  const wrong = { runId: 'r', checkpointId: 'first-schedule', decisionId: 'first', baseRevision: 0, action: 'continue' as const };
+  const result = await handleSubmitOrchestrationDecision(context, wrong);
+  const conflict = JSON.parse(result.content[0]!.text);
+  expect(result.isError).toBe(false);
+  expect(conflict.applied).toBe(false);
+  expect(conflict.currentRun.coordinatorGate.checkpointId).toBe(before.coordinatorGate!.checkpointId);
+  expect(runner.getRunState('dynamic', 'r')).toEqual(before);
+  expect(host.created).toEqual([]);
+  const accepted = await handleSubmitOrchestrationDecision(context, { ...wrong, checkpointId: conflict.currentRun.coordinatorGate.checkpointId });
+  expect(JSON.parse(accepted.content[0]!.text).status).toBe('running');
+  await tick(); expect(host.created).toEqual(['session-a', 'session-b']);
+});
+
+it('retries from an active coordinator but still blocks an unsafe execution worker before any commit', async () => {
+  let unsafeWorker: string | undefined = 'failed-session';
+  const checked: string[][] = [];
+  runner = new TaskRunner({ host: { ...host, assertTaskSafePoint(ids) {
+    checked.push(ids);
+    for (const id of ids) if (id === 'orch' || id === unsafeWorker) throw new Error(`Execution ${id} has not confirmed shutdown`);
+  } }, workspaceId: 'ws', workspaceRoot: root });
+  await start();
+  const binding = runner.reserveTaskWorker('orch', { runId: 'r', nodeId: 'a' }, 'bad-worker', 'worker');
+  runner.bindTaskWorker(binding, 'bad-worker', 'failed-session');
+  host.complete('a', 'primary response');
+  runner.completeTaskWorker('dynamic', 'r', 'bad-worker', 'failed-session', 'failed', undefined, 'source missing');
+  host.complete('b', 'independent successful result'); await tick();
+  const before = readRunState(root, 'dynamic', 'r')!;
+  expect(() => decide({ action: 'retry', rationale: 'Correct missing source' })).toThrow('failed-session');
+  expect(readRunState(root, 'dynamic', 'r')).toEqual(before);
+  unsafeWorker = undefined;
+  const retried = decide({ action: 'retry', rationale: 'Correct missing source' });
+  expect(retried.status).toBe('waiting-coordinator');
+  expect(retried.coordinatorGate!.checkpointId).not.toBe(before.coordinatorGate!.checkpointId);
+  expect(retried.nodes.find(node => node.id === 'b')!.state).toBe('done');
+  expect(retried.nodes.find(node => node.id === 'a')!.state).toBe('pending');
+  expect(checked.length).toBeGreaterThan(1);
+  expect(checked.every(ids => !ids.includes('orch') && ids.includes('failed-session'))).toBe(true);
+  expect(host.created).toEqual(['session-a', 'session-b']);
+});
 
 it('acknowledges an identical committed continue without repeated work or accepting conflicting identities', async () => {
   runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true });

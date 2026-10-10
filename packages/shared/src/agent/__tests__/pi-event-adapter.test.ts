@@ -831,12 +831,11 @@ describe('PiEventAdapter', () => {
       } as any))
       const completeEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any))
 
-      expect(errorEvents).toHaveLength(1)
-      expect(errorEvents[0]).toMatchObject({
-        type: 'error',
-        message: 'Stream ended without finish_reason',
-      })
-      expect(completeEvents).toEqual([{ type: 'complete' }])
+      expect(errorEvents).toHaveLength(0)
+      expect(completeEvents).toEqual([
+        { type: 'error', message: 'Stream ended without finish_reason' },
+        { type: 'complete' },
+      ])
     })
 
     it('should emit plain error for unclassified error messages', () => {
@@ -927,9 +926,10 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('typed_error');
-      expect(events[0].error.code).toBe('rate_limited');
+      expect(events).toHaveLength(0);
+      const terminal = collect(adapter.adaptEvent({ type: 'agent_end', willRetry: false } as any));
+      expect(terminal[0].type).toBe('typed_error');
+      expect(terminal[0].error.code).toBe('rate_limited');
     });
 
     it('should not emit error when the user stops a turn', () => {
@@ -1609,13 +1609,13 @@ describe('PiEventAdapter', () => {
       });
     });
 
-    it('should emit nothing for successful auto_retry_end', () => {
+    it('clears the transient status for successful auto_retry_end', () => {
       const events = collect(adapter.adaptEvent({
         type: 'auto_retry_end',
         success: true,
       } as any));
 
-      expect(events).toHaveLength(0);
+      expect(events).toEqual([{ type: 'status', message: '' }]);
     });
 
     it('should emit nothing for queue_update', () => {
@@ -1828,13 +1828,11 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      // Rate-limit yields a typed_error (not held) — overflow state stays 'none'
-      // so a subsequent agent_end completes the queue normally.
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toMatch(/^(error|typed_error)$/);
+      // Retryable failures are held until the SDK confirms no retry follows.
+      expect(events).toHaveLength(0);
 
       const agentEndEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
-      expect(agentEndEvents).toMatchObject([{ type: 'complete' }]);
+      expect(agentEndEvents).toMatchObject([{ type: 'typed_error' }, { type: 'complete' }]);
       expect(adapter.shouldCompleteQueue(true)).toBe(true);
     });
 

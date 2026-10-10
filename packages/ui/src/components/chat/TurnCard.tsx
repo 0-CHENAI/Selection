@@ -735,6 +735,13 @@ export function ActivityStatusIcon({
   const reduceMotion = useReducedMotion()
   const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
 
+  // The lattice is for active work; terminal states use the familiar circle icons.
+  if (status === 'running' || status === 'backgrounded') {
+    return <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
+      <Spinner className={cn(SIZE_CONFIG.spinnerSize, status === 'backgrounded' && 'text-accent')} />
+    </span>
+  }
+
   // Render the appropriate icon based on status
   const renderIcon = () => {
     // For completed status with custom icon, use it instead of checkmark
@@ -763,18 +770,6 @@ export function ActivityStatusIcon({
     switch (status) {
       case 'pending':
         return <Circle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
-      case 'running':
-        return (
-          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            <Spinner className={SIZE_CONFIG.spinnerSize} />
-          </div>
-        )
-      case 'backgrounded':
-        return (
-          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            <Spinner className={cn(SIZE_CONFIG.spinnerSize, "text-accent")} />
-          </div>
-        )
       case 'completed':
         // Edit and Write tools get their own icons with accent color instead of green checkmark
         if (toolName === 'Edit') {
@@ -1219,15 +1214,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           )}
         >
           <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            {isRunning ? (
-              <Spinner className={SIZE_CONFIG.spinnerSizeSmall} />
-            ) : activity.status === 'error' ? (
-              <XCircle className={cn(SIZE_CONFIG.iconSize, 'text-destructive')} />
-            ) : activity.status === 'pending' || activity.status === 'backgrounded' ? (
-              <Circle className={SIZE_CONFIG.iconSize} />
-            ) : (
-              <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
-            )}
+            <ActivityStatusIcon status={activity.status} />
           </div>
           <span className={activity.taskContext ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'truncate'}>{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
         </div>
@@ -2832,7 +2819,8 @@ export function ResponseCard({
           className={cn("relative group transition-colors duration-200",
             isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
         >
-          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-4 size-3 text-muted-foreground" />}
+          {/* Center the marker in the first line after the body padding and paragraph margin. */}
+          {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-[calc(1rem+0.5lh-0.375rem)] size-3 text-[13px] leading-relaxed text-muted-foreground" />}
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div

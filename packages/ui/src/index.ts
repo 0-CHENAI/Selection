@@ -105,6 +105,7 @@ export {
 export {
   Spinner,
   LoadingIndicator,
+  LatticeLoader,
   SimpleDropdown,
   SimpleDropdownItem,
   PreviewHeader,
@@ -129,6 +130,8 @@ export {
   useIslandNavigation,
   type SpinnerProps,
   type LoadingIndicatorProps,
+  type LatticeLoaderProps,
+  type LatticeStatus,
   type SimpleDropdownProps,
   type SimpleDropdownItemProps,
   type PreviewHeaderProps,

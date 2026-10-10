@@ -32,12 +32,11 @@ describe('TaskStatusIcon (#204)', () => {
     expect(src).not.toMatch(/const StatusIcon = /)
   })
 
-  it('uses Spinner only while the task is running', () => {
-    expect(renderIcon('running')).toContain('spinner')
-    expect(renderIcon('completed')).not.toContain('spinner')
-    expect(renderIcon('failed')).not.toContain('spinner')
-    expect(renderIcon('stopped')).not.toContain('spinner')
-    expect(renderIcon('orphaned')).not.toContain('spinner')
-    expect(renderIcon('stale')).not.toContain('spinner')
+  it('shows the working indicator only while the task is running', () => {
+    expect(renderIcon('running')).toContain('role="status"')
+    expect(renderIcon('running')).toContain('data-status="working"')
+    for (const status of ['completed', 'failed', 'stopped', 'orphaned', 'stale'] as const) {
+      expect(renderIcon(status)).not.toContain('data-status="working"')
+    }
   })
 })

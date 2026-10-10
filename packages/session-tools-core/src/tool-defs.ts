@@ -351,7 +351,7 @@ export const SubmitOrchestrationDecisionSchema = z.object({
   changeKind: z.enum(['structure', 'repair', 'research']).optional(),
   researchExpansion: ResearchExpansionToolSchema.optional(),
   runId: z.string().describe('Active run id'),
-  checkpointId: z.string().describe('Checkpoint this decision answers'),
+  checkpointId: z.string().describe('Exact opaque coordinatorGate.checkpointId from the current host checkpoint. Copy it verbatim; reason names such as first-schedule or node-failed are NOT checkpoint IDs. Never infer or reuse an old ID.'),
   decisionId: z.string().describe('Idempotency key for this decision'),
   baseRevision: z.number().int().min(0).describe('Revision this decision is based on'),
   action: z.enum(['continue', 'patch', 'pause', 'retry']).describe('continue the graph, patch pending nodes, pause for review, or retry failed/invalid nodes and affected dependents after workers settle; unrelated successful work is preserved'),

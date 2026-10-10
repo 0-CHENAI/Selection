@@ -651,7 +651,7 @@ class ActiveRun {
   }
 
   /** Explicit recovery follows dependency edges; unrelated successful work remains intact. */
-  private retryFailedNodes(): RunSnapshot {
+  private retryFailedNodes(coordinatorActive = false): RunSnapshot {
     const roots = new Set([...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'invalid').map(([id]) => id));
     const affected = dependencyImpact(roots, this.spec.nodes, this.edges);
     const retryIds = [...affected];
@@ -667,7 +667,7 @@ class ActiveRun {
     }
     this.assertSensitiveReady();
     if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
-    this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+    this.deps.host.assertTaskSafePoint?.(this.executionSessions(!coordinatorActive));
     // One durable event also invalidates stale reviewer decisions and expanded descendants.
     this.log({ kind: 'run-resumed', retryNodeIds: retryIds, discardInstanceIds: discardIds });
     this.applyRetryReset(retryIds, discardIds);
@@ -2143,9 +2143,9 @@ class ActiveRun {
     return this.sessionToNode.has(sessionId) || [...this.workers.values()].some(worker => worker.sessionId === sessionId) || this.opts.orchestratorSessionId === sessionId;
   }
 
-  executionSessions(): string[] {
+  executionSessions(includeCoordinator = true): string[] {
     return [...new Set([...this.sessionToNode.keys(), ...[...this.workers.values()].flatMap(worker => worker.sessionId ? [worker.sessionId] : []),
-      ...(this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])])];
+      ...(includeCoordinator && this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])])];
   }
 
   markSuperseded(runId: string): void {
@@ -3435,6 +3435,7 @@ class ActiveRun {
           `Conductor checkpoint (${reason}).`,
           `checkpointId=${checkpointId}`,
           `revision=${this.revision}`,
+          `Decision identity (copy verbatim, never use the reason as checkpointId): ${JSON.stringify({ runId: this.runId, checkpointId, baseRevision: this.revision })}`,
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, pause, or retry.',
           'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
@@ -3521,10 +3522,12 @@ class ActiveRun {
       if (this.inFlight || this.hasUnsettledRunningNode() || this.hasExpandingWork()) throw new TaskControlError(this.runStatus, 'Wait for active workers to settle before retrying failed nodes');
       this.assertSensitiveReady();
       if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
-      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      // The authorized coordinator is executing this decision, not restarting
+      // itself. Every execution worker must still have confirmed shutdown.
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions(false));
       this.commitPlanPatch(undefined, { ...decision, consumedResults, plannerPhase: 'active', rationale: decision.rationale! }, decision);
       this.clearCoordinatorGate();
-      return this.retryFailedNodes();
+      return this.retryFailedNodes(true);
     }
     if (result.action === 'patch' && result.patch) {
       this.commitPlanPatch(result.patch, { ...decision, consumedResults, rationale: decision.rationale ?? '' }, decision);
