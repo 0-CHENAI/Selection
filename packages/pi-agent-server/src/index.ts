@@ -29,7 +29,7 @@ import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-r
 import { createTaskContextTool } from './task-context.ts';
 import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
-import { answerExecutionError, isAnswerTool, isTurnCompletionTool, answerTurnToolNames } from './answer-delivery-guard.ts';
+import { answerExecutionError, isAnswerTool, isTurnCompletionTool, acceptsTurnCompletion, answerTurnToolNames } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -1194,7 +1194,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           pendingToolExecutions.set(requestId, { resolve });
         });
 
-        if (isTurnCompletionTool(executionName) && !result.isError) answerAccepted = true;
+        if (acceptsTurnCompletion(executionName, result)) answerAccepted = true;
         return {
           content: normalizeProxyToolContent(result.content),
           details: proxyToolDetails(result),

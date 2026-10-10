@@ -11,6 +11,18 @@ export function isTurnCompletionTool(name: string): boolean {
   return isAnswerTool(name) || isCoordinatorDecisionTool(name);
 }
 
+/** A duplicate receipt must not abandon a newer gate whose notification started this turn. */
+export function acceptsTurnCompletion(name: string, result: { isError?: boolean; content: string | { type: string; text?: string }[] }): boolean {
+  if (!isTurnCompletionTool(name) || result.isError) return false;
+  if (isCoordinatorDecisionTool(name)) {
+    try {
+      const receipt = JSON.parse(typeof result.content === 'string' ? result.content : result.content.find(block => block.type === 'text')?.text ?? '');
+      if (receipt?.alreadyApplied === true && receipt.status === 'waiting-coordinator' && receipt.coordinatorGate?.checkpointId) return false;
+    } catch { /* Older successful receipts keep their existing handoff behavior. */ }
+  }
+  return true;
+}
+
 /** Scope model-visible tools for this turn; the caller restores the full set next turn. */
 export function answerTurnToolNames(names: string[], state: { runId?: string; recovery?: boolean; coordinationOnly?: boolean }): string[] {
   return names.filter(name => state.recovery ? isAnswerTool(name)

@@ -45,6 +45,30 @@ async function firstReview() {
   decide();await tick();
   await complete('review',{reviews:[{claimRef:{id:'cost',version:1},citationExists:true,support:'contradicted',finding:'Source says 1,000,000'}],issues:[{id:'wrong-cost',claimRef:{id:'cost',version:1},finding:'Wrong number',disposition:'defer',reason:'Needs canonical correction then fresh review'}]});
 }
+test('a superseded help input retires the stale answer and refreshes the same worker after the current gate', async () => {
+  await firstReview();
+  decide({ action: 'patch', rationale: 'Correct cost and independently review it', add: [node('fix', 'researcher', ['review']), node('waiting', 'reviewer', ['review'])], update: [{ id: 'report', depends_on: ['fix', 'waiting'] }] }); await tick();
+  const old = loadTaskResults(root, 'research', 'r').research!.claims[0]!;
+  const promise = runner.taskHelp('session-waiting', 0, { action: 'request', requestId: 'needs-correction', problem: 'Cost v1 is contradicted', tried: ['Read original'], needed: 'Wait for corrected claim', claimRefs: [{ id: 'cost', version: 1 }] }) as Promise<unknown>;
+  const rejection = promise.catch(error => error.message);
+  const help = loadTaskResults(root, 'research', 'r').help![0]!;
+  const { producedBy: _producer, review: _review, reviewer: _reviewer, ...claim } = old;
+  await complete('fix', { claims: [{ ...claim, version: 2, text: 'Cost 1,000,000 yuan' }] });
+  const answer = { action: 'answer' as const, requestId: help.id, runId: 'r', baseRevision: 1, responseId: 'obsolete-answer', response: 'Use old v1' };
+  expect(runner.taskHelp('orch', 0, answer)).toMatchObject({ state: 'cancelled', needsRefresh: true });
+  expect(loadTaskResults(root, 'research', 'r').help![0]).toMatchObject({ state: 'cancelled', responses: [] });
+  expect(runner.getRunState('research', 'r')!.nodes.find(node => node.id === 'waiting')!.state).toBe('waiting-help');
+  decide(); await tick();
+  expect(await rejection).toContain('No stale response was applied');
+  expect(runner.getRunState('research', 'r')!.nodes.find(node => node.id === 'waiting')).toMatchObject({ state: 'running', attempt: 1, sessionId: 'session-waiting' });
+  expect(sent.filter(message => message.id === 'session-waiting')).toHaveLength(1);
+  expect(() => runner.taskHelp('orch', 0, answer)).toThrow('retired attempt');
+  const refreshed = runner.taskHelp('session-waiting', 0, { action: 'request', requestId: 'current-correction', problem: 'Review current v2', tried: ['Refreshed canonical results'], needed: 'Confirm unchanged scope', claimRefs: [{ id: 'cost', version: 2 }] }) as Promise<unknown>;
+  const current = loadTaskResults(root, 'research', 'r').help!.at(-1)!;
+  runner.taskHelp('orch', 0, { ...answer, requestId: current.id, responseId: 'current-answer', response: 'Read and review v2 within the existing scope' });
+  expect(await refreshed).toMatchObject({ state: 'answered', permissionGranted: false });
+  expect(loadTaskResults(root, 'research', 'r').research!.claims[0]!.version).toBe(2);
+});
 test('F5-a/d durable business records survive restart, dynamic correction and exact-version review',async()=>{
   await firstReview();
   const before=loadTaskResults(root,'research','r').research!;

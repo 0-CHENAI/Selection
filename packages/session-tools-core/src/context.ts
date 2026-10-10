@@ -388,7 +388,7 @@ export interface SessionToolContext {
 
   submitOrchestrationPatch?(input: OrchestrationPatchInput): Promise<{ status: string; revision?: number }>;
 
-  submitOrchestrationDecision?(input: OrchestrationDecisionInput): Promise<{ status: string; revision?: number }>;
+  submitOrchestrationDecision?(input: OrchestrationDecisionInput): Promise<{ status: string; revision?: number; alreadyApplied?: boolean; coordinatorGate?: { checkpointId: string } }>;
 
   submitTaskNodeVerdict?(input: SubmitTaskNodeVerdictInput): Promise<{ ok: boolean; error?: string }>;
 

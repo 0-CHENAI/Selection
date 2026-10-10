@@ -35,6 +35,49 @@ function decide(extra: Partial<OrchestrationDecision> = {}) {
 }
 async function start() { runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); decide(); await tick(); }
 
+it('acknowledges an identical committed continue without repeated work or accepting conflicting identities', async () => {
+  runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+  const gate = readRunState(root, 'dynamic', 'r')!.coordinatorGate!;
+  const decision: OrchestrationDecision = { runId: 'r', checkpointId: gate.checkpointId, decisionId: 'first-continue', baseRevision: 0, action: 'continue', rationale: 'start', plannerPhase: 'active', consumedResults: [] };
+  runner.applyOrchestrationDecisionByRunId('orch', decision); await tick();
+  const log = readRunLog(root, 'dynamic', 'r'), checkpoint = readRunState(root, 'dynamic', 'r');
+  expect(runner.applyOrchestrationDecisionByRunId('orch', decision)).toMatchObject({ status: 'running', alreadyApplied: true });
+  expect(readRunLog(root, 'dynamic', 'r')).toEqual(log);
+  expect(readRunState(root, 'dynamic', 'r')).toEqual(checkpoint);
+  expect(host.created).toEqual(['session-a', 'session-b']);
+  expect(() => runner.applyOrchestrationDecisionByRunId('other', decision)).toThrow('coordinator');
+  for (const change of [{ decisionId: 'unknown' }, { baseRevision: 1 }, { consumedResults: ['unknown-result'] }, { plannerPhase: 'draining' as const }, { rationale: 'changed' }, { add: [] }]) {
+    try { runner.applyOrchestrationDecisionByRunId('orch', { ...decision, ...change }); throw new Error('Expected conflict'); }
+    catch (error) {
+      expect((error as Error).message).not.toContain('resume a human pause');
+      expect((error as { currentRun?: unknown }).currentRun).toMatchObject({ runId: 'r', status: 'running' });
+    }
+  }
+  runner.pause('dynamic', 'r');
+  expect(() => runner.applyOrchestrationDecisionByRunId('orch', decision)).toThrow('resume a human pause');
+  expect(host.created).toEqual(['session-a', 'session-b']);
+});
+
+it('a durable continue replay preserves a newer result gate, including after process recovery', async () => {
+  await start(); host.complete('a', 'A'); await tick();
+  const gate = readRunState(root, 'dynamic', 'r')!.coordinatorGate!;
+  const decision: OrchestrationDecision = { runId: 'r', checkpointId: gate.checkpointId, decisionId: 'consume-A', baseRevision: 0, action: 'continue', consumedResults: gate.resultEventIds };
+  runner.applyOrchestrationDecisionByRunId('orch', decision); await tick();
+  host.complete('b', 'B'); await tick();
+  const before = runner.getRunState('dynamic', 'r')!, log = readRunLog(root, 'dynamic', 'r');
+  expect(before.coordinatorGate!.checkpointId).not.toBe(gate.checkpointId);
+  expect(runner.applyOrchestrationDecisionByRunId('orch', decision)).toEqual({ ...before, alreadyApplied: true });
+  expect(readRunLog(root, 'dynamic', 'r')).toEqual(log);
+  const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root });
+  recovered.scanUnfinished();
+  const restored = recovered.getRunState('dynamic', 'r')!;
+  expect(recovered.applyOrchestrationDecisionByRunId('orch', decision)).toEqual({ ...restored, alreadyApplied: true });
+  expect(recovered.getRunState('dynamic', 'r')!.planner!.pendingResults).toEqual(before.planner!.pendingResults);
+  expect(recovered.getRunState('dynamic', 'r')!.coordinatorGate).toEqual(before.coordinatorGate);
+  expect(recoveredHost.created).toEqual([]);
+  expect(() => recovered.applyOrchestrationDecisionByRunId('orch', { ...decision, decisionId: 'stale-new-id' })).toThrow('checkpointId does not match');
+});
+
 it('F4-a consumes A and adds D atomically while B is live, without duplicate work', async () => {
   await start(); expect(host.created).toEqual(['session-a', 'session-b']);
   host.complete('a', 'A cost 1000000'); await tick();
