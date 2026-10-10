@@ -59,6 +59,8 @@ it('acknowledges an identical committed continue without repeated work or accept
 });
 
 it('a durable continue replay preserves a newer result gate, including after process recovery', async () => {
+  const now = () => '2026-10-10T00:00:00.000Z';
+  runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now });
   await start(); host.complete('a', 'A'); await tick();
   const gate = readRunState(root, 'dynamic', 'r')!.coordinatorGate!;
   const decision: OrchestrationDecision = { runId: 'r', checkpointId: gate.checkpointId, decisionId: 'consume-A', baseRevision: 0, action: 'continue', consumedResults: gate.resultEventIds };
@@ -68,7 +70,7 @@ it('a durable continue replay preserves a newer result gate, including after pro
   expect(before.coordinatorGate!.checkpointId).not.toBe(gate.checkpointId);
   expect(runner.applyOrchestrationDecisionByRunId('orch', decision)).toEqual({ ...before, alreadyApplied: true });
   expect(readRunLog(root, 'dynamic', 'r')).toEqual(log);
-  const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root });
+  const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root, now });
   recovered.scanUnfinished();
   const restored = recovered.getRunState('dynamic', 'r')!;
   expect(recovered.applyOrchestrationDecisionByRunId('orch', decision)).toEqual({ ...restored, alreadyApplied: true });

@@ -451,7 +451,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(snap.blockers).toContain('first-schedule');
   });
 
-  it('continues, patches, pauses, and rejects stale or replayed decisions', async () => {
+  it('acknowledges an identical committed continue without dispatching the nodes again', async () => {
     startV3();
     const r = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
     r.getLatestRun('v3demo');
@@ -467,13 +467,15 @@ describe('TaskRunner v3 quality/efficiency', () => {
     await tick();
     expect(host.dispatchedNames().sort()).toEqual(['a', 'b']);
 
-    expect(() => r.applyOrchestrationDecisionByRunId('orch', {
+    expect(r.applyOrchestrationDecisionByRunId('orch', {
       runId: 'r1',
       checkpointId: cp,
       decisionId: 'd1',
       baseRevision: 0,
       action: 'continue',
-    })).toThrow(TaskControlError);
+    }).alreadyApplied).toBe(true);
+    await tick();
+    expect(host.dispatchedNames().sort()).toEqual(['a', 'b']);
   });
 
   it('pauses on request and rejects a stale revision', () => {
