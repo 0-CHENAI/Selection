@@ -6,6 +6,10 @@ test('chat plans preserve root defaults and derive stable root-scoped ownership'
   const plan = buildChatPlan(input, root)
   expect(plan.defaults).toEqual({ model: 'model', permissionMode: 'safe' })
   expect(plan.schema_version).toBe(3)
+  expect(plan.execution?.coordinator_gate?.mode).toBe('adaptive')
+  for (const mode of ['required', 'off'] as const) {
+    expect(buildChatPlan({ requestId: mode, spec: { ...plan, execution: { coordinator_gate: { mode } } } }, root).execution?.coordinator_gate?.mode).toBe(mode)
+  }
   expect(buildChatPlan(input, { ...root, originalRequest: 'Original goal with user constraints' }).goal).toBe('Original goal with user constraints')
   expect(plan.locked_fields).toEqual(['goal', 'acceptance_criteria'])
   expect(plan.id).toBe(buildChatPlan({ ...input, requestId: 'retry' }, root).id)
@@ -33,6 +37,7 @@ test('new chat research plans require host-owned original-read receipts', () => 
   expect(plan.research?.assuranceVersion).toBe(2)
   expect(plan.research?.judgmentVersion).toBe(1)
   expect(plan.runner).toBe('orchestrate')
+  expect(plan.execution?.coordinator_gate?.mode).toBe('required')
   expect(() => buildChatPlan({ requestId: 'static-research', spec: { ...plan, runner: 'conduct' } }, root)).toThrow('requires runner: orchestrate')
   const ordinary = { ...plan, runner: 'conduct', research: undefined, nodes: [{ id: 'work', prompt: 'Read originals' }] }
   expect(buildChatPlan({ requestId: 'static', spec: ordinary }, root).runner).toBe('conduct')
