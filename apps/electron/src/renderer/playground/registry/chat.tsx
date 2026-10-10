@@ -2,7 +2,7 @@ import * as React from 'react'
 import type { ComponentEntry } from './types'
 import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
 import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
-import { TurnCard, type ActivityItem } from '@craft-agent/ui'
+import { LatticeLoader, TurnCard, type ActivityItem } from '@craft-agent/ui'
 import type { BackgroundTask } from '@/components/app-shell/ActiveTasksBar'
 import { ActiveOptionBadges } from '@/components/app-shell/ActiveOptionBadges'
 import { ChatInputZone, InputContainer } from '@/components/app-shell/input'
@@ -970,6 +970,30 @@ const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => 
 }))
 
 export const chatComponents: ComponentEntry[] = [
+  {
+    id: 'lattice-loader',
+    name: 'LatticeLoader',
+    category: 'Chat',
+    description: 'Theme-aware thinking wave, completion check and error cross',
+    component: LatticeLoader,
+    props: [
+      { name: 'status', control: { type: 'select', options: [
+        { label: '运行中', value: 'working' }, { label: '完成', value: 'done' }, { label: '失败', value: 'error' },
+      ] }, defaultValue: 'working' },
+      { name: 'label', control: { type: 'string' }, defaultValue: '思考中…' },
+      { name: 'doneLabel', control: { type: 'string' }, defaultValue: '已完成' },
+      { name: 'errorLabel', control: { type: 'string' }, defaultValue: '失败' },
+      { name: 'cellSize', control: { type: 'number', min: 3, max: 8 }, defaultValue: 5 },
+      { name: 'gap', control: { type: 'number', min: 1, max: 3 }, defaultValue: 2 },
+      { name: 'fontSize', control: { type: 'number', min: 10, max: 18 }, defaultValue: 13 },
+      { name: 'showTimer', control: { type: 'boolean' }, defaultValue: true },
+    ],
+    variants: [
+      { name: '运行中', props: { status: 'working' } },
+      { name: '完成', props: { status: 'done', elapsed: 2.4 } },
+      { name: '失败', props: { status: 'error', elapsed: 2.4 } },
+    ],
+  },
   {
     id: 'empty-state-hint',
     name: 'EmptyStateHint',

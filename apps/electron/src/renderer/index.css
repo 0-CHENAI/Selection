@@ -1162,56 +1162,6 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   opacity: 0;
 }
 
-/* =============================================================================
-   LOADING INDICATOR - SPINKIT GRID SPINNER
-
-   3x3 grid spinner based on SpinKit Grid.
-   - Uses currentColor (inherits text color)
-   - Uses em units (scales with font-size)
-   - Pure CSS animation with staggered delays
-
-   https://github.com/tobiasahlin/SpinKit
-============================================================================= */
-
-.spinner {
-  display: inline-grid;
-  grid-template-columns: repeat(3, 1fr);
-  width: 1em;
-  height: 1em;
-  gap: 0.08em;
-}
-
-.spinner-cube {
-  background-color: currentColor;
-  animation: spinner-grid 1.3s infinite ease-in-out;
-  transform: scale3d(0.5, 0.5, 1);
-}
-
-.spinner-cube:nth-child(1) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(2) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(3) { animation-delay: 0.4s; }
-.spinner-cube:nth-child(4) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(5) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(6) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(7) { animation-delay: 0s; }
-.spinner-cube:nth-child(8) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(9) { animation-delay: 0.2s; }
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner-cube {
-    animation: none;
-  }
-}
-
-@keyframes spinner-grid {
-  0%, 70%, 100% {
-    transform: scale3d(0.5, 0.5, 1);
-  }
-  35% {
-    transform: scale3d(0, 0, 1);
-  }
-}
-
 /* Toast animation - scale and fade in */
 @keyframes toast-in {
   from {
