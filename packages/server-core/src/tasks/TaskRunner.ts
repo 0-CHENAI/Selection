@@ -3435,6 +3435,7 @@ class ActiveRun {
           `Conductor checkpoint (${reason}).`,
           `checkpointId=${checkpointId}`,
           `revision=${this.revision}`,
+          `Decision identity (copy verbatim, never use the reason as checkpointId): ${JSON.stringify({ runId: this.runId, checkpointId, baseRevision: this.revision })}`,
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, pause, or retry.',
           'Parent chat messages are not decisions. After an accepted decision, end this assistant turn immediately; the host sends the next checkpoint or verification request. Do not poll or reuse an earlier checkpoint id.',
