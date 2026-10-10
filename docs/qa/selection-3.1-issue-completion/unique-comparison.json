@@ -191,6 +191,40 @@
       "runId": null,
       "nodes": [],
       "conclusion": "direct delivery passed; no delegation"
+    },
+    {
+      "label": "current",
+      "rootId": "261010-deft-ripple",
+      "taskSlug": "pro-410e73252dbc5676137c56ab",
+      "workMode": "PRO",
+      "permissionMode": "allow-all",
+      "model": "gpt-6-luna",
+      "elapsedMs": 654635,
+      "status": "completed",
+      "inputHash": "2ad428eb50a21f32b311a0a6ad87c686cc316c93e830308c453f5cf8a46354e2",
+      "normalizedPromptHash": "610a71288b62e58bfa66af06fc371093796b82903f7a7e766e77a320d7973262",
+      "toolCalls": 42,
+      "workers": 5,
+      "checks": {
+        "inputUnchanged": true,
+        "modeAndPermission": true,
+        "originalRead": true,
+        "correctCost": true,
+        "limitsDisclosed": true,
+        "completed": true,
+        "structuredResearch": true,
+        "exactErrataResolved": true,
+        "correctedIndependentSupport": true,
+        "originalReadsAndBundle": true,
+        "freshPremiseAndGate": true,
+        "noResearchBlockers": true
+      },
+      "manualPlanEdits": 0,
+      "manualOutputs": 0,
+      "manualVerdicts": 0,
+      "sample": "post-fix ordinary PRO",
+      "productTestCommit": "ff5721ca52c3b9942db9ee6fb52093e8650d30fa",
+      "evidence": "structured-minimal-fixed.json"
     }
   ]
 }
