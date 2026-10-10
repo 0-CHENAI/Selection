@@ -8107,9 +8107,12 @@ export class SessionManager implements ISessionManager {
           if (file.content === null) return { passed: false, checks: ['Declared output is missing'] }
           const candidate = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'validation', randomUUID(), feedbackBasename(file.path))
           atomicWrite(candidate, file.content)
-          const validation = await validateCandidateFile(candidate)
-          checks.push(...validation.checks)
-
+          try {
+            const validation = await validateCandidateFile(candidate)
+            checks.push(...validation.checks)
+          } catch (error) {
+            return { passed: false, checks: [...checks, `Output "${file.path}": ${error instanceof Error ? error.message : String(error)}`] }
+          }
         }
         if (merged.some(file => requiresProjectValidation(file.path))) {
           if (this.projectValidationControllers.has(sessionId)) throw new Error('Project validation is already running')

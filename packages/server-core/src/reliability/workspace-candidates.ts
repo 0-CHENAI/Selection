@@ -4,6 +4,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, readdirSync } from '
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inside, type IsolatedWorkspace } from './isolated-workspace'
 import type { CandidateFile } from './integrate-candidates'
+import { isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 
 function readRegular(root: string, path: string): Buffer | null {
   const target = resolve(root,path)
@@ -20,6 +21,7 @@ export function collectWorkspaceCandidates(state: IsolatedWorkspace, outputs: Re
     if (!output.path || isAbsolute(output.path) || !inside(state.directory,resolve(state.directory,output.path))) throw new Error('Output must be relative to its work directory')
     const target = resolve(state.directory,output.path)
     const normalized = relative(state.directory,target).split(sep).join('/')
+    if (isSessionScratchPath(normalized)) throw new Error('Session scratch files are not deliverable outputs')
     if (normalized.split('/').some(part => part.toLowerCase() === '.git')) throw new Error('Repository metadata is not an output')
     if (seen.has(target)) throw new Error('Duplicate workspace output')
     seen.add(target)
@@ -58,6 +60,7 @@ export function discoverWorkspaceOutputs(state: IsolatedWorkspace): Record<strin
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         if (entry.name.toLowerCase() === '.git') continue
         const target = resolve(directory, entry.name)
+        if (isSessionScratchPath(relative(state.directory, target))) continue
         if (entry.isSymbolicLink()) throw new Error('Candidate outputs cannot be symbolic links')
         if (entry.isDirectory()) visit(target)
         else if (entry.isFile()) paths.add(relative(state.directory, target).split(sep).join('/'))
@@ -67,7 +70,7 @@ export function discoverWorkspaceOutputs(state: IsolatedWorkspace): Record<strin
     visit(state.directory)
     for (const path of Object.keys(state.inputs)) paths.add(path.split(sep).join('/'))
   }
-  const files = collectWorkspaceCandidates(state, [...paths].map(path => ({ path })))
+  const files = collectWorkspaceCandidates(state, [...paths].filter(path => !isSessionScratchPath(path)).map(path => ({ path })))
   const changed = files.filter(file => file.base === null ? file.candidate !== null : file.candidate === null || !file.base.equals(file.candidate))
   // Deletion needs an explicit contract/UI; do not silently apply destructive discoveries.
   if (changed.some(file => file.candidate === null)) throw new Error('Deleted candidate files require an explicit recovery or review; the source was preserved')

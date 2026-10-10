@@ -1,9 +1,35 @@
 import { expect,test } from 'bun:test'
-import { mkdtempSync,mkdirSync,readFileSync,rmSync,writeFileSync } from 'node:fs'
+import { mkdtempSync,mkdirSync,readFileSync,realpathSync,rmSync,writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prepareIsolatedWorkspace, assertIsolatedTool } from './isolated-workspace'
 import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from './workspace-candidates'
+import { saveSourceSnapshot, readSourceSnapshot } from '@craft-agent/shared/source-snapshot'
+import { execFileSync } from 'node:child_process'
+import { relative } from 'node:path'
+
+for (const gitProject of [false, true]) test(`web cache stays readable but is excluded from workspace delivery (git=${gitProject})`, () => {
+  const root = mkdtempSync(join(tmpdir(), 'cache-output-')), source = join(root, 'source'); mkdirSync(source)
+  try {
+    if (gitProject) {
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: source, stdio: 'pipe' })
+      git('init'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
+      git('commit', '--allow-empty', '-m', 'base')
+    }
+    const state = prepareIsolatedWorkspace(source, join(root, 'storage'), [])
+    const snapshot = saveSourceSnapshot(state.directory, Buffer.from('<p>Original source</p>'), 'https://example.com', 'text/html',
+      [{ id: 'content', label: 'Source', kind: 'section', text: 'Original source' }], [])
+    expect(discoverWorkspaceOutputs(state)).toEqual({})
+    const indexPath = join(state.directory, '.selection-sources', snapshot.version, 'index.json')
+    for (const path of [snapshot.originalPath, snapshot.textPath, indexPath]) {
+      expect(() => collectWorkspaceCandidates(state, [{ path: relative(realpathSync(state.directory), path) }])).toThrow('scratch')
+    }
+    writeFileSync(join(state.directory, 'report.md'), 'User report')
+    expect(discoverWorkspaceOutputs(state)).toEqual({ 'report.md': 'report.md' })
+    expect(readSourceSnapshot(indexPath, state.directory)).toEqual(snapshot)
+    expect(readFileSync(snapshot.originalPath, 'utf8')).toBe('<p>Original source</p>')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 test('non-Git candidates retain the declared baseline independently of source and candidate edits',()=>{
   const root=mkdtempSync(join(tmpdir(),'workspace-output-')), source=join(root,'source');mkdirSync(source)
   try {
