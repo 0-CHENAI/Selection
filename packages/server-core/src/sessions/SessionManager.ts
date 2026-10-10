@@ -1571,7 +1571,7 @@ setBackendModelRequestLimiter((quota, owner, signal) => hostModelRequestPool.acq
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private pendingUserSubmissions = new Map<string, Promise<void>>()
-  private executionOwners = new Map<string, { release: () => void; calls: number }>()
+  private executionOwners = new Map<string, { release: () => void; calls: number; completion?: SessionCompletionEvent }>()
   private startupRecoveryClaims = new Set<string>()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
@@ -6879,6 +6879,12 @@ export class SessionManager implements ISessionManager {
       if (--owner.calls === 0) {
         this.executionOwners.delete(sessionId)
         owner.release()
+        // Publish settlement only after this turn's execution cleanup has released ownership.
+        const completion = owner.completion
+        if (completion && this.sessions.get(sessionId) === managed
+          && managed.processingGeneration === completion.generation && !managed.isProcessing && !managed.messageQueue.length) {
+          this.emitSessionComplete(completion)
+        }
       }
     }
   }
@@ -9980,6 +9986,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   }
 
   private emitSessionComplete(evt: SessionCompletionEvent): void {
+    const owner = this.executionOwners.get(evt.sessionId)
+    if (owner) { owner.completion = evt; return }
     if (this.sessionCompletionListeners.size === 0) return
     for (const listener of this.sessionCompletionListeners) {
       try {

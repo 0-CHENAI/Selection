@@ -1307,7 +1307,9 @@ class ActiveRun {
     }
     if (this.runStatus !== 'running') return;
     this.resumeAnsweredHelp();
-    if (this.pendingPlannerResults().length && this.coordinatorGateEnabled()) {
+    if (this.pendingPlannerResults().length && this.coordinatorGateEnabled()
+      && (!this.adaptiveScheduling() || this.allNodesSettled()
+        || this.inFlight === 0 && !this.spec.nodes.some(node => this.isReady(node) && this.researchStageReady(node)))) {
       this.enterCoordinatorGate(this.allNodesSettled() ? 'before-verify' : 'new-result');
       this.emitChanged();
       return;
@@ -3366,8 +3368,13 @@ class ActiveRun {
       && this.spec.runner === 'orchestrate'
       && this.plannerRequired
       && !!this.opts.orchestratorSessionId
-      && (this.spec.execution?.coordinator_gate?.mode ?? 'required') === 'required'
+      && (this.spec.execution?.coordinator_gate?.mode ?? 'required') !== 'off'
     );
+  }
+
+  /** Frozen research retains stage review; known ordinary dependencies can advance automatically. */
+  private adaptiveScheduling(): boolean {
+    return this.spec.execution?.coordinator_gate?.mode === 'adaptive' && !this.spec.research;
   }
 
   private qualityGateEnabled(): boolean {
@@ -3416,6 +3423,7 @@ class ActiveRun {
 
   private enterCoordinatorGate(reason: CoordinatorGateReason, advisory?: string): boolean {
     if (!this.coordinatorGateEnabled()) return false;
+    if (reason === 'first-schedule' && this.adaptiveScheduling()) return false;
     if (this.coordinatorGate && !this.completedCheckpointIds.has(this.coordinatorGate.checkpointId)) return true;
     const now = this.nowMs();
     const checkpointId = `cp-${this.runId}-${this.revision}-${reason}-${this.nextSeq}`;

@@ -1,5 +1,8 @@
 import { expect, it } from 'bun:test';
 import { SessionManager, createManagedSession } from './SessionManager.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 function fixture() {
   const manager = new SessionManager();
@@ -10,6 +13,28 @@ function fixture() {
   internal.flushSession = async () => {};
   return { manager, managed, internal };
 }
+
+it('completion reaches the scheduler after execution ownership releases, never from a stale generation', async () => {
+  const { manager, managed, internal } = fixture();
+  const directory = mkdtempSync(join(tmpdir(), 'settled-execution-'));
+  managed.workspace = { ...managed.workspace, rootPath: directory };
+  let completions = 0;
+  manager.onSessionComplete(() => { manager.assertTaskSafePoint([managed.id]); completions++; });
+  try {
+    await internal.withSessionExecution(managed.id, async () => {
+      managed.isProcessing = true;
+      await internal.onProcessingStopped(managed.id, 'complete', managed.processingGeneration);
+      expect(completions).toBe(0);
+      expect(() => manager.assertTaskSafePoint([managed.id])).toThrow('shutdown');
+    });
+    expect(completions).toBe(1);
+    await internal.withSessionExecution(managed.id, async () => {
+      internal.emitSessionComplete({ sessionId: managed.id, workspaceId: 'ws', generation: managed.processingGeneration, reason: 'complete' });
+      managed.processingGeneration++;
+    });
+    expect(completions).toBe(1);
+  } finally { manager.cleanup(); rmSync(directory, { recursive: true, force: true }); }
+});
 
 it('a failed event sink cannot prevent authoritative completion', async () => {
   const { manager, managed, internal } = fixture();
