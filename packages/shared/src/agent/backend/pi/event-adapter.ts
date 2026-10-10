@@ -18,7 +18,7 @@ import type {
   AgentSessionEvent,
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
-import { isContextOverflow } from '@earendil-works/pi-ai';
+import { isContextOverflow, isRetryableAssistantError } from '@earendil-works/pi-ai';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { AnswerArgumentStream } from '../../../answer-argument-stream';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
@@ -167,6 +167,11 @@ export class PiEventAdapter extends BaseEventAdapter {
   private activityAt = 0;
   private reasoningBytes = 0;
   private visibleBytes = 0;
+  // message_end precedes the SDK's retry decision. Keep transient failures out
+  // of the durable transcript until agent_end confirms they are terminal.
+  private pendingRetryError: CraftAgentEvent | null = null;
+  private awaitingRetry = false;
+  private retryErrorDelivered = false;
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
@@ -241,7 +246,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       this.pendingQueueComplete = false;
       return true;
     }
-    return isAgentEnd && this.overflowState === 'none';
+    return isAgentEnd && this.overflowState === 'none' && !this.awaitingRetry;
   }
 
   /**
@@ -253,6 +258,9 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.overflowState = 'none';
     this.heldOverflowError = null;
     this.pendingQueueComplete = false;
+    this.pendingRetryError = null;
+    this.awaitingRetry = false;
+    this.retryErrorDelivered = false;
   }
 
   private armOverflowFallbackTimer(): void {
@@ -298,6 +306,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   protected onTurnStart(): void {
+    this.pendingRetryError = null;
+    this.awaitingRetry = false;
+    this.retryErrorDelivered = false;
     this.boundary = undefined;
     this.boundaryStreamed = false;
     this.markerAnswerStarted = false;
@@ -340,10 +351,22 @@ export class PiEventAdapter extends BaseEventAdapter {
         break;
 
       case 'agent_start':
+        if (this.awaitingRetry) yield { type: 'status', message: '' };
         // Internal — agent run has started
         break;
 
       case 'agent_end':
+        if ((event as { willRetry?: boolean }).willRetry === true) {
+          this.pendingRetryError = null;
+          this.awaitingRetry = true;
+          break;
+        }
+        this.awaitingRetry = false;
+        if (this.pendingRetryError) {
+          yield this.pendingRetryError;
+          this.pendingRetryError = null;
+          this.retryErrorDelivered = true;
+        }
         // Overflow recovery: hold the queue open while the SDK runs
         // _runAutoCompaction("overflow") + agent.continue(). The recovered
         // turn will arrive as a fresh agent_start … agent_end pair.
@@ -509,10 +532,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           const parsed = parseError(new Error(msg.errorMessage));
           if (transportDetails?.length) parsed.details = transportDetails;
           const isClassified = parsed.code !== 'unknown_error' || !!parsed.details?.length;
-          if (isClassified) {
-            yield { type: 'typed_error', error: parsed };
-          } else {
-            yield { type: 'error', message: msg.errorMessage };
+          const failure: CraftAgentEvent = isClassified
+            ? { type: 'typed_error', error: parsed }
+            : { type: 'error', message: msg.errorMessage };
+          if (isRetryableAssistantError(event.message as AssistantMessage)) this.pendingRetryError = failure;
+          else {
+            yield failure;
+            this.retryErrorDelivered = true;
           }
           break;
         }
@@ -839,6 +865,9 @@ export class PiEventAdapter extends BaseEventAdapter {
       }
 
       case 'auto_retry_start': {
+        this.awaitingRetry = true;
+        this.pendingRetryError = null;
+        this.retryErrorDelivered = false;
         const retryEvent = event as Extract<AgentSessionEvent, { type: 'auto_retry_start' }>;
         yield {
           type: 'status',
@@ -849,9 +878,18 @@ export class PiEventAdapter extends BaseEventAdapter {
 
       case 'auto_retry_end': {
         const retryEndEvent = event as Extract<AgentSessionEvent, { type: 'auto_retry_end' }>;
-        if (!retryEndEvent.success && retryEndEvent.finalError) {
+        if (retryEndEvent.success) {
+          yield { type: 'status', message: '' };
+        } else if (!this.retryErrorDelivered && retryEndEvent.finalError) {
           yield { type: 'error', message: `Retry failed: ${retryEndEvent.finalError}` };
+          // Cancellation during backoff has no subsequent agent_end.
+          if (this.awaitingRetry) {
+            yield { type: 'complete' };
+            this.pendingQueueComplete = true;
+          }
         }
+        this.awaitingRetry = false;
+        this.pendingRetryError = null;
         break;
       }
 
