@@ -47,7 +47,7 @@ v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache:
 ## v3 调度门与验证
 
 - orchestrate v3 在首次调度、节点失败、审批响应、预算恢复、无 ready 节点和最终验证前进入 `waiting-coordinator`。
-- 协调器必须调用 `submit_orchestration_decision`（continue / patch / pause / retry）。过期、重复或错误 revision 会被拒绝。
+- 协调器必须调用 `submit_orchestration_decision`（continue / patch / pause / retry）。已持久化的相同 continue 请求返回 `alreadyApplied`，不会重复执行或释放新检查点；冲突重放、过期新决策和错误 revision 会被拒绝。人工暂停仍须显式恢复。旧日志缺少原请求回执时不会猜测成功。
 - 添加替代节点不消除原节点失败。所有活动 worker 收尾后，retry 必须注明原因，复用原运行恢复规则，将失败/无效节点及受影响下游重置为 pending；成功的无关分支和失败历史保留。协调者在新的检查点补丁修正 pending 节点的输入/依赖，再继续执行。不能把没有实质修正的重复重试当成进展。
 - 协调器连续 120 秒没有实际模型输出或工具进展时暂停，并显示 `coordinator-timeout`，不会自动继续。真实进展会延长等待期限并持久化；不增长的心跳、仅等待 API 的状态和其他子节点的活动不会延长期限。
 - verify/judge 必须 `submit_task_node_verdict`。最终 run verdict 仍由父 Coordinator 的 `submit_task_verdict` 提交，普通聊天文本不是 verdict。

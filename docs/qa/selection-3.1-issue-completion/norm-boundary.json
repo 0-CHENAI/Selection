@@ -1,0 +1,20 @@
+{
+  "rootId": "261010-proud-ripple",
+  "mode": "NORM",
+  "permission": "allow-all",
+  "swarmEnabled": false,
+  "denied": [
+    {
+      "kind": "worker",
+      "error": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows."
+    },
+    {
+      "kind": "dag",
+      "error": "NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows."
+    }
+  ],
+  "newChildren": 0,
+  "newRuns": 0,
+  "modeUnchanged": true,
+  "sideEffects": false
+}

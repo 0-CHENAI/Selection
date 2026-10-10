@@ -5183,7 +5183,7 @@ export class SessionManager implements ISessionManager {
             changeKind: input.changeKind,
             researchExpansion: input.researchExpansion as never,
           })
-          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner }
+          return { status: snap.status, revision: snap.revision, coordinatorGate: snap.coordinatorGate, planner: snap.planner, alreadyApplied: snap.alreadyApplied }
         },
         submitTaskNodeVerdictFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)

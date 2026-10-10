@@ -1,0 +1,38 @@
+{
+  "rootId": "261010-airy-amber",
+  "runId": "chat-0ef003cc70d8f5a4ed7167e5714594d5688231cfd73670d5d57dcd4c01b1ac42",
+  "decision": {
+    "runId": "chat-0ef003cc70d8f5a4ed7167e5714594d5688231cfd73670d5d57dcd4c01b1ac42",
+    "checkpointId": "cp-chat-0ef003cc70d8f5a4ed7167e5714594d5688231cfd73670d5d57dcd4c01b1ac42-0-first-schedule-2",
+    "decisionId": "decision-first-schedule-continue-20261010",
+    "baseRevision": 0,
+    "action": "continue",
+    "plannerPhase": "active",
+    "consumedResults": []
+  },
+  "toolStatus": "completed",
+  "receipt": {
+    "status": "completed",
+    "revision": 0,
+    "planner": {
+      "phase": "exhausted",
+      "pendingResults": [],
+      "consumedResults": 2
+    },
+    "alreadyApplied": true,
+    "nextStep": "End this assistant turn now. The host will send the next checkpoint or final verification request. Do not poll or reuse the previous checkpoint id."
+  },
+  "runLogHashBefore": "0f94710dcfe99f712fb4b8af39a0ad514f11d5c4f719727fa639e98c1aee4df6",
+  "runLogHashAfter": "0f94710dcfe99f712fb4b8af39a0ad514f11d5c4f719727fa639e98c1aee4df6",
+  "unchangedRunLog": true,
+  "newToolCalls": [
+    {
+      "name": "mcp__session__submit_orchestration_decision",
+      "status": "completed"
+    },
+    {
+      "name": "mcp__session__submit_answer",
+      "status": "completed"
+    }
+  ]
+}

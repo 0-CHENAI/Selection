@@ -250,6 +250,8 @@ export interface NodeRunStatus {
 }
 
 export interface RunSnapshot {
+  /** Response-only receipt: the identical continue was committed previously; no work was repeated. */
+  alreadyApplied?: boolean;
   help?: TaskHelpRecord[];
   coordinatorGate?: CoordinatorGateState;
   research?: ResearchSummary;
@@ -3309,7 +3311,8 @@ class ActiveRun {
         cancelled: result.cancelled } : undefined;
       if (decision) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
         kind: 'coordinator-decision', checkpointId: decision.checkpointId, decisionId: decision.decisionId, action: decision.action, baseRevision: decision.baseRevision,
-        consumedResults: decision.action === 'pause' ? [] : consumedResults, plannerPhase: this.planningPhase() }); }
+        consumedResults: decision.action === 'pause' ? [] : consumedResults, plannerPhase: this.planningPhase(),
+        continueRequest: decision.action === 'continue' ? { rationale: decision.rationale, consumedResults: decision.consumedResults, plannerPhase: decision.plannerPhase } : undefined }); }
       if (result) { this.decisionEventSeqs.add(this.nextSeq); appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { t, seq: this.nextSeq++, revision: this.revision,
         kind: 'orchestration-patch', decisionId: patch.decisionId, baseRevision: patch.baseRevision, rationale: patch.rationale,
         added: change!.added, updated: change!.updated, cancelled: result.cancelled.length ? result.cancelled : undefined, consumedResults, plannerPhase: this.planningPhase(), changeKind: patch.changeKind ?? 'structure' }); }
@@ -3449,7 +3452,31 @@ class ActiveRun {
   }
 
   applyOrchestrationDecision(decision: OrchestrationDecision): RunSnapshot {
-    if (this.runStatus !== 'waiting-coordinator') throw new TaskControlError(this.runStatus, 'Run is not waiting for a coordinator; resume a human pause explicitly');
+    // Only acknowledge a durable, identical non-mutating request. Never release
+    // a newer gate, restart workers, or bypass an explicit human pause.
+    if (decision.runId === this.runId && decision.action === 'continue'
+      && ['running', 'waiting-coordinator', 'verifying', 'completed'].includes(this.runStatus)
+      && this.seenDecisionIds.has(decision.decisionId) && this.completedCheckpointIds.has(decision.checkpointId)
+      && [decision.add, decision.update, decision.cancel, decision.constraints, decision.decisions, decision.changeKind, decision.researchExpansion].every(value => value === undefined)) {
+      const receipt = readRunLog(this.deps.workspaceRoot, this.slug, this.runId).findLast(entry => entry.kind === 'coordinator-decision'
+        && entry.decisionId === decision.decisionId && entry.checkpointId === decision.checkpointId
+        && entry.seq !== undefined && this.decisionEventSeqs.has(entry.seq));
+      if (receipt?.kind === 'coordinator-decision' && receipt.action === 'continue' && receipt.baseRevision === decision.baseRevision
+        && receipt.seq !== undefined && this.decisionEventSeqs.has(receipt.seq) && receipt.continueRequest
+        && JSON.stringify([receipt.continueRequest.rationale, receipt.continueRequest.consumedResults, receipt.continueRequest.plannerPhase])
+          === JSON.stringify([decision.rationale, decision.consumedResults, decision.plannerPhase])) {
+        return { ...this.snapshot(), alreadyApplied: true };
+      }
+    }
+    if (this.runStatus !== 'waiting-coordinator') {
+      const guidance = this.runStatus === 'pausing' || this.runStatus === 'paused'
+        ? 'resume a human pause explicitly'
+        : `current status is ${this.runStatus}; end this turn and wait for the host to send a new coordinator checkpoint`;
+      throw new TaskControlError(this.runStatus, `Run is not waiting for a coordinator; ${guidance}`, {
+        runId: this.runId, revision: this.revision, status: this.runStatus,
+        coordinatorGate: this.coordinatorGate ? structuredClone(this.coordinatorGate) : undefined,
+      });
+    }
     const result = validateOrchestrationDecision(
       decision,
       {
@@ -3585,11 +3612,17 @@ class ActiveRun {
         return { id: request.id, state: request.state };
       }
       if (request.state === 'answered') throw new Error('This help request already has an answer');
-      const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
-      if (request.claimRefs.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
-        || request.sourceRefs.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) throw new Error('Help inputs changed; do not apply a stale response');
       const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
       if (state?.state !== 'waiting-help' || state.sessionId !== request.sessionId || state.attempt !== request.attempt || state.generation !== undefined && state.generation !== request.generation) throw new Error('Help request no longer owns this execution attempt');
+      const summary = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+      if (request.claimRefs.some(ref => !summary?.claims.some(claim => claim.id === ref.id && claim.version === ref.version))
+        || request.sourceRefs.some(ref => !summary?.sources.some(source => source.id === ref.id && source.version === ref.version))) {
+        // Reject the obsolete answer, but unblock its retained tool context so
+        // the worker can refresh canonical versions instead of waiting forever.
+        this.saveHelp({ ...request, state: 'cancelled', cancellationReason: 'Help inputs changed; refresh get_task_results and use current claim/source versions. No stale response was applied; no permissions were granted.' });
+        this.scheduleReady();
+        return { id: request.id, state: 'cancelled', needsRefresh: true };
+      }
       const next: TaskHelpRecord = { ...request, state: input.action === 'answer' ? 'answered' : 'waiting-user',
         responses: [...request.responses, { id: input.responseId!, action: input.action, text: input.response!, revision: this.revision }] };
       this.saveHelp(next); this.scheduleReady();
@@ -3673,7 +3706,7 @@ class ActiveRun {
 
   private resumeAnsweredHelp(): void {
     for (const request of this.help.values()) {
-      if (request.state !== 'answered' || !this.helpWaiters.has(request.id) || this.inFlight >= this.maxParallel) continue;
+      if (!['answered', 'cancelled'].includes(request.state) || !this.helpWaiters.has(request.id) || this.inFlight >= this.maxParallel) continue;
       const state = this.instances.get(request.nodeId) ?? this.state.get(request.nodeId);
       const node = this.spec.nodes.find(node => node.id === definitionId(request.nodeId));
       if (state?.state !== 'waiting-help' || !node || state.sessionId !== request.sessionId || state.attempt !== request.attempt) continue;
@@ -3685,7 +3718,8 @@ class ActiveRun {
         this.helpTimeouts.delete(request.id);
       }
       this.log({ kind: 'node-help-resumed', nodeId: request.nodeId, requestId: request.id });
-      this.helpWaiters.get(request.id)!.resolve({ id: request.id, state: 'answered', response: request.responses.at(-1)!.text,
+      if (request.state === 'cancelled') this.helpWaiters.get(request.id)!.reject(new Error(request.cancellationReason));
+      else this.helpWaiters.get(request.id)!.resolve({ id: request.id, state: 'answered', response: request.responses.at(-1)!.text,
         permissionGranted: false, instruction: 'Continue only the affected task from retained tool results; never replay completed operations.' });
       this.helpWaiters.delete(request.id);
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { answerExecutionError, answerTurnToolNames, isTurnCompletionTool } from './answer-delivery-guard'
+import { answerExecutionError, answerTurnToolNames, isTurnCompletionTool, acceptsTurnCompletion } from './answer-delivery-guard'
 
 describe('SDK answer delivery boundary', () => {
   const normal = { runId: 'run', accepted: false, recovery: false, batchSize: 1 }
@@ -46,5 +46,17 @@ describe('SDK answer delivery boundary', () => {
     }
     expect(isTurnCompletionTool('get_task_results')).toBe(false)
     expect(isTurnCompletionTool('mcp__session__submit_task_node_verdict')).toBe(false)
+  })
+  it('keeps the SDK turn open for a duplicate receipt with a newer pending gate', () => {
+    const receipt = (body: unknown, isError = false) => ({ isError, content: [{ type: 'text', text: JSON.stringify(body) }] })
+    for (const name of ['submit_orchestration_decision', 'mcp__session__submit_orchestration_decision', 'session__submit_orchestration_decision']) {
+      expect(acceptsTurnCompletion(name, receipt({ alreadyApplied: true, status: 'waiting-coordinator', coordinatorGate: { checkpointId: 'new' } }))).toBe(false)
+      expect(acceptsTurnCompletion(name, receipt({ status: 'waiting-coordinator', coordinatorGate: { checkpointId: 'new' } }))).toBe(true)
+      expect(acceptsTurnCompletion(name, receipt({ alreadyApplied: true, status: 'running' }))).toBe(true)
+      expect(acceptsTurnCompletion(name, receipt({ status: 'running' }, true))).toBe(false)
+    }
+    expect(acceptsTurnCompletion('submit_answer', receipt({ accepted: true }))).toBe(true)
+    expect(acceptsTurnCompletion('Read', receipt({}))).toBe(false)
+    expect(acceptsTurnCompletion('submit_orchestration_decision', { content: JSON.stringify({ alreadyApplied: true, status: 'waiting-coordinator', coordinatorGate: { checkpointId: 'new' } }) })).toBe(false)
   })
 })

@@ -111,7 +111,7 @@ export interface SessionScopedToolCallbacks {
   ) => Promise<{ status: string; revision?: number }>;
   submitOrchestrationDecisionFn?: (
     input: import('@craft-agent/session-tools-core').OrchestrationDecisionInput
-  ) => Promise<{ status: string; revision?: number }>;
+  ) => Promise<{ status: string; revision?: number; alreadyApplied?: boolean; coordinatorGate?: { checkpointId: string } }>;
   submitTaskNodeVerdictFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskNodeVerdictInput
   ) => Promise<{ ok: boolean; error?: string }>;

@@ -20,7 +20,7 @@ import { TaskSpecSchema, type TaskSpec } from './schema.ts';
 import type { NodeOutput } from './refs.ts';
 import type { ValidationResult } from '../config/validators.ts';
 import type { CoordinatorGateReason, TaskRunMetrics } from './metrics.ts';
-import type { CoordinatorGateState } from './orchestration-decision.ts';
+import type { CoordinatorGateState, OrchestrationDecision } from './orchestration-decision.ts';
 import type { PlannerPhase, PlannerResultEvent } from './planner.ts';
 
 const TASKS_DIR = 'tasks';
@@ -174,6 +174,8 @@ type RunLogPayload =
       baseRevision: number;
       consumedResults?: string[];
       plannerPhase?: PlannerPhase;
+      /** Original continue payload, committed atomically for safe duplicate acknowledgement. */
+      continueRequest?: Pick<OrchestrationDecision, 'rationale' | 'consumedResults' | 'plannerPhase'>;
     }
   | { t: string; kind: 'coordinator-timeout'; checkpointId: string }
   | { t: string; kind: 'coordinator-progress'; checkpointId: string; deadline: string }

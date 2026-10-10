@@ -629,6 +629,14 @@ async function loadSessionMessages(
     // tokenUsage and sessionFolderPath are only returned by getSession() (not getSessions()),
     // so they must be explicitly merged here to be available after app restart.
     const existingSession = get(sessionAtomFamily(sessionId))
+    // Streaming can create a placeholder before session_created is hydrated.
+    // Fill its missing execution identity from the host without overwriting a
+    // newer mode event or optimistic UI state received during the fetch.
+    const executionIdentity = {
+      workMode: existingSession?.workMode ?? loadedSession.workMode,
+      workModeNeedsReview: existingSession?.workModeNeedsReview ?? loadedSession.workModeNeedsReview,
+      executionRootSessionId: existingSession?.executionRootSessionId ?? loadedSession.executionRootSessionId,
+    }
     const preservedStaleMessages = !!existingSession
       && existingSession.messages.length > 0
       && (!loadedSession.messages || loadedSession.messages.length === 0)
@@ -636,6 +644,7 @@ async function loadSessionMessages(
     const mergedSession = existingSession
       ? {
           ...existingSession,
+          ...executionIdentity,
           // CRITICAL: Don't clobber messages if session is actively streaming
           // AND already has messages in the atom. Streaming events update the atom
           // directly and may contain messages the IPC response doesn't know about
@@ -656,18 +665,16 @@ async function loadSessionMessages(
       : loadedSession
     set(sessionAtomFamily(sessionId), mergedSession)
 
-    // Update only lastFinalMessageId in metadata (now computable from loaded messages).
-    // Don't replace the full meta entry — other fields are maintained through
-    // optimistic updates and IPC events, and may be ahead of disk state.
+    // Keep execution identity consistent with the full atom so the mode selector
+    // and session list cannot label a PRO placeholder as NORM.
+    // Other UI metadata may be ahead of the fetched snapshot.
     const lastFinalMessageId = findLastFinalMessageId(loadedSession.messages)
-    if (lastFinalMessageId) {
-      const metaMap = get(sessionMetaMapAtom)
-      const existingMeta = metaMap.get(sessionId)
-      if (existingMeta && existingMeta.lastFinalMessageId !== lastFinalMessageId) {
-        const newMetaMap = new Map(metaMap)
-        newMetaMap.set(sessionId, { ...existingMeta, lastFinalMessageId })
-        set(sessionMetaMapAtom, newMetaMap)
-      }
+    const metaMap = get(sessionMetaMapAtom)
+    const existingMeta = metaMap.get(sessionId)
+    if (existingMeta) {
+      const newMetaMap = new Map(metaMap)
+      newMetaMap.set(sessionId, { ...existingMeta, ...executionIdentity, ...(lastFinalMessageId ? { lastFinalMessageId } : {}) })
+      set(sessionMetaMapAtom, newMetaMap)
     }
 
     // Mark as loaded only when we received a fresh payload.

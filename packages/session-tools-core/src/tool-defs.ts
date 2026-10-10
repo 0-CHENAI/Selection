@@ -696,7 +696,7 @@ Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel p
 
   submit_orchestration_decision: `Release a v3 coordinator scheduling gate.
 
-Requires runId, checkpointId, decisionId, and baseRevision. action continue uses the current graph, patch updates pending nodes then continues, pause waits for the user. Stale revision, replayed decisionId, and unknown checkpointId are rejected. Timeout pauses with coordinator-timeout and does not auto-continue.`,
+Requires runId, checkpointId, decisionId, and baseRevision. action continue uses the current graph, patch updates pending nodes then continues, pause waits for the user. An identical durably accepted continue returns alreadyApplied without releasing a newer gate or repeating work. Conflicting replays, stale new decisions, and unknown checkpoints are rejected. Explicit human pauses still require human resume. Timeout pauses with coordinator-timeout and does not auto-continue.`,
 
   submit_task_node_verdict: `Submit a structured pass/fail verdict for a verify or judge node.
 
