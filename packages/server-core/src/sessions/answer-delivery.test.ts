@@ -175,10 +175,10 @@ describe('explicit answer delivery lifecycle (#330)', () => {
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)
     const names = ['报告.DOC', '报告.docx', '报告.docm', '讲稿.ppt', '讲稿.PPTX', '讲稿.pptm', '数据.xls', '数据.xlsx', '数据.xlsm', '数据.xlsb',
-      '页面.html', '页面.htm', '笔记.txt', '论文.tex', '草稿.md', '草稿.markdown', '文档.pdf', 'Q3%20报告.pdf']
+      '页面.html', '页面.htm', '论文.tex', '草稿.md', '草稿.markdown', '文档.pdf', 'Q3%20报告.pdf']
     let modelCalls = 0
     const agent = install(async function* () {
-      for (const name of [...names, 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), 'output')
+      for (const name of [...names, '笔记.txt', '日志.TXT', 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), 'output')
       await control!.submit({ ...submission, markdown: '文件已更新。' })
       yield { type: 'complete' }
     })
@@ -188,18 +188,23 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const update = events.find(event => event.type === 'text_complete' && event.answerCommitted)
     expect(update?.artifactVersions?.map((ref: { path: string }) => basename(ref.path)).sort()).toEqual(names.sort())
     expect(update?.artifactVersions).toHaveLength(names.length)
+    expect(readFileSync(join(dir, '笔记.txt'), 'utf8')).toBe('output')
+    expect(readFileSync(join(dir, '日志.TXT'), 'utf8')).toBe('output')
     expect(modelCalls).toBe(0)
     expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).at(-1)?.artifactVersions).toEqual(update.artifactVersions)
   })
 
   it('shows an unlinked edit but never an unchanged linked input', async () => {
-    const file = join(root, 'report.txt')
+    const file = join(root, 'report.md')
+    const textFile = join(root, 'report.txt')
     const input = join(root, 'input.pdf')
     writeFileSync(file, 'before')
+    writeFileSync(textFile, 'before')
     writeFileSync(input, 'source')
     await Bun.sleep(ARTIFACT_WRITE_CLOCK_SKEW_MS + 20)
     install(async function* () {
       writeFileSync(file, 'after editing')
+      writeFileSync(textFile, 'after editing')
       await control!.submit({ ...submission, markdown: `已修改。[参考资料](${input})` })
       yield { type: 'complete' }
     })
@@ -208,6 +213,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(update?.artifactVersions).toHaveLength(1)
     expect(sameArtifactLocation(update!.artifactVersions![0]!.path, file)).toBe(true)
     expect(update?.artifactVersions?.[0]?.change).toBe('modified')
+    expect(readFileSync(textFile, 'utf8')).toBe('after editing')
   })
 
   it('includes a newly written file at an explicit destination outside the working directory', async () => {
