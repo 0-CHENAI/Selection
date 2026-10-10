@@ -3,7 +3,7 @@ import { extractDeliveredResponseArtifacts } from '../response-artifacts'
 
 it('shows every supported changed file without a link or a model selection', () => {
   const names = ['a.doc', 'b.DOCX', 'b.docm', 'b.dotx', 'b.rtf', 'c.ppt', 'd.PPTX', 'd.pptm', 'd.potx', 'd.ppsx',
-    'e.xls', 'f.XLSX', 'f.xlsm', 'f.xlsb', 'f.xltx', 'g.htm', 'h.HTML', 'i.txt', 'j.tex', 'j.latex', 'k.md', 'l.markdown', 'm.pdf']
+    'e.xls', 'f.XLSX', 'f.xlsm', 'f.xlsb', 'f.xltx', 'g.htm', 'h.HTML', 'j.tex', 'j.latex', 'k.md', 'l.markdown', 'm.pdf']
   const versions = names.map(name => ({ path: `/results/${name}`, change: 'created' as const }))
   expect(extractDeliveredResponseArtifacts(versions).map(file => file.name)).toEqual(names)
 })
@@ -26,7 +26,7 @@ it('excludes unsupported formats, deleted files and session scratch', () => {
   expect(extractDeliveredResponseArtifacts()).toEqual([])
 })
 
-it('hides historical source-cache cards on every platform while keeping ordinary TXT outputs', () => {
+it('hides historical source-cache and TXT cards on every platform while keeping other documents', () => {
   const paths = [
     '/work/.selection-sources/version/snapshot.txt',
     '.selection-sources/version/snapshot.txt',
@@ -34,9 +34,12 @@ it('hides historical source-cache cards on every platform while keeping ordinary
     '/work/.selection-sources/version/extracted.md',
     '/results/snapshot.txt',
     '/work/.selection-sources-export/snapshot.txt',
+    'C:\\results\\REPORT.TXT',
+    '/results/report.pdf',
+    '/work/.selection-sources-export/report.md',
   ]
   expect(extractDeliveredResponseArtifacts(paths.map(path => ({ path, ordinal: 1 }))).map(file => file.path))
-    .toEqual(paths.slice(4))
+    .toEqual(paths.slice(7))
 })
 
 it('keeps distinct paths, deduplicates aliases and preserves restored versions', () => {

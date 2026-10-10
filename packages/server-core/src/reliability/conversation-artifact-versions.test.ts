@@ -18,8 +18,8 @@ test('web source snapshots stay readable evidence without becoming deliverables 
     const snapshot = saveSourceSnapshot(root, Buffer.from('<p>Original source</p>'), 'https://example.com', 'text/html',
       [{ id: 'content', label: 'Source', kind: 'section', text: 'Original source' }], [],
       { toolCallId: 'fetch-1', sessionId: 'session', requestedUrl: 'https://example.com', finalUrl: 'https://example.com', contentType: 'text/html' })
-    const userFile = join(root, 'snapshot.txt')
-    writeFileSync(userFile, 'User-requested text report')
+    const userFile = join(root, 'snapshot.md')
+    writeFileSync(userFile, 'User-requested Markdown report')
     expect(inventory.changed()).toEqual([userFile])
     const cacheLink = `[source](<${snapshot.textPath}>)`
     await turn.track(cacheLink)

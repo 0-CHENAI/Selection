@@ -15,6 +15,8 @@ test('the filesystem ledger finds created and edited Chinese paths without treat
     const inventory = new ArtifactCandidateInventory([root])
     writeFileSync(report, '<html>hello</html>')
     writeFileSync(helper, 'after')
+    writeFileSync(join(root, 'snapshot.txt'), 'search cache')
+    writeFileSync(join(root, 'REPORT.TXT'), 'plain text')
     expect(inventory.changed()).toEqual([report])
     expect(inventory.changed()).not.toContain(data)
   } finally { rmSync(root, { recursive: true, force: true }) }
