@@ -55,6 +55,33 @@ it('returns an unapplied checkpoint conflict and starts the graph only after a f
   await tick(); expect(host.created).toEqual(['session-a', 'session-b']);
 });
 
+it('retries from an active coordinator but still blocks an unsafe execution worker before any commit', async () => {
+  let unsafeWorker: string | undefined = 'failed-session';
+  const checked: string[][] = [];
+  runner = new TaskRunner({ host: { ...host, assertTaskSafePoint(ids) {
+    checked.push(ids);
+    for (const id of ids) if (id === 'orch' || id === unsafeWorker) throw new Error(`Execution ${id} has not confirmed shutdown`);
+  } }, workspaceId: 'ws', workspaceRoot: root });
+  await start();
+  const binding = runner.reserveTaskWorker('orch', { runId: 'r', nodeId: 'a' }, 'bad-worker', 'worker');
+  runner.bindTaskWorker(binding, 'bad-worker', 'failed-session');
+  host.complete('a', 'primary response');
+  runner.completeTaskWorker('dynamic', 'r', 'bad-worker', 'failed-session', 'failed', undefined, 'source missing');
+  host.complete('b', 'independent successful result'); await tick();
+  const before = readRunState(root, 'dynamic', 'r')!;
+  expect(() => decide({ action: 'retry', rationale: 'Correct missing source' })).toThrow('failed-session');
+  expect(readRunState(root, 'dynamic', 'r')).toEqual(before);
+  unsafeWorker = undefined;
+  const retried = decide({ action: 'retry', rationale: 'Correct missing source' });
+  expect(retried.status).toBe('waiting-coordinator');
+  expect(retried.coordinatorGate!.checkpointId).not.toBe(before.coordinatorGate!.checkpointId);
+  expect(retried.nodes.find(node => node.id === 'b')!.state).toBe('done');
+  expect(retried.nodes.find(node => node.id === 'a')!.state).toBe('pending');
+  expect(checked.length).toBeGreaterThan(1);
+  expect(checked.every(ids => !ids.includes('orch') && ids.includes('failed-session'))).toBe(true);
+  expect(host.created).toEqual(['session-a', 'session-b']);
+});
+
 it('acknowledges an identical committed continue without repeated work or accepting conflicting identities', async () => {
   runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true });
   const gate = readRunState(root, 'dynamic', 'r')!.coordinatorGate!;
