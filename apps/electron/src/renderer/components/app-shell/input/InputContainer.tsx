@@ -76,6 +76,7 @@ export function InputContainer({
   textareaRef,
   compactMode,
   isProcessing,
+  appearance = 'prompt',
   onAnimatedHeightChange,
   ...freeFormProps
 }: InputContainerProps) {
@@ -252,6 +253,7 @@ export function InputContainer({
       return (
         <FreeFormInput
           {...freeFormProps}
+          appearance={appearance}
           compactMode={compactMode}
           isProcessing={isProcessing}
           isCollapsedInCompact={isCollapsedInCompact}
@@ -291,6 +293,7 @@ export function InputContainer({
       <motion.div
         className={cn(
           "input-container relative rounded-[12px] overflow-hidden transition-colors",
+          mode === 'freeform' && !compactMode && appearance === 'prompt' && 'prompt-composer',
           isFocusedPanel ? "shadow-middle" : "shadow-minimal",
           "bg-background"
         )}
