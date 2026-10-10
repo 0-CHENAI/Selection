@@ -1,10 +1,10 @@
 {
-  "version": "1.0.152",
-  "schemaCrc": "7a7d408f",
+  "version": "1.0.156",
+  "schemaCrc": "616668a7",
   "generatedFrom": "reviewed-release-binary",
   "rootHelpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
-  "helpAllSha256": "043f1ede834eb58d83360a1fcfbd5db5ba07724abfb8a807da3d32d5d3d7fe85",
-  "helpAllEntries": 2466,
+  "helpAllSha256": "615783d30f99403376ed6139e9f0c48d01181f77b7e6ef454c50fe3a52a9c458",
+  "helpAllEntries": 2493,
   "rootCommands": [
     "add",
     "add-part",
@@ -139,7 +139,7 @@
       "flags": []
     },
     "mcp": {
-      "helpSha256": "2ebc20b2142f0550ee855ef5cff5f3791e38aa6c70dfc8e798810c672c24edac",
+      "helpSha256": "005374708e208ed5dc59d9bbf95226e6057ddead38e2f681b0d3f8927e98b88d",
       "flags": []
     },
     "merge": {
