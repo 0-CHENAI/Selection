@@ -735,10 +735,10 @@ export function ActivityStatusIcon({
   const reduceMotion = useReducedMotion()
   const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
 
-  // Keep the same lattice mounted so a live wave can dissolve into its result.
-  if (status !== 'pending' && !(status === 'completed' && (customIcon || toolName === 'Edit' || toolName === 'Write'))) {
+  // The lattice is for active work; terminal states use the familiar circle icons.
+  if (status === 'running' || status === 'backgrounded') {
     return <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
-      <Spinner className={SIZE_CONFIG.spinnerSize} status={status === 'completed' ? 'done' : status === 'error' ? 'error' : 'working'} />
+      <Spinner className={cn(SIZE_CONFIG.spinnerSize, status === 'backgrounded' && 'text-accent')} />
     </span>
   }
 
@@ -778,7 +778,9 @@ export function ActivityStatusIcon({
         if (toolName === 'Write') {
           return <FilePenLine className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
         }
-        return null
+        return <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-success")} />
+      case 'error':
+        return <XCircle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-destructive")} />
     }
   }
 

@@ -151,8 +151,8 @@ describe('TurnCard thinking indicator (#239)', () => {
       { id: 'done', type: 'status', status: 'completed', content: '读取资料 · 完成', timestamp: 3 },
     ])
     expect(html).toContain('lucide-circle ')
-    expect(html).toContain('data-status="error"')
-    expect(countOccurrences(html, 'data-status="done"')).toBe(1)
+    expect(html).toContain('lucide-circle-x')
+    expect(countOccurrences(html, 'lucide-circle-check')).toBe(1)
   })
   it.each(['en', 'zh-Hans'] as const)('keeps internal task context in a compact status row without raw protocol in %s', async language => {
     const activity: ActivityItem = {
@@ -165,7 +165,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     }], { isComplete: true, isStreaming: false })
     expect(html).toContain(resources[language].translation['chat.taskContext.coordination.title'])
     expect(html).toContain(resources[language].translation['chat.taskContext.coordination.description'])
-    expect(html).toContain('data-status="done"')
+    expect(html).toContain('lucide-circle-check')
     expect(html).not.toContain('Conductor checkpoint')
     expect(html).not.toContain('internal-run-123')
     expect(html).not.toContain('<details')
@@ -185,7 +185,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).toContain('<details')
     expect(html).not.toContain('<details open')
     expect(html).toContain('<summary')
-    expect(html).toContain('data-status="done"')
+    expect(html).toContain('lucide-circle-check')
     for (const text of ['核对两年成本', '关键金额须经独立审查', '已冻结的原始成本资料', '只读资料，不修改文件']) expect(html).toContain(text)
     expect(html).toContain(resources[language].translation['tasks.research.sources'])
     expect(html).not.toMatch(/internal-hash|depends_on|Apply these skills|查看原始记录/)
