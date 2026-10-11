@@ -1684,6 +1684,41 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   height: calc(100dvh - var(--task-graph-window-inset) * 2);
   top: 50%;
 }
+/* Scoped exception to the global dialog animation reset. Radix retains the
+   observer until the exit animation ends, then restores the trigger focus. */
+@keyframes task-graph-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes task-graph-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes task-graph-dialog-in {
+  from { opacity: 0; scale: 0.985; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes task-graph-dialog-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.985; }
+}
+.automatic-task-graph-overlay[data-state="open"] {
+  animation: task-graph-overlay-in 240ms ease-out both !important;
+}
+.automatic-task-graph-overlay[data-state="closed"] {
+  animation: task-graph-overlay-out 180ms ease-in both !important;
+}
+.automatic-task-graph-dialog[data-state="open"] {
+  animation: task-graph-dialog-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+.automatic-task-graph-dialog[data-state="closed"] {
+  animation: task-graph-dialog-out 180ms ease-in both !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .automatic-task-graph-dialog[data-state="open"] { animation-name: task-graph-overlay-in !important; }
+  .automatic-task-graph-dialog[data-state="closed"] { animation-name: task-graph-overlay-out !important; }
+  .automatic-task-graph-dialog[data-state], .automatic-task-graph-overlay[data-state] { animation-duration: 100ms !important; }
+}
 /* Match top/bottom gaps, clear native controls, and blur all background chrome. */
 .automatic-task-graph-dialog[data-native-caption="true"] {
   --task-graph-window-inset: max(var(--topbar-height, 48px), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 48px)));
