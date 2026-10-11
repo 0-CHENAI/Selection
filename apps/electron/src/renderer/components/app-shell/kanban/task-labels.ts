@@ -20,6 +20,7 @@ const RUN_STATUS_KEYS: Record<string, string> = {
   completed: 'tasks.runStatusCompleted',
   failed: 'tasks.runStatusFailed',
   interrupted: 'tasks.runStatusInterrupted',
+  'not-started': 'tasks.runStatusNotStarted',
   paused: 'tasks.runStatusPaused',
   pausing: 'tasks.runStatusPausing',
   repairing: 'tasks.runStatusRepairing',

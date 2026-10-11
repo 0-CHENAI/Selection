@@ -82,6 +82,7 @@ const OVERLAY_RANK: Record<string, number> = {
   failed: 8,
   invalid: 8,
   'waiting-approval': 7,
+  'waiting-help': 7,
   running: 6,
   'retry-wait': 5,
   interrupted: 4,
@@ -192,17 +193,17 @@ export function deleteImpact(graph: CanvasGraph, nodeId: string): { dependents: 
   return { dependents: graph.edges.filter((e) => e.source === nodeId).map((e) => e.target) }
 }
 
-export function autoLayout(graph: CanvasGraph, direction: 'TB' | 'LR' = 'TB'): CanvasGraph {
+export function autoLayout(graph: CanvasGraph, direction: 'TB' | 'LR' = 'TB', size = { width: 196, height: 72 }): CanvasGraph {
   const g = new dagre.graphlib.Graph()
   g.setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: direction, nodesep: 48, ranksep: 88 })
-  for (const n of graph.nodes) g.setNode(n.id, { width: 196, height: 72 })
+  g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 })
+  for (const n of graph.nodes) g.setNode(n.id, { ...size })
   for (const e of graph.edges) g.setEdge(e.source, e.target)
   dagre.layout(g)
   return {
     nodes: graph.nodes.map((n) => {
       const p = g.node(n.id)
-      return { ...n, x: (p?.x ?? n.x) - 98, y: (p?.y ?? n.y) - 36 }
+      return { ...n, x: (p?.x ?? n.x) - size.width / 2, y: (p?.y ?? n.y) - size.height / 2 }
     }),
     edges: graph.edges,
   }
