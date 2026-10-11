@@ -67,7 +67,6 @@ import {
   type NavHistoryState,
 } from './navigation-history'
 import * as storage from '@/lib/local-storage'
-import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import type {
   DeepLinkNavigation,
   Session,
@@ -180,9 +179,6 @@ export function NavigationProvider({
   remoteWorkspaceId,
 }: NavigationProviderProps) {
   const { t } = useTranslation()
-  const { dagOrchestrationEnabled } = useAdvancedSettings()
-  const dagOrchestrationEnabledRef = useRef(dagOrchestrationEnabled)
-  useEffect(() => { dagOrchestrationEnabledRef.current = dagOrchestrationEnabled }, [dagOrchestrationEnabled])
   const [, setSession] = useSession()
 
   // Read session metadata directly from atom (reactive to session changes)
@@ -444,7 +440,7 @@ export function NavigationProvider({
           : state
       )
       const requestedRoute = params.get('route')
-      const initialRoute = requestedRoute === 'board' && !dagOrchestrationEnabledRef.current
+      const initialRoute = requestedRoute === 'board'
         ? routes.view.allSessions()
         : requestedRoute
       const sidebarParam = params.get('sidebar') || undefined
@@ -476,7 +472,7 @@ export function NavigationProvider({
             const proportion = parseFloat(entry.slice(colonIdx + 1))
             if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
               const encodedRoute = entry.slice(0, colonIdx) as ViewRoute
-              const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+              const rawRoute = encodedRoute === 'board'
                 ? routes.view.allSessions()
                 : encodedRoute
               const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
@@ -484,7 +480,7 @@ export function NavigationProvider({
             }
           }
           const encodedRoute = entry as ViewRoute
-          const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+          const rawRoute = encodedRoute === 'board'
             ? routes.view.allSessions()
             : encodedRoute
           const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
@@ -870,7 +866,7 @@ export function NavigationProvider({
       }
 
       const requested = parseRoute(route)
-      const parsed = requested?.type === 'view' && requested.name === 'board' && !dagOrchestrationEnabledRef.current
+      const parsed = requested?.type === 'view' && requested.name === 'board'
         ? parseRoute(routes.view.allSessions())
         : requested
       if (!parsed) {
@@ -1110,7 +1106,7 @@ export function NavigationProvider({
         return
       }
 
-      const routeStr = pending.name === 'board' && !dagOrchestrationEnabledRef.current
+      const routeStr = pending.name === 'board'
         ? routes.view.allSessions()
         : `${pending.name}${pending.id ? `/${pending.id}` : ''}`
       const navState = parseRouteToNavigationState(routeStr)

@@ -38,10 +38,8 @@ import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
-import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import ProjectInfoPage from '@/pages/ProjectInfoPage'
-import { KanbanBoardContainer } from './kanban/KanbanBoardContainer'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
@@ -139,7 +137,6 @@ export function MainContentPanel({
   const [sendResourceIds, setSendResourceIds] = useState<string[]>([])
   const [sendResourceLabel, setSendResourceLabel] = useState('')
   const hasOtherWorkspaces = workspaces.length > 1
-  const { dagOrchestrationEnabled } = useAdvancedSettings()
 
   const openSendDialog = useCallback((type: SendResourceType, ids: Set<string>) => {
     const count = ids.size
@@ -315,16 +312,6 @@ export function MainContentPanel({
 
   // Chats navigator - show chat, multi-select panel, or draft composer
   if (isSessionsNavigation(navState)) {
-    // Board route: full-width new-orchestration editor (#261).
-    // A disabled advanced switch falls through to the ordinary session view.
-    if (dagOrchestrationEnabled && navState.viewMode === 'board') {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <KanbanBoardContainer />
-        </Panel>
-      )
-    }
-
     // Multi-select mode: show batch actions panel
     if (isMultiSelectActive) {
       return wrapWithStoplight(

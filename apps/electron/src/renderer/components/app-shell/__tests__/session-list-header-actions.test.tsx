@@ -76,7 +76,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(searchIdx).toBe(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
     expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
-    expect(controls).toContain("value={isBoardView ? 'PRO' : workModeView}")
+    expect(controls).toContain("value={workModeView}")
     expect(controls).toContain('switchWorkModeView(mode)')
     expect(controls).not.toContain('tasks.newOrchestration')
   })
@@ -108,20 +108,14 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
   })
 
-  it('protects unsaved orchestration edits for both search and list navigation', () => {
+  it('removes manual authoring from product navigation while retaining project management', () => {
     const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
-    const taskEditor = readFileSync(join(import.meta.dir, '../kanban/TaskEditor.tsx'), 'utf8')
-    const taskYamlImport = readFileSync(join(import.meta.dir, '../kanban/TaskYamlImport.tsx'), 'utf8')
-
-    expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
-    expect(appShell).toContain("kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))")
-    expect(appShell).toContain('if (isBoardView && !(await leaveOrchestrationView())) return')
-    expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
-    expect(taskEditor).toContain('return () => setDirty(false)')
-    expect(taskYamlImport).toContain('useSetAtom(kanbanEditorDirtyAtom)')
-    expect(taskYamlImport).toContain('setEditorDirty(value.trim().length > 0)')
-    expect(taskYamlImport).toContain("yaml.trim() && !await confirmAction(t('tasks.discardUnsaved'))")
-    expect(taskYamlImport).toContain('setEditorDirty(false)')
+    const content = readFileSync(join(import.meta.dir, '../MainContentPanel.tsx'), 'utf8')
+    expect(appShell).not.toContain('nav:newOrchestration')
+    expect(appShell).not.toContain('kanbanEditorDirtyAtom')
+    expect(content).not.toContain('KanbanBoardContainer')
+    expect(appShell).toContain('nav:projects')
+    expect(content).toContain('ProjectInfoPage')
   })
 
   it('uses exactly one desktop switcher for list and orchestration views', () => {
@@ -141,7 +135,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
     expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
     expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
-    expect(topBarCall).toContain("value={isBoardView ? 'PRO' : workModeView}")
+    expect(topBarCall).toContain("value={workModeView}")
   })
 
   it('keeps compact search clear of the start-aligned list title', () => {
