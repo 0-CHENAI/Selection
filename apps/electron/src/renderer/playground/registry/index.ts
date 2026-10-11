@@ -27,6 +27,8 @@ import { handoverComponents } from './handover'
 import { workModeComponents } from './work-mode'
 import { taskEditorComponents } from './task-editor'
 import { taskEditorLiveComponents } from './task-editor-live'
+import { automaticTaskGraphComponents } from './automatic-task-graph'
+import { x6TaskGraphComponents } from './x6-task-graph'
 
 export * from './types'
 
@@ -50,6 +52,8 @@ export const componentRegistry: ComponentEntry[] = [
   ...handoverComponents,
   ...taskEditorComponents,
   ...taskEditorLiveComponents,
+  ...automaticTaskGraphComponents,
+  ...x6TaskGraphComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,
   ...automationComponents,

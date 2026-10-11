@@ -296,7 +296,7 @@ export const GetTaskResultsSchema = z.object({
 });
 
 export const SubmitTaskOutputSchema = z.object({
-  text: z.string().optional().describe('Optional prose summary of the node result'),
+  text: z.string().optional().describe('Optional Markdown summary of the node result. Use actual line breaks, not literal backslash-n sequences.'),
   values: z.record(z.string(), z.unknown()).optional().describe('Declared output values keyed by name'),
 });
 
@@ -684,7 +684,7 @@ Returns typed outputs, artifacts, revisions, verdicts, and per-node state.`,
 
   submit_task_output: `Submit structured output for the current Conductor node.
 
-Required when the node declares outputs. Pass values matching the declared names. Optional text is a prose summary. Missing this call marks the node invalid.`,
+Required when the node declares outputs. Pass values matching the declared names. Optional text is a Markdown summary: use actual line breaks for paragraphs and lists, not literal backslash-n sequences. Missing this call marks the node invalid.`,
 
   submit_task_verdict: `Submit the Conductor verification verdict for the current run.
 

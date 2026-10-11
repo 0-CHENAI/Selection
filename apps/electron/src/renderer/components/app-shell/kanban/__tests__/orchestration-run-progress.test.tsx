@@ -14,6 +14,7 @@ import {
 } from '../orchestration-run-progress'
 import type { Turn } from '@craft-agent/ui'
 import type { Message } from '@craft-agent/core'
+import { groupMessagesByTurn, isTaskStartAcknowledgment } from '@craft-agent/ui/chat/turn-utils'
 
 function snapshot(partial: Partial<TaskRunSnapshotDto> = {}): TaskRunSnapshotDto {
   return {
@@ -63,6 +64,35 @@ it('collects distinct successful worker sources for the owning run, including re
 })
 
 describe('inline orchestration progress', () => {
+  it('shows dispatched workers from the accepted start receipt before any coordinator checkpoint', () => {
+    for (const toolName of ['run_task', 'session__run_task', 'mcp__session__run_task']) {
+      const messages: Message[] = [
+        { id: 'request', role: 'user', content: '核对资料', timestamp: 1 },
+        { id: 'start', role: 'tool', toolName, toolStatus: 'completed', content: '', timestamp: 2,
+          toolResult: JSON.stringify({ runId: 'run-1', status: 'running' }) },
+        { id: 'ack', role: 'assistant', content: '已启动核对。', timestamp: 3 },
+      ]
+      const grouped = groupMessagesByTurn(messages, { isTaskOrchestrationRoot: true, isTaskOrchestrationRunning: true, isSessionProcessing: false })
+      const projected = withOrchestrationProgress(grouped, snapshot({ nodes: [
+        node({ id: 'research', title: '搜集资料', state: 'running', sessionId: 'worker', startedAt: 4 }),
+        node({ id: 'verify', title: '独立核验', state: 'pending' }),
+      ] }), key => key)
+      const chain = projected.find(turn => turn.type === 'assistant')
+      if (chain?.type !== 'assistant') throw new Error('Missing execution chain')
+      expect(chain.taskRunId).toBe('run-1')
+      expect(chain.activities.filter(activity => activity.taskNode).map(activity => activity.taskNode))
+        .toEqual([
+          { title: '搜集资料', description: undefined, sessionId: 'worker', stateLabel: 'tasks.nodeStateRunning' },
+          { title: '独立核验', description: undefined, sessionId: undefined, stateLabel: 'tasks.nodeStatePending' },
+        ])
+      expect(chain.isComplete).toBe(false)
+      expect(chain.response?.text).toBe('已启动核对。')
+      expect(isTaskStartAcknowledgment(chain.activities)).toBe(true)
+      expect(projected[0]).toBe(grouped[0])
+      expect(withOrchestrationProgress(grouped, snapshot({ runId: 'unrelated' }), key => key)).toBe(grouped)
+    }
+  })
+
   it('shows the selected worker state without mistaking a previous attempt for a completed retry', () => {
     const runs = [snapshot({ nodes: [node({ id: 'research', state: 'done', sessionId: 'latest', attempts: [
       { attempt: 1, sessionId: 'previous', state: 'invalid' },
@@ -100,6 +130,43 @@ describe('inline orchestration progress', () => {
     if (activeOnly?.type !== 'assistant') throw Error('Missing active chain')
     expect(activeOnly.activities.find(row => row.id === 'task-node:run-1:next')?.timestamp).toBe(40)
   })
+
+  it('places a late start receipt before its workers without moving other operations or mutating history', () => {
+    for (const toolName of ['run_task', 'session__run_task', 'mcp__session__run_task']) {
+      const turn: Turn = { type: 'assistant', taskRunId: 'run-1', turnId: 'root', timestamp: 1,
+        isComplete: false, isStreaming: true, activities: [
+          { id: 'plan', type: 'tool', toolName: 'create_task', status: 'completed', timestamp: 10 },
+          { id: 'start', type: 'tool', toolName, status: 'completed', timestamp: 30, content: '{"runId":"run-1","status":"running"}' },
+          { id: 'review', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 25 },
+        ] }
+      const before = JSON.stringify(turn)
+      const run = snapshot({ nodes: [
+        node({ id: 'community', startedAt: 21, state: 'running' }),
+        node({ id: 'official', startedAt: 20, state: 'running' }), node({ id: 'pending' }),
+      ] })
+      const projected = withOrchestrationProgress([turn], run, key => key)[0]
+      if (projected?.type !== 'assistant') throw Error('Missing work chain')
+      expect(projected.activities.filter(row => row.statusType !== 'task_progress').toSorted((a, b) => a.timestamp - b.timestamp)
+        .map(row => row.id)).toEqual(['plan', 'start', 'task-node:run-1:official', 'task-node:run-1:community', 'review', 'task-node:run-1:pending'])
+      expect(projected.activities.find(row => row.id === 'start')?.timestamp).toBe(20)
+      expect(projected.activities.find(row => row.id === 'task-node:run-1:pending')?.timestamp).toBe(30)
+      expect(JSON.stringify(turn)).toBe(before)
+      const repeated = withOrchestrationProgress([{ ...turn, activities: [...turn.activities, { ...turn.activities[1]!, id: 'repeat', timestamp: 40 }] }], run, key => key)[0]
+      expect(repeated.type === 'assistant' && repeated.activities.find(row => row.id === 'repeat')?.timestamp).toBe(40)
+      const legacy = withOrchestrationProgress([turn], snapshot({ nodes: [node({ id: 'legacy', state: 'done' })] }), key => key)[0]
+      expect(legacy.type === 'assistant' && legacy.activities.find(row => row.id === 'start')?.timestamp).toBe(30)
+      for (const unrelated of [
+        { ...turn.activities[1]!, status: 'error' as const },
+        { ...turn.activities[1]!, content: '{"runId":"other"}' },
+        { ...turn.activities[1]!, content: 'invalid JSON' },
+        { ...turn.activities[1]!, toolName: 'mcp__other__run_task' },
+      ]) {
+        const untouched = withOrchestrationProgress([{ ...turn, activities: [unrelated] }], run, key => key)[0]
+        expect(untouched.type === 'assistant' && untouched.activities[0]?.timestamp).toBe(30)
+      }
+    }
+  })
+
   it('updates only the latest matching chain, keeps worker states folded and preserves the report', () => {
     const turns: Turn[] = ['run-1', 'run-2', 'run-1'].map((taskRunId, index) => ({
       type: 'assistant', taskRunId, turnId: `turn-${index}`, activities: [], timestamp: index,

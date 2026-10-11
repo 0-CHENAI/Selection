@@ -23,7 +23,8 @@ import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPr
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
-import { TaskOrchestrationEditButton } from '@/components/ui/TaskOrchestrationEditButton'
+import { TaskGraphButton } from '@/components/ui/TaskGraphButton'
+import { AutomaticTaskGraphDialog } from '@/components/app-shell/kanban/AutomaticTaskGraphDialog'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
 import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
@@ -45,7 +46,6 @@ import {
 import { draftComposerAtomFamily, workModeViewAtom } from '@/atoms/work-mode'
 import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
-import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import { constrainThinkingLevel, modelThinkingLevels, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getSessionTitle } from '@/utils/session'
@@ -596,7 +596,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     if (sessionId) onMarkSessionUnread(sessionId)
   }, [sessionId, onMarkSessionUnread])
 
-  const { dagOrchestrationEnabled, swarmAgentsEnabled } = useAdvancedSettings()
+  const { swarmAgentsEnabled } = useAdvancedSettings()
   const currentWorkMode = isDraft ? draftWorkMode : session?.workMode ?? sessionMeta?.workMode ?? 'NORM'
   const capabilityError = complexCapabilityError(isDraft ? { workMode: draftWorkMode } : session ?? sessionMeta, 'delegate')
   const swarmEnabled = !capabilityError && swarmAgentsEnabled
@@ -604,14 +604,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const swarmToggleDisabled = !!capabilityError || sessionMeta?.orchestrationRole === 'worker'
     || sessionMeta?.orchestrationRole === 'reviewer'
 
-  // Task orchestrator sessions with actual run history get an "Edit task" header action
-  // that opens the board's full-pane Task editor prefilled from task.yaml — the same
-  // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
-  // task can be re-run (Save & Run mints a fresh Conductor run).
+  // Only PRO roots expose the automatic run observer; it never enters an editor.
   const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
   const orchestration = useOrchestrationRuns(
-    dagOrchestrationEnabled && !isDraft && isTaskOrchestrator ? activeWorkspaceId : undefined,
+    !capabilityError && !isDraft && isTaskOrchestrator ? activeWorkspaceId : undefined,
     taskSlug, sessionId,
   )
   const hasOrchestrationRun = !!sessionId && orchestration.runs.some(run => run.orchestratorSessionId === sessionId)
@@ -620,18 +617,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       className="rounded border border-border px-2 py-1 transition-colors hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">{t('tasks.retryFailedNodes')}</button>
     <span className="text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
   </div> : undefined
-  const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
-  const handleEditTask = React.useCallback(() => {
-    if (!dagOrchestrationEnabled || !sessionId || !taskSlug || !isTaskOrchestrator || !hasOrchestrationRun) return
-    setKanbanEditorTarget({
-      workspaceId: activeWorkspaceId ?? undefined,
-      mode: 'edit',
-      sessionId,
-      taskSlug,
-      initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined,
-    })
-    navigate(routes.view.board())
-  }, [dagOrchestrationEnabled, taskSlug, isTaskOrchestrator, hasOrchestrationRun, sessionId, sessionMeta, activeWorkspaceId, setKanbanEditorTarget])
+  const [taskGraphOpen, setTaskGraphOpen] = React.useState(false)
+  const taskGraphTrigger = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => { setTaskGraphOpen(false) }, [sessionId, currentWorkMode])
 
   const handlePreviewChildSession = React.useCallback((childSessionId: string) => {
     if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) {
@@ -675,25 +663,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, session?.sessionFolderPath, sessionMeta, t])
 
-  // Topology action opens the definition editor for orchestrator sessions. Compact mode also
-  // shows session info; desktop online-share control has been removed.
-  const editTaskButton = React.useMemo(() => {
-    if (!dagOrchestrationEnabled || !isTaskOrchestrator || !hasOrchestrationRun) return undefined
-    return (
-      <TaskOrchestrationEditButton
-        compact={!!isCompactMode}
-        onEdit={handleEditTask}
-      />
-    )
-  }, [dagOrchestrationEnabled, isTaskOrchestrator, hasOrchestrationRun, handleEditTask, isCompactMode])
+  const taskGraphButton = !capabilityError && isTaskOrchestrator && hasOrchestrationRun
+    ? <TaskGraphButton triggerRef={taskGraphTrigger} open={taskGraphOpen} onOpen={() => setTaskGraphOpen(true)} /> : undefined
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
-  const sessionHeaderActions = editTaskButton && primaryHeaderAction ? (
+  const sessionHeaderActions = taskGraphButton && primaryHeaderAction ? (
     <div className="flex items-center gap-1.5">
-      {editTaskButton}
+      {taskGraphButton}
       {primaryHeaderAction}
     </div>
-  ) : (editTaskButton ?? primaryHeaderAction)
+  ) : (taskGraphButton ?? primaryHeaderAction)
 
   const canHandover = !!sessionId && !sessionMeta?.parentSessionId && !sessionMeta?.taskNodeId && !sessionMeta?.workModeNeedsReview
     && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)
@@ -749,6 +728,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     handleOpenInNewWindow,
     handleDelete,
   ])
+
+  const taskGraphDialog = !capabilityError ? (
+    <AutomaticTaskGraphDialog open={taskGraphOpen} onOpenChange={setTaskGraphOpen}
+      triggerRef={taskGraphTrigger}
+      workspaceId={activeWorkspaceId ?? undefined} run={orchestration.runs.at(-1) ?? null}
+      onOpenChildSession={(id) => { setTaskGraphOpen(false); handlePreviewChildSession(id) }} />
+  ) : null
 
   const childPreviewDialog = (
     <ChildSessionPreviewDialog
@@ -924,6 +910,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSubmit={handleRenameSubmit}
             placeholder={t('chat.enterSessionName')}
           />
+          {taskGraphDialog}
           {childPreviewDialog}
         </>
       )
@@ -1016,6 +1003,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {taskGraphDialog}
       {childPreviewDialog}
     </ResponseSourcesLayout>
   )

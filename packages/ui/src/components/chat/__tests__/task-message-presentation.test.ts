@@ -153,6 +153,39 @@ describe('root orchestration work chain', () => {
   })
   const options = { isTaskOrchestrationRoot: true, isSessionProcessing: false }
 
+  it('joins adaptive starts to later checkpoints and preserves the completed report when a new run starts', () => {
+    const start = (id: string, timestamp: number, runId: string): Message => ({
+      ...receipt(id, timestamp, 'running', 'run_task', runId), answerRunId: `answer-${id}`, toolResult: JSON.stringify({ runId, status: 'running' }),
+    })
+    const messages = [start('start', 1, 'run-123'), reply('ack', 2, '已启动核对。'),
+      checkpoint('verify', 3, 'verification'), receipt('verdict', 4, 'completed', 'submit_task_verdict'),
+      committedReply('report', 5, '已核对的最终报告。', 'verify'), start('next', 6, 'run-456'), reply('next-ack', 7, '开始下一项。')]
+    const frozen = JSON.stringify(messages)
+    const turns = groupMessagesByTurn(messages, { ...options, isTaskOrchestrationRunning: true })
+    expect(turns).toHaveLength(2)
+    expect(turns[0]?.type === 'assistant' && turns[0].taskRunId).toBe('run-123')
+    expect(turns[0]?.type === 'assistant' && turns[0].response?.text).toBe('已核对的最终报告。')
+    expect(turns[0]?.type === 'assistant' && turns[0].isComplete).toBe(true)
+    expect(turns[1]?.type === 'assistant' && turns[1].taskRunId).toBe('run-456')
+    expect(turns[1]?.type === 'assistant' && turns[1].isComplete).toBe(false)
+    expect(JSON.stringify(messages)).toBe(frozen)
+    const ordinary = groupMessagesByTurn([{ ...start('ordinary', 1, 'run-123'), answerRunId: undefined }, reply('ordinary-ack', 2, '已启动核对。')], { isSessionProcessing: false })
+    expect(ordinary[0]?.type === 'assistant' && ordinary[0].taskRunId).toBeUndefined()
+    expect(ordinary[0]?.type === 'assistant' && ordinary[0].response?.text).toBe('已启动核对。')
+  })
+
+  it('does not bind a failed, foreign or malformed start receipt to an orchestration run', () => {
+    const accepted: Message = { ...receipt('start', 1, 'running', 'run_task'), toolResult: '{"runId":"run-123","status":"running"}' }
+    for (const start of [
+      { ...accepted, isError: true }, { ...accepted, toolStatus: 'executing' as const, toolResult: undefined },
+      { ...accepted, toolName: 'mcp__other__run_task' }, { ...accepted, toolResult: 'not JSON' },
+      { ...accepted, toolResult: '{"runId":"","status":"running"}' },
+    ]) {
+      const turns = groupMessagesByTurn([start, reply('ack', 2)], options)
+      expect(turns[0]?.type === 'assistant' && turns[0].taskRunId).toBeUndefined()
+    }
+  })
+
   it('collects hidden checkpoints and their replies across answer runs, even between worker callbacks', () => {
     const messages = [checkpoint('cp-1', 1), receipt('continue', 2, 'running'), reply('ack-1', 3, undefined, 'answer-cp-1'),
       checkpoint('cp-2', 4), receipt('patch', 5, 'running'), reply('ack-2', 6, '下一步核验修订稿。', 'answer-cp-2')]

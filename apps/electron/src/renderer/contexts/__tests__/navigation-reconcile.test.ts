@@ -3,6 +3,10 @@ import { normalizePanelRouteForReconcile } from '../navigation-reconcile'
 import type { NavigationState } from '../../../shared/types'
 
 describe('normalizePanelRouteForReconcile', () => {
+  it('restores a retired board link into the ordinary session navigator', () => {
+    expect(normalizePanelRouteForReconcile('board', state => state)).toBe('allSessions')
+    expect(normalizePanelRouteForReconcile('board', state => ({ ...state, details: { type: 'session', sessionId: 'root' } }) as NavigationState)).toBe('allSessions/session/root')
+  })
   it('auto-selects session details for filter-only session routes', () => {
     const resolver = (state: NavigationState): NavigationState => {
       if (state.navigator === 'sessions' && !state.details) {

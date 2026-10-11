@@ -1,6 +1,4 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
-import { confirmAction } from '@/lib/confirmation'
-import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -26,7 +24,6 @@ import {
   Radio,
   Info,
   FolderKanban,
-  Workflow,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -68,7 +65,6 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
 import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
@@ -322,16 +318,6 @@ function AppShellContent({
 
   const sessionFilter = sessionsContext?.filter ?? null
 
-  // Board view replaces the session-list navigator with the full-width Kanban panel,
-  // so the navigator (and its resize handle) collapse to zero width while it's active.
-  const { dagOrchestrationEnabled } = useAdvancedSettings()
-  const isBoardView = dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board'
-  useEffect(() => {
-    if (isBoardView) setWorkModeView('PRO')
-  }, [isBoardView, setWorkModeView])
-  const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
-  const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
-
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
 
@@ -430,23 +416,9 @@ function AppShellContent({
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
 
-  const leaveOrchestrationView = React.useCallback(async () => {
-    if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return false
-    setKanbanEditorTarget(null)
-    navigate(routes.view.allSessions())
-    return true
-  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
-
-  useEffect(() => {
-    if (!dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board') {
-      void leaveOrchestrationView()
-    }
-  }, [dagOrchestrationEnabled, navState, leaveOrchestrationView])
-
-  const openSessionSearch = React.useCallback(async () => {
-    if (isBoardView && !(await leaveOrchestrationView())) return
+  const openSessionSearch = React.useCallback(() => {
     setSearchActive(true)
-  }, [isBoardView, leaveOrchestrationView])
+  }, [])
 
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
@@ -1054,8 +1026,7 @@ function AppShellContent({
 
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
-    if (mode === workModeView && !isBoardView) { cancelWorkModeTransition(); return }
-    if (isBoardView && !(await leaveOrchestrationView())) return
+    if (mode === workModeView) { cancelWorkModeTransition(); return }
     const scope = activeWorkspaceId ?? ''
     const remembered = modeNavigation.get(`${scope}:${mode}`)
     const target = remembered && sessionMetaMap.get(remembered)?.workMode === mode ? remembered : undefined
@@ -1066,7 +1037,7 @@ function AppShellContent({
       setSearchQuery('')
       navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
     })
-  }, [workModeView, isBoardView, leaveOrchestrationView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
+  }, [workModeView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
 
   useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
@@ -1350,12 +1321,6 @@ function AppShellContent({
   const handleSkillsClick = useCallback(() => {
     navigate(routes.view.skills())
   }, [])
-
-  const handleNewOrchestration = useCallback(async () => {
-    if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return
-    setKanbanEditorTarget(null)
-    navigate(routes.view.board())
-  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
 
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
@@ -1700,14 +1665,11 @@ function AppShellContent({
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
-    if (workModeView === 'PRO' && dagOrchestrationEnabled) {
-      result.push({ id: 'nav:newOrchestration', type: 'nav', action: handleNewOrchestration })
-    }
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleNewOrchestration, workModeView, dagOrchestrationEnabled, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1893,7 +1855,7 @@ function AppShellContent({
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
           afterWorkspace={isSessionsNavigation(navState) ? (
-            <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={isBoardView ? 'PRO' : workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
+            <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
           isCompact={isAutoCompact}
         />
@@ -2049,13 +2011,6 @@ function AppShellContent({
                         onAddSkill: openAddSkill,
                       },
                     },
-                    ...(workModeView === 'PRO' && dagOrchestrationEnabled ? [{
-                      id: "nav:newOrchestration",
-                      title: t("tasks.newOrchestration"),
-                      icon: Workflow,
-                      variant: "ghost" as const,
-                      onClick: handleNewOrchestration,
-                    }] : []),
                     {
                       id: "nav:projects",
                       title: t("sidebar.projects"),
@@ -2385,7 +2340,7 @@ function AppShellContent({
             )}
             </div>
           }
-          navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden || isBoardView ? 0 : sessionListWidth)}
+          navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
           isRightSidebarVisible={false}
           isCompact={isAutoCompact}
@@ -2425,8 +2380,8 @@ function AppShellContent({
         </div>
         )}
 
-        {/* Session List Resize Handle (absolute, hidden in focused mode and board view) */}
-        {!effectiveSidebarAndNavigatorHidden && !isBoardView && (
+        {/* Session List Resize Handle (absolute, hidden in focused mode) */}
+        {!effectiveSidebarAndNavigatorHidden && (
         <div
           ref={sessionListHandleRef}
           onMouseDown={(e) => { e.preventDefault(); setIsResizing('session-list') }}

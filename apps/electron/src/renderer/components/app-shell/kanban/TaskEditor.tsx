@@ -38,6 +38,7 @@ import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
 import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
+import { taskResultMarkdown } from './task-result-markdown'
 import { ConductorWorkbench, ManagedTaskWorkers, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
 import { Button } from '@/components/ui/button'
@@ -1965,7 +1966,7 @@ function ResultsPanel({
                 </span>
               )}
             </div>
-            {verdict.reason && <p className="mt-0.5 text-[12px] leading-relaxed text-foreground/65">{verdict.reason}</p>}
+            {verdict.reason && <div className="mt-0.5 text-[12px] leading-relaxed text-foreground/65"><Markdown>{taskResultMarkdown(verdict.reason)}</Markdown></div>}
             {verdict.nodes && verdict.nodes.length > 0 && (
               <p className="mt-1 text-[11px] text-foreground/45">{t('tasks.repairNodes', { nodes: verdict.nodes.join(', ') })}</p>
             )}
@@ -2025,7 +2026,7 @@ function ResultsPanel({
           )}
           {node.output ? (
             <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-border/50 bg-background px-3 py-2 text-[12px] leading-relaxed">
-              <Markdown>{node.output}</Markdown>
+              <Markdown>{taskResultMarkdown(node.output)}</Markdown>
             </div>
           ) : (
             <p className="mt-1.5 text-[11.5px] text-foreground/40">{t('tasks.noOutput')}</p>

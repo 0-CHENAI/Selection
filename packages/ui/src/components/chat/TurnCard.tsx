@@ -1087,7 +1087,10 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
       <UsersRound className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-accent')} aria-hidden="true" />
       <span className="min-w-0 truncate text-foreground/75 group-focus-visible/child:text-foreground group-focus-visible/child:underline group-focus-visible/child:underline-offset-4">{node.title}</span>
       <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
-        <ActivityStatusIcon status={activity.status} />{node.stateLabel}
+        {activity.status === 'completed'
+          ? <Check className={cn(SIZE_CONFIG.iconSize, 'shrink-0 text-success')} aria-hidden="true" />
+          : <ActivityStatusIcon status={activity.status} />}
+        {node.stateLabel}
       </span>
       {node.sessionId && onOpenDetails && <ChevronRight className={cn(SIZE_CONFIG.iconSize, 'ml-auto shrink-0 text-muted-foreground')} aria-hidden="true" />}
     </>
