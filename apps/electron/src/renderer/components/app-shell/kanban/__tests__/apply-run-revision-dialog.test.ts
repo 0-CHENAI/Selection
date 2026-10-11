@@ -1,7 +1,11 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import type { TaskApplyRunRevisionResult } from '@craft-agent/shared/protocol'
 import { canConfirmRunRevision, revisionRequiresV3Ack } from '../ApplyRunRevisionDialog'
-import { runtimeNodesForDefinition } from '../ConductorWorkbench'
+
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
+mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }))
+
+const { runtimeNodesForDefinition } = await import('../ConductorWorkbench')
 
 function preview(overrides: Partial<TaskApplyRunRevisionResult> = {}): TaskApplyRunRevisionResult {
   return {
