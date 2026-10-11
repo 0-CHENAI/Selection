@@ -644,16 +644,23 @@ function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] 
     }
     const context = turn.activities.find(activity => activity.type === 'task-context'
       && ['coordination', 'verification'].includes(activity.taskContext?.kind ?? ''))
+    // Adaptive scheduling can dispatch workers without a first checkpoint.
+    // Bind their progress to the host's accepted start receipt instead.
+    const start = turn.activities.findLast(activity => activity.type === 'tool' && activity.status === 'completed'
+      && normalizeCraftSessionToolName(activity.toolName ?? '') === 'run_task')
+    const startReceipt = start?.content ? parseOrchestrationResult(start.content) : null
+    const startRunId = typeof startReceipt?.runId === 'string' && startReceipt.runId.trim() ? startReceipt.runId : undefined
     const runId = context?.taskContext?.runId
       ?? context?.content?.match(/\brunId[=:]\s*"?([\w-]+)/)?.[1]
-    if (context) {
+      ?? startRunId
+    if (context || startRunId) {
       // A pause/failure report is a user-facing boundary. A new execution must
       // also leave the preceding run's report intact, even with no human turn.
       if (outcome === 'delivery' || runId && execution?.taskRunId && runId !== execution.taskRunId) execution = undefined
       outcome = 'process'
-      legacyVerdict = context.taskContext?.kind === 'verification' && !!context.content?.includes('VERDICT: PASS')
+      legacyVerdict = context?.taskContext?.kind === 'verification' && !!context.content?.includes('VERDICT: PASS')
     }
-    if (!execution && !context) {
+    if (!execution && !context && !startRunId) {
       result.push(turn)
       continue
     }
@@ -684,7 +691,9 @@ function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] 
     // Historical v1 verification used an explicit verdict line instead of a tool receipt.
     if (legacyVerdict && /^VERDICT: (?:PASS|FAIL\b.*)$/m.test(turn.response?.text ?? '')) outcome = 'delivery'
     if (outcome === 'process') {
-      demoteResponseToWorkChain(execution)
+      // Keep the initial receipt's acknowledgment as the existing dashed note.
+      // Coordinator checkpoints still fold subsequent narration into the chain.
+      if (context || !startRunId) demoteResponseToWorkChain(execution)
       execution.isComplete = !turn.isStreaming
       execution.isStreaming = turn.isStreaming
     } else if (execution.response) {

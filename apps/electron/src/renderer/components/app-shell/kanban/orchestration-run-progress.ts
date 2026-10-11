@@ -4,6 +4,7 @@ import type { Message } from '@craft-agent/core'
 import type { ResponseSource } from '@craft-agent/ui/chat'
 import { collectTurnResearchSources, sourceUrlKey } from '@craft-agent/ui/chat/source-metadata'
 import { taskAssignmentSummary } from '@craft-agent/ui/chat/task-message-presentation'
+import { normalizeCraftSessionToolName } from '@craft-agent/ui/chat/turn-utils'
 import { overlayState } from './conductor-graph'
 import { resolveNodeStatePill } from './node-state-pill'
 import { runStatusLabelKey } from './task-labels'
@@ -173,6 +174,14 @@ export function withOrchestrationProgress(
   if (latest?.type !== 'assistant') return turns
   const rows = buildOrchestrationProgressRows(undefined, run)
   const summary = `${t('session.executionChildren', { count: rows.length })} · ${countFinishedProgressRows(rows)}/${rows.length} · ${t(runStatusLabelKey(run.status) ?? 'tasks.starting')}`
+  // A receipt without tool_start can arrive after worker dispatch. Anchor only
+  // the first accepted start to that recorded dispatch, leaving history intact.
+  const firstDispatchAt = Math.min(...run.nodes.flatMap(node => Number.isFinite(node.startedAt) ? [node.startedAt!] : []))
+  const startIndex = latest.activities.findIndex(activity => {
+    if (activity.type !== 'tool' || activity.status !== 'completed'
+      || normalizeCraftSessionToolName(activity.toolName ?? '') !== 'run_task') return false
+    try { return JSON.parse(activity.content ?? '').runId === run.runId } catch { return false }
+  })
   // Undispatched/legacy nodes follow known work without inventing execution times.
   const fallbackTimestamp = run.nodes.reduce((time, node) => Number.isFinite(node.startedAt) ? Math.max(time, node.startedAt!) : time,
     latest.activities.reduce((time, activity) => Math.max(time, activity.timestamp), latest.timestamp))
@@ -188,7 +197,8 @@ export function withOrchestrationProgress(
     content: `${row.title} · ${t(resolveNodeStatePill(row.state).labelKey ?? 'tasks.nodeStateInterrupted')}`,
     timestamp: row.startedAt ?? fallbackTimestamp,
   }, ...statusRows(row.children ?? [])])
-  const activities = [...latest.activities, ...statusRows(rows), {
+  const activities = [...latest.activities.map((activity, activityIndex) => activityIndex === startIndex && activity.timestamp > firstDispatchAt
+    ? { ...activity, timestamp: firstDispatchAt } : activity), ...statusRows(rows), {
     id: `task-progress:${run.runId}`, type: 'status' as const,
     statusType: 'task_progress',
     status: ['running', 'waiting-coordinator', 'verifying', 'repairing'].includes(run.status) ? 'running' as const
