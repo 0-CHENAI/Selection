@@ -21,4 +21,6 @@ jobs:
         with:
           bun-version: '1.3.10'
       - run: bun install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: bun test packages/shared/src/skills/install.test.ts packages/shared/src/skills/install-source.test.ts packages/shared/src/agent/__tests__/pi-skill-install.test.ts
