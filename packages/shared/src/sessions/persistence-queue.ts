@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { writeFile, rename, unlink } from 'fs/promises'
+import { writeFile, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import type { StoredSession, SessionHeader } from './types.js'
 import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
 import { toPortablePath } from '../utils/paths.js'
 import { createSessionHeader, makeSessionPathPortable, readSessionHeader } from './jsonl.js'
 import { debug } from '../utils/debug.js'
+import { replaceSessionFile } from './replace-session-file.js'
 
 interface PendingWrite {
   data: StoredSession
@@ -159,7 +160,7 @@ class SessionPersistenceQueue {
       try {
         await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
         // Replace directly so the last committed transcript always remains readable.
-        await rename(tmpFile, filePath)
+        await replaceSessionFile(tmpFile, filePath)
       } finally { await unlink(tmpFile).catch(() => {}) }
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {

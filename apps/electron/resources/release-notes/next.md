@@ -68,6 +68,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Empty branch after a Windows file lock** — Session transcript replacement now retries brief Windows sharing violations without removing the committed file. Creating a branch verifies that the copied history reached disk before opening it; a failed write removes the incomplete child and reports an error instead of opening an empty conversation.
+
 - **Faster mode switching** — Switching between NORM and PRO opens the selected mode's new-conversation composer instead of restoring its last conversation. Each mode keeps its own draft and input settings. Content cross-fades in 150 ms without large-area blur; navigation cancellation, reduced-motion support and older-runtime fallback remain available.
 
 - **Virtualized long conversations** — Messages load on first approach to the viewport. Already loaded content keeps its DOM and component state throughout the conversation; offscreen content skips layout and paint. Switching conversations releases the previous cache. Measured row heights preserve the full scrollbar and reading position. Search, conversation records and annotation jumps retain full-history indexing. Returning to the bottom resumes streaming follow. Unchanged reply Markdown is memoized; restored history skips paragraph reveal scans, empty annotation updates and repeated outline text parsing.

@@ -33,6 +33,11 @@ jobs:
       - name: Verify Windows artifact delivery
         run: bun test packages/server-core/src/reliability/artifact-versions.test.ts packages/server-core/src/reliability/conversation-artifact-versions.test.ts packages/server-core/src/reliability/artifact-delivery-review.test.ts packages/server-core/src/sessions/session-artifact-display.test.ts packages/server-core/src/sessions/artifact-restore-agent.test.ts packages/server-core/src/sessions/answer-delivery.test.ts packages/ui/src/components/chat/__tests__/response-artifacts.test.ts apps/electron/src/renderer/event-processor/handlers/__tests__/artifact-selection-updated.test.ts apps/electron/src/main/__tests__/answer-delivery-pipeline.test.ts
 
+      - name: Verify Windows branch history
+        run: |
+          bun test ./packages/shared/src/sessions/__tests__/replace-session-file.test.ts ./packages/shared/tests/persistence-queue.test.ts ./packages/server-core/src/sessions/branch-files.test.ts ./packages/pi-agent-server/src/pi-session-manager.test.ts
+          bun test ./apps/electron/src/main/__tests__/session-branch-rollback.isolated.ts
+
   validate:
     runs-on: ubuntu-latest
 

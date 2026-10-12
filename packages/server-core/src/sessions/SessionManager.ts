@@ -3757,7 +3757,19 @@ export class SessionManager implements ISessionManager {
         delete branchedStored.branchFromSdkCwd
         delete branchedStored.branchFromSdkTurnId
       }
-      await saveStoredSession(branchedStored)
+      try {
+        await saveStoredSession(branchedStored)
+        // The persistence queue logs write errors. Never acknowledge a fork
+        // whose transcript remained empty (e.g. a Windows replacement lock).
+        const persistedBranch = loadStoredSession(workspaceRootPath, storedSession.id)
+        if (!persistedBranch || persistedBranch.messages.length !== branchedStored.messages.length
+          || persistedBranch.messages.some((message, index) => message.id !== branchedStored.messages[index]?.id)) {
+          throw new Error('Could not verify branch history: the copied messages were not saved. Please try again.')
+        }
+      } catch (error) {
+        deleteStoredSession(workspaceRootPath, storedSession.id)
+        throw error
+      }
 
       // Propagate the Pi turn-anchor sidecar into the branch so a downstream
       // branch can still resolve anchors for messages copied here from the

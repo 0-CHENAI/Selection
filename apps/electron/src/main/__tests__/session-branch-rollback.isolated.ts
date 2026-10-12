@@ -15,6 +15,7 @@ let idCounter = 0
 const storedById = new Map<string, any>()
 const deletedIds: string[] = []
 let mockedProvider: 'anthropic' | 'pi' = 'anthropic'
+let loseBranchHistoryWrite = false
 
 // Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
 const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
@@ -213,9 +214,11 @@ mock.module('@craft-agent/shared/automations', () => ({
 
 mock.module('@craft-agent/shared/sessions', () => ({
   listSessions: () => [],
-  loadSession: (_root: string, id: string) => storedById.get(id) ?? null,
+  loadSession: (_root: string, id: string) => structuredClone(storedById.get(id) ?? null),
   saveSession: async (session: any) => {
-    storedById.set(session.id, session)
+    // Reproduce a failed replacement after the child's empty file was created.
+    if (loseBranchHistoryWrite && session.id.startsWith('child-') && session.messages.length) return
+    storedById.set(session.id, structuredClone(session))
   },
   createSession: async (_root: string, opts: any) => {
     const id = `child-${++idCounter}`
@@ -285,6 +288,7 @@ describe('session branch rollback on preflight failure', () => {
     // isolated source directory so these tests still reach the intended failure.
     await mkdir(join(workspaceRootPath, 'sessions', 'source-1'), { recursive: true })
     mockedProvider = 'anthropic'
+    loseBranchHistoryWrite = false
     idCounter = 0
     storedById.clear()
     deletedIds.length = 0
@@ -302,6 +306,40 @@ describe('session branch rollback on preflight failure', () => {
       createdAt: Date.now() - 20,
       lastUsedAt: Date.now() - 5,
     })
+  })
+
+  it('returns the selected history in both the creation response and later message loads', async () => {
+    const source = storedById.get('source-1')
+    source.messages.push({ id: 'm3', type: 'user', content: 'later question', timestamp: Date.now() })
+    const manager = new SessionManager()
+    ;(manager as any).getOrCreateAgent = async (managed: any) => {
+      managed.agent = { supportsBranching: true, ensureBranchReady: async () => {}, destroy: () => {} }
+      return managed.agent
+    }
+    const branch = await manager.createSession('ws-1', {
+      branchFromSessionId: 'source-1', branchFromMessageId: 'm2',
+    })
+    expect(branch.messages.map(message => message.id)).toEqual(['m1', 'm2'])
+    expect((await manager.getSession(branch.id))?.messages.map(message => message.id)).toEqual(['m1', 'm2'])
+    expect(storedById.get('source-1').messages.map((message: any) => message.id)).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('rejects and removes an empty branch when the history replacement did not reach disk', async () => {
+    loseBranchHistoryWrite = true
+    const manager = new SessionManager()
+    const startAgent = mock(async (managed: any) => {
+      managed.agent = { supportsBranching: true, ensureBranchReady: async () => {}, destroy: () => {} }
+      return managed.agent
+    })
+    ;(manager as any).getOrCreateAgent = startAgent
+    await expect(manager.createSession('ws-1', {
+      branchFromSessionId: 'source-1', branchFromMessageId: 'm2',
+    })).rejects.toThrow('Could not verify branch history')
+    expect(startAgent).not.toHaveBeenCalled()
+    expect(deletedIds).toEqual(['child-1'])
+    expect(storedById.has('child-1')).toBe(false)
+    expect((manager as any).sessions.has('child-1')).toBe(false)
+    expect(storedById.get('source-1').messages).toHaveLength(2)
   })
 
   it('deletes newly created child session when ensureBranchReady throws', async () => {
