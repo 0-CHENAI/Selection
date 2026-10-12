@@ -2,6 +2,7 @@ import { existsSync, lstatSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
+import { compactArtifactVersionSummary } from '@craft-agent/core/utils'
 import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
 import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from './artifact-candidate-inventory'
 
@@ -22,8 +23,7 @@ export function artifactVersionTitle(markdown: string): string | undefined {
     if (plain.length < 6) continue
     const sentenceEnd = plain.search(/[。！？!?]/u)
     const sentence = (sentenceEnd >= 0 ? plain.slice(0, sentenceEnd + 1) : plain).trim()
-    const chars = Array.from(sentence)
-    return chars.length <= 48 ? sentence : `${chars.slice(0, 47).join('')}…`
+    return compactArtifactVersionSummary(sentence)
   }
   return undefined
 }
@@ -31,14 +31,17 @@ export function artifactVersionTitle(markdown: string): string | undefined {
 function suppliedVersionTitle(value: string | undefined): string | undefined {
   const title = value?.trim().replace(/\s+/g, ' ').replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
   if (!title || /^(?:文件(?:内容)?(?:已)?更新|更新文件|初始版本|file (?:updated|changed)|updated file)$/i.test(title)) return undefined
-  const chars = Array.from(title)
-  return chars.length <= 48 ? title : `${chars.slice(0, 47).join('')}…`
+  return compactArtifactVersionSummary(title)
 }
 
 /** Display older records using their saved AI answer without rewriting history. */
 export function withHistoricalAnswerTitles(record: ArtifactRecord, answerFor: (sourceRunId: string, versionId: string) => string | undefined): ArtifactRecord {
   return { ...record, versions: record.versions.map(version => {
-    if (version.summaryOrigin === 'assistant' || !version.sourceRunId) return version
+    if (version.summaryOrigin === 'assistant' && version.summary) {
+      const summary = compactArtifactVersionSummary(version.summary)
+      return summary === version.summary ? version : { ...version, summary }
+    }
+    if (!version.sourceRunId) return version
     const answer = answerFor(version.sourceRunId, version.id)
     const title = answer ? artifactVersionTitle(answer) : undefined
     return title ? { ...version, summary: title, summaryOrigin: 'assistant' as const } : version

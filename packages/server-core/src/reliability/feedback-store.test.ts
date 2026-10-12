@@ -141,3 +141,18 @@ test('invalid persisted resolution flags cannot release protected artifact versi
     }
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('Office targets survive reload and cannot be rebound on retries or updates', () => {
+  const root = mkdtempSync(join(tmpdir(), 'feedback-office-'))
+  try {
+    const store = new FeedbackStore(root)
+    const officeSelection = { previewId: 'preview', artifactId: 'a', baseVersion: 'v', path: '/document.docx', hash: 'a'.repeat(64),
+      elements: [{ path: '/body/p[1]', type: 'paragraph', summary: 'Original', digest: 'b'.repeat(64) }] }
+    const input = { sessionId: 's', artifactId: 'a', baseVersion: 'v', instruction: 'change', officeSelection }
+    const { record } = store.create('request', input)
+    expect(new FeedbackStore(root).read(record.id).officeSelection).toEqual(officeSelection)
+    expect(() => store.findRequest('request', { ...input, officeSelection: { ...officeSelection, hash: 'c'.repeat(64) } })).toThrow('different feedback')
+    record.officeSelection = { ...officeSelection, elements: [] }
+    expect(() => store.save(record)).toThrow('identity cannot change')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

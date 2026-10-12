@@ -3,12 +3,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir, hostname } from 'node:os'
 import { join } from 'node:path'
 import * as config from '@craft-agent/shared/config'
-import { loadSession as loadStoredSession, saveSession as saveStoredSession } from '@craft-agent/shared/sessions'
+import { createSession as createStoredSession, loadSession as loadStoredSession, saveSession as saveStoredSession } from '@craft-agent/shared/sessions'
 import { parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { ArtifactVersions } from '../reliability/artifact-versions'
 import { createManagedSession, SessionManager } from './SessionManager'
 
-test('dialog restore moves the current pointer from version 2 to version 1 and records its summary', async () => {
+for (const officeRevision of [false, true]) test(`dialog restore moves the current pointer from version 2 to version 1 and records its summary (Office=${officeRevision})`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-dialog-restore-'))
   const workspace = { id: 'workspace', name: 'Workspace', rootPath: join(root, 'workspace') }
   mkdirSync(workspace.rootPath)
@@ -18,15 +18,21 @@ test('dialog restore moves the current pointer from version 2 to version 1 and r
     const candidate = join(workspace.rootPath, 'revised.docx')
     writeFileSync(file, 'hello')
     writeFileSync(candidate, 'hi')
+    const revision = officeRevision ? await createStoredSession(workspace.rootPath, { hidden: true, parentSessionId: 'session' }) : undefined
+    if (revision) {
+      const saved = loadStoredSession(workspace.rootPath, revision.id)!
+      saved.messages = [{ id: 'revision-answer', type: 'assistant', content: '生成仅含 hello 的 Word 文档' }]
+      await saveStoredSession(saved)
+    }
     const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspace.id)
-    const first = store.register(file, 'session/user-1', [], '用户请求创建 Word 文档')
+    const first = store.register(file, revision?.id ?? 'session/user-1', [], '用户请求创建 Word 文档')
     const second = store.apply(first.id, first.currentVersion, candidate, 'session/user-2')
     const manager = new SessionManager()
     const managed = createManagedSession({ id: 'session' }, workspace as never, { messagesLoaded: true })
     managed.messages.push(
       { id: 'user-1', role: 'user', content: '创建文档', timestamp: 1 },
-      { id: 'answer-1', role: 'assistant', content: '生成仅含 hello 的 Word 文档', timestamp: 2,
-        artifactVersions: [{ path: file, artifactId: first.id, versionId: first.currentVersion, ordinal: 1 }] },
+      { id: 'answer-1', role: 'assistant', content: officeRevision ? '已修改所选的 1 个元素。' : '生成仅含 hello 的 Word 文档', timestamp: 2,
+        artifactVersions: [{ path: file, artifactId: first.id, versionId: first.currentVersion, ordinal: 1, ...(officeRevision ? { change: 'modified' as const } : {}) }] },
       { id: 'user-2', role: 'user', content: '修改文档', timestamp: 3 },
       { id: 'answer-2', role: 'assistant', content: '正文由 hello 改为 hi', timestamp: 4,
         artifactVersions: [{ path: file, artifactId: first.id, versionId: second.currentVersion, ordinal: 2 }] },

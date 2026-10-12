@@ -23,6 +23,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
+import { ChatVirtualHistory, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
 import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -98,12 +99,10 @@ import { NewSessionBrand, shouldShowNewSessionBrand } from "./NewSessionBrand"
 import {
   forceStickToBottomState,
   isAtBottom,
-  isProgrammaticScrollLocked,
   programmaticScrollLockMs,
   readScrollMetrics,
   resolveStickToBottomState,
   shouldApplyUserScroll,
-  shouldLoadEarlierTurns,
   snapStickyViewportToBottom,
   type ScrollMetrics,
 } from "./ChatDisplay.scroll-to-bottom"
@@ -593,9 +592,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isInputDisabled = disabled
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
-  // Reverse pagination: show last N turns initially, load more on scroll up
-  const TURNS_PER_PAGE = 20
-  const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
+  const virtualHistoryRef = React.useRef<ChatVirtualHistoryHandle>(null)
+  const [historyBounds, setHistoryBounds] = React.useState({ sessionId: session?.id ?? null, start: 0, end: 0 })
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
   const activeSessionId = session?.id ?? null
@@ -626,6 +624,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     ))
   }, [])
   const scrollToLatest = React.useCallback((behavior: ScrollBehavior) => {
+    virtualHistoryRef.current?.scrollToLatest()
     const resolved: ScrollBehavior = reduceMotion || behavior === 'instant' ? 'instant' : behavior
     applyStickState(null, {
       forceStick: true,
@@ -806,11 +805,31 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const sessionDisplayMessages = useMemo(() => sessionMessages?.map(message => withTaskMessagePresentation(message, {
     taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
   })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
+  const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
+  // Group once for rendering, search and the outline; only visible turns mount cards.
+  const allTurns = React.useMemo(() => {
+    if (!sessionMessages) return []
+    const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
+    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
+    return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
+  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
+  const { start: startIndex, end: endIndex } = historyBounds.sessionId === activeSessionId
+    ? historyBounds : { start: 0, end: 0 }
+  const turns = allTurns.slice(startIndex, endIndex)
+  const hasMoreBelow = endIndex < allTurns.length
+  const handleHistoryWindowChange = useCallback((start: number, end: number) => {
+    setHistoryBounds(previous => previous.sessionId === activeSessionId && previous.start === start && previous.end === end
+      ? previous : { sessionId: activeSessionId, start, end })
+  }, [activeSessionId])
+  const revealTurn = useCallback((index: number) => {
+    isStickToBottomRef.current = false
+    ignoreScrollUnstickUntilRef.current = 0
+    virtualHistoryRef.current?.scrollToTurn(index)
+  }, [])
   const matchingOccurrences = useMemo(() => {
     if (!searchQuery.trim() || !sessionDisplayMessages.length) return []
-    const startTime = performance.now()
     const query = searchQuery.toLowerCase()
-    const turns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
+    const turns = allTurns
     const matches: { matchId: string; turnId: string; turnIndex: number; matchIndexInTurn: number }[] = []
 
     for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
@@ -851,28 +870,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
     }
     return matches
-  }, [searchQuery, sessionDisplayMessages, taskGroupingOptions, countOccurrences])
-
-  // Auto-expand pagination when search is active to show all matching turns
-  // This ensures match count is stable and all matches are highlightable from the start
-  useEffect(() => {
-    if (!isSearchActive || matchingOccurrences.length === 0) return
-
-    // Find the earliest matching turn index (reduce to avoid RangeError on large arrays)
-    const earliestMatchTurnIndex = matchingOccurrences.reduce(
-      (min, m) => m.turnIndex < min ? m.turnIndex : min,
-      matchingOccurrences[0]!.turnIndex
-    )
-    const totalTurns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions).length
-
-    // Calculate how many turns we need to show to include all matches
-    // totalTurns - visibleTurnCount = startIndex, so we need visibleTurnCount = totalTurns - earliestMatchTurnIndex + buffer
-    const requiredVisibleCount = totalTurns - earliestMatchTurnIndex + 5 // +5 buffer for context
-
-    if (requiredVisibleCount > visibleTurnCount) {
-      setVisibleTurnCount(requiredVisibleCount)
-    }
-  }, [isSearchActive, matchingOccurrences, sessionDisplayMessages, taskGroupingOptions, visibleTurnCount])
+  }, [searchQuery, sessionDisplayMessages, allTurns, countOccurrences])
 
   // Extract unique turn IDs that have matches (for highlighting)
   const matchingTurnIds = useMemo(() => {
@@ -899,13 +897,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (validMatches.length > 0 && currentMatchIndex < validMatches.length) {
       const matchData = validMatches[currentMatchIndex]
       const { turnId, turnIndex } = matchData
-      const totalTurns = totalTurnCountRef.current
-
-      // Check if the match is outside the visible range
-      const currentStartIndex = Math.max(0, totalTurns - visibleTurnCount)
-      if (turnIndex < currentStartIndex) {
-        const newVisibleCount = totalTurns - turnIndex + 5
-        setVisibleTurnCount(newVisibleCount)
+      if (turnIndex < startIndex || turnIndex >= endIndex) {
+        revealTurn(turnIndex)
         return
       }
 
@@ -926,7 +919,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         applyStickState(readScrollMetrics(viewport))
       })
     }
-  }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount, applyStickState])
+  }, [validMatches, currentMatchIndex, session?.id, startIndex, endIndex, revealTurn, applyStickState])
 
   // ---------------------------------------------------------------------------
   // CSS Custom Highlight API — non-destructive text highlighting
@@ -938,12 +931,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   const MAX_HIGHLIGHT_RANGES = 5000
   // Store computed ranges so the active-match effect can restyle without re-walking the DOM
-  const highlightRangesRef = React.useRef<Range[]>([])
+  const highlightRangesRef = React.useRef<Map<string, Range>>(new Map())
+  const activeMatchIdRef = React.useRef<string | undefined>(undefined)
+  activeMatchIdRef.current = validMatches[currentMatchIndex]?.matchId
+  const applySearchHighlights = useCallback(() => {
+    const highlights = getCSSHighlights()
+    if (!highlights) return
+    const ranges = highlightRangesRef.current
+    const active = activeMatchIdRef.current ? ranges.get(activeMatchIdRef.current) : undefined
+    try {
+      highlights.set('search-passive', new Highlight(...[...ranges.values()].filter(range => range !== active)))
+      if (active) highlights.set('search-active', new Highlight(active))
+      else highlights.delete('search-active')
+    } catch { /* API unavailable — no-op */ }
+  }, [])
 
   // Effect 1: Walk DOM and collect highlight ranges when search/session/pagination changes
   useEffect(() => {
     const cssHighlights = getCSSHighlights()
-    highlightRangesRef.current = []
+    highlightRangesRef.current = new Map()
 
     // Clear previous highlights
     try {
@@ -958,11 +964,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (matchingTurnIdSet.size === 0) return
 
     const rafId = requestAnimationFrame(() => {
-      const allRanges: Range[] = []
+      const allRanges = new Map<string, Range>()
 
       turnRefs.current.forEach((container, turnKey) => {
-        if (allRanges.length >= MAX_HIGHLIGHT_RANGES) return
+        if (allRanges.size >= MAX_HIGHLIGHT_RANGES) return
         if (!matchingTurnIdSet.has(turnKey)) return
+        if (container.closest('[data-chat-virtual-visible="false"]')) return
 
         // For assistant turns, narrow search to response content root
         const searchRoot = container.querySelector('[data-search-root="response"]') || container
@@ -1003,7 +1010,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
         // Find all matches in the concatenated string
         let searchPos = 0
-        while (searchPos < lowerConcatenated.length && allRanges.length < MAX_HIGHLIGHT_RANGES) {
+        let matchIndexInTurn = 0
+        while (searchPos < lowerConcatenated.length && allRanges.size < MAX_HIGHLIGHT_RANGES) {
           const idx = lowerConcatenated.indexOf(query, searchPos)
           if (idx === -1) break
           const matchEnd = idx + query.length
@@ -1025,55 +1033,31 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             }
 
             if (startSet) {
-              allRanges.push(range)
+              allRanges.set(`${turnKey}-match-${matchIndexInTurn}`, range)
             }
           } catch {
             // Range creation can fail if node was removed during walk
           }
 
           searchPos = matchEnd
+          matchIndexInTurn++
         }
       })
 
       // Store ranges for the active-match effect to use
       highlightRangesRef.current = allRanges
 
-      if (allRanges.length === 0 && matchingTurnIdSet.size > 0) {
-        console.warn('[search-highlight] 0 ranges from', matchingTurnIdSet.size, 'matching turns — possible turn ID mismatch')
-      }
-
-      if (allRanges.length === 0) return
-
-      try {
-        // Apply all ranges as passive initially — the active-match effect will restyle
-        cssHighlights.set('search-passive', new Highlight(...allRanges))
-      } catch {
-        // Highlight API call failed — degrade gracefully
-      }
+      applySearchHighlights()
     })
 
     return () => cancelAnimationFrame(rafId)
-  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, visibleTurnCount])
+  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, startIndex, endIndex, applySearchHighlights])
 
   // Effect 2: Update active/passive highlight split when navigation index changes
   // Lightweight — just reshuffles existing Range objects between two Highlight instances
   useEffect(() => {
-    const cssHighlights = getCSSHighlights()
-    const allRanges = highlightRangesRef.current
-    if (!cssHighlights || allRanges.length === 0) return
-
-    try {
-      const activeRange = allRanges[currentMatchIndex]
-      if (activeRange) {
-        const passiveRanges = allRanges.filter((_, i) => i !== currentMatchIndex)
-        cssHighlights.set('search-passive', new Highlight(...passiveRanges))
-        cssHighlights.set('search-active', new Highlight(activeRange))
-      } else {
-        cssHighlights.set('search-passive', new Highlight(...allRanges))
-        cssHighlights.delete('search-active')
-      }
-    } catch { /* graceful degradation */ }
-  }, [currentMatchIndex])
+    applySearchHighlights()
+  }, [currentMatchIndex, applySearchHighlights])
 
   // Navigate to next match (no looping - stops at last match)
   const goToNextMatch = useCallback(() => {
@@ -1194,9 +1178,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     })
   }, [session])
 
-  // Ref to track total turn count for scroll handler
-  const totalTurnCountRef = React.useRef(0)
-
   // Latest message metadata (for commit-time auto-scroll)
   const messageCount = session?.messages.length ?? 0
   const lastMessage = messageCount > 0 ? session?.messages[messageCount - 1] : undefined
@@ -1252,7 +1233,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
     const metrics = readScrollMetrics(viewport)
-    const { scrollTop } = metrics
     const atBottom = isAtBottom(metrics)
     const now = Date.now()
     if (atBottom) ignoreScrollUnstickUntilRef.current = 0
@@ -1262,25 +1242,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       applyStickState(metrics)
     }
 
-    // Load more turns when scrolling near top (within 100px)
-    if (shouldLoadEarlierTurns(scrollTop, isProgrammaticScrollLocked(now, ignoreScrollUnstickUntilRef.current))) {
-      setVisibleTurnCount(prev => {
-        // Check if there are more turns to load
-        const currentStartIndex = Math.max(0, totalTurnCountRef.current - prev)
-        if (currentStartIndex <= 0) return prev // Already showing all
-
-        // Remember scroll height before adding more items
-        const prevScrollHeight = viewport.scrollHeight
-
-        // Schedule scroll position adjustment after render
-        requestAnimationFrame(() => {
-          const newScrollHeight = viewport.scrollHeight
-          viewport.scrollTop = newScrollHeight - prevScrollHeight + scrollTop
-        })
-
-        return prev + TURNS_PER_PAGE
-      })
-    }
   }, [applyStickState])
 
   // Set up scroll event listener
@@ -1334,8 +1295,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs('instant'),
     })
-    setVisibleTurnCount(TURNS_PER_PAGE)
   }, [session?.id, applyStickState])
+
+  React.useLayoutEffect(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    if (!isStickToBottomRef.current) applyStickState(readScrollMetrics(viewport))
+  }, [activeSessionId, startIndex, endIndex, hasMoreBelow, applyStickState])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1579,15 +1545,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return undefined
   }, [pendingPermission, pendingCredential])
 
-  // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
-  const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
-  const allTurns = React.useMemo(() => {
-    if (!sessionMessages) return []
-    const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
-    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
-    return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
-  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
-
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
       message.role === 'user' && message.isQueued && !message.hidden,
@@ -1595,13 +1552,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     [session?.messages],
   )
 
-  // Keep ref in sync for scroll handler
-  totalTurnCountRef.current = allTurns.length
-
-  // Reverse pagination: only render last N turns for fast initial render
-  const startIndex = Math.max(0, allTurns.length - visibleTurnCount)
-  const turns = allTurns.slice(startIndex)
-  const hasMoreAbove = startIndex > 0
   // Bind recovery to the current user turn's latest error, never a historical error.
   const latestUserIndex = allTurns.findLastIndex(turn => turn.type === 'user')
   const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
@@ -1617,7 +1567,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         items.push({ key: getTurnKey(turn, index), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
       } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
         const item = items[items.length - 1]!
-        item.preview = (item.preview + '\n' + turn.response.text).trim()
+        // The tooltip shows three lines; do not process full historical reports for it.
+        item.preview = (item.preview + '\n' + turn.response.text.slice(0, 800)).trim().slice(0, 800)
       }
     })
     return items
@@ -1627,9 +1578,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!activeSessionId) return
     isStickToBottomRef.current = false
     ignoreScrollUnstickUntilRef.current = 0
-    setVisibleTurnCount(count => Math.max(count, allTurns.length - item.index))
+    revealTurn(item.index)
     setNavigationTarget({ sessionId: activeSessionId, key: item.key })
-  }, [activeSessionId, allTurns.length])
+  }, [activeSessionId, revealTurn])
 
   React.useLayoutEffect(() => {
     if (!navigationTarget) return
@@ -1654,7 +1605,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const observer = new MutationObserver(() => { if (jump()) observer.disconnect() })
     observer.observe(viewport, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [navigationTarget, activeSessionId, visibleTurnCount])
+  }, [navigationTarget, activeSessionId, startIndex, endIndex])
 
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1673,8 +1624,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const targetTurnIndex = assistantTurnIndexByMessageId.get(item.messageId)
     if (targetTurnIndex == null) return
 
-    const ensureVisibleCount = allTurns.length - targetTurnIndex
-
     const scrollToTurn = () => {
       const targetTurn = allTurns[targetTurnIndex]
       if (!targetTurn) return false
@@ -1687,8 +1636,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       return true
     }
 
-    if (ensureVisibleCount > visibleTurnCount) {
-      setVisibleTurnCount(ensureVisibleCount)
+    if (targetTurnIndex < startIndex || targetTurnIndex >= endIndex) {
+      revealTurn(targetTurnIndex)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           if (!scrollToTurn()) {
@@ -1706,7 +1655,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         void scrollToTurn()
       })
     }
-  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+  }, [assistantTurnIndexByMessageId, allTurns, startIndex, endIndex, revealTurn])
 
   const [bodyFeedbackTarget, setBodyFeedbackTarget] = useState<BodyFeedbackTarget | null>(null)
   const bodyFeedbackFocus = React.useRef<HTMLElement | null>(null)
@@ -1730,10 +1679,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, anchor?: { x: number; y: number }) => {
     const targetTurnIndex = assistantTurnIndexByMessageId.get(item.messageId)
     if (targetTurnIndex != null) {
-      const ensureVisibleCount = allTurns.length - targetTurnIndex
-      if (ensureVisibleCount > visibleTurnCount) {
-        setVisibleTurnCount(ensureVisibleCount)
-      }
+      if (targetTurnIndex < startIndex || targetTurnIndex >= endIndex) revealTurn(targetTurnIndex)
     }
 
     followUpOpenNonceRef.current += 1
@@ -1745,7 +1691,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       anchorY: anchor?.y,
       nonce: followUpOpenNonceRef.current,
     })
-  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+  }, [assistantTurnIndexByMessageId, startIndex, endIndex, revealTurn])
 
   const handleFollowUpIndexClick = useCallback((item: {
     messageId: string
@@ -1759,7 +1705,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isSessionSwitchForScroll = prevSessionIdForScrollRef.current !== null && prevSessionIdForScrollRef.current !== session?.id
   const skipScrollToBottom = isSessionSwitchForScroll && isSearchActive
   const hasUnrenderedLoadedMessages = !messagesLoading
-    && turns.length === 0
+    && allTurns.length === 0
     && session?.messages.some(message => !message.hidden && !message.isQueued)
   const showNewSessionBrand = shouldShowNewSessionBrand({
     compactMode,
@@ -1773,7 +1719,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
 
   return (
-    <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat">
+    <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat"
+      data-chat-window-start={startIndex} data-chat-window-end={endIndex} data-chat-total-turns={allTurns.length}>
       <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
         refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
         onClose={() => setBodyFeedbackTarget(null)}
@@ -1877,7 +1824,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     skip={skipScrollToBottom}
                   />
                   {/* Empty state for compact mode - inviting conversational prompt, centered in full popover */}
-                  {compactMode && turns.length === 0 && !session.handover && (
+                  {compactMode && allTurns.length === 0 && !session.handover && (
                     <div className="pointer-events-none absolute inset-0 overflow-hidden flex flex-col items-center justify-center select-none gap-1">
                       <span className="text-sm text-muted-foreground">{emptyStateLabel || t("editPopover.whatToChange")}</span>
                       {!emptyStateLabel && (
@@ -1894,17 +1841,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       </div>
                     </div>
                   )}
-                  {/* Load more indicator - shown when there are older messages */}
-                  {hasMoreAbove && (
-                    <div className="text-center text-muted-foreground/60 text-xs py-3 select-none">
-                      ↑ {t('chat.scrollUpForEarlier', { count: startIndex })}
-                    </div>
-                  )}
-                  {!hasMoreAbove && <HandoverMessageBubble session={session} compactMode={compactMode} />}
-                  {turns.map((turn, index) => {
+                  <HandoverMessageBubble session={session} compactMode={compactMode} />
+                  <ChatVirtualHistory key={session.id} ref={virtualHistoryRef} turns={allTurns}
+                    viewportRef={scrollViewportRef} getTurnKey={getTurnKey} onWindowChange={handleHistoryWindowChange}>
+                  {(turn, index) => {
                     // Compute turn key and check if it's a search match
-                    const turnKey = getTurnKey(turn, startIndex + index)
-                    const isCurrentMatch = isSearchActive && matchingTurnIds[currentMatchIndex] === turnKey
+                    const turnKey = getTurnKey(turn, index)
+                    const isCurrentMatch = isSearchActive && validMatches[currentMatchIndex]?.turnId === turnKey
                     const isAnyMatch = isSearchActive && matchingTurnIds.includes(turnKey)
 
                     // User turns - render with MemoizedMessageBubble
@@ -1913,6 +1856,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       return (
                         <div
                           key={turnKey}
+                          data-chat-turn-key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
                           className={cn(
                             compactMode ? "pt-2 pb-1" : CHAT_LAYOUT.userMessagePadding,
@@ -1945,6 +1889,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       return (
                         <div
                           key={turnKey}
+                          data-chat-turn-key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
                           className={cn(
                             "rounded-lg transition-all duration-200",
@@ -2003,10 +1948,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     // mt-2 matches ResponseCard spacing for visual consistency
                     if (turn.type === 'auth-request') {
                       // Interactive only if no user message follows
-                      const isAuthInteractive = !turns.slice(index + 1).some(t => t.type === 'user')
+                      const isAuthInteractive = index > latestUserIndex
                       return (
                         <div
                           key={turnKey}
+                          data-chat-turn-key={turnKey}
                           ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
                           className={cn(
                             "mt-2 rounded-lg transition-all duration-200",
@@ -2025,13 +1971,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     }
 
                     // Check if this is the last response (for Accept Plan button visibility)
-                    const isLastResponse = index === turns.length - 1 || !turns.slice(index + 1).some(t => t.type === 'user')
+                    const isLastResponse = index > latestUserIndex
 
                     // Assistant turns - render with TurnCard (buffered streaming)
-                    const assistantUiKey = getAssistantTurnUiKey(turn, startIndex + index)
+                    const assistantUiKey = getAssistantTurnUiKey(turn, index)
                     return (
                       <div
                         key={turnKey}
+                        data-chat-turn-key={turnKey}
                         ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
                         className={cn(
                           "pt-2",
@@ -2270,7 +2217,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       />
                       </div>
                     )
-                  })}
+                  }}
+                  </ChatVirtualHistory>
                     </motion.div>
                     )}
                     </AnimatePresence>
@@ -2294,11 +2242,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {/* Processing Indicator - always visible while processing.
+                {/* Processing Indicator - visible on the latest page while processing.
                     Slides in/out on the same curve as the turn card blocks so the
                     turn boundary does not pop the transcript by one row. */}
                 <AnimatePresence initial={false}>
-                {sessionBusy && (() => {
+                {sessionBusy && !hasMoreBelow && (() => {
                   // Prefer the turn-start clock. Regenerating reuses the original
                   // user-message timestamp, which would otherwise keep counting
                   // from the first send.

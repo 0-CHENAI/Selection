@@ -116,6 +116,7 @@ export interface AppShellContextType {
   // File/URL handlers - these can open in tabs or external apps
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
+  officeCollaboration?: { sessionId: string; available: boolean; active: boolean; choosing: boolean; onToggle: () => void }
 
   // Workspace
   onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void | Promise<void>

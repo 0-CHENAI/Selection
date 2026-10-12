@@ -5,10 +5,15 @@ import { join, relative, isAbsolute } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
 
 /** Only native confinement may authorize Shell in a candidate workspace. */
-export function createIsolatedShell(directory: string): { directory: string; operations: BashOperations; dispose: () => void } | undefined {
+export function createIsolatedShell(directory: string, options: { denyExternalBrowsers?: boolean; officeDocument?: { path: string; binary: string } } = {}): { directory: string; operations: BashOperations; dispose: () => void } | undefined {
   const root = realpathSync(directory)
   if (process.platform !== 'darwin' && process.platform !== 'linux') return undefined
   if (process.platform === 'linux' && !['/usr/bin/bwrap', '/bin/bwrap'].some(path => existsSync(path))) return undefined
+  const officeDocument = options.officeDocument && { path: realpathSync(options.officeDocument.path), binary: realpathSync(options.officeDocument.binary) }
+  if (officeDocument) {
+    const path = relative(root, officeDocument.path)
+    if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new Error('Office document escapes isolated workspace')
+  }
   // .NET Unix sockets have a 104-byte path limit; keep private IPC scratch short.
   const temporary = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'sel-')))
   const home = join(temporary, 'home')
@@ -36,6 +41,11 @@ export function createIsolatedShell(directory: string): { directory: string; ope
     if (existsSync(join(root, '.git'))) prefix.push('--ro-bind', join(root, '.git'), join(root, '.git'))
     prefix.push('/bin/bash', '--noprofile', '--norc', '-c')
   } else { dispose(); return undefined }
+  if (process.platform === 'darwin' && options.denyExternalBrowsers) {
+    // Applies to descendants too, including browsers spawned inside OfficeCLI
+    // or Python. Deny before exec, so Chrome never starts and cannot crash.
+    prefix[1] += ' (deny process-exec (regex #".*/([Gg]oogle [Cc]hrome[^/]*|[Cc]hrome[^/]*|[Cc]hromium[^/]*|[Ff]irefox[^/]*|[Mm]icrosoft [Ee]dge[^/]*|[Ss]afari[^/]*|[Mm][Ss][Ee]dge[^/]*)(/.*)?$"))'
+  }
   const environment = (env?: NodeJS.ProcessEnv) => ({ ...process.env, ...env, HOME: home, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
     XDG_CACHE_HOME: join(home, '.cache'), XDG_CONFIG_HOME: join(home, '.config'), DOTNET_CLI_HOME: home, DOTNET_EnableDiagnostics: '0', PYTHONDONTWRITEBYTECODE: '1' })
   // Executable presence is insufficient: kernel/container policy may reject it.
@@ -47,7 +57,22 @@ export function createIsolatedShell(directory: string): { directory: string; ope
     const target = realpathSync(cwd), path = relative(root, target)
     if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new Error('Shell directory escapes isolated workspace')
     return new Promise((resolve, reject) => {
-      const args = [...prefix, command]
+      // The supervisor outlives the model's command (including exit/exec), so
+      // resident edits reach disk before process-group cleanup kills the daemon.
+      // Run the close in the same confinement and private IPC environment.
+      const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
+      const transaction = officeDocument ? [
+        `/bin/bash --noprofile --norc -c ${quote(command)}`,
+        'selection_office_command_status=$?',
+        `selection_office_flush_output=$(${quote(officeDocument.binary)} close ${quote(officeDocument.path)} 2>&1)`,
+        'selection_office_flush_status=$?',
+        'if [ "$selection_office_flush_status" -ne 0 ]; then',
+        '  printf "Office candidate flush failed: %s\\n" "$selection_office_flush_output" >&2',
+        '  exit "$selection_office_flush_status"',
+        'fi',
+        'exit "$selection_office_command_status"',
+      ].join('\n') : command
+      const args = [...prefix, transaction]
       if (process.platform === 'linux') args[args.indexOf('--chdir') + 1] = target
       const child = spawn(executable, args, { cwd: target, env: environment(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
       if (child.pid) children.add(child.pid)

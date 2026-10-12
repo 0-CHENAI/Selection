@@ -18,6 +18,7 @@ import { MetadataBadge } from '@/components/ui/metadata-badge'
 import { openLabelLink } from '@/lib/open-label-link'
 import { SessionInfoPopover } from './SessionInfoPopover'
 import { SwarmToggle } from './input/SwarmToggle'
+import { OfficeCollaborationButton } from './input/OfficeCollaborationButton'
 
 // ============================================================================
 // Permission Mode Icon Component
@@ -168,9 +169,9 @@ export function ActiveOptionBadges({
         </div>
       )}
 
-    <div className={cn("flex items-start gap-2 mb-2 px-px pt-px pb-0.5", className)}>
+    <div className={cn("flex flex-wrap items-start gap-2 mb-2 px-px pt-px pb-0.5", className)}>
       {/* Left side: permission → Swarm → labels stack */}
-      <div className="flex items-start gap-2 min-w-0 flex-1">
+      <div className="flex items-start gap-2 min-w-0 flex-1 basis-auto">
         {/* Permission Mode Badge */}
         {permissionMode && (
           <div className="shrink-0">
@@ -242,8 +243,9 @@ export function ActiveOptionBadges({
 
       </div>
 
-      {/* Right side: Files popover button */}
-      <div className="shrink-0">
+      {/* Right side: document collaboration and session files. */}
+      <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+        <OfficeCollaborationButton sessionId={sessionId} />
         <FilesPopoverButton sessionId={sessionId} sessionFolderPath={sessionFolderPath} />
       </div>
     </div>

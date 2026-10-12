@@ -1,14 +1,15 @@
 // ego-browser nodejs < scripts/qa-work-mode-transition.js
-// Resume with globalThis.motionQA = { spaceId, outputDir }.
+// Resume with globalThis.motionQA = { spaceId, outputDir, url }.
 const { strict: assert } = await import('node:assert')
 const { mkdir } = await import('node:fs/promises')
 const config = globalThis.motionQA ?? {}
 const task = await taskSpace(config.spaceId ?? 'NORM PRO motion QA')
+console.log({ spaceId: task.spaceId })
 const page = task.page('p1')
 const directory = config.outputDir ?? '/tmp/selection-work-mode-motion'
 await mkdir(directory, { recursive: true })
-await page.goto('http://127.0.0.1:5187/playground.html')
-const previous = await page.evaluate(() => ({ component: localStorage.getItem('playground-selected-component'), theme: localStorage.getItem('craft-theme') }))
+await page.goto(config.url ?? 'http://127.0.0.1:5187/playground.html')
+const previous = await page.evaluate(() => ({ component: localStorage.getItem('playground-selected-component'), theme: localStorage.getItem('craft-theme'), language: localStorage.getItem('i18nextLng') }))
 const settled = mode => page.waitForFunction(mode => document.documentElement.dataset.workMode === mode && !document.documentElement.dataset.workModeTransitionPhase, mode)
 const switchMode = async mode => { await page.click(`loc=role:button[name="${mode}"]`); await settled(mode) }
 const editor = '[data-work-mode-chat] [contenteditable="true"]'
@@ -52,15 +53,12 @@ async function probe(mode, reduced = false) {
   for (const pair of result.opacities) {
     assert.ok(pair.every(value => value > 0 && value < 1), 'both pictures are visible at the midpoint')
     assert.ok(Math.abs(pair[0] + pair[1] - 1) < .01, 'matching fades overlap without a blank gap')
-    if (!reduced) assert.ok(pair[1] < .4, 'the main view does not finish most of its transition in the first 60ms')
   }
-  assert.ok(result.filters.flat().every(filter => reduced ? filter === 'none' : /^blur\([\d.]+px\)$/.test(filter) && Number(filter.match(/[\d.]+/)[0]) > 0 && Number(filter.match(/[\d.]+/)[0]) < 2), 'normal motion has bounded soft focus; reduced motion has no blur')
+  assert.ok(result.filters.flat().every(filter => filter === 'none'), 'normal and reduced motion never blur the large content snapshots')
   for (const animation of result.animations) {
-    assert.equal(animation.duration, reduced ? 150 : 360)
+    assert.equal(animation.duration, 150)
     assert.ok(animation.frames.every(frame => !frame.transform || frame.transform === 'none'), 'content dissolves without moving or scaling the frame')
-    assert.ok(reduced
-      ? animation.frames.every(frame => !frame.filter || frame.filter === 'none')
-      : animation.frames.some(frame => frame.filter === 'blur(2px)') && animation.frames.some(frame => frame.filter === 'blur(0px)'), 'soft focus has explicit 0–2px endpoints and is omitted for reduced motion')
+    assert.ok(animation.frames.every(frame => !frame.filter || frame.filter === 'none'), 'the transition uses opacity without filter effects')
   }
   await capture(`${reduced ? 'reduced' : 'midpoint'}-${mode.toLowerCase()}`)
   await page.evaluate(() => { window.motionQAAnimations.forEach(a => a.play()); document.startViewTransition = window.motionQAOriginal })
@@ -101,7 +99,7 @@ try {
   assert.equal(await readDraft(), 'PRO 独立草稿')
   await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await switchMode('NORM')
-  // Older runtimes use the same bounded focus change, with opacity-only reduced motion.
+  // Older runtimes use the same short opacity fade for both motion preferences.
   for (const reduce of [false, true]) {
     await page.cdp('Emulation.setEmulatedMedia', { features: reduce ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [] })
     await switchMode('NORM')
@@ -122,7 +120,7 @@ try {
     await page.click('loc=role:button[name="PRO"]')
     await page.waitForFunction(() => window.motionQAFallbackAnimations.length === 2)
     const fallback = await page.evaluate(() => window.motionQAFallbackAnimations.map(a => ({ duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes() })))
-    assert.ok(fallback.every(a => a.duration === (reduce ? 150 : 360) && (reduce ? a.frames.every(f => !f.filter) : a.frames[0].filter === 'blur(2px)' && a.frames[1].filter === 'blur(0px)')))
+    assert.ok(fallback.every(a => a.duration === 150 && a.frames.every(f => !f.filter || f.filter === 'none')))
     await page.evaluate(() => {
       window.motionQAFallbackAnimations.forEach(a => a.play())
       Element.prototype.animate = window.motionQAAnimate
@@ -157,14 +155,14 @@ try {
     await capture(`pro-${theme.toLowerCase()}`)
   }
   assert.equal(await page.evaluate(() => [...document.querySelectorAll('[data-work-mode-transition]')].every(e => getComputedStyle(e).opacity === '1' && getComputedStyle(e).filter === 'none' && getComputedStyle(e).pointerEvents !== 'none' && getComputedStyle(e).viewTransitionName === 'none')), true)
-  console.log({ passed: true, overlappingSnapshots: [forward.opacities, back.opacities], boundedBlur: [forward.filters, back.filters], draftPreserved: true, cancelledNavigation: true, reducedMotion: reduced.animations.map(a => a.duration), fallback: true, compactKeyboard: true, outputDir: directory })
+  console.log({ passed: true, overlappingSnapshots: [forward.opacities, back.opacities], filters: [forward.filters, back.filters], durationMs: forward.animations.map(a => a.duration), draftPreserved: true, cancelledNavigation: true, reducedMotion: reduced.animations.map(a => a.duration), fallback: true, compactKeyboard: true, outputDir: directory })
 } finally {
   await page.evaluate(previous => {
     window.motionQAAnimations?.forEach(a => a.play())
     window.motionQAFallbackAnimations?.forEach(a => a.play())
     if (window.motionQAAnimate) Element.prototype.animate = window.motionQAAnimate
     if (window.motionQAOriginal) document.startViewTransition = window.motionQAOriginal
-    for (const [key, value] of [['playground-selected-component', previous.component], ['craft-theme', previous.theme]]) {
+    for (const [key, value] of [['playground-selected-component', previous.component], ['craft-theme', previous.theme], ['i18nextLng', previous.language]]) {
       if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value)
     }
   }, previous)

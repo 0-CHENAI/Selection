@@ -164,6 +164,9 @@ interface InitMessage {
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
   isolatedShellDirectory?: string;
+  isolatedOfficeDocument?: { path: string; binary: string };
+  denyExternalBrowsers?: boolean;
+
   documentSourceDirectory?: string;
   toolResultRecovery?: import('../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan;
   forceFreshSession?: boolean;
@@ -769,7 +772,9 @@ async function ensureSession(): Promise<AgentSession> {
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
   confinedShellCleanup?.(); confinedShellCleanup = undefined;
-  const isolatedShell = initConfig.isolatedShellDirectory ? createIsolatedShell(initConfig.isolatedShellDirectory) : undefined;
+  const isolatedShell = initConfig.isolatedShellDirectory ? createIsolatedShell(initConfig.isolatedShellDirectory, {
+    denyExternalBrowsers: initConfig.denyExternalBrowsers, officeDocument: initConfig.isolatedOfficeDocument,
+  }) : undefined;
   confinedShellCleanup = isolatedShell?.dispose;
   const builtinDefs = [
     registerRecoveryClass(createSelectionReadToolDefinition(cwd), 'read-only'),

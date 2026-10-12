@@ -213,6 +213,8 @@ export const CHANNEL_MAP = {
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
   getBodyFeedbackDetails: invoke(RPC_CHANNELS.artifacts.BODY_FEEDBACK),
+  officePreview: invoke(RPC_CHANNELS.artifacts.OFFICE_PREVIEW),
+  getOfficeFiles: invoke(RPC_CHANNELS.artifacts.OFFICE_FILES),
   artifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK),
   previewArtifactVersion: invoke(RPC_CHANNELS.artifacts.PREVIEW),
   cleanupArtifactVersions: invoke(RPC_CHANNELS.artifacts.CLEANUP),

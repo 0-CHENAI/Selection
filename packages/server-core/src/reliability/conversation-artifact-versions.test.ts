@@ -272,6 +272,29 @@ test('an explicit AI change title wins over the answer opening and old prompts a
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('saves titles within 30 characters and compacts legacy titles without rewriting history', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-short-title-'))
+  try {
+    const file = join(root, 'report.docx')
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const tracker = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {})
+    writeFileSync(file, 'first')
+    const longTitle = '已将正文三段散文替换为七言绝句《山行即事》（标题居中加粗，四句两两分行居中排版），其余结构与格式保持不变，文件校验通过。'
+    const title = '已将正文三段散文替换为七言绝句《山行即事》'
+    await tracker.capture('已交付报告。\n\n[报告](report.docx)', 'session/user-1', longTitle)
+    const record = store.findByPath(file)!
+    expect(record.versions[0]).toMatchObject({ summary: title, summaryOrigin: 'assistant' })
+    expect(Array.from(record.versions[0]!.summary!).length).toBeLessThanOrEqual(30)
+    expect(artifactVersionTitle(longTitle)).toBe(title)
+    const oldTitle = `${Array.from(longTitle).slice(0, 47).join('')}…`
+    const legacy = { ...record, versions: [{ ...record.versions[0]!, summary: oldTitle }] }
+    const shown = withHistoricalAnswerTitles(legacy, () => { throw new Error('Existing AI summaries need no source lookup') })
+    expect(shown.versions[0]!.summary).toBe(title)
+    expect(legacy.versions[0]!.summary).toBe(oldTitle)
+    expect(withHistoricalAnswerTitles(shown, () => undefined)).toEqual(shown)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('a helper script in the session data folder is not a result file', async () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-scratch-'))
   try {

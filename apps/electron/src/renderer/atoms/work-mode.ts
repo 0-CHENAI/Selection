@@ -5,7 +5,6 @@ import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 
 /** Navigation only: switching this never changes a persisted session's mode. */
 export const workModeViewAtom = atom<WorkMode>('NORM')
-export const workModeNavigationAtom = atom<Map<string, string | null>>(new Map())
 
 export interface DraftComposerState {
   initialized: boolean

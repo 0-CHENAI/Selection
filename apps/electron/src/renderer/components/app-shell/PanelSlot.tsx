@@ -128,11 +128,11 @@ export function PanelSlot({
             : {}
           ),
           // Corner radii: edge corners (touching window boundary) vs interior corners.
-          // Compact mode panels run flush to the viewport floor — no rounded bottom.
+          // Compact mode runs flush unless a trailing sibling restores the frame inset.
           borderTopLeftRadius: RADIUS_INNER,
-          borderBottomLeftRadius: isCompact ? 0 : (isAtLeftEdge ? RADIUS_EDGE : RADIUS_INNER),
+          borderBottomLeftRadius: isCompact && isAtRightEdge ? 0 : (isAtLeftEdge ? RADIUS_EDGE : RADIUS_INNER),
           borderTopRightRadius: RADIUS_INNER,
-          borderBottomRightRadius: isCompact ? 0 : (isAtRightEdge ? RADIUS_EDGE : RADIUS_INNER),
+          borderBottomRightRadius: isCompact && isAtRightEdge ? 0 : (isAtRightEdge ? RADIUS_EDGE : RADIUS_INNER),
           ...(isOnly
             ? { flexGrow: 1, minWidth: 0 }
             : { flexGrow: proportion, flexShrink: 1, flexBasis: 0, minWidth: PANEL_MIN_WIDTH }

@@ -31,6 +31,7 @@ Do not read global `~/.agents/skills/officecli`, `docx`, `xlsx`, or `pptx` instr
 
 - Use OfficeCLI as the only engine for `.docx`, `.docm`, `.xlsx`, `.xlsm`, and `.pptx` work. Do not switch to python-docx, openpyxl, python-pptx, or MarkItDown for a supported operation.
 - Keep the resident document session open across related edits. Use `save` when an intermediate checkpoint is useful and `close` only at the final delivery gate.
+- Exception for interactive revisions in an isolated candidate: the runtime saves and closes the candidate at the end of every Bash call. Batch related edits in one call; verify saved content in the next. Do not depend on resident state across calls or inspect resident processes/locks. Use the isolated `dataFolderPath` for scratch output and finish with one short change summary for version history, without repeating the document or a troubleshooting report.
 - Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget. Continue until the official Delivery Gate passes, the user cancels, or a genuine external blocker makes file state unverifiable.
 - Treat a non-zero exit code, `WARNING`, `UNSUPPORTED`, missing output, or read-back mismatch as incomplete work. Inspect the relevant `officecli help` output, repair, and verify again.
 - A mutating command can leave a partial change even when it exits non-zero, including `WARNING: UNSUPPORTED` with exit code 2. Read back the document before retrying; repair or remove the partial change, or restore a verified checkpoint. Never replay the command blindly.

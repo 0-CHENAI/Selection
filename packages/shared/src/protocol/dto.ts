@@ -725,6 +725,9 @@ export type SessionEvent =
   | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
+  officeSelection?: import('./artifacts').OfficeSelection
+  /** Optional document context for ordinary chat; the host validates the session's file scope. */
+  officeContext?: { path: string }
   annotationFollowUps?: AnnotationFeedbackReference[]
   skillSlugs?: string[]
   badges?: ContentBadge[]

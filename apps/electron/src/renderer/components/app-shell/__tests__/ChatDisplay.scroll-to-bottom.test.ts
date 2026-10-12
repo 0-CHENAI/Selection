@@ -15,8 +15,37 @@ import {
   shouldLoadEarlierTurns,
   followStickyViewportToBottom,
   snapStickyViewportToBottom,
+  readScrollMetrics,
+  isAtBottom,
   type ScrollMetrics,
 } from '../ChatDisplay.scroll-to-bottom'
+
+describe('virtual history preserves reader intent and streaming', () => {
+  const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
+  const body = source.match(/const handleScroll = React.useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[applyStickState\]\)/)?.[1]
+  function scroll(sticky: boolean, atBottom: boolean) {
+    expect(body).toBeDefined()
+    const viewport = { scrollTop: atBottom ? 4600 : 1000, scrollHeight: 5000, clientHeight: 400 }
+    const stickyRef = { current: sticky }
+    let updates = 0
+    const scope = {
+      scrollViewportRef: { current: viewport }, readScrollMetrics, isAtBottom,
+      ignoreScrollUnstickUntilRef: { current: 0 }, isStickToBottomRef: stickyRef, shouldApplyUserScroll,
+      applyStickState: () => { updates++; stickyRef.current = isAtBottom(viewport) },
+    }
+    new Function(...Object.keys(scope), body!)(...Object.values(scope))
+    return { sticky: stickyRef.current, updates }
+  }
+  test('layout growth alone cannot release the sticky bottom', () => {
+    expect(scroll(true, false)).toEqual({ sticky: true, updates: 0 })
+  })
+  test('reader scrolling away keeps control of the full history', () => {
+    expect(scroll(false, false)).toEqual({ sticky: false, updates: 1 })
+  })
+  test('returning to the actual bottom resumes following', () => {
+    expect(scroll(false, true)).toEqual({ sticky: true, updates: 1 })
+  })
+})
 
 describe('streaming resize follows frames and reader intent (#328)', () => {
   const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')

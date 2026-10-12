@@ -65,7 +65,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
+import { workModeViewAtom } from '@/atoms/work-mode'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -168,6 +168,8 @@ interface AppShellProps {
   menuNewChatTrigger?: number
   /** Focused mode - hides sidebars, shows only the chat content */
   isFocusedMode?: boolean
+  /** A sibling panel supplies the right edge inset and remains present through its exit animation. */
+  hasTrailingPanel?: boolean
 }
 
 /**
@@ -197,6 +199,7 @@ function AppShellContent({
   defaultCollapsed = false,
   menuNewChatTrigger,
   isFocusedMode = false,
+  hasTrailingPanel = false,
 }: AppShellProps) {
   // Destructure commonly used values from context
   // Note: sessions is NOT destructured here - we use sessionMetaMapAtom instead
@@ -282,8 +285,6 @@ function AppShellContent({
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
   const workModeView = useAtomValue(workModeViewAtom)
   const setWorkModeView = useSetAtom(workModeViewAtom)
-  const modeNavigation = useAtomValue(workModeNavigationAtom)
-  const setModeNavigation = useSetAtom(workModeNavigationAtom)
   const focusedWorkMode = sessionWorkModeView(focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined, sessionMetaMap)
   useEffect(() => {
     if (focusedWorkMode) setWorkModeView(focusedWorkMode)
@@ -1027,17 +1028,13 @@ function AppShellContent({
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
     if (mode === workModeView) { cancelWorkModeTransition(); return }
-    const scope = activeWorkspaceId ?? ''
-    const remembered = modeNavigation.get(`${scope}:${mode}`)
-    const target = remembered && sessionMetaMap.get(remembered)?.workMode === mode ? remembered : undefined
     await transitionWorkMode(() => {
-      setModeNavigation(previous => new Map(previous).set(`${scope}:${workModeView}`, focusedSessionId ?? null))
       setWorkModeView(mode)
       setSearchActive(false)
       setSearchQuery('')
-      navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
+      navigate(routes.view.allSessions(), draftSessionNavigateOptions())
     })
-  }, [workModeView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
+  }, [workModeView, setWorkModeView])
 
   useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
@@ -1866,8 +1863,8 @@ function AppShellContent({
         className="flex items-stretch relative"
         style={{
           height: '100%',
-          paddingRight: isAutoCompact ? 0 : PANEL_EDGE_INSET,
-          paddingBottom: isAutoCompact ? 0 : PANEL_EDGE_INSET,
+          paddingRight: isAutoCompact || hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
+          paddingBottom: isAutoCompact && !hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
           paddingLeft: 0,
           gap: PANEL_GAP,
         }}
@@ -2342,7 +2339,7 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={false}
+          isRightSidebarVisible={hasTrailingPanel}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />

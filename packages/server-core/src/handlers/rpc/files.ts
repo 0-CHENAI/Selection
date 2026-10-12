@@ -20,6 +20,8 @@ import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.artifacts.OFFICE_FILES,
+  RPC_CHANNELS.artifacts.OFFICE_PREVIEW,
   RPC_CHANNELS.artifacts.BODY_FEEDBACK,
   RPC_CHANNELS.artifacts.MANAGE,
   RPC_CHANNELS.artifacts.FEEDBACK,
@@ -42,6 +44,20 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.artifacts.OFFICE_FILES, async (ctx, sessionId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = typeof sessionId === 'string' && await deps.sessionManager.getSession(sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getOfficeFiles) throw new Error('Office discovery is unavailable')
+    return deps.sessionManager.getOfficeFiles(sessionId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.OFFICE_PREVIEW, async (ctx, operation: import('@craft-agent/shared/protocol').OfficePreviewOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = operation && await deps.sessionManager.getSession(operation.sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.officePreview) throw new Error('Office preview is unavailable')
+    return deps.sessionManager.officePreview(operation, ctx.clientId)
+  })
   server.handle(RPC_CHANNELS.artifacts.BODY_FEEDBACK, async (ctx, sessionId: string, sourceMessageId: string, annotationId: string) => {
     const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
     const session = await deps.sessionManager.getSession(sessionId)
@@ -108,14 +124,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       const sessions = new Map<string, ReturnType<typeof loadStoredSession>>()
       return withHistoricalAnswerTitles(record, (sourceRunId, versionId) => {
         const separator = sourceRunId.lastIndexOf('/')
-        if (separator < 1) return undefined
-        const sessionId = sourceRunId.slice(0, separator)
+        const sessionId = separator < 1 ? sourceRunId : sourceRunId.slice(0, separator)
         try { validateSessionId(sessionId) } catch { return undefined }
         if (!sessions.has(sessionId)) {
           try { sessions.set(sessionId, loadStoredSession(workspace.rootPath, sessionId)) }
           catch { sessions.set(sessionId, null) }
         }
-        return sessions.get(sessionId)?.messages.find(message => message.type === 'assistant'
+        const session = sessions.get(sessionId)
+        if (separator < 1) return session?.hidden && session.parentSessionId
+          ? session.messages.findLast(message => message.type === 'assistant' && !message.isIntermediate && message.phase !== 'intermediate')?.content
+          : undefined
+        return session?.messages.find(message => message.type === 'assistant'
           && message.artifactVersions?.some(ref => ref.versionId === versionId))?.content
       })
     }

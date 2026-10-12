@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiAgent } from '../pi-agent.ts';
 import * as configStorage from '../../config/storage.ts';
+import { resolveOfficecliBinary } from '../../utils/officecli.ts';
 
 function fixture(code: string) {
   const root = mkdtempSync(join(tmpdir(), 'pi-lifecycle-'));
@@ -18,7 +19,7 @@ function fixture(code: string) {
   const internal = agent as any;
   internal.getPiAuth = async () => null;
   internal.getApiKey = async () => null;
-  return { agent, internal, script, async cleanup() {
+  return { agent, internal, script, root, async cleanup() {
     agent.destroy();
     // Windows may retain the child's working directory until process exit.
     for (let attempt = 0; ; attempt++) {
@@ -32,6 +33,32 @@ function fixture(code: string) {
 }
 
 describe('Pi subprocess lifecycle fault injection', () => {
+  it.skipIf(!resolveOfficecliBinary({ trustEnvironment: false }))('passes the Office candidate and trusted runtime into its confined subprocess', async () => {
+    const f = fixture(`
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const message = JSON.parse(line);
+        if (message.type === 'init') console.log(JSON.stringify({ type: 'ready' }));
+        if (message.type === 'set_auto_compaction') console.log(JSON.stringify({ type: 'set_auto_compaction_result', id: message.id, enabled: true }));
+        if (message.type === 'shutdown') process.exit(0);
+      });
+    `);
+    f.internal.config.isolatedShellDirectory = f.root;
+    f.internal.config.isolatedOfficeDocumentPath = join(f.root, 'candidate.docx');
+    f.internal.config.denyExternalBrowsers = true;
+    f.internal.config.envOverrides = { CRAFT_OFFICECLI: '/untrusted/officecli' };
+    const sent: any[] = [];
+    const send = f.internal.send.bind(f.internal);
+    f.internal.send = (command: unknown) => { sent.push(command); send(command); };
+    try {
+      await f.internal.ensureSubprocess(2000);
+      const init = sent.find(command => command.type === 'init');
+      expect(init.isolatedOfficeDocument).toEqual({ path: join(f.root, 'candidate.docx'), binary: resolveOfficecliBinary({ trustEnvironment: false }) });
+      expect(init.isolatedShellDirectory).toBe(f.root);
+      expect(init.plansFolderPath).toBe(join(f.root, '.qa', 'plans'));
+      expect(init.denyExternalBrowsers).toBe(true);
+    } finally { await f.cleanup(); }
+  });
+
   it('does not register source tools while the child is still initializing', async () => {
     const f = fixture('');
     const sent: unknown[] = [];

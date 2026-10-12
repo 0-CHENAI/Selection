@@ -350,8 +350,10 @@ export abstract class BaseAgent implements AgentBackend {
       workspaceId: config.workspace.id,
       sessionId: this._sessionId,
       workingDirectory: this.workingDirectory,
-      plansFolderPath: getSessionPlansPath(config.workspace.rootPath, this._sessionId),
-      dataFolderPath: getSessionDataPath(config.workspace.rootPath, this._sessionId),
+      plansFolderPath: config.isolatedOfficeDocumentPath
+        ? join(config.isolatedShellDirectory!, '.qa', 'plans') : getSessionPlansPath(config.workspace.rootPath, this._sessionId),
+      dataFolderPath: config.isolatedOfficeDocumentPath
+        ? join(config.isolatedShellDirectory!, '.qa') : getSessionDataPath(config.workspace.rootPath, this._sessionId),
     });
 
     // SourceManager: tracks active/inactive sources and formats state for context injection

@@ -14,7 +14,7 @@ import { SkillAvatar } from '@/components/ui/skill-avatar'
 // Types
 // ============================================================================
 
-export type SlashCommandId = PermissionMode | 'compact' | 'delegate'
+export type SlashCommandId = PermissionMode | 'compact' | 'delegate' | 'office-edit'
 
 /** Union type for all item types in the slash menu */
 export type SlashItemType = 'command' | 'folder' | 'skill'
@@ -123,6 +123,7 @@ const delegateCommand: SlashCommand = {
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   delegateCommand,
   compactCommand,
+  { id: 'office-edit', label: 'Office 交互预览', description: '选择文档中的元素，再在聊天中提出修改', icon: <Sparkles className={MENU_ICON_SIZE} /> },
 ]
 
 /** Drop the sub-agent command when Advanced → Swarm agents is off. */
@@ -206,7 +207,7 @@ const MODE_COMMAND_IDS = new Set<string>(['safe', 'ask', 'allow-all'])
 
 function CommandItemContent({ command, isActive }: { command: SlashCommand; isActive: boolean }) {
   const { t } = useTranslation()
-  const label = MODE_COMMAND_IDS.has(command.id) ? t(`mode.${command.id}`, command.label) : command.label
+  const label = command.id === 'office-edit' ? t('chat.officePreview.title') : MODE_COMMAND_IDS.has(command.id) ? t(`mode.${command.id}`, command.label) : command.label
   return (
     <>
       <div className="shrink-0 text-muted-foreground">{command.icon}</div>

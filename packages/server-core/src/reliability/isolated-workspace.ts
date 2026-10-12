@@ -13,6 +13,8 @@ export interface IsolatedWorkspace {
   delivery?: TaskDeliveryReceipt
   /** Trusted runtime policy for new Swarm workers without explicit file declarations. */
   autoDelivery?: true
+  denyExternalBrowsers?: boolean
+  officeDocumentPath?: string
   deliveryContract?: WorkspaceDeliveryContract
   deliveryProgress?: {
     phase: 'validating' | 'integrating' | 'conflict' | 'validation-failed'

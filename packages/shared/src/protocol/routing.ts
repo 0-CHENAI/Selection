@@ -214,6 +214,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
   RPC_CHANNELS.artifacts.CLEANUP,
   RPC_CHANNELS.artifacts.PREVIEW,
+  RPC_CHANNELS.artifacts.OFFICE_FILES,
+  RPC_CHANNELS.artifacts.OFFICE_PREVIEW,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
   RPC_CHANNELS.server.CREATE_WORKSPACE,

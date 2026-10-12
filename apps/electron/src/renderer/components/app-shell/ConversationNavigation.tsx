@@ -26,6 +26,11 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
   const { t } = useTranslation()
   const [activeKey, setActiveKey] = React.useState<string>()
   const railRef = React.useRef<HTMLElement>(null)
+  const labels = React.useMemo(() => items.map((item, index) => ({
+    title: getConversationNavigationTitlePreview(item.title, item.badges ?? []),
+    label: t('chat.goToRecord', { number: index + 1, title: markdownToPlainText(item.title) }),
+    preview: markdownToPlainText(item.preview).replace(/\s+/g, ' '),
+  })), [items, t])
 
   React.useEffect(() => {
     const viewport = viewportRef.current
@@ -38,13 +43,14 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
       for (const item of items) {
         const element = turnRefs.current.get(item.key)
         if (!element || !viewport.contains(element)) continue
+        if (element.closest('[data-chat-virtual-visible="false"]')) continue
         if (!current) current = item.key
         if (element.getBoundingClientRect().top <= top) current = item.key
         else break
       }
       // The final record may be too short to align with the viewport top.
       if (viewport.scrollHeight > viewport.clientHeight && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 2) {
-        current = items.at(-1)?.key
+        current = items.findLast(item => turnRefs.current.get(item.key)?.closest('[data-chat-virtual-visible="true"]'))?.key
       }
       setActiveKey(current)
     }
@@ -83,12 +89,12 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
       <nav ref={railRef} aria-label={t('chat.recordNavigation')}
         className="pointer-events-auto relative max-h-full w-8 min-w-8 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item, index) => {
-          const titlePreview = getConversationNavigationTitlePreview(item.title, item.badges ?? [])
+          const { title: titlePreview, label, preview } = labels[index]!
 
           return (
             <Tooltip.Root key={item.key}>
               <Tooltip.Trigger asChild>
-                <button type="button" aria-label={t('chat.goToRecord', { number: index + 1, title: markdownToPlainText(item.title) })}
+                <button type="button" aria-label={label}
                   aria-current={activeKey === item.key ? 'step' : undefined}
                   onClick={() => onNavigate(item)}
                   className="group flex h-3 w-8 items-center pl-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring">
@@ -104,7 +110,7 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
                   </div>
                   {item.preview && (
                     <div className="mt-2 line-clamp-3 [overflow-wrap:anywhere] text-muted-foreground">
-                      {markdownToPlainText(item.preview).replace(/\s+/g, ' ')}
+                      {preview}
                     </div>
                   )}
                 </Tooltip.Content>
