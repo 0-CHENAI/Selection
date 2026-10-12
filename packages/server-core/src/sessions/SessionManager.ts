@@ -6759,8 +6759,8 @@ export class SessionManager implements ISessionManager {
     for (const metadata of listStoredSessions(workspaceRootPath)) {
       if (metadata.id === sourceSessionId) continue
       const branch = loadStoredSession(workspaceRootPath, metadata.id)
-      if (!branch || branch.parentSessionId || !branch.branchFromMessageId
-        || branch.branchFromSessionPath !== sourceDir) continue
+      if (!branch || branch.parentSessionId || !branch.branchFromMessageId || !branch.branchFromSessionPath
+        || normalizePath(branch.branchFromSessionPath) !== normalizePath(sourceDir)) continue
       const snapshot = await copyBranchFiles(sourceDir, getSessionStoragePath(workspaceRootPath, branch.id))
       const runtime = this.sessions.get(branch.id)
       if (runtime) {
@@ -6771,7 +6771,8 @@ export class SessionManager implements ISessionManager {
         await saveStoredSession(branch)
       }
       await sessionPersistenceQueue.flush(branch.id)
-      if (loadStoredSession(workspaceRootPath, branch.id)?.branchFromSessionPath !== snapshot) {
+      const savedSourcePath = loadStoredSession(workspaceRootPath, branch.id)?.branchFromSessionPath
+      if (!savedSourcePath || normalizePath(savedSourcePath) !== normalizePath(snapshot)) {
         throw new Error(`Could not preserve branch ${branch.id}; source session was not deleted.`)
       }
     }

@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createSession, getSessionPath, loadSession, saveSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager'
 
@@ -32,7 +32,7 @@ it('preserves a cold legacy branch before deleting its source', async () => {
   expect(existsSync(sourceDir)).toBe(false)
   const restored = loadSession(root, branch.id)!
   expect(restored.messages[0]?.content).toBe('retained answer')
-  expect(restored.branchFromSessionPath).toBe(join(branchDir, '.branch-source'))
+  expect(resolve(restored.branchFromSessionPath!)).toBe(join(branchDir, '.branch-source'))
   expect(await readFile(join(branchDir, 'attachments', 'proof.txt'), 'utf8')).toBe('original attachment')
   expect(existsSync(join(restored.branchFromSessionPath!, '.pi-sessions', 'history.jsonl'))).toBe(true)
 })

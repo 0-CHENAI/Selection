@@ -33,9 +33,9 @@ export function expandPath(inputPath: string, basePath?: string): string {
     return home;
   }
 
-  // Handle ~/ prefix
-  if (expanded.startsWith('~/')) {
-    expanded = join(home, expanded.slice(2));
+  // Accept native Windows separators too, including paths saved by older builds.
+  if (/^~[\\/]/.test(expanded)) {
+    expanded = join(home, normalizePath(expanded.slice(2)));
   }
 
   // Handle ${HOME} and $HOME variables
@@ -66,6 +66,12 @@ export function expandPath(inputPath: string, basePath?: string): string {
 export function toPortablePath(absolutePath: string): string {
   if (!absolutePath) return absolutePath;
 
+  // Persistence and JSONL headers both convert paths. Keep the conversion
+  // idempotent: path.normalize() turns ~/... into ~\\... on Windows.
+  if (absolutePath === '~' || /^~[\\/]/.test(absolutePath)) {
+    return normalizePath(absolutePath);
+  }
+
   const home = homedir();
   const normalized = normalize(absolutePath);
 
@@ -79,11 +85,11 @@ export function toPortablePath(absolutePath: string): string {
   const homePrefixWin = home + '\\';
 
   if (normalized.startsWith(homePrefix)) {
-    return '~/' + normalized.slice(homePrefix.length);
+    return '~/' + normalizePath(normalized.slice(homePrefix.length));
   }
 
   if (normalized.startsWith(homePrefixWin)) {
-    return '~/' + normalized.slice(homePrefixWin.length);
+    return '~/' + normalizePath(normalized.slice(homePrefixWin.length));
   }
 
   // Path is outside home directory, keep as absolute
