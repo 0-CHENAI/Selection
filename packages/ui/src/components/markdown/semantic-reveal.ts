@@ -122,7 +122,8 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     // Restored history has no reveal work. Avoid scanning every paragraph and
     // reading viewport geometry each time a virtual row enters the DOM.
     if (!enabled) {
-      initial = false
+      // Keep the initial baseline guard: if this cached history later resumes
+      // streaming, seed its current paragraphs without fading old text again.
       mutations?.disconnect()
       return
     }
