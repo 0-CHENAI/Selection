@@ -35,10 +35,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            label: linux-x64
-          - os: macos-15-intel
-            label: macos-x64
           - os: macos-15
             label: macos-arm64
           - os: windows-2025
