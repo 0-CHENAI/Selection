@@ -1,11 +1,12 @@
 import * as React from "react"
 import i18next from "i18next"
+import { resolveSessionName } from "@craft-agent/shared/display-titles"
 import type { Session, Message } from "../../shared/types"
 import type { SessionMeta } from "../atoms/sessions"
 import type { SessionStatusId } from "../config/session-status-config"
 
 /** Common session fields used by getSessionTitle */
-type SessionLike = Pick<Session, 'name' | 'preview'> & { messages?: Session['messages'] }
+type SessionLike = Pick<Session, 'name' | 'preview' | 'handover'> & { messages?: Session['messages'] }
 
 /**
  * Sanitize content for display as session title.
@@ -35,7 +36,7 @@ function normalizeTitleCasing(title: string): string {
  */
 export function getSessionTitle(session: SessionLike | SessionMeta): string {
   if (session.name) {
-    return normalizeTitleCasing(session.name)
+    return normalizeTitleCasing(resolveSessionName(session)!)
   }
 
   // Check loaded messages first (only available on full Session)

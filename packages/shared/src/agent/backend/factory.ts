@@ -99,10 +99,13 @@ export function detectProvider(_authType: string): AgentProvider {
  * });
  * ```
  */
+let hostModelRequestLimiter: CoreBackendConfig['modelRequestLimiter'];
+/** Install once in the host so utility backends and normal conversations share the same quota. */
+export function setBackendModelRequestLimiter(limiter: CoreBackendConfig['modelRequestLimiter']): void { hostModelRequestLimiter = limiter; }
 export function createBackend(config: BackendConfig): AgentBackend {
   switch (config.provider) {
     case 'pi':
-      return new PiAgent(config);
+      return new PiAgent({ ...config, modelRequestLimiter: config.modelRequestLimiter ?? hostModelRequestLimiter });
 
     default:
       throw new Error(

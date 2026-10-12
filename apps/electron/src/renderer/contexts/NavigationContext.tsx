@@ -67,7 +67,6 @@ import {
   type NavHistoryState,
 } from './navigation-history'
 import * as storage from '@/lib/local-storage'
-import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import type {
   DeepLinkNavigation,
   Session,
@@ -87,8 +86,9 @@ import {
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
 import { normalizeRemovedSessionClassification } from '../../shared/session-classification'
+import { workModeViewAtom } from '@/atoms/work-mode'
+import { isWorkModeRoot } from '@/lib/work-mode-navigation'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
-import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
 import {
@@ -179,13 +179,11 @@ export function NavigationProvider({
   remoteWorkspaceId,
 }: NavigationProviderProps) {
   const { t } = useTranslation()
-  const { dagOrchestrationEnabled } = useAdvancedSettings()
-  const dagOrchestrationEnabledRef = useRef(dagOrchestrationEnabled)
-  useEffect(() => { dagOrchestrationEnabledRef.current = dagOrchestrationEnabled }, [dagOrchestrationEnabled])
   const [, setSession] = useSession()
 
   // Read session metadata directly from atom (reactive to session changes)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
+  const workModeView = useAtomValue(workModeViewAtom)
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   const pushPanel = useSetAtom(pushPanelAtom)
 
@@ -442,7 +440,7 @@ export function NavigationProvider({
           : state
       )
       const requestedRoute = params.get('route')
-      const initialRoute = requestedRoute === 'board' && !dagOrchestrationEnabledRef.current
+      const initialRoute = requestedRoute === 'board'
         ? routes.view.allSessions()
         : requestedRoute
       const sidebarParam = params.get('sidebar') || undefined
@@ -474,7 +472,7 @@ export function NavigationProvider({
             const proportion = parseFloat(entry.slice(colonIdx + 1))
             if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
               const encodedRoute = entry.slice(0, colonIdx) as ViewRoute
-              const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+              const rawRoute = encodedRoute === 'board'
                 ? routes.view.allSessions()
                 : encodedRoute
               const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
@@ -482,7 +480,7 @@ export function NavigationProvider({
             }
           }
           const encodedRoute = entry as ViewRoute
-          const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+          const rawRoute = encodedRoute === 'board'
             ? routes.view.allSessions()
             : encodedRoute
           const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
@@ -563,9 +561,9 @@ export function NavigationProvider({
 
   // Keep the global session selection in sync with the focused panel
   useEffect(() => {
-    if (isSessionsNavigation(navigationState) && navigationState.details) {
-      setSession({ selected: navigationState.details.sessionId })
-      if (workspaceId) {
+    if (isSessionsNavigation(navigationState)) {
+      setSession({ selected: navigationState.details?.sessionId ?? null })
+      if (workspaceId && navigationState.details) {
         // Only persist if the session belongs to this workspace (prevents cross-workspace
         // pollution during workspace switch, when workspaceId changed but navigationState
         // still reflects the old workspace's focused panel)
@@ -587,12 +585,12 @@ export function NavigationProvider({
     (_filter: SessionFilter): SessionMeta[] => {
       // First filter out hidden sessions - they should never appear in any view
       const visibleSessions = sessionMetas.filter(
-        s => isOrdinarySessionVisible(s) && (!workspaceId || s.workspaceId === workspaceId)
+        s => isWorkModeRoot(s, workModeView) && (!workspaceId || s.workspaceId === workspaceId)
       )
 
       return visibleSessions
     },
-    [sessionMetas, workspaceId]
+    [sessionMetas, workspaceId, workModeView]
   )
 
   const getFirstSessionId = useCallback(
@@ -715,7 +713,7 @@ export function NavigationProvider({
 
       switch (parsed.name) {
         case 'new-session': {
-          const createOptions: import('../../shared/types').CreateSessionOptions = {}
+          const createOptions: import('../../shared/types').CreateSessionOptions = { workMode: workModeView }
           if (parsed.params.mode) {
             const parsedMode = parsePermissionMode(parsed.params.mode)
             if (parsedMode) {
@@ -853,7 +851,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, workModeView]
   )
 
   // =========================================================================
@@ -868,7 +866,7 @@ export function NavigationProvider({
       }
 
       const requested = parseRoute(route)
-      const parsed = requested?.type === 'view' && requested.name === 'board' && !dagOrchestrationEnabledRef.current
+      const parsed = requested?.type === 'view' && requested.name === 'board'
         ? parseRoute(routes.view.allSessions())
         : requested
       if (!parsed) {
@@ -1108,7 +1106,7 @@ export function NavigationProvider({
         return
       }
 
-      const routeStr = pending.name === 'board' && !dagOrchestrationEnabledRef.current
+      const routeStr = pending.name === 'board'
         ? routes.view.allSessions()
         : `${pending.name}${pending.id ? `/${pending.id}` : ''}`
       const navState = parseRouteToNavigationState(routeStr)

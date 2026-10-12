@@ -17,6 +17,13 @@ interface PanelHeaderCenterButtonProps extends React.ButtonHTMLAttributes<HTMLBu
 export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeaderCenterButtonProps>(
   ({ icon, tooltip, tooltipDescription, tooltipDisabled, className, ...props }, ref) => {
     const [tooltipOpen, setTooltipOpen] = React.useState(false)
+    const suppressRestoredFocus = React.useRef(false)
+    React.useEffect(() => {
+      if (tooltipDisabled) {
+        setTooltipOpen(false)
+        suppressRestoredFocus.current = true
+      }
+    }, [tooltipDisabled])
     const button = (
       <button
         ref={ref}
@@ -32,6 +39,14 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
           className
         )}
         {...props}
+        onFocus={event => {
+          props.onFocus?.(event)
+          // Restore keyboard focus after closing the dialog without reopening its tooltip.
+          if (suppressRestoredFocus.current) {
+            suppressRestoredFocus.current = false
+            event.preventDefault()
+          }
+        }}
       >
         {icon}
       </button>
@@ -39,7 +54,7 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
 
     if (tooltip) {
       return (
-        <Tooltip open={!tooltipDisabled && tooltipOpen} onOpenChange={setTooltipOpen}>
+        <Tooltip open={!tooltipDisabled && tooltipOpen} onOpenChange={value => setTooltipOpen(!tooltipDisabled && value)}>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
           <TooltipContent side="bottom" className={tooltipDescription ? 'max-w-80' : undefined}>
             <div className={tooltipDescription ? 'font-medium' : undefined}>{tooltip}</div>

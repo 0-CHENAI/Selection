@@ -9,6 +9,7 @@ export function answerToolBlock(control: AnswerDeliveryControl | undefined, acce
   if (!control) return isSubmitAnswer(toolName) ? 'Answer delivery is unavailable in this session.' : undefined;
   if (runId !== control.runId || !control.isActive()) return 'This answer delivery turn is no longer active.';
   if (accepted) return 'The answer has already been delivered. No further tools may execute.';
+  if (control.coordinationOnly && isSubmitAnswer(toolName)) return 'This internal coordinator turn cannot deliver an answer. After an accepted orchestration decision, end the assistant turn without submit_answer; the host sends the next checkpoint.';
   if (control.recovery && !isSubmitAnswer(toolName)) return 'Only submit_answer is allowed during answer recovery. Do not repeat business tools.';
   return undefined;
 }

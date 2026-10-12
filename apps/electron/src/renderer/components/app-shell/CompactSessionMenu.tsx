@@ -28,6 +28,8 @@ import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
 import {
   ChevronDown,
+  ArrowRightLeft,
+  ArrowUpLeft,
   Columns2,
   Copy,
   FolderOpen,
@@ -188,6 +190,7 @@ export function CompactSessionMenu({
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="!flex flex-row items-center gap-2 !text-left pr-3">
           <DrawerTitle className="flex-1 min-w-0 truncate">{title ?? ''}</DrawerTitle>
+          {badge}
         </DrawerHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-6">
@@ -202,6 +205,8 @@ export function CompactSessionMenu({
             onOpenInNewPanel={closeAfter(actions.openInNewPanel)}
             onShowInFinder={closeAfter(actions.showInFinder)}
             onCopyPath={closeAfter(actions.copyPath)}
+            onViewHandover={item.handover ? closeAfter(actions.viewHandover) : undefined}
+            onOpenHandoverSource={item.handover && actions.canOpenHandoverSource ? closeAfter(actions.openHandoverSource) : undefined}
             onDelete={closeAfter(onDelete)}
           />
         </div>
@@ -227,6 +232,8 @@ interface RootPaneProps {
   onShowInFinder?: () => void
   onCopyPath?: () => void
   onDelete?: () => void
+  onViewHandover?: () => void
+  onOpenHandoverSource?: () => void
 }
 
 function RootPane({
@@ -240,6 +247,8 @@ function RootPane({
   onOpenInNewPanel,
   onShowInFinder,
   onCopyPath,
+  onViewHandover,
+  onOpenHandoverSource,
   onDelete,
 }: RootPaneProps) {
   const { t } = useTranslation()
@@ -265,6 +274,11 @@ function RootPane({
 
       <Separator />
 
+      {onViewHandover && <>
+        <Row icon={<ArrowRightLeft className="h-4 w-4" />} label={t('handover.viewBackground')} onTap={onViewHandover} />
+        <Row icon={<ArrowUpLeft className="h-4 w-4" />} label={t(onOpenHandoverSource ? 'handover.openSource' : 'handover.sourceRemoved')} onTap={onOpenHandoverSource} disabled={!onOpenHandoverSource} />
+        <Separator />
+      </>}
       <Row icon={<Columns2 className="h-4 w-4" />} label={t('sessionMenu.openInNewPanel')} onTap={onOpenInNewPanel} />
       <Row
         icon={<FolderOpen className="h-4 w-4" />}
@@ -362,6 +376,7 @@ interface RowProps {
   label: React.ReactNode
   trailing?: React.ReactNode
   destructive?: boolean
+  disabled?: boolean
   onTap?: () => void
 }
 
@@ -370,16 +385,18 @@ function Row({
   label,
   trailing,
   destructive,
+  disabled,
   onTap,
 }: RowProps) {
-  if (!onTap) return null
+  if (!onTap && !disabled) return null
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onTap}
       className={cn(
         'flex items-center gap-3 w-full px-3 py-3 rounded-[10px] text-left transition-colors',
-        'hover:bg-foreground/5 active:bg-foreground/10',
+        'hover:bg-foreground/5 active:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50',
         destructive && 'text-destructive hover:bg-destructive/10 active:bg-destructive/15',
       )}
     >

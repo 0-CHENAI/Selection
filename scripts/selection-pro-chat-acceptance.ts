@@ -1,0 +1,186 @@
+#!/usr/bin/env bun
+/** Real-agent chat intake acceptance. No pre-authored plan, manual patch or YAML injection. */
+import assert from 'node:assert/strict'
+import { writeFileSync, mkdirSync, copyFileSync } from 'node:fs'
+import { resolve, join } from 'node:path'
+import { getWorkspaces, getLlmConnections, getDefaultLlmConnection, ensureConfigDir } from '@craft-agent/shared/config'
+import { createProject, updateProject } from '@craft-agent/shared/projects'
+import { loadTaskResults, readRunLog, inspectTaskRun } from '@craft-agent/shared/tasks'
+import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
+import { SessionManager, setSessionPlatform, type SessionRuntimeActivity } from '@craft-agent/server-core/sessions'
+import { createHeadlessPlatform } from '@craft-agent/server-core/runtime'
+import { TaskRunner } from '@craft-agent/server-core/tasks'
+import { setBackendModelRequestLimiter } from '../packages/shared/src/agent/backend/index'
+import { LlmConnectionPool } from '../packages/server-core/src/tasks/connection-pool'
+
+const repo = resolve(import.meta.dir, '..')
+const batch2 = process.argv.includes('--batch2')
+const repair = process.argv.includes('--repair')
+const errata = process.argv.includes('--errata')
+const judgment = process.argv.includes('--judgment')
+const help = process.argv.includes('--help')
+const research = batch2 || process.argv.includes('--research') || errata || judgment
+const concurrency = process.argv.includes('--concurrency')
+const requestMetrics = { acquired: 0, released: 0, active: 0, peak: 0, owners: new Set<string>() }
+if (concurrency) {
+  const pool = new LlmConnectionPool()
+  setBackendModelRequestLimiter(async (quota, owner, signal) => {
+    const lease = await pool.acquireRequest(quota, owner, signal)
+    requestMetrics.acquired++; requestMetrics.active++; requestMetrics.owners.add(owner)
+    requestMetrics.peak = Math.max(requestMetrics.peak, requestMetrics.active)
+    console.log(`Model request acquired: ${requestMetrics.acquired}; active: ${requestMetrics.active}`)
+    let released = false
+    return { release(feedback) {
+      if (released) return
+      released = true; requestMetrics.released++; requestMetrics.active--
+      lease.release(feedback)
+    } }
+  })
+}
+const workspace = getWorkspaces()[0]
+const connection = getLlmConnections().find(item => item.slug === getDefaultLlmConnection())
+assert(workspace && connection?.defaultModel, 'A configured workspace and model are required')
+assert.equal(connection.defaultModel, 'gpt-6-luna', 'This acceptance uses the user-requested GPT-6-luna connection')
+setBundledAssetsRoot(join(repo, 'apps/electron'))
+ensureConfigDir()
+setSessionPlatform(createHeadlessPlatform())
+const manager = new SessionManager()
+const evidencePath = batch2 ? '/tmp/selection-pro-chat-batch2-acceptance.json' : help ? '/tmp/selection-pro-chat-help-acceptance.json' : judgment ? '/tmp/selection-pro-chat-judgment-acceptance.json' : concurrency ? '/tmp/selection-pro-chat-concurrency-acceptance.json' : errata ? '/tmp/selection-pro-chat-errata-acceptance.json' : research ? '/tmp/selection-pro-chat-research-acceptance.json' : repair ? '/tmp/selection-pro-chat-repair-acceptance.json' : '/tmp/selection-pro-chat-acceptance.json'
+let rootId: string | undefined
+let lastActivity = Date.now()
+let latestActivity: SessionRuntimeActivity | undefined
+const startedAt = Date.now()
+const unsubscribe = manager.onRuntimeActivity(activity => {
+  if (activity.rootSessionId !== rootId) return
+  lastActivity = activity.at
+  latestActivity = activity
+})
+manager.setEventSink((_channel, _target, event) => {
+  if (event?.type === 'error' && event.sessionId === rootId) console.error(JSON.stringify(event))
+})
+const runner = new TaskRunner({ host: manager, workspaceId: workspace.id, workspaceRoot: workspace.rootPath })
+manager.setTaskRunnerLookup(id => id === workspace.id ? runner : null)
+try {
+  await manager.reinitializeAuth()
+  const fixtureDirectory = batch2 ? '/tmp/selection-batch2-originals' : join(repo, 'scripts/fixtures/selection-3.0')
+  let projectId: string | undefined
+  if (batch2) {
+    copyFileSync(join(repo, 'scripts/fixtures/selection-3.0/draft.txt'), join(fixtureDirectory, 'draft.txt'))
+    const project = createProject(workspace.rootPath, { name: `Batch2 ${Date.now()}`, workingDirectory: fixtureDirectory })
+    updateProject(workspace.rootPath, project.slug, { historySearchEnabled: true }); projectId = project.id
+    const historyId = `batch2-scope-${Date.now()}`, directory = join(workspace.rootPath, 'sessions', historyId)
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'session.jsonl'), JSON.stringify({ id: historyId, projectId, workMode: 'PRO', workspaceRootPath: workspace.rootPath, createdAt: Date.now(), lastUsedAt: Date.now() }) + '\n' + JSON.stringify({ id: 'scope', type: 'user', timestamp: Date.now(), content: 'BATCH2_SCOPE：本次金额使用人民币两年总额。项目历史只提供口径，成本事实必须独立查阅原文。' }) + '\n')
+  }
+  const root = await manager.createSession(workspace.id, { workMode: 'PRO', hidden: true, permissionMode: 'safe',
+    model: connection.defaultModel, llmConnection: connection.slug, name: 'PRO 聊天规划验收',
+    projectId, workingDirectory: fixtureDirectory })
+  rootId = root.id
+  lastActivity = Date.now()
+  console.log(`Acceptance root: ${root.id}`)
+  const goal = `请建立并执行计划，对本地成本资料 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/costs.txt'))} 完成读取、独立核验、报告三个步骤。先给我简要说明计划，随后在当前只读授权内自行推进，无需再次询问是否执行。报告必须区分A的可确认两年成本、B尚未核实的口径及风险缺口，不得捏造事实，不得写文件或改变权限。请使用现有规范计划和真实工具完成，不要只回复规划建议。`
+  const researchGoal = `${goal} 请使用内置深度研究能力，提供可追溯的结论版本、原文证据与独立来源审查记录，并在来源包中保留实际查阅范围。成本和风险分别判断覆盖与限制，研究完成不能只看执行完成。`
+  const batch2Goal = `请在当前项目建立并实际执行一个只读的研究计划，使用 GPT-6-luna、规范 orchestrate 和研究来源凭据完成读取→独立核验→报告。先用 project_history 明确检索 BATCH2_SCOPE 并按命中的原文版本展开口径。读取者也应检索这条口径；独立审查者不能从兄弟节点聊天继承结论，必须亲自读取冻结原文。先用 document_index 定位 ${fixtureDirectory}/cost.pdf 的成本实际页和 ${fixtureDirectory}/cost.xlsx 的工作表单元格，再用 document_read 按需读取，不把索引当作查阅；cost.docx 用于长章节索引定位。另外用 web_fetch 实际获取 https://example.com 并保留其返回的冻结快照路径，把网页标题作为独立的测试维度，与成本资料分开；网页没有成本资料。研究源使用已成功索引的本地 PDF、XLSX 及实际网页快照，不用搜索摘要当原文。项目ID为 ${projectId}。研究维度至少包括成本口径和风险局限。A 两年成本以原文为准，B 待核实不得比较，风险缺口内容未知不得推断。在研究计划中先保留旧草稿 ${join(fixtureDirectory, 'draft.txt')} 的金额为待核实结论版本，独立来源审查后追加精确版本勘误，修正后再次独立审查；必要时仅修订待执行节点，让报告引用正确的版本和真实来源范围。不要覆盖原文件，不写结果文件，不改变权限，不再次询问执行许可。最终给简明中文报告与来源。`
+  await manager.sendMessage(root.id, batch2 ? batch2Goal : help ? `${goal} 为验证自主协作，读取资料的 worker 请在读完原文后使用 task_help 向根协调者求助，说明已经尝试的读取步骤并询问方案 B 是否允许估算。根协调者应依据本次只读目标回答：B 口径未核实，保留限制，不估算、不扩大权限。得到答复后 worker 在原会话继续提交成果，无需询问用户；无关任务照常推进。最终报告说明该问题的处置。` : judgment ? `${researchGoal} 重要结论必须记录证伪条件，并由独立审查明确批判本线前提。请审视“把两年总额直接当作单年成本”这一替代前提，记录一个真正不同前提的歧路候选，并说明是否采用及原因：本次原目标仅解释资料写明的两年总额，不能把年均换算与单年实测混同；不扩大到新调查。事实错误或缺失证据留在原线修补。最终报告披露候选处置、竞争解释与限制。` : concurrency ? `${goal} 请把金额与口径分析、风险资料覆盖分析作为两个独立任务并行执行（max_parallel 至少为 2），随后由独立审查和报告节点汇合各自的真实成果。` : errata ? `${researchGoal} 另外，既存草稿 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/draft.txt'))} 也属于冻结原文。先保留草稿中的 A 金额为待核实结论版本，不能把它当作已确认事实；安排独立来源核验，发现错误后追加针对该精确版本的勘误。在原研究线产生修订版本和新的独立审查，最终报告引用勘误并说明历史结论的失效与修正。不建立替代前提分支，不覆盖任何原文件。` : research ? researchGoal : repair ? `${goal} 另外，本次有既存草稿 ${JSON.stringify(join(repo, 'scripts/fixtures/selection-3.0/draft.txt'))}。请先读取并保留该草稿作为初稿，安排独立核验节点检验它；遇到错误后按核验结果返修并再次独立核验，交付纠正后的报告和修正说明。通过现有动态编排持续推进，只读产生文本成果即可。` : goal)
+  const session = await manager.getSession(root.id)
+  assert(session?.taskSlug, 'The agent did not bind a canonical plan from the chat goal')
+  const start = runner.getLatestRun(session.taskSlug)
+  assert(start, 'The agent did not start the canonical plan')
+  let terminal = runner.getRunState(session.taskSlug, start.runId)!
+  while (!['completed', 'failed', 'stopped', 'paused', 'interrupted', 'waiting-approval'].includes(terminal.status)) {
+    assert(Date.now() - lastActivity < 600_000, `Acceptance has no runtime activity in ${terminal.status}`)
+    await new Promise(resolve => setTimeout(resolve, 250))
+    terminal = runner.getRunState(session.taskSlug, start.runId)!
+  }
+  // A submitted verdict settles the scheduler before the coordinator's answer has finished.
+  while ((await manager.getSession(root.id))?.isProcessing) {
+    assert(Date.now() - lastActivity < 600_000, 'Coordinator report has no runtime activity')
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  const result = loadTaskResults(workspace.rootPath, session.taskSlug, start.runId)
+  const events = readRunLog(workspace.rootPath, session.taskSlug, start.runId)
+  const record = { rootId: root.id, slug: session.taskSlug, runId: start.runId, model: connection.defaultModel,
+    permissionMode: session.permissionMode, status: terminal.status, elapsedMs: Date.now() - startedAt,
+    manualPlanEdits: 0, lastActivity, latestActivity, result, events: events.length, finalText: manager.getSessionFinalText(root.id),
+    requestMetrics: concurrency ? { ...requestMetrics, owners: [...requestMetrics.owners] } : undefined }
+  writeFileSync(evidencePath, JSON.stringify(record, null, 2))
+  assert.equal(terminal.status, 'completed', JSON.stringify(terminal.blockers))
+  assert.equal(terminal.orchestratorSessionId, root.id)
+  assert.equal(session.permissionMode, 'safe')
+  if (concurrency) {
+    assert(requestMetrics.acquired > 0, 'Actual model requests must acquire host-owned slots')
+    assert.equal(requestMetrics.active, 0, 'All completed requests must release their slots')
+    assert.equal(requestMetrics.acquired, requestMetrics.released)
+    assert(requestMetrics.peak >= 2 && requestMetrics.peak <= 4, 'Independent work must overlap within the shared quota')
+    assert.equal(requestMetrics.owners.size, 1, 'Coordinator and workers belong to one root quota owner')
+  }
+  const spawns = events.filter(event => event.kind === 'node-spawned')
+  assert(spawns.length >= 2, 'Independent review requires distinct execution contexts')
+  assert(new Set(spawns.map(event => event.sessionId)).size >= 2)
+  if (batch2) {
+    assert(result.research?.sources.some(source => source.units?.some(unit => unit.kind === 'page' && unit.id === 'page-17')))
+    assert(result.research?.sources.some(source => source.units?.some(unit => unit.kind === 'cell' && unit.id === 'Costs!B2')))
+    assert(result.research?.sources.some(source => source.acquisition?.finalUrl.includes('example.com')))
+    const nativeMessages = (await manager.getSession(root.id))?.messages ?? []
+    assert(nativeMessages.some(message => message.toolName?.includes('project_history')), 'Actual root must search authorized history')
+    const replay = inspectTaskRun(workspace.rootPath, session.taskSlug, start.runId)
+    assert.equal(replay.snapshot.status, terminal.status); assert.equal(replay.snapshot.revision, terminal.revision)
+    writeFileSync('/tmp/selection-batch2-replay.json', JSON.stringify(replay, null, 2))
+  }
+  if (!research) assert(events.some(event => event.kind === 'node-verdict' && event.result === 'pass'), 'Independent review must submit a structured pass verdict')
+  assert(result?.nodes.length && result.nodes.length >= 2, 'Independent verification needs a separate node')
+  assert(record.finalText?.match(/100|1[,.]?000[,.]?000/), 'The final user report must include the verified cost')
+  assert(record.finalText?.includes('B') && /未|待|不/.test(record.finalText), 'The report must retain the unresolved B boundary')
+  assert(record.finalText?.includes('风险') && /缺口|缺失/.test(record.finalText), 'The report must retain the risk gap')
+  if (research) {
+    assert.equal(result.research?.assuranceVersion, 2)
+    assert(result.research.reads.length >= 2, 'Original author/reviewer reads must be recorded by actual tool events')
+    assert(result.research.sourceBundle.cited.some(source => source.readIds.length >= 2))
+    assert(result.research.claims.some(claim => claim.review?.support === 'supported' && claim.reviewer?.sessionId !== claim.producedBy.sessionId))
+    assert.equal(result.research.blockers.length, 0)
+  }
+  if (errata || batch2) {
+    assert(result.research!.errata.length > 0, 'Independent source review must append an exact-version correction')
+    assert(result.research!.errata.every(item => item.state === 'resolved' && result.research!.report?.erratumIds?.includes(item.id)))
+    assert(result.research!.claims.some(claim => claim.version > 1 && claim.review?.support === 'supported'), 'Corrected conclusions require new versions and fresh independent review')
+    assert.equal(result.research!.lines.length, 1, 'A factual correction must preserve its original research premise')
+  }
+  if (help) {
+    assert(result.help?.some(record => record.state === 'answered' && record.responses.some(response => response.action === 'answer')), 'A worker must receive a recorded coordinator answer')
+    assert(events.some(event => event.kind === 'node-help-resumed'), 'The waiting worker must resume its retained execution context')
+    for (const record of result.help!) {
+      assert.equal(record.attempt, result.nodes.find(node => node.id === record.nodeId)?.attempt, 'Help must not create a new execution attempt')
+      assert.equal(spawns.filter(event => event.nodeId === record.nodeId).length, 1, 'Help must not replay a task prompt or spawn another context')
+    }
+  }
+  if (judgment) {
+    const projection = result.research!.judgment
+    assert.equal(projection?.version, 1)
+    assert(result.research!.claims.every(claim => !claim.critical || claim.falsificationConditions?.length))
+    assert(projection!.critiques.some(critique => critique.current))
+    assert(projection!.candidates.length > 0 && projection!.candidates.every(candidate => candidate.disposition))
+    assert(projection!.candidates.every(candidate => result.research!.report?.branchCandidateIds?.includes(candidate.id)))
+    assert(projection!.stages.every(stage => ['deliverable', 'limited-delivery'].includes(stage.state)))
+  }
+  if (repair) assert(events.some(event => event.kind === 'orchestration-patch') || events.some(event => event.kind === 'node-verdict' && event.result === 'fail'), 'The erroneous draft must trigger a recorded correction or result-driven plan revision')
+  console.log(JSON.stringify({ ...record, result: undefined }, null, 2))
+} catch (error) {
+  // Snapshot before cleanup: cancellation caused by the harness is not the initial failure.
+  const session = rootId ? await manager.getSession(rootId) : undefined
+  const run = session?.taskSlug ? runner.getLatestRun(session.taskSlug) : undefined
+  const state = session?.taskSlug && run ? runner.getRunState(session.taskSlug, run.runId) : undefined
+  const result = session?.taskSlug && run ? loadTaskResults(workspace.rootPath, session.taskSlug, run.runId) : undefined
+  const events = session?.taskSlug && run ? readRunLog(workspace.rootPath, session.taskSlug, run.runId) : []
+  writeFileSync(evidencePath, JSON.stringify({ rootId, slug: session?.taskSlug, runId: run?.runId,
+    model: connection.defaultModel, permissionMode: session?.permissionMode, status: state?.status,
+    acceptance: 'failed', error: error instanceof Error ? error.message : String(error),
+    elapsedMs: Date.now() - startedAt, lastActivity, latestActivity, state, result, events: events.length,
+    finalText: rootId ? manager.getSessionFinalText(rootId) : undefined,
+    requestMetrics: concurrency ? { ...requestMetrics, owners: [...requestMetrics.owners] } : undefined,
+  }, null, 2))
+  throw error
+} finally {
+  unsubscribe()
+  await manager.flushAllSessions()
+  manager.cleanup()
+}

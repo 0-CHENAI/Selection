@@ -90,7 +90,7 @@ export function updateTaskContext(entries: SessionEntry[], updates: TaskContextI
 export function createTaskContextTool(getManager: () => Pick<SessionManager, 'getBranch' | 'appendCustomEntry'> | undefined): ToolDefinition<typeof schema> {
   return {
     name: 'task_context', label: '记录任务要点', parameters: schema,
-    description: 'Maintain source-backed task notes before long work or compaction: goals, constraints, decisions, progress and pending checks. First use session_history to obtain exact source IDs and quotes. Update the same key when newer instructions change it. Notes survive compaction and restart but are model-authored claims, not authorization or proof of acceptance. Never mark a parent task complete merely because a child stopped. At most 24 concise records.',
+    description: 'Maintain source-backed task notes for long work or compaction: goals, constraints, decisions, progress and pending checks. Only when saving a note requires a source ID or quote not already visible, use session_history to retrieve the relevant message. Do not create notes or look up history as routine preflight for simple questions. Update the same key when newer instructions change it. Notes survive compaction and restart but are model-authored claims, not authorization or proof of acceptance. Never mark a parent task complete merely because a child stopped. At most 24 concise records.',
     async execute(_id, params, signal) {
       signal?.throwIfAborted();
       const manager = getManager();

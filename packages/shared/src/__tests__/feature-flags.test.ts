@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
+import { build } from 'esbuild';
 import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled, isTasksOrchestrateEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
@@ -29,6 +30,26 @@ afterEach(() => {
   if (ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
   else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE;
 
+});
+
+describe('renderer build flags without a process global', () => {
+  for (const [override, preview, enabled] of [
+    ['1', '', true], ['', '1', true], ['0', '1', false], ['', '', true],
+  ] as const) {
+    it(`honors orchestration=${override || 'unset'}, preview=${preview || 'unset'}`, async () => {
+      const result = await build({
+        entryPoints: [new URL('../feature-flags.ts', import.meta.url).pathname],
+        bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'flags',
+        define: {
+          'process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE': JSON.stringify(override),
+          'process.env.CRAFT_SWARM_PREVIEW_BUILD': JSON.stringify(preview),
+        },
+      });
+      const flags = new Function('process', `${result.outputFiles[0]!.text}; return flags;`)(undefined);
+      expect(flags.isTasksOrchestrateEnabled()).toBe(enabled);
+      expect(flags.isSwarmPreviewBuild()).toBe(preview === '1');
+    });
+  }
 });
 
 describe('feature-flags runtime helpers', () => {
@@ -105,9 +126,9 @@ describe('feature-flags runtime helpers', () => {
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 
-  it('isTasksOrchestrateEnabled defaults off outside preview', () => {
+  it('isTasksOrchestrateEnabled is available in standard builds', () => {
     delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
-    expect(isTasksOrchestrateEnabled()).toBe(process.env.CRAFT_SWARM_PREVIEW_BUILD === '1');
+    expect(isTasksOrchestrateEnabled()).toBe(true);
   });
 
   it('isTasksOrchestrateEnabled honors explicit override true', () => {

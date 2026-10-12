@@ -47,8 +47,8 @@ const MODE_STYLES: Record<PermissionMode, { className: string; shadowVar: string
     shadowVar: 'var(--foreground-rgb)',
   },
   ask: {
-    className: 'bg-info/10 text-info',
-    shadowVar: 'var(--info-rgb)',
+    className: 'bg-permission-ask/10 text-permission-ask',
+    shadowVar: 'var(--permission-ask-rgb)',
   },
   'allow-all': {
     className: 'bg-accent/5 text-accent',

@@ -92,8 +92,12 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.62 0.13 293);           /* purple - brand, Auto mode */
   --accent-rgb: 104, 78, 133;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.50178870 0.09392988 58.44502375); /* Binchael copper #8B5527 */
+  --pro-accent-rgb: 97, 60, 27;
   --info: oklch(0.75 0.16 70);              /* amber - warnings, Ask mode */
   --info-rgb: 180, 120, 40;                 /* RGB for shadow-tinted */
+  --permission-ask: var(--info);
+  --permission-ask-rgb: var(--info-rgb);
   --success: oklch(0.55 0.17 145);          /* green - connected, checkmarks */
   --success-rgb: 34, 120, 60;               /* RGB for shadow-tinted */
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
@@ -104,6 +108,7 @@
   --shadow-blur-opacity: 0.06;              /* Blur/spread shadow opacity */
 
   /* === SHADOW VALUES (reusable across utility classes and component overrides) === */
+  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, var(--shadow-blur-opacity));
   --shadow-minimal:
     rgba(0, 0, 0, 0) 0px 0px 0px 0px,
     rgba(0, 0, 0, 0) 0px 0px 0px 0px,
@@ -260,6 +265,8 @@
   --user-message-bubble-dimmed: oklch(from var(--foreground) l c h / 0.03);
   --accent: oklch(0.65 0.22 293);            /* brighter purple in dark */
   --accent-rgb: 130, 75, 185;               /* darkened RGB for shadow-tinted (70% of accent) */
+  --pro-accent: oklch(0.76808414 0.08380584 76.89195147); /* Binchael champagne #D2AD76 */
+  --pro-accent-rgb: 147, 121, 83;
   --info: oklch(0.78 0.14 70);               /* amber */
   --info-rgb: 210, 155, 55;                  /* RGB for shadow-tinted */
   --success: oklch(0.60 0.17 145);           /* green */
@@ -310,6 +317,75 @@
   --md-bullets: var(--foreground-50);
   --md-counters: var(--foreground-50);
 }
+
+/* PRO accent: Binchael's light copper (#8B5527) and dark champagne (#D2AD76).
+   Higher specificity than preset :root overrides; NORM keeps the selected theme.
+   Shadow RGB follows the existing 70% brightness convention. */
+:root[data-work-mode="PRO"] {
+  --accent: var(--pro-accent);
+  --accent-rgb: var(--pro-accent-rgb);
+  --permission-ask: oklch(0.48819831 0.21716546 264.37630409); /* blue #1D4ED8 */
+  --permission-ask-rgb: 20, 55, 151;
+}
+
+:root.dark[data-work-mode="PRO"] {
+  --permission-ask: oklch(0.71374005 0.14338051 254.62402137); /* blue #60A5FA */
+  --permission-ask-rgb: 67, 115, 175;
+}
+
+/* Snapshot only the changing surfaces. Chrome and the selected mode indicator stay live. */
+html[data-work-mode-transition-phase] {
+  view-transition-name: none;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="list"] {
+  view-transition-name: work-mode-list;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition="chat"] {
+  view-transition-name: work-mode-chat;
+}
+html[data-work-mode-transition-phase] [data-work-mode-transition] {
+  pointer-events: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(work-mode-list),
+::view-transition-group(work-mode-chat) {
+  animation: none;
+}
+::view-transition-old(work-mode-list),
+::view-transition-old(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-focus-out 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+::view-transition-new(work-mode-list),
+::view-transition-new(work-mode-chat) {
+  mix-blend-mode: normal;
+  animation: work-mode-focus-in 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(work-mode-list),
+  ::view-transition-old(work-mode-chat) {
+    animation-name: work-mode-fade-out;
+    animation-duration: 150ms;
+  }
+  ::view-transition-new(work-mode-list),
+  ::view-transition-new(work-mode-chat) {
+    animation-name: work-mode-fade-in;
+    animation-duration: 150ms;
+  }
+}
+/* A shallow focus change softens overlapping text without moving the fixed frame. */
+@keyframes work-mode-focus-out {
+  from { opacity: 1; filter: blur(0px); }
+  to { opacity: 0; filter: blur(2px); }
+}
+@keyframes work-mode-focus-in {
+  from { opacity: 0; filter: blur(2px); }
+  to { opacity: 1; filter: blur(0px); }
+}
+@keyframes work-mode-fade-out { to { opacity: 0; } }
+@keyframes work-mode-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* Theme Override - Semi-transparent background to allow macOS vibrancy through.
    Only applied when ThemeContext sets data-theme-override (macOS desktop). */
@@ -437,6 +513,7 @@ html[data-font="inter"] {
   --color-foreground: var(--foreground);
   --color-accent: var(--accent);
   --color-info: var(--info);
+  --color-permission-ask: var(--permission-ask);
   --color-success: var(--success);
   --color-destructive: var(--destructive);
 
@@ -1085,56 +1162,6 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   opacity: 0;
 }
 
-/* =============================================================================
-   LOADING INDICATOR - SPINKIT GRID SPINNER
-
-   3x3 grid spinner based on SpinKit Grid.
-   - Uses currentColor (inherits text color)
-   - Uses em units (scales with font-size)
-   - Pure CSS animation with staggered delays
-
-   https://github.com/tobiasahlin/SpinKit
-============================================================================= */
-
-.spinner {
-  display: inline-grid;
-  grid-template-columns: repeat(3, 1fr);
-  width: 1em;
-  height: 1em;
-  gap: 0.08em;
-}
-
-.spinner-cube {
-  background-color: currentColor;
-  animation: spinner-grid 1.3s infinite ease-in-out;
-  transform: scale3d(0.5, 0.5, 1);
-}
-
-.spinner-cube:nth-child(1) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(2) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(3) { animation-delay: 0.4s; }
-.spinner-cube:nth-child(4) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(5) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(6) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(7) { animation-delay: 0s; }
-.spinner-cube:nth-child(8) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(9) { animation-delay: 0.2s; }
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner-cube {
-    animation: none;
-  }
-}
-
-@keyframes spinner-grid {
-  0%, 70%, 100% {
-    transform: scale3d(0.5, 0.5, 1);
-  }
-  35% {
-    transform: scale3d(0, 0, 1);
-  }
-}
-
 /* Toast animation - scale and fade in */
 @keyframes toast-in {
   from {
@@ -1603,3 +1630,197 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   min-height: 31px;
   padding: 6px 8px;
 }
+
+/* Task authoring follows its panel width, including side-by-side app panes. */
+.task-editor { container: task-editor / inline-size; }
+.task-editor [hidden] { display: none !important; }
+.task-editor-authoring { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); }
+.task-editor-tabs { order: 3; flex-basis: 100%; }
+.task-editor-dialog > [data-slot="dialog-header"] { flex-shrink: 0; text-align: left; padding-right: 1.5rem; }
+.task-editor-dialog .task-editor-dialog-footer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+@container task-editor (min-width: 960px) {
+  .task-editor-tabs { order: 0; flex-basis: auto; margin-left: 1rem; }
+}
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-template-columns: minmax(0, 1fr); overflow-y: auto; align-content: start; }
+  .task-editor-definition, .task-editor-nodes { overflow: visible; }
+  .task-editor-node-list { overflow: visible; flex: auto; }
+  .task-editor-actions { gap: 0.5rem; }
+  .task-editor-divider { display: none; }
+}
+@container task-editor (max-width: 440px) {
+  .task-editor-actions { flex-basis: 100%; margin-left: 0; }
+  .task-editor-tabs { width: 100%; }
+  .task-editor-tabs > button { flex: 1; padding-inline: 0.5rem; }
+}
+.task-workbench { container: task-workbench / inline-size; }
+.task-workbench-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.task-workbench-grid.has-inspector { grid-template-columns: minmax(0, 1fr) clamp(400px, 32cqi, 560px); }
+.task-workbench-grid > .task-node-inspector { grid-column: 2; grid-row: 1 / -1; }
+@container task-workbench (max-width: 760px) {
+  .task-workbench-grid.has-inspector { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .task-workbench-grid > .task-node-inspector { grid-column: 1; }
+  .task-node-inspector { position: absolute; inset: 0 0 0 auto; width: min(560px, 100%); z-index: 5; box-shadow: -8px 0 24px color-mix(in srgb, var(--foreground) 8%, transparent); }
+}
+.task-editor-subview-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+@container task-editor (max-width: 660px) {
+  .task-editor-authoring { grid-auto-rows: max-content; }
+}
+@container task-workbench (max-width: 560px) {
+  .task-graph-overview { display: none; }
+}
+
+/* Automatic task observer: retain Selection's surfaces and PRO accent. */
+.automatic-task-graph-dialog {
+  --task-graph-window-inset: 20px;
+  width: min(1680px, calc(100vw - 40px));
+  height: calc(100dvh - var(--task-graph-window-inset) * 2);
+  top: 50%;
+}
+/* Scoped exception to the global dialog animation reset. Radix retains the
+   observer until the exit animation ends, then restores the trigger focus. */
+@keyframes task-graph-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes task-graph-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes task-graph-dialog-in {
+  from { opacity: 0; scale: 0.985; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes task-graph-dialog-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.985; }
+}
+.automatic-task-graph-overlay[data-state="open"] {
+  animation: task-graph-overlay-in 240ms ease-out both !important;
+}
+.automatic-task-graph-overlay[data-state="closed"] {
+  animation: task-graph-overlay-out 180ms ease-in both !important;
+}
+.automatic-task-graph-dialog[data-state="open"] {
+  animation: task-graph-dialog-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+.automatic-task-graph-dialog[data-state="closed"] {
+  animation: task-graph-dialog-out 180ms ease-in both !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .automatic-task-graph-dialog[data-state="open"] { animation-name: task-graph-overlay-in !important; }
+  .automatic-task-graph-dialog[data-state="closed"] { animation-name: task-graph-overlay-out !important; }
+  .automatic-task-graph-dialog[data-state], .automatic-task-graph-overlay[data-state] { animation-duration: 100ms !important; }
+}
+/* Match top/bottom gaps, clear native controls, and blur all background chrome. */
+.automatic-task-graph-dialog[data-native-caption="true"] {
+  --task-graph-window-inset: max(var(--topbar-height, 48px), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 48px)));
+}
+.task-graph-close { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; color: var(--muted-foreground); outline: none; transition: color 140ms ease-out; }
+.task-graph-close:hover, .task-graph-close:focus-visible { color: var(--foreground); }
+.task-graph-close:focus-visible { outline: 2px solid var(--pro-accent); outline-offset: 2px; }
+.task-workbench {
+  --task-graph-accent: var(--pro-accent);
+  --task-graph-complete: var(--success);
+  --task-graph-connector: color-mix(in srgb, var(--foreground) 26%, transparent);
+}
+.task-graph-canvas {
+  position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 12px;
+  background-color: var(--card); background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 12%, transparent) 0.8px, transparent 1px);
+  background-size: 28px 28px; cursor: grab; touch-action: none;
+}
+.task-graph-canvas[data-panning="true"] { cursor: grabbing; }
+.task-graph-canvas:focus-visible { outline: 2px solid var(--task-graph-accent); outline-offset: -3px; }
+.task-graph-stage { position: absolute; inset: 0 auto auto 0; transform-origin: 0 0; }
+.task-graph-canvas[data-transitioning="true"] .task-graph-stage { transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+.task-graph-connections { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.task-flow-edge-path { stroke-linecap: round; stroke-dasharray: 6 6; animation: task-flow-edge-dashes 2400ms linear infinite; }
+@keyframes task-flow-edge-dashes { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -12; } }
+.task-workbench[data-motion-paused="true"] .task-flow-edge-path,
+.task-workbench [inert] .task-flow-edge-path { animation-play-state: paused; }
+.task-flow-edge-label { fill: var(--foreground); font-size: 11px; paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
+.task-graph-node-position { position: absolute; }
+.task-graph-canvas-hint { position: absolute; left: 16px; top: 16px; pointer-events: none; font-size: 12px; color: var(--muted-foreground); }
+.task-graph-controls { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); cursor: default; }
+.task-graph-controls button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--muted-foreground); outline: none; transition: color 140ms ease-out; }
+.task-graph-controls button:hover { color: var(--foreground); }
+.task-graph-controls button:focus-visible { color: var(--foreground); outline: 2px solid var(--task-graph-accent); outline-offset: -2px; }
+.task-graph-controls button:disabled { opacity: 0.35; }
+.task-graph-zoom { width: 42px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.task-graph-overview { position: absolute; right: 16px; bottom: 16px; width: 148px; height: 88px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); pointer-events: none; }
+.task-graph-overview-node { fill: color-mix(in srgb, var(--foreground) 20%, var(--popover)); }
+.task-graph-overview-node[data-selected="true"] { fill: var(--task-graph-accent); }
+.task-flow-node {
+  display: block; text-align: left; position: relative; cursor: pointer;
+  width: 288px;
+  height: 128px;
+  padding: 16px;
+  color: var(--foreground);
+  background: var(--popover);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, var(--popover));
+  outline: none;
+  transition: background-color 180ms ease-out, border-color 180ms ease-out;
+}
+.task-flow-node:hover { border-color: color-mix(in srgb, var(--task-graph-accent) 45%, var(--popover)); }
+.task-flow-node[data-state="running"] { background: color-mix(in srgb, var(--task-graph-accent) 6%, var(--popover)); }
+.task-flow-node[data-selected="true"] { background: color-mix(in srgb, var(--task-graph-accent) 4%, var(--popover)); }
+.task-flow-node:focus-visible:not([data-selected="true"]) {
+  outline: 2px solid var(--task-graph-accent);
+  outline-offset: 3px;
+}
+.task-flow-node-selection { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); pointer-events: none; }
+.task-flow-node-selection rect { fill: none; stroke: var(--task-graph-accent); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 1.25 1.25; animation: task-flow-node-selection-dashes 60s linear infinite; }
+@keyframes task-flow-node-selection-dashes { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+.task-workbench[data-motion-paused="true"] .task-flow-node-selection rect,
+.task-workbench [aria-hidden="true"] .task-flow-node-selection rect { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .task-flow-node-selection rect { animation: none; } }
+.task-flow-node-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 11px; }
+.task-flow-node-kind { display: inline-flex; min-width: 0; align-items: center; gap: 5px; color: var(--task-graph-accent); white-space: nowrap; }
+.task-flow-node-kind > svg { flex-shrink: 0; }
+.task-flow-node-state { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 9999px; background: color-mix(in srgb, currentColor 8%, transparent); white-space: nowrap; }
+.task-flow-node-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px; font-size: 15px; font-weight: 600; line-height: 20px; }
+.task-flow-node-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: color-mix(in srgb, var(--foreground) 65%, var(--popover)); margin-top: 6px; }
+.task-flow-node-instances { font-size: 10px; color: var(--muted-foreground); }
+.task-workbench[data-motion-paused="true"] .task-flow-node-state .animate-spin { animation-play-state: paused; }
+.task-graph-run-status { border-radius: 6px; padding: 3px 6px; white-space: nowrap; background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.task-workbench .text-muted-foreground { color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); }
+.task-inspector-title { font-size: 18px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.task-inspector-section:not(:first-child) { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.task-inspector-label { margin-bottom: 12px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--foreground); }
+.task-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.task-inspector-section-heading .task-inspector-label { margin-bottom: 0; }
+.task-inspector-item-title { margin-bottom: 8px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--foreground); }
+.task-inspector-execution + .task-inspector-execution { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.task-inspector-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+.task-inspector-fields dt { margin-bottom: 4px; font-size: 12px; line-height: 18px; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); }
+.task-inspector-fields dd { font-size: 13px; line-height: 20px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--foreground); overflow-wrap: anywhere; }
+.task-inspector-copy { font-size: 13px; line-height: 1.75; color: color-mix(in srgb, var(--foreground) 85%, var(--popover)); }
+.task-inspector-tabs { position: relative; display: flex; width: 100%; height: 52px; padding: 6px; gap: 4px; border-radius: 12px; background: color-mix(in srgb, var(--foreground) 5%, var(--popover)); }
+.task-inspector-tabs [data-slot="tabs-trigger"] { position: relative; z-index: 1; flex: 1; min-width: 0; height: 40px; padding: 0 6px; gap: 0; border-radius: 8px; background: transparent; box-shadow: none; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); transition: color 140ms ease-out; }
+.task-inspector-tabs [data-slot="tabs-trigger"]:hover { color: var(--foreground); }
+.task-inspector-tabs [data-slot="tabs-trigger"][aria-selected="true"] { color: var(--pro-accent); }
+.task-inspector-tabs [data-slot="tabs-trigger"]:focus-visible { box-shadow: none; outline: none; color: var(--pro-accent); }
+.task-inspector-tabs [data-slot="tabs-trigger"]:focus-visible svg { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--pro-accent) 65%, transparent)); stroke-width: 2.5; }
+.task-inspector-tab-indicator { position: absolute; top: 6px; left: 0; height: 40px; border-radius: 8px; pointer-events: none; background: color-mix(in srgb, var(--pro-accent) 14%, var(--popover)); }
+.task-inspector-tab-indicator[data-phase="stretch"] { transition: transform 190ms cubic-bezier(0.32, 0.72, 0.24, 1), width 190ms cubic-bezier(0.32, 0.72, 0.24, 1); }
+.task-inspector-tab-indicator[data-phase="settle"] { transition: transform 420ms cubic-bezier(0.28, 1.28, 0.36, 1), width 420ms cubic-bezier(0.24, 1.34, 0.38, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .task-inspector-tab-indicator[data-phase] { transition: none; }
+}
+.task-inspector-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; border-radius: 6px; color: color-mix(in srgb, var(--foreground) 70%, var(--popover)); font-size: 12px; text-align: left; outline: none; transition: color 140ms ease-out; }
+.task-inspector-back:hover { color: var(--foreground); }
+.task-inspector-back:focus-visible { outline: 2px solid var(--pro-accent); outline-offset: 2px; }
+.task-node-inspector { animation: task-inspector-enter 180ms cubic-bezier(.2,.7,.2,1); }
+@keyframes task-inspector-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+@media (max-width: 600px) {
+  .automatic-task-graph-dialog { --task-graph-window-inset: 16px; width: calc(100vw - 16px); }
+}
+@media (prefers-reduced-motion: reduce) { .task-flow-node, .task-graph-canvas[data-transitioning="true"] .task-graph-stage { transition: none; } .task-node-inspector, .task-flow-edge-path { animation: none; } }

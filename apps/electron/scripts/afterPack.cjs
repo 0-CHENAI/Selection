@@ -103,8 +103,39 @@ function resolvePackagedResourcesRoot(context) {
   return path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
 }
 
+function copyAgentRuntimes(context, resourcesRoot) {
+  const projectDir = context.packager.projectDir;
+  // electron-builder excludes nested node_modules and may omit symlinked vendor directories.
+  // Copy the reviewed runtime trees after its filters, before signing the application.
+  for (const relative of ['resources/session-mcp-server', 'resources/pi-agent-server', 'vendor/bun']) {
+    const source = path.join(projectDir, relative);
+    if (!fs.existsSync(source)) throw new Error(`Required agent runtime is missing: ${relative}`);
+    const destination = path.join(resourcesRoot, 'app', relative);
+    fs.rmSync(destination, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.cpSync(source, destination, { recursive: true, dereference: true });
+  }
+  for (const relative of ['resources/session-mcp-server/index.js', 'resources/pi-agent-server/index.js',
+    'resources/pi-agent-server/photon_rs_bg.wasm', 'resources/pi-agent-server/image-resize-worker.js',
+    `vendor/bun/${context.electronPlatformName === 'win32' ? 'bun.exe' : 'bun'}`]) {
+    if (!fs.existsSync(path.join(resourcesRoot, 'app', relative))) throw new Error(`Packaged agent runtime is missing: ${relative}`);
+  }
+  const ripgrep = 'node_modules/@vscode/ripgrep';
+  const sources = [path.join(projectDir, ripgrep), path.join(projectDir, '..', '..', ripgrep)];
+  const source = sources.find(candidate => fs.existsSync(candidate));
+  if (!source) throw new Error('Required search runtime is missing: @vscode/ripgrep');
+  const destination = path.join(resourcesRoot, 'app', ripgrep);
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, { recursive: true, dereference: true });
+  if (!fs.existsSync(path.join(destination, 'bin', context.electronPlatformName === 'win32' ? 'rg.exe' : 'rg'))) {
+    throw new Error('Packaged search binary is missing');
+  }
+}
+
 module.exports = async function afterPack(context) {
   const resourcesRoot = resolvePackagedResourcesRoot(context);
+  copyAgentRuntimes(context, resourcesRoot);
   pruneForeignPlatformRuntimes(context, resourcesRoot);
   copySharpRuntime(context, resourcesRoot);
 
@@ -143,3 +174,4 @@ module.exports = async function afterPack(context) {
 module.exports.pruneForeignPlatformRuntimes = pruneForeignPlatformRuntimes;
 module.exports.resolvePackagedResourcesRoot = resolvePackagedResourcesRoot;
 module.exports.copySharpRuntime = copySharpRuntime;
+module.exports.copyAgentRuntimes = copyAgentRuntimes;

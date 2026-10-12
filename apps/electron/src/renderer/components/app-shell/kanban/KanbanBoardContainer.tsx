@@ -26,7 +26,7 @@ export function KanbanBoardContainer() {
     [llmConnections],
   )
   const defaultModel = catalogDefaultModel(groups)
-  const target = resolveOrchestrationEditorTarget(editorTarget, orchestrationProjectId)
+  const target = resolveOrchestrationEditorTarget(editorTarget, orchestrationProjectId, activeWorkspaceId)
 
   const closeToList = React.useCallback(() => {
     setEditorTarget(null)
@@ -55,6 +55,7 @@ export function KanbanBoardContainer() {
               navigateToSession(sessionId)
             }}
             onCreated={({ sessionId, taskLabelId, projectId: createdProjectId }) => {
+              setEditorTarget(null)
               if (taskLabelId && onJumpToTaskSessions) {
                 onJumpToTaskSessions(sessionId, { labelId: taskLabelId, projectId: createdProjectId })
               } else {

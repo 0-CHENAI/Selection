@@ -80,13 +80,13 @@ export function ApplyRunRevisionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!applying) onOpenChange(next) }}>
-      <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[620px]">
+      <DialogContent className="task-editor-dialog flex max-h-[82dvh] flex-col overflow-hidden sm:max-w-[620px]">
         <DialogHeader>
           <DialogTitle>{t('tasks.applyRevisionTitle')}</DialogTitle>
           <DialogDescription>{t('tasks.applyRevisionDescription')}</DialogDescription>
         </DialogHeader>
 
-        {loading ? (
+        <div className="min-h-0 overflow-y-auto">{loading ? (
           <div className="py-8 text-center text-sm text-foreground/50">{t('tasks.revisionPreviewLoading')}</div>
         ) : preview ? (
           <div className="space-y-4">
@@ -96,6 +96,7 @@ export function ApplyRunRevisionDialog({
               <DiffGroup label={t('tasks.revisionChanged')} values={preview.diff.changed} />
             </div>
 
+            {preview.impact && <div className="space-y-1 text-xs text-foreground/70"><p>{t('tasks.explain.affected')}: {preview.impact.affected.join(', ') || '—'}</p><p>{t('tasks.explain.unaffected')}: {preview.impact.unaffected.join(', ') || '—'}</p></div>}
             {preview.diff.added.length === 0 && preview.diff.removed.length === 0 && preview.diff.changed.length === 0 && (
               <div role="note" className="text-[12px] text-foreground/55">{t('tasks.revisionNoChanges')}</div>
             )}
@@ -159,9 +160,9 @@ export function ApplyRunRevisionDialog({
           <div role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-[12px] text-red-700 dark:text-red-300">
             {error}
           </div>
-        ) : null}
+        ) : null}</div>
 
-        <DialogFooter>
+        <DialogFooter className="task-editor-dialog-footer">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={applying}>
             {t('common.cancel')}
           </Button>

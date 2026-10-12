@@ -26,12 +26,11 @@ export function resolveBackgroundTaskChipLabel(input: {
   return shortenTaskId(input.taskId)
 }
 
-/** Live agents and terminal managed Swarm agents use the same closable preview. */
+/** Agent output stays in the owning chat for both live and historical tasks. */
 export function shouldPreviewBackgroundTask(task?: {
   type?: string
   status?: string
   orchestrationId?: string
 }): boolean {
-  if (task?.type !== 'agent') return false
-  return task.status === 'running' || task.status === 'stale' || Boolean(task.orchestrationId)
+  return task?.type === 'agent'
 }

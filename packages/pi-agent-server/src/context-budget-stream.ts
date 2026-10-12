@@ -1,6 +1,7 @@
 import { PI_SESSION_TOOL_SHORT_NAME_ALIASES } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
 import { boundedModelStream, MODEL_REQUEST_TIMEOUT_MS } from './bounded-model-stream.ts';
-import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails } from '../../shared/src/request-diagnostics.ts';
+import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails, subscribeModelRequestQueue } from '../../shared/src/request-diagnostics.ts';
+import { hasModelRequestGate } from '../../shared/src/model-request-gate';
 import {
   createAssistantMessageEventStream,
   getCurrentTools,
@@ -170,8 +171,16 @@ export function createContextBudgetedStream(
         const timeoutMs = typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
           ? Math.min(configuredTimeout, MODEL_REQUEST_TIMEOUT_MS) : MODEL_REQUEST_TIMEOUT_MS;
         const stream = boundedModelStream(
-          signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, { ...attemptOptions, signal })),
-          attemptOptions.signal, timeoutMs,
+          signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, {
+            ...attemptOptions, signal,
+            // SDK wall clocks start before fetch, including host queueing. The
+            // cancellable idle bound above owns the deadline once a slot exists.
+            timeoutMs: hasModelRequestGate() ? 2_147_483_647 : attemptOptions.timeoutMs,
+            // Codex defaults to a persistent WebSocket, which bypasses fetch.
+            // Use its supported SSE transport for host-owned request accounting.
+            transport: hasModelRequestGate() && model.api === 'openai-codex-responses' ? 'sse' : attemptOptions.transport,
+          })),
+          attemptOptions.signal, timeoutMs, listener => subscribeModelRequestQueue(diagnosticScope, listener),
         );
         for await (const rawEvent of stream) {
           if ('partial' in rawEvent) lastPartial = rawEvent.partial;

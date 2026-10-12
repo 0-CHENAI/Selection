@@ -1,0 +1,130 @@
+{
+  "fixtureHash": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+  "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+  "model": "gpt-6-luna",
+  "connection": "pi-api-key-2",
+  "runDirectory": "/Users/chenai/.selection/workspaces/my-workspace/tasks/f0-1791046266754/runs/run-1791046266776",
+  "terminal": {
+    "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+    "slug": "f0-1791046266754",
+    "runId": "run-1791046266776",
+    "taskId": "f0-1791046266754",
+    "status": "completed",
+    "canRetryFailedNodes": false,
+    "orchestratorSessionId": "261004-steady-moor",
+    "tokensUsed": 20570,
+    "revision": 0,
+    "metrics": {
+      "elapsedMs": 25423,
+      "queueMs": 7,
+      "modelMs": 25413,
+      "tokensUsed": 20570,
+      "retries": 0,
+      "repairs": 0,
+      "coordinatorWaitMs": 0,
+      "coordinatorWaits": 0,
+      "cacheHits": 0,
+      "cacheMisses": 0,
+      "cacheBypasses": 0,
+      "criticalPathNodeIds": []
+    },
+    "nodes": [
+      {
+        "id": "a",
+        "title": "a",
+        "attempts": [
+          {
+            "attempt": 1,
+            "sessionId": "261004-bright-eagle",
+            "state": "done",
+            "revision": 0
+          }
+        ],
+        "definitionId": "a",
+        "state": "done",
+        "sessionId": "261004-bright-eagle",
+        "attempt": 1,
+        "retryCount": 0,
+        "role": "worker",
+        "model": "gpt-6-luna",
+        "tokensUsed": 20570,
+        "elapsedMs": 25413,
+        "queueMs": 7
+      }
+    ]
+  },
+  "result": {
+    "taskId": "f0-1791046266754",
+    "orchestratorSessionId": "261004-steady-moor",
+    "slug": "f0-1791046266754",
+    "runId": "run-1791046266776",
+    "runIds": [
+      "run-1791046266776"
+    ],
+    "verdicts": [],
+    "repair": {
+      "used": 0,
+      "max": 3
+    },
+    "runStatus": "completed",
+    "tokensUsed": 20570,
+    "nodes": [
+      {
+        "id": "a",
+        "title": "a",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261004-bright-eagle",
+        "output": "方案 A 两年总成本为 1,000,000 元。仍有未核实事项：方案 B 的成本口径待核对，暂不能与 A 直接比较；风险资料还存在一个未补齐的缺口，具体内容未说明。",
+        "outputs": {
+          "total_cost": 1000000,
+          "unresolved": true
+        }
+      }
+    ],
+    "revision": 0
+  },
+  "regressions": {
+    "ordinarySessionId": "261004-neat-marble",
+    "ordinaryOutput": "A 的两年总成本：**1000000 元**。\n\n仍未核实的问题：\n- 方案 B 的成本口径是什么？是否能与方案 A 直接比较？\n- 风险资料中未补齐的缺口是什么？",
+    "legacyResult": {
+      "taskId": "f0-1791046266754-legacy",
+      "orchestratorSessionId": "261004-zesty-nebula",
+      "slug": "f0-1791046266754-legacy",
+      "runId": "run-1791046314221",
+      "runIds": [
+        "run-1791046314221"
+      ],
+      "verdicts": [],
+      "repair": {
+        "used": 0,
+        "max": 3
+      },
+      "runStatus": "completed",
+      "tokensUsed": 40170,
+      "nodes": [
+        {
+          "id": "read",
+          "title": "read",
+          "state": "done",
+          "attempt": 1,
+          "revision": 0,
+          "sessionId": "261004-gentle-channel",
+          "output": "1000000"
+        },
+        {
+          "id": "summarize",
+          "title": "summarize",
+          "state": "done",
+          "attempt": 1,
+          "revision": 0,
+          "sessionId": "261004-clear-hazel",
+          "output": "1000000"
+        }
+      ],
+      "revision": 0
+    }
+  },
+  "reload": "same run, output, revision and attempt; no additional execution"
+}

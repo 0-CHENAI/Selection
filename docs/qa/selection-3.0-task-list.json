@@ -1,0 +1,46 @@
+{
+  "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+  "connection": "pi-api-key-2",
+  "model": "gpt-6-luna",
+  "sessionId": "261004-vast-cobble",
+  "firstList": [
+    {
+      "id": "step-1",
+      "content": "读取 costs.txt 并确认 A 的两年成本",
+      "status": "completed"
+    },
+    {
+      "id": "step-2",
+      "content": "区分已核实信息与未核实缺口",
+      "status": "completed"
+    },
+    {
+      "id": "step-3",
+      "content": "整理最终报告（等用户明确说继续后再做）",
+      "status": "pending",
+      "activeForm": "等待用户指示后整理最终报告"
+    }
+  ],
+  "last": [
+    {
+      "id": "step-1",
+      "content": "读取 costs.txt 并确认 A 的两年成本",
+      "status": "completed"
+    },
+    {
+      "id": "step-2",
+      "content": "区分已核实信息与未核实缺口",
+      "status": "completed"
+    },
+    {
+      "id": "step-3",
+      "content": "整理最终报告（等用户明确说继续后再做）",
+      "status": "completed"
+    }
+  ],
+  "output": "## 方案成本与信息缺口报告\n\n### 已核实信息\n\n- **方案 A：**两年总成本为 **100 万元（1,000,000 元）**。\n- **方案 B：**成本口径尚待核对，因此目前不能与方案 A 直接比较。\n- **风险资料：**存在一个尚未补齐的缺口；现有资料未说明缺口的具体内容。\n- **外部操作：**资料中记录的已确认外部操作为无。\n\n### 尚待核实\n\n1. 方案 B 的成本口径及其与方案 A 的可比性。\n2. 风险资料中未补齐缺口的具体内容。\n\n### 说明\n\n以上依据 `costs.txt` 中的 Selection 3.0 固定验收资料整理；该文件明确说明资料仅用于测试，不代表市场事实。",
+  "simpleSessionId": "261004-airy-pulsar",
+  "simpleAnswer": "每年50万元。",
+  "unchangedTaskDirectory": true,
+  "immutableEarlierSnapshot": true
+}

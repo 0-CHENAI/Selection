@@ -81,6 +81,8 @@ function fuzzyAutolinkedFileName(target: string): string | null {
  */
 export function resolveMarkdownLinkTarget(target: string): ResolvedMarkdownLinkTarget {
   const trimmed = target.trim()
+  // Internal session links use the host's existing deep-link/ownership routing.
+  if (/^craftagents:/i.test(trimmed)) return { kind: 'url', url: trimmed }
 
   const fileUrlPath = resolveFileUrlPath(trimmed)
   if (fileUrlPath) {

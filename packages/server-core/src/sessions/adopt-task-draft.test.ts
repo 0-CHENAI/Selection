@@ -8,7 +8,7 @@ import { SessionManager } from './SessionManager.ts'
 describe('adoptGeneratedTaskOrchestrator guards', () => {
   function seed(sm: SessionManager, id: string, fields: { taskDraft?: boolean; taskSlug?: string }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(sm as any).sessions.set(id, { id, ...fields })
+    ;(sm as any).sessions.set(id, { id, workMode: 'PRO', ...fields })
   }
 
   it('returns false when the session does not exist', async () => {
@@ -45,7 +45,7 @@ describe('adoptGeneratedTaskOrchestrator guards', () => {
 describe('bindExistingSessionToTask guards', () => {
   function seed(sm: SessionManager, id: string, fields: { taskDraft?: boolean; taskSlug?: string }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(sm as any).sessions.set(id, { id, ...fields })
+    ;(sm as any).sessions.set(id, { id, workMode: 'PRO', ...fields })
   }
 
   it('returns false when the session does not exist', async () => {
@@ -90,6 +90,7 @@ describe('adopt/bind route changed fields through canonical live-update mutators
     any.setSessionPermissionMode = (_id: string, m: string) => { calls.mode.push(m) }
     any.sessions.set('s', {
       id: 's',
+      workMode: 'PRO',
       taskDraft: true,
       messages: [],
       connectionLocked: false,

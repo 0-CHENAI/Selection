@@ -2,6 +2,8 @@
 import { useTranslation } from 'react-i18next'
 import {
   Check,
+  ArrowRightLeft,
+  ArrowUpLeft,
   Columns2,
   Copy,
   FolderKanban,
@@ -111,6 +113,11 @@ export function SessionMenu({
       </MenuItem>
 
       <Separator />
+      {item.handover && <>
+        <MenuItem onClick={actions.viewHandover}><ArrowRightLeft className="h-3.5 w-3.5" /><span className="flex-1">{t('handover.viewBackground')}</span></MenuItem>
+        <MenuItem onClick={actions.openHandoverSource} disabled={!actions.canOpenHandoverSource}><ArrowUpLeft className="h-3.5 w-3.5" /><span className="flex-1">{t(actions.canOpenHandoverSource ? 'handover.openSource' : 'handover.sourceRemoved')}</span></MenuItem>
+        <Separator />
+      </>}
       <MenuItem onClick={actions.openInNewPanel}>
         <Columns2 className="h-3.5 w-3.5" />
         <span className="flex-1">{t('sessionMenu.openInNewPanel')}</span>

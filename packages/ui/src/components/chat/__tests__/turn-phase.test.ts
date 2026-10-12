@@ -430,6 +430,9 @@ describe('shouldShowThinkingIndicator', () => {
 })
 
 describe('shouldShowGenericThinkingIndicator', () => {
+  it('uses the visible subagent progress status instead of a second thinking row', () => {
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, [{ type: 'status', status: 'running' }])).toBe(false)
+  })
   it('hides the duplicate row when a visible intermediate activity is running (#239)', () => {
     expect(shouldShowGenericThinkingIndicator('awaiting', false, [{
       type: 'intermediate',

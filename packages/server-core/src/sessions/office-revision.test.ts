@@ -35,7 +35,7 @@ for (const outcome of ['applied', 'cancelled', 'no-summary']) test.skipIf(!binar
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   const manager = new SessionManager(), internal = manager as any
   try {
-    const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: workspace.rootPath }, workspace as never, { messagesLoaded: true })
+    const parent = createManagedSession({ id: 'parent', workMode: 'NORM', permissionMode: 'allow-all', workingDirectory: workspace.rootPath }, workspace as never, { messagesLoaded: true })
     internal.sessions.set(parent.id, parent)
     const outside = join(root, 'unrelated.docx')
     copyFileSync(file, outside)

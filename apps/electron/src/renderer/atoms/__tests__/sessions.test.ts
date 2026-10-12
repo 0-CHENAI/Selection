@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { createStore } from 'jotai'
 import type { Message, Session } from '../../../shared/types'
+import { createEmptySession } from '../../event-processor/helpers'
+import { sessionWorkModeView } from '../../lib/work-mode-navigation'
 import {
   sessionAtomFamily,
   sessionMetaMapAtom,
@@ -125,6 +127,35 @@ describe('session message loading atoms', () => {
     expect(calls).toEqual([sessionId, sessionId])
     expect(secondResult?.messages.map((message) => message.id)).toEqual(['m1', 'm2'])
     expect(store.get(loadedSessionsAtom).has(sessionId)).toBe(true)
+  })
+
+  it.each(['NORM', 'PRO'] as const)('hydrates %s execution identity after an event-created placeholder', async (workMode) => {
+    const store = createStore()
+    const sessionId = `placeholder-${workMode}`
+    const placeholder = { ...createEmptySession(sessionId, 'workspace-1'), isFlagged: true, hasUnread: false }
+    store.set(initializeSessionsAtom, [placeholder])
+    globalThis.window = { electronAPI: { getSessionMessages: async () => makeSession({
+      id: sessionId, workMode, executionRootSessionId: sessionId, workModeNeedsReview: false,
+      messages: [msg('original')], isFlagged: false, hasUnread: true,
+    }) } } as unknown as typeof window
+
+    await store.set(ensureSessionMessagesLoadedAtom, sessionId)
+    expect(store.get(sessionAtomFamily(sessionId))).toMatchObject({ workMode, executionRootSessionId: sessionId, workModeNeedsReview: false, isFlagged: true, hasUnread: false })
+    const metadata = store.get(sessionMetaMapAtom)
+    expect(metadata.get(sessionId)).toMatchObject({ workMode, executionRootSessionId: sessionId, workModeNeedsReview: false })
+    expect(sessionWorkModeView(metadata.get(sessionId), metadata)).toBe(workMode)
+  })
+
+  it('does not overwrite a mode event received while the session fetch was in flight', async () => {
+    const store = createStore(), sessionId = 'mode-event-race'
+    store.set(initializeSessionsAtom, [createEmptySession(sessionId, 'workspace-1')])
+    globalThis.window = { electronAPI: { getSessionMessages: async () => {
+      store.set(updateSessionAtom, sessionId, session => session && ({ ...session, workMode: 'PRO' }))
+      return makeSession({ id: sessionId, workMode: 'NORM' })
+    } } } as unknown as typeof window
+    await store.set(ensureSessionMessagesLoadedAtom, sessionId)
+    expect(store.get(sessionAtomFamily(sessionId))?.workMode).toBe('PRO')
+    expect(store.get(sessionMetaMapAtom).get(sessionId)?.workMode).toBe('PRO')
   })
 })
 

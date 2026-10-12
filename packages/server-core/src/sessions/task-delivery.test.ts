@@ -8,6 +8,27 @@ import { getSessionPath } from '@craft-agent/shared/sessions'
 import { SessionManager, createManagedSession } from './SessionManager'
 import { prepareIsolatedWorkspace } from '../reliability/isolated-workspace'
 
+test('an unsupported real output records its path and validation failure without replacing the original', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'unsupported-delivery-'))
+  const workspace = { id: 'unsupported', name: 'Unsupported', rootPath: join(root, 'workspace') }
+  const source = join(workspace.rootPath, 'project'); mkdirSync(source, { recursive: true })
+  writeFileSync(join(source, 'original'), 'User original')
+  const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
+  const manager = new SessionManager()
+  const managed = createManagedSession({ id: 'output', permissionMode: 'allow-all' }, workspace as never, { messagesLoaded: true })
+  managed.isolatedWorkspace = prepareIsolatedWorkspace(source, join(root, 'isolated'), ['original'])
+  ;(manager as any).sessions.set(managed.id, managed)
+  try {
+    writeFileSync(join(managed.isolatedWorkspace.directory, 'original'), 'Candidate')
+    await expect(manager.finalizeTaskWorkspace(managed.id, {}, () => {})).rejects.toThrow('Output "original": No format validator')
+    expect(managed.isolatedWorkspace.deliveryProgress?.phase).toBe('validation-failed')
+    const saved = JSON.parse(readFileSync(join(getSessionPath(workspace.rootPath, managed.id), 'data', 'isolated-workspace.json'), 'utf8'))
+    expect(saved.deliveryProgress.phase).toBe('validation-failed')
+    expect(readFileSync(join(source, 'original'), 'utf8')).toBe('User original')
+    expect(readFileSync(join(managed.isolatedWorkspace.directory, 'original'), 'utf8')).toBe('Candidate')
+  } finally { lookup.mockRestore(); manager.cleanup(); rmSync(root, { recursive: true, force: true }) }
+})
+
 for (const sourceCode of [false, true]) for (const pending of [false, true]) test(`SessionManager replays delivery after reload without applying candidate edits (pending=${pending}, code=${sourceCode})`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'manager-delivery-'))
   const workspace = { id: 'delivery-workspace', name: 'Delivery', rootPath: join(root, 'workspace') }

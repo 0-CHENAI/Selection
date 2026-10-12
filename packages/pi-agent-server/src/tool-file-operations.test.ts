@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileFingerprint, readToolFileOperation, verifyToolFileOperation, writeFileWithReceipt, type ToolFileOperationIdentity } from '../../shared/src/agent/backend/pi/file-operation-receipts';
 import { nativeEditOperations, nativeWriteOperations, withToolFileOperation } from './tool-file-operations';
+import { ToolNotPerformedError } from './tool-recovery';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture(toolName: 'Write' | 'Edit' = 'Write') {
@@ -35,6 +36,21 @@ test('native Edit preserves SDK BOM and CRLF handling and journals the final com
   expect(receipt.before).toEqual(before);
   expect(receipt.expected).toEqual(fileFingerprint(file));
   expect(verifyToolFileOperation(receipt, identity)).toBe(true);
+});
+test('an unmatched native Edit is not performed; errors after a write or prior receipt stay uncertain', async () => {
+  const { root, identity } = fixture('Edit');
+  const file = join(root, 'report.txt'); writeFileSync(file, 'original report');
+  const tool = createEditToolDefinition(root, { operations: nativeEditOperations });
+  const edit = () => tool.execute(identity.toolCallId, { path: file, edits: [{ oldText: 'missing', newText: 'updated' }] }, undefined, undefined, {} as never);
+  await expect(withToolFileOperation(root, identity, edit)).rejects.toBeInstanceOf(ToolNotPerformedError);
+  expect(readFileSync(file, 'utf8')).toBe('original report');
+  expect(readToolFileOperation(root, identity)).toBeUndefined();
+  const failure = new Error('Error after mutation');
+  await expect(withToolFileOperation(root, identity, async () => {
+    await nativeEditOperations.writeFile(file, 'updated');
+    throw failure;
+  })).rejects.toBe(failure);
+  await expect(withToolFileOperation(root, identity, edit)).rejects.not.toBeInstanceOf(ToolNotPerformedError);
 });
 test('failure to save the prepared receipt prevents any native file write', async () => {
   const { root, identity } = fixture();

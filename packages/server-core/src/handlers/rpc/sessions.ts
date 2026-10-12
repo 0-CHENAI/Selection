@@ -187,9 +187,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@craft-agent/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
-    // The renderer adds the session synchronously from this return value (App.tsx handleCreateSession),
-    // so suppress the broadcast to avoid a redundant hydrate round-trip.
-    const session = await sessionManager.createSession(workspaceId, options, { emitCreatedEvent: false })
+    // Other windows and RPC clients need the same metadata before processing events arrive.
+    // The creating renderer already deduplicates session_created against its returned session.
+    const session = await sessionManager.createSession(workspaceId, options)
     end()
     return session
   })
@@ -302,6 +302,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'handover':
+        if (!sessionManager.handoverSession) throw new Error('Handover is unavailable')
+        return sessionManager.handoverSession(sessionId, command.operation)
       case 'flag':
         return sessionManager.flagSession(sessionId)
       case 'unflag':
@@ -336,6 +339,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
           throw new Error(`Invalid thinking level: ${command.level}. Valid values: ${VALID_THINKING_LEVELS_LIST}`)
         }
         return sessionManager.setSessionThinkingLevel(sessionId, command.level)
+      case 'setWorkMode':
+        if (!sessionManager.setSessionWorkMode) throw new Error('Work mode selection is unavailable')
+        return sessionManager.setSessionWorkMode(sessionId, command.mode)
       case 'updateWorkingDirectory':
         return sessionManager.updateWorkingDirectory(sessionId, command.dir)
       case 'setSources':

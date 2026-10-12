@@ -120,3 +120,28 @@ describe('deletion write barrier', () => {
     expect(queue.hasPending('deleting')).toBe(false)
   })
 })
+
+it('concurrent immediate flushes wait for the next writer, including work queued while waiting', async () => {
+  const { SessionPersistenceQueue } = await import('../persistence-queue')
+  const queue = new SessionPersistenceQueue(10000)
+  let releaseFirst!: () => void, releaseSecond!: () => void
+  const first = new Promise<void>(resolve => { releaseFirst = resolve }), second = new Promise<void>(resolve => { releaseSecond = resolve })
+  let startedSecond!: () => void
+  const secondStarted = new Promise<void>(resolve => { startedSecond = resolve })
+  let writes = 0
+  ;(queue as any).write = async (id: string) => {
+    ;(queue as any).pending.delete(id)
+    if (++writes === 1) await first
+    else { startedSecond(); await second }
+  }
+  queue.enqueue({ id: 'parallel' } as any)
+  const initial = queue.flush('parallel')
+  let latestDone = false
+  const waiting = queue.flush('parallel')
+  const anotherWaiting = queue.flush('parallel').then(() => { latestDone = true })
+  queue.enqueue({ id: 'parallel' } as any)
+  releaseFirst(); await secondStarted; await Promise.resolve()
+  expect(latestDone).toBe(false)
+  releaseSecond(); await Promise.all([initial, waiting, anotherWaiting])
+  expect(latestDone).toBe(true); expect(writes).toBe(2)
+})

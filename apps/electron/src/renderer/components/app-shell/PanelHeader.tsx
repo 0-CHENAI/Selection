@@ -218,7 +218,7 @@ export function PanelHeader({
 
   const desktopCentered = !isCompactMode && titleAlign === 'center'
   const content = desktopCentered ? (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-1.5">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(max-content,1fr)_minmax(0,2fr)_minmax(max-content,1fr)] items-center gap-1.5">
       <div className="titlebar-no-drag flex min-w-0 items-center">{leadingAction}</div>
       <div className="flex min-w-0 justify-center select-none">
         <div className="max-w-full overflow-hidden">{titleNode}</div>

@@ -50,5 +50,5 @@ export const PI_TOOL_NAME_MAP: Record<string, string> = {
 
 /** Native identities only; callers must also require a registered read-only contract. */
 export function isNativeReadOnlyTool(name: string): boolean {
-  return ['Read', 'Grep', 'Glob', 'Find', 'Ls'].includes(PI_TOOL_NAME_MAP[name] ?? name);
+  return ['Read', 'Grep', 'Glob', 'Find', 'Ls', 'document_index', 'document_read'].includes(PI_TOOL_NAME_MAP[name] ?? name);
 }

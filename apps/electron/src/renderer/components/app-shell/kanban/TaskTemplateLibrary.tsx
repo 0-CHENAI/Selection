@@ -33,7 +33,7 @@ export function TaskTemplateLibrary({
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const mounted = React.useRef(true)
-  React.useEffect(() => () => { mounted.current = false }, [])
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const loadList = React.useCallback(async () => {
     const list = await window.electronAPI.listTaskTemplates(workspaceId)
@@ -110,30 +110,32 @@ export function TaskTemplateLibrary({
 
   if (selectedId && detail && spec) {
     return (
-      <section className="flex h-full min-h-0 flex-col gap-3 p-6" aria-label={t('tasks.templateLibrary')}>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedId(undefined); setDetail(null) }}>{t('tasks.templateBack')}</Button>
-          <h2 className="text-lg font-semibold">{detail.name}</h2>
+      <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4" aria-label={t('tasks.templateLibrary')}>
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border pb-3">
+          <h2 className="min-w-0 break-words text-base font-semibold">{detail.name}</h2>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void exportYaml()}>{t('tasks.templateExport')}</Button>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void removeTemplate()}>{t('tasks.templateDelete')}</Button>
-            <Button size="sm" disabled={busy} onClick={() => void createFromSelectedTemplate()}>{t('tasks.templateUse')}</Button>
           </div>
         </div>
-        {detail.description && <p className="text-sm text-muted-foreground">{detail.description}</p>}
+        {detail.description && <p className="max-h-24 shrink-0 overflow-y-auto break-words text-sm text-muted-foreground">{detail.description}</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
           <ConductorWorkbench spec={spec} />
+        </div>
+        <div className="task-editor-subview-footer">
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => { setSelectedId(undefined); setDetail(null) }}>{t('tasks.templateBack')}</Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
+          <Button size="sm" disabled={busy} onClick={() => void createFromSelectedTemplate()}>{t('tasks.templateUse')}</Button>
         </div>
       </section>
     )
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4 p-6" aria-label={t('tasks.templateLibrary')}>
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">{t('tasks.templateLibrary')}</h2>
-        <Button variant="ghost" className="ml-auto" onClick={onClose}>{t('common.cancel')}</Button>
+    <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4" aria-label={t('tasks.templateLibrary')}>
+      <div className="flex shrink-0 items-center gap-3 border-b border-border pb-3">
+        <h2 className="text-base font-semibold">{t('tasks.templateLibrary')}</h2>
       </div>
       <p className="text-sm text-muted-foreground">{t('tasks.templateHint')}</p>
       <input
@@ -144,10 +146,10 @@ export function TaskTemplateLibrary({
         aria-label={t('tasks.templateSearch')}
       />
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {visible.length === 0 ? (
+      <div className="min-h-0 flex-1 overflow-y-auto">{visible.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('tasks.templateEmpty')}</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 overflow-auto">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-3 overflow-auto">
           {visible.map((item) => (
             <button
               key={item.id}
@@ -165,7 +167,8 @@ export function TaskTemplateLibrary({
             </button>
           ))}
         </div>
-      )}
+      )}</div>
+      <div className="task-editor-subview-footer"><Button variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button></div>
     </section>
   )
 }

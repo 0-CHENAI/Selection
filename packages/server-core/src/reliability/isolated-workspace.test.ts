@@ -4,6 +4,23 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prepareIsolatedWorkspace, assertIsolatedTool } from './isolated-workspace'
+
+test('isolated research permits native web reads and scoped result tools without admitting external writes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'isolation-research-'))
+  try {
+    const source = join(root, 'source')
+    mkdirSync(source)
+    const state = prepareIsolatedWorkspace(source, join(root, 'store'))
+    for (const name of ['WebSearch', 'web_search', 'WebFetch', 'web_fetch', 'Find', 'Ls',
+      'session_history', 'task_context', 'mcp__session__submit_task_node_verdict', 'session__task_help']) {
+      expect(() => assertIsolatedTool(state, name, { query: 'model generation speed' })).not.toThrow()
+    }
+    for (const name of ['WebSearch_external', 'mcp__external__web_search', 'mcp__external__submit_task_node_verdict', 'Bash']) {
+      expect(() => assertIsolatedTool(state, name, {})).toThrow('sandbox')
+    }
+    expect(() => assertIsolatedTool(state, 'Write', { path: join(source, 'report.txt') })).toThrow('isolated work directory')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 test('Git snapshots preserve staged and unstaged input without mutating the user index', () => {
   const root = mkdtempSync(join(tmpdir(), 'isolation-')), repo = join(root, 'repo'), store = join(root, 'store')
   mkdirSync(repo)

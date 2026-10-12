@@ -75,12 +75,10 @@ describe('session list and orchestration view controls (#264, #283)', () => {
 
     expect(searchIdx).toBe(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
-    expect(controls).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
-    expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
-    expect(controls).toContain("view === 'list' && isBoardView")
-    expect(controls).toContain("view === 'board' && !isBoardView")
-    expect(controls).toContain('leaveOrchestrationView()')
-    expect(controls).toContain('flex items-center gap-1.5')
+    expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(controls).toContain("value={workModeView}")
+    expect(controls).toContain('switchWorkModeView(mode)')
+    expect(controls).not.toContain('tasks.newOrchestration')
   })
 
   it('keeps search in the navigator header on desktop and compact layouts', () => {
@@ -110,20 +108,14 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
   })
 
-  it('protects unsaved orchestration edits for both search and list navigation', () => {
+  it('removes manual authoring from product navigation while retaining project management', () => {
     const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
-    const taskEditor = readFileSync(join(import.meta.dir, '../kanban/TaskEditor.tsx'), 'utf8')
-    const taskYamlImport = readFileSync(join(import.meta.dir, '../kanban/TaskYamlImport.tsx'), 'utf8')
-
-    expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
-    expect(appShell).toContain("kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))")
-    expect(appShell).toContain('if (isBoardView && !(await leaveOrchestrationView())) return')
-    expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
-    expect(taskEditor).toContain('return () => setDirty(false)')
-    expect(taskYamlImport).toContain('useSetAtom(kanbanEditorDirtyAtom)')
-    expect(taskYamlImport).toContain('setEditorDirty(value.trim().length > 0)')
-    expect(taskYamlImport).toContain("yaml.trim() && !await confirmAction(t('tasks.discardUnsaved'))")
-    expect(taskYamlImport).toContain('setEditorDirty(false)')
+    const content = readFileSync(join(import.meta.dir, '../MainContentPanel.tsx'), 'utf8')
+    expect(appShell).not.toContain('nav:newOrchestration')
+    expect(appShell).not.toContain('kanbanEditorDirtyAtom')
+    expect(content).not.toContain('KanbanBoardContainer')
+    expect(appShell).toContain('nav:projects')
+    expect(content).toContain('ProjectInfoPage')
   })
 
   it('uses exactly one desktop switcher for list and orchestration views', () => {
@@ -142,8 +134,8 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(topBar).toContain('afterWorkspace')
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
     expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
-    expect(topBarCall).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
-    expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
+    expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(topBarCall).toContain("value={workModeView}")
   })
 
   it('keeps compact search clear of the start-aligned list title', () => {
@@ -162,18 +154,18 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
   })
 
-  it('labels the switcher 列表 / 新建编排 in Chinese', () => {
+  it('labels the persistent work-mode switcher NORM / PRO', () => {
     const zh = LOCALE_REGISTRY['zh-Hans'].messages
     expect(zh['kanban.list']).toBe('列表')
     expect(zh['kanban.board']).toBe('新建编排')
 
     const html = renderWithI18n(
       'zh-Hans',
-      <BoardListToggle value="list" onChange={() => {}} />,
+      <BoardListToggle value="NORM" onChange={() => {}} />,
     )
-    expect(html).toContain('列表')
-    expect(html).toContain('新建编排')
-    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
+    expect(html).toContain('NORM')
+    expect(html).toContain('PRO')
+    expect(html.indexOf('NORM')).toBeLessThan(html.indexOf('PRO'))
     expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
     expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })

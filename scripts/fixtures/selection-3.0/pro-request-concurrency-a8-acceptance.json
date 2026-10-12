@@ -1,0 +1,54 @@
+{
+  "rootId": "261005-pearl-flood",
+  "slug": "pro-8fbfba94172fbeb0bf5c3c43",
+  "runId": "chat-2803d87d56c47be6ed5e65ca71347caabcccd698fe8ff25307abe95aed2780bf",
+  "model": "gpt-6-luna",
+  "permissionMode": "safe",
+  "status": "completed",
+  "elapsedMs": 533854,
+  "manualPlanEdits": 0,
+  "events": 52,
+  "requestMetrics": {
+    "acquired": 52,
+    "released": 52,
+    "active": 0,
+    "peak": 3,
+    "owners": [
+      "ws_pro_a8_qa/261005-pearl-flood"
+    ]
+  },
+  "finalText": "# 成本资料分析报告\n\n**资料：**[`costs.txt`](/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt)  \n**范围：**仅依据该文件原文；文件注明“仅用于测试，不代表市场事实”（第 1 行）。\n\n## A：可确认的两年成本\n\n原文记载方案 A 两年总成本为 **100 万元，即 1,000,000 元**（第 3 行）。单位换算为：100 万元 × 10,000 元/万元 = **1,000,000 元**，与原文括注一致。\n\n这确认的是文件所载总额及其单位换算，**不是**对成本明细或总额构成的独立复算。原文没有列出分项金额、费用纳入或排除范围及计算依据（第 3 行），因此这些仍未核实。\n\n## B：尚未核实的成本口径\n\n原文明确称方案 B 的成本口径“待核对”，并注明“暂不能与 A 直接比较”（第 4 行）。文件没有提供 B 的金额、成本构成、分项金额、计算依据，也没有说明其成本期间是否与 A 的两年期间一致。因此，现有资料不足以计算 B 的成本、比较两方案高低或确认可比性。A 的“两年”也没有具体起止日期或计期规则（第 3–4 行）。\n\n## 资料覆盖与风险缺口\n\n- 原文称“存在一个未补齐的缺口”，但未说明缺口内容、影响对象、严重程度、补齐判定标准或后续处理安排（第 5 行）；据此无法判断具体风险类型或影响。\n- A 缺少分项、费用范围及核算支撑；B 缺少具体口径、金额和对应资料（第 3–4 行）。责任人和完成期限等安排也未见于原文（第 4–5 行），不能据此推断现实状态。\n- 第 6 行记载“已确认的外部操作：无”。这只说明文件没有已确认的外部操作记录；文件未说明确认范围或核查方法，不能据此断言实际不存在外部操作。\n\n## 独立核验与执行结果\n\n独立核验节点直接回查原文件并审查两项分析，结果为 **通过（pass）**：A 的金额换算正确，B 的未核实口径及风险资料缺口得到保留，未发现内容层面的实质缺陷。核验并未补足原文缺失的成本明细或风险缺口详情。\n\n工作流按要求将金额与口径分析、风险资料覆盖分析设为两个独立并行节点（计划 `max_parallel: 2`），之后执行独立审查与汇总报告。最终验收通过。整个过程只读指定资料，未写文件或更改权限。",
+  "tokensUsed": 133455,
+  "nodes": [
+    {
+      "id": "read-source",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-young-grove"
+    },
+    {
+      "id": "amount-scope-analysis",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-open-quasar"
+    },
+    {
+      "id": "risk-coverage-analysis",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-warm-deer"
+    },
+    {
+      "id": "independent-review",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-young-thunder"
+    },
+    {
+      "id": "final-report",
+      "state": "done",
+      "attempt": 1,
+      "sessionId": "261005-apt-rapids"
+    }
+  ]
+}

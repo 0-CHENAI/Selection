@@ -1,5 +1,6 @@
 import { BodyFeedbackDialog, type BodyFeedbackTarget } from './BodyFeedbackDialog'
 import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
+import { HandoverMessageBubble } from './HandoverMessageBubble'
 import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
 import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
 import { isTerminalResponseError } from '@/utils/terminal-error'
@@ -53,11 +54,15 @@ import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
+import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
+import type { ResponseSource } from '@craft-agent/ui/chat'
+import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
   formatUserMessageTime,
   HeightPresence,
   UserMessageBubble,
+  withTaskMessagePresentation,
   groupMessagesByTurn,
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
@@ -231,6 +236,10 @@ interface ChatDisplayProps {
   /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
+  orchestrationRuns?: TaskRunSnapshotDto[]
+  orchestrationSources?: ReadonlyMap<string, ResponseSource[]>
+  /** Run controls live inside the latest execution's collapsed work chain. */
+  orchestrationWorkControls?: React.ReactNode
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -297,6 +306,8 @@ interface ChatDisplayProps {
   enableFocusZone?: boolean
   /** Hide the composer (used by read-only child previews). */
   hideComposer?: boolean
+  /** Give read-only task output a separate assignment / result hierarchy. */
+  taskPreview?: boolean
 }
 
 import {
@@ -533,6 +544,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
   swarmRunning = false,
+  orchestrationRuns,
+  orchestrationSources,
+  orchestrationWorkControls,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -564,6 +578,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onPreviewSession,
   enableFocusZone = true,
   hideComposer = false,
+  taskPreview = false,
 }, ref) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
@@ -776,11 +791,26 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Find ALL individual match occurrences (not just turns)
   // Returns array with unique matchId for each occurrence
+  const sessionMessages = session?.messages
+  const sessionIsProcessing = session?.isProcessing
+  const sessionTaskSlug = session?.taskSlug
+  const sessionTaskNodeId = session?.taskNodeId
+  const sessionName = session?.name
+  const sessionParentId = session?.parentSessionId
+  const taskGroupingOptions = useMemo(() => ({
+    isSessionProcessing: sessionIsProcessing,
+    isManagedSwarmRunning: swarmRunning,
+    isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
+    isTaskOrchestrationRoot: Boolean(sessionTaskSlug && !sessionTaskNodeId && !sessionParentId),
+  }), [sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionTaskNodeId, sessionParentId])
+  const sessionDisplayMessages = useMemo(() => sessionMessages?.map(message => withTaskMessagePresentation(message, {
+    taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
+  })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
   const matchingOccurrences = useMemo(() => {
-    if (!searchQuery.trim() || !session?.messages) return []
+    if (!searchQuery.trim() || !sessionDisplayMessages.length) return []
     const startTime = performance.now()
     const query = searchQuery.toLowerCase()
-    const turns = groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
+    const turns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
     const matches: { matchId: string; turnId: string; turnIndex: number; matchIndexInTurn: number }[] = []
 
     for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
@@ -821,7 +851,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
     }
     return matches
-  }, [searchQuery, session?.messages, session?.isProcessing, countOccurrences])
+  }, [searchQuery, sessionDisplayMessages, taskGroupingOptions, countOccurrences])
 
   // Auto-expand pagination when search is active to show all matching turns
   // This ensures match count is stable and all matches are highlightable from the start
@@ -833,7 +863,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       (min, m) => m.turnIndex < min ? m.turnIndex : min,
       matchingOccurrences[0]!.turnIndex
     )
-    const totalTurns = groupMessagesByTurn(session?.messages || [], { isSessionProcessing: session?.isProcessing }).length
+    const totalTurns = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions).length
 
     // Calculate how many turns we need to show to include all matches
     // totalTurns - visibleTurnCount = startIndex, so we need visibleTurnCount = totalTurns - earliestMatchTurnIndex + buffer
@@ -842,7 +872,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (requiredVisibleCount > visibleTurnCount) {
       setVisibleTurnCount(requiredVisibleCount)
     }
-  }, [isSearchActive, matchingOccurrences, session?.messages, session?.isProcessing, visibleTurnCount])
+  }, [isSearchActive, matchingOccurrences, sessionDisplayMessages, taskGroupingOptions, visibleTurnCount])
 
   // Extract unique turn IDs that have matches (for highlighting)
   const matchingTurnIds = useMemo(() => {
@@ -1550,19 +1580,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingPermission, pendingCredential])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
-  const sessionMessages = session?.messages
-  const sessionIsProcessing = session?.isProcessing
-  const sessionTaskSlug = session?.taskSlug
-  const sessionParentId = session?.parentSessionId
   const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
   const allTurns = React.useMemo(() => {
     if (!sessionMessages) return []
-    return groupMessagesByTurn(sessionMessages, {
-      isSessionProcessing: sessionIsProcessing,
-      isManagedSwarmRunning: swarmRunning,
-      isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
-    })
-  }, [sessionMessages, sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionParentId])
+    const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
+    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
+    return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
+  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
@@ -1589,7 +1613,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!showRecordNavigation) return []
     const items: ConversationNavigationItem[] = []
     allTurns.forEach((turn, index) => {
-      if (turn.type === 'user') {
+      if (turn.type === 'user' && !turn.message.taskContext) {
         items.push({ key: getTurnKey(turn, index), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
       } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
         const item = items[items.length - 1]!
@@ -1749,7 +1773,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
 
   return (
-    <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
+    <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat">
       <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
         refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
         onClose={() => setBodyFeedbackTarget(null)}
@@ -1776,11 +1800,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)'
               }}
             >
-              <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef}>
+              <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef} constrainContentWidth={compactMode}>
               <div className={cn(
                 CHAT_LAYOUT.maxWidth,
                 "mx-auto min-w-0",
-                compactMode ? "px-3 py-4 space-y-2" : [CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing]
+                taskPreview ? "w-full px-5 py-5 space-y-3 [overflow-wrap:anywhere]" : compactMode ? "w-full px-3 py-4 space-y-2 [overflow-wrap:anywhere]" : [CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing]
               )}>
                 {/* Session-level AnimatePresence: Prevents layout jump when switching sessions */}
                 <AnimatePresence mode={compactMode ? "sync" : "wait"} initial={false}>
@@ -1853,7 +1877,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     skip={skipScrollToBottom}
                   />
                   {/* Empty state for compact mode - inviting conversational prompt, centered in full popover */}
-                  {compactMode && turns.length === 0 && (
+                  {compactMode && turns.length === 0 && !session.handover && (
                     <div className="pointer-events-none absolute inset-0 overflow-hidden flex flex-col items-center justify-center select-none gap-1">
                       <span className="text-sm text-muted-foreground">{emptyStateLabel || t("editPopover.whatToChange")}</span>
                       {!emptyStateLabel && (
@@ -1876,6 +1900,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       ↑ {t('chat.scrollUpForEarlier', { count: startIndex })}
                     </div>
                   )}
+                  {!hasMoreAbove && <HandoverMessageBubble session={session} compactMode={compactMode} />}
                   {turns.map((turn, index) => {
                     // Compute turn key and check if it's a search match
                     const turnKey = getTurnKey(turn, startIndex + index)
@@ -2021,6 +2046,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}
                         activities={turn.activities}
+                        researchSources={turn.taskRunId ? orchestrationSources?.get(turn.taskRunId) : undefined}
+                        workControls={turn.taskRunId === orchestrationRuns?.at(-1)?.runId && turn.activities.some(activity => activity.taskNode) ? orchestrationWorkControls : undefined}
                         response={turn.response}
                         intent={turn.intent}
                         isStreaming={turn.isStreaming}
@@ -2035,10 +2062,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         onOpenUrl={onOpenUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
+                        taskPreview={taskPreview}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
                         resolveAnnotationResult={resolveAnnotationResult}
-                        onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy
+                        onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy && !disableSend
                           ? async () => {
                             if (!session) return
                             const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
@@ -2196,6 +2224,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           })
                         }}
                         onOpenActivityDetails={(activity) => {
+                          if (activity.taskNode?.sessionId && onPreviewSession) {
+                            onPreviewSession(activity.taskNode.sessionId)
+                            return
+                          }
                           // Write tool for .md/.txt → Document overlay (rendered markdown)
                           // rather than multi-diff, since these are better viewed as formatted documents
                           const isDocumentWrite = activity.toolName === 'Write' && (() => {
@@ -2337,6 +2369,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
             inputProps={{
+              workMode: session.workMode,
               placeholder,
               disabled: isInputDisabled,
               isProcessing: sessionBusy,

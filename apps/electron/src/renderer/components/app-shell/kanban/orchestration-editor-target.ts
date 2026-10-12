@@ -8,7 +8,8 @@ export function isUnboundTaskEdit(target?: TaskEditorTarget): boolean {
 export function resolveOrchestrationEditorTarget(
   editorTarget: TaskEditorTarget | null,
   projectId?: string | null,
+  workspaceId?: string | null,
 ): TaskEditorTarget {
-  if (editorTarget) return editorTarget
+  if (editorTarget && (!workspaceId || editorTarget.workspaceId === workspaceId)) return editorTarget
   return projectId ? { mode: 'create', initialProjectId: projectId } : { mode: 'create' }
 }

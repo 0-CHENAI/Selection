@@ -2,7 +2,7 @@
  * TopBar - Persistent top bar above all panels (Slack-style)
  *
  * Desktop: [Sidebar] [Back] [Forward] [Workspace selector] [afterWorkspace] ... [Browser strip]
- * Compact: [App menu] [Workspace selector]
+ * Compact: [App menu] [Workspace selector] [afterWorkspace]
  *
  * Fixed at top of window, 48px tall.
  * macOS: offset left to avoid stoplight controls.
@@ -48,7 +48,7 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
-  /** Desktop-only control rendered immediately after the workspace selector. */
+  /** Mode navigation rendered immediately after the workspace selector. */
   afterWorkspace?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
   isCompact?: boolean
@@ -217,11 +217,9 @@ export function TopBar({
           </div>
         </div>
       </div>
-      {!isCompact && (
-        <div className="titlebar-no-drag flex justify-center">
-          {afterWorkspace}
-        </div>
-      )}
+      <div className={cn("titlebar-no-drag flex shrink-0 justify-center", isCompact && "pr-2")} >
+        {afterWorkspace}
+      </div>
 
       {/* === RIGHT: Browser strip === */}
       {!isCompact && (

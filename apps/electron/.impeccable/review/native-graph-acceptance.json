@@ -1,0 +1,51 @@
+{
+  "scope": "Production HTML/SVG task observer with labelled synthetic 3-, 4- and 10-node preview transports. Windows platform simulated on macOS; no Windows hardware acceptance.",
+  "decision": "User clarified to replace React Flow rather than enable it. No new rendering dependency; dagre retained.",
+  "noReactFlowRuntime": true,
+  "reactFlowDependencyRemoved": true,
+  "layout": { "nodeWidth": 288, "nodeHeight": 128, "wideDirection": "LR", "narrowDirection": "TB", "explicitDirectionPreserved": true },
+  "behavior": {
+    "pointerPan": true,
+    "keyboardPan": true,
+    "zoomAndFit": true,
+    "liveViewportPreserved": true,
+    "currentResultsShown": true,
+    "completedSignalStatic": true,
+    "replaySignalStatic": true,
+    "reducedMotion": true,
+    "nodeAccessibleNameIncludesLocalizedKindAndState": ["Running", "Done", "Invalid"],
+    "narrowInspectorEnterFocus": "Close",
+    "narrowHiddenCanvasInert": true,
+    "narrowTabAndShiftTabVisible": { "forwardSteps": 12, "backwardSteps": 12, "obscuredFocusCount": 0 },
+    "detailCloseFocus": "检索官方信息 · Session · Running",
+    "wideCanvasRemainsInteractive": true,
+    "dialogCloseFocus": "Automatic task flow",
+    "tenNodesFit": true,
+    "tenNodeOverview": true,
+    "writeCalls": 0
+  },
+  "windowsNarrow": {
+    "viewport": [440, 900], "modalTop": 72,
+    "closeTop": 93.375, "closeWidth": 36, "closeHeight": 36,
+    "avoidsCaption": true, "closeHitTarget": true
+  },
+  "screenshots": [
+    { "path": "native-graph-user.png", "viewport": [1728, 1117], "scenario": "three", "theme": "dark", "note": "Viewport inferred from the user's 2x macOS capture." },
+    { "path": "native-graph-dark.png", "viewport": [1440, 900], "scenario": "running", "theme": "dark" },
+    { "path": "native-graph-light.png", "viewport": [1440, 900], "scenario": "running with responsibilities inspector", "theme": "light" },
+    { "path": "native-graph-narrow-windows.png", "viewport": [440, 900], "scenario": "running with overlay inspector", "theme": "dark", "note": "Win32 platform emulation; no native Windows window controls are rendered." }
+  ],
+  "checks": {
+    "tests": { "pass": 43, "fail": 0, "files": 7 },
+    "electronTypecheck": "pass",
+    "electronLint": { "errors": 0, "existingWarnings": 87 },
+    "rendererBuild": "pass",
+    "diffCheck": "pass",
+    "layoutDetector": []
+  },
+  "review": { "disposition": "ship", "scope": "Verdict Pass on the two material fixes only; both resolved, with no direct regression reported." },
+  "documentation": "native-graph-documentation.md",
+  "issueEvidence": "https://github.com/0-CHENAI/Selection/issues/480#issuecomment-6097931893",
+  "openSourceAlternatives": { "preferredForEvaluation": "AntV X6", "backup": "Reaflow", "integrated": false, "basis": "Official documentation and source review; no alternative-library visual or performance acceptance yet." },
+  "delivery": "Local uncommitted changes on codex/autonomous-task-graph; issues remain open."
+}

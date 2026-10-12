@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "6862f9afe0ce4deb238d53f86ffed2c06b7f7fa5",
+  "package": "ordinary mac-arm64 directory package; no CRAFT_DEV_RUNTIME or preview flags",
+  "backendRootId": "261010-nimble-rainbow",
+  "actualWorkMode": "PRO",
+  "beforeDisplay": "NORM selected; handover target PRO; no composer PRO badge",
+  "afterDisplay": "PRO selected; handover target NORM; composer PRO badge present",
+  "regression": "event-created placeholder fetched full PRO session but ignored missing execution identity; red before repair, green after",
+  "nativeCoverage": "cold reload of original screenshot session and switching to real NORM root; delayed hydration race covered in Jotai regression",
+  "normRootId": "261010-proud-ripple",
+  "mainSha256": "f42c1328c2abcb2de7609b0b4aae73c398357a076a392d3f068f8001edb3e61b"
+}

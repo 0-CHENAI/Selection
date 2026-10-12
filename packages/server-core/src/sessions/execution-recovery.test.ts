@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { SessionManager, createManagedSession } from './SessionManager'
 import { writeExecutionCheckpoint, readExecutionCheckpoint, sdkStateHash } from '../reliability/execution-checkpoint'
-import { getSessionPath } from '@craft-agent/shared/sessions'
+import { getSessionPath, loadSession } from '@craft-agent/shared/sessions'
 
 test('runtime checkpoints retain coordinator identity, compaction position and the persisted SDK anchor', async () => {
   const root = mkdtempSync(`${tmpdir()}/selection-checkpoint-link-`)
@@ -400,4 +400,20 @@ for (const scenario of ['success', 'checkpoint-crash', 'cancelled', 'file-change
     expect(PiSessions.open(pi.getSessionFile()!).buildSessionContext().messages.filter(message => message.role === 'toolResult')).toHaveLength(1)
     expect(loadSession(root, sessionId)?.messages.filter(message => message.toolUseId === 'write')).toHaveLength(1)
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+for (const isError of [false, true]) test(`A1 native read persists byte proof without treating original error text as an execution error (${isError})`, async () => {
+  const root = mkdtempSync(`${tmpdir()}/selection-read-persist-`)
+  const manager = new SessionManager()
+  try {
+    const managed = createManagedSession({ id: 'read-proof', permissionMode: 'safe' }, { id: 'w', name: 'w', rootPath: root } as never, { messagesLoaded: true })
+    ;(manager as any).sessions.set(managed.id, managed)
+    const sourceRead = { path: '/original.txt', contentHash: 'hash', startLine: 1, endLine: 1, returnedTextHash: 'returned' }
+    await (manager as any).processEvent(managed, { type: 'tool_result', toolName: 'Read', toolUseId: 'read',
+      result: '[ERROR] is a quoted line from an original log file.', isError, sourceRead })
+    ;(manager as any).persistSession(managed); await manager.flushSession(managed.id)
+    const message = loadSession(root, managed.id)!.messages.find(message => message.toolUseId === 'read')!
+    expect(message.isError).toBe(isError)
+    expect(message.sourceRead).toEqual(isError ? undefined : sourceRead)
+  } finally { manager.cleanup(); rmSync(root, { recursive: true, force: true }) }
 })

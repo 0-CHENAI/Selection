@@ -12,6 +12,7 @@ import {
   type ModelsSimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import { createContextBudgetedStream } from './context-budget-stream.ts';
+import { setModelRequestGate } from '../../shared/src/model-request-gate';
 
 const model = {
   id: 'test-model',
@@ -68,6 +69,19 @@ const overflowText =
   'This model maximum context length is 262144 tokens. However, you requested 214575 output tokens and your prompt contains at least 47570 input tokens. (context_length_exceeded)';
 
 describe('createContextBudgetedStream', () => {
+  it('uses the cancellable idle deadline and accounted SSE transport for gated Codex requests', async () => {
+    setModelRequestGate(async () => ({ release() {} }));
+    try {
+      let seen: ModelsSimpleStreamOptions | undefined;
+      await createContextBudgetedStream((_model, _context, options) => {
+        seen = options;
+        return eventsStream([{ type: 'done', reason: 'stop', message: message('stop') }]);
+      }, { ...model, api: 'openai-codex-responses' }, emptyContext, { timeoutMs: 20, transport: 'auto' }).result();
+      expect(seen?.timeoutMs).toBe(2_147_483_647);
+      expect(seen?.transport).toBe('sse');
+      expect(seen?.signal).toBeInstanceOf(AbortSignal);
+    } finally { setModelRequestGate(undefined); }
+  });
   it('never sends an input that cannot fit with reserve and even one output token', async () => {
     let calls = 0;
     const smallModel = { ...model, contextWindow: 4096, maxTokens: 1024 };

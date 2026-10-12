@@ -2,6 +2,7 @@
  * Spec ↔ canvas graph helpers. Pure: no React, no fs.
  * Edges are depends_on (source = dependency, target = dependent).
  */
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import dagre from '@dagrejs/dagre'
 
 export type CanvasKind =
@@ -46,7 +47,9 @@ export type SpecLike = {
     title?: string
     kind?: string
     prompt?: string
+    inputs?: Record<string, string | { from: string }>
     depends_on?: string[]
+    actor?: { id: string; persona?: string }
   }>
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
 }
@@ -70,7 +73,7 @@ export function specTopologyKey(spec: SpecLike): string {
   return `${dir}\x1e${spec.nodes
     .map((n) => {
       const p = layout[n.id]
-      return [n.id, n.kind ?? '', n.title ?? '', p?.x ?? '', p?.y ?? '', ...(n.depends_on ?? [])].join('\x1f')
+      return [n.id, n.kind ?? '', n.title ?? '', p?.x ?? '', p?.y ?? '', ...effectiveNodeDeps(n, spec.nodes)].join('\x1f')
     })
     .join('|')}`
 }
@@ -79,6 +82,7 @@ const OVERLAY_RANK: Record<string, number> = {
   failed: 8,
   invalid: 8,
   'waiting-approval': 7,
+  'waiting-help': 7,
   running: 6,
   'retry-wait': 5,
   interrupted: 4,
@@ -111,7 +115,7 @@ export function specToGraph(spec: SpecLike): CanvasGraph {
   }))
   const edges: CanvasEdge[] = []
   for (const n of spec.nodes) {
-    for (const dep of n.depends_on ?? []) {
+    for (const dep of effectiveNodeDeps(n, spec.nodes)) {
       if (spec.nodes.some((x) => x.id === dep)) edges.push({ source: dep, target: n.id })
     }
   }
@@ -189,17 +193,17 @@ export function deleteImpact(graph: CanvasGraph, nodeId: string): { dependents: 
   return { dependents: graph.edges.filter((e) => e.source === nodeId).map((e) => e.target) }
 }
 
-export function autoLayout(graph: CanvasGraph, direction: 'TB' | 'LR' = 'TB'): CanvasGraph {
+export function autoLayout(graph: CanvasGraph, direction: 'TB' | 'LR' = 'TB', size = { width: 196, height: 72 }): CanvasGraph {
   const g = new dagre.graphlib.Graph()
   g.setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: direction, nodesep: 48, ranksep: 88 })
-  for (const n of graph.nodes) g.setNode(n.id, { width: 196, height: 72 })
+  g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 })
+  for (const n of graph.nodes) g.setNode(n.id, { ...size })
   for (const e of graph.edges) g.setEdge(e.source, e.target)
   dagre.layout(g)
   return {
     nodes: graph.nodes.map((n) => {
       const p = g.node(n.id)
-      return { ...n, x: (p?.x ?? n.x) - 98, y: (p?.y ?? n.y) - 36 }
+      return { ...n, x: (p?.x ?? n.x) - size.width / 2, y: (p?.y ?? n.y) - size.height / 2 }
     }),
     edges: graph.edges,
   }

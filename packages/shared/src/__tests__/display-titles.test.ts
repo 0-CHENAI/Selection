@@ -10,6 +10,7 @@ import {
   matchesTitleSearch,
   normalizeDisplayTitle,
   resolveSkillTitle,
+  resolveSessionName,
   resolveSourceTitle,
 } from '../display-titles.ts'
 import {
@@ -23,6 +24,20 @@ import { deleteSkill, invalidateSkillsCache, loadAllSkills, loadSkillBySlug } fr
 
 let workspaceRoot: string
 const tempDirs: string[] = []
+
+describe('resolveSessionName', () => {
+  it('removes only generated prefixes on handover conversations without changing stored names', () => {
+    const handover = { handoverId: 'old-handover' }
+    const session = { name: 'PRO · NORM · PRO · 成本分析', handover }
+    expect(resolveSessionName(session)).toBe('成本分析')
+    expect(session.name).toBe('PRO · NORM · PRO · 成本分析')
+    expect(resolveSessionName({ name: '成本分析', handover })).toBe('成本分析')
+    expect(resolveSessionName({ name: 'PRO · 产品策略' })).toBe('PRO · 产品策略')
+    expect(resolveSessionName({ name: 'PRO 产品策略', handover })).toBe('PRO 产品策略')
+    expect(resolveSessionName({ name: 'PRO · ', handover })).toBe('PRO · ')
+    expect(resolveSessionName({ handover })).toBeUndefined()
+  })
+})
 
 function createSource(slug: string, name: string): void {
   const sourceDir = join(workspaceRoot, 'sources', slug)

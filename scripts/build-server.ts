@@ -56,6 +56,7 @@ import {
   downloadOfficecli,
   downloadUv,
   buildMcpServers,
+  copyPiAgentServer,
   getPlatformKey,
 } from './build/common';
 
@@ -391,7 +392,7 @@ function copyProductionDeps(config: ServerBuildConfig): void {
   //    imports that happen to work due to hoisting. No more whack-a-mole.
   // -------------------------------------------------------------------------
   // messaging-gateway is included so the Lark SDK lands in node_modules.
-  const SERVER_PACKAGES = ['server', 'server-core', 'shared', 'core', 'session-tools-core', 'session-mcp-server', 'messaging-gateway'];
+  const SERVER_PACKAGES = ['server', 'server-core', 'shared', 'core', 'session-tools-core', 'session-mcp-server', 'messaging-gateway', 'pi-agent-server'];
 
   const allImports = new Set<string>();
   for (const pkg of SERVER_PACKAGES) {
@@ -485,6 +486,8 @@ function copyWorkspacePackages(config: ServerBuildConfig): void {
     'session-tools-core',
     'session-mcp-server',
     'messaging-gateway',
+    // Server-side handover/history readers import the native transcript helpers.
+    'pi-agent-server',
   ];
 
   for (const pkg of packages) {
@@ -886,6 +889,7 @@ async function main(): Promise<void> {
   // Step 5: Assemble resources
   console.log('\n[5/8] Assembling resources...');
   assembleResources(config);
+  copyPiAgentServer({ ...buildConfig, electronDir: outputDir });
 
   // Step 6: Copy production node_modules
   console.log('\n[6/8] Copying production dependencies...');

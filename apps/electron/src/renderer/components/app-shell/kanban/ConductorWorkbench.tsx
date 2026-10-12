@@ -1,32 +1,19 @@
 /**
  * Read-only topology + live-run overlay.
- * Authoring stays on the definition tab and YAML — this surface never writes spec.nodes.
+ * Inspect assignments and outcomes without granting execution or editing authority.
  */
+import { projectTaskView } from '@craft-agent/shared/tasks/explain'
+import { effectiveNodeDeps } from '@craft-agent/shared/tasks/plan'
 import * as React from 'react'
-import {
-  ReactFlow,
-  ReactFlowProvider,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  useReactFlow,
-  type Node,
-  type Edge,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
 import { useTranslation } from 'react-i18next'
-import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { resolveNodeStatePill } from './node-state-pill'
-import { nodeKindLabelKey, runStatusLabelKey, runnerLabelKey } from './task-labels'
+import { TASK_FLOW_NODE_SIZE } from './TaskFlowNode'
+import { TaskGraphCanvas, type TaskGraphNode, type TaskGraphEdge } from './TaskGraphCanvas'
+import { TaskNodeInspector } from './TaskNodeInspector'
 import type { EditorNodeKind } from './task-spec-form'
 import {
   autoLayout,
-  hasCompleteLayout,
   overlayState,
-  specToGraph,
   specTopologyKey,
   type CanvasGraph,
 } from './conductor-graph'
@@ -36,13 +23,15 @@ export type WorkbenchNode = {
   title?: string
   kind?: EditorNodeKind
   prompt?: string
+  inputs?: Record<string, string | { from: string }>
   depends_on?: string[]
   permissionMode?: string
   model?: string
+  actor?: { id: string; persona?: string }
   outputs?: Array<{ name?: string; kind?: string; type?: string }>
   loop?: unknown
   for_each?: string
-  route?: unknown
+  route?: { cases?: Array<{ goto: string; when: unknown }>; default: string }
   when?: unknown
 }
 
@@ -51,16 +40,19 @@ export interface WorkbenchSpec {
   title?: string
   goal?: string
   runner?: 'conduct' | 'orchestrate'
+  defaults?: { permissionMode?: string }
+  research?: unknown
   nodes: WorkbenchNode[]
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
 }
 
-export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; labelKey: string; value: string }> {
+export function nodeDefinitionRows(node: WorkbenchNode, nodes?: WorkbenchNode[]): Array<{ key: string; labelKey: string; value: string }> {
   const rows: Array<{ key: string; labelKey: string; value: string }> = []
   if (node.title && node.title !== node.id) rows.push({ key: 'title', labelKey: 'tasks.title', value: node.title })
-  if (node.depends_on?.length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: node.depends_on.join(', ') })
+  if (effectiveNodeDeps(node, nodes).length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: effectiveNodeDeps(node, nodes).join(', ') })
   if (node.permissionMode) rows.push({ key: 'permission', labelKey: 'tasks.nodePermission', value: node.permissionMode })
   if (node.model) rows.push({ key: 'model', labelKey: 'tasks.nodeModel', value: node.model })
+  if (node.actor) rows.push({ key: 'actor', labelKey: 'tasks.nodeActor', value: `${node.actor.id}${node.actor.persona ? ` · ${node.actor.persona}` : ''}` })
   const outputs = node.outputs?.map((output) => output.name).filter(Boolean)
   if (outputs?.length) rows.push({ key: 'outputs', labelKey: 'tasks.nodeOutputs', value: outputs.join(', ') })
   if (node.for_each) rows.push({ key: 'for_each', labelKey: 'tasks.nodeControlFlow', value: `for_each: ${node.for_each}` })
@@ -71,9 +63,28 @@ export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; la
 }
 
 interface ConductorWorkbenchProps {
+  workspaceId?: string
+  onOpenChildSession?: (sessionId: string) => void
   spec: WorkbenchSpec
   liveRun?: TaskRunSnapshotDto | null
   compact?: boolean
+}
+
+export function ManagedTaskWorkers({ workers, runId, onOpenSession }: { workers?: TaskRunSnapshotDto['workers']; runId: string; onOpenSession?: (id: string) => void }) {
+  const { t } = useTranslation()
+  if (!workers?.length) return null
+  return <details className="min-w-0 text-[12.5px]">
+    <summary className="cursor-pointer rounded-sm text-foreground/80 outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('tasks.managedWorkers')} ({workers.length})</summary>
+    <ul className="mt-2 max-h-40 space-y-2 overflow-auto text-foreground/80">
+      {workers.map(worker => <li key={worker.workerId} className="break-words [overflow-wrap:anywhere]">
+        <p>{worker.nodeId} · r{worker.revision} · {t('tasks.nodeAttempt')} {worker.attempt} · {t(`tasks.workerRole.${worker.role}`)} · {t(`tasks.workerState.${worker.state}`)}</p>
+        <p className="font-mono text-[11px] text-foreground/70">{worker.sessionId ?? worker.workerId} · {runId}</p>
+        {worker.sessionId && onOpenSession ? <button type="button" className="rounded-sm text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onOpenSession(worker.sessionId!)}>{t('tasks.openChildSession')}</button> : null}
+        {worker.output?.text ? <p className="whitespace-pre-wrap">{worker.output.text}</p> : null}
+        {worker.reason ? <p>{worker.reason}</p> : null}
+      </li>)}
+    </ul>
+  </details>
 }
 
 export function runtimeNodesForDefinition(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
@@ -90,74 +101,66 @@ function definitionOverlayState(nodeId: string, live: ConductorWorkbenchProps['l
   })
 }
 
-function nodeLabel(
-  n: { id: string; title?: string; kind?: string },
-  live: ConductorWorkbenchProps['liveRun'],
-  translate: (key: string) => string,
-): string {
-  const state = definitionOverlayState(n.id, live)
-  const pill = state ? resolveNodeStatePill(state) : null
-  const stateText = pill?.labelKey ? translate(pill.labelKey) : state
-  return `${n.title ?? n.id} · ${translate(nodeKindLabelKey(n.kind))}${stateText ? ` · ${stateText}` : ''}`
-}
-
-function toFlow(
+export function toTaskGraph(
   graph: CanvasGraph,
   spec: WorkbenchSpec,
   live: ConductorWorkbenchProps['liveRun'],
-  translate: (key: string) => string,
-): { nodes: Node[]; edges: Edge[] } {
+  direction: 'TB' | 'LR' = spec.ui?.layout?.direction ?? 'TB',
+): { nodes: TaskGraphNode[]; edges: TaskGraphEdge[] } {
   const byId = new Map(spec.nodes.map((n) => [n.id, n]))
   return {
     nodes: graph.nodes.map((n) => ({
       id: n.id,
       position: { x: n.x, y: n.y },
-      data: { label: nodeLabel(byId.get(n.id) ?? n, live, translate) },
+      data: { title: n.title, kind: n.kind, caption: byId.get(n.id)?.prompt ?? n.prompt,
+        state: definitionOverlayState(n.id, live), instanceCount: runtimeNodesForDefinition(live?.nodes ?? [], n.id).length, direction },
     })),
-    edges: graph.edges.map((e, i) => ({ id: `e-${e.source}-${e.target}-${i}`, source: e.source, target: e.target })),
+    edges: graph.edges.map((e, i) => {
+      const state = definitionOverlayState(e.source, live)
+      const active = state === 'done' && definitionOverlayState(e.target, live) === 'running'
+      const color = active ? 'var(--task-graph-accent)' : state === 'done' ? 'var(--task-graph-complete)' : 'var(--task-graph-connector)'
+      return { id: `e-${e.source}-${e.target}-${i}`, source: e.source, target: e.target,
+        color, active,
+        label: 'label' in e ? String(e.label ?? '') : undefined }
+    }),
   }
 }
 
-function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun'], translate: (key: string) => string) {
-  const graph = specToGraph(spec)
-  const laid = hasCompleteLayout(spec) ? graph : autoLayout(graph, spec.ui?.layout?.direction)
-  return toFlow(laid, spec, live, translate)
+function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun'], direction: 'TB' | 'LR') {
+  const projection = projectTaskView(spec, 'task')
+  const graph: CanvasGraph = { nodes: projection.nodes.map(node => ({ ...node, kind: node.kind as CanvasGraph['nodes'][number]['kind'], x: spec.ui?.layout?.nodes?.[node.id]?.x ?? 0, y: spec.ui?.layout?.nodes?.[node.id]?.y ?? 0 })), edges: projection.edges }
+  const laid = autoLayout(graph, direction, TASK_FLOW_NODE_SIZE)
+  return toTaskGraph(laid, spec, live, direction)
 }
 
-function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
-  const { t } = useTranslation()
-  const { fitView } = useReactFlow()
-  const orchestrateOn = isTasksOrchestrateEnabled()
-  const initial = displayFlow(spec, liveRun, t)
-  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
+export function ConductorWorkbench({ spec, liveRun, workspaceId, onOpenChildSession, compact }: ConductorWorkbenchProps) {
+  const [pageHidden, setPageHidden] = React.useState(() => typeof document !== 'undefined' && document.hidden)
+  React.useEffect(() => {
+    const update = () => setPageHidden(document.hidden)
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
+  const workbench = React.useRef<HTMLDivElement>(null)
+  const [wide, setWide] = React.useState(false)
+  const [inspectorOverlays, setInspectorOverlays] = React.useState(false)
+  React.useLayoutEffect(() => {
+    const element = workbench.current
+    if (!element) return
+    const measure = () => {
+      setWide(element.clientWidth >= 960)
+      setInspectorOverlays(element.clientWidth <= 760)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const graphContainer = React.useRef<HTMLDivElement>(null)
+  const restoreNodeFocus = React.useRef<string>()
+  const direction = spec.ui?.layout?.direction ?? (wide ? 'LR' : 'TB')
   const [selected, setSelected] = React.useState<string | null>(null)
-  const topologyKey = specTopologyKey(spec)
-  const liveKey = `${liveRun?.status ?? ''}:${liveRun?.metrics?.elapsedMs ?? ''}:${liveRun?.metrics?.cacheHits ?? ''}:${(liveRun?.nodes ?? []).map((n) => `${n.id}:${n.state}:${n.cacheStatus}:${n.elapsedMs}:${n.verdict?.result}`).join('|')}`
-
-  React.useEffect(() => {
-    const flow = displayFlow(spec, liveRun, t)
-    setNodes(flow.nodes)
-    setEdges(flow.edges)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topologyKey])
-
-  React.useEffect(() => {
-    setNodes((prev) =>
-      prev.map((n) => {
-        const authored = spec.nodes.find((p) => p.id === n.id)
-        if (!authored) return n
-        const label = nodeLabel(authored, liveRun, t)
-        return n.data.label === label ? n : { ...n, data: { ...n.data, label } }
-      }),
-    )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKey])
-
-  React.useEffect(() => {
-    const id = requestAnimationFrame(() => fitView({ padding: 0.2 }))
-    return () => cancelAnimationFrame(id)
-  }, [topologyKey, fitView])
+  const topologyKey = `${direction}:${specTopologyKey(spec)}`
+  const flow = React.useMemo(() => displayFlow(spec, liveRun, direction), [spec, liveRun, direction])
 
   React.useEffect(() => {
     if (selected && !spec.nodes.some((n) => n.id === selected)) setSelected(null)
@@ -165,195 +168,33 @@ function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   }, [topologyKey, selected])
 
   const selectedSpec = spec.nodes.find((n) => n.id === selected)
+  const inspectorOverlayOpen = inspectorOverlays && Boolean(selectedSpec)
+  React.useLayoutEffect(() => {
+    const element = graphContainer.current
+    if (!element) return
+    element.inert = inspectorOverlayOpen
+    if (!inspectorOverlayOpen && restoreNodeFocus.current) {
+      const id = restoreNodeFocus.current
+      restoreNodeFocus.current = undefined
+      Array.from(element.querySelectorAll<HTMLElement>('[data-node-id]'))
+        .find(node => node.dataset.nodeId === id)?.querySelector<HTMLButtonElement>('button')?.focus()
+    }
+  }, [inspectorOverlayOpen, selected])
   const selectedLive = selectedSpec ? definitionOverlayState(selectedSpec.id, liveRun) : undefined
-  const selectedPill = selectedLive ? resolveNodeStatePill(selectedLive) : null
   const selectedInstances = selectedSpec ? runtimeNodesForDefinition(liveRun?.nodes ?? [], selectedSpec.id) : []
-  const dynamicInstances = (liveRun?.nodes ?? []).filter((node) => node.definitionId || node.id.includes('#'))
-  const runStatusKey = runStatusLabelKey(liveRun?.status)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex items-center gap-2 text-[12.5px] text-foreground/55">
-        <span>{t(runnerLabelKey(spec.runner, orchestrateOn))}</span>
-        <span className="text-foreground/40">{t('tasks.canvasReadOnlyHint')}</span>
-        {liveRun && (
-          <span className="ml-auto flex flex-wrap items-center gap-2">
-            <span>{t('tasks.tabLiveRun')}: {runStatusKey ? t(runStatusKey) : liveRun.status}</span>
-            {liveRun.status === 'waiting-coordinator' && (
-              <span>{t('tasks.coordinatorWaiting')}: {liveRun.blockers?.join(', ')}</span>
-            )}
-            {liveRun.blockers?.includes('coordinator-timeout') && <span>{t('tasks.coordinatorTimeout')}</span>}
-            {liveRun.metrics?.verifyBudgetRemaining !== undefined && (
-              <span>{t('tasks.verifyBudget')}: {liveRun.metrics.verifyBudgetRemaining}</span>
-            )}
-            {liveRun.metrics?.criticalPathNodeIds?.length ? (
-              <span>{t('tasks.criticalPath')}: {liveRun.metrics.criticalPathNodeIds.slice(0, 4).join(' → ')}</span>
-            ) : null}
-          </span>
-        )}
-      </div>
-      <div className={`grid flex-1 grid-cols-[minmax(0,1fr)_220px] gap-2 ${compact ? 'min-h-0' : 'min-h-[420px]'}`}>
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable
-            deleteKeyCode={null}
-            onSelectionChange={(sel) => {
-              const id = sel.nodes[0]?.id
-              if (id) setSelected(id)
-            }}
-            onPaneClick={() => setSelected(null)}
-            fitView
-          >
-            <Background />
-            <Controls />
-            <MiniMap />
-          </ReactFlow>
+    <div ref={workbench} className="task-workbench flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-motion-paused={pageHidden}>
+      <div className={`task-workbench-grid grid min-h-0 min-w-0 flex-1 gap-3 ${selectedSpec ? 'has-inspector' : ''}`}>
+        <div ref={graphContainer} className="flex min-h-0 min-w-0" aria-hidden={inspectorOverlayOpen || undefined}>
+          <TaskGraphCanvas {...flow} selected={selected} topologyKey={topologyKey} onSelect={setSelected} compact={compact} />
         </div>
-        <aside className="overflow-auto rounded-lg border border-border bg-card p-2 text-[12.5px]">
-          {selectedSpec ? (
-            <div className="flex flex-col gap-2">
-              <div className="font-semibold">{selectedSpec.id}</div>
-              <div className="text-foreground/55">{t(nodeKindLabelKey(selectedSpec.kind))}</div>
-              {selectedPill && selectedLive && (
-                <div className={`inline-flex w-fit rounded border px-1.5 py-0.5 text-[11px] ${selectedPill.className}`}>
-                  {selectedPill.labelKey ? t(selectedPill.labelKey) : selectedLive}
-                </div>
-              )}
-              {nodeDefinitionRows(selectedSpec).map((row) => (
-                <div key={row.key} className="text-foreground/55">
-                  <span className="font-medium text-foreground/70">{t(row.labelKey)}: </span>
-                  <span className="break-words text-foreground/80">{row.value}</span>
-                </div>
-              ))}
-              {selectedSpec.prompt && <p className="whitespace-pre-wrap text-foreground/80">{selectedSpec.prompt}</p>}
-              {selectedInstances.length > 0 && (
-                <section className="mt-1 border-t border-border/70 pt-2">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground/45">
-                    {t('tasks.runtimeInstances', { count: selectedInstances.length })}
-                  </div>
-                  <div className="space-y-3">
-                    {selectedInstances.map((instance) => {
-                      const pill = resolveNodeStatePill(instance.state)
-                      return (
-                        <div key={instance.id} className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate font-mono text-[11px] font-semibold">{instance.id}</span>
-                            <span className={`ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10.5px] ${pill.className}`}>
-                              {pill.labelKey ? t(pill.labelKey) : instance.state}
-                            </span>
-                          </div>
-                          <dl className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-foreground/55">
-                            <div>
-                              <dt className="inline">{t('tasks.nodeModel')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.model ?? t('tasks.notAvailable')}</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeTokens')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.tokensUsed ?? 0}</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeAttempt')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.attempt}</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeRetries')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.retryCount ?? 0}</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeElapsed')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.elapsedMs ?? 0}ms</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeQueue')}: </dt>
-                              <dd className="inline text-foreground/75">{instance.queueMs ?? 0}ms</dd>
-                            </div>
-                            <div>
-                              <dt className="inline">{t('tasks.nodeCache')}: </dt>
-                              <dd className="inline text-foreground/75">
-                                {instance.cacheStatus === 'hit'
-                                  ? t('tasks.nodeCacheHit')
-                                  : instance.cacheStatus === 'bypass'
-                                    ? t('tasks.nodeCacheBypass')
-                                    : instance.cacheStatus === 'miss'
-                                      ? t('tasks.nodeCacheMiss')
-                                      : instance.cacheStatus ?? t('tasks.notAvailable')}
-                              </dd>
-                            </div>
-                          </dl>
-                          {instance.cacheStatus === 'hit' && (
-                            <div className="mt-1.5 text-[11px] text-foreground/55">
-                              {t('tasks.cacheSource')}: {instance.cacheSourceRunId ?? t('tasks.notAvailable')}
-                              {instance.cacheCreatedAt ? ` · ${t('tasks.cacheCreatedAt')}: ${instance.cacheCreatedAt}` : ''}
-                            </div>
-                          )}
-                          {instance.verdict && (
-                            <div className="mt-1.5 rounded-md bg-foreground/[0.04] px-2 py-1.5 text-[11px]">
-                              <div>{t('tasks.finalVerdict')}: {instance.verdict.result}</div>
-                              {instance.verdict.reason && (
-                                <div className="text-foreground/70">{instance.verdict.reason}</div>
-                              )}
-                              {instance.verdict.evidence && (
-                                <div className="text-foreground/70">{t('tasks.evidenceSummary')}: {instance.verdict.evidence}</div>
-                              )}
-                            </div>
-                          )}
-                          {instance.blocker && (
-                            <div className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
-                              <span className="font-semibold">{t('tasks.nodeBlocker')}: </span>{instance.blocker}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </section>
-              )}
-            </div>
-          ) : (
-            <p className="text-foreground/45">{t('tasks.canvasInspectorEmpty')}</p>
-          )}
-          {dynamicInstances.length > 0 && (
-            <section className="mt-3 border-t border-border/70 pt-2">
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/45">
-                {t('tasks.dynamicInstances', { count: dynamicInstances.length })}
-              </div>
-              <div className="space-y-1">
-                {dynamicInstances.map((instance) => {
-                  const definition = instance.definitionId ?? instance.id.slice(0, instance.id.indexOf('#'))
-                  const pill = resolveNodeStatePill(instance.state)
-                  return (
-                    <button
-                      key={instance.id}
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      onClick={() => setSelected(definition)}
-                    >
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{instance.id}</span>
-                      <span className={`shrink-0 rounded border px-1 py-0.5 text-[10px] ${pill.className}`}>
-                        {pill.labelKey ? t(pill.labelKey) : instance.state}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </section>
-          )}
-        </aside>
+        {selectedSpec && <TaskNodeInspector key={selectedSpec.id} node={selectedSpec} nodes={spec.nodes} instances={selectedInstances} state={selectedLive} run={liveRun} workspaceId={workspaceId} overlay={inspectorOverlayOpen}
+          onSelect={setSelected} onOpenSession={onOpenChildSession} onClose={() => {
+            restoreNodeFocus.current = selectedSpec.id
+            setSelected(null)
+          }} />}
       </div>
     </div>
-  )
-}
-
-export function ConductorWorkbench(props: ConductorWorkbenchProps) {
-  return (
-    <ReactFlowProvider>
-      <WorkbenchInner {...props} />
-    </ReactFlowProvider>
   )
 }

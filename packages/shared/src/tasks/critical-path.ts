@@ -1,4 +1,5 @@
-import { nodeDeps, type TaskNode, type TaskSpec } from './schema.ts';
+import { effectiveNodeDeps } from './plan.ts';
+import type { TaskNode, TaskSpec } from './schema.ts';
 
 const TERMINAL = new Set(['done', 'skipped', 'failed', 'invalid', 'cancelled']);
 
@@ -16,7 +17,7 @@ export function criticalPathRemaining(
   const dependents = new Map<string, string[]>();
   for (const node of spec.nodes) dependents.set(node.id, []);
   for (const node of spec.nodes) {
-    for (const dep of nodeDeps(node)) {
+    for (const dep of effectiveNodeDeps(node, spec.nodes)) {
       dependents.get(dep)?.push(node.id);
     }
   }

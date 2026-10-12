@@ -20,7 +20,7 @@ const body = `已将正文替换为七言绝句，并保留标题居中、字体
 | --- | --- |
 | 文件格式 | 通过 |`
 
-for (const mode of ['stored', 'active', 'missing', 'unrelated', 'edited', 'annotated', 'ordinary'] as const) {
+for (const mode of ['stored', 'active', 'stored-nested', 'active-nested', 'missing', 'unrelated', 'edited', 'annotated', 'ordinary'] as const) {
   test(`recovers only generated Office reply bodies from their own saved revision (${mode})`, async () => {
     const root = mkdtempSync(join(tmpdir(), 'office-reply-recovery-'))
     const workspace = { id: 'workspace', name: 'Workspace', rootPath: root }
@@ -30,17 +30,21 @@ for (const mode of ['stored', 'active', 'missing', 'unrelated', 'edited', 'annot
       const file = join(root, 'hello report.docx'), candidate = join(root, 'candidate.docx')
       writeFileSync(file, 'original'); writeFileSync(candidate, 'changed')
       const child = await createSession(root, { hidden: true, parentSessionId: mode === 'unrelated' ? 'another-chat' : 'parent' })
-      const privateFile = join(getSessionPath(root, child.id), 'candidate', 'hello report.docx')
+      const nested = mode.endsWith('-nested')
+      const activeChild = mode.startsWith('active')
+      const candidateDirectory = join(getSessionPath(root, child.id), 'candidate', ...(nested ? ['feedback-request'] : []))
+      const privateFile = join(candidateDirectory, 'hello report.docx')
       const markdown = `${body}\n\n[成果文件](<${encodeURI(privateFile)}>)`
       const savedChild = loadSession(root, child.id)!
+      if (nested) savedChild.workingDirectory = candidateDirectory
       savedChild.messages = [
-        { id: 'child-final', type: 'assistant', content: mode === 'active' ? '过期磁盘回答' : markdown, phase: 'final' },
+        { id: 'child-final', type: 'assistant', content: activeChild ? '过期磁盘回答' : markdown, phase: 'final' },
         { id: 'late-progress', type: 'assistant', content: '正在结束任务', phase: 'intermediate', isIntermediate: true },
         messageToStored({ id: 'private-draft', role: 'assistant', timestamp: 1, content: '不可显示的草稿', phase: 'final', hidden: true }),
       ]
       await saveSession(savedChild)
-      if (mode === 'active') {
-        const active = createManagedSession({ id: child.id, hidden: true, parentSessionId: 'parent' }, workspace as never, { messagesLoaded: true })
+      if (activeChild) {
+        const active = createManagedSession({ id: child.id, hidden: true, parentSessionId: 'parent', ...(nested ? { workingDirectory: candidateDirectory } : {}) }, workspace as never, { messagesLoaded: true })
         active.messages = [{ id: 'child-final', role: 'assistant', timestamp: 1, content: markdown, phase: 'final' }]
         internal.sessions.set(child.id, active)
       }
@@ -66,7 +70,7 @@ for (const mode of ['stored', 'active', 'missing', 'unrelated', 'edited', 'annot
       internal.persistSession(parent); await manager.flushSession(parent.id)
       if (mode === 'missing') rmSync(getSessionPath(root, child.id), { recursive: true, force: true })
       const session = await manager.getSession(parent.id)
-      const expected = ['stored', 'active'].includes(mode) ? `${body}\n\n[成果文件](<${encodeURI(revised.path)}>)` : original
+      const expected = ['stored', 'active', 'stored-nested', 'active-nested'].includes(mode) ? `${body}\n\n[成果文件](<${encodeURI(revised.path)}>)` : original
       expect(session!.messages.at(-1)!.content).toBe(expected)
       expect(parent.messages.at(-1)!.content).toBe(expected)
       expect(loadSession(root, parent.id)!.messages.at(-1)!.content).toBe(expected)

@@ -1,0 +1,1551 @@
+{
+  "recordedAt": "2026-10-07T11:56:52.902526+00:00",
+  "baseCommit": "38799def49602fb59ab1f44e3b5776d24a89b16c",
+  "issues": [
+    460,
+    464,
+    471,
+    465
+  ],
+  "delivery": "Local implementation and real GPT-6-luna closure passed. Only Issue evidence is published, by explicit user choice; code stays on local version-3.0, with no push or PR. Issues remain open pending remote delivery.",
+  "validation": {
+    "regression": {
+      "passed": 1045,
+      "failed": 0,
+      "files": 130,
+      "assertions": 5171,
+      "durationMs": 44200,
+      "log": "/tmp/selection-batch2-final-complete-regression.log",
+      "commit": "4e2278f89",
+      "note": "Full second-batch source regression including all recovery, history-version and compact-coordinator changes."
+    },
+    "typecheck": "all workspace packages passed",
+    "lint": "passed with existing warnings",
+    "i18nParity": "passed",
+    "rendererBuild": "passed",
+    "standaloneServerBuild": "passed",
+    "packagedHistoryReplayImports": "passed",
+    "officeNativeGuide": {
+      "command": "apps/electron/resources/bin/officecli load_skill excel",
+      "passed": true
+    },
+    "nativeBundleHash": "495a396fde43ca95154e1cb22a3658399d84f19c8c558ab27b5259771f9cab51",
+    "packageLimitations": [
+      "Standalone server and copied desktop resources were verified. Ordinary installer joint acceptance remains #466.",
+      "Current Pi bundle contains no koffi external import; the existing optional-copy warning is retained."
+    ],
+    "nativeBundleCopiesIdentical": true,
+    "snapshotPathFix": {
+      "commit": "dd62d4d54",
+      "testsPassed": 62,
+      "testsFailed": 0,
+      "assertions": 489,
+      "files": 10,
+      "log": "/tmp/selection-batch2-snapshot-fix-tests.log",
+      "actualFailedInputsRefrozen": 5,
+      "originalVersionAndLocationsRetained": true,
+      "changedOriginalAndTamperedSnapshotRejected": true,
+      "typecheck": "passed",
+      "lint": "passed with existing warnings",
+      "desktopMainBuild": "passed",
+      "standaloneServerBuild": "passed"
+    },
+    "coordinatorHelpFix": {
+      "commit": "80e4fd3d3",
+      "passed": 24,
+      "failed": 0,
+      "files": 5,
+      "assertions": 188,
+      "log": "/tmp/selection-batch2-help-fix-tests.log"
+    },
+    "helpToolRecoveryFix": {
+      "commit": "0201ea7e3",
+      "passed": 25,
+      "failed": 0,
+      "files": 3,
+      "assertions": 161,
+      "log": "/tmp/selection-batch2-help-recovery-tests.log",
+      "scope": "Only bound canonical host help is recoverable as read-only; foreign tools and unknown side effects remain blocked."
+    },
+    "helpRestartFix": {
+      "commit": "399ef8d3a",
+      "passed": 200,
+      "failed": 0,
+      "files": 5,
+      "assertions": 1060,
+      "log": "/tmp/selection-batch2-help-restart-tests.log",
+      "scope": "Normal fresh-attempt retry after a lost help waiter; completed siblings retained and late replies fenced."
+    },
+    "finalRecoveryAndHistoryFixes": {
+      "commit": "f7f4539a1",
+      "passed": 56,
+      "failed": 0,
+      "files": 7,
+      "assertions": 296,
+      "log": "/tmp/selection-batch2-final-recovery-tests.log",
+      "scope": "Key-order-independent history version, canonical cancellation retirement, real unresolved failures still block, exact replay and RPC isolation."
+    },
+    "finalChecks": {
+      "typecheck": "/tmp/selection-batch2-context-typecheck.log",
+      "lint": "/tmp/selection-batch2-context-lint.log",
+      "desktopMainBuild": "/tmp/selection-batch2-context-main-build.log",
+      "standaloneServerBuild": "/tmp/selection-batch2-context-server-build.log",
+      "status": "passed; existing lint and bundle warnings retained"
+    },
+    "coordinatorContextFix": {
+      "commit": "4e2278f89",
+      "passed": 174,
+      "failed": 0,
+      "files": 3,
+      "assertions": 986,
+      "log": "/tmp/selection-batch2-coordinator-context-tests.log",
+      "actualCheckpointCharactersBefore": 127676,
+      "actualCheckpointCharactersAfter": 17610,
+      "completeReceiptsRetained": true,
+      "canonicalLookupRequiredForEvidenceJudgment": true
+    },
+    "nativeProductionBuildLog": "/tmp/selection-batch2-final-native-production.log",
+    "nativeProductionCopyLog": "/tmp/selection-batch2-final-native-copy.log"
+  },
+  "nativeFormats": [
+    {
+      "file": "cost.pdf",
+      "unit": "page-17",
+      "sourceVersion": "5d0d6d00bdfa85c72c1599b1fab34220cf971bce78247eba32d4474224fd07e4",
+      "originalHash": "78622a434b6f3bb75eae86f63c26bff8d9897c7aab67130afdb59c31f00fb31a",
+      "totalUnits": 20,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/5d0d6d00bdfa85c72c1599b1fab34220cf971bce78247eba32d4474224fd07e4/snapshot.txt",
+        "contentHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+        "startLine": 17,
+        "endLine": 17,
+        "returnedTextHash": "7c22da3abdac317047ee5c3f4c1153910a6f676fb7a241b7c6fda850dba1ccc1"
+      },
+      "limitations": [
+        "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.xlsx",
+      "unit": "Costs!B2",
+      "sourceVersion": "31f3b4f24252321f9841d5c7135646bed4e51b251991981fcbcbbfd82b716f29",
+      "originalHash": "a55777f7e6438f075c1ec6168b27b2d3ded01e2126efbb0de868da0c8f16a32f",
+      "totalUnits": 5,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/31f3b4f24252321f9841d5c7135646bed4e51b251991981fcbcbbfd82b716f29/snapshot.txt",
+        "contentHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+        "startLine": 3,
+        "endLine": 3,
+        "returnedTextHash": "6cce36d9f8a9e151b100234af75cca89d55bcb94c153f51847debdf1f39cae45"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.docx",
+      "unit": "paragraph-204",
+      "sourceVersion": "5132a19bbbd115ee04b95d3764b16f7a68c3f10a893bb105ceef695cff95cf8e",
+      "originalHash": "ce202bccbe06e250a49025b9119981e0b9f8e97f3d4cebb9043706f2e851a0e4",
+      "totalUnits": 204,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/5132a19bbbd115ee04b95d3764b16f7a68c3f10a893bb105ceef695cff95cf8e/snapshot.txt",
+        "contentHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+        "startLine": 204,
+        "endLine": 204,
+        "returnedTextHash": "e9774f2834714e7db529d7061f04b49d939eee60b2dc5c05780805806fb7c463"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+        "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    },
+    {
+      "file": "cost.pptx",
+      "unit": "slide-2",
+      "sourceVersion": "31c1faa91f1056e32e2ba89a8ca2f95c6a84c175dc3e4d8e8aca01246c67b35a",
+      "originalHash": "36404e86c18059f9dd7ebb33d756021b956dc93693a926308802804a1c6303d7",
+      "totalUnits": 2,
+      "receipt": {
+        "path": "/private/tmp/selection-batch2-format-check/.selection-sources/31c1faa91f1056e32e2ba89a8ca2f95c6a84c175dc3e4d8e8aca01246c67b35a/snapshot.txt",
+        "contentHash": "c9a72214113ea64979302b24726990caf495f9bcb9951f6247f398ac221df57b",
+        "startLine": 3,
+        "endLine": 4,
+        "returnedTextHash": "5f219259b17c1f8f82c8bbf97b924eff840e717a2082e26dfffe4c3fc83b93c9"
+      },
+      "limitations": [
+        "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+      ],
+      "quoteMatched": true,
+      "indexIsEvidence": false,
+      "indexReused": true
+    }
+  ],
+  "realModel": {
+    "model": "gpt-6-luna",
+    "rootId": "261007-broad-ripple",
+    "slug": "pro-b03491ddbd986e644c0b092b",
+    "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+    "permissionMode": "safe",
+    "manualPlanEdits": 0,
+    "continuation": {
+      "afterRuntimeFix": true,
+      "originalRootId": "261007-broad-ripple",
+      "completedNodesPreserved": 6
+    },
+    "acceptance": "passed",
+    "status": "completed",
+    "revision": 5,
+    "events": 194,
+    "finalResumeElapsedMs": 647793,
+    "activeCompletedNodes": [
+      "read-originals",
+      "independent-source-review",
+      "correct-and-errata",
+      "final-chinese-report",
+      "independent-recheck-recovery",
+      "final-independent-verification",
+      "correct-scope-version-report",
+      "verify-corrected-scope-report"
+    ],
+    "retiredNode": "independent-recheck",
+    "retirement": "Canonical coordinator cancellation at revision 3 after standard recovery reset; audit events retained, old completed outputs not overwritten.",
+    "frozenSources": 5,
+    "unavailableSources": 0,
+    "frozenSourcesUnchangedAcrossResume": true,
+    "originalBusinessRecordsPreserved": true,
+    "researchReadReceipts": 71,
+    "currentResearchBlockers": [],
+    "claims": [
+      {
+        "id": "a-cost",
+        "version": 2,
+        "support": "supported",
+        "producer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "correct-and-errata",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "64984ca6f16a91724d20714dcdd6c9507cb569ffe8b7d8051a39d39aad1cd863",
+          "sessionId": "261007-sunny-badger"
+        },
+        "reviewer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "independent-recheck-recovery",
+          "attempt": 1,
+          "revision": 1,
+          "artifactVersion": "dd495b375ba957f54f2bc60cc96b333ce2aba5d6e1c900438e74b206837ac8ab",
+          "sessionId": "261007-warm-peak"
+        }
+      },
+      {
+        "id": "b-basis",
+        "version": 1,
+        "support": "supported",
+        "producer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "read-originals",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "2c5706561a5fe134d814bde7ce478b2b45a501ed8cbe7f6328db4f23a95350d0",
+          "sessionId": "261007-high-ridge"
+        },
+        "reviewer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "independent-recheck-recovery",
+          "attempt": 1,
+          "revision": 1,
+          "artifactVersion": "dd495b375ba957f54f2bc60cc96b333ce2aba5d6e1c900438e74b206837ac8ab",
+          "sessionId": "261007-warm-peak"
+        }
+      },
+      {
+        "id": "risk-gap-limit",
+        "version": 1,
+        "support": "supported",
+        "producer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "read-originals",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "2c5706561a5fe134d814bde7ce478b2b45a501ed8cbe7f6328db4f23a95350d0",
+          "sessionId": "261007-high-ridge"
+        },
+        "reviewer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "independent-recheck-recovery",
+          "attempt": 1,
+          "revision": 1,
+          "artifactVersion": "dd495b375ba957f54f2bc60cc96b333ce2aba5d6e1c900438e74b206837ac8ab",
+          "sessionId": "261007-warm-peak"
+        }
+      },
+      {
+        "id": "web-title-status",
+        "version": 1,
+        "support": "partial",
+        "producer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "read-originals",
+          "attempt": 1,
+          "revision": 0,
+          "artifactVersion": "2c5706561a5fe134d814bde7ce478b2b45a501ed8cbe7f6328db4f23a95350d0",
+          "sessionId": "261007-high-ridge"
+        },
+        "reviewer": {
+          "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+          "nodeId": "independent-recheck-recovery",
+          "attempt": 1,
+          "revision": 1,
+          "artifactVersion": "dd495b375ba957f54f2bc60cc96b333ce2aba5d6e1c900438e74b206837ac8ab",
+          "sessionId": "261007-warm-peak"
+        }
+      }
+    ],
+    "errata": [
+      {
+        "id": "erratum-a-cost-v1-to-v2",
+        "target": {
+          "kind": "claim",
+          "claimRef": {
+            "id": "a-cost",
+            "version": 1
+          }
+        },
+        "state": "resolved",
+        "affectedClaimRefs": [
+          {
+            "id": "a-cost",
+            "version": 1
+          }
+        ]
+      }
+    ],
+    "report": {
+      "claimRefs": [
+        {
+          "id": "a-cost",
+          "version": 2
+        },
+        {
+          "id": "b-basis",
+          "version": 1
+        },
+        {
+          "id": "risk-gap-limit",
+          "version": 1
+        }
+      ],
+      "limitations": [
+        "a-cost@2 仅适用于明确标注 TEST FIXTURE ONLY 的冻结测试资料，不代表现实市场成本。",
+        "PDF核验基于文本层，未核查图像、版面或OCR；DOCX定位为第204段且无物理页码，提取未覆盖页眉、脚注或修订痕迹；XLSX提取不验证渲染布局、图表、公式或格式。",
+        "冻结 web_fetch 提取未核实标题；提取限制不支持断言网页本身无标题，且该网页不是成本证据。网页标题维度独立且仅限快照能支持的表述。"
+      ],
+      "unresolved": [
+        "BATCH2_SCOPE 历史版本元数据冲突：当前 canonical 与 revision 4 最新独立验证支持 a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7；恢复型独立复核记录为 52e855bde0907e01a3bab254b526c430ce7578a5d6e85d68d00974c3d591390e。现有证据未解释冲突来源。展开文本口径相同，项目历史仅作口径依据，不作成本事实证据。",
+        "冻结 example.com web_fetch 提取没有可核实标题；不能据此确定网页本身是否有标题。"
+      ],
+      "changeEvidence": [
+        "erratum-a-cost-v1-to-v2 精确指向 a-cost@1：保留 CNY 100,000 为待核实旧候选，并以经独立原文核验和复审的 a-cost@2（CNY 1,000,000）作为更正版结论。任何仍将 a-cost@1 的 CNY 100,000 当作最终结论的报告均已被该追加勘误取代。",
+        "若冻结 PDF 物理第17页、XLSX Costs!A2:B2 或 DOCX 第204段内容/版本变化，须重审 a-cost@2；若 PDF 的 TEST FIXTURE ONLY 标记变化，须重审适用范围。",
+        "若 project_history 对指定 session/message 的精确版本记录经核实或更正，应修订冲突说明；在此之前保留 canonical/revision 4 与恢复型复核记录之间的冲突。"
+      ],
+      "erratumIds": [
+        "erratum-a-cost-v1-to-v2"
+      ],
+      "lineIds": [
+        "main"
+      ],
+      "producedBy": {
+        "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+        "nodeId": "correct-scope-version-report",
+        "attempt": 1,
+        "revision": 5,
+        "artifactVersion": "a106bbfc43893d429beb4fa85fe0fb33f793c1b12c4cdcbb40121a8d7b0102b5",
+        "sessionId": "261007-refined-halo"
+      }
+    },
+    "projectHistory": [
+      {
+        "sessionId": "261007-broad-ripple",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_2bnG1ojJGw2PmIaSX5vjjqIO",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_tHsbJErK1V5WH1DCGe2NBTBy",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-high-ridge",
+        "nodeId": "read-originals",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_1JtmzmXVtzWf7qHn0yFMg2gY",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_oG7VF1nzjVUSjtWKzbE8Hsmg",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-rapid-elk",
+        "nodeId": "independent-source-review",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_PItRwSob47mHhQZId9yPSaD6",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_9vPxo5LwAy7z2OgxectfbcDj",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-sunny-badger",
+        "nodeId": "correct-and-errata",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_LQid71DewGrjYOiKw89hoMAk",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_xyDeQvHJ9O4XjWc9yjOd9LZz",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-lively-hazel",
+        "nodeId": "independent-recheck",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_Umju6dRD7Efs5R6iYxBQlpwS",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_DYzfYI2J3d9vhcnhjZ85KuOl",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-warm-peak",
+        "nodeId": "independent-recheck-recovery",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_Wm4mfqex5gLqmCtyFGtAhVH7",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_Eh933YojWV7MnZ6wBZlYnGwm",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "52e855bde0907e01a3bab254b526c430ce7578a5d6e85d68d00974c3d591390e"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-new-delta",
+        "nodeId": "final-chinese-report",
+        "searches": 0,
+        "expansions": 0,
+        "calls": []
+      },
+      {
+        "sessionId": "261007-agile-bay",
+        "nodeId": "final-independent-verification",
+        "searches": 1,
+        "expansions": 1,
+        "calls": [
+          {
+            "toolUseId": "call_hbX19qtKilmA7Zxl8dNFfpDq",
+            "input": {
+              "query": "BATCH2_SCOPE"
+            }
+          },
+          {
+            "toolUseId": "call_uIKQ99ktPACByRJ6Dis0lJK6",
+            "input": {
+              "sessionId": "batch2-scope-1791368733551",
+              "messageId": "scope",
+              "expectedVersion": "a5a9efcf7a544a10e092323bada4c4d16f1f26809a4cb82bccc991c559f553b7"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "261007-refined-halo",
+        "nodeId": "correct-scope-version-report",
+        "searches": 0,
+        "expansions": 0,
+        "calls": []
+      },
+      {
+        "sessionId": "261007-steady-halo",
+        "nodeId": "verify-corrected-scope-report",
+        "searches": 0,
+        "expansions": 0,
+        "calls": []
+      }
+    ],
+    "citationReads": [
+      {
+        "sourceId": "cost-pdf",
+        "sourceVersion": "db668496f0532c17879994078f077deda939a7a19fac8c905a16483c0c81b3fd",
+        "reads": [
+          {
+            "id": "8fdf1235d243d0d58d76b82e227a477b9932ea7d40834cd75ae219105f44d7ab",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "50f1a749c19ee5a66f3761b1ba258482fe525714512d575ba47f037b9c9d0a4f",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 1,
+            "endLine": 20
+          },
+          {
+            "id": "057d911eb54f1d8bb492185a168cba01a0c4bc01a416cc65879425ea2c3fcabe",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "eb8477aa3c8f8db7f7c2f41d72236c2613a9d682de254621f963fe460c22adab",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "cfa9bfac629183e11192bb9b0331efdac5930003bba7eeb3eb90e6140768500a",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "2b936b549b888749450866a2fbf6a94f2d05901bc62a6b4a5f02532c9f488a0a",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "f81bc76406030b9e96e296ccaca3a8c1b36d5bb16266351839ce8b9b302e8bd2",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "d13eda366ad0f6b3b010dadca5b5193958bf64d42cbbbd73e513f01eff89a954",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 1,
+            "endLine": 20
+          },
+          {
+            "id": "6e7b9aae5ec8dd6fdceee72c83a0b36442f35a0e0ecb3067d6a33b23fb8d620d",
+            "sessionId": "261007-new-delta",
+            "nodeId": "final-chinese-report",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "7c5258db01162973e252e203fe56126fee03a145e4c4b69a58a095ace0ee17a2",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "2eae3918fdf2341f88f16886c3edc8b8060335a7a4d622cf52c9d44af3fed08b",
+            "sessionId": "261007-refined-halo",
+            "nodeId": "correct-scope-version-report",
+            "startLine": 17,
+            "endLine": 17
+          },
+          {
+            "id": "05564dfc75795f7f45e573ef1188c6b045cae2f0f1bdc366890784fe5438bff0",
+            "sessionId": "261007-steady-halo",
+            "nodeId": "verify-corrected-scope-report",
+            "startLine": 15,
+            "endLine": 17
+          }
+        ]
+      },
+      {
+        "sourceId": "cost-xlsx",
+        "sourceVersion": "fa71530e22b1e1a90fead4a3701b0edef0c9ac2dd4a9cf7b5d8bd1d08591b733",
+        "reads": [
+          {
+            "id": "14ac76f10b73acfa08078299c7f91e56c8b5767a3ef0074fa15a86999dc1d04c",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "20d0661ccea42dcd8beef530b5d5bbdab056071a6bb2ec039365ceb6b9d0fdd3",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "ace0e681ddb3e66771274dafcfbed58b9ca6fdec56e441fe870bd9b2f5da66ce",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 4,
+            "endLine": 4
+          },
+          {
+            "id": "689de7b7b1efd65029f55c6a71a391ee2eaa085e9accfadc9ff3ffa78a3f3264",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 5,
+            "endLine": 5
+          },
+          {
+            "id": "9da5731456a95f8d6d8d499d9bf332ebbc4d16f80ae9ec027039406f55eefcc8",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "f9bbdb8c48901c808773e5ccd9c37e806810750749a993e694a86e18f3f7f567",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "22e877df34dd7500b85135346fa86a44142339c0fa1c83ada5d5b684289e9790",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 4,
+            "endLine": 4
+          },
+          {
+            "id": "4b2d97f28027ca10c5f9824689ab9e28cceb131e6a55d1fb9a14a33732119342",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 5,
+            "endLine": 5
+          },
+          {
+            "id": "f264b75f4f381a1135062b0e4f53b2cc350da1a7c739f73e9f88062e4c75ca7b",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 1,
+            "endLine": 5
+          },
+          {
+            "id": "844e375936ef6946200c01c9018f0896781053c24f07befa690dfc4fd3ad8ac5",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "a774a5f044bbc08e9d526203624d914faa9db3b01c96efad15279cb7d8bdb3a0",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 4,
+            "endLine": 4
+          },
+          {
+            "id": "501a5b474de59d5e401259c3666f05ef19f0f3bbb9ffd5c5859c46803f00c3da",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 5,
+            "endLine": 5
+          },
+          {
+            "id": "b5a3c181e36037c9f618113856427fddb3f1bbd99414486bdfd85e2b927895fb",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "fac9ac6327d7d67944834dae05f2d6f0600e03c382938aeff037aafee19ca404",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "ba8d2fd9b1d52f8d2966b7f5c930ed4b8c82f72c146bf762a597ba234998cd10",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "03d4e641835aa26e80f4829f19b03c7aed7254a26a2a9efb1b113715010aca17",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 4,
+            "endLine": 4
+          },
+          {
+            "id": "f491b1eca03d24a8665988122000fc3b0e62095a2d606ab3f89c9a3a14566ff5",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 5,
+            "endLine": 5
+          },
+          {
+            "id": "63d84b725d55afa2ca9deb285a8fa9961ec9a60a410cb1d380f05acc29097bc1",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "7f6e837323623be45c6a5530cc4c8c0441d07f5e42c2af0d94e497404686163a",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "2a3be6ac00a64e4df7a3ce7218c300fc34cf2e0cd1b923082cd4d79f1c7efd11",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 4,
+            "endLine": 4
+          },
+          {
+            "id": "332b688746c8b9cccb8947e2b782280524b792638ad288df4bdeb5bb4419696e",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 5,
+            "endLine": 5
+          },
+          {
+            "id": "fca9bdbd6f61106e322bbad6a69ecd2d2e12a5cc29058b0df55bf4901bc35ad8",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 1,
+            "endLine": 5
+          },
+          {
+            "id": "a7127e388f87d453ba87dac6b92062f1f26d89f1447abce1901e8ccfefb4fa76",
+            "sessionId": "261007-new-delta",
+            "nodeId": "final-chinese-report",
+            "startLine": 1,
+            "endLine": 5
+          },
+          {
+            "id": "76471c26d22f02bbe7f0c9b05455bef98a1cc4922e005dac4e2cb5a4845fda99",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 1,
+            "endLine": 2
+          },
+          {
+            "id": "f9c5b13a8b1cf1ab30177b73d72f6d36da00fbb0cb630ed0965b48395532ed37",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "fbca4d44f05f568c07e799aa1820345ab5029e5eb67e0448f305f4bce3ca27b4",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 3,
+            "endLine": 3
+          },
+          {
+            "id": "a80300c8bf2d463d91ad881556656fbe072b185f7e63e6fbc39fcc4a8882bbff",
+            "sessionId": "261007-refined-halo",
+            "nodeId": "correct-scope-version-report",
+            "startLine": 1,
+            "endLine": 5
+          }
+        ]
+      },
+      {
+        "sourceId": "cost-docx",
+        "sourceVersion": "bad1a1a18d08693ef20ede374edf5428c77add944836923ca468e9df95d6b1d9",
+        "reads": [
+          {
+            "id": "b197de7aa041677542fbd4c0f54dd394f5ceed06f23548fca9e9356a4010be93",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "c639526a13f5610ae116bb26f67dac354f0448f252083b4ef7ceba9772767eca",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "e0ebadcfe933732dcb8d20caabe14a8f780b31eb5410ea8106fb0a39df011bb4",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 203,
+            "endLine": 204
+          },
+          {
+            "id": "418bb0690b007937c4a9a389dccb186a0adbf6ea2cd62c5c2e5f252e5882b4bf",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "5f394d9e649d8a09e19e472774343f620438683c1e676f3d81a77f268f571dfd",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 203,
+            "endLine": 204
+          },
+          {
+            "id": "692d8863397f1d4d4cdf9741579c61aae7679663eedd26f0a9a32f6c46dcbd9c",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "c9b7c409cfc4f9691b64953fd89d00dce7476604b41bdf566e69956a902da191",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 202,
+            "endLine": 204
+          },
+          {
+            "id": "dc69b5bbecd48578fac9f02fdb39504d8db6f70311b1897b672e2385b01d93fa",
+            "sessionId": "261007-new-delta",
+            "nodeId": "final-chinese-report",
+            "startLine": 202,
+            "endLine": 204
+          },
+          {
+            "id": "90dea31fb6a4a3eb3ba3a609932caa0db4b8ad054fbc73254959c9dcea2d0c98",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "2ae5a0e5588c4ff9dc1d4a93f5e9f7310861511053d699710d20d12e9c8fff6f",
+            "sessionId": "261007-refined-halo",
+            "nodeId": "correct-scope-version-report",
+            "startLine": 204,
+            "endLine": 204
+          },
+          {
+            "id": "e0ac11f6217346f098222d5764dd4fe525379d5462cc080231e3cc752218442e",
+            "sessionId": "261007-steady-halo",
+            "nodeId": "verify-corrected-scope-report",
+            "startLine": 202,
+            "endLine": 204
+          }
+        ]
+      },
+      {
+        "sourceId": "prior-draft",
+        "sourceVersion": "29136b34d1c4d0ef616bdb575b73ec8b39e3e4a93db2222b9d6cad90cc38ffad",
+        "reads": [
+          {
+            "id": "003d7e1a35411c98d0878c8eefd22bd1285074b42c3ad04268baa96fdf10cc56",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 1,
+            "endLine": 4
+          },
+          {
+            "id": "01889dafa32e21bcd6915f2af376aecad635ad747d71bea8d224f1ff3317cda4",
+            "sessionId": "261007-rapid-elk",
+            "nodeId": "independent-source-review",
+            "startLine": 1,
+            "endLine": 4
+          },
+          {
+            "id": "40883084b3f7303247c422de2bd3ef3e1a85029949520d8d68a94231f8da9caf",
+            "sessionId": "261007-sunny-badger",
+            "nodeId": "correct-and-errata",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "c7be008f2953f812c0e8b33cc1fa962d5d4e4babbad2908f4bb5ef7ddf9c5984",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 1,
+            "endLine": 4
+          },
+          {
+            "id": "a046d295f318cd90235fb27a964ee86172bd815c74db858e59ba031d6d852a47",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 1,
+            "endLine": 4
+          },
+          {
+            "id": "e1e4d722922b4338dc0116d7f4ce76f833eb52f1a7bb6f2f4ac883d6014aec6b",
+            "sessionId": "261007-agile-bay",
+            "nodeId": "final-independent-verification",
+            "startLine": 2,
+            "endLine": 2
+          },
+          {
+            "id": "ed7fc8405a20aa3b96b2cb60c62aff6c5cc48b471313b4968baa3b77b03cce70",
+            "sessionId": "261007-refined-halo",
+            "nodeId": "correct-scope-version-report",
+            "startLine": 1,
+            "endLine": 4
+          }
+        ]
+      },
+      {
+        "sourceId": "example-web-fetch",
+        "sourceVersion": "c5426d6e4608fb5dba78cd1256c6670c7a6fe8bfb2b87705fc4ae7a46e009e97",
+        "reads": [
+          {
+            "id": "8b3493c261f87d8c49ab8384e291edc81805f4193e6d96755b7e98b0e5f6280f",
+            "sessionId": "261007-high-ridge",
+            "nodeId": "read-originals",
+            "startLine": 1,
+            "endLine": 1
+          },
+          {
+            "id": "6233c0f230a70f0c15d010f327b6b3bb76d563434d825a27f6e0b441bd5fc225",
+            "sessionId": "261007-lively-hazel",
+            "nodeId": "independent-recheck",
+            "startLine": 1,
+            "endLine": 1
+          },
+          {
+            "id": "fd9758b341c10944e3fbcf34173479df067ee238ad085fa5916427618a530487",
+            "sessionId": "261007-warm-peak",
+            "nodeId": "independent-recheck-recovery",
+            "startLine": 1,
+            "endLine": 1
+          },
+          {
+            "id": "cd2d37aee1c7ab3c1133fb2a73300c9f8bb06761ac11a2d01f6a2fc935ca4181",
+            "sessionId": "261007-refined-halo",
+            "nodeId": "correct-scope-version-report",
+            "startLine": 1,
+            "endLine": 1
+          }
+        ]
+      }
+    ],
+    "frozenWeb": {
+      "sourceId": "example-web-fetch",
+      "version": "c5426d6e4608fb5dba78cd1256c6670c7a6fe8bfb2b87705fc4ae7a46e009e97",
+      "acquisition": {
+        "toolCallId": "call_iCYKSTkghkJiGad2FBdzyVqm",
+        "sessionId": "261007-ready-opal",
+        "requestedUrl": "https://example.com",
+        "finalUrl": "https://example.com/",
+        "contentType": "text/html"
+      },
+      "readCount": 4,
+      "workerSessions": [
+        "261007-high-ridge",
+        "261007-lively-hazel",
+        "261007-refined-halo",
+        "261007-warm-peak"
+      ],
+      "snapshotTitleVerified": false,
+      "limitations": [
+        "HTML text extraction excludes navigation, scripts and embedded media; layout and JavaScript content are not verified."
+      ]
+    },
+    "sourceLocations": [
+      {
+        "id": "cost-pdf",
+        "version": "db668496f0532c17879994078f077deda939a7a19fac8c905a16483c0c81b3fd",
+        "hash": "6c0b4ea739a20d75e9b1231715d7cc2cd14758860095bc40b115d98f3c9c400d",
+        "textHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+        "units": 20,
+        "locationKinds": [
+          "page"
+        ],
+        "limitations": [
+          "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+        ]
+      },
+      {
+        "id": "cost-xlsx",
+        "version": "fa71530e22b1e1a90fead4a3701b0edef0c9ac2dd4a9cf7b5d8bd1d08591b733",
+        "hash": "c63839c7dd7ef8e7dec0a10cd7c200e703888393085afd1da1742e7c8713a82c",
+        "textHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+        "units": 5,
+        "locationKinds": [
+          "cell"
+        ],
+        "limitations": [
+          "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+        ]
+      },
+      {
+        "id": "cost-docx",
+        "version": "bad1a1a18d08693ef20ede374edf5428c77add944836923ca468e9df95d6b1d9",
+        "hash": "d6fa9e7050bb4ae8e9c846dfadaa250fd717994277de71bbf5ae985dd1ed43c4",
+        "textHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+        "units": 204,
+        "locationKinds": [
+          "paragraph"
+        ],
+        "limitations": [
+          "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+          "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+        ]
+      },
+      {
+        "id": "prior-draft",
+        "version": "29136b34d1c4d0ef616bdb575b73ec8b39e3e4a93db2222b9d6cad90cc38ffad",
+        "hash": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+        "textHash": "426c5ba88c88c86c7dcf84d7b3c2c29cd9a9e662723434b4dc3de36a0a212e81",
+        "units": 1,
+        "locationKinds": [
+          "section"
+        ],
+        "limitations": [
+          "Text sections use literal Markdown headings and line ranges, not physical pages."
+        ]
+      },
+      {
+        "id": "example-web-fetch",
+        "version": "c5426d6e4608fb5dba78cd1256c6670c7a6fe8bfb2b87705fc4ae7a46e009e97",
+        "hash": "25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484",
+        "textHash": "0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f",
+        "units": 1,
+        "locationKinds": [
+          "section"
+        ],
+        "limitations": [
+          "HTML text extraction excludes navigation, scripts and embedded media; layout and JavaScript content are not verified."
+        ]
+      }
+    ],
+    "acceptanceNativeBundleHash": "495a396fde43ca95154e1cb22a3658399d84f19c8c558ab27b5259771f9cab51",
+    "hostCommit": "4e2278f89",
+    "log": "/tmp/selection-batch2-compact-resumed-live.log",
+    "fullSnapshot": "/tmp/selection-pro-chat-batch2-acceptance.json",
+    "verificationLog": "/tmp/selection-batch2-retry-verification.log",
+    "limitations": [
+      "TEST FIXTURE ONLY; model correctness does not establish real market costs.",
+      "The frozen web text does not establish the original page title; title claim remains partial.",
+      "Historical scope versions from before and after the stable-message hash fix differ; immutable audit records and identical scope text are preserved and the model report explicitly discloses this difference.",
+      "This is a resumed run after recorded blocking defects, not a claim of an uninterrupted first-attempt success."
+    ]
+  },
+  "actualRunReplay": {
+    "passed": true,
+    "readOnly": true,
+    "cursor": 38,
+    "total": 38,
+    "revision": 1,
+    "status": "paused",
+    "views": [
+      "task",
+      "data",
+      "control",
+      "actor",
+      "research"
+    ],
+    "nodeIds": [
+      "research-seed",
+      "review-seed",
+      "correct-cost",
+      "review-correction",
+      "final-report",
+      "research-seed-retry"
+    ],
+    "initialCursor": 1,
+    "initialRevision": 0,
+    "revisionCursor": 21,
+    "changes": [
+      {
+        "revision": 1,
+        "reason": "初始研究节点三次尝试均以基础设施 network_error 失败，所有研究维度仍未覆盖且没有任何研究证据。为避免把失败当作完成，在原授权和范围内新增同职责只读重试节点，并将尚未执行的独立 seed 审查切换到重试节点输出；其后顺序保持不变。",
+        "impact": {
+          "added": [
+            "research-seed-retry"
+          ],
+          "changed": [
+            "review-seed"
+          ],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "research-seed-retry",
+            "review-seed",
+            "correct-cost",
+            "review-correction",
+            "final-report"
+          ],
+          "unaffected": [
+            "research-seed"
+          ]
+        }
+      }
+    ],
+    "modelToolCallsBefore": 61,
+    "modelToolCallsAfter": 61,
+    "fileCount": 400,
+    "workspaceHashBefore": "633ca7728a0094bb4a0b1cc003682869ed4eef6e20739716f70dd68654298555",
+    "workspaceHashAfter": "633ca7728a0094bb4a0b1cc003682869ed4eef6e20739716f70dd68654298555",
+    "repeatReadIdentical": true,
+    "limitations": [],
+    "freshProcessReadIdentical": true,
+    "rootId": "261007-ready-opal",
+    "slug": "pro-846bea2fcd4490f4bab1f0a0",
+    "runId": "chat-c1d450c44949b7aa3d1e8df07bb01625cc5b36a03c29fdb51e05c81c87f44e4a",
+    "note": "Historical paused-run replay evidence; completed-run closure is recorded separately."
+  },
+  "ui": {
+    "transport": "display-only playground fixture, not a real model/backend acceptance",
+    "light": "backend-batch2-light.png",
+    "dark": "backend-batch2-dark.png",
+    "checks": [
+      "five views and actor/research labels",
+      "historical cursor changes runtime overlay without changing task definition",
+      "return to live view",
+      "no Create/Save/Run calls"
+    ]
+  },
+  "pending": [
+    "Ordinary installer joint acceptance and controlled Misaka/ZCode comparison remain #466.",
+    "Remote code delivery is intentionally not performed, per the user choice; Issue comments are evidence only."
+  ],
+  "previousModelAttempts": [
+    {
+      "model": "gpt-6-luna",
+      "rootId": "261007-ready-opal",
+      "slug": "pro-846bea2fcd4490f4bab1f0a0",
+      "runId": "chat-c1d450c44949b7aa3d1e8df07bb01625cc5b36a03c29fdb51e05c81c87f44e4a",
+      "statusBeforeCleanup": "paused",
+      "elapsedMs": 718903,
+      "manualPlanEdits": 0,
+      "acceptance": "failed",
+      "cause": "Research workers received network_error / Connection error; independent errata review and final report did not complete.",
+      "successCounts": {
+        "read": 8,
+        "mcp__session__project_history": 2,
+        "document_index": 6,
+        "bash": 1,
+        "document_read": 27,
+        "web_fetch": 1,
+        "mcp__session__create_task": 1,
+        "mcp__session__run_task": 1,
+        "mcp__session__submit_answer": 1,
+        "mcp__session__submit_orchestration_decision": 3
+      },
+      "rootSourceReadCount": 36,
+      "workerResearchReadCount": 0,
+      "sources": [
+        {
+          "id": "cost-pdf",
+          "version": "db668496f0532c17879994078f077deda939a7a19fac8c905a16483c0c81b3fd",
+          "hash": "6c0b4ea739a20d75e9b1231715d7cc2cd14758860095bc40b115d98f3c9c400d",
+          "textHash": "eedd061c152d297c949884220e1f00932d3866d5eee840efdc4b2f093c90fa9b",
+          "unitCount": 20,
+          "locationKinds": [
+            "page"
+          ],
+          "limitations": [
+            "PDF text layer only; reading order, figures and visual layout require separate visual review. OCR is not implied."
+          ]
+        },
+        {
+          "id": "cost-xlsx",
+          "version": "fa71530e22b1e1a90fead4a3701b0edef0c9ac2dd4a9cf7b5d8bd1d08591b733",
+          "hash": "c63839c7dd7ef8e7dec0a10cd7c200e703888393085afd1da1742e7c8713a82c",
+          "textHash": "729ec4ebe960f94b7537b8600c38be9d70ff5f604c23622e4f8c204fc793db3e",
+          "unitCount": 5,
+          "locationKinds": [
+            "cell"
+          ],
+          "limitations": [
+            "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill."
+          ]
+        },
+        {
+          "id": "cost-docx",
+          "version": "bad1a1a18d08693ef20ede374edf5428c77add944836923ca468e9df95d6b1d9",
+          "hash": "d6fa9e7050bb4ae8e9c846dfadaa250fd717994277de71bbf5ae985dd1ed43c4",
+          "textHash": "a272d9fd0e1174514cbb09d9e683b3f987cb54b71b4a8d592df695d94c0d2354",
+          "unitCount": 204,
+          "locationKinds": [
+            "paragraph"
+          ],
+          "limitations": [
+            "Office structure/text extraction only; rendered layout, charts, formulas and formatting require the native Office Skill.",
+            "DOCX paragraphs/heading styles are stable locations; physical page numbers are unavailable until rendered. Headers, footnotes and tracked changes are not covered."
+          ]
+        },
+        {
+          "id": "example-page-snapshot",
+          "version": "c5426d6e4608fb5dba78cd1256c6670c7a6fe8bfb2b87705fc4ae7a46e009e97",
+          "hash": "25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484",
+          "textHash": "0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f",
+          "unitCount": 1,
+          "locationKinds": [
+            "section"
+          ],
+          "acquisition": {
+            "toolCallId": "call_iCYKSTkghkJiGad2FBdzyVqm",
+            "sessionId": "261007-ready-opal",
+            "requestedUrl": "https://example.com",
+            "finalUrl": "https://example.com/",
+            "contentType": "text/html"
+          },
+          "limitations": [
+            "HTML text extraction excludes navigation, scripts and embedded media; layout and JavaScript content are not verified."
+          ]
+        }
+      ],
+      "fullFailureSnapshot": "/tmp/selection-batch2-network-failure.json",
+      "log": "/tmp/selection-batch2-network-failure.log",
+      "nextAttempt": {
+        "rootId": "261007-still-lagoon",
+        "elapsedMs": 5738,
+        "error": "The agent did not bind a canonical plan from the chat goal",
+        "networkLog": "/tmp/selection-batch2-network-root-failure.log"
+      },
+      "limitations": [
+        "Root tool receipts are not researcher/reviewer receipts and are not counted as independent evidence.",
+        "An earlier attempt used stale compiled native tools and is excluded from acceptance.",
+        "Native-format fixture draft path was corrected before the second attempt."
+      ]
+    },
+    {
+      "rootId": "261007-deep-nebula",
+      "model": "gpt-6-luna",
+      "acceptance": "failed",
+      "cause": "Non-web indexed snapshot paths were rejected by the frozen research source loader. Pre-stop evidence was preserved; this attempt was terminated rather than accepted.",
+      "manualPlanEdits": 0,
+      "workerHistory": {
+        "rootId": "261007-deep-nebula",
+        "workerId": "261007-new-gold",
+        "rootSuccessfulQueries": 1,
+        "rootSuccessfulExactExpansions": 1,
+        "workerSuccessfulQueries": 1,
+        "workerSuccessfulExactExpansions": 1,
+        "missingSessionIdRejected": true
+      },
+      "unavailableDocumentSources": 4,
+      "snapshot": "/tmp/selection-batch2-snapshot-path-failure.json",
+      "fixCommit": "dd62d4d54"
+    }
+  ],
+  "githubEvidence": {
+    "460": "https://github.com/0-CHENAI/Selection/issues/460#issuecomment-6035759255",
+    "464": "https://github.com/0-CHENAI/Selection/issues/464#issuecomment-6035759585",
+    "471": "https://github.com/0-CHENAI/Selection/issues/471#issuecomment-6035759927",
+    "465": "https://github.com/0-CHENAI/Selection/issues/465#issuecomment-6035760163"
+  },
+  "runtimeRecoveryFailures": [
+    {
+      "snapshot": "/tmp/selection-batch2-help-entry-failure.json",
+      "state": "waiting-help",
+      "completedNodes": 3,
+      "cause": "Worker exact-premise typo repeated; PRO root help tool unavailable.",
+      "fixCommits": [
+        "80e4fd3d3",
+        "0201ea7e3",
+        "399ef8d3a"
+      ],
+      "isPassingEvidence": false
+    },
+    {
+      "snapshot": "/tmp/selection-batch2-recovered-replacement-failure.json",
+      "state": "failed",
+      "revision": 2,
+      "cause": "Replacement review and report were valid, but original failed node remained canonical and blocking.",
+      "isPassingEvidence": false
+    },
+    {
+      "snapshot": "/tmp/selection-batch2-cancelled-state-failure.json",
+      "state": "failed",
+      "revision": 3,
+      "cause": "After an authorized coordinator cancellation, orphan in-memory node state prevented final verification.",
+      "fixCommit": "f7f4539a1",
+      "isPassingEvidence": false
+    },
+    {
+      "snapshot": "/tmp/selection-batch2-checkpoint-compaction-timeout.json",
+      "state": "paused",
+      "revision": 4,
+      "cause": "Repeated canonical research records inflated the coordinator checkpoint to 127676 characters, triggering compaction and coordinator timeout.",
+      "fixCommit": "4e2278f89",
+      "isPassingEvidence": false
+    }
+  ],
+  "implementationCommits": [
+    "78bc041b4a2843637dabd3aa1e09f3b643219f15",
+    "dd62d4d54",
+    "80e4fd3d3",
+    "0201ea7e3",
+    "399ef8d3a",
+    "f7f4539a1",
+    "4e2278f89"
+  ],
+  "completedRunReplay": {
+    "rootId": "261007-broad-ripple",
+    "slug": "pro-b03491ddbd986e644c0b092b",
+    "runId": "chat-b75554ebc6f96833b53cbce332ed6e25aea6718a1ad31ceb3e9fd987675f33d3",
+    "passed": true,
+    "cursor": 194,
+    "revision": 5,
+    "status": "completed",
+    "views": [
+      "task",
+      "data",
+      "control",
+      "actor",
+      "research"
+    ],
+    "fileCount": 562,
+    "workspaceHashBefore": "3e7cc0109e8ef7bd2d4c13336f7c885adeab09b2361b6493c7bf8e358fd96c67",
+    "workspaceHashAfter": "3e7cc0109e8ef7bd2d4c13336f7c885adeab09b2361b6493c7bf8e358fd96c67",
+    "toolCallsBefore": 305,
+    "toolCallsAfter": 305,
+    "repeatedReadIdentical": true,
+    "readOnly": true,
+    "changes": [
+      {
+        "revision": 1,
+        "reason": "原 independent-recheck 已失败，要求修订版 a-cost@2 有新鲜独立复核的锁定标准仍未满足。保留已失败节点供审计，增加一次恢复型独立复核，并使仍待执行的最终报告只依赖该新复核成功。",
+        "impact": {
+          "added": [
+            "independent-recheck-recovery"
+          ],
+          "changed": [
+            "final-chinese-report"
+          ],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "independent-recheck-recovery",
+            "final-chinese-report"
+          ],
+          "unaffected": [
+            "read-originals",
+            "independent-source-review",
+            "correct-and-errata",
+            "independent-recheck"
+          ]
+        }
+      },
+      {
+        "revision": 2,
+        "reason": "恢复型复核已独立支持 a-cost@2 及 B、风险边界，但发现冻结规范中所列的 project_history 版本标识与本轮实际检索展开的版本标识不同，且已将该项限缩处置。为确保报告不掩盖这一可追溯性限制，只更新尚未执行的最终报告提示，要求如实列示两种版本标识并说明这不构成成本证据，也不推翻独立成本原文。",
+        "impact": {
+          "added": [],
+          "changed": [
+            "final-chinese-report"
+          ],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "final-chinese-report"
+          ],
+          "unaffected": [
+            "read-originals",
+            "independent-source-review",
+            "correct-and-errata",
+            "independent-recheck",
+            "independent-recheck-recovery"
+          ]
+        }
+      },
+      {
+        "revision": 3,
+        "reason": "恢复型独立复核节点 independent-recheck-recovery 已完成，并对 a-cost@2、B/风险边界及网页快照限制提交了独立审查；最终中文报告也已完成并引用修订主张。重复节点 independent-recheck 由于调度错误无法派发，保留其失败记录但取消此尚未执行节点，避免重做已完成的独立复核；按现有图进入独立最终验证，不改变冻结研究范围或权限。",
+        "impact": {
+          "added": [],
+          "changed": [],
+          "removed": [
+            "independent-recheck"
+          ],
+          "cancelled": [
+            "independent-recheck"
+          ],
+          "affected": [
+            "independent-recheck"
+          ],
+          "unaffected": [
+            "read-originals",
+            "independent-source-review",
+            "correct-and-errata",
+            "final-chinese-report",
+            "independent-recheck-recovery"
+          ]
+        }
+      },
+      {
+        "revision": 4,
+        "reason": "现存恢复型独立复核与最终报告节点已完成，但当前调度状态仍有 node-failed blocker，且尚无独立最终验证节点结果。新增一个全新上下文的 verify 节点，核对报告所引当前主张、原始来源读取凭据、勘误与范围限制，并独立读取关键冻结来源位置；保留既有失败记录和完成节点，不重复派发原失败复核，不改动锁定内容、权限或研究范围。",
+        "impact": {
+          "added": [
+            "final-independent-verification"
+          ],
+          "changed": [],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "final-independent-verification"
+          ],
+          "unaffected": [
+            "read-originals",
+            "independent-source-review",
+            "correct-and-errata",
+            "final-chinese-report",
+            "independent-recheck-recovery"
+          ]
+        }
+      },
+      {
+        "revision": 5,
+        "reason": "最终验证显示报告对 BATCH2_SCOPE 历史版本的披露需修正。保留全部审计记录，准确区分当前 canonical/最新验证所见版本与恢复型复核的历史记录，并新增独立复核；金额事实与历史元数据无关。",
+        "impact": {
+          "added": [
+            "correct-scope-version-report",
+            "verify-corrected-scope-report"
+          ],
+          "changed": [],
+          "removed": [],
+          "cancelled": [],
+          "affected": [
+            "correct-scope-version-report",
+            "verify-corrected-scope-report"
+          ],
+          "unaffected": [
+            "read-originals",
+            "independent-source-review",
+            "correct-and-errata",
+            "final-chinese-report",
+            "independent-recheck-recovery",
+            "final-independent-verification"
+          ]
+        }
+      }
+    ],
+    "freshProcessJsonRpcReadIdentical": true,
+    "freshProcessLog": "/tmp/selection-batch2-fresh-process-replay.log",
+    "verificationLog": "/tmp/selection-batch2-retry-verification.log"
+  },
+  "githubReadBackVerification": {
+    "at": "2026-10-07T12:00:09.711452+00:00",
+    "transport": "gh CLI",
+    "comments": [
+      {
+        "issue": 460,
+        "commentId": 6035759255,
+        "url": "https://github.com/0-CHENAI/Selection/issues/460#issuecomment-6035759255",
+        "updatedAt": "2026-10-07T11:59:37Z",
+        "bodyReadBackIdentical": true,
+        "state": "OPEN"
+      },
+      {
+        "issue": 464,
+        "commentId": 6035759585,
+        "url": "https://github.com/0-CHENAI/Selection/issues/464#issuecomment-6035759585",
+        "updatedAt": "2026-10-07T11:59:38Z",
+        "bodyReadBackIdentical": true,
+        "state": "OPEN"
+      },
+      {
+        "issue": 471,
+        "commentId": 6035759927,
+        "url": "https://github.com/0-CHENAI/Selection/issues/471#issuecomment-6035759927",
+        "updatedAt": "2026-10-07T11:59:40Z",
+        "bodyReadBackIdentical": true,
+        "state": "OPEN"
+      },
+      {
+        "issue": 465,
+        "commentId": 6035760163,
+        "url": "https://github.com/0-CHENAI/Selection/issues/465#issuecomment-6035760163",
+        "updatedAt": "2026-10-07T11:59:42Z",
+        "bodyReadBackIdentical": true,
+        "state": "OPEN"
+      }
+    ],
+    "codePushed": false,
+    "pullRequestCreated": false
+  }
+}

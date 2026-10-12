@@ -287,8 +287,10 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.tasks.DELETE_TEMPLATE,
   RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE,
   RPC_CHANNELS.tasks.LIST_RUNS,
+  RPC_CHANNELS.tasks.PATCH_RUN,
   RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
+  RPC_CHANNELS.tasks.INSPECT_RUN,
   RPC_CHANNELS.tasks.RUN_CHANGED,
 
   // file — workspace files (not openDialog which is native)

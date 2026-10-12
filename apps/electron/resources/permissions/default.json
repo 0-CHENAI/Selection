@@ -98,6 +98,10 @@
       "comment": "OfficeCLI read-only get/query without output-producing options"
     },
     {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+load_skill[ \\t]+[a-z][a-z0-9-]*[ \\t]*$",
+      "comment": "OfficeCLI official guide inspection; no output or mutation options"
+    },
+    {
       "pattern": "^officecli(?:\\.cmd|\\.exe)?\\s+--(help|version)\\b",
       "comment": "OfficeCLI help and version inspection"
     },

@@ -189,10 +189,13 @@ describe('pi-agent-server bundle', () => {
 });
 
 
-it.each(['permission', 'proxy'])('abort releases a pending %s bridge before waiting on the SDK', async stage => {
+it.each([
+  ['permission', 'test_wait', 'unknown'], ['proxy', 'test_wait', 'unknown'],
+  ['proxy', 'mcp__session__task_help', 'read-only'], ['proxy', 'mcp__external__task_help', 'unknown'],
+])('abort releases a pending %s bridge for %s with recovery %s', async (stage, toolName, recovery) => {
   const server = Bun.serve({ port: 0, fetch() {
     const chunks = [
-      { choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_wait', type: 'function', function: { name: 'test_wait', arguments: '{}' } }] }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_wait', type: 'function', function: { name: toolName, arguments: '{}' } }] }, finish_reason: null }] },
       { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
     ];
     return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
@@ -206,8 +209,8 @@ it.each(['permission', 'proxy'])('abort releases a pending %s bridge before wait
         workingDirectory: scratchDir, plansFolderPath: join(scratchDir, 'plans'),
         providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
         customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'local-model', contextWindow: 8192, maxTokens: 128 }] },
-      { type: 'register_tools', tools: [{ name: 'test_wait', description: 'Test pending bridge.', inputSchema: { type: 'object', properties: {} } }] },
-      { type: 'prompt', id: `abort-${stage}`, message: 'Run test_wait.', systemPrompt: 'Local protocol test.' },
+      { type: 'register_tools', tools: [{ name: toolName, description: 'Test pending bridge.', inputSchema: { type: 'object', properties: {} } }] },
+      { type: 'prompt', id: `abort-${stage}`, message: `Run ${toolName}.`, systemPrompt: 'Local protocol test.' },
     ], (output, send) => {
       const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
       const permission = events.find(event => event.type === 'pre_tool_use_request');
@@ -221,5 +224,7 @@ it.each(['permission', 'proxy'])('abort releases a pending %s bridge before wait
     });
     expect(aborted).toBe(true);
     expect(output).toContain('agent_end');
+    const permission = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }).find(event => event.type === 'pre_tool_use_request');
+    expect(permission.recoveryClass).toBe(recovery);
   } finally { server.stop(true); }
 }, RUN_TIMEOUT_MS + 1000);

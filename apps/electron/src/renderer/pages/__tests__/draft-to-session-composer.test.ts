@@ -13,18 +13,18 @@ describe('draft to live session composer', () => {
     // Both the initial submission and draft-reset submission read this ref.
     expect(chatPage.match(/workingDirectory: draftWorkingDirectoryOverride,/g)).toHaveLength(2)
     expect(chatPage.match(/workingDirectory: ctx.workingDirectory \?\? 'user_default'/g)).toHaveLength(2)
-    expect(chatPage).toContain('setWorkspaceWorkingDirectory(settings.workingDirectory)')
+    expect(chatPage).toContain('workspaceWorkingDirectory: settings?.workingDirectory')
     expect(chatPage).not.toContain('setDraftWorkingDirectory(settings.workingDirectory)')
     expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory')
-    expect(chatPage).toContain('[isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption]')
+    expect(chatPage).toContain('draftSessionOptionsId(activeWorkspaceId')
   })
 
   it('uses app and workspace thinking defaults and sends the displayed supported level', () => {
     const chatPage = read('../ChatPage.tsx')
     expect(chatPage).toContain('window.electronAPI.getDefaultThinkingLevel()')
-    expect(chatPage).toContain('draftThinkingSelection.current ?? settings?.thinkingLevel ?? appDefault')
+    expect(chatPage).toContain('draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection')
     expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(2)
-    expect(chatPage).toContain('if (isDraft) draftThinkingSelection.current = level')
+    expect(chatPage).toContain('if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))')
     expect(chatPage).toContain('constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))')
     expect(chatPage).toContain('draftCreateRef.current.thinkingLevel = draftThinkingLevel')
     expect(chatPage.match(/thinkingLevel=\{isDraft \? draftThinkingLevel : sessionOpts\.thinkingLevel\}/g)).toHaveLength(2)

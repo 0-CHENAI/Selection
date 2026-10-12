@@ -75,15 +75,16 @@ export function localArtifactLinks(markdown: string): string[] {
   return [...paths]
 }
 
-/** Helper scripts, drafts, and QA dumps live in the session data or plans folder, not in the result. */
+/** Source caches and session scratch are internal working files, not deliverables. */
 export function isSessionScratchPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
-  return /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans)(?:\/|$)/.test(normalized)
-    || /(?:^|\/)sessions\/[^/]+\/(?:data|plans)(?:\/|$)/.test(normalized)
+  return /(?:^|\/)\.selection-sources(?:\/|$)/.test(normalized)
+    || /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans|long_responses)(?:\/|$)/.test(normalized)
+    || /(?:^|\/)sessions\/[^/]+\/(?:data|plans|long_responses)(?:\/|$)/.test(normalized)
 }
 
 /** Formats shown on the conversation's changed-file shelf. */
 export function isArtifactCardPath(path: string): boolean {
-  return /\.(?:docx?|docm|dotx?|dotm|rtf|pptx?|pptm|potx?|potm|ppsx?|ppsm|xlsx?|xlsm|xlsb|xltx?|xltm|html?|txt|tex|latex|md|markdown|pdf)$/i.test(path)
+  return /\.(?:docx?|docm|dotx?|dotm|rtf|pptx?|pptm|potx?|potm|ppsx?|ppsm|xlsx?|xlsm|xlsb|xltx?|xltm|html?|tex|latex|md|markdown|pdf)$/i.test(path)
     && !isSessionScratchPath(path)
 }

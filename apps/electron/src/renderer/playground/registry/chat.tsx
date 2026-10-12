@@ -2,7 +2,7 @@ import * as React from 'react'
 import type { ComponentEntry } from './types'
 import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
 import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
-import { TurnCard, type ActivityItem } from '@craft-agent/ui'
+import { LatticeLoader, TurnCard, type ActivityItem } from '@craft-agent/ui'
 import type { BackgroundTask } from '@/components/app-shell/ActiveTasksBar'
 import { ActiveOptionBadges } from '@/components/app-shell/ActiveOptionBadges'
 import { ChatInputZone, InputContainer } from '@/components/app-shell/input'
@@ -14,7 +14,9 @@ import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Circle, Sparkles } from 'lucide-react'
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import type { SessionStatus } from '@/config/session-status-config'
-import type { FileAttachment, PermissionRequest, PermissionMode } from '../../../shared/types'
+import type { FileAttachment, PermissionRequest, PermissionMode, LlmConnectionWithStatus } from '../../../shared/types'
+import { type ThinkingLevel, THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { cn } from '@/lib/utils'
 import { AppShellProvider } from '@/context/AppShellContext'
 import { ModalProvider } from '@/context/ModalContext'
@@ -534,7 +536,28 @@ const deepNestedActivities: ActivityItem[] = [
 
 type InputContainerMode = 'freeform' | 'permission' | 'admin_approval'
 
+// UI acceptance fixtures, independent of the user's configured connections.
+const inputModelMenuConnections: LlmConnectionWithStatus[] = [
+  {
+    slug: 'eming', name: 'Eming', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
+    createdAt: 0, isAuthenticated: true, isDefault: true, defaultModel: 'gpt-6-luna',
+    models: [
+      { id: 'gpt-6-luna', name: 'gpt-6-luna', shortName: 'gpt-6-luna', description: 'UI fixture', provider: 'pi', contextWindow: 258_000, maxTokens: 128_000, supportedThinkingLevels: THINKING_LEVELS.map(level => level.id) },
+      { id: 'gpt-6.1-sol', name: 'gpt-6.1-sol', shortName: 'gpt-6.1-sol', description: 'UI fixture', provider: 'pi', contextWindow: 272_000, maxTokens: 128_000, supportedThinkingLevels: ['low', 'high', 'max'] },
+    ],
+  },
+  {
+    slug: 'direct-fixture', name: 'Direct-only (fixture)', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
+    createdAt: 0, isAuthenticated: true, defaultModel: 'direct-fixture',
+    models: [{ id: 'direct-fixture', name: 'No reasoning (fixture)', shortName: 'Direct', description: 'UI fixture', provider: 'pi', contextWindow: 128_000, supportsThinking: false }],
+  },
+]
+
 interface InputContainerPlaygroundProps {
+  appearance?: 'classic' | 'prompt'
+  workMode?: WorkMode
+  modelPickerHierarchy?: boolean
+  thinkingLevel?: ThinkingLevel
   disabled?: boolean
   isProcessing?: boolean
   placeholder?: string
@@ -560,6 +583,10 @@ interface InputContainerPlaygroundProps {
 }
 
 function InputContainerPlayground({
+  appearance = 'prompt',
+  workMode = 'NORM',
+  modelPickerHierarchy = false,
+  thinkingLevel = 'medium',
   disabled = false,
   isProcessing = false,
   placeholder = 'Message Selection...',
@@ -585,6 +612,9 @@ function InputContainerPlayground({
 }: InputContainerPlaygroundProps) {
   const playgroundSessionId = 'playground-session'
   const [model, setModel] = React.useState(currentModel)
+  const [connection, setConnection] = React.useState('eming')
+  const [effort, setEffort] = React.useState(thinkingLevel)
+  const [processing, setProcessing] = React.useState(isProcessing)
   const [mode, setMode] = React.useState<PermissionMode>(permissionMode)
   const [inputValue, setInputValue] = React.useState('')
   const [currentSessionStatus, setCurrentSessionStatus] = React.useState('in-progress')
@@ -602,6 +632,9 @@ function InputContainerPlayground({
   React.useEffect(() => {
     setModel(currentModel)
   }, [currentModel])
+
+  React.useEffect(() => { setEffort(thinkingLevel) }, [thinkingLevel])
+  React.useEffect(() => { setProcessing(isProcessing) }, [isProcessing])
 
   React.useEffect(() => {
     setMode(permissionMode)
@@ -737,7 +770,11 @@ function InputContainerPlayground({
 
   return (
     <ModalProvider>
-    <AppShellProvider value={playgroundAppShellContext as any}>
+    <AppShellProvider value={{
+      ...playgroundAppShellContext,
+      llmConnections: modelPickerHierarchy ? inputModelMenuConnections : [],
+      workspaceDefaultLlmConnection: modelPickerHierarchy ? 'eming' : undefined,
+    } as any}>
       <div className="w-full h-full flex flex-col bg-background">
         <div className="flex-1" />
 
@@ -758,27 +795,36 @@ function InputContainerPlayground({
           currentSessionStatus={showStatuses ? currentSessionStatus : undefined}
           onSessionStatusChange={setCurrentSessionStatus}
           inputProps={{
+            appearance,
+            workMode,
+            thinkingLevel: effort,
+            onThinkingLevelChange: setEffort,
             placeholder,
             disabled,
-            isProcessing,
+            isProcessing: processing,
             structuredInput,
             onStructuredResponse: (response) => {
               console.log('[Playground] Structured response:', response)
             },
             currentModel: model,
+            currentConnection: modelPickerHierarchy ? connection : undefined,
+            onConnectionChange: modelPickerHierarchy ? setConnection : undefined,
             sources: showSources ? sources : [],
             enabledSourceSlugs: showSources ? enabledSourceSlugs : [],
             onSourcesChange: showSources ? setEnabledSourceSlugs : undefined,
             workingDirectory: showWorkingDirectory ? cwd : undefined,
             onWorkingDirectoryChange: showWorkingDirectory ? setCwd : undefined,
             followUpItems,
-            onSubmit: mockInputCallbacks.onSubmit,
+            onSubmit: (message, attachments) => {
+              mockInputCallbacks.onSubmit(message, attachments)
+              setProcessing(true)
+            },
             onModelChange: setModel,
             onInputChange: setInputValue,
             inputValue,
             onHeightChange: mockInputCallbacks.onHeightChange,
             onFocusChange: mockInputCallbacks.onFocusChange,
-            onStop: mockInputCallbacks.onStop,
+            onStop: () => { mockInputCallbacks.onStop(); setProcessing(false) },
           }}
         />
       </div>
@@ -971,6 +1017,30 @@ const emptyStateHintVariants = Array.from({ length: getHintCount() }, (_, i) => 
 
 export const chatComponents: ComponentEntry[] = [
   {
+    id: 'lattice-loader',
+    name: 'LatticeLoader',
+    category: 'Chat',
+    description: 'Theme-aware thinking wave, completion check and error cross',
+    component: LatticeLoader,
+    props: [
+      { name: 'status', control: { type: 'select', options: [
+        { label: '运行中', value: 'working' }, { label: '完成', value: 'done' }, { label: '失败', value: 'error' },
+      ] }, defaultValue: 'working' },
+      { name: 'label', control: { type: 'string' }, defaultValue: '思考中…' },
+      { name: 'doneLabel', control: { type: 'string' }, defaultValue: '已完成' },
+      { name: 'errorLabel', control: { type: 'string' }, defaultValue: '失败' },
+      { name: 'cellSize', control: { type: 'number', min: 3, max: 8 }, defaultValue: 5 },
+      { name: 'gap', control: { type: 'number', min: 1, max: 3 }, defaultValue: 2 },
+      { name: 'fontSize', control: { type: 'number', min: 10, max: 18 }, defaultValue: 13 },
+      { name: 'showTimer', control: { type: 'boolean' }, defaultValue: true },
+    ],
+    variants: [
+      { name: '运行中', props: { status: 'working' } },
+      { name: '完成', props: { status: 'done', elapsed: 2.4 } },
+      { name: '失败', props: { status: 'error', elapsed: 2.4 } },
+    ],
+  },
+  {
     id: 'empty-state-hint',
     name: 'EmptyStateHint',
     category: 'Chat',
@@ -1152,6 +1222,14 @@ export const chatComponents: ComponentEntry[] = [
     props: [],
     variants: [
       { name: 'Default', props: {} },
+      {
+        name: '中间进度气泡对齐',
+        props: {
+          activities: [{ id: 'progress-fixture', type: 'tool', toolName: 'run_task', status: 'completed', timestamp: 1,
+            content: JSON.stringify({ runId: 'ui-fixture', status: 'running' }) }],
+          response: { text: '已启动调研，包含近期官方信息与社区反馈检索，并安排独立核验关键结论和引用。完成后我会整理成简体中文摘要，区分官方确认、社区体验与尚未证实的推断。', isStreaming: false },
+        },
+      },
     ],
     mockData: () => ({
       activities: flatActivities,
@@ -1254,6 +1332,30 @@ export const chatComponents: ComponentEntry[] = [
     layout: 'full',
     previewOverflow: 'visible',
     props: [
+      {
+        name: 'appearance',
+        description: 'Compare the integrated PromptBar with the original composer',
+        control: { type: 'select', options: [{ label: 'PromptBar 融合', value: 'prompt' }, { label: '原输入框', value: 'classic' }] },
+        defaultValue: 'prompt',
+      },
+      {
+        name: 'thinkingLevel',
+        description: 'Reasoning effort — the highest supported level enables sparks',
+        control: { type: 'select', options: THINKING_LEVELS.map(level => ({ label: level.id, value: level.id })) },
+        defaultValue: 'medium',
+      },
+      {
+        name: 'workMode',
+        description: 'Conversation mode — PRO uses theme-aware gold effects',
+        control: { type: 'select', options: [{ label: 'NORM', value: 'NORM' }, { label: 'PRO', value: 'PRO' }] },
+        defaultValue: 'NORM',
+      },
+      {
+        name: 'modelPickerHierarchy',
+        description: 'UI fixtures for the connection → model menu and reasoning capabilities',
+        control: { type: 'boolean' },
+        defaultValue: false,
+      },
       {
         name: 'inputMode',
         description: 'Input mode rendered by InputContainer',
@@ -1418,6 +1520,30 @@ export const chatComponents: ComponentEntry[] = [
     ],
     mockData: () => ({}),
     variants: [
+      {
+        name: 'PromptBar 融合',
+        description: '真实输入框融合 PromptBar，可调整思考强度并体验发送/停止状态切换',
+        props: { appearance: 'prompt', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: 'PromptBar 最高强度',
+        description: '最高思考强度启用微光，输入时光点加速',
+        props: { appearance: 'prompt', workMode: 'NORM', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: 'PromptBar PRO 金色',
+        description: 'PRO 会话使用浅色铜金、深色香槟金的文字与微光',
+        props: { appearance: 'prompt', workMode: 'PRO', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '模型菜单内调节强度',
+        description: '同一浮窗先选供应商、再选模型并调节强度；模型能力仅作界面验收样例',
+        props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '原输入框对比',
+        props: { appearance: 'classic', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
       {
         name: 'Default (Comprehensive)',
         description: 'App-like full setup with badges, labels, statuses, sources, and working directory',

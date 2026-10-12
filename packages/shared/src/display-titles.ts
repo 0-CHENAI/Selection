@@ -1,5 +1,5 @@
 /**
- * Display-title helpers for sources and skills.
+ * Display-title helpers for sources, skills and sessions.
  *
  * This module is browser-safe (no Node.js APIs). Filesystem overlay
  * operations live in `display-titles-storage.ts`.
@@ -48,6 +48,12 @@ export function resolveSkillTitle(skill: {
   metadata: { name: string }
 }): string {
   return skill.displayTitle?.trim() || skill.metadata.name
+}
+
+/** Older handovers embedded mode labels in the name; mode is now a separate badge. */
+export function resolveSessionName(session: { name?: string; handover?: { handoverId: string } }): string | undefined {
+  if (!session.name || !session.handover) return session.name
+  return session.name.replace(/^(?:(?:NORM|PRO) · )+/, '') || session.name
 }
 
 /** Agent-facing label: lead with the user-facing title, keep slug machine-readable. */

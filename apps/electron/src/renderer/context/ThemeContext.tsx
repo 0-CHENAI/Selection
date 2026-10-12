@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
+import { useAtomValue } from 'jotai'
+import { workModeViewAtom } from '@/atoms/work-mode'
 import * as storage from '@/lib/local-storage'
 import {
   resolveTheme,
@@ -131,6 +133,7 @@ export function ThemeProvider({
   defaultFont = 'system',
   activeWorkspaceId = null
 }: ThemeProviderProps) {
+  const workMode = useAtomValue(workModeViewAtom)
   const [initialStoredTheme] = useState<StoredTheme | null>(() => loadStoredTheme())
 
   // === Preference state (persisted at app level) ===
@@ -315,6 +318,13 @@ export function ThemeProvider({
   }, [shikiConfig, isDark, presetTheme])
 
   // === DOM Effects (SINGLETON - all theme DOM manipulation happens here) ===
+
+  // Root scope also covers portaled controls and consumers reading accent tokens.
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    root.dataset.workMode = workMode
+    return () => { delete root.dataset.workMode }
+  }, [workMode])
 
   // Apply base theme class and data attributes
   useEffect(() => {

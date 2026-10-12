@@ -29,6 +29,9 @@ import {
   shouldEnsureDocxOutlineStyles,
 } from '../officecli'
 
+// Keep native smoke tests on the reviewed binary, like the production wrapper.
+const OFFICECLI_TEST_ENV = { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' }
+
 function seedTrustedOfficecliRoot(appRootPath: string) {
   const binDir = join(appRootPath, 'apps', 'electron', 'resources', 'bin')
   const runtimeDir = join(binDir, `${process.platform}-${process.arch}`)
@@ -326,7 +329,7 @@ describe('bundled officecli smoke', () => {
 
   it('reports a version', () => {
     if (!binary) return
-    const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe' })
+    const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe', env: OFFICECLI_TEST_ENV })
     expect(result.exitCode).toBe(0)
     expect(result.stdout.toString()).toMatch(/\d+\.\d+/)
   })
@@ -342,10 +345,7 @@ describe('bundled officecli smoke', () => {
         cwd: workDir,
         stdout: 'pipe',
         stderr: 'pipe',
-        env: {
-          ...process.env,
-          OFFICECLI_NO_AUTO_RESIDENT: '1',
-        },
+        env: OFFICECLI_TEST_ENV,
       })
       const output = `${result.stdout.toString()}${result.stderr.toString()}`
       if (result.exitCode !== 0 || /\b(?:WARNING|UNSUPPORTED)\b/i.test(output)) {
@@ -409,7 +409,7 @@ describe('bundled officecli smoke', () => {
   it('prints every specialized skill in full via load_skill', () => {
     if (!binary) return
     for (const alias of BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES) {
-      const result = Bun.spawnSync([binary, 'load_skill', alias], { stdout: 'pipe', stderr: 'pipe' })
+      const result = Bun.spawnSync([binary, 'load_skill', alias], { stdout: 'pipe', stderr: 'pipe', env: OFFICECLI_TEST_ENV })
       expect(result.exitCode).toBe(0)
       expect(result.stdout.toString().length).toBeGreaterThan(500)
     }
@@ -420,7 +420,7 @@ describe('bundled officecli smoke', () => {
     const root = mkdtempSync(join(tmpdir(), 'officecli-morph-helper-'))
     const helper = join(process.cwd(), 'apps', 'electron', 'resources', 'scripts', 'officecli-morph-helper.ts')
     const deck = join(root, '形变 演示.pptx')
-    const env = { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' }
+    const env = OFFICECLI_TEST_ENV
     const run = (argv: string[]) => Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe', env })
     try {
       expect(run([binary, 'create', deck]).exitCode).toBe(0)
@@ -438,7 +438,7 @@ describe('bundled officecli smoke', () => {
   it('uses atomic batch with read-back and preserves XLSM macro parts', () => {
     if (!binary) return
     const root = mkdtempSync(join(tmpdir(), 'officecli-xlsm-'))
-    const env = { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' }
+    const env = OFFICECLI_TEST_ENV
     const run = (args: string[]) => {
       const result = Bun.spawnSync([binary, ...args], { stdout: 'pipe', stderr: 'pipe', env })
       const output = `${result.stdout.toString()}${result.stderr.toString()}`
@@ -489,7 +489,7 @@ describe('bundled officecli smoke', () => {
   it('persists native CSV and TSV import into worksheet cells', () => {
     if (!binary) return
     const root = mkdtempSync(join(tmpdir(), 'officecli-import-'))
-    const env = { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' }
+    const env = OFFICECLI_TEST_ENV
     const run = (args: string[]) => {
       const result = Bun.spawnSync([binary, ...args], { stdout: 'pipe', stderr: 'pipe', env })
       const output = `${result.stdout.toString()}${result.stderr.toString()}`
@@ -634,7 +634,7 @@ describe('docx outline heading seed', () => {
     const root = mkdtempSync(join(tmpdir(), 'officecli-heading-'))
     const touchedFiles: string[] = []
     const env = {
-      ...process.env,
+      ...OFFICECLI_TEST_ENV,
       CRAFT_OFFICECLI: binary,
     }
 

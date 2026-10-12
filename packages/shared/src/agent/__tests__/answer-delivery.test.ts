@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PiAgent } from '../pi-agent'
 import type { AnswerDeliveryControl } from '../backend/types'
 import { answerToolBlock } from '../answer-delivery'
+import * as config from '../../config'
 
 const request = { requestId: 'req', toolName: 'mcp__session__submit_answer', args: { markdown: '完整答案。', featuredArtifacts: [] }, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry', answerRunId: 'run' }
 describe('answer delivery execution bridge', () => {
@@ -58,11 +59,50 @@ describe('answer delivery execution bridge', () => {
     expect(sent.at(-1).result.isError).toBe(true)
     expect(answerToolBlock(control, false, 'Bash', 'run')).toBeUndefined()
   })
+  it('keeps internal coordination tools active without allowing final answer delivery', async () => {
+    control.coordinationOnly = true
+    expect(answerToolBlock(control, false, 'mcp__session__submit_orchestration_decision', 'run')).toBeUndefined()
+    expect(answerToolBlock(control, false, 'submit_answer', 'run')).toContain('end the assistant turn')
+    await (agent as any).handleToolExecuteRequest(request)
+    expect(sent.at(-1).result.isError).toBe(true)
+    expect(submitted).toHaveLength(0)
+  })
+  it('registers answer delivery for a restored canonical root even when boot configuration disabled it', () => {
+    ;(agent as any).config.explicitAnswerDelivery = false
+    ;(agent as any).config.session.taskSlug = 'existing-plan'
+    const browser = spyOn(config, 'getBrowserToolEnabled').mockReturnValue(false)
+    try { (agent as any).registerSessionToolsWithSubprocess() }
+    finally { browser.mockRestore() }
+    const names = sent.at(-1).tools.map((tool: any) => tool.name)
+    expect(names).toContain('mcp__session__submit_answer')
+    expect(names).not.toContain('mcp__session__submit_task_output')
+    expect(names).not.toContain('mcp__session__submit_task_node_verdict')
+    expect((agent as any).registeredAnswerDelivery).toBe(true)
+  })
   it('limits recovery to answer submission and fails closed after cancellation', () => {
     control.recovery = true
     expect(answerToolBlock(control, false, 'Bash', 'run')).toContain('Only submit_answer')
     expect(answerToolBlock(control, false, 'submit_answer', 'run')).toBeUndefined()
     control.isActive = () => false
     expect(answerToolBlock(control, false, 'submit_answer', 'run')).toContain('no longer active')
+  })
+  it('reads only its own live runtime context during recovery and rejects stale turns', async () => {
+    control.recovery = true
+    const routed: unknown[] = []
+    ;(agent as any).routeToolCall = async (...args: unknown[]) => {
+      routed.push(args)
+      return { content: '{"orchestration":{"status":"running"}}', isError: false }
+    }
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'context', answerRunId: 'run',
+      toolName: 'Bash', args: { command: 'forbidden', sessionId: 'other' } })
+    expect(routed).toEqual([['mcp__session__get_session_info', {}]])
+    expect(sent.at(-1).result.isError).toBe(false)
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'old', answerRunId: 'old' })
+    expect(sent.at(-1).result.isError).toBe(true)
+    control.isActive = () => false
+    await (agent as any).handleRuntimeContextRequest({ requestId: 'cancelled', answerRunId: 'run' })
+    expect(sent.at(-1).result.isError).toBe(true)
+    expect(routed).toHaveLength(1)
+    expect(answerToolBlock({ ...control, isActive: () => true }, false, 'get_session_info', 'run')).toContain('Only submit_answer')
   })
 })

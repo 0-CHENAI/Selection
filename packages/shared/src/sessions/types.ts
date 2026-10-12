@@ -1,3 +1,4 @@
+import type { HandoverLink } from '../protocol/handover'
 /**
  * Session Types
  *
@@ -10,6 +11,7 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { WorkModeMetadata } from './work-mode.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
 
@@ -34,6 +36,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'workMode', 'workModeNeedsReview', 'executionRootSessionId', 'handover',
   'sharedProjectMemoryEnabled',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
@@ -63,6 +66,10 @@ export const SESSION_PERSISTENT_FIELDS = [
   'taskSlug',
   'taskRunId',
   'taskNodeId',
+  'taskAttempt',
+  'taskRevision',
+  'taskActor',
+  'taskWorkerId',
   'taskNodeCount',
   'taskDraft',
   // Per-session Swarm preview state and lineage
@@ -208,7 +215,8 @@ export type { StoredMessage } from '@craft-agent/core/types';
 /**
  * Session configuration (persisted metadata)
  */
-export interface SessionConfig extends SwarmSessionMetadata {
+export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
+  handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -329,6 +337,11 @@ export interface SessionConfig extends SwarmSessionMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
@@ -349,7 +362,8 @@ export interface StoredSession extends SessionConfig {
  * Contains all metadata needed for list views (pre-computed at save time).
  * This enables fast session listing without parsing message content.
  */
-export interface SessionHeader extends SwarmSessionMetadata {
+export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
+  handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -442,6 +456,11 @@ export interface SessionHeader extends SwarmSessionMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
@@ -462,7 +481,8 @@ export interface SessionHeader extends SwarmSessionMetadata {
 /**
  * Session metadata (lightweight, for lists)
  */
-export interface SessionMetadata extends SwarmSessionMetadata {
+export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata {
+  handover?: HandoverLink;
   id: string;
   workspaceRootPath: string;
   name?: string;
@@ -540,6 +560,11 @@ export interface SessionMetadata extends SwarmSessionMetadata {
   taskRunId?: string;
   /** Tasks Conductor: id of the DAG node this child session executes (child nodes only). */
   taskNodeId?: string;
+  taskAttempt?: number;
+  taskRevision?: number;
+  taskActor?: { id: string; persona?: string };
+  taskWorkerId?: string;
+
   /** Tasks Conductor: total DAG node count (orchestrator only) — board progress denominator that stays stable while children spawn lazily. */
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */

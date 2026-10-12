@@ -39,12 +39,12 @@ export function TaskTemplateSaveDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onClose() }}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="task-editor-dialog flex max-h-[82dvh] flex-col overflow-hidden sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>{t('tasks.templateSave')}</DialogTitle>
           <DialogDescription>{t('tasks.templateSaveHint')}</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           <label className="flex flex-col gap-1 text-[12.5px]">
             <span className="font-medium">{t('tasks.templateName')}</span>
             <input
@@ -74,7 +74,7 @@ export function TaskTemplateSaveDialog({
           </label>
           {error && <p role="alert" className="text-[12.5px] text-destructive">{error}</p>}
         </div>
-        <DialogFooter>
+        <DialogFooter className="task-editor-dialog-footer">
           <Button variant="outline" size="sm" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
           <Button size="sm" disabled={busy || !name.trim()} onClick={() => onSubmit({
             name: name.trim(),

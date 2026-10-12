@@ -1,0 +1,258 @@
+{
+  "issue": 453,
+  "case": "F3",
+  "recordedAt": "2026-10-03T19:33:49.476074+00:00",
+  "workspaceId": "797f4ce6-6124-0541-4f53-44eb5e7e0767",
+  "slug": "f3-1791055813851",
+  "runId": "run-1791055926614",
+  "rootSessionId": "261004-active-birch",
+  "fixtureSha256": "4c99133f5aba0554887a6e679c276035b86b13a6d88c6da6fbc4868c0a144fb6",
+  "model": "gpt-6-luna",
+  "bModel": "pi/MiniMax-M3",
+  "connection": "pi-api-key-2",
+  "bConnection": "pi-api-key",
+  "manualLockPreserved": true,
+  "frozenRunPreserved": true,
+  "effectiveEdges": [
+    [
+      "a",
+      "c"
+    ],
+    [
+      "b",
+      "c"
+    ]
+  ],
+  "permissionMode": "safe",
+  "rounds": [
+    {
+      "round": 1,
+      "baseDraftVersion": 1,
+      "valid": true,
+      "errors": [],
+      "b": {
+        "id": "b",
+        "prompt": "Read \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\" with a file tool. Is B's cost basis verified? Submit submit_task_output values {verified: boolean}, plus short prose describing the uncertainty. Do not invent facts, delegate or modify files.",
+        "kind": "session",
+        "outputs": [
+          {
+            "name": "verified",
+            "kind": "param",
+            "type": "boolean",
+            "required": true
+          }
+        ],
+        "model": "pi/MiniMax-M3",
+        "llmConnection": "pi-api-key",
+        "locked": true,
+        "timeout": 1234
+      },
+      "cPrompt": "Produce a concise report from both bound inputs: A cost = ${inputs.a_cost}, B verified = ${inputs.b_verified}. Submit submit_task_output values {a_cost: number, b_verified: boolean}, with text explaining B and risk limits, and explain the source-material limitations in Chinese. Do not delegate or modify files.",
+      "constraints": [
+        "只读资料，不执行外部操作"
+      ],
+      "decisions": [
+        "资料不足时保留未知，禁止编造 B 风险结论"
+      ],
+      "lockedFields": [
+        "constraints",
+        "decisions"
+      ]
+    },
+    {
+      "round": 2,
+      "baseDraftVersion": 2,
+      "valid": true,
+      "errors": [],
+      "b": {
+        "id": "b",
+        "prompt": "Read \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\" with a file tool. Is B's cost basis verified? Submit submit_task_output values {verified: boolean}, plus short prose describing the uncertainty. Do not invent facts, delegate or modify files.",
+        "kind": "session",
+        "model": "pi/MiniMax-M3",
+        "llmConnection": "pi-api-key",
+        "locked": true,
+        "outputs": [
+          {
+            "name": "verified",
+            "kind": "param",
+            "type": "boolean",
+            "required": true
+          }
+        ],
+        "timeout": 1234
+      },
+      "cPrompt": "Produce a concise report from both bound inputs: A cost = ${inputs.a_cost}, B verified = ${inputs.b_verified}. Submit submit_task_output values {a_cost: number, b_verified: boolean}, with text explaining B and risk limits, and explain the source-material limitations in Chinese. 明确列出未核实问题。 Do not delegate or modify files.",
+      "constraints": [
+        "只读资料，不执行外部操作"
+      ],
+      "decisions": [
+        "资料不足时保留未知，禁止编造 B 风险结论"
+      ],
+      "lockedFields": [
+        "constraints",
+        "decisions"
+      ]
+    },
+    {
+      "round": 3,
+      "baseDraftVersion": 3,
+      "valid": true,
+      "errors": [],
+      "b": {
+        "id": "b",
+        "prompt": "Read \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\" with a file tool. Is B's cost basis verified? Submit submit_task_output values {verified: boolean}, plus short prose describing the uncertainty. Do not invent facts, delegate or modify files.",
+        "kind": "session",
+        "model": "pi/MiniMax-M3",
+        "llmConnection": "pi-api-key",
+        "locked": true,
+        "outputs": [
+          {
+            "name": "verified",
+            "kind": "param",
+            "type": "boolean",
+            "required": true
+          }
+        ],
+        "timeout": 1234
+      },
+      "cPrompt": "Produce a concise report from both bound inputs: A cost = ${inputs.a_cost}, B verified = ${inputs.b_verified}. Submit submit_task_output values {a_cost: number, b_verified: boolean}, with text explaining B and risk limits, and explain the source-material limitations in Chinese. 明确列出未核实问题。 Do not delegate or modify files.",
+      "constraints": [
+        "只读资料，不执行外部操作"
+      ],
+      "decisions": [
+        "资料不足时保留未知，禁止编造 B 风险结论"
+      ],
+      "lockedFields": [
+        "constraints",
+        "decisions"
+      ]
+    }
+  ],
+  "canonicalReviewContextVerified": true,
+  "frozenPlanSha256": "ef8d19d67edb548b38db8aef79d5ef5234f6b358715e57c0a9cab095cf2d6961",
+  "runtimeB": {
+    "id": "b",
+    "prompt": "Read \"/Users/chenai/local/Research/Selection/scripts/fixtures/selection-3.0/costs.txt\" with a file tool. Is B's cost basis verified? Submit submit_task_output values {verified: boolean}, plus short prose describing the uncertainty. Do not invent facts, delegate or modify files.",
+    "kind": "session",
+    "model": "pi/MiniMax-M3",
+    "llmConnection": "pi-api-key",
+    "locked": true,
+    "outputs": [
+      {
+        "name": "verified",
+        "kind": "param",
+        "type": "boolean",
+        "required": true
+      }
+    ],
+    "timeout": 1234
+  },
+  "dependencyTiming": {
+    "aDone": "2026-10-03T19:32:21.533Z",
+    "bDone": "2026-10-03T19:32:23.862Z",
+    "cSpawned": "2026-10-03T19:32:23.868Z",
+    "waitedForBoth": true
+  },
+  "results": {
+    "taskId": "f3-1791055813851",
+    "orchestratorSessionId": "261004-active-birch",
+    "slug": "f3-1791055813851",
+    "runId": "run-1791055926614",
+    "runIds": [
+      "run-1791055926614"
+    ],
+    "verdict": {
+      "result": "pass"
+    },
+    "verdicts": [
+      {
+        "result": "pass"
+      }
+    ],
+    "repair": {
+      "used": 0,
+      "max": 3
+    },
+    "runStatus": "completed",
+    "tokensUsed": 60597,
+    "acceptanceCriteria": "最终报告包含 A 的两年成本与 B 的核对状态；对资料未证实内容保留未知，不编造 B 风险结论，并用中文说明资料限制。",
+    "nodes": [
+      {
+        "id": "a",
+        "title": "a",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261004-azure-flower",
+        "output": "方案 A 两年总成本为 1,000,000 元。",
+        "outputs": {
+          "cost": 1000000
+        }
+      },
+      {
+        "id": "b",
+        "title": "b",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261004-safe-rose",
+        "output": "B's cost basis is NOT verified. The file costs.txt states: \"方案 B 成本口径：待核对，暂不能与 A 直接比较\" (Plan B cost basis: pending verification, cannot be directly compared with A). The fixture also notes an unfilled risk gap and explicitly zero confirmed external operations. Per the user constraint \"资料不足时保留未知，禁止编造 B 风险结论\", the answer must be false with uncertainty preserved.",
+        "outputs": {
+          "verified": false
+        }
+      },
+      {
+        "id": "c",
+        "title": "c",
+        "state": "done",
+        "attempt": 1,
+        "revision": 0,
+        "sessionId": "261004-fresh-zenith",
+        "output": "简要报告：A 成本为 1,000,000；未提供币种、计价周期或成本构成，故仅按输入原值记录。B verified=false，表示 B 尚未核实；现有资料不足以确认其事实、风险性质、发生概率、影响程度或风险等级，不据此作任何 B 风险结论。未核实问题：① B 的具体事项及来源是什么？② 支持或反驳 B 的证据有哪些、证据日期和适用范围是什么？③ “已核实”的判定标准与核查状态是什么？④ 若后续确认，影响、概率、应对措施及责任方是什么？资料限制：当前仅有“A 成本=1,000,000”和“B verified=false”两项输入，没有支持性文件、背景、定义或核验记录，因此上述问题均应保留为未知。",
+        "outputs": {
+          "a_cost": 1000000,
+          "b_verified": false
+        }
+      }
+    ],
+    "revision": 0
+  },
+  "hostRegression": {
+    "tests": 377,
+    "failed": 0,
+    "assertions": 1400,
+    "files": 35
+  },
+  "relatedHandoverAndWorkModeRegression": [
+    "",
+    " 18 pass",
+    " 0 fail",
+    " 262 expect() calls",
+    "Ran 18 tests across 4 files. [680.00ms]"
+  ],
+  "browserPreview": {
+    "component": "TaskEditor + TaskProposal + ConductorWorkbench + ConfirmationHost",
+    "transport": "fixed; separate from real host/model F3",
+    "twoRoundsAndLocksPreserved": true,
+    "invalidReferenceAndCycleRollback": true,
+    "lockedAndStaleProposalRejected": true,
+    "draftApplyCounts": {
+      "saved": 0,
+      "created": 0,
+      "started": 0
+    },
+    "runtimeCommitReceiptRevision": 1,
+    "compactViewport": {
+      "width": 375,
+      "height": 700,
+      "horizontalOverflow": false
+    }
+  },
+  "validation": {
+    "typecheckAll": "passed",
+    "lint": "0 errors; existing Electron 86 / shared 8 warnings",
+    "i18n": "2325 keys; parity and sorted passed",
+    "electronBuild": "passed; final main rebuild passed",
+    "diffCheck": "passed"
+  }
+}

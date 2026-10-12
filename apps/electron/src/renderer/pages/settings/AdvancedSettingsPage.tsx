@@ -1,8 +1,7 @@
 /**
  * AdvancedSettingsPage
  *
- * App-level capability switches that are off unless explicitly enabled:
- * DAG orchestration, Swarm agents, and the optional AnySearch API key.
+ * Optional AnySearch credentials. PRO owns orchestration capabilities.
  */
 
 import { useCallback, useState } from 'react'
@@ -16,7 +15,6 @@ import {
   SettingsCard,
   SettingsSecretInput,
   SettingsSection,
-  SettingsToggle,
 } from '@/components/settings'
 import { notifyAdvancedSettingsChanged, useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 
@@ -30,16 +28,6 @@ export default function AdvancedSettingsPage() {
   const advanced = useAdvancedSettings()
   const [anySearchApiKey, setAnySearchApiKey] = useState('')
   const [isSavingAnySearchApiKey, setIsSavingAnySearchApiKey] = useState(false)
-
-  const handleDagOrchestrationChange = useCallback(async (enabled: boolean) => {
-    await window.electronAPI.setDagOrchestrationEnabled(enabled)
-    notifyAdvancedSettingsChanged()
-  }, [])
-
-  const handleSwarmAgentsChange = useCallback(async (enabled: boolean) => {
-    await window.electronAPI.setSwarmAgentsEnabled(enabled)
-    notifyAdvancedSettingsChanged()
-  }, [])
 
   const handleSaveAnySearchApiKey = useCallback(async () => {
     const apiKey = anySearchApiKey.trim()
@@ -82,28 +70,6 @@ export default function AdvancedSettingsPage() {
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
             <div className="space-y-8">
-              <SettingsSection title={t('settings.advanced.dagOrchestration')}>
-                <SettingsCard>
-                  <SettingsToggle
-                    label={t('settings.advanced.dagOrchestration')}
-                    description={t('settings.advanced.dagOrchestrationDesc')}
-                    checked={advanced.dagOrchestrationEnabled}
-                    onCheckedChange={handleDagOrchestrationChange}
-                  />
-                </SettingsCard>
-              </SettingsSection>
-
-              <SettingsSection title={t('settings.advanced.swarmAgents')}>
-                <SettingsCard>
-                  <SettingsToggle
-                    label={t('settings.advanced.swarmAgents')}
-                    description={t('settings.advanced.swarmAgentsDesc')}
-                    checked={advanced.swarmAgentsEnabled}
-                    onCheckedChange={handleSwarmAgentsChange}
-                  />
-                </SettingsCard>
-              </SettingsSection>
-
               <SettingsSection title={t('settings.advanced.anySearchApiKey')}>
                 <SettingsCard>
                   <div className="px-4 py-3.5 space-y-3">

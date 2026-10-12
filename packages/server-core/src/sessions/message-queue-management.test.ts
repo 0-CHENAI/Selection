@@ -154,7 +154,8 @@ describe('message queue management (#22)', () => {
       forceAbort,
     } as never
 
-    await manager.sendMessage(managed.id, 'hidden nudge', undefined, undefined, { hidden: true })
+    const taskContext = { kind: 'verification' as const, title: '结果复核' }
+    await manager.sendMessage(managed.id, 'hidden nudge', undefined, undefined, { hidden: true, taskContext })
 
     expect(forceAbort).not.toHaveBeenCalled()
     expect(managed.stopRequested).toBeFalsy()
@@ -162,6 +163,7 @@ describe('message queue management (#22)', () => {
     expect(managed.messages.find(message => message.content === 'hidden nudge')).toMatchObject({
       hidden: true,
       isQueued: true,
+      taskContext,
     })
     expect(managed.messageQueue.some(item => item.message === 'hidden nudge')).toBe(true)
   })

@@ -254,7 +254,7 @@ export function SendToWorkspaceDialog({
   )
 }
 
-/** Send button with purple LED border that traces around it during transfer */
+/** Send button with an accent border that traces around it during transfer */
 function TransferButton({ onClick, disabled, isTransferring, progress }: {
   onClick: () => void
   disabled: boolean
@@ -287,12 +287,12 @@ function TransferButton({ onClick, disabled, isTransferring, progress }: {
             width="calc(100% - 3px)" height="calc(100% - 3px)"
             rx="10" ry="10"
             fill="none"
-            stroke="#8B5CF6"
+            stroke="var(--accent)"
             strokeWidth="2"
             strokeDasharray={perim > 0 ? `${progress * perim} ${perim}` : '0 999'}
             style={{
               transition: 'stroke-dasharray 0.2s ease-out',
-              filter: 'drop-shadow(0 0 3px #8B5CF6) drop-shadow(0 0 6px rgba(139,92,246,0.3))',
+              filter: 'drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 30%, transparent))',
             }}
           />
         </svg>

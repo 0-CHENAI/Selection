@@ -27,3 +27,15 @@ export * from './node-verdict.ts';
 export * from './metrics.ts';
 export * from './critical-path.ts';
 export * from './workspace-cache.ts';
+export * from './plan.ts';
+export * from './planner.ts';
+
+export * from './research.ts';
+export * from './research-storage.ts';
+export { addResearchTemplate } from './research-template.ts';
+
+export * from './research-expansion.ts';
+export * from './task-help.ts';
+
+export * from './replay.ts';
+export * from './explain.ts';

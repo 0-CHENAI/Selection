@@ -245,6 +245,13 @@ export function handleStatus(
 ): ProcessResult {
   const { session, streaming } = state
 
+  // An empty status clears transient feedback after recovery, without adding
+  // an empty work-chain item to the transcript.
+  if (!event.message) return {
+    state: { session: { ...session, currentStatus: undefined }, streaming },
+    effects: [],
+  }
+
   const statusMessage: Message = {
     id: generateMessageId(),
     role: 'status',

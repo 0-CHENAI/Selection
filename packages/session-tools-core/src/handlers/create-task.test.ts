@@ -2,18 +2,21 @@ import { describe, expect, it } from 'bun:test';
 import type { SessionToolContext } from '../context.ts';
 import { handleCreateTask } from './create-task.ts';
 
-describe('handleCreateTask — agent creation stays disabled', () => {
-  it('rejects an otherwise valid request without invoking the backend', async () => {
+describe('canonical plan creation', () => {
+  it('requires a request identity before reaching the backend', async () => {
     let calls = 0;
     const ctx = { createTask: async () => { calls++; throw new Error('must not run'); } } as unknown as SessionToolContext;
-    const result = await handleCreateTask(ctx, { title: 'Task', description: 'Work' });
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain('Create or import a V3 workflow in the editor');
+    expect((await handleCreateTask(ctx, { title: 'Task', description: 'Work' })).isError).toBe(true);
     expect(calls).toBe(0);
   });
-  it('rejects stale clients even without a callback', async () => {
-    const result = await handleCreateTask({} as SessionToolContext, { title: 'Task', description: 'Work' });
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain('Create or import a V3 workflow in the editor');
+  it('passes an identified plan and preserves host errors', async () => {
+    const args = { requestId: 'r1', title: 'Task', description: 'Work' };
+    const ctx = { createTask: async (input: unknown) => {
+      expect(input).toEqual(args);
+      return { slug: 'task', orchestratorSessionId: 'root', warnings: [] };
+    } } as unknown as SessionToolContext;
+    expect((await handleCreateTask(ctx, args)).isError).not.toBe(true);
+    ctx.createTask = async () => { throw new Error('NORM cannot create plans'); };
+    expect(JSON.stringify(await handleCreateTask(ctx, args))).toContain('NORM cannot create plans');
   });
 });

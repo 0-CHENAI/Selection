@@ -19,6 +19,8 @@ export type ArtifactOperation =
 export interface ArtifactFeedback {
   officeSelection?: OfficeSelection
   revision?: number
+  /** Stable receipt owner; inline NORM revisions share a session but not an execution. */
+  executionId?: string
   version: 1; id: string; sessionId: string; artifactId: string; baseVersion: string; instruction: string
   validationInputs?: string[]
   anchor?: { hash: string; start: number; end: number; text: string }

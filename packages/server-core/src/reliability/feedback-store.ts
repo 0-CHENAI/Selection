@@ -9,6 +9,8 @@ import { join } from 'node:path'
 export interface FeedbackRecord {
   officeSelection?: OfficeSelection
   revision?: number
+  /** Stable receipt owner; inline NORM revisions share a session but not an execution. */
+  executionId?: string
   version: 1; id: string; sessionId: string; artifactId: string; baseVersion: string; instruction: string
   validationInputs?: string[]
   anchor?: { hash: string; start: number; end: number; text: string }
@@ -90,7 +92,7 @@ export class FeedbackStore {
       || !['queued','running','validating','applied','conflict','failed','cancelled'].includes(record.status)
       || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt)
       || record.userResolved !== undefined && typeof record.userResolved !== 'boolean'
-      || [record.childSessionId, record.appliedVersion, record.error].some(value => value !== undefined && typeof value !== 'string')
+      || [record.executionId, record.childSessionId, record.appliedVersion, record.error].some(value => value !== undefined && typeof value !== 'string')
       || record.validationInputs !== undefined && (!Array.isArray(record.validationInputs) || record.validationInputs.some(value => typeof value !== 'string' || !value))
       || record.validation !== undefined && (!Array.isArray(record.validation) || record.validation.some(value => typeof value !== 'string'))
       || record.officeSelection !== undefined && !validOfficeSelection(record.officeSelection)

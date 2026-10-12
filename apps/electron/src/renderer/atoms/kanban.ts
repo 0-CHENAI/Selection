@@ -5,9 +5,13 @@
  */
 
 import { atom } from 'jotai'
+import { atomWithStorage } from 'jotai/utils'
 import type { TaskEditorTarget } from '@/components/app-shell/kanban/types'
 
-export const kanbanEditorTargetAtom = atom<TaskEditorTarget | null>(null)
+// Preserve only the target identity. Unsaved drafts remain renderer-local.
+export const kanbanEditorTargetAtom = atomWithStorage<TaskEditorTarget | null>(
+  'craft-orchestration-editor-target', null, undefined, { getOnInit: true },
+)
 
 /**
  * Shared dirty state owned by TaskEditor so navigation controls outside the

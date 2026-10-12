@@ -42,3 +42,36 @@ it('keeps source extraction scoped to the activities supplied by the owning turn
 it('does not interpret web-like text emitted by unrelated tools as research', () => {
   expect(collectTurnResearchSources([{ type: 'tool', status: 'completed', toolName: 'Bash', content: 'Content from https://example.com:\n\nThis is a shell fixture.' }])).toEqual([])
 })
+
+it('recognizes frozen web snapshots read in PRO across native and Pi path formats', () => {
+  const file = `${'a'.repeat(64)}.txt`
+  for (const toolInput of [
+    { file_path: `{{SESSION_PATH}}/data/handover/handoff/files/${file}` },
+    { file_path: `/sessions/pro/data/handover/handoff/files/${file}` },
+    { path: `C:\\sessions\\pro\\data\\handover\\handoff\\files\\${file}` },
+  ]) {
+    const activity = { type: 'tool', status: 'completed', toolName: 'read', toolInput,
+      content: 'Content from https://example.com/page (asked: "overview"):\n\n# Saved page\n\nFrozen **evidence**. [Unrelated link](https://other.example.com)' }
+    const sources = collectTurnResearchSources([activity, { ...activity, toolName: 'Read' }])
+    expect(sources).toHaveLength(1)
+    expect(sources[0]?.url).toBe('https://example.com/page')
+    expect(sources[0]?.description).toContain('Frozen evidence.')
+    expect(collectSourceMetadata([{ role: 'tool', ...activity }]).get(sources[0]!.url)?.description).toBe(sources[0]?.description)
+  }
+})
+
+it('excludes ordinary files, manifests, failed reads and unfinished snapshot reads', () => {
+  const input = { file_path: `data/handover/handoff/files/${'b'.repeat(64)}.txt` }
+  const read = { type: 'tool', status: 'completed', toolName: 'Read', toolInput: input,
+    content: 'Content from https://example.com/page:\n\nSaved evidence.' }
+  expect(collectTurnResearchSources([
+    { ...read, toolInput: { file_path: '/notes/page.txt' } },
+    { ...read, toolInput: { file_path: 'data/handover/handoff/snapshot.json' } },
+    { ...read, toolName: 'Bash' },
+    { ...read, status: 'running' },
+    { ...read, status: 'error' },
+    { ...read, content: 'Error: no such file' },
+    { ...read, content: 'A file mentioning https://example.com/page' },
+    { ...read, content: 'Content from https://user:secret@example.com/page:\n\nSaved evidence.' },
+  ])).toEqual([])
+})

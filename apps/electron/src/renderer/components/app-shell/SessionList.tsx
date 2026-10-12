@@ -42,6 +42,7 @@ export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
 interface SessionListProps {
   items: SessionMeta[]
+  childrenByRoot?: Map<string, SessionMeta[]>
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onFlag?: (sessionId: string) => void
   onUnflag?: (sessionId: string) => void
@@ -114,6 +115,7 @@ export type { SessionStatusId }
  */
 export function SessionList({
   items,
+  childrenByRoot,
   onDelete,
   onFlag,
   onUnflag,
@@ -772,12 +774,15 @@ export function SessionList({
         renderItem={(row, _indexInGroup, isFirstInGroup) => {
           const flatIndex = rowIndexMap.get(row.item.id) ?? 0
           const rowProps = interactions.getRowProps(row, flatIndex)
+          // Child deep links still highlight their owning root, without adding sidebar rows.
+          const executionChildren = childrenByRoot?.get(row.item.id) ?? []
+          const selectedId = focusedSessionId !== undefined ? focusedSessionId : selectionStore.state.selected
           return (
             <SessionItem
               item={row.item}
               index={flatIndex}
               itemProps={rowProps.buttonProps as Record<string, unknown>}
-              isSelected={rowProps.isSelected}
+              isSelected={rowProps.isSelected || executionChildren.some(child => child.id === selectedId)}
               isFirstInGroup={isFirstInGroup}
               isInMultiSelect={rowProps.isInMultiSelect ?? false}
               onSelect={() => handleSelectSession(row, flatIndex)}
@@ -826,13 +831,11 @@ export function SessionList({
             </div>
           ) : undefined
         }
-        footer={
-          hasMore ? (
-            <div className="flex justify-center py-4">
-              <Spinner className="text-muted-foreground" />
-            </div>
-          ) : undefined
-        }
+        footer={hasMore ? (
+          <div className="flex justify-center py-4">
+            <Spinner className="text-muted-foreground" />
+          </div>
+        ) : undefined}
         viewportRef={scrollViewportRef}
         containerRef={zoneRef}
         containerProps={{

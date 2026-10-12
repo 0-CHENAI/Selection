@@ -176,16 +176,23 @@ export interface AnswerSubmission {
 export interface AnswerDeliveryControl {
   runId: string;
   recovery: boolean;
+  /** Host-owned internal scheduling turn; it must not deliver a user answer. */
+  coordinationOnly?: boolean;
   isActive: () => boolean;
   submit: (submission: AnswerSubmission) => Promise<void>;
 }
 
 export interface CoreBackendConfig {
+  /** Host-only shared model quota. Never supplied by model/tool arguments. */
+  modelRequestLimiter?: (quota: string, owner: string, signal?: AbortSignal) => Promise<import('../../model-request-gate').ModelRequestLease>;
   /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
   isolatedShellDirectory?: string;
   /** Candidate whose resident changes must be flushed before each Shell returns. */
   isolatedOfficeDocumentPath?: string;
   denyExternalBrowsers?: boolean;
+
+  /** Host-validated original project directory; document navigation reads it without changing the worker's write directory. */
+  documentSourceDirectory?: string;
   /** Trusted runtime-only recovery data; never provided by model arguments. */
   toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
   explicitAnswerDelivery?: boolean;

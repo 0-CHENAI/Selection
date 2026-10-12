@@ -1,0 +1,59 @@
+{
+  "sourceCommit": "ccb7193fb96c35025624ccaf5b9c7f25ee99ea7c",
+  "snapshotSha256": "25dbcbad328b30f3df37c593173ca9d1170107afd5732000da2dc5ec3e5b1c76",
+  "snapshotUnchanged": true,
+  "exactContextFieldsPreserved": true,
+  "background": {
+    "beforeUtf8Bytes": 605492,
+    "afterUtf8Bytes": 310902,
+    "reductionPercent": 48.65
+  },
+  "realF7Recovery": {
+    "runId": "run-1791087470605",
+    "records": 9,
+    "blockers": [],
+    "coverage": {
+      "covered": 1,
+      "limited": 0,
+      "uncovered": 1,
+      "total": 2
+    },
+    "claims": [
+      {
+        "id": "cost",
+        "version": 2,
+        "support": "supported"
+      },
+      {
+        "id": "b-basis",
+        "version": 1,
+        "support": "supported"
+      }
+    ]
+  },
+  "measurementScope": "Same immutable real F7 snapshot, deterministic background serialization; not a new model latency, token or price measurement.",
+  "validation": {
+    "fullSourceTests": {
+      "pass": 7597,
+      "fail": 0,
+      "skip": 11,
+      "laterAddedTests": 3
+    },
+    "finalAffectedTests": {
+      "handover": 19,
+      "research": 9,
+      "progress": 13,
+      "fail": 0
+    },
+    "newRegressionTests": 10,
+    "typecheckAll": "passed",
+    "lint": {
+      "errors": 0,
+      "electronExistingWarnings": 86,
+      "sharedExistingWarnings": 8
+    },
+    "electronBuild": "passed",
+    "finalMainBuild": "passed",
+    "diffCheck": "passed"
+  }
+}

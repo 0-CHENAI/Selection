@@ -44,6 +44,7 @@ export type {
   AnnotationFeedbackStatus,
   ArtifactDeliveryChange,
   ArtifactDeliveryRef,
+  SourceReadProof,
   Message,
   StoredMessage,
   TokenUsage,

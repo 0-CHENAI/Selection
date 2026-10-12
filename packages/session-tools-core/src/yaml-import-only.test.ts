@@ -4,9 +4,9 @@ import { handleCreateTask } from './handlers/create-task.ts';
 import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import type { SessionToolContext } from './context.ts';
 
-it('does not advertise Agent task creation tools', () => {
+it('advertises separate canonical creation and editor proposal tools', () => {
   const names = getSessionToolNames();
-  expect(names).not.toContain('create_task');
+  expect(names).toContain('create_task');
   expect(names).toContain('submit_task_definition');
   expect(names).toContain('run_task');
 });

@@ -4,6 +4,7 @@ import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/ut
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
 import { compactArtifactVersionSummary } from '@craft-agent/core/utils'
 import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
+import { ARTIFACT_WRITE_CLOCK_SKEW_MS } from './artifact-candidate-inventory'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
 export function artifactVersionTitle(markdown: string): string | undefined {
@@ -120,7 +121,7 @@ export class ConversationArtifactVersions {
     // ctime also moves when a file is opened or its metadata is touched.
     // Some filesystems report a write a few milliseconds behind the process
     // clock. Keep the allowance narrow so an older linked file stays a citation.
-    return Math.max(file.birthtimeMs, file.mtimeMs) >= this.turnStartedAt - 2
+    return Math.max(file.birthtimeMs, file.mtimeMs) >= this.turnStartedAt - ARTIFACT_WRITE_CLOCK_SKEW_MS
   }
 
   async track(markdown: string): Promise<void> {
@@ -130,6 +131,7 @@ export class ConversationArtifactVersions {
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
       try {
         const safe = await this.authorize(candidate)
+        if (isSessionScratchPath(safe)) continue
         if (this.paths.has(safe)) return
         if (!existsSync(safe)) { this.pendingWrites.add(safe); continue }
         if (!lstatSync(safe).isFile()) continue
@@ -156,6 +158,7 @@ export class ConversationArtifactVersions {
       for (const candidate of candidates) {
         try {
           const safe = await this.authorize(candidate)
+          if (isSessionScratchPath(safe)) continue
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
           const changedPath = writtenPaths.find(path => sameArtifactLocation(path, safe))

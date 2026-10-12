@@ -5,17 +5,23 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-async function requestThroughInterceptor(model: Model<'openai-completions'>, requestTimeoutMs = 15000) {
+async function requestThroughInterceptor(model: Model<'openai-completions'>, requestTimeoutMs = 15000, slotDelayMs?: number) {
   const sessionDir = mkdtempSync(join(tmpdir(), 'provider-297-'));
   const interceptor = resolve(import.meta.dir, '../../shared/src/unified-network-interceptor.ts');
   const budget = resolve(import.meta.dir, './context-budget-stream.ts');
   const code = `
     import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
     import { createContextBudgetedStream } from ${JSON.stringify(pathToFileURL(budget).href)};
+    import { setModelRequestGate } from ${JSON.stringify(pathToFileURL(resolve(import.meta.dir, '../../shared/src/model-request-gate.ts')).href)};
+    let acquired = 0; const released = [];
+    if (${slotDelayMs !== undefined}) setModelRequestGate(async () => {
+      acquired++; await new Promise(resolve => setTimeout(resolve, ${slotDelayMs ?? 0}));
+      return { release: feedback => released.push(feedback) };
+    });
     const response = await createContextBudgetedStream(streamSimple, ${JSON.stringify(model)},
       { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] },
       { apiKey: 'local-test-only', timeoutMs: ${requestTimeoutMs} }).result();
-    console.log(JSON.stringify({ response, settledAt: Date.now() }));
+    console.log(JSON.stringify({ response, settledAt: Date.now(), acquired, released }));
     // Keep the process alive so the test distinguishes cancellation from process exit.
     if (${requestTimeoutMs} < 15000) await new Promise(resolve => setTimeout(resolve, 600));
   `;
@@ -31,6 +37,21 @@ async function requestThroughInterceptor(model: Model<'openai-completions'>, req
     return JSON.parse(stdout);
   } finally { clearTimeout(timeout); proc.kill(); rmSync(sessionDir, { recursive: true, force: true }); }
 }
+
+it('A8 production interceptor shares its slot hook with the runtime and excludes queue time from provider idle timeout', async () => {
+  let requests = 0;
+  const server = Bun.serve({ port: 0, fetch() {
+    requests++;
+    return new Response('data: {"choices":[{"index":0,"delta":{"content":"Ready"},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  try {
+    const model: Model<'openai-completions'> = { id: 'local-test', name: 'Local test', api: 'openai-completions', provider: 'openai', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+      reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 128 };
+    const { response, acquired, released } = await requestThroughInterceptor(model, 80, 150);
+    expect(response.stopReason, JSON.stringify({ response, acquired, released })).toBe('stop'); expect(requests).toBe(1);
+    expect(acquired).toBe(1); expect(released).toEqual([{ status: 200 }]);
+  } finally { server.stop(true); }
+}, 20_000);
 
 
 it.each([false, true])('accepts a first token after 10 seconds through the interceptor (heartbeat=%s)', async heartbeat => {
@@ -113,12 +134,12 @@ it.each(['unknown', 'malformed', 'http-error', 'truncated'])('retains structured
 }, 20000);
 
 
-it.each([false, true])('bounds an open SSE connection and cancels HTTP transport (partial=%s)', async partial => {
+it.each([false, true, 'queued'] as const)('bounds an open SSE connection and cancels HTTP transport (partial=%s)', async partial => {
   let cancelledAt = 0;
   const server = Bun.serve({ port: 0, idleTimeout: 30, fetch() {
     return new Response(new ReadableStream({
       start(controller) {
-        const data = partial
+        const data = partial === true
           ? 'data: {"choices":[{"index":0,"delta":{"content":"Recorded work"},"finish_reason":null}]}\n\n'
           : ': connected\n\n';
         controller.enqueue(new TextEncoder().encode(data));
@@ -132,12 +153,13 @@ it.each([false, true])('bounds an open SSE connection and cancels HTTP transport
       baseUrl: `http://127.0.0.1:${server.port}/v1`, reasoning: false, input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 128,
     };
-    const { response, settledAt } = await requestThroughInterceptor(model, 500);
+    const { response, settledAt, acquired, released } = await requestThroughInterceptor(model, 500, partial === 'queued' ? 650 : undefined);
     expect(response.stopReason).toBe('error');
     expect(response.errorMessage).toContain('time limit');
     // Cancellation must reach the server while the child is still alive.
     expect(cancelledAt).toBeGreaterThan(0);
     expect(cancelledAt - settledAt).toBeLessThan(400);
-    if (partial) expect(response.content).toContainEqual({ type: 'text', text: 'Recorded work' });
+    if (partial === true) expect(response.content).toContainEqual({ type: 'text', text: 'Recorded work' });
+    if (partial === 'queued') { expect(acquired).toBe(1); expect(released).toHaveLength(1); }
   } finally { server.stop(true); }
 }, 20000);
