@@ -599,6 +599,7 @@ export class PiAgent extends BaseAgent {
     };
     const officecliWrapperDir = getOfficecliWrapperDir(officecliResolution);
     const officecliBinary = resolveOfficecliBinary(officecliResolution);
+    if (this.config.isolatedOfficeDocumentPath && !officecliBinary) throw new Error('Office candidate execution requires the bundled OfficeCLI runtime');
     const officecliResources = resolveOfficecliResourcesRoot(officecliResolution);
     this.managedOfficecliShellAvailable = Boolean(officecliWrapperDir && officecliBinary && officecliResources);
     this.managedOfficecliBinaryPath = this.managedOfficecliShellAvailable ? officecliBinary : undefined;
@@ -682,7 +683,8 @@ export class PiAgent extends BaseAgent {
     const sessionPath = this.config.session
       ? getSessionPath(this.config.workspace.rootPath, sessionId)
       : '';
-    const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, sessionId);
+    const plansFolderPath = this.config.isolatedOfficeDocumentPath
+      ? join(this.config.isolatedShellDirectory!, '.qa', 'plans') : getSessionPlansPath(this.config.workspace.rootPath, sessionId);
     const workingDirectory = this.config.session?.workingDirectory || cwd;
 
     // Send init command (flat structure matching subprocess InboundMessage type)
@@ -713,6 +715,9 @@ export class PiAgent extends BaseAgent {
       resumeSdkSessionId: this.config.session?.sdkSessionId,
       toolResultRecovery: this.config.toolResultRecovery,
       isolatedShellDirectory: this.config.isolatedShellDirectory,
+      isolatedOfficeDocument: this.config.isolatedOfficeDocumentPath
+        ? { path: this.config.isolatedOfficeDocumentPath, binary: officecliBinary! } : undefined,
+      denyExternalBrowsers: this.config.denyExternalBrowsers,
       forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
@@ -1493,10 +1498,12 @@ export class PiAgent extends BaseAgent {
     const rootPath = this.config.workspace.rootPath ?? this.workingDirectory;
     const workspaceSlug = extractWorkspaceSlug(rootPath, this.config.workspace.id);
     const sessionId = this.config.session?.id || this._sessionId;
-    const plansFolderPath = sessionId
+    const plansFolderPath = this.config.isolatedOfficeDocumentPath
+      ? join(this.config.isolatedShellDirectory!, '.qa', 'plans') : sessionId
       ? getSessionPlansPath(rootPath, sessionId)
       : undefined;
-    const dataFolderPath = sessionId
+    const dataFolderPath = this.config.isolatedOfficeDocumentPath
+      ? join(this.config.isolatedShellDirectory!, '.qa') : sessionId
       ? getSessionDataPath(rootPath, sessionId)
       : undefined;
 
@@ -2576,10 +2583,13 @@ export class PiAgent extends BaseAgent {
       // session_state, source state) ride the user-message tail so a per-turn
       // re-stamp doesn't invalidate the prompt cache. buildVolatileContextParts
       // consumes the one-shot mode-change signal, so it is called exactly once.
-      const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
+      const plansFolderPath = this.config.isolatedOfficeDocumentPath
+        ? join(this.config.isolatedShellDirectory!, '.qa', 'plans') : getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
+      const dataFolderPath = this.config.isolatedOfficeDocumentPath
+        ? join(this.config.isolatedShellDirectory!, '.qa') : undefined;
       const stableParts = this.promptBuilder.buildStableContextParts();
       const volatileParts = this.promptBuilder.buildVolatileContextParts(
-        { plansFolderPath },
+        { plansFolderPath, dataFolderPath },
         sourceContext
       );
 

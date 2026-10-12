@@ -83,19 +83,21 @@ test('a relocated artifact opens through its exact saved alias, with content and
   } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
 })
 
-test('opening an older artifact shows the AI answer title without changing its saved version record', async () => {
+for (const officeRevision of [false, true]) test(`opening an older artifact shows the AI answer title without changing its saved version record (Office=${officeRevision})`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-old-title-'))
   const workspace = { id: 'workspace', rootPath: root, name: 'Workspace' }
   const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
   try {
     const file = join(root, 'report.docx')
     writeFileSync(file, 'document bytes')
-    const session = await createSession(root)
+    const parent = officeRevision ? await createSession(root) : undefined
+    const session = await createSession(root, parent ? { hidden: true, parentSessionId: parent.id } : undefined)
     const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), workspace.id)
-    const record = store.register(file, `${session.id}/user-1`, [], '请帮我调整报告')
+    const record = store.register(file, officeRevision ? session.id : `${session.id}/user-1`, [], '请帮我调整报告')
     const saved = loadSession(root, session.id)!
     saved.messages = [{ id: 'answer-1', type: 'assistant', content: '已修复目录分页并统一表格格式。\n\n[报告](report.docx)',
-      artifactVersions: [{ path: file, versionId: record.currentVersion, ordinal: 1 }] }]
+      artifactVersions: officeRevision ? undefined : [{ path: file, versionId: record.currentVersion, ordinal: 1 }] },
+      { id: 'progress', type: 'assistant', content: '正在结束修改任务。', isIntermediate: true, phase: 'intermediate' }]
     await saveSession(saved)
     const handlers = new Map<string, HandlerFn>()
     registerFilesHandlers({ handle(channel, handler) { handlers.set(channel, handler) } } as RpcServer, {} as HandlerDeps)
@@ -214,4 +216,38 @@ test('an older record without file identity can be explicitly rebound after a re
     expect(after.versions.map(version => version.ordinal)).toEqual([1])
     expect(store.read(first.id).id).toBe(first.id)
   } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('Office preview RPC uses the session host and rejects cross-workspace access', async () => {
+  const calls: unknown[] = [], handlers = new Map<string, HandlerFn>()
+  const owners: string[] = []
+  registerFilesHandlers({ handle(channel, handler) { handlers.set(channel, handler) } } as RpcServer, {
+    sessionManager: {
+      getSession: async () => ({ workspaceId: 'host-workspace' }),
+      officePreview: async (operation: unknown, ownerId: string) => { calls.push(operation); owners.push(ownerId); return { previewId: 'owned-preview' } },
+    },
+  } as unknown as HandlerDeps)
+  const handle = handlers.get(RPC_CHANNELS.artifacts.OFFICE_PREVIEW)!
+  const operation = { type: 'open', sessionId: 'session', path: '/remote/document.docx' }
+  await expect(handle({ clientId: 'client', workspaceId: 'other' } as RequestContext, operation)).rejects.toThrow('does not belong')
+  expect(calls).toEqual([])
+  expect(await handle({ clientId: 'client', workspaceId: 'host-workspace' } as RequestContext, operation)).toEqual({ previewId: 'owned-preview' })
+  expect(calls).toEqual([operation])
+  expect(owners).toEqual(['client'])
+})
+
+test('Office discovery RPC uses the owning host and refuses foreign workspaces before scanning', async () => {
+  const calls: string[] = [], handlers = new Map<string, HandlerFn>()
+  registerFilesHandlers({ handle(channel, handler) { handlers.set(channel, handler) } } as RpcServer, {
+    sessionManager: {
+      getSession: async () => ({ workspaceId: 'host-workspace' }),
+      getOfficeFiles: async (id: string) => { calls.push(id); return ['/remote/document.docx'] },
+    },
+  } as unknown as HandlerDeps)
+  const handle = handlers.get(RPC_CHANNELS.artifacts.OFFICE_FILES)!
+  await expect(handle({ clientId: 'client', workspaceId: 'other' } as RequestContext, 'session')).rejects.toThrow('does not belong')
+  await expect(handle({ clientId: 'client', workspaceId: 'host-workspace' } as RequestContext, null)).rejects.toThrow('does not belong')
+  expect(calls).toEqual([])
+  expect(await handle({ clientId: 'client', workspaceId: 'host-workspace' } as RequestContext, 'session')).toEqual(['/remote/document.docx'])
+  expect(calls).toEqual(['session'])
 })

@@ -1,3 +1,5 @@
+import { useOfficePreview } from './hooks/useOfficePreview'
+import { useOfficeFiles } from './hooks/useOfficeFiles'
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
@@ -759,6 +761,14 @@ export default function App() {
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
+  const { open: openOfficePreview, close: closeOfficePreview, capture: captureOfficeSelection, context: officePreviewContext, panel: officePreviewPanel, picker: officeFilePicker, isOpen: officePreviewOpen, isPresent: officePreviewPresent, isChoosing: officePreviewChoosing } = useOfficePreview(sessionSelection.selected, windowWorkspaceId)
+  const officeFiles = useOfficeFiles(sessionSelection.selected, windowWorkspaceId)
+  const toggleOfficeCollaboration = useCallback(() => {
+    if (officePreviewOpen || officePreviewChoosing) closeOfficePreview()
+    else if (sessionSelection.selected && officeFiles.length) {
+      void openOfficePreview(sessionSelection.selected, officeFiles.length === 1 ? officeFiles[0] : '', officeFiles)
+    }
+  }, [sessionSelection.selected, officeFiles, officePreviewOpen, officePreviewChoosing, openOfficePreview, closeOfficePreview])
 
   // Notification system - shows native OS notifications and badge count
   const handleNavigateToSession = useCallback((sessionId: string) => {
@@ -1314,10 +1324,25 @@ export default function App() {
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
     let locallyCommitted = false
     try {
+      const officeCommand = message.trim().match(/^\/office-edit(?:\s+([\s\S]+))?$/i)
+      const naturalOfficeOpen = /^(?:请)?打开(?:这个|这份)?(?:Excel|Word|PPT|PowerPoint|文档|表格|演示文稿)(?:让我|供我|以便我)?选(?:择)?(?:区域|元素|内容)[。！!]?$/i.test(message.replace(/\s+/g, ''))
+      if (officeCommand || naturalOfficeOpen) {
+        const session = store.get(sessionAtomFamily(sessionId))
+        const discovered = await window.electronAPI.getOfficeFiles(sessionId).catch(() => undefined)
+        const candidates = discovered ?? [...new Set((session?.messages ?? []).filter(item => !item.hidden).flatMap(item => [
+          ...(item.artifactVersions ?? []).map(ref => ref.path), ...(item.attachments ?? []).map(file => file.storedPath),
+        ]).filter(path => /\.(docx|xlsx|pptx)$/i.test(path)))]
+        await openOfficePreview(sessionId, '', candidates)
+        return true
+      }
+      const officeSelection = await captureOfficeSelection(sessionId)
+      const officeContext = officeSelection ? undefined : officePreviewContext(sessionId)
       // Capture live generation so composer submits stay in the queue
       // instead of looking like a new transcript turn (#22, #23).
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
+      if (officeSelection && sendingMidStream) throw new Error('请等待当前任务完成后再提交 Office 修改')
+      if (officeSelection && (attachments?.length || annotationFollowUps?.length)) throw new Error('定向 Office 修改暂不支持同时发送附件或其他反馈')
       const optionSnapshot = sessionOptions.get(sessionId)
       const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream, swarmAgentsEnabled)
       if (!delegateSubmission.allowed) return false
@@ -1465,6 +1490,8 @@ export default function App() {
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, outgoingMessage, processedAttachments, storedAttachments, {
         skillSlugs,
+        officeSelection,
+        officeContext,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
         annotationFollowUps,
@@ -1477,11 +1504,12 @@ export default function App() {
           permissionMode: optionSnapshot?.permissionMode ?? 'ask',
         } : undefined,
       })
+      // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
-        isProcessing: false,
+        isProcessing: locallyCommitted ? false : s.isProcessing,
         messages: [
           ...s.messages,
           {
@@ -1494,7 +1522,7 @@ export default function App() {
       }))
       return locallyCommitted
     }
-  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug])
+  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext])
 
   /**
    * Unified handler for all session option changes.
@@ -1938,6 +1966,10 @@ export default function App() {
     workspaces,
     activeWorkspaceId: windowWorkspaceId,
     activeWorkspaceSlug: windowWorkspaceSlug,
+    officeCollaboration: sessionSelection.selected ? {
+      sessionId: sessionSelection.selected, available: officeFiles.length > 0,
+      active: officePreviewOpen, choosing: officePreviewChoosing, onToggle: toggleOfficeCollaboration,
+    } : undefined,
     llmConnections,
     workspaceDefaultLlmConnection,
     refreshLlmConnections,
@@ -1985,6 +2017,7 @@ export default function App() {
     workspaces,
     windowWorkspaceId,
     windowWorkspaceSlug,
+    sessionSelection.selected, officeFiles, officePreviewOpen, officePreviewChoosing, toggleOfficeCollaboration,
     llmConnections,
     workspaceDefaultLlmConnection,
     refreshLlmConnections,
@@ -2208,7 +2241,8 @@ export default function App() {
                 onRetry={handleReconnectTransport}
               />
             )}
-            <div className="flex-1 min-h-0">
+            <div className="flex flex-1 min-h-0">
+              <div className="min-w-0 flex-1">
               {sessionLoadError ? (
                 <SessionLoadErrorScreen
                   message={sessionLoadError}
@@ -2220,8 +2254,12 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
+                  hasTrailingPanel={officePreviewPresent}
                 />
               )}
+              </div>
+              {officePreviewPanel}
+              {officeFilePicker}
             </div>
             <ResetConfirmationDialog
               open={showResetDialog}

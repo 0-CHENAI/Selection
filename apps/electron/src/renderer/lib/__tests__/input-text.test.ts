@@ -76,6 +76,11 @@ describe('getRestorableStoppedPrompt', () => {
 })
 
 describe('sessionHasLiveGeneration', () => {
+  it('does not let an interrupted Office mirror lock an idle session', () => {
+    const messages = [{ role: 'tool', toolUseId: 'office-child-call-1', toolStatus: 'executing' }]
+    expect(sessionHasLiveGeneration({ isProcessing: false, messages })).toBe(false)
+    expect(sessionHasLiveGeneration({ isProcessing: true, messages })).toBe(true)
+  })
   it('treats isProcessing as live generation', () => {
     expect(sessionHasLiveGeneration({ isProcessing: true, messages: [] })).toBe(true)
   })

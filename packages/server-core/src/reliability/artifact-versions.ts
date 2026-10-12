@@ -379,7 +379,7 @@ export class ArtifactVersions {
   }
 
   /** Validation belongs to the caller; arbitrary model claims are not validation evidence. */
-  apply(id: string, expectedVersion: string, candidatePath: string, sourceRunId?: string, restoredFrom?: string, expectedCandidateHash?: string, referenceOwner?: string): ArtifactRecord {
+  apply(id: string, expectedVersion: string, candidatePath: string, sourceRunId?: string, restoredFrom?: string, expectedCandidateHash?: string, referenceOwner?: string, assistantSummary?: string): ArtifactRecord {
     return this.locked(id, () => {
       const record = this.read(id)
       const pendingPath = `${this.recordPath(id)}.pending`
@@ -389,7 +389,8 @@ export class ArtifactVersions {
         || this.snapshot(record.path).digest !== base.hash) throw new ArtifactConflict()
       const candidate = this.snapshot(candidatePath)
       if (expectedCandidateHash !== undefined && candidate.digest !== expectedCandidateHash) throw new ArtifactConflict()
-      const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(), hash: this.put(candidate.bytes), size: candidate.bytes.length, createdAt: Date.now(), sourceRunId, restoredFrom }
+      const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(), hash: this.put(candidate.bytes), size: candidate.bytes.length, createdAt: Date.now(), sourceRunId, restoredFrom,
+        ...(assistantSummary ? { summary: assistantSummary, summaryOrigin: 'assistant' as const } : {}) }
       const after = { ...record, currentVersion: next.id, versions: [...record.versions, next] }
       delete after.lastRestore
       if (referenceOwner !== undefined) {

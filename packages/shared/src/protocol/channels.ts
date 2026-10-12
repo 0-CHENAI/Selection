@@ -17,7 +17,7 @@ export const RPC_CHANNELS = {
     STATUS_CHANGED: 'server:statusChanged',
     HOME_DIR: 'server:homeDir',
   },
-  artifacts: { BODY_FEEDBACK: 'artifacts:bodyFeedback', CLEANUP: 'artifacts:cleanup', FEEDBACK_CONTEXT: 'artifacts:feedbackContext', MANAGE: 'artifacts:manage', FEEDBACK: 'artifacts:feedback', FEEDBACK_LIST: 'artifacts:feedbackList', PREVIEW: 'artifacts:preview' },
+  artifacts: { OFFICE_FILES: 'artifacts:officeFiles', OFFICE_PREVIEW: 'artifacts:officePreview', BODY_FEEDBACK: 'artifacts:bodyFeedback', CLEANUP: 'artifacts:cleanup', FEEDBACK_CONTEXT: 'artifacts:feedbackContext', MANAGE: 'artifacts:manage', FEEDBACK: 'artifacts:feedback', FEEDBACK_LIST: 'artifacts:feedbackList', PREVIEW: 'artifacts:preview' },
   sessions: {
     GET: 'sessions:get',
     GET_UNREAD_SUMMARY: 'sessions:getUnreadSummary',

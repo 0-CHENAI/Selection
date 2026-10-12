@@ -1033,6 +1033,7 @@ export function FreeFormInput({
 
   // Handle slash command selection (feature commands — modes use the badge UI / Shift+Tab)
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
+    if (commandId === 'office-edit' && !isProcessing) onSubmit('/office-edit', undefined)
     if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
   }, [isProcessing, onSubmit])
 

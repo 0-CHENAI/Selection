@@ -306,6 +306,10 @@ export interface Message {
   clientMessageId?: string;
   /** Feedback payload retained for replay validation, independent of later annotation edits. */
   annotationFollowUps?: AnnotationFeedbackSnapshot[];
+  /** Host-validated active Office document retained for queued and replayed user turns. */
+  officeDocumentPath?: string;
+  /** Submitted spelling of the context path, used to validate idempotent client retries. */
+  officeContextPath?: string;
   role: MessageRole;
   content: string;
   timestamp: number;
@@ -432,6 +436,10 @@ export interface StoredMessage {
   clientMessageId?: string;
   /** Feedback payload retained for replay validation, independent of later annotation edits. */
   annotationFollowUps?: AnnotationFeedbackSnapshot[];
+  /** Host-validated active Office document retained independently of the preview lifetime. */
+  officeDocumentPath?: string;
+  /** Submitted context path retained for idempotent client retries. */
+  officeContextPath?: string;
   type: MessageRole;
   content: string;
   timestamp?: number;

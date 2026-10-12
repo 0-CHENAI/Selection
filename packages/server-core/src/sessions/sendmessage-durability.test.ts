@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { getSessionFilePath } from '@craft-agent/shared/sessions/storage'
+import * as config from '@craft-agent/shared/config'
+import { messageToStored, storedToMessage } from '@craft-agent/core'
 import { assertAnnotationSource } from '../reliability/annotation-follow-ups'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
@@ -111,6 +113,63 @@ describe('sendMessage durability', () => {
 
     expect(ackedMessageId).not.toBeNull()
     expect(onDiskAtAck).toBe(true)
+  })
+
+  it('persists optional document context before acknowledging and accepts retries after preview/file closure', async () => {
+    const managed = buildSession('office-context-queued')
+    managed.isProcessing = true
+    const file = join(tmpRoot, '当前 文档.docx')
+    writeFileSync(file, 'document')
+    const canonical = realpathSync(file)
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(managed.workspace)
+    const options = { optimisticMessageId: 'office-context-client', officeContext: { path: file } }
+    const acknowledgements: string[] = []
+    const ack = (id: string) => {
+      acknowledgements.push(id)
+      const lines = readFileSync(getSessionFilePath(tmpRoot, managed.id), 'utf8').trim().split('\n')
+      expect(lines.slice(1).map(line => JSON.parse(line))).toContainEqual(expect.objectContaining({
+        id, content: '更换内容，换成一个七言绝句', officeDocumentPath: canonical, officeContextPath: file, isQueued: true,
+      }))
+    }
+    try {
+      await sm.sendMessage(managed.id, '更换内容，换成一个七言绝句', undefined, undefined, options, undefined, undefined, ack)
+      const restored = storedToMessage(JSON.parse(JSON.stringify(messageToStored(managed.messages[0]!))))
+      expect(restored.officeDocumentPath).toBe(canonical)
+      expect(restored.content).toBe('更换内容，换成一个七言绝句')
+      rmSync(file)
+      await sm.sendMessage(managed.id, restored.content, undefined, undefined, options, undefined, undefined, ack)
+      expect(acknowledgements).toEqual([restored.id, restored.id])
+      expect(managed.messages).toHaveLength(1)
+      expect(managed.messageQueue).toHaveLength(1)
+      await expect(sm.sendMessage(managed.id, restored.content, undefined, undefined, {
+        ...options, officeContext: { path: join(tmpRoot, '另一份.docx') },
+      })).rejects.toThrow('different content')
+    } finally { lookup.mockRestore() }
+  })
+
+  it('validates ordinary Office context against workspace/upload scope without needing a selection', async () => {
+    const managed = buildSession('office-context-scope')
+    const other = buildSession('other-session')
+    managed.isProcessing = true
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'office-context-outside-'))
+    const outside = join(outsideRoot, 'other.docx')
+    writeFileSync(outside, 'outside')
+    other.messages.push({ id: 'upload', role: 'user', content: '', timestamp: 1,
+      attachments: [{ storedPath: outside } as never] })
+    const linked = join(tmpRoot, 'outside-link.docx')
+    symlinkSync(outside, linked)
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(managed.workspace)
+    try {
+      for (const path of [outside, linked]) {
+        await expect(sm.sendMessage(managed.id, '这份文档说了什么？', undefined, undefined, { officeContext: { path } })).rejects.toThrow()
+      }
+      expect(managed.messages).toEqual([])
+      expect(managed.messageQueue).toEqual([])
+      managed.messages.push({ id: 'own-upload', role: 'user', content: '', timestamp: 1,
+        attachments: [{ storedPath: outside } as never] })
+      await sm.sendMessage(managed.id, '这份文档说了什么？', undefined, undefined, { officeContext: { path: outside } })
+      expect(managed.messages.at(-1)).toMatchObject({ content: '这份文档说了什么？', officeDocumentPath: realpathSync(outside) })
+    } finally { lookup.mockRestore(); rmSync(outsideRoot, { recursive: true, force: true }) }
   })
 
   it('rejects explicit delegation instead of queueing its turn capability', async () => {

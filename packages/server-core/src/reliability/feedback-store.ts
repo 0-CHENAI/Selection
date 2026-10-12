@@ -1,3 +1,4 @@
+import type { OfficeSelection } from '@craft-agent/shared/protocol'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from './project-lock'
 import { atomicWrite } from './artifact-versions'
@@ -6,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface FeedbackRecord {
+  officeSelection?: OfficeSelection
   revision?: number
   version: 1; id: string; sessionId: string; artifactId: string; baseVersion: string; instruction: string
   validationInputs?: string[]
@@ -13,6 +15,14 @@ export interface FeedbackRecord {
   status: 'queued' | 'running' | 'validating' | 'applied' | 'conflict' | 'failed' | 'cancelled'
   createdAt: number; updatedAt: number; childSessionId?: string; appliedVersion?: string
   validation?: string[]; error?: string; userResolved?: boolean
+}
+function validOfficeSelection(value: OfficeSelection): boolean {
+  return !!value && [value.previewId, value.artifactId, value.baseVersion, value.path].every(item => typeof item === 'string' && item.length > 0)
+    && typeof value.hash === 'string' && /^[a-f0-9]{64}$/.test(value.hash)
+    && Array.isArray(value.elements) && value.elements.length > 0 && value.elements.length <= 256
+    && value.elements.every(item => item && typeof item.path === 'string' && item.path.startsWith('/')
+      && typeof item.type === 'string' && typeof item.summary === 'string' && item.summary.length <= 500
+      && typeof item.digest === 'string' && /^[a-f0-9]{64}$/.test(item.digest))
 }
 export function assertFeedbackAnchor(bytes: Buffer, anchor: NonNullable<FeedbackRecord['anchor']>): void {
   const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -48,7 +58,7 @@ export class FeedbackStore {
       .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
   }
   private path(id: string) { if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Invalid feedback identity'); return join(this.root, `${id}.json`) }
-  create(requestId: string, input: Pick<FeedbackRecord, 'sessionId' | 'artifactId' | 'baseVersion' | 'instruction' | 'anchor' | 'validationInputs'>): { record: FeedbackRecord; created: boolean } {
+  create(requestId: string, input: Pick<FeedbackRecord, 'sessionId' | 'artifactId' | 'baseVersion' | 'instruction' | 'anchor' | 'validationInputs' | 'officeSelection'>): { record: FeedbackRecord; created: boolean } {
     const id = createHash('sha256').update(`${input.sessionId}\0${requestId}`).digest('hex')
     const release = acquireProjectLock(join(this.root, 'locks', id))
     try {
@@ -59,13 +69,14 @@ export class FeedbackStore {
     } finally { release() }
   }
   /** Resolve retries before checking the mutable target version. */
-  findRequest(requestId: string, input: Pick<FeedbackRecord, 'sessionId' | 'artifactId' | 'baseVersion' | 'instruction' | 'anchor' | 'validationInputs'>): FeedbackRecord | undefined {
+  findRequest(requestId: string, input: Pick<FeedbackRecord, 'sessionId' | 'artifactId' | 'baseVersion' | 'instruction' | 'anchor' | 'validationInputs' | 'officeSelection'>): FeedbackRecord | undefined {
     if (!requestId || !input.instruction.trim()) throw new Error('Request identity and feedback are required')
     const id = createHash('sha256').update(`${input.sessionId}\0${requestId}`).digest('hex')
     if (existsSync(this.path(id))) {
       const record = this.read(id)
       if (record.artifactId !== input.artifactId || record.baseVersion !== input.baseVersion || record.instruction !== input.instruction
         || JSON.stringify(record.validationInputs ?? []) !== JSON.stringify(input.validationInputs ?? [])
+        || !isDeepStrictEqual(record.officeSelection, input.officeSelection)
         || JSON.stringify(record.anchor) !== JSON.stringify(input.anchor)) throw new Error('Request identity was already used for different feedback')
       return record
     }
@@ -82,6 +93,7 @@ export class FeedbackStore {
       || [record.childSessionId, record.appliedVersion, record.error].some(value => value !== undefined && typeof value !== 'string')
       || record.validationInputs !== undefined && (!Array.isArray(record.validationInputs) || record.validationInputs.some(value => typeof value !== 'string' || !value))
       || record.validation !== undefined && (!Array.isArray(record.validation) || record.validation.some(value => typeof value !== 'string'))
+      || record.officeSelection !== undefined && !validOfficeSelection(record.officeSelection)
       || record.anchor !== undefined && (!record.anchor || typeof record.anchor.hash !== 'string' || !/^[a-f0-9]{64}$/.test(record.anchor.hash)
         || !Number.isSafeInteger(record.anchor.start) || !Number.isSafeInteger(record.anchor.end)
         || record.anchor.start < 0 || record.anchor.end <= record.anchor.start || typeof record.anchor.text !== 'string')) throw new Error('Unsupported or invalid feedback record')
@@ -96,6 +108,7 @@ export class FeedbackStore {
       if (previous.sessionId !== record.sessionId || previous.artifactId !== record.artifactId
         || previous.baseVersion !== record.baseVersion || previous.instruction !== record.instruction
         || previous.createdAt !== record.createdAt || !isDeepStrictEqual(previous.anchor, record.anchor)
+        || !isDeepStrictEqual(previous.officeSelection, record.officeSelection)
         || !isDeepStrictEqual(previous.validationInputs, record.validationInputs)) {
         throw new Error('Feedback identity cannot change')
       }

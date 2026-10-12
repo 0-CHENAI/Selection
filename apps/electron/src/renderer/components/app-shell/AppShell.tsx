@@ -167,6 +167,8 @@ interface AppShellProps {
   menuNewChatTrigger?: number
   /** Focused mode - hides sidebars, shows only the chat content */
   isFocusedMode?: boolean
+  /** A sibling panel supplies the right edge inset and remains present through its exit animation. */
+  hasTrailingPanel?: boolean
 }
 
 /**
@@ -196,6 +198,7 @@ function AppShellContent({
   defaultCollapsed = false,
   menuNewChatTrigger,
   isFocusedMode = false,
+  hasTrailingPanel = false,
 }: AppShellProps) {
   // Destructure commonly used values from context
   // Note: sessions is NOT destructured here - we use sessionMetaMapAtom instead
@@ -1872,8 +1875,8 @@ function AppShellContent({
         className="flex items-stretch relative"
         style={{
           height: '100%',
-          paddingRight: isAutoCompact ? 0 : PANEL_EDGE_INSET,
-          paddingBottom: isAutoCompact ? 0 : PANEL_EDGE_INSET,
+          paddingRight: isAutoCompact || hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
+          paddingBottom: isAutoCompact && !hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
           paddingLeft: 0,
           gap: PANEL_GAP,
         }}
@@ -2346,7 +2349,7 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden || isBoardView ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={false}
+          isRightSidebarVisible={hasTrailingPanel}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />

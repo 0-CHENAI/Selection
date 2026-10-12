@@ -6,8 +6,9 @@ import { successResponse, errorResponse } from '../response.ts';
 // Routing and unknown business fields remain invalid.
 export const SubmitAnswerSchema = z.object({
   markdown: z.string().refine(value => /[^\s|]/u.test(value), 'Answer must contain renderable text'),
+  // Accept older callers; the host limits saved/displayed version titles to 30 characters.
   artifactVersionTitle: z.string().trim().min(4).max(60).optional()
-    .describe('When this turn creates or changes a delivered file, write a specific, short change title for its saved version. Describe the result, not the user request. Omit for answers without file changes.'),
+    .describe('When this turn creates or changes a delivered file, write a specific change title of at most 30 characters for its saved version. Describe the result, not the user request. Omit for answers without file changes.'),
 }).strict();
 
 const DELIVERY_RECEIPT = 'Answer delivered. Stop here.'

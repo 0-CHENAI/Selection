@@ -183,6 +183,9 @@ export interface AnswerDeliveryControl {
 export interface CoreBackendConfig {
   /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
   isolatedShellDirectory?: string;
+  /** Candidate whose resident changes must be flushed before each Shell returns. */
+  isolatedOfficeDocumentPath?: string;
+  denyExternalBrowsers?: boolean;
   /** Trusted runtime-only recovery data; never provided by model arguments. */
   toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
   explicitAnswerDelivery?: boolean;

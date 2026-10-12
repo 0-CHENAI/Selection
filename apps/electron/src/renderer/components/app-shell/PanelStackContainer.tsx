@@ -126,8 +126,8 @@ export function PanelStackContainer({
         style={{
           paddingBlock: PANEL_STACK_VERTICAL_OVERFLOW,
           marginBlock: -PANEL_STACK_VERTICAL_OVERFLOW,
-          marginBottom: -6,
-          paddingBottom: 6,
+          marginBottom: isRightSidebarVisible ? 0 : -PANEL_EDGE_INSET,
+          paddingBottom: isRightSidebarVisible ? 0 : PANEL_EDGE_INSET,
           '--compact-panel-stack-top': `${PANEL_STACK_VERTICAL_OVERFLOW + COMPACT_PANEL_TOP_GAP}px`,
         } as React.CSSProperties}
       >
@@ -141,11 +141,11 @@ export function PanelStackContainer({
                 'bg-background shadow-middle',
               )}
               style={{
-                // Compact mode runs flush to the viewport floor — no rounded bottom.
+                // A trailing sibling keeps the shared frame inset in compact mode too.
                 borderTopLeftRadius: RADIUS_INNER,
-                borderBottomLeftRadius: 0,
+                borderBottomLeftRadius: isRightSidebarVisible ? RADIUS_INNER : 0,
                 borderTopRightRadius: RADIUS_INNER,
-                borderBottomRightRadius: 0,
+                borderBottomRightRadius: isRightSidebarVisible ? RADIUS_INNER : 0,
               }}
             >
               {navigatorSlot}

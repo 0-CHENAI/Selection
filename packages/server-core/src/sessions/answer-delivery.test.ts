@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
-import { storedToMessage } from '@craft-agent/core'
+import { messageToStored, storedToMessage } from '@craft-agent/core'
+import * as config from '@craft-agent/shared/config'
 import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/types'
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
@@ -51,6 +52,54 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     }]
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
+
+  for (const mode of ['question', 'edit', 'queued-reload'] as const) it(`uses optional Office context in ordinary chat (${mode})`, async () => {
+    // An upload outside scanned roots proves the active document is tracked
+    // before model execution even when it has no prior delivered answer link.
+    const uploadRoot = mkdtempSync(join(tmpdir(), 'office-context-upload-'))
+    const file = join(uploadRoot, '参考 文档.docx')
+    writeFileSync(file, '原文')
+    const canonical = realpathSync(file)
+    const request = mode === 'question' ? '这份文档说了什么？' : '更换内容，换成一个七言绝句'
+    const answer = mode === 'question' ? '文档内容是原文。' : '已将全文替换为七言绝句。'
+    managed.messages.push({ id: 'upload', role: 'user', content: '上传文档', timestamp: 1,
+      attachments: [{ storedPath: file } as never] })
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(managed.workspace)
+    install(async function* () {
+      expect(prompts[0]).toStartWith(request)
+      expect(prompts[0]).toContain(JSON.stringify(canonical))
+      expect(prompts[0]).toContain('with no selected scope')
+      expect(prompts[0]).toContain('answer questions without changing the file')
+      if (mode !== 'question') writeFileSync(file, '已改为七言绝句')
+      await control!.submit({ ...submission, markdown: answer })
+      yield { type: 'complete' }
+    })
+    try {
+      let existingMessageId: string | undefined
+      if (mode === 'queued-reload') {
+        const accepted = storedToMessage(JSON.parse(JSON.stringify(messageToStored({
+          id: 'queued-context', role: 'user', content: request, timestamp: 2,
+          officeDocumentPath: canonical, officeContextPath: file, isQueued: true,
+        }))))
+        managed.messages.push(accepted)
+        existingMessageId = accepted.id
+      }
+      await manager.sendMessage(managed.id, request, undefined, undefined,
+        existingMessageId ? undefined : { officeContext: { path: file } }, existingMessageId)
+      const final = events.find(event => event.type === 'text_complete' && event.answerCommitted)
+      expect(final?.text).toBe(answer)
+      expect(events.some(event => event.type === 'error')).toBe(false)
+      const saved = loadStoredSession(root, managed.id)!.messages.map(storedToMessage)
+      expect(saved.findLast(message => message.role === 'user')).toMatchObject({ content: request, officeDocumentPath: canonical })
+      expect(saved.findLast(message => message.role === 'user')?.content).not.toContain('office_preview_context')
+      expect(readFileSync(file, 'utf8')).toBe(mode === 'question' ? '原文' : '已改为七言绝句')
+      expect(final.artifactVersions).toHaveLength(mode === 'question' ? 0 : 1)
+      if (mode !== 'question') {
+        expect(final.artifactVersions[0].change).toBe('modified')
+        expect(sameArtifactLocation(final.artifactVersions[0].path, canonical)).toBe(true)
+      }
+    } finally { lookup.mockRestore(); rmSync(uploadRoot, { recursive: true, force: true }) }
+  })
 
   it('publishes every supported changed file without links, proposals, or a review model', async () => {
     const dir = getSessionPath(root, managed.id)

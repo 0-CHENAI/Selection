@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Layers3, Eye, LoaderCircle, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ManagedArtifact } from '@craft-agent/shared/protocol'
+import { compactArtifactVersionSummary } from '@craft-agent/core/utils'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
@@ -81,9 +82,9 @@ export function ArtifactVersionsDialog({ open, path, record, missingFile, error,
                 <span className="font-medium">{t('chat.artifactVersions.version', { number: version.ordinal ?? record.versions.length - index })}</span>
                 {version.id === record.currentVersion && <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">{t('chat.artifactVersions.current')}</span>}
               </div>
-              <p className="truncate text-xs leading-relaxed" title={version.summaryOrigin === 'assistant' ? version.summary : undefined}>
+              <p className="whitespace-normal break-words [overflow-wrap:anywhere] text-xs leading-relaxed">
                 {version.summaryOrigin === 'assistant' && version.summary
-                  ? version.summary
+                  ? compactArtifactVersionSummary(version.summary)
                   : version.restoredFrom
                     ? t('chat.artifactVersions.restoredFromVersion', { number: record.versions.find(item => item.id === version.restoredFrom)?.ordinal ?? '?' })
                     : t(version.ordinal === 1 ? 'chat.artifactVersions.initialVersion' : 'chat.artifactVersions.fileUpdated')}

@@ -56,6 +56,7 @@ interface LiveGenerationCandidate {
   isIntermediate?: boolean
   content?: unknown
   toolStatus?: string
+  toolUseId?: string
   isBackground?: boolean
   taskId?: string
 }
@@ -84,7 +85,12 @@ export function sessionHasLiveGeneration(
   if (!session) return false
   if (session.isProcessing) return true
   if (session.currentStatus?.message) return true
-  return (session.messages ?? []).some(isLiveGenerationMessage)
+  return (session.messages ?? []).some(message => {
+    // Office tools are mirrored from a separate worker. Once the host marks
+    // the parent idle, a persisted mirror cannot keep the composer locked.
+    if (session.isProcessing === false && message.toolUseId?.startsWith('office-')) return false
+    return isLiveGenerationMessage(message)
+  })
 }
 
 function isLiveGenerationMessage(message: LiveGenerationCandidate): boolean {
