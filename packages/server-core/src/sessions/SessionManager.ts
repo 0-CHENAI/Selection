@@ -54,7 +54,7 @@ import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-c
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { readFileSync, existsSync, statSync } from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
 import {
@@ -8520,19 +8520,21 @@ export class SessionManager implements ISessionManager {
     if (!parent || parent.hidden || parent.isolatedWorkspace) throw new Error('Office discovery requires an active parent chat')
     await this.ensureMessagesLoaded(parent)
     const root = parent.workspace.rootPath
+    const sessionDirectory = getSessionStoragePath(root, parent.id)
     const excluded = [join(root, 'artifacts', 'versions'), join(root, 'artifacts', 'feedback'),
-      ...['skills', 'sources', 'automations'].map(name => join(root, name))]
-    for (const session of this.sessions.values()) {
-      if (session.workspace.id !== parent.workspace.id) continue
-      const directory = getSessionStoragePath(root, session.id)
-      if (session.hidden || session.isolatedWorkspace) excluded.push(directory)
-      else excluded.push(...['candidate', 'data', 'plans'].map(name => join(directory, name)))
+      ...['skills', 'sources', 'automations'].map(name => join(root, name)),
+      ...['candidate', 'data', 'plans'].map(name => join(sessionDirectory, name))]
+    // A selected working directory may contain application storage. Exclude sibling
+    // sessions on disk as well as loaded ones so their files never become candidates.
+    const sessionEntries = await readdir(join(root, 'sessions'), { withFileTypes: true }).catch(() => [])
+    for (const entry of sessionEntries) {
+      if (entry.isDirectory() && entry.name !== parent.id) excluded.push(getSessionStoragePath(root, entry.name))
     }
     const referenced = parent.messages.filter(message => !message.hidden).flatMap(message => [
       ...(message.artifactVersions ?? []).map(ref => ref.path),
       ...(message.attachments ?? []).map(file => file.storedPath),
     ])
-    return discoverOfficeFiles([parent.workingDirectory, root].filter((path): path is string => !!path), excluded,
+    return discoverOfficeFiles([parent.workingDirectory, sessionDirectory].filter((path): path is string => !!path), excluded,
       referenced, path => this.authorizeOfficeDocumentPath(parent, path))
   }
 

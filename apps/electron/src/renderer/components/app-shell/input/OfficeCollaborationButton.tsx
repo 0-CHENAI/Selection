@@ -1,10 +1,11 @@
-import { useSyncExternalStore, type CSSProperties } from 'react'
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { PanelsTopLeft, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
+import { shouldShowHeaderTooltipOnFocus } from '@/components/ui/header-icon-tooltip'
 
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)'
 const subscribeReducedMotion = (notify: () => void) => {
@@ -18,6 +19,17 @@ export function OfficeCollaborationButton({ sessionId }: { sessionId?: string })
   const { t } = useTranslation()
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, () => true)
   const collaboration = useOptionalAppShellContext()?.officeCollaboration
+  const button = useRef<HTMLButtonElement>(null)
+  const [tooltipOpen, setTooltipOpen] = useState(false)
+  const tooltipDismissed = useRef(false)
+  const tooltipScope = `${sessionId}:${collaboration?.active}:${collaboration?.choosing}`
+  const previousTooltipScope = useRef(tooltipScope)
+  useLayoutEffect(() => {
+    if (previousTooltipScope.current !== tooltipScope) tooltipDismissed.current = true
+    previousTooltipScope.current = tooltipScope
+    setTooltipOpen(false)
+  }, [tooltipScope])
+  const dismissTooltip = () => { tooltipDismissed.current = true; setTooltipOpen(false) }
   const visible = !!collaboration && collaboration.sessionId === sessionId && (collaboration.available || collaboration.active)
   return <AnimatePresence>
     {visible && collaboration && <motion.div key="office-collaboration"
@@ -25,9 +37,17 @@ export function OfficeCollaborationButton({ sessionId }: { sessionId?: string })
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 3, scale: 0.96 }}
       transition={{ duration: reducedMotion ? 0 : 0.2, ease: [0.22, 1, 0.36, 1] }}>
-      <Tooltip>
+      <Tooltip open={tooltipOpen && visible} onOpenChange={open => {
+        if (!open) setTooltipOpen(false)
+        else if (!tooltipDismissed.current && button.current
+          && (button.current.matches(':hover') || shouldShowHeaderTooltipOnFocus(button.current))) setTooltipOpen(true)
+      }}>
         <TooltipTrigger asChild>
-          <button type="button" onClick={collaboration.onToggle} data-office-collaboration
+          <button ref={button} type="button" onClick={() => { dismissTooltip(); collaboration.onToggle() }} data-office-collaboration
+            onPointerDown={dismissTooltip}
+            onPointerEnter={() => { tooltipDismissed.current = false }}
+            onPointerLeave={() => setTooltipOpen(false)}
+            onBlur={() => { tooltipDismissed.current = false; setTooltipOpen(false) }}
             aria-label={t('chat.officePreview.collaborate')} aria-pressed={collaboration.active}
             aria-expanded={collaboration.active || collaboration.choosing}
             style={collaboration.active ? { '--shadow-color': 'var(--accent-rgb)' } as CSSProperties : undefined}

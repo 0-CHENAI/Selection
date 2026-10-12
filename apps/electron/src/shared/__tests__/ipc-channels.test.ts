@@ -30,6 +30,8 @@ const EXPECTED_CHANNELS: string[] = [
   'artifacts:feedbackContext',
   'artifacts:feedbackList',
   'artifacts:manage',
+  'artifacts:officeFiles',
+  'artifacts:officePreview',
   'artifacts:preview',
   'auth:logout',
   'auth:showDeleteSessionConfirmation',

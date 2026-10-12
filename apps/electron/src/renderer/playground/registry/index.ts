@@ -25,6 +25,7 @@ import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
 import { handoverComponents } from './handover'
 import { workModeComponents } from './work-mode'
+import { officeCollaborationComponents } from './office-collaboration'
 import { taskEditorComponents } from './task-editor'
 import { taskEditorLiveComponents } from './task-editor-live'
 import { automaticTaskGraphComponents } from './automatic-task-graph'
@@ -49,6 +50,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...oauthComponents,
   ...sessionListComponents,
   ...workModeComponents,
+  ...officeCollaborationComponents,
   ...handoverComponents,
   ...taskEditorComponents,
   ...taskEditorLiveComponents,

@@ -9,17 +9,21 @@ const isOfficeFile = (path: string) => /\.(docx|xlsx|pptx)$/i.test(path) && !bas
 export async function discoverOfficeFiles(roots: string[], excludedPaths: string[], referencedPaths: string[],
   authorize: (path: string) => Promise<string>): Promise<string[]> {
   const blocked = await Promise.all(excludedPaths.map(path => realpath(path).catch(() => resolve(path))))
-  const queue = [...new Set(await Promise.all(roots.map(path => realpath(path).catch(() => resolve(path)))))]
+  const allowedRoots = [...new Set(await Promise.all(roots.map(path => realpath(path).catch(() => resolve(path)))))]
+  const queue = [...allowedRoots]
   const visited = new Set<string>(), files = new Set<string>()
   const isBlocked = (path: string) => blocked.some(root => inside(root, path))
-  const add = async (path: string) => {
+  const add = async (path: string, referenced = false) => {
     if (!isOfficeFile(path)) return
     try {
       const safe = await authorize(path)
+      // A file symlink cannot expand discovery beyond the selected directories.
+      // Explicit session attachments and deliveries may live outside those roots.
+      if (!referenced && !allowedRoots.some(root => inside(root, safe))) return
       if (!isBlocked(safe) && (await stat(safe)).isFile()) files.add(safe)
     } catch { /* Removed, unreadable or out-of-scope files are not candidates. */ }
   }
-  for (const path of referencedPaths) await add(path)
+  for (const path of referencedPaths) await add(path, true)
   let examined = 0
   // Bound background discovery in large project folders; breadth-first visits user files first.
   while (queue.length && examined < 10_000 && files.size < 500) {

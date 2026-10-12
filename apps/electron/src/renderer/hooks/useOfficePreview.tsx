@@ -6,14 +6,16 @@ import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
 import { officeScrollAnchor, readOfficePreviewState, writeOfficePreviewState, type OfficePreviewScope, type OfficePreviewState } from '../lib/office-preview-state'
 import { Popover, PopoverAnchor, PopoverContent } from '../components/ui/popover'
-import { ArrowLeftRight, LoaderCircle, MousePointer2, X } from 'lucide-react'
+import { ArrowLeftRight, Copy, LoaderCircle, MousePointer2, X } from 'lucide-react'
+import { FileTypeIcon } from '@craft-agent/ui'
+import { toast } from 'sonner'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '../components/ui/alert-dialog'
 import { HeaderIconButton } from '../components/ui/HeaderIconButton'
 import { OfficePreviewPanel } from '../components/app-shell/OfficePreviewPanel'
 import { OfficePreviewLoading } from '../components/app-shell/OfficePreviewLoading'
 import { RADIUS_EDGE, RADIUS_INNER } from '../components/app-shell/panel-constants'
 
-type PreviewView = OfficePreviewScope & { path: string; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
+type PreviewView = OfficePreviewScope & { path: string; pickerInPanel?: boolean; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
 
 type CachedPreview = { view: PreviewView; position: OfficePreviewState; usedAt: number; pending: Promise<unknown> }
 const previewKey = (scope: OfficePreviewScope) => JSON.stringify([scope.workspaceId, scope.sessionId])
@@ -115,7 +117,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       if (saved) writeOfficePreviewState(old, { ...saved, open: false })
     }
   }, [detach])
-  const open = useCallback(async (sessionId: string, path = '', candidates?: string[]) => {
+  const open = useCallback(async (sessionId: string, path = '', candidates?: string[], pickerInPanel = false) => {
     if (sessionId !== scope.current.sessionId) return
     const targetScope = { ...scope.current }, key = previewKey(targetScope)
     const files = [...new Set([...(candidates ?? []), ...(path ? [path] : [])])]
@@ -138,8 +140,13 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     const ticket = sequence.current
     latestOpen.current.set(key, ticket)
     pending.current = reusable?.pending ?? Promise.resolve()
-    updateView({ ...reusable?.view, ...targetScope, path, candidates: candidates ? files : reusable?.view.candidates ?? files, count: reusable?.view.count ?? 0, busy: !!path, resuming: !!path, error: undefined })
-    if (!path) { latestOpen.current.delete(key); return }
+    updateView({ ...reusable?.view, ...targetScope, path, pickerInPanel, candidates: candidates ? files : reusable?.view.candidates ?? files, count: reusable?.view.count ?? 0, busy: !!path, resuming: !!path, error: undefined })
+    if (!path) {
+      // Choosing is not consent to reopen the previously selected document.
+      if (pickerInPanel && saved) writeOfficePreviewState(targetScope, { ...saved, open: false })
+      latestOpen.current.delete(key)
+      return
+    }
     writeOfficePreviewState(targetScope, position)
     if (!candidates && window.electronAPI.getOfficeFiles) void window.electronAPI.getOfficeFiles(sessionId).then(paths => {
       if (ticket === sequence.current) updateView(old => old ? { ...old, candidates: [...new Set([...paths, path])] } : old)
@@ -309,9 +316,10 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     if (target?.sessionId !== sessionId || !target.preview) return
     return { path: target.preview.path }
   }, [])
-  const picker = view && !view.path ? <Popover open onOpenChange={isOpen => { if (!isOpen) close() }}>
+  const picker = view && !view.path && !view.pickerInPanel ? <Popover open onOpenChange={isOpen => { if (!isOpen) close() }}>
     <PopoverAnchor virtualRef={composerAnchor} />
-    <PopoverContent side="top" align={pickerTrigger.current ? 'end' : 'start'} sideOffset={12} className="w-[480px] max-w-[calc(100vw-40px)] bg-background text-foreground opacity-100 shadow-modal-small ring-1 ring-border p-3" aria-label={t('chat.officePreview.choose')}>
+    <PopoverContent side="top" align={pickerTrigger.current ? 'end' : 'start'} sideOffset={12}
+      className="w-[480px] max-w-[calc(100vw-40px)] bg-background text-foreground opacity-100 shadow-modal-small ring-1 ring-border p-3" aria-label={t('chat.officePreview.choose')}>
       <div className="flex items-center gap-2 px-2 py-2 text-sm">
         <strong className="flex-1">{t('chat.officePreview.choose')}</strong>
         <button type="button" onClick={close}>{t('chat.officePreview.close')}</button>
@@ -336,7 +344,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       aria-label={t('chat.officePreview.title')} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-foreground-2 shadow-middle">
     <div className="flex h-[50px] shrink-0 items-center gap-2 px-3 text-sm">
       <strong className="min-w-0 truncate" title={target.path}>{officePreviewFileName(target.path) || t('chat.officePreview.choose')}</strong>
-      <button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => void open(target.sessionId, '', target.candidates)}>
+      <button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => void open(target.sessionId, '', target.candidates, true)}>
         <ArrowLeftRight aria-hidden="true" className="size-3.5" />{t('chat.officePreview.switchFile')}
       </button>
       <div className="ml-auto shrink-0"><HeaderIconButton onClick={close} aria-label={t('chat.officePreview.closeLabel')} tooltip={t('chat.officePreview.closeLabel')} icon={<X className="size-4" />} /></div>
@@ -361,8 +369,45 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     </div>
   </aside>
   })
+  const fileChoices = view?.candidates?.map(path => ({ path, name: path.split(/[/\\]/).pop() || path })) ?? []
+  const copyFilePath = async (path: string) => {
+    try { await navigator.clipboard.writeText(path); toast.success(t('toast.pathCopied')) }
+    catch { toast.error(t('toast.copyFailed')) }
+  }
+  const chooser = view?.pickerInPanel && !view.path ? <aside data-office-file-chooser
+    style={{ borderRadius: RADIUS_INNER, borderBottomRightRadius: RADIUS_EDGE }}
+    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}
+    aria-label={t('chat.officePreview.title')} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-foreground-2 shadow-middle">
+    <div className="flex h-[50px] shrink-0 items-center gap-2 px-3 text-sm">
+      <strong>{t('chat.officePreview.title')}</strong>
+      <div className="ml-auto"><HeaderIconButton onClick={close} aria-label={t('chat.officePreview.closeLabel')} tooltip={t('chat.officePreview.closeLabel')} icon={<X className="size-4" />} /></div>
+    </div>
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <h2 className="mb-4 text-sm font-medium">{t('chat.officePreview.choose')}</h2>
+      {!view.candidates?.length && <p className="text-sm text-muted-foreground">{t('chat.officePreview.empty')}</p>}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,15rem),1fr))] gap-3">
+        {fileChoices.map(({ path, name }) => <li key={path} className="min-w-0">
+            <div className="relative grid h-full grid-cols-[2rem_minmax(0,1fr)] gap-x-3 rounded-xl bg-foreground/[0.04] p-4 transition-colors hover:bg-foreground/[0.07] focus-within:bg-foreground/[0.07]">
+            <button type="button" data-office-file-card={path} title={path} aria-label={`${t('common.open')} ${name}`}
+              onClick={() => void open(view.sessionId, path, view.candidates)}
+              className="col-start-2 min-w-0 text-left after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <FileTypeIcon fileName={name} className="absolute left-4 top-1/2 size-8 -translate-y-1/2" />
+              <span data-office-file-name className="block break-all text-sm font-medium line-clamp-2">{officePreviewFileName(name.replace(/\.(?:docx|xlsx|pptx)$/i, ''))}</span>
+            </button>
+            <div className="col-start-2 mt-1 flex min-w-0 items-center gap-1">
+              <span data-office-file-path={path} title={path} className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{path}</span>
+              <HeaderIconButton data-office-copy-path={path} className="relative z-10"
+                aria-label={`${t('common.copyPath')} ${name}`} tooltip={t('common.copyPath')}
+                onClick={() => void copyFilePath(path)} icon={<Copy aria-hidden="true" className="size-3.5" />} />
+            </div>
+            </div>
+          </li>)}
+      </ul>
+    </div>
+  </aside> : null
+  const panelOpen = !!view?.path || !!chooser
   const panel = <>
-    <OfficePreviewPanel open={!!view?.path} onPresenceChange={setPanelPresent}>{pages}</OfficePreviewPanel>
+    <OfficePreviewPanel open={panelOpen} onPresenceChange={setPanelPresent}>{chooser}{pages}</OfficePreviewPanel>
     <AlertDialog open={!!selectionOverflow && selectionOverflow.previewId === view?.preview?.previewId} onOpenChange={isOpen => { if (!isOpen) setSelectionOverflow(undefined) }}>
       <AlertDialogContent>
         <AlertDialogHeader><AlertDialogTitle>{t('chat.officePreview.selectionOverflowTitle')}</AlertDialogTitle><AlertDialogDescription>{t('chat.officePreview.selectionOverflow', { count: selectionOverflow?.count ?? 0, max: OFFICE_PREVIEW_MAX_SELECTION })}</AlertDialogDescription></AlertDialogHeader>
@@ -370,5 +415,5 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       </AlertDialogContent>
     </AlertDialog>
   </>
-  return { open, close, capture, context, panel, picker, isOpen: !!view?.path, isPresent: !!view?.path || panelPresent, isChoosing: !!view && !view.path }
+  return { open, close, capture, context, panel, picker, isOpen: panelOpen, isPresent: panelOpen || panelPresent, isChoosing: !!view && !view.path }
 }

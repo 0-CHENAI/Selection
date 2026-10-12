@@ -37,7 +37,7 @@ export function OfficePreviewPanel({ open, children, onPresenceChange }: { open:
   // Match the existing 45% split, allowing narrower windows to keep both regions visible.
   const width = Math.min(containerWidth / 2, Math.max(320, containerWidth * 0.45))
   return <motion.div ref={root} data-office-panel={open ? 'open' : present ? 'closing' : 'closed'}
-    className="h-full min-h-0 shrink-0 overflow-hidden"
+    className="relative z-panel h-full min-h-0 shrink-0 overflow-x-clip overflow-y-visible"
     aria-hidden={!open || undefined}
     style={{ pointerEvents: open ? undefined : 'none' }}
     initial={reduceMotion ? false : { width: 0, opacity: 0 }}

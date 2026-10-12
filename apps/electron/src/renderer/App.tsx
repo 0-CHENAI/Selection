@@ -766,7 +766,7 @@ export default function App() {
   const toggleOfficeCollaboration = useCallback(() => {
     if (officePreviewOpen || officePreviewChoosing) closeOfficePreview()
     else if (sessionSelection.selected && officeFiles.length) {
-      void openOfficePreview(sessionSelection.selected, officeFiles.length === 1 ? officeFiles[0] : '', officeFiles)
+      void openOfficePreview(sessionSelection.selected, '', officeFiles, true)
     }
   }, [sessionSelection.selected, officeFiles, officePreviewOpen, officePreviewChoosing, openOfficePreview, closeOfficePreview])
 
