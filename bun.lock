@@ -154,6 +154,7 @@
         "@radix-ui/react-popover": "^1.1.15",
         "@radix-ui/react-switch": "^1.2.6",
         "@tanstack/react-table": "^8.21.3",
+        "@tanstack/react-virtual": "3.14.15",
         "chrono-node": "^2.9.0",
         "cmdk": "^1.1.1",
         "electron-log": "^5.4.3",
@@ -1377,7 +1378,11 @@
 
     "@tanstack/react-table": ["@tanstack/react-table@8.21.3", "", { "dependencies": { "@tanstack/table-core": "8.21.3" }, "peerDependencies": { "react": ">=16.8", "react-dom": ">=16.8" } }, "sha512-5nNMTSETP4ykGegmVkhjcS8tTLW6Vl4axfEGQN3v0zdHYbK4UfoqfPChclTrJ4EoK9QynqAu9oUf8VEmrpZ5Ww=="],
 
+    "@tanstack/react-virtual": ["@tanstack/react-virtual@3.14.15", "https://registry.npmmirror.com/@tanstack/react-virtual/-/react-virtual-3.14.15.tgz", { "dependencies": { "@tanstack/virtual-core": "3.19.0" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-FXU72FW6a3yRtOpn7ollcsmPSi7ShMJECiqTpnCG2n2R8FIPrZrPYPAUmETGO8OCojATFbpLSDMuYuXX9mUAjg=="],
+
     "@tanstack/table-core": ["@tanstack/table-core@8.21.3", "", {}, "sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg=="],
+
+    "@tanstack/virtual-core": ["@tanstack/virtual-core@3.19.0", "https://registry.npmmirror.com/@tanstack/virtual-core/-/virtual-core-3.19.0.tgz", {}, "sha512-6k6+BXoM01iJTfqH5hvih0Kj49x130wRzty1muE1hBJJm5/P8h3aEYEtQPa4iYE239nF4i6UL/KIIuQI3zG4sw=="],
 
     "@tiptap/core": ["@tiptap/core@3.20.0", "", { "peerDependencies": { "@tiptap/pm": "^3.20.0" } }, "sha512-aC9aROgia/SpJqhsXFiX9TsligL8d+oeoI8W3u00WI45s0VfsqjgeKQLDLF7Tu7hC+7F02teC84SAHuup003VQ=="],
 

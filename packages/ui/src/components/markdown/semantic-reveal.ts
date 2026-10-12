@@ -119,6 +119,13 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
         for (const unit of pending) expose(unit)
       } else flush()
     }
+    // Restored history has no reveal work. Avoid scanning every paragraph and
+    // reading viewport geometry each time a virtual row enters the DOM.
+    if (!enabled) {
+      initial = false
+      mutations?.disconnect()
+      return
+    }
     const bounds = viewport?.getBoundingClientRect()
     const top = Math.max(0, bounds?.top ?? 0)
     const bottom = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight)

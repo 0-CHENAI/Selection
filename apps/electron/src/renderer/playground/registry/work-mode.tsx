@@ -118,13 +118,16 @@ function SubagentProgressPreview({ status = 'running' }: { status?: 'running' | 
 }
 
 // Real composer and rows with deterministic transport; never starts model work.
-function WorkModePreview({ compactTopBar = false, compactInput = false, dagHistory = 'none' }: {
-  compactTopBar?: boolean; compactInput?: boolean; dagHistory?: 'none' | 'saved' | 'running' | 'completed' | 'other-root'
+function WorkModePreview({ compactTopBar = false, compactInput = false, dagHistory = 'none', longHistory = false }: {
+  compactTopBar?: boolean; compactInput?: boolean; dagHistory?: 'none' | 'saved' | 'running' | 'completed' | 'other-root'; longHistory?: boolean
 }) {
   const { t } = useTranslation()
   const base = useAppShellContext()
   const [mode, setMode] = useAtom(workModeViewAtom)
   const [selected, setSelected] = React.useState<string | null>(null)
+  const [historySearch, setHistorySearch] = React.useState('')
+  const [matchInfo, setMatchInfo] = React.useState({ count: 0, index: 0 })
+  const historyChatRef = React.useRef<import('@/components/app-shell/ChatDisplay').ChatDisplayHandle>(null)
   const [options, setOptions] = React.useState<Map<string, SessionOptions>>(new Map())
   const drafts = React.useRef(new Map<string, string>())
   const attachments = React.useRef(new Map<string, FileAttachment[]>())
@@ -133,9 +136,13 @@ function WorkModePreview({ compactTopBar = false, compactInput = false, dagHisto
   const setPro = useSetAtom(sessionAtomFamily('pro-root'))
   const setWorker = useSetAtom(sessionAtomFamily('pro-worker'))
   const sessions = React.useMemo(() => [
-    { id: 'pro-root', name: 'PRO · 成本核对', taskSlug: dagHistory === 'none' ? undefined : `preview-${dagHistory}`, handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
+    { id: 'pro-root', name: 'PRO · 成本核对', taskSlug: dagHistory === 'none' ? undefined : `preview-${dagHistory}`, handover: { handoverId: 'legacy-preview', sourceSessionId: 'norm-source', snapshotVersion: 1 }, workMode: 'PRO', executionRootSessionId: 'pro-root', workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground',
+      messages: longHistory ? Array.from({ length: 120 }, (_, index) => [
+        { id: `history-user-${index}`, role: 'user', content: `第 ${index + 1} 轮：请核对成本与依据。`, timestamp: index * 2 + 1 },
+        { id: `history-answer-${index}`, role: 'assistant', content: `## 第 ${index + 1} 轮核对\n\n滚动验收。${index === 7 ? 'needle-early-007' : ''}\n\n${'这一轮保留原始依据和核对过程。滚动到更早记录时应按可见区域渲染，并保留正在阅读的位置。\n\n'.repeat(48)}\n\n\`\`\`typescript\nconst round = ${index + 1}\nconsole.log(round)\n\`\`\``, timestamp: index * 2 + 2 },
+      ]).flat() : [], lastMessageAt: Date.now(), isProcessing: false, permissionMode: 'safe' },
     { id: 'pro-worker', name: 'A 成本资料读取', workMode: 'PRO', executionRootSessionId: 'pro-root', parentSessionId: 'pro-root', taskNodeId: 'a', hidden: true, workspaceId: base.activeWorkspaceId!, workspaceName: 'Playground', messages: [{ id: 'a', role: 'assistant', content: 'A 两年成本为 1000000 元，B 的成本口径仍待核实。[参考来源](https://example.com/costs)', timestamp: Date.now() }], lastMessageAt: Date.now(), isProcessing: false, hasUnread: true, permissionMode: 'safe' },
-  ] as Session[], [base.activeWorkspaceId, dagHistory])
+  ] as Session[], [base.activeWorkspaceId, dagHistory, longHistory])
   React.useEffect(() => {
     const previousTaskAPI = { getTask: window.electronAPI.getTask, onTaskRunChanged: window.electronAPI.onTaskRunChanged }
     setMetadata(new Map(sessions.map(session => [session.id, extractSessionMeta(session)])))
@@ -161,6 +168,8 @@ function WorkModePreview({ compactTopBar = false, compactInput = false, dagHisto
     setOptions(previous => new Map(previous).set(id, { ...defaultSessionOptions, ...previous.get(id), ...updates }))
   }, [])
   const context = { ...base, isCompactMode: compactInput, sessionOptions: options, onSessionOptionsChange,
+    ...(longHistory ? { sessionListSearchQuery: historySearch, isSearchModeActive: !!historySearch,
+      chatDisplayRef: historyChatRef, onChatMatchInfoChange: setMatchInfo } : {}),
     llmConnections: [{ slug: 'preview', name: '原有模型', providerType: 'pi', authType: 'api_key', defaultModel: 'original-model', isDefault: true, models: ['original-model'] }] as typeof base.llmConnections,
     getDraft: (id: string) => drafts.current.get(id) ?? '',
     onInputChange: (id: string, text: string) => { drafts.current.set(id, text) },
@@ -188,6 +197,21 @@ function WorkModePreview({ compactTopBar = false, compactInput = false, dagHisto
           afterWorkspace={<BoardListToggle className={compactTopBar ? '[&_svg]:hidden' : undefined} value={mode} onChange={switchMode} />} />
       </div>
       <button type="button" className="self-end px-4 py-1 text-xs text-muted-foreground" onClick={() => select('pro-worker')}>打开 PRO 子会话深链接</button>
+      {longHistory && <div className="flex items-center gap-3 px-4 py-2 text-xs" data-long-history-controls>
+        <button type="button" onClick={() => select('pro-root')}>打开长对话</button>
+        <input aria-label="搜索长对话" value={historySearch} onChange={event => setHistorySearch(event.target.value)} className="bg-transparent outline-none" />
+        <button type="button" onClick={() => historyChatRef.current?.goToPrevMatch()}>上一处</button>
+        <button type="button" onClick={() => historyChatRef.current?.goToNextMatch()}>下一处</button>
+        <span data-history-match-count={matchInfo.count} data-history-match-index={matchInfo.index}>命中 {matchInfo.count}，位置 {matchInfo.index}</span>
+        <button type="button" onClick={() => setPro(previous => previous ? { ...previous, messages: [...previous.messages,
+          { id: `append-user-${previous.messages.length}`, role: 'user', content: '追加消息', timestamp: Date.now() },
+          { id: `append-answer-${previous.messages.length}`, role: 'assistant', content: '新的回复仍应跟随底部。', timestamp: Date.now() + 1 },
+        ] } : previous)}>追加一轮消息</button>
+        <button type="button" onClick={() => setPro(previous => previous ? { ...previous, isProcessing: true,
+          messages: previous.messages.map((message, index) => index === previous.messages.length - 1
+            ? { ...message, content: message.content + '\n\n新的流式段落继续增长。\n\n'.repeat(12) } : message),
+        } : previous)}>延长当前回复</button>
+      </div>}
       <div className="flex min-h-0 flex-1">
         <div className="w-64 shrink-0 border-r border-border" data-work-mode-list data-work-mode-transition="list">
           <PanelHeader title={t('sidebar.allSessions')} titleAlign="start" />
@@ -200,6 +224,10 @@ function WorkModePreview({ compactTopBar = false, compactInput = false, dagHisto
   </SessionListProvider></NavigationProvider></ModalProvider></DismissibleLayerProvider></FocusProvider></ActionRegistryProvider></AppShellProvider>
 }
 export const workModeComponents: ComponentEntry[] = [{
+  id: 'long-conversation-pagination', name: '长对话虚拟列表', category: 'Chat',
+  description: '120 轮含 Markdown 和代码的实际聊天组件，固定传输数据，不调用模型。', component: WorkModePreview,
+  props: [{ name: 'longHistory', control: { type: 'boolean' }, defaultValue: true }], layout: 'top',
+}, {
   id: 'subagent-progress', name: '子代理协作进度', category: 'Session List',
   description: '从折叠区点击子代理任务查看输出；固定预览数据，不调用模型。', component: SubagentProgressPreview,
   props: [{ name: 'status', control: { type: 'select', options: [{ label: '运行中', value: 'running' }, { label: '已完成', value: 'completed' }, { label: '失败', value: 'failed' }] }, defaultValue: 'running' }], layout: 'top',

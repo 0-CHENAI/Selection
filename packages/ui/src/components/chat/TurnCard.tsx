@@ -40,7 +40,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { Markdown } from '../markdown'
+import { MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { type IslandTransitionConfig } from '../ui'
@@ -2153,7 +2153,7 @@ export function ResponseCard({
   useEffect(() => {
     const root = contentLayerRef.current
     if (!root) {
-      setAnnotationOverlay({ rects: [], chips: [] })
+      setAnnotationOverlay(previous => previous.rects.length || previous.chips.length ? { rects: [], chips: [] } : previous)
       return
     }
 
@@ -2180,7 +2180,7 @@ export function ResponseCard({
       clearBlockAnnotationMarkers(root)
 
       if (!renderedAnnotations.length) {
-        setAnnotationOverlay({ rects: [], chips: [] })
+        setAnnotationOverlay(previous => previous.rects.length || previous.chips.length ? { rects: [], chips: [] } : previous)
         return
       }
 
@@ -2207,6 +2207,7 @@ export function ResponseCard({
     }
 
     recomputeOverlay()
+    if (!renderedAnnotations.length) return
     window.addEventListener('resize', scheduleCoordsRecompute)
     // Capture-phase: scroll events don't bubble, but capture-phase listeners on
     // ancestors fire for descendant scrolls — so this catches the overflow-auto
@@ -2849,7 +2850,7 @@ export function ResponseCard({
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
-              <Markdown
+              <MemoizedMarkdown
                 id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
                 isStreaming={presentationStreaming && variant === 'response'}
                 revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
@@ -2858,7 +2859,7 @@ export function ResponseCard({
                 onFileClick={onOpenFile}
               >
                 {bodyText}
-              </Markdown>
+              </MemoizedMarkdown>
               {annotationOverlayLayer}
             </div>
           </div>
