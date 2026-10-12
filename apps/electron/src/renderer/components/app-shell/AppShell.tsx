@@ -65,7 +65,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { workModeViewAtom, workModeNavigationAtom } from '@/atoms/work-mode'
+import { workModeViewAtom } from '@/atoms/work-mode'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -285,8 +285,6 @@ function AppShellContent({
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
   const workModeView = useAtomValue(workModeViewAtom)
   const setWorkModeView = useSetAtom(workModeViewAtom)
-  const modeNavigation = useAtomValue(workModeNavigationAtom)
-  const setModeNavigation = useSetAtom(workModeNavigationAtom)
   const focusedWorkMode = sessionWorkModeView(focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined, sessionMetaMap)
   useEffect(() => {
     if (focusedWorkMode) setWorkModeView(focusedWorkMode)
@@ -1030,17 +1028,13 @@ function AppShellContent({
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
     if (mode === workModeView) { cancelWorkModeTransition(); return }
-    const scope = activeWorkspaceId ?? ''
-    const remembered = modeNavigation.get(`${scope}:${mode}`)
-    const target = remembered && sessionMetaMap.get(remembered)?.workMode === mode ? remembered : undefined
     await transitionWorkMode(() => {
-      setModeNavigation(previous => new Map(previous).set(`${scope}:${workModeView}`, focusedSessionId ?? null))
       setWorkModeView(mode)
       setSearchActive(false)
       setSearchQuery('')
-      navigate(routes.view.allSessions(target), target ? undefined : draftSessionNavigateOptions())
+      navigate(routes.view.allSessions(), draftSessionNavigateOptions())
     })
-  }, [workModeView, activeWorkspaceId, modeNavigation, focusedSessionId, setModeNavigation, setWorkModeView, sessionMetaMap])
+  }, [workModeView, setWorkModeView])
 
   useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
