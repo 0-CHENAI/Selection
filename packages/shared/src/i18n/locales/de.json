@@ -745,7 +745,7 @@
   "dialog.fullTakeover.acknowledge": "Ich kenne das Risiko und möchte fortfahren",
   "dialog.fullTakeover.confirm": "{{mode}} aktivieren",
   "dialog.fullTakeover.detail": "Nutze das nur, wenn du der aktuellen Aufgabe vertraust. Pro Workspace wird einmal gefragt.",
-  "dialog.fullTakeover.message": "Mit aktiviertem {{mode}} überspringt der Agent Bestätigungsschritte und kann mehr Aktionen direkt ausführen, darunter sensible Vorgänge, Dateiänderungen oder externe Befehle.",
+  "dialog.fullTakeover.message": "Wenn du {{mode}} aktivierst, überspringt der Agent Bestätigungsschritte und kann mehr Aktionen direkt ausführen, darunter sensible Vorgänge, Dateiänderungen oder externe Befehle.",
   "dialog.fullTakeover.title": "{{mode}} aktivieren?",
   "dialog.irreversible": "Diese Aktion kann nicht rückgängig gemacht werden.",
   "dialog.logoutConfirmation": "Bist du sicher, dass du dich abmelden möchtest?",

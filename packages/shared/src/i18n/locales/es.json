@@ -745,7 +745,7 @@
   "dialog.fullTakeover.acknowledge": "Entiendo el riesgo y quiero continuar",
   "dialog.fullTakeover.confirm": "Activar {{mode}}",
   "dialog.fullTakeover.detail": "Úsalo solo si confías en la tarea actual. Solo se pregunta una vez por espacio de trabajo.",
-  "dialog.fullTakeover.message": "Con {{mode}} activado, el agente reduce los pasos de confirmación y puede ejecutar directamente más operaciones, incluidas acciones sensibles, cambios en archivos o comandos externos.",
+  "dialog.fullTakeover.message": "Si activas el modo {{mode}}, el agente reduce los pasos de confirmación y puede ejecutar directamente más operaciones, incluidas acciones sensibles, cambios en archivos o comandos externos.",
   "dialog.fullTakeover.title": "¿Activar {{mode}}?",
   "dialog.irreversible": "Esta acción no se puede deshacer.",
   "dialog.logoutConfirmation": "¿Estás seguro de que quieres cerrar sesión?",

@@ -1,5 +1,4 @@
 import i18n from 'i18next'
-import { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/mode-types'
 import { confirmAction } from './confirmation'
 
 /**
@@ -68,15 +67,20 @@ const fullTakeoverConfirmation = createFullTakeoverConfirmation({
     (await window.electronAPI.getWorkspaceSettings(workspaceId))?.fullTakeoverAcknowledged === true,
   saveAcknowledged: (workspaceId) =>
     window.electronAPI.updateWorkspaceSetting(workspaceId, 'fullTakeoverAcknowledged', true),
-  ask: () => confirmAction(i18n.t('dialog.fullTakeover.message', { mode: PERMISSION_MODE_CONFIG['allow-all'].displayName }), {
-    title: i18n.t('dialog.fullTakeover.title', { mode: PERMISSION_MODE_CONFIG['allow-all'].displayName }),
-    detail: i18n.t('dialog.fullTakeover.detail'),
-    confirmLabel: i18n.t('dialog.fullTakeover.confirm', { mode: PERMISSION_MODE_CONFIG['allow-all'].displayName }),
-    cancelLabel: i18n.t('common.cancel'),
-    acknowledgeLabel: i18n.t('dialog.fullTakeover.acknowledge'),
-    warning: true,
-    destructive: false,
-  }),
+  ask: () => {
+    // Resolve the mode name through i18n, not PERMISSION_MODE_CONFIG: that config
+    // is internal and English-only (it would read "Full Takeover" in every locale).
+    const mode = i18n.t('mode.allow-all')
+    return confirmAction(i18n.t('dialog.fullTakeover.message', { mode }), {
+      title: i18n.t('dialog.fullTakeover.title', { mode }),
+      detail: i18n.t('dialog.fullTakeover.detail'),
+      confirmLabel: i18n.t('dialog.fullTakeover.confirm', { mode }),
+      cancelLabel: i18n.t('common.cancel'),
+      acknowledgeLabel: i18n.t('dialog.fullTakeover.acknowledge'),
+      warning: true,
+      destructive: false,
+    })
+  },
 })
 
 /**
