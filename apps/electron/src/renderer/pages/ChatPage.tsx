@@ -678,7 +678,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)
   const headerActions = (
     <div className="flex items-center gap-1.5">
-      {!canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
+      {/* "Work mode fixed" badge is for existing sessions that cannot hand over.
+          Drafts have no session yet; their mode is already shown by the top NORM / PRO switcher. */}
+      {!isDraft && !canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
         {currentWorkMode}
       </span>}
       {sessionHeaderActions}
