@@ -38,6 +38,7 @@ export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonPr
     ref,
   ) => {
     const buttonRef = useRef<HTMLButtonElement | null>(null)
+    const tooltipRef = useRef<HTMLSpanElement | null>(null)
     const tooltipId = useId()
     const [open, setOpen] = useState(false)
     const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
@@ -48,7 +49,7 @@ export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonPr
       setCoords(placeViewportTooltip(el.getBoundingClientRect(), {
         width: window.innerWidth,
         height: window.innerHeight,
-      }))
+      }, tooltipRef.current?.getBoundingClientRect()))
     }, [])
 
     const show = useCallback(() => {
@@ -65,9 +66,12 @@ export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonPr
       if (!open || !tooltip) return
       updatePosition()
       const onReposition = () => updatePosition()
+      const observer = new ResizeObserver(onReposition)
+      if (tooltipRef.current) observer.observe(tooltipRef.current)
       window.addEventListener('resize', onReposition)
       window.addEventListener('scroll', onReposition, true)
       return () => {
+        observer.disconnect()
         window.removeEventListener('resize', onReposition)
         window.removeEventListener('scroll', onReposition, true)
       }
@@ -122,11 +126,12 @@ export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonPr
         {button}
         {open && coords && typeof document !== 'undefined' && createPortal(
           <span
+            ref={tooltipRef}
             id={tooltipId}
             role="tooltip"
             data-testid="header-icon-tooltip"
             className={cn(
-              "z-tooltip pointer-events-none fixed -translate-x-1/2 whitespace-nowrap",
+              "z-tooltip pointer-events-none fixed -translate-x-1/2 w-max max-w-[calc(100vw-16px)] whitespace-normal break-words",
               "overflow-hidden rounded-[8px] px-2.5 py-1.5 text-xs",
               "dark bg-background/80 backdrop-blur-xl backdrop-saturate-150 border border-border/50 text-foreground shadow-modal-small",
               "animate-in fade-in-0 duration-100",

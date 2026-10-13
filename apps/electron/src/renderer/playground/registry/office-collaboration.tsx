@@ -54,7 +54,7 @@ function OfficeCollaborationPreview() {
         <span data-office-qa-open-calls={openCalls}>预览调用 {openCalls}</span>
         <button type="button" onClick={() => void preview.open(sessionId, '', files)}>旧命令选择框</button>
       </div>
-      <div className="flex h-[520px] w-[800px] max-w-full min-w-0" data-office-chooser-layout>
+      <div className="flex h-[520px] w-[800px] max-w-full min-w-0 @container/office-layout" data-office-chooser-layout>
         <div className="flex min-w-0 flex-1 flex-col justify-end gap-3 rounded-xl bg-background p-4">
           <div className="text-sm text-muted-foreground">当前会话</div>
           <div className="flex justify-end"><OfficeCollaborationButton sessionId={sessionId} /></div>

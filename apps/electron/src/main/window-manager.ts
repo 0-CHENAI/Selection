@@ -8,6 +8,7 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import { trackWindowResize } from './window-resize'
 import { parseDeepLink } from './deep-link'
 import {
   getWindowsBackgroundMaterial,
@@ -269,6 +270,8 @@ export class WindowManager {
         webviewTag: false // Browser integration uses WebContentsView, not <webview>
       }
     })
+
+    trackWindowResize(window)
 
     // Show window when first paint is ready (faster perceived startup)
     window.once('ready-to-show', () => {

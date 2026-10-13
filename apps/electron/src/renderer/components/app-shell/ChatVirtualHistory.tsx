@@ -30,16 +30,17 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
 }, ref) {
   const listRef = React.useRef<HTMLDivElement>(null)
   const retainedKeys = React.useRef(new Set<string>())
-  const [geometry, setGeometry] = React.useState({ width: 680, margin: 0 })
-  const estimates = React.useMemo(() => turns.map(turn => estimateChatTurnHeight(turn, geometry.width)), [turns, geometry.width])
+  const [initialWidth] = React.useState(() => viewportRef.current?.clientWidth || 680)
+  const [scrollMargin, setScrollMargin] = React.useState(0)
+  const estimates = React.useMemo(() => turns.map(turn => estimateChatTurnHeight(turn, initialWidth)), [turns, initialWidth])
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: turns.length,
     getScrollElement: () => viewportRef.current,
     getItemKey: index => getTurnKey(turns[index]!, index),
     estimateSize: index => estimates[index]!,
-    initialRect: { width: geometry.width, height: viewportRef.current?.clientHeight || 600 },
+    initialRect: { width: initialWidth, height: viewportRef.current?.clientHeight || 600 },
     initialOffset: () => Math.max(0, estimates.reduce((sum, height) => sum + height, 0) - (viewportRef.current?.clientHeight || 600)),
-    scrollMargin: geometry.margin,
+    scrollMargin,
     overscan: 1,
     // Let React batch scroll work instead of synchronously committing long cards.
     useFlushSync: false,
@@ -68,9 +69,8 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
     const list = listRef.current, viewport = viewportRef.current
     if (!list || !viewport) return
     const measure = () => {
-      const width = list.clientWidth
       const margin = list.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop
-      setGeometry(previous => previous.width === width && Math.abs(previous.margin - margin) < 1 ? previous : { width, margin })
+      setScrollMargin(previous => Math.abs(previous - margin) < 1 ? previous : margin)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -79,14 +79,10 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
     return () => observer.disconnect()
   }, [viewportRef])
 
-  // A panel width change invalidates wrapping heights, but ordinary scrolling
-  // retains the measured cache and all previously visited rows.
-  const previousWidth = React.useRef(geometry.width)
-  React.useLayoutEffect(() => {
-    if (previousWidth.current === geometry.width) return
-    previousWidth.current = geometry.width
-    virtualizer.measure()
-  }, [geometry.width, virtualizer])
+  // Each mounted row already reports wrapping changes through measureElement's
+  // ResizeObserver. Clearing the entire cache on every width change throws away
+  // those measurements, changes the visible range and remounts expensive cards.
+  // Unvisited rows keep their estimates until they enter the viewport.
 
   React.useImperativeHandle(ref, () => ({
     scrollToTurn: index => virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' }),

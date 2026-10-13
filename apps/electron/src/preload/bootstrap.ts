@@ -40,6 +40,7 @@ import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from
 import type { RpcClient } from '@craft-agent/server-core/transport'
 import type { RemoteServerConfig } from '@craft-agent/core/types'
 import type { ElectronAPI } from '../shared/types'
+import { GET_WINDOW_RESIZE_STATE, WINDOW_RESIZE_STATE } from '../shared/window-resize'
 
 // ---------------------------------------------------------------------------
 // Client interface — common surface for both RoutedClient and WsRpcClient
@@ -196,6 +197,16 @@ const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailabl
 ;(api as ElectronAPI).onConfirmDialog = handler => confirmationBridge.register(handler)
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
+
+if (process.platform === 'darwin' || process.platform === 'win32') {
+  ;(api as ElectronAPI).onWindowResizeStateChange = callback => {
+    const handler = (_event: Electron.IpcRendererEvent, resizing: boolean) => callback(resizing)
+    ipcRenderer.on(WINDOW_RESIZE_STATE, handler)
+    // A preview mounted (or renderer reloaded) mid-gesture needs current state.
+    ipcRenderer.send(GET_WINDOW_RESIZE_STATE)
+    return () => ipcRenderer.removeListener(WINDOW_RESIZE_STATE, handler)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Transport connection state logging (for remote connections)

@@ -35,13 +35,23 @@ export function useSemanticReveal(
         if (played.size > 512) played.delete(played.values().next().value!)
       }
     }
-    controller.current = createSemanticReveal(root.current, admission.current.initial)
-    return () => controller.current?.dispose()
+    // Restored history needs neither geometry reads nor animation observers.
+    // If it later resumes streaming, the update effect creates a controller
+    // with animateInitial=false to seed existing text without replaying it.
+    if (admission.current.initial) controller.current = createSemanticReveal(root.current, true)
+    return () => {
+      controller.current?.dispose()
+      controller.current = undefined
+    }
     // Admission belongs to the message lifetime; content updates use the effect below.
   }, [root, identity])
   useBrowserLayoutEffect(() => {
     // A live response retains its admission through completion so the last
     // paragraph can finish fading. Restored history remains immediate.
-    controller.current?.update(streaming, streaming || sawLive.current || !!admission.current?.initial)
+    const enabled = streaming || sawLive.current || !!admission.current?.initial
+    if (enabled && !controller.current && root.current) {
+      controller.current = createSemanticReveal(root.current, !!admission.current?.initial)
+    }
+    controller.current?.update(streaming, enabled)
   }, [root, content, startTime, streaming, identity])
 }

@@ -38,13 +38,13 @@ export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHea
   const resizeTo = (width: number) => setWidthRatio(Math.min(maxWidth, Math.max(minWidth, width)) / Math.max(1, containerWidth))
   React.useEffect(() => {
     const element = layoutRef.current
-    if (!element) return
+    if (!element || !panelPresent) return
     const observer = new ResizeObserver(([entry]) => {
       if (entry) setContainerWidth(entry.contentRect.width)
     })
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [panelPresent])
   return (
     <SourcesPanelContext.Provider value={openSources}>
       <div ref={layoutRef} data-source-layout={panelPresent ? "open" : undefined} className="flex h-full min-h-0 min-w-0 overflow-x-auto">

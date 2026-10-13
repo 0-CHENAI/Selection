@@ -49,7 +49,11 @@ export function placeViewportTooltip(
   tooltipSize: { width: number; height: number } = DEFAULT_TOOLTIP_SIZE,
   gap = GAP,
 ): TooltipPlacement {
-  const left = trigger.left + trigger.width / 2
+  const halfWidth = Math.min(tooltipSize.width, Math.max(0, viewport.width - VIEWPORT_PAD * 2)) / 2
+  const left = Math.max(VIEWPORT_PAD + halfWidth, Math.min(
+    trigger.left + trigger.width / 2,
+    viewport.width - VIEWPORT_PAD - halfWidth,
+  ))
   const above = trigger.top - gap - tooltipSize.height
   if (above >= VIEWPORT_MARGIN_TOP) {
     return { left, top: above, placement: 'above' }

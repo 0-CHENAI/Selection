@@ -78,7 +78,7 @@ import { type SessionStatusId, type SessionStatus, statusConfigsToSessionStatuse
 import { useStatuses } from "@/hooks/useStatuses"
 import { useLabels } from "@/hooks/useLabels"
 import { useViews } from "@/hooks/useViews"
-import { useContainerWidth } from "@/hooks/useContainerWidth"
+import { useContainerBreakpoint } from "@/hooks/useContainerBreakpoint"
 import { findLabelById, sortLabelsForDisplay } from "@craft-agent/shared/labels"
 import { resolveEntityColor } from "@craft-agent/shared/colors"
 import * as storage from "@/lib/local-storage"
@@ -255,9 +255,8 @@ function AppShellContent({
   // and switches to single-panel mode. Works in both webui (narrow viewport) and
   // desktop (narrow window or small screen).
   const shellRef = useRef<HTMLDivElement>(null)
-  const shellWidth = useContainerWidth(shellRef)
   const MOBILE_THRESHOLD = 768
-  const isAutoCompact = shellWidth > 0 && shellWidth < MOBILE_THRESHOLD
+  const isAutoCompact = useContainerBreakpoint(shellRef, MOBILE_THRESHOLD)
 
   const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
 

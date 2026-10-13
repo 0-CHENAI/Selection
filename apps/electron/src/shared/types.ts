@@ -634,6 +634,8 @@ export interface ElectronAPI {
   onBadgeDrawWindows(callback: (data: { count: number }) => void): () => void
   getWindowFocusState(): Promise<boolean>
   onWindowFocusChange(callback: (isFocused: boolean) => void): () => void
+  /** Native resize gesture state, including the current state on subscription. macOS/Windows only. */
+  onWindowResizeStateChange?(callback: (isResizing: boolean) => void): () => void
   onNotificationNavigate(callback: (data: { workspaceId: string; sessionId: string }) => void): () => void
 
   // Theme preferences sync across windows

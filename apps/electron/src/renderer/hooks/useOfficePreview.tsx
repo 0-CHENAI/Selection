@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '../components/ui/alert-dialog'
 import { HeaderIconButton } from '../components/ui/HeaderIconButton'
 import { OfficePreviewPanel } from '../components/app-shell/OfficePreviewPanel'
+import { OfficePreviewFrame } from '../components/app-shell/OfficePreviewFrame'
 import { OfficePreviewLoading } from '../components/app-shell/OfficePreviewLoading'
 import { RADIUS_EDGE, RADIUS_INNER } from '../components/app-shell/panel-constants'
 
@@ -352,7 +353,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     {target.error && <p role="alert" className="px-4 pb-3 text-xs text-destructive">{target.error}</p>}
     <div className="relative flex min-h-0 flex-1 flex-col">
       {target.busy && !target.document && !target.error && <OfficePreviewLoading />}
-      {target.document && <iframe ref={element => { if (element) frames.current.set(key, element); else frames.current.delete(key) }} title={t('chat.officePreview.title')} sandbox="allow-scripts" srcDoc={target.document} style={{ pointerEvents: target.resuming ? 'none' : undefined }} aria-busy={target.resuming || undefined} className="min-h-0 w-full flex-1 border-0 bg-background" />}
+      {target.document && <OfficePreviewFrame ref={element => { if (element) frames.current.set(key, element); else frames.current.delete(key) }} title={t('chat.officePreview.title')} sandbox="allow-scripts" srcDoc={target.document} style={{ pointerEvents: target.resuming ? 'none' : undefined }} aria-busy={target.resuming || undefined} />}
       {target.resuming && target.document && <OfficePreviewLoading compact />}
       {target.preview?.isDraft && !target.resuming && <div role="status" className="pointer-events-none absolute inset-x-3 top-4 flex justify-center">
         <div className="flex max-w-full items-center gap-2.5 rounded-full bg-background/95 px-4 py-2.5 text-accent shadow-minimal ring-1 ring-border/50 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200">
@@ -360,7 +361,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
           <div className="min-w-0"><p className="text-xs font-medium">{t('chat.officePreview.draft')}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{t('chat.officePreview.draftHint')}</p></div>
         </div>
       </div>}
-      {target.preview && <div role="status" aria-atomic="true" aria-label={t('chat.officePreview.selectionCountLabel', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION })} className="pointer-events-none absolute inset-x-3 bottom-8 flex justify-center">
+      {target.preview && <div role="status" aria-atomic="true" aria-label={t('chat.officePreview.selectionCountLabel', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION })} className="pointer-events-none absolute inset-x-3 bottom-8 flex justify-center peer-data-[office-resizing=true]/office-viewport:hidden">
         <div className={`inline-flex items-center gap-2 rounded-full bg-background px-5 py-2.5 text-sm font-medium shadow-middle ring-1 ${target.count > OFFICE_PREVIEW_MAX_SELECTION ? 'text-destructive ring-destructive/30' : target.count > 0 ? 'text-accent ring-accent/25' : 'text-foreground ring-border'}`}>
           {target.busy ? <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" /> : <MousePointer2 aria-hidden="true" className="size-4" />}
           <span className="tabular-nums">{t('chat.officePreview.selectionCount', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION })}</span>
