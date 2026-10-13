@@ -1,11 +1,26 @@
-import { afterEach, expect, it, spyOn } from 'bun:test'
+import { afterAll, afterEach, expect, it, spyOn } from 'bun:test'
+import { mkdtempSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import * as config from '@craft-agent/shared/config'
 import { storedToMessage } from '@craft-agent/core/types'
-import { createSession, loadSession, saveSession, sessionPersistenceQueue } from '@craft-agent/shared/sessions'
-import { SessionManager, createManagedSession } from './SessionManager'
+
+// The tracked-test runner starts each file in a fresh process. Initialize a
+// disposable app config before importing modules that capture CONFIG_DIR.
+const configRoot = mkdtempSync(join(tmpdir(), 'branch-history-config-'))
+const previousConfigDir = process.env.CRAFT_CONFIG_DIR
+process.env.CRAFT_CONFIG_DIR = configRoot
+const config = await import('@craft-agent/shared/config')
+expect(config.CONFIG_DIR).toBe(configRoot)
+config.ensureConfigDir()
+const { createSession, loadSession, saveSession, sessionPersistenceQueue } = await import('@craft-agent/shared/sessions')
+const { SessionManager, createManagedSession } = await import('./SessionManager')
+
+afterAll(async () => {
+  if (previousConfigDir === undefined) delete process.env.CRAFT_CONFIG_DIR
+  else process.env.CRAFT_CONFIG_DIR = previousConfigDir
+  await rm(configRoot, { recursive: true, force: true })
+})
 
 const roots: string[] = []
 afterEach(async () => {
