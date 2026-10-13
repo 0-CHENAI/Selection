@@ -46,6 +46,8 @@ export interface WorkspaceConfig {
     enabledSourceSlugs?: string[]; // Sources to enable by default
     permissionMode?: PermissionMode; // Default permission mode ('safe', 'ask', 'allow-all')
     cyclablePermissionModes?: PermissionMode[]; // Which modes can be cycled with SHIFT+TAB (min 2, default: all 3)
+    /** User confirmed the Full Takeover risk warning once for this workspace; later switches don't ask again. */
+    fullTakeoverAcknowledged?: boolean;
     workingDirectory?: string;
     thinkingLevel?: ThinkingLevel; // Default thinking level for new sessions (default: 'medium')
     colorTheme?: string; // Color theme override for this workspace (preset ID). Undefined = inherit from app default.

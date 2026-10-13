@@ -934,10 +934,11 @@ export function FreeFormInput({
         draftInput,
       })
 
-      // Switch to allow-all (Auto) mode if in Explore mode (allow execution without prompts)
-      // Only switch if currently in safe mode - if user is in 'ask' mode, respect their choice
+      // Approving a plan is consent to execute it, not to Full Takeover. Switch
+      // Explore -> Smart Approval only (routine work runs, risky actions still ask);
+      // if the user is already in another mode, respect their choice.
       if (permissionMode === 'safe') {
-        onPermissionModeChange?.('allow-all')
+        onPermissionModeChange?.('ask')
       }
 
       onSubmit(text, undefined)
@@ -961,9 +962,9 @@ export function FreeFormInput({
       const shouldIncludeDraft = e.detail?.includeDraftInput !== false
       const draftInputSnapshot = shouldIncludeDraft ? consumeInputDraftSnapshot() : ''
 
-      // Switch to allow-all (Auto) mode if in Explore mode
+      // Same as plain plan approval: elevate only to Smart Approval.
       if (permissionMode === 'safe') {
-        onPermissionModeChange?.('allow-all')
+        onPermissionModeChange?.('ask')
       }
 
       // Persist the pending plan execution state BEFORE sending /compact.

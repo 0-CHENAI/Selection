@@ -61,6 +61,7 @@ import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run-params'
 import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
+import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 
 
 function v3MigrationLines(spec: Record<string, unknown>, translate: (key: string, values?: Record<string, string>) => string): string[] {
@@ -1697,7 +1698,11 @@ function ExistingTaskEditor({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-[160px]">
                   {(['allow-all', 'ask', 'safe'] as const).map((m) => (
-                    <DropdownMenuItem key={m} className="text-xs" onSelect={() => { setPermissionMode(m); markFormChanged() }}>
+                    <DropdownMenuItem key={m} className="text-xs" onSelect={async () => {
+                      // Task runs execute unattended, so Full Takeover asks for risk confirmation once per workspace.
+                      if (!(await confirmPermissionModeChange(m, permissionMode, workspaceId))) return
+                      setPermissionMode(m); markFormChanged()
+                    }}>
                       <span className="truncate">{t(`mode.${m}`)}</span>
                       {permissionMode === m && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                     </DropdownMenuItem>

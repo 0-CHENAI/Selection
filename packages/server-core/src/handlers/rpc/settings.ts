@@ -144,6 +144,7 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
       model: config?.defaults?.model,
       permissionMode: config?.defaults?.permissionMode,
       cyclablePermissionModes: config?.defaults?.cyclablePermissionModes,
+      fullTakeoverAcknowledged: config?.defaults?.fullTakeoverAcknowledged === true,
       thinkingLevel: normalizeThinkingLevel(config?.defaults?.thinkingLevel),
       workingDirectory: config?.defaults?.workingDirectory,
       localMcpEnabled: config?.localMcpServers?.enabled ?? true,
@@ -157,10 +158,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     const workspace = getWorkspaceOrThrow(workspaceId)
     const normalizedValue = key === 'workingDirectory' && typeof value === 'string'
       ? value.trim()
-      : value
+      : key === 'fullTakeoverAcknowledged'
+        ? value === true
+        : value
 
     // Validate key is a known workspace setting
-    const validKeys = ['name', 'model', 'enabledSourceSlugs', 'permissionMode', 'cyclablePermissionModes', 'thinkingLevel', 'workingDirectory', 'localMcpEnabled', 'defaultLlmConnection']
+    const validKeys = ['name', 'model', 'enabledSourceSlugs', 'permissionMode', 'cyclablePermissionModes', 'fullTakeoverAcknowledged', 'thinkingLevel', 'workingDirectory', 'localMcpEnabled', 'defaultLlmConnection']
     if (!validKeys.includes(key)) {
       throw new Error(`Invalid workspace setting key: ${key}. Valid keys: ${validKeys.join(', ')}`)
     }

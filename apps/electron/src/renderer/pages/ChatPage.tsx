@@ -49,6 +49,8 @@ import { projectsAtom } from '@/atoms/projects'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import { constrainThinkingLevel, modelThinkingLevels, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getSessionTitle } from '@/utils/session'
+import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
+import type { PermissionMode } from '../../shared/types'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable, connectionModelIdsMatch } from '@config/llm-connections'
 
@@ -360,6 +362,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     })
     return () => { cancelled = true }
   }, [isDraft, activeWorkspaceId, optionsSessionId, draftComposer.hydrated, setDraftComposer, setPermissionMode, setOption, sessionOpts.permissionMode, draftStore])
+
+  // User-initiated mode changes only (badge, compact selector, plan approval).
+  // Switching into Full Takeover asks for risk confirmation once per workspace.
+  const handlePermissionModeChange = React.useCallback(async (mode: PermissionMode) => {
+    if (!(await confirmPermissionModeChange(mode, sessionOpts.permissionMode, activeWorkspaceId))) return
+    setPermissionMode(mode)
+  }, [sessionOpts.permissionMode, activeWorkspaceId, setPermissionMode])
 
   const handleThinkingLevelChange = React.useCallback((level: ThinkingLevel) => {
     if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))
@@ -868,7 +877,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
                   onThinkingLevelChange={handleThinkingLevelChange}
                   permissionMode={sessionOpts.permissionMode}
-                  onPermissionModeChange={setPermissionMode}
+                  onPermissionModeChange={handlePermissionModeChange}
                   enabledModes={enabledModes}
                   inputValue={inputValue}
                   onInputChange={handleInputChange}
@@ -960,7 +969,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
               onThinkingLevelChange={handleThinkingLevelChange}
               permissionMode={sessionOpts.permissionMode}
-              onPermissionModeChange={setPermissionMode}
+              onPermissionModeChange={handlePermissionModeChange}
               enabledModes={enabledModes}
               inputValue={inputValue}
               onInputChange={handleInputChange}

@@ -1072,6 +1072,8 @@ export interface WorkspaceSettings {
   model?: string
   permissionMode?: PermissionMode
   cyclablePermissionModes?: PermissionMode[]
+  /** Full Takeover risk warning already confirmed for this workspace. */
+  fullTakeoverAcknowledged?: boolean
   thinkingLevel?: ThinkingLevel
   workingDirectory?: string
   localMcpEnabled?: boolean

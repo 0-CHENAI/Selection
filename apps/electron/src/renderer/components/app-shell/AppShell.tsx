@@ -64,6 +64,7 @@ import { useFocusContext } from "@/context/FocusContext"
 import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
+import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
@@ -735,7 +736,7 @@ function AppShellContent({
     dispatchFocusInputEvent({ sessionId: targetSessionId })
   }, [])
 
-  useAction('chat.cyclePermissionMode', () => {
+  useAction('chat.cyclePermissionMode', async () => {
     if (effectiveSessionId) {
       const currentOptions = contextValue.sessionOptions.get(effectiveSessionId)
       const currentMode = currentOptions?.permissionMode ?? 'ask'
@@ -744,7 +745,15 @@ function AppShellContent({
       const currentIndex = modes.indexOf(currentMode)
       // If current mode not in enabled list, jump to first enabled mode
       const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % modes.length
-      const nextMode = modes[nextIndex]
+      let nextMode = modes[nextIndex]
+      if (!nextMode) return
+      // Cycling into Full Takeover asks for risk confirmation once per workspace.
+      // If declined, skip past it so repeated Shift+Tab keeps cycling instead of
+      // reopening the dialog.
+      if (!(await confirmPermissionModeChange(nextMode, currentMode, activeWorkspaceId))) {
+        nextMode = modes[(nextIndex + 1) % modes.length]
+        if (!nextMode || nextMode === 'allow-all' || nextMode === currentMode) return
+      }
       contextValue.onSessionOptionsChange(effectiveSessionId, { permissionMode: nextMode })
     }
   })

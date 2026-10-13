@@ -29,6 +29,7 @@ import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { toast } from 'sonner'
+import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 
 import {
@@ -245,10 +246,13 @@ export default function WorkspaceSettingsPage() {
   // Workspace settings handlers
   const handlePermissionModeChange = useCallback(
     async (newMode: PermissionMode) => {
+      // Only user-driven selects reach here (the load effect sets state directly).
+      // Switching into Full Takeover asks for risk confirmation once per workspace.
+      if (!(await confirmPermissionModeChange(newMode, permissionMode, activeWorkspaceId))) return
       setPermissionMode(newMode)
       await updateWorkspaceSetting('permissionMode', newMode)
     },
-    [updateWorkspaceSetting]
+    [updateWorkspaceSetting, permissionMode, activeWorkspaceId]
   )
 
   const handleWorkingDirectorySelected = useCallback(async (selectedPath: string) => {

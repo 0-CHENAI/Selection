@@ -9,6 +9,10 @@ export interface ConfirmationRequest {
   cancelLabel: string
   destructive: boolean
   returnFocus: HTMLElement | null
+  /** When set, a checkbox with this label must be ticked before Confirm is enabled. */
+  acknowledgeLabel?: string
+  /** Show a warning icon beside the message (risk confirmations). */
+  warning?: boolean
 }
 
 export function createConfirmationController() {

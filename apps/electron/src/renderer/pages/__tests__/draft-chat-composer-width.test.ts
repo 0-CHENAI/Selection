@@ -19,7 +19,8 @@ describe('draft chat composer width', () => {
     expect(chatDisplay).toContain('CHAT_CLASSES.recordRailGrid')
     expect(chatDisplay).toContain('CHAT_CLASSES.recordRailContent')
     expect(chatDisplay).toContain('<ChatInputZone')
-    expect(chatPage).toContain('onPermissionModeChange={setPermissionMode}')
+    // Mode changes go through the Full Takeover risk gate before reaching state.
+    expect(chatPage).toContain('onPermissionModeChange={handlePermissionModeChange}')
     expect(chatPage).toContain("onSwarmEnabledChange={undefined}")
     expect(chatPage).toContain('onWorkingDirectoryChange={handleWorkingDirectoryChange}')
     expect(chatPage).toContain('onSourcesChange={handleSourcesChange}')
