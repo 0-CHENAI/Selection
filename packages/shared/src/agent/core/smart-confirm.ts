@@ -1,5 +1,5 @@
 /**
- * Smart confirmation rules for the `ask` permission mode ("智能确认").
+ * Smart confirmation rules for the `ask` permission mode ("Smart Approval" / 智能审批).
  *
  * Principle: reversible work that only touches the session's own folders runs
  * without a prompt; anything irreversible, outside those folders, sensitive, or

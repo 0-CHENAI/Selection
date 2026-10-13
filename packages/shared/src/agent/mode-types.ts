@@ -62,8 +62,8 @@ export function toCanonicalPermissionMode(mode: PermissionMode): PermissionModeC
  * Parse user-facing mode names into internal mode keys.
  *
  * Accepts canonical values (explore/ask/execute) and legacy aliases
- * (safe/allow-all, ask-to-edit) for backward compatibility. `smart-confirm` is
- * the current user-facing name of `ask`.
+ * (safe/allow-all, ask-to-edit, smart-confirm) for backward compatibility.
+ * `smart-approval` is the current user-facing name of `ask`.
  */
 export function parsePermissionMode(mode: string): PermissionMode | null {
   const normalized = mode.trim().toLowerCase();
@@ -76,6 +76,7 @@ export function parsePermissionMode(mode: string): PermissionMode | null {
   if (normalized === 'execute') return 'allow-all';
   if (normalized === 'ask-to-edit' || normalized === 'ask_to_edit' || normalized === 'ask to edit') return 'ask';
   if (normalized === 'smart-confirm' || normalized === 'smart_confirm' || normalized === 'smart confirm') return 'ask';
+  if (normalized === 'smart-approval' || normalized === 'smart_approval' || normalized === 'smart approval') return 'ask';
 
   return null;
 }
@@ -316,11 +317,11 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
     },
   },
   'ask': {
-    displayName: 'Smart Confirm',
-    shortName: 'Smart Confirm',
-    description: 'Runs low-risk work automatically; asks before risky actions.',
-    // Info icon from Lucide
-    svgPath: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 8v4m0 4h.01',
+    displayName: 'Smart Approval',
+    shortName: 'Smart Approval',
+    description: 'Runs low-risk work automatically; risky actions need your approval.',
+    // Shield-check icon from Lucide (lucide-react v0.561.0): guarded, but proceeds
+    svgPath: 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z M9 12l2 2 4-4',
     colorClass: {
       text: 'text-info',
       bg: 'bg-info',

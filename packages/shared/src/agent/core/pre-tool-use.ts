@@ -1135,7 +1135,7 @@ function wrapCommandForMacAdminPrompt(command: string): string {
 }
 
 /**
- * Determine if user approval is needed in 'ask' mode ("Smart Confirm").
+ * Determine if user approval is needed in 'ask' mode ("Smart Approval").
  *
  * Returns prompt info if user should be asked, null if auto-allowed.
  * This is the single source of truth for ask-mode decisions across all agents.

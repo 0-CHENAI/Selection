@@ -1,5 +1,5 @@
 /**
- * End-to-end ask-mode ("Smart Confirm") decisions through the real
+ * End-to-end ask-mode ("Smart Approval") decisions through the real
  * shouldPromptInAskMode: real bundled permissions config, real
  * PermissionManager approvals, real temp folders.
  */
@@ -53,7 +53,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('Smart Confirm (ask mode) end to end', () => {
+describe('Smart Approval (ask mode) end to end', () => {
   it('runs project edits and routine commands without prompting', () => {
     expect(ask('Write', { file_path: join(project, 'src', 'a.ts'), content: 'x' })).toBeNull();
     expect(ask('Edit', { file_path: join(project, 'README.md') })).toBeNull();

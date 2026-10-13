@@ -22,7 +22,7 @@ function createConfig(workspaceRootPath: string): BackendConfig {
 
 // Regression: PiAgent used to ignore the "Always allow" flag, so the same
 // command prompted again every time.
-describe('PiAgent "Always allow" in Smart Confirm mode', () => {
+describe('PiAgent "Always allow" in Smart Approval mode', () => {
   let root: string
   let previousConfigDir: string | undefined
   let agent: PiAgent

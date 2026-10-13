@@ -183,7 +183,7 @@ DevTools opens automatically (configured in `index.ts`). Remove `mainWindow.webC
 - **AI-generated titles** - Sessions get automatic titles after first exchange
 - **Subagent support** - Load and apply agent definitions from Craft documents
 - **Shell integration** - Open URLs in browser, open files in default apps
-- **Permission modes** - Three-level permission system (Explore, Smart Confirm, Auto)
+- **Permission modes** - Three-level permission system (Explore, Smart Approval, Auto)
 - **Background tasks** - Run long-running tasks in background with progress tracking
 - **Multi-file diff** - VS Code-style window for viewing all file changes in a turn
 - **Dynamic statuses** - Workspace-customizable session workflow states
