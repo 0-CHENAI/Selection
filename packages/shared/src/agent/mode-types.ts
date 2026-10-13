@@ -62,7 +62,8 @@ export function toCanonicalPermissionMode(mode: PermissionMode): PermissionModeC
  * Parse user-facing mode names into internal mode keys.
  *
  * Accepts canonical values (explore/ask/execute) and legacy aliases
- * (safe/allow-all, ask-to-edit) for backward compatibility.
+ * (safe/allow-all, ask-to-edit) for backward compatibility. `smart-confirm` is
+ * the current user-facing name of `ask`.
  */
 export function parsePermissionMode(mode: string): PermissionMode | null {
   const normalized = mode.trim().toLowerCase();
@@ -74,6 +75,7 @@ export function parsePermissionMode(mode: string): PermissionMode | null {
   if (normalized === 'explore') return 'safe';
   if (normalized === 'execute') return 'allow-all';
   if (normalized === 'ask-to-edit' || normalized === 'ask_to_edit' || normalized === 'ask to edit') return 'ask';
+  if (normalized === 'smart-confirm' || normalized === 'smart_confirm' || normalized === 'smart confirm') return 'ask';
 
   return null;
 }
@@ -314,9 +316,9 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
     },
   },
   'ask': {
-    displayName: 'Ask to Edit',
-    shortName: 'Ask to Edit',
-    description: 'Ask before making any edits.',
+    displayName: 'Smart Confirm',
+    shortName: 'Smart Confirm',
+    description: 'Runs low-risk work automatically; asks before risky actions.',
     // Info icon from Lucide
     svgPath: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 8v4m0 4h.01',
     colorClass: {

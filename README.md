@@ -93,7 +93,7 @@ bun run electron:start
 - **Multi-Provider Support**: Run sessions with Google AI Studio, ChatGPT Plus, GitHub Copilot, OpenAI API keys, Bedrock, or OpenAI Compatible endpoints
 - **Craft MCP Integration**: Access to 32+ Craft document tools (blocks, collections, search, tasks)
 - **Sources**: Connect to MCP servers, REST APIs (Google, Slack, Microsoft), and local filesystems
-- **Permission Modes**: Three-level system (Explore, Ask to Edit, Auto) with customizable rules
+- **Permission Modes**: Three-level system (Explore, Smart Confirm, Auto) with customizable rules
 - **Background Tasks**: Run long-running operations with progress tracking
 - **Dynamic Status System**: Customizable session workflow states (Todo, In Progress, Done, etc.)
 - **Theme System**: Cascading themes at app and workspace levels
@@ -135,7 +135,7 @@ Connect external data sources to your workspace:
 | Mode | Display | Behavior |
 |------|---------|----------|
 | `safe` | Explore | Read-only, blocks all write operations |
-| `ask` | Ask to Edit | Prompts for approval (default) |
+| `ask` | Smart Confirm | Runs low-risk work automatically, asks before risky actions (default) |
 | `allow-all` | Auto | Auto-approves all commands |
 
 Use **SHIFT+TAB** to cycle through modes in the chat interface.

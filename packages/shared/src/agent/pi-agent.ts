@@ -331,6 +331,8 @@ export class PiAgent extends BaseAgent {
   private pendingPermissions: Map<string, {
     resolve: (allowed: boolean) => void;
     toolName: string;
+    /** Smart-confirm approval key recorded on "Always allow" (absent = not rememberable). */
+    rememberKey?: string;
   }> = new Map();
 
   // One-shot host tokens bound to the exact feedback text shown in the permission UI.
@@ -1745,6 +1747,7 @@ export class PiAgent extends BaseAgent {
         this.pendingPermissions.set(permRequestId, {
           resolve,
           toolName,
+          rememberKey: result.rememberKey,
         });
       });
 
@@ -2890,10 +2893,16 @@ export class PiAgent extends BaseAgent {
    * Respond to a pending permission request.
    * Permission checking now happens in the main process, so this resolves locally.
    */
-  respondToPermission(requestId: string, allowed: boolean, _alwaysAllow?: boolean): void {
+  respondToPermission(requestId: string, allowed: boolean, alwaysAllow?: boolean): void {
     const pending = this.pendingPermissions.get(requestId);
     if (pending) {
       this.pendingPermissions.delete(requestId);
+      // "Always allow" remembers only this exact command / directory / tool for
+      // the rest of the session (see smart-confirm rememberKeys).
+      if (allowed && alwaysAllow && pending.rememberKey) {
+        this.permissionManager.rememberApproval(pending.rememberKey);
+        this.debug(`Remembered approval for session: ${pending.rememberKey}`);
+      }
       pending.resolve(allowed);
     }
   }

@@ -20,7 +20,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { expandPath } from '../../utils/paths.ts';
 import { resolveBundledOfficecliSkillRead } from '../../utils/officecli.ts';
 import {
@@ -51,6 +51,13 @@ import {
 } from '../mode-manager.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
 import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
+import {
+  classifyFileWrite,
+  isAutoApprovableBashCommand,
+  rememberKeys,
+  resolveTrustedZones,
+  type TrustedZones,
+} from './smart-confirm.ts';
 
 // ============================================================
 // TYPES
@@ -616,6 +623,8 @@ export type PreToolUseCheckResult =
       rememberForMinutes?: number;
       commandHash?: string;
       approvalTtlSeconds?: number;
+      /** Session approval key recorded when the user picks "Always allow". */
+      rememberKey?: string;
     }
   | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean; additionalSourceSlugs?: string[] }
   | {
@@ -676,6 +685,8 @@ export interface PreToolUseInput {
  * This keeps the pipeline testable without importing the full PermissionManager.
  */
 export interface PermissionManagerLike {
+  /** Exact-match approvals recorded via "Always allow" (smart-confirm keys). */
+  isApprovalRemembered?(key: string): boolean;
   isCommandWhitelisted(command: string): boolean;
   isDangerousCommand(command: string): boolean;
   getBaseCommand(command: string): string;
@@ -945,6 +956,11 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
       permissionsContext,
       plansFolderPath,
       onDebug,
+      {
+        workingDirectory,
+        // plans/ lives directly under the session folder.
+        sessionFolder: plansFolderPath ? dirname(plansFolderPath) : undefined,
+      },
     );
     if (promptInfo) {
       const adminWrappedInput =
@@ -968,6 +984,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
         rememberForMinutes: promptInfo.rememberForMinutes,
         commandHash: promptInfo.commandHash,
         approvalTtlSeconds: promptInfo.approvalTtlSeconds,
+        rememberKey: promptInfo.rememberKey,
       };
     }
   }
@@ -996,7 +1013,26 @@ interface PromptInfo {
   rememberForMinutes?: number;
   commandHash?: string;
   approvalTtlSeconds?: number;
+  rememberKey?: string;
 }
+
+/** Folders that bound smart confirmation; see smart-confirm.ts. */
+export interface SmartConfirmContext {
+  /** Session working directory (also the base for relative paths). */
+  workingDirectory?: string;
+  /** Session-owned folder; writes there never prompt. */
+  sessionFolder?: string;
+}
+
+function isRemembered(permissionManager: PermissionManagerLike, key: string): boolean {
+  return permissionManager.isApprovalRemembered?.(key) ?? false;
+}
+
+const FILE_WRITE_REASON_TEXT = {
+  sensitive: 'sensitive file',
+  outside_zone: 'outside the working directory',
+  unknown_path: 'path could not be resolved',
+} as const;
 
 function hashCommand(command: string): string {
   return createHash('sha256').update(command, 'utf8').digest('hex');
@@ -1099,13 +1135,19 @@ function wrapCommandForMacAdminPrompt(command: string): string {
 }
 
 /**
- * Determine if user approval is needed in 'ask' mode.
+ * Determine if user approval is needed in 'ask' mode ("Smart Confirm").
  *
  * Returns prompt info if user should be asked, null if auto-allowed.
  * This is the single source of truth for ask-mode decisions across all agents.
  * `shouldAllowToolInMode()` always returns `{allowed: true}` in ask mode, so
  * the prompt decision lives here rather than being inferred from a permission
  * check.
+ *
+ * Reversible work inside the session's own folders runs without a prompt;
+ * writes elsewhere, sensitive files, irreversible or unrecognised commands,
+ * and external side effects (MCP / API mutations) still ask. Without a
+ * `smartContext` nothing is treated as trusted, so every write and every
+ * non-read-only command prompts.
  */
 export function shouldPromptInAskMode(
   toolName: string,
@@ -1114,30 +1156,43 @@ export function shouldPromptInAskMode(
   permissionsContext: PermissionsContext,
   plansFolderPath?: string,
   onDebug?: (message: string) => void,
+  smartContext: SmartConfirmContext = {},
 ): PromptInfo | null {
 
   if (isDeveloperFeedbackTool(toolName)) {
     return developerFeedbackPrompt(toolName, input);
   }
 
+  let zones: TrustedZones | undefined;
+  const getZones = (): TrustedZones => {
+    zones ??= resolveTrustedZones(smartContext.workingDirectory, smartContext.sessionFolder);
+    return zones;
+  };
+
   // --- File writes ---
   if (FILE_WRITE_TOOLS.has(toolName)) {
-    if (permissionManager.isCommandWhitelisted(toolName)) {
-      onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
+    const filePath = (input.file_path as string) || (input.notebook_path as string) || '';
+    const decision = classifyFileWrite(
+      filePath,
+      getZones(),
+      smartContext.workingDirectory,
+      key => isRemembered(permissionManager, key),
+    );
+    if (decision.autoAllow) {
+      onDebug?.(`Smart confirm: auto-allowing ${toolName} to "${filePath}"`);
       return null;
     }
-    const filePath = (input.file_path as string) || (input.notebook_path as string) || 'unknown';
     return {
       promptType: 'file_write',
-      description: `${toolName}: ${filePath}`,
-      command: filePath,
+      description: `${toolName}: ${filePath || 'unknown'} (${FILE_WRITE_REASON_TEXT[decision.reason]})`,
+      command: decision.resolvedPath ?? (filePath || 'unknown'),
+      rememberKey: decision.rememberKey,
     };
   }
 
   // --- Bash commands ---
   if (toolName === 'Bash') {
     const command = typeof input.command === 'string' ? input.command : '';
-    const baseCommand = permissionManager.getBaseCommand(command);
 
     const adminPrompt = classifyAdminApproval(command);
     if (adminPrompt) {
@@ -1148,30 +1203,28 @@ export function shouldPromptInAskMode(
     // (same pipeline as Explore mode — catches redirects, substitutions, pipes to write commands)
     const mergedConfig = permissionsConfigCache.getMergedConfig(permissionsContext);
     if (isReadOnlyBashCommandWithConfig(command, mergedConfig)) {
-      onDebug?.(`Auto-allowing read-only command: ${baseCommand}`);
+      onDebug?.(`Auto-allowing read-only command: ${permissionManager.getBaseCommand(command)}`);
       return null;
     }
 
-    // Check session whitelist (not dangerous)
-    if (permissionManager.isCommandWhitelisted(baseCommand) &&
-        !permissionManager.isDangerousCommand(baseCommand)) {
-      onDebug?.(`Auto-allowing "${baseCommand}" (previously approved)`);
+    // "Always allow" remembers the exact command, never the base command:
+    // approving `rm -rf build` must not approve every `rm`.
+    const rememberKey = rememberKeys.bash(command);
+    if (isRemembered(permissionManager, rememberKey)) {
+      onDebug?.('Auto-allowing previously approved command');
       return null;
     }
 
-    // Check domain whitelist for curl/wget
-    if (['curl', 'wget'].includes(baseCommand)) {
-      const domain = permissionManager.extractDomainFromNetworkCommand(command);
-      if (domain && permissionManager.isDomainWhitelisted(domain)) {
-        onDebug?.(`Auto-allowing ${baseCommand} to "${domain}" (domain whitelisted)`);
-        return null;
-      }
+    if (isAutoApprovableBashCommand(command, mergedConfig.readOnlyBashPatterns, getZones())) {
+      onDebug?.(`Smart confirm: auto-allowing routine command: ${command}`);
+      return null;
     }
 
     return {
       promptType: 'bash',
       description: `Execute: ${command}`,
       command,
+      rememberKey,
     };
   }
 
@@ -1183,7 +1236,7 @@ export function shouldPromptInAskMode(
       toolName, input, 'safe', { plansFolderPath }
     );
     if (!safeModeResult.allowed) {
-      if (permissionManager.isCommandWhitelisted(toolName)) {
+      if (isRemembered(permissionManager, rememberKeys.tool(toolName)) || permissionManager.isCommandWhitelisted(toolName)) {
         onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
         return null;
       }
@@ -1191,6 +1244,7 @@ export function shouldPromptInAskMode(
         promptType: 'mcp_mutation',
         description: `Session tool: ${toolName}`,
         command: toolName,
+        rememberKey: rememberKeys.tool(toolName),
       };
     }
     return null;
@@ -1204,7 +1258,7 @@ export function shouldPromptInAskMode(
     );
     if (!safeModeResult.allowed) {
       // It's a mutation — check whitelist
-      if (permissionManager.isCommandWhitelisted(toolName)) {
+      if (isRemembered(permissionManager, rememberKeys.tool(toolName)) || permissionManager.isCommandWhitelisted(toolName)) {
         onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
         return null;
       }
@@ -1213,6 +1267,7 @@ export function shouldPromptInAskMode(
         promptType: 'mcp_mutation',
         description: `MCP: ${serverAndTool}`,
         command: toolName,
+        rememberKey: rememberKeys.tool(toolName),
       };
     }
     // Read-only MCP tool — no prompt needed
@@ -1234,7 +1289,7 @@ export function shouldPromptInAskMode(
       }
 
       // Check session whitelist
-      if (permissionManager.isCommandWhitelisted(apiDescription)) {
+      if (isRemembered(permissionManager, rememberKeys.api(`${toolName} ${apiDescription}`)) || permissionManager.isCommandWhitelisted(apiDescription)) {
         onDebug?.(`Auto-allowing API "${apiDescription}" (previously approved)`);
         return null;
       }
@@ -1243,6 +1298,7 @@ export function shouldPromptInAskMode(
         promptType: 'api_mutation',
         description: `API: ${apiDescription}`,
         command: apiDescription,
+        rememberKey: rememberKeys.api(`${toolName} ${apiDescription}`),
       };
     }
   }

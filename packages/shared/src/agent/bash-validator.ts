@@ -606,6 +606,67 @@ function getRedirectExplanation(op: string): string {
 }
 
 /**
+ * Parse a command into its simple commands (each as a word list) for callers
+ * that apply their own per-command policy, e.g. ask-mode smart confirmation.
+ *
+ * Fails closed: returns null when the command cannot be parsed or contains any
+ * construct whose effect is not visible from the words alone — unsafe
+ * redirects, command/process/parameter expansion, env-var prefixes,
+ * background execution, or control flow (if/for/while/function...).
+ * `&&`, `||`, `;`, pipelines and subshells are flattened.
+ */
+export function extractSimpleCommandsStrict(command: string): string[][] | null {
+  if (!command.trim() || hasControlCharacters(command)) return null;
+  let ast: ScriptNode;
+  try {
+    ast = bashParser(command) as ScriptNode;
+  } catch {
+    return null;
+  }
+  const out: string[][] = [];
+  const visit = (node: ASTNode): boolean => {
+    switch (node.type) {
+      case 'Script':
+        return (node as ScriptNode).commands.every(visit);
+      case 'CompoundList':
+        return (node as CompoundListNode).commands.every(visit);
+      case 'LogicalExpression': {
+        const n = node as LogicalExpressionNode;
+        return visit(n.left) && visit(n.right);
+      }
+      case 'Pipeline':
+        return (node as PipelineNode).commands.every(visit);
+      case 'Subshell':
+        return visit((node as SubshellNode).list);
+      case 'Command': {
+        const n = node as CommandNode;
+        if (n.async || !n.name) return false;
+        if (checkWordForExpansions(n.name)) return false;
+        const words = [n.name.text];
+        for (const item of [...(n.prefix ?? []), ...(n.suffix ?? [])]) {
+          if (item.type === 'Redirect') {
+            if (!isRedirectSafe(item as RedirectNode)) return false;
+          } else if (item.type === 'Word') {
+            const word = item as WordNode;
+            if (checkWordForExpansions(word)) return false;
+            if ((n.prefix ?? []).includes(item)) return false;
+            words.push(word.text);
+          } else {
+            // AssignmentWord (FOO=bar cmd) and anything unknown.
+            return false;
+          }
+        }
+        out.push(words);
+        return true;
+      }
+      default:
+        return false;
+    }
+  };
+  return visit(ast) ? out : null;
+}
+
+/**
  * Check if the command string contains dangerous control characters.
  *
  * Note: Newlines and carriage returns are NOT blocked here because bash-parser

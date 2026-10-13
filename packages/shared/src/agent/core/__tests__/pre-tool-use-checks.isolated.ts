@@ -1163,12 +1163,28 @@ describe('shouldPromptInAskMode', () => {
       expect(result!.description).toContain('/test/nb.ipynb');
     });
 
-    it('auto-allows whitelisted file write tools', () => {
+    it('does not treat a tool-name whitelist as approval for every write', () => {
+      // "Always allow" used to be keyed by tool name, which would have approved
+      // writes anywhere. Approvals are now scoped to a directory.
       pm = createMockPermissionManager({
         isCommandWhitelisted: (cmd) => cmd === 'Write',
       });
 
       const result = shouldPromptInAskMode('Write', { file_path: '/test/a.ts' }, pm, {
+        workspaceRootPath: '/test',
+        activeSourceSlugs: [],
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.rememberKey).toBe('write-dir:/test');
+    });
+
+    it('auto-allows writes under a remembered directory', () => {
+      pm = createMockPermissionManager({
+        isApprovalRemembered: (key) => key === 'write-dir:/test',
+      });
+
+      const result = shouldPromptInAskMode('Write', { file_path: '/test/sub/a.ts' }, pm, {
         workspaceRootPath: '/test',
         activeSourceSlugs: [],
       });
@@ -1216,19 +1232,33 @@ describe('shouldPromptInAskMode', () => {
       expect(result!.command).toBe('cat /etc/hosts > /tmp/test');
     });
 
-    it('auto-allows whitelisted non-dangerous commands', () => {
+    it('auto-allows a remembered exact command', () => {
       pm = createMockPermissionManager({
-        isCommandWhitelisted: (cmd) => cmd === 'npm',
-        isDangerousCommand: () => false,
+        isApprovalRemembered: (key) => key === 'bash:npm run e2e',
         getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
       });
 
-      const result = shouldPromptInAskMode('Bash', { command: 'npm test' }, pm, {
+      const result = shouldPromptInAskMode('Bash', { command: 'npm run e2e' }, pm, {
         workspaceRootPath: '/test',
         activeSourceSlugs: [],
       });
 
       expect(result).toBeNull();
+    });
+
+    it('remembering one command does not approve others with the same base command', () => {
+      pm = createMockPermissionManager({
+        isApprovalRemembered: (key) => key === 'bash:npm run e2e',
+        getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
+      });
+
+      const result = shouldPromptInAskMode('Bash', { command: 'npm publish' }, pm, {
+        workspaceRootPath: '/test',
+        activeSourceSlugs: [],
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.rememberKey).toBe('bash:npm publish');
     });
 
     it('still prompts for whitelisted dangerous commands', () => {
@@ -1247,7 +1277,7 @@ describe('shouldPromptInAskMode', () => {
       expect(result!.promptType).toBe('bash');
     });
 
-    it('auto-allows curl to whitelisted domain', () => {
+    it('prompts for curl even to a domain-whitelisted host (network commands can upload data)', () => {
       pm = createMockPermissionManager({
         getBaseCommand: (cmd) => cmd.split(/\s+/)[0] || cmd,
         extractDomainFromNetworkCommand: () => 'api.example.com',
@@ -1259,7 +1289,8 @@ describe('shouldPromptInAskMode', () => {
         activeSourceSlugs: [],
       });
 
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.promptType).toBe('bash');
     });
 
     it('prompts for curl to non-whitelisted domain', () => {

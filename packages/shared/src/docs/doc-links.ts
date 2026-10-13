@@ -71,7 +71,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/core-concepts/permissions',
     title: 'Permissions',
     summary:
-      'Control how much autonomy your agent has. Explore mode is read-only, Ask to Edit prompts before changes, and Execute mode runs without prompts.',
+      'Control how much autonomy your agent has. Explore mode is read-only, Smart Confirm runs low-risk work automatically and asks before risky actions, and Execute mode runs without prompts.',
   },
   labels: {
     path: '/labels/overview',

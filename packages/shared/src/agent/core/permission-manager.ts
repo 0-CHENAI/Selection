@@ -72,6 +72,8 @@ export class PermissionManager {
   // Session-scoped whitelists for "always allow" feature
   private alwaysAllowedCommands: Set<string> = new Set();
   private alwaysAllowedDomains: Set<string> = new Set();
+  /** Case-sensitive approval keys from "Always allow" (paths, exact commands). */
+  private rememberedApprovals: Set<string> = new Set();
 
   constructor(config: PermissionManagerConfig) {
     this.config = config;
@@ -366,12 +368,26 @@ export class PermissionManager {
   }
 
   /**
+   * Remember an approval for the rest of the session ("Always allow").
+   * Keys come from smart-confirm `rememberKeys` and are matched exactly
+   * (case-sensitive), so approving `rm -rf build` never approves `rm -rf Build`.
+   */
+  rememberApproval(key: string): void {
+    this.rememberedApprovals.add(key);
+  }
+
+  isApprovalRemembered(key: string): boolean {
+    return this.rememberedApprovals.has(key);
+  }
+
+  /**
    * Clear all session-scoped whitelists.
    * Called on session clear or dispose.
    */
   clearWhitelists(): void {
     this.alwaysAllowedCommands.clear();
     this.alwaysAllowedDomains.clear();
+    this.rememberedApprovals.clear();
   }
 
   /**

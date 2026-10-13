@@ -218,13 +218,13 @@ import { PERMISSION_MODE_CONFIG } from './mode-types.ts';
 /** User-visible messages for each permission mode */
 export const PERMISSION_MODE_MESSAGES: Record<PermissionMode, string> = {
   'safe': `${PERMISSION_MODE_CONFIG['safe'].displayName} mode active. Read-only exploration enabled.`,
-  'ask': `${PERMISSION_MODE_CONFIG['ask'].displayName} mode active. Prompts for dangerous operations.`,
+  'ask': `${PERMISSION_MODE_CONFIG['ask'].displayName} mode active. Low-risk work runs automatically; risky actions ask first.`,
   'allow-all': `${PERMISSION_MODE_CONFIG['allow-all'].displayName} mode active. All operations permitted.`,
 };
 
 /** System prompts sent to Claude when mode changes */
 export const PERMISSION_MODE_PROMPTS: Record<PermissionMode, string> = {
   'safe': `The user has switched to ${PERMISSION_MODE_CONFIG['safe'].displayName} mode (read-only). You can read files, search, and explore the codebase, but write operations (Bash, Write, Edit, API calls) are blocked. Focus on understanding and explaining rather than making changes.`,
-  'ask': `The user has switched to ${PERMISSION_MODE_CONFIG['ask'].displayName} mode. Most operations are allowed, but dangerous bash commands will prompt for user approval. You have access to write operations.`,
+  'ask': `The user has switched to ${PERMISSION_MODE_CONFIG['ask'].displayName} mode. You have access to write operations. These run without prompting: edits inside the working directory and the session folder, read-only commands, and routine development commands (tests, builds, lint, formatting, git add/commit/fetch, mkdir). These ask the user first: writes outside the working directory, sensitive files (.env, keys, credentials, .git internals), deleting or irreversible commands (rm, git push/reset/rebase), installing software, sudo, and external side effects (network uploads, MCP or API mutations). Do not try to work around a prompt; if the user denies an action, adjust your approach.`,
   'allow-all': `The user has switched to ${PERMISSION_MODE_CONFIG['allow-all'].displayName} mode. All operations are permitted without prompts. Use with care.`,
 };
