@@ -41,7 +41,7 @@ interface CredentialsStepProps {
   isWaitingForCode?: boolean
   onSubmitAuthCode?: (code: string) => void
   onCancelOAuth?: () => void
-  // Device flow (Copilot)
+  // Device flow (GitHub Copilot / Kimi Code)
   copilotDeviceCode?: { userCode: string; verificationUri: string }
   // Edit mode (pre-fill existing connection values)
   editInitialValues?: {
@@ -73,6 +73,8 @@ export function CredentialsStep({
   const { t } = useTranslation()
   const isChatGptOAuth = apiSetupMethod === 'pi_chatgpt_oauth'
   const isCopilotOAuth = apiSetupMethod === 'pi_copilot_oauth'
+  const isKimiOAuth = apiSetupMethod === 'pi_kimi_oauth'
+  const isDeviceFlowOAuth = isCopilotOAuth || isKimiOAuth
   const isPiApiKey = apiSetupMethod === 'pi_api_key'
   const isApiKey = isPiApiKey
 
@@ -98,7 +100,7 @@ export function CredentialsStep({
     onBack()
   }
 
-  // Copilot device code clipboard handling
+  // Device-flow (Copilot / Kimi Code) device code clipboard handling
   const [copiedCode, setCopiedCode] = useState(false)
 
   // Auto-copy device code to clipboard when it appears
@@ -162,12 +164,31 @@ export function CredentialsStep({
     )
   }
 
-  // --- Copilot OAuth flow (device flow) ---
-  if (isCopilotOAuth) {
+  // --- Device-flow OAuth (GitHub Copilot / Kimi Code) ---
+  if (isDeviceFlowOAuth) {
+    const copy = isKimiOAuth
+      ? {
+          title: t("onboarding.credentials.connectKimi"),
+          description: t("onboarding.credentials.connectKimiDesc"),
+          signIn: t("onboarding.credentials.signInKimi"),
+          enterCode: t("onboarding.credentials.enterCodeOnKimi"),
+          browserOpened: t("onboarding.credentials.browserOpenedKimi"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInKimi"),
+          connected: t("onboarding.credentials.kimiConnected"),
+        }
+      : {
+          title: t("onboarding.credentials.connectGitHub"),
+          description: t("onboarding.credentials.connectGitHubDesc"),
+          signIn: t("onboarding.credentials.signInGitHub"),
+          enterCode: t("onboarding.credentials.enterCodeOnGitHub"),
+          browserOpened: t("onboarding.credentials.browserOpenedGitHub"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInGitHub"),
+          connected: t("onboarding.credentials.copilotConnected"),
+        }
     return (
       <StepFormLayout
-        title={t("onboarding.credentials.connectGitHub")}
-        description={t("onboarding.credentials.connectGitHubDesc")}
+        title={copy.title}
+        description={copy.description}
         actions={
           <>
             <BackButton onClick={handleOAuthBack} disabled={status === 'validating'} />
@@ -178,7 +199,7 @@ export function CredentialsStep({
               loadingText={t("onboarding.credentials.waitingForAuth")}
             >
               <ExternalLink className="size-4" />
-              {t("onboarding.credentials.signInGitHub")}
+              {copy.signIn}
             </ContinueButton>
           </>
         }
@@ -187,7 +208,7 @@ export function CredentialsStep({
           {copilotDeviceCode ? (
             <div className="rounded-xl bg-foreground-2 p-4 text-sm space-y-3">
               <p className="text-muted-foreground text-center">
-                {t("onboarding.credentials.enterCodeOnGitHub")}
+                {copy.enterCode}
               </p>
               <div className="flex flex-col items-center justify-center gap-2">
                 <button
@@ -203,12 +224,12 @@ export function CredentialsStep({
                 </span>
               </div>
               <p className="text-muted-foreground text-xs text-center">
-                {t("onboarding.credentials.browserOpenedGitHub")}
+                {copy.browserOpened}
               </p>
             </div>
           ) : (
             <div className="rounded-xl bg-foreground-2 p-4 text-sm text-muted-foreground text-center">
-              <p>{t("onboarding.credentials.clickToSignInGitHub")}</p>
+              <p>{copy.clickToSignIn}</p>
             </div>
           )}
           {status === 'error' && errorMessage && (
@@ -218,7 +239,7 @@ export function CredentialsStep({
           )}
           {status === 'success' && (
             <div className="rounded-lg bg-success/10 text-success text-sm p-3 text-center">
-              {t("onboarding.credentials.copilotConnected")}
+              {copy.connected}
             </div>
           )}
         </div>

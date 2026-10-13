@@ -878,7 +878,11 @@ export default function AiSettingsPage() {
     apiSetupOnboarding.reset()
 
     if (connection.authType === 'oauth') {
-      const method = connection.piAuthProvider === 'github-copilot' ? 'pi_copilot_oauth' : 'pi_chatgpt_oauth'
+      const method = connection.piAuthProvider === 'github-copilot'
+        ? 'pi_copilot_oauth'
+        : connection.piAuthProvider === 'kimi-coding'
+          ? 'pi_kimi_oauth'
+          : 'pi_chatgpt_oauth'
       apiSetupOnboarding.handleStartOAuth(method, connection.slug)
     }
   }, [apiSetupOnboarding, openApiSetup, t])

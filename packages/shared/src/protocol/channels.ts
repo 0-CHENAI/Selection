@@ -236,6 +236,11 @@ export const RPC_CHANNELS = {
     LOGOUT: 'copilot:logout',
     DEVICE_CODE: 'copilot:deviceCode',
   },
+  kimi: {
+    START_OAUTH: 'kimi:startOAuth',
+    CANCEL_OAUTH: 'kimi:cancelOAuth',
+    DEVICE_CODE: 'kimi:deviceCode',
+  },
   settings: {
     SETUP_LLM_CONNECTION: 'settings:setupLlmConnection',
     TEST_LLM_CONNECTION_SETUP: 'settings:testLlmConnectionSetup',

@@ -17,6 +17,7 @@ import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
+let kimiOAuthAbort: AbortController | null = null
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.llmConnections.LIST,
@@ -38,6 +39,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.copilot.CANCEL_OAUTH,
   RPC_CHANNELS.copilot.GET_AUTH_STATUS,
   RPC_CHANNELS.copilot.LOGOUT,
+  RPC_CHANNELS.kimi.START_OAUTH,
+  RPC_CHANNELS.kimi.CANCEL_OAUTH,
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
   RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
   RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
@@ -914,5 +917,77 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       deps.platform.logger?.error('Failed to clear Copilot credentials:', error)
       return { success: false }
     }
+  })
+
+  // ============================================================
+  // Kimi Code OAuth (device flow via Pi SDK)
+  // ============================================================
+
+  server.handle(RPC_CHANNELS.kimi.START_OAUTH, async (ctx, connectionSlug: string): Promise<{
+    success: boolean
+    error?: string
+  }> => {
+    let flowAbort: AbortController | null = null
+    try {
+      const { loginKimiCodingWithSdk } = await import('@craft-agent/shared/auth/kimi-coding-sdk')
+      const credentialManager = getCredentialManager()
+
+      // Cancel any previous in-flight flow
+      kimiOAuthAbort?.abort()
+      flowAbort = new AbortController()
+      kimiOAuthAbort = flowAbort
+
+      deps.platform.logger?.info(`Starting Kimi Code OAuth device flow for connection: ${connectionSlug}`)
+
+      const credentials = await loginKimiCodingWithSdk({
+        onDeviceCode: ({ userCode, verificationUri }) => {
+          deps.platform.logger?.info(`[Kimi OAuth] Device code: ${userCode}`)
+          pushTyped(server, RPC_CHANNELS.kimi.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
+            userCode,
+            verificationUri,
+          })
+          // verificationUri already embeds the user code (verification_uri_complete)
+          server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, verificationUri).catch(err => {
+            deps.platform.logger?.warn(`Failed to open browser for Kimi OAuth: ${err}`)
+          })
+        },
+        onProgress: (message) => {
+          deps.platform.logger?.info(`[Kimi OAuth] ${message}`)
+        },
+        signal: flowAbort.signal,
+      })
+
+      // Never persist credentials from a cancelled or superseded flow.
+      if (flowAbort.signal.aborted || kimiOAuthAbort !== flowAbort) {
+        throw new Error('Kimi Code OAuth flow was cancelled or superseded')
+      }
+      kimiOAuthAbort = null
+
+      await credentialManager.setLlmOAuth(connectionSlug, {
+        accessToken: credentials.access,
+        refreshToken: credentials.refresh,
+        expiresAt: credentials.expires,
+      })
+
+      deps.platform.logger?.info('Kimi Code OAuth completed successfully')
+      refreshModelsInBackground(connectionSlug, 'Kimi Code auth')
+      return { success: true }
+    } catch (error) {
+      if (flowAbort && kimiOAuthAbort === flowAbort) kimiOAuthAbort = null
+      deps.platform.logger?.error('Kimi Code OAuth failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OAuth authentication failed',
+      }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.kimi.CANCEL_OAUTH, async (): Promise<{ success: boolean }> => {
+    if (kimiOAuthAbort) {
+      kimiOAuthAbort.abort()
+      kimiOAuthAbort = null
+      deps.platform.logger?.info('Kimi Code OAuth cancelled')
+    }
+    return { success: true }
   })
 }

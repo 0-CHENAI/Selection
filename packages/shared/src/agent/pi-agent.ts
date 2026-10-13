@@ -138,6 +138,11 @@ import { LLM_QUERY_TIMEOUT_MS, type LLMQueryRequest, type LLMQueryResult } from 
 import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
 import { saveBinaryResponse } from '../utils/binary-detection.ts';
 
+/** OAuth providers whose short-lived tokens are refreshed main-side before spawn and before each turn. */
+const PROACTIVE_OAUTH_REFRESH_PROVIDERS: ReadonlySet<string> = new Set(['github-copilot', 'kimi-coding']);
+/** Refresh when a token has less than this much validity left. */
+const OAUTH_REFRESH_SKEW_MS = 5 * 60_000;
+
 // ============================================================
 // PiAgent Implementation
 // ============================================================
@@ -581,17 +586,10 @@ export class PiAgent extends BaseAgent {
     // Resolve credentials before spawning so we can derive AWS env vars
     // from the same fetch that produces piAuth (single source of truth).
 
-    // For Copilot OAuth: preemptively refresh the short-lived Copilot token
+    // For short-lived OAuth tokens (Copilot, Kimi Code): preemptively refresh
     // before fetching credentials, so getPiAuth() picks up a fresh token.
     // refreshAndPushTokens guards this.subprocess internally — safe to call pre-spawn.
-    if (this.config.authType === 'oauth' && runtime.piAuthProvider === 'github-copilot') {
-      const slug = this.config.connectionSlug || 'pi';
-      const stored = await getCredentialManager().getLlmOAuth(slug);
-      if (stored?.refreshToken && (!stored.expiresAt || stored.expiresAt < Date.now() + 5 * 60_000)) {
-        this.debug('Copilot token expired or expiring soon — refreshing before session start');
-        await this.refreshAndPushTokens();
-      }
-    }
+    await this.refreshOAuthIfExpiring('before session start');
 
     // Retrieve auth credentials for the subprocess.
     // Custom endpoint mode must NOT fall back to global API keys — keyless local endpoints
@@ -867,6 +865,23 @@ export class PiAgent extends BaseAgent {
               },
             };
           }
+          // Kimi Code: the API expects `Authorization: Bearer`, which Pi only
+          // sends for OAuth credentials (api_key would become `x-api-key`).
+          // Refresh stays main-side (refreshAndPushTokens) because Kimi rotates
+          // refresh tokens — so withhold the refresh token and pin expiry far
+          // in the future to stop the subprocess from refreshing on its own.
+          if (piAuthProvider === 'kimi-coding') {
+            this.debug(`Retrieved Kimi Code OAuth credential for Pi provider: ${piAuthProvider}`);
+            return {
+              provider: piAuthProvider,
+              credential: {
+                type: 'oauth',
+                access: oauth.accessToken,
+                refresh: '',
+                expires: Number.MAX_SAFE_INTEGER,
+              },
+            };
+          }
           // Other OAuth providers: pass as api_key (bearer token)
           this.debug(`Retrieved OAuth access token for Pi provider: ${piAuthProvider}`);
           return {
@@ -952,8 +967,31 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Refresh short-lived OAuth tokens that are expired or about to expire.
+   *
+   * Only providers whose tokens are refreshed main-side are covered. The Pi
+   * subprocess never refreshes these itself (Kimi rotates refresh tokens, so a
+   * subprocess-side refresh would silently invalidate the stored credential).
+   */
+  private async refreshOAuthIfExpiring(context: string): Promise<void> {
+    if (this.config.authType !== 'oauth') return;
+    const piAuthProvider = getBackendRuntime(this.config).piAuthProvider;
+    if (!piAuthProvider || !PROACTIVE_OAUTH_REFRESH_PROVIDERS.has(piAuthProvider)) return;
+    try {
+      const slug = this.config.connectionSlug || 'pi';
+      const stored = await getCredentialManager().getLlmOAuth(slug);
+      if (stored?.refreshToken && (!stored.expiresAt || stored.expiresAt < Date.now() + OAUTH_REFRESH_SKEW_MS)) {
+        this.debug(`${piAuthProvider} token expired or expiring soon — refreshing ${context}`);
+        await this.refreshAndPushTokens();
+      }
+    } catch (error) {
+      this.debug(`Proactive OAuth refresh check failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
    * Refresh OAuth tokens and push updated credentials to the running subprocess.
-   * Handles both Copilot (Pi SDK) and ChatGPT Plus token refresh.
+   * Handles Copilot and Kimi Code (Pi SDK) and ChatGPT Plus token refresh.
    */
   private async refreshAndPushTokens(): Promise<void> {
     if (this.config.authType !== 'oauth') return;
@@ -994,6 +1032,16 @@ export class PiAgent extends BaseAgent {
           // Copilot: refresh the short-lived Copilot token using the GitHub access token
           const { refreshGitHubCopilotTokenWithSdk } = await import('../auth/github-copilot-sdk.ts');
           const newCreds = await refreshGitHubCopilotTokenWithSdk(stored.refreshToken);
+          await credentialManager.setLlmOAuth(slug, {
+            accessToken: newCreds.access,
+            refreshToken: newCreds.refresh,
+            expiresAt: newCreds.expires,
+          });
+        } else if (piAuthProvider === 'kimi-coding') {
+          // Kimi Code: refresh via Pi SDK. The refresh token may rotate, so
+          // always persist the returned one.
+          const { refreshKimiCodingTokenWithSdk } = await import('../auth/kimi-coding-sdk.ts');
+          const newCreds = await refreshKimiCodingTokenWithSdk(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,
@@ -2629,6 +2677,10 @@ export class PiAgent extends BaseAgent {
         }
       }
 
+      if (!this._isProcessing || this.abortReason) return;
+      // Long-lived subprocesses outlast short OAuth tokens (Copilot ~30 min,
+      // Kimi Code); refresh before the turn instead of failing it with a 401.
+      await this.refreshOAuthIfExpiring('before turn');
       if (!this._isProcessing || this.abortReason) return;
       // A persisted or newly bound canonical root can acquire this protocol
       // after its subprocess was created with native text answers.

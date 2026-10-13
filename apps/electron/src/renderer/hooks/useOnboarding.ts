@@ -111,6 +111,7 @@ interface UseOnboardingReturn {
 export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   pi_chatgpt_oauth: 'chatgpt-plus',
   pi_copilot_oauth: 'github-copilot',
+  pi_kimi_oauth: 'kimi-code',
   pi_api_key: 'pi-api-key',
 }
 
@@ -183,6 +184,7 @@ export function apiSetupMethodToConnectionSetup(
   switch (method) {
     case 'pi_chatgpt_oauth':
     case 'pi_copilot_oauth':
+    case 'pi_kimi_oauth':
       return {
         slug,
         credential: options.credential,
@@ -527,7 +529,7 @@ export function useOnboarding({
   // Two-step OAuth flow state
   const [isWaitingForCode, setIsWaitingForCode] = useState(false)
 
-  // Copilot device code (displayed during device flow)
+  // Device code displayed during device-flow OAuth (GitHub Copilot, Kimi Code)
   const [copilotDeviceCode, setCopilotDeviceCode] = useState<{ userCode: string; verificationUri: string } | undefined>()
 
   // Start OAuth flow (Claude or ChatGPT depending on selected method)
@@ -596,6 +598,35 @@ export function useOnboarding({
               ...s,
               credentialStatus: 'error',
               errorMessage: result.error || 'GitHub authentication failed',
+            }))
+          }
+        } finally {
+          cleanup()
+          setCopilotDeviceCode(undefined)
+        }
+        return
+      }
+
+      // Kimi Code OAuth (device flow — polls for token after user approves on kimi.com)
+      if (effectiveMethod === 'pi_kimi_oauth') {
+        const effectiveEditingSlug = connectionSlugOverride ?? editingSlug
+        const isReauth = !!effectiveEditingSlug
+        const connectionSlug = apiSetupMethodToConnectionSetup(effectiveMethod, {}, effectiveEditingSlug, existingSlugs).slug
+
+        const cleanup = window.electronAPI.onKimiDeviceCode((data) => {
+          setCopilotDeviceCode(data)
+        })
+
+        try {
+          const result = await window.electronAPI.startKimiOAuth(connectionSlug)
+
+          if (result.success) {
+            await saveAndValidateConnection(connectionSlug, effectiveMethod, undefined, isReauth)
+          } else {
+            setState(s => ({
+              ...s,
+              credentialStatus: 'error',
+              errorMessage: result.error || 'Kimi Code authentication failed',
             }))
           }
         } finally {

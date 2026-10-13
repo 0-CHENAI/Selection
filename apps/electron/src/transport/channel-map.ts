@@ -172,6 +172,11 @@ export const CHANNEL_MAP = {
   copilotLogout: invoke(RPC_CHANNELS.copilot.LOGOUT),
   onCopilotDeviceCode: listener(RPC_CHANNELS.copilot.DEVICE_CODE),
 
+  // Kimi Code OAuth (device flow)
+  startKimiOAuth: invoke(RPC_CHANNELS.kimi.START_OAUTH),
+  cancelKimiOAuth: invoke(RPC_CHANNELS.kimi.CANCEL_OAUTH),
+  onKimiDeviceCode: listener(RPC_CHANNELS.kimi.DEVICE_CODE),
+
   // Server info (REMOTE_ELIGIBLE)
   getServerHomeDir: invoke(RPC_CHANNELS.server.HOME_DIR),
 

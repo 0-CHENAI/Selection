@@ -465,6 +465,11 @@ export interface ElectronAPI {
   copilotLogout(connectionSlug: string): Promise<{ success: boolean }>
   onCopilotDeviceCode(callback: (data: { userCode: string; verificationUri: string }) => void): () => void
 
+  // Kimi Code OAuth (device flow)
+  startKimiOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>
+  cancelKimiOAuth(): Promise<{ success: boolean }>
+  onKimiDeviceCode(callback: (data: { userCode: string; verificationUri: string }) => void): () => void
+
   /** Unified LLM connection setup */
   setupLlmConnection(setup: LlmConnectionSetup): Promise<{ success: boolean; error?: string }>
   /** Unified connection test — spawns a lightweight agent subprocess to validate credentials */

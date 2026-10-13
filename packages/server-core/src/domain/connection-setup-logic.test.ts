@@ -171,6 +171,20 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.midStreamBehavior).toBe('queue')
   })
 
+  it('Kimi Code → Pi OAuth on the kimi-coding provider', () => {
+    const conn = createBuiltInConnection('kimi-code')
+    expect(conn.name).toBe('Kimi Code')
+    expect(conn.providerType).toBe('pi')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.piAuthProvider).toBe('kimi-coding')
+  })
+
+  it('derived Kimi Code slugs reuse the template', () => {
+    const conn = createBuiltInConnection('kimi-code-2')
+    expect(conn.piAuthProvider).toBe('kimi-coding')
+    expect(conn.name).toBe('Kimi Code 2')
+  })
+
 })
 
 describe('persistableLlmSetupCredential', () => {

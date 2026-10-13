@@ -275,6 +275,32 @@ export const onboardingComponents: ComponentEntry[] = [
     }),
   },
   {
+    id: 'credentials-step-kimi',
+    name: 'Credentials - Kimi Code',
+    category: 'Onboarding',
+    description: 'Kimi Code OAuth device flow authentication',
+    component: CredentialsStep,
+    props: [],
+    variants: [
+      { name: 'Initial', props: { apiSetupMethod: 'pi_kimi_oauth', status: 'idle' } },
+      {
+        name: 'Device Code Shown',
+        props: {
+          apiSetupMethod: 'pi_kimi_oauth',
+          status: 'validating',
+          copilotDeviceCode: { userCode: 'WXYZ-5678', verificationUri: 'https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678' },
+        },
+      },
+      { name: 'Success', props: { apiSetupMethod: 'pi_kimi_oauth', status: 'success' } },
+    ],
+    mockData: () => ({
+      apiSetupMethod: 'pi_kimi_oauth',
+      onSubmit: noopHandler,
+      onStartOAuth: noopHandler,
+      onBack: noopHandler,
+    }),
+  },
+  {
     id: 'completion-step',
     name: 'CompletionStep',
     category: 'Onboarding',

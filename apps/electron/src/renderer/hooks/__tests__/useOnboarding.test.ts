@@ -33,7 +33,7 @@ describe('resolveSlugForMethod', () => {
 
   it('works for all setup methods', () => {
     const methods: ApiSetupMethod[] = [
-      'pi_chatgpt_oauth', 'pi_copilot_oauth', 'pi_api_key',
+      'pi_chatgpt_oauth', 'pi_copilot_oauth', 'pi_kimi_oauth', 'pi_api_key',
     ]
     for (const method of methods) {
       const slug = resolveSlugForMethod(method, null, new Set())
@@ -71,6 +71,11 @@ describe('apiSetupMethodToConnectionSetup', () => {
   it('pi_chatgpt_oauth maps to chatgpt-plus slug', () => {
     const setup = apiSetupMethodToConnectionSetup('pi_chatgpt_oauth', {}, null, new Set())
     expect(setup.slug).toBe('chatgpt-plus')
+  })
+
+  it('pi_kimi_oauth maps to kimi-code slug', () => {
+    const setup = apiSetupMethodToConnectionSetup('pi_kimi_oauth', {}, null, new Set())
+    expect(setup.slug).toBe('kimi-code')
   })
 
   it('pi_copilot_oauth maps to github-copilot slug', () => {

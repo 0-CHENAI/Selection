@@ -339,6 +339,11 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.copilot.LOGOUT,
   RPC_CHANNELS.copilot.DEVICE_CODE,
 
+  // kimi — Kimi Code device-flow OAuth via capability passthrough
+  RPC_CHANNELS.kimi.START_OAUTH,
+  RPC_CHANNELS.kimi.CANCEL_OAUTH,
+  RPC_CHANNELS.kimi.DEVICE_CODE,
+
   // Claude OAuth — runs on workspace server so credentials and connection config
   // end up on the same server that will use them. Browser opening is client-side.
   // (ChatGPT OAuth stays LOCAL_ONLY — requires localhost callback server.)

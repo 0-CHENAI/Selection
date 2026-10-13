@@ -173,6 +173,12 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
     authType: 'oauth',
     piAuthProvider: 'github-copilot',
   },
+  'kimi-code': {
+    name: 'Kimi Code',
+    providerType: 'pi',
+    authType: 'oauth',
+    piAuthProvider: 'kimi-coding',
+  },
   'pi-api-key': {
     name: 'Selection Backend (API Key)',
     providerType: 'pi',

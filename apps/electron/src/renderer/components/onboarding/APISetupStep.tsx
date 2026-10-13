@@ -16,11 +16,13 @@ const BetaBadge = ({ label }: { label: string }) => (
  *
  * - 'pi_chatgpt_oauth' → pi + oauth
  * - 'pi_copilot_oauth' → pi + oauth
+ * - 'pi_kimi_oauth' → pi + oauth (Kimi Code device flow)
  * - 'pi_api_key' → pi + api_key
  */
 export type ApiSetupMethod =
   | 'pi_chatgpt_oauth'
   | 'pi_copilot_oauth'
+  | 'pi_kimi_oauth'
   | 'pi_api_key'
 
 /**
@@ -34,6 +36,8 @@ export function apiSetupMethodToConnectionTypes(method: ApiSetupMethod): {
     case 'pi_chatgpt_oauth':
       return { providerType: 'pi', authType: 'oauth' };
     case 'pi_copilot_oauth':
+      return { providerType: 'pi', authType: 'oauth' };
+    case 'pi_kimi_oauth':
       return { providerType: 'pi', authType: 'oauth' };
     case 'pi_api_key':
       return { providerType: 'pi', authType: 'api_key' };
@@ -50,6 +54,7 @@ interface ApiSetupOption {
 const API_SETUP_ICONS: Record<ApiSetupMethod, React.ReactNode> = {
   pi_chatgpt_oauth: <Cpu className="size-4" />,
   pi_copilot_oauth: <Cpu className="size-4" />,
+  pi_kimi_oauth: <Cpu className="size-4" />,
   pi_api_key: <Key className="size-4" />,
 }
 

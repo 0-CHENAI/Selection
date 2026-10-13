@@ -20,6 +20,7 @@
     "./agent/user-message-sanitize": "./src/agent/user-message-sanitize.ts",
     "./auth": "./src/auth/index.ts",
     "./auth/github-copilot-sdk": "./src/auth/github-copilot-sdk.ts",
+    "./auth/kimi-coding-sdk": "./src/auth/kimi-coding-sdk.ts",
     "./auth/callback-page": "./src/auth/callback-page.ts",
     "./auth/types": "./src/auth/types.ts",
     "./config": "./src/config/index.ts",
