@@ -34,7 +34,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Interactive HTML artifacts** — HTML files and `html-preview` entries now open in the built-in browser with working scripts, animation and relative assets. Generated pages use temporary isolated browser sessions. The previous HTML iframe preview and its custom zoom controls are removed. Version previews open the selected document snapshot; separate resource files are not archived.
 
-- **Safer Office document edits** — Bundled OfficeCLI is updated to v1.0.152. After a warned or failed write, the agent checks for partial changes before retrying so it does not duplicate document content. PR #417.
+- **Safer Office document edits** — Bundled OfficeCLI is updated to v1.0.156 with matching official guides and Windows runtime verification. After a warned or failed write, the agent checks for partial changes before retrying so it does not duplicate document content. PRs #417 and #477.
 
 - **Simpler settings** — The Input page, spell check, send-key choice, and project color highlight are removed. Connection icons are now labeled provider icons, and an empty default-sources section uses the same settings card as the other rows. Advanced settings store an optional AnySearch API key locally without showing the saved value. PRO now provides orchestration in standard builds, with an explicit build override for disabling it. Fixes #413.
 
