@@ -44,6 +44,8 @@ interface OnboardingWizardProps {
   onSubmitCredential: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
+  /** Let the API-key credentials form switch to ChatGPT / Copilot OAuth sign-in. */
+  allowOAuthSwitch?: boolean
 
   // Claude OAuth (two-step flow)
   isWaitingForCode?: boolean
@@ -101,6 +103,7 @@ export function OnboardingWizard({
   onSubmitCredential,
   onStartOAuth,
   onFinish,
+  allowOAuthSwitch,
   // Two-step OAuth flow
   isWaitingForCode,
   onSubmitAuthCode,
@@ -173,6 +176,8 @@ export function OnboardingWizard({
             onSubmit={onSubmitCredential}
             onStartOAuth={onStartOAuth}
             onBack={onBack}
+            onSelectApiSetupMethod={onSelectApiSetupMethod}
+            allowOAuthSwitch={allowOAuthSwitch}
             isWaitingForCode={isWaitingForCode}
             onSubmitAuthCode={onSubmitAuthCode}
             editInitialValues={editInitialValues}

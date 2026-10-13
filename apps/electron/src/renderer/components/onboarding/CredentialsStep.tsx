@@ -5,7 +5,7 @@
  * with StepFormLayout for the onboarding wizard context.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Check, ExternalLink } from "lucide-react"
 import type { ApiSetupMethod } from "./APISetupStep"
@@ -16,6 +16,7 @@ import {
   type ApiKeyStatus,
   type ApiKeySubmitData,
   type OAuthStatus,
+  type OAuthSetupMethod,
 } from "../apisetup"
 import type { CustomEndpointApi } from '@config/llm-connections'
 
@@ -28,6 +29,14 @@ interface CredentialsStepProps {
   onSubmit: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onBack: () => void
+  /**
+   * Switch the credentials step to another setup method (e.g. API key -> OAuth).
+   * When provided together with `allowOAuthSwitch`, the API-key endpoint
+   * dropdown also offers ChatGPT / GitHub Copilot account sign-in.
+   */
+  onSelectApiSetupMethod?: (method: ApiSetupMethod) => void
+  /** Offer OAuth providers from the API-key form (disabled when editing an existing connection). */
+  allowOAuthSwitch?: boolean
   // Two-step OAuth flow
   isWaitingForCode?: boolean
   onSubmitAuthCode?: (code: string) => void
@@ -56,6 +65,8 @@ export function CredentialsStep({
   onSubmit,
   onStartOAuth,
   onBack,
+  onSelectApiSetupMethod,
+  allowOAuthSwitch,
   copilotDeviceCode,
   editInitialValues,
 }: CredentialsStepProps) {
@@ -64,6 +75,28 @@ export function CredentialsStep({
   const isCopilotOAuth = apiSetupMethod === 'pi_copilot_oauth'
   const isPiApiKey = apiSetupMethod === 'pi_api_key'
   const isApiKey = isPiApiKey
+
+  // Remember whether an OAuth page was reached from the API-key endpoint
+  // dropdown, so "Back" returns to that form instead of the provider list.
+  const cameFromApiKeyFormRef = useRef(false)
+  if (isApiKey) cameFromApiKeyFormRef.current = false
+
+  const canSwitchToOAuth = !!allowOAuthSwitch && !!onSelectApiSetupMethod
+  const handleSelectOAuthMethod = canSwitchToOAuth
+    ? (method: OAuthSetupMethod) => {
+        cameFromApiKeyFormRef.current = true
+        onSelectApiSetupMethod!(method)
+      }
+    : undefined
+
+  const handleOAuthBack = () => {
+    if (cameFromApiKeyFormRef.current && onSelectApiSetupMethod) {
+      cameFromApiKeyFormRef.current = false
+      onSelectApiSetupMethod('pi_api_key')
+      return
+    }
+    onBack()
+  }
 
   // Copilot device code clipboard handling
   const [copiedCode, setCopiedCode] = useState(false)
@@ -97,7 +130,7 @@ export function CredentialsStep({
         description={t("onboarding.credentials.connectChatGPTDesc")}
         actions={
           <>
-            <BackButton onClick={onBack} disabled={status === 'validating'} />
+            <BackButton onClick={handleOAuthBack} disabled={status === 'validating'} />
             <ContinueButton
               onClick={() => onStartOAuth?.()}
               className="gap-2"
@@ -137,7 +170,7 @@ export function CredentialsStep({
         description={t("onboarding.credentials.connectGitHubDesc")}
         actions={
           <>
-            <BackButton onClick={onBack} disabled={status === 'validating'} />
+            <BackButton onClick={handleOAuthBack} disabled={status === 'validating'} />
             <ContinueButton
               onClick={() => onStartOAuth?.()}
               className="gap-2"
@@ -240,6 +273,7 @@ export function CredentialsStep({
         onSubmit={onSubmit}
         providerType={providerType}
         presetFilter={isOrderPrefill ? 'order' : undefined}
+        onSelectOAuthMethod={isOrderPrefill ? undefined : handleSelectOAuthMethod}
         initialValues={editInitialValues}
       />
     </StepFormLayout>

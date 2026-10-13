@@ -387,7 +387,8 @@ export function useOnboarding({
 
   // Select API setup method (legacy — kept for direct edit flows)
   const handleSelectApiSetupMethod = useCallback((method: ApiSetupMethod) => {
-    setState(s => ({ ...s, apiSetupMethod: method }))
+    // Clear any status/error left over from the previous method's form.
+    setState(s => ({ ...s, apiSetupMethod: method, credentialStatus: 'idle', errorMessage: undefined }))
   }, [])
 
   // Submit credential (API key + optional endpoint config)

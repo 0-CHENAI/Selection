@@ -1239,6 +1239,7 @@ export default function AiSettingsPage() {
                   onSubmitLocalModel={apiSetupOnboarding.handleSubmitLocalModel}
                   onStartOAuth={apiSetupOnboarding.handleStartOAuth}
                   onFinish={handleApiSetupFinish}
+                  allowOAuthSwitch={!editingConnectionSlug}
                   isWaitingForCode={apiSetupOnboarding.isWaitingForCode}
                   onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
                   onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}

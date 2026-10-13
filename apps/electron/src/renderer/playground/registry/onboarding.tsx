@@ -162,6 +162,8 @@ export const onboardingComponents: ComponentEntry[] = [
       onSubmit: (data: { apiKey: string; baseUrl?: string; connectionDefaultModel?: string; models?: string[] }) => console.log('[Playground] Submitted:', data),
       onStartOAuth: noopHandler,
       onBack: noopHandler,
+      allowOAuthSwitch: true,
+      onSelectApiSetupMethod: (method: string) => console.log('[Playground] Switch to method:', method),
     }),
   },
   {

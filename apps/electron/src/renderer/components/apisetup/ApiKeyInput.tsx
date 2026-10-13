@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { cn } from "@/lib/utils"
 import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
@@ -105,6 +106,15 @@ export interface ApiKeySubmitData {
   bedrockAuthMethod?: 'iam_credentials' | 'environment'
 }
 
+/** OAuth-based setup methods that can be reached from the endpoint dropdown. */
+export type OAuthSetupMethod = 'pi_chatgpt_oauth' | 'pi_copilot_oauth'
+
+/** Account sign-in providers shown in the endpoint dropdown's OAuth section. */
+export const OAUTH_PROVIDER_OPTIONS: ReadonlyArray<{ method: OAuthSetupMethod; label: string }> = [
+  { method: 'pi_chatgpt_oauth', label: 'ChatGPT Plus / Pro' },
+  { method: 'pi_copilot_oauth', label: 'GitHub Copilot' },
+]
+
 export interface ApiKeyInputProps {
   /** Current validation status */
   status: ApiKeyStatus
@@ -120,6 +130,12 @@ export interface ApiKeyInputProps {
   providerType?: 'anthropic' | 'openai' | 'pi' | 'google' | 'pi_api_key'
   /** Limit the endpoint dropdown (ORDER onboarding: Anthropic / OpenAI compatible only) */
   presetFilter?: 'order'
+  /**
+   * When provided, the endpoint dropdown also lists account sign-in (OAuth)
+   * providers. Selecting one hands control back to the parent so it can switch
+   * to the matching OAuth flow instead of API-key entry.
+   */
+  onSelectOAuthMethod?: (method: OAuthSetupMethod) => void
   /** Pre-fill values when editing an existing connection */
   initialValues?: {
     apiKey?: string
@@ -313,6 +329,7 @@ export function ApiKeyInput({
   disabled,
   providerType = 'pi_api_key',
   presetFilter,
+  onSelectOAuthMethod,
   initialValues,
 }: ApiKeyInputProps) {
   // Get presets based on provider type
@@ -844,6 +861,22 @@ export function ApiKeyInput({
                   <Check className={cn("size-3", activePreset === preset.key ? "opacity-100" : "opacity-0")} />
                 </StyledDropdownMenuItem>
               ))}
+              {onSelectOAuthMethod && (
+                <>
+                  <StyledDropdownMenuSeparator />
+                  <div className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">
+                    {t('apiSetup.oauthSignIn')}
+                  </div>
+                  {OAUTH_PROVIDER_OPTIONS.map((option) => (
+                    <StyledDropdownMenuItem
+                      key={option.method}
+                      onClick={() => onSelectOAuthMethod(option.method)}
+                    >
+                      {option.label}
+                    </StyledDropdownMenuItem>
+                  ))}
+                </>
+              )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -2163,6 +2163,7 @@ export default function App() {
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}
             onFinish={onboarding.handleFinish}
+            allowOAuthSwitch
             isWaitingForCode={onboarding.isWaitingForCode}
             onSubmitAuthCode={onboarding.handleSubmitAuthCode}
             onCancelOAuth={onboarding.handleCancelOAuth}

@@ -47,6 +47,7 @@
   "apiSetup.multimodal": "Multimodális",
   "apiSetup.multimodalHint": "Képbemenet engedélyezése ennél a modellnél",
   "apiSetup.noModels": "Nincs modell",
+  "apiSetup.oauthSignIn": "Bejelentkezés fiókkal (OAuth)",
   "apiSetup.orderModelHint": "Válassz több modellt, majd állítsd be lent a korlátokat és a multimodalitást.",
   "apiSetup.pasteAuthCode": "Ide illessze be az engedélyezési kódját",
   "apiSetup.pasteKey": "Illeszd be a kulcsot…",

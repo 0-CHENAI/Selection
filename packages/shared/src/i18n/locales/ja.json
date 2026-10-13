@@ -47,6 +47,7 @@
   "apiSetup.multimodal": "マルチモーダル",
   "apiSetup.multimodalHint": "このモデルへの画像入力を許可",
   "apiSetup.noModels": "モデルが見つかりません",
+  "apiSetup.oauthSignIn": "アカウントでサインイン（OAuth）",
   "apiSetup.orderModelHint": "複数モデルを選択し、下で上限とマルチモーダル対応を設定します。",
   "apiSetup.pasteAuthCode": "認証コードをここに貼り付けてください",
   "apiSetup.pasteKey": "キーを貼り付けてください…",

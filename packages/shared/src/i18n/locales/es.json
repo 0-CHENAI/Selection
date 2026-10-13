@@ -47,6 +47,7 @@
   "apiSetup.multimodal": "Multimodal",
   "apiSetup.multimodalHint": "Permitir imágenes para este modelo",
   "apiSetup.noModels": "No se encontraron modelos",
+  "apiSetup.oauthSignIn": "Iniciar sesión con cuenta (OAuth)",
   "apiSetup.orderModelHint": "Elige varios modelos y configura abajo sus límites y capacidad multimodal.",
   "apiSetup.pasteAuthCode": "Pega tu código de autorización aquí",
   "apiSetup.pasteKey": "Pega tu clave aquí…",

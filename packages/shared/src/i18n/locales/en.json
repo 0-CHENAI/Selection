@@ -47,6 +47,7 @@
   "apiSetup.multimodal": "Multimodal",
   "apiSetup.multimodalHint": "Allow image input for this model",
   "apiSetup.noModels": "No models found",
+  "apiSetup.oauthSignIn": "Sign in with account (OAuth)",
   "apiSetup.orderModelHint": "Select multiple models, then configure limits and multimodal support below.",
   "apiSetup.pasteAuthCode": "Paste your authorization code here",
   "apiSetup.pasteKey": "Paste your key here...",

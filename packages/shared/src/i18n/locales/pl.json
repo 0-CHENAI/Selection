@@ -47,6 +47,7 @@
   "apiSetup.multimodal": "Multimodalny",
   "apiSetup.multimodalHint": "Zezwalaj na obrazy dla tego modelu",
   "apiSetup.noModels": "Nie znaleziono modeli",
+  "apiSetup.oauthSignIn": "Zaloguj się kontem (OAuth)",
   "apiSetup.orderModelHint": "Wybierz wiele modeli, a poniżej ustaw limity i obsługę obrazów.",
   "apiSetup.pasteAuthCode": "Wklej tutaj swój kod autoryzacyjny",
   "apiSetup.pasteKey": "Wklej klucz tutaj…",
