@@ -2,6 +2,7 @@
 
 - 旧版本：1.0.156 (616668a7)
 - 新版本：1.0.157 (f950ee40)
+- Windows x64 二进制复验：SHA256 与清单一致；命令与参数契约一致，schema CRC 为 c11d61e0，已记录平台专用值。
 - 上游 tag commit：b65272a18aef891941451705ff93e8a287f3eb72
 - 未分类命令：无
 - 过期分类：无
@@ -105,7 +106,8 @@
       "after": {
         "name": "officecli-win-x64.exe",
         "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-win-x64.exe",
-        "sha256": "bd64eba587e56cc71709cdd1f38ae9ac77cd65a9c8ea744b0996897c0557e343"
+        "sha256": "bd64eba587e56cc71709cdd1f38ae9ac77cd65a9c8ea744b0996897c0557e343",
+        "schemaCrc": "c11d61e0"
       }
     }
   ]
