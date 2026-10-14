@@ -42,6 +42,8 @@ describe('applySystemPromptOverride', () => {
       hasConfiguredAuth: () => true,
       checkAuth: async () => ({ apiKey: 'offline-test' }),
       getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+      getModel: (provider: string, modelId: string) =>
+        provider === model.provider && modelId === model.id ? model : undefined,
       streamSimple: (_model: typeof model, context: { messages: Parameters<typeof getCurrentSystemPrompt>[0] }) => {
         prompts.push(getCurrentSystemPrompt(context.messages));
         const stream = createAssistantMessageEventStream();

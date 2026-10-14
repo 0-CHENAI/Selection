@@ -36,6 +36,8 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
+import { applyProviderEndpointEnv } from './provider-endpoint-env.ts';
+import { toPiProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 import { homedir } from 'node:os';
 
 // Pi SDK
@@ -1739,6 +1741,24 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // Command Handlers
 // ============================================================
 
+/** Wire auth with the provider id the Pi SDK knows. Stored configs stay unchanged. */
+function toPiAuth<T extends { provider: string }>(piAuth: T): T {
+  return { ...piAuth, provider: toPiProviderId(piAuth.provider) };
+}
+
+/**
+ * Azure's tenant endpoint reaches the SDK through AZURE_OPENAI_BASE_URL.
+ * Re-applied when the runtime config or credential changes so an edited
+ * endpoint takes effect without restarting the subprocess.
+ */
+function syncProviderEndpointEnv(config: { piAuth?: { provider: string }; baseUrl?: string }): void {
+  const previous = process.env.AZURE_OPENAI_BASE_URL;
+  applyProviderEndpointEnv(config.piAuth?.provider, config.baseUrl);
+  const next = process.env.AZURE_OPENAI_BASE_URL;
+  if (next && next !== previous) debugLog(`Set AZURE_OPENAI_BASE_URL=${next}`);
+  else if (!next && previous) debugLog('Cleared AZURE_OPENAI_BASE_URL');
+}
+
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
   modelRequestSlots.close();
   setModelRequestGate(msg.modelRequestSlots ? modelRequestSlots.acquire : undefined);
@@ -1762,16 +1782,11 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   customEndpointModelIds = new Set();
   customModelOverrides.clear();
 
-  initConfig = msg;
-
-  // Azure OpenAI requires a tenant-specific endpoint URL.
-  // The Pi SDK (via Vercel AI SDK) reads AZURE_OPENAI_BASE_URL from env.
-  if (msg.piAuth?.provider === 'azure-openai-responses' && msg.baseUrl) {
-    process.env.AZURE_OPENAI_BASE_URL = msg.baseUrl;
-    debugLog(`Set AZURE_OPENAI_BASE_URL=${msg.baseUrl}`);
-  } else {
-    delete process.env.AZURE_OPENAI_BASE_URL;
-  }
+  // Stored provider ids (azure-openai-responses) become Pi SDK ids (azure) once,
+  // so credentials, model lookup, and the endpoint env all see the same id.
+  // The connection record itself is not rewritten.
+  initConfig = msg.piAuth ? { ...msg, piAuth: toPiAuth(msg.piAuth) } : msg;
+  syncProviderEndpointEnv(initConfig);
 
   // Start callback server for call_llm (idempotent — skips if already running)
   await startCallbackServer();
@@ -2086,6 +2101,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       customEndpoint: msg.customEndpoint,
       customModels: msg.customModels,
     };
+    syncProviderEndpointEnv(initConfig);
 
     if (piModelRegistry) {
       customEndpointModelIds = new Set();
@@ -2330,9 +2346,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
         debugLog('token_update received before init; ignoring');
         break;
       }
-      initConfig.piAuth = msg.piAuth;
+      initConfig.piAuth = toPiAuth(msg.piAuth);
+      syncProviderEndpointEnv(initConfig);
       if (moduleCredentialStore) {
-        const { provider, credential } = msg.piAuth;
+        const { provider, credential } = initConfig.piAuth;
         await syncCredentialForPiSdk(moduleCredentialStore, provider, credential);
         debugLog(`Updated ${credential.type} credential for provider: ${provider}`);
       } else {

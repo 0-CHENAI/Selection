@@ -88,12 +88,23 @@ describe('resolvePiModel', () => {
     it('returns exact match for piAuthProvider', () => {
       const registry = createMockRegistry({
         openai: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'openai' }],
-        'azure-openai-responses': [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure-openai-responses' }],
+        azure: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.2', 'openai');
       expect(result).toBeDefined();
       expect(result!.provider).toBe('openai');
+    });
+
+    it('resolves a stored Azure connection against the renamed SDK provider', () => {
+      const registry = createMockRegistry({
+        azure: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'azure' }],
+      });
+
+      const stored = resolvePiModel(registry, 'gpt-5.2', 'azure-openai-responses');
+      expect(stored?.provider).toBe('azure');
+      expect(stored?.id).toBe('gpt-5.2');
+      expect(resolvePiModel(registry, 'pi/gpt-5.2', 'azure')?.provider).toBe('azure');
     });
 
     it('strips MiniMax- prefix for minimax-cn provider', () => {
@@ -161,11 +172,11 @@ describe('resolvePiModel', () => {
 
   describe('provider-safe fallback', () => {
     it('does not return a model from an incompatible provider via getAll fallback', () => {
-      // gpt-5.4 exists under azure-openai-responses but NOT github-copilot.
+      // gpt-5.4 exists under azure but NOT github-copilot.
       // With github-copilot auth, the fallback must not return the azure model.
       const registry = createMockRegistry({
         'github-copilot': [{ id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', provider: 'github-copilot' }],
-        'azure-openai-responses': [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure-openai-responses' }],
+        azure: [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.4', 'github-copilot');
@@ -200,12 +211,12 @@ describe('resolvePiModel', () => {
 
     it('does not filter by provider when piAuthProvider is not set', () => {
       const registry = createMockRegistry({
-        'azure-openai-responses': [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure-openai-responses' }],
+        azure: [{ id: 'gpt-5.4', name: 'GPT-5.4', provider: 'azure' }],
       });
 
       const result = resolvePiModel(registry, 'gpt-5.4');
       expect(result).toBeDefined();
-      expect(result!.provider).toBe('azure-openai-responses');
+      expect(result!.provider).toBe('azure');
     });
 
     it('skips incompatible providers in the common-provider fallback loop', () => {

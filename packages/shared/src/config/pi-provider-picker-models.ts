@@ -11,11 +11,12 @@ import {
   formatPiProviderPickerModels,
   type PiProviderPickerModel,
 } from './openrouter-catalog.ts'
+import { toPiProviderId } from './pi-provider-ids.ts'
 
 export type { PiProviderPickerModel }
 
 function sdkModelsForProvider(provider: string): PiProviderPickerModel[] {
-  const models = getModels(provider as Parameters<typeof getModels>[0])
+  const models = getModels(toPiProviderId(provider) as Parameters<typeof getModels>[0])
   return models.map((model) => ({
     id: model.id,
     name: model.name,

@@ -2,6 +2,7 @@ import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.t
 import type { ModelDefinition } from '../../../../config/models.ts';
 import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
+import { toPiProviderId } from '../../../../config/pi-provider-ids.ts';
 import { toCustomEndpointModelPayload } from '../../../../config/model-image-support.ts';
 import {
   fetchOpenRouterCatalog,
@@ -356,7 +357,7 @@ export const piDriver: ProviderDriver = {
     let modelBaseUrl: string | undefined;
     try {
       const { getModels } = await import('@earendil-works/pi-ai/compat');
-      const models = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
+      const models = getModels(toPiProviderId(piAuthProvider) as Parameters<typeof getModels>[0]);
       const requestedId = firstId.startsWith('pi/') ? firstId.slice(3) : firstId;
       const match = models.find(m => m.id === requestedId) || models[0];
       if (match) {

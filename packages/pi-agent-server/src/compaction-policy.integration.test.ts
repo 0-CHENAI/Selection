@@ -30,6 +30,8 @@ it('an oversized first input stays intact and delivers one actionable error with
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
     streamSimple: () => { providerCalls++; throw new Error('Oversized input must not reach the provider'); },
   } as unknown as ModelRuntime;
   installContextBudgetGuard(runtime);
@@ -73,6 +75,8 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
     streamSimple: (_model: typeof model, context: Context) => {
       const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
       providerCalls.push({ summary, context });
@@ -137,6 +141,8 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
     streamSimple: (_model: typeof model, context: Context) => {
       const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
       if (summary) { summaries++; lifecycle.push('summary'); }
@@ -204,7 +210,7 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
     && JSON.stringify(message.content).includes('same user task'))).toBe(true);
 });
 
-it('Pi 0.87.1 compacts after a completed tool before its next provider request', async () => {
+it('compacts after a completed tool before its next provider request', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-native-compaction-'));
   tempDirs.push(cwd);
   const lifecycle: string[] = [];
@@ -214,6 +220,8 @@ it('Pi 0.87.1 compacts after a completed tool before its next provider request',
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
     streamSimple: (_model: typeof model, context: Context) => {
       const summary = getCurrentSystemPrompt(context.messages).includes('You are a context summarization assistant');
       lifecycle.push(summary ? 'summary' : `model-${++modelRequests}`);
@@ -275,6 +283,8 @@ it('five real SDK compactions automatically reconcile sourced notes and refresh 
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
     streamSimple: (_model: typeof model, context: Context) => {
       calls.push(context);
       const stream = createAssistantMessageEventStream();
