@@ -1,4 +1,5 @@
 import type { ModelRegistry as PiModelRegistry } from '@earendil-works/pi-coding-agent';
+import { toPiProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 
 // Re-export from shared so the auth-aware mini-model denylist has a single
 // source of truth (also used by `getMiniModel()` at selection time).
@@ -37,8 +38,10 @@ export function resolvePiModel(
   piAuthProvider?: string,
   preferCustomEndpoint?: boolean,
 ): PiModel | undefined {
-  // Strip Craft's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
+  // Strip Selection's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
   const requestedBareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
+  // Stored connection ids (azure-openai-responses) become SDK ids (azure) here.
+  const sdkProvider = piAuthProvider ? toPiProviderId(piAuthProvider) : undefined;
 
   // Custom-endpoint takes precedence when configured.
   // Case-insensitive: ORDER ids like DeepSeek-V4-Flash must not miss the
@@ -50,19 +53,19 @@ export function resolvePiModel(
 
   // DeepSeek temporarily routes its retired V4 Flash ID to V4.1 Flash, but
   // Pi's current catalog only exposes the canonical deepseek-flash ID.
-  const bareId = piAuthProvider === 'deepseek' && requestedBareId === 'deepseek-v4-flash'
+  const bareId = sdkProvider === 'deepseek' && requestedBareId === 'deepseek-v4-flash'
     ? 'deepseek-flash' : requestedBareId;
 
   // If we know the auth provider, do an exact provider+model lookup first.
   // This avoids the getAll() ambiguity where the same model ID exists under
   // multiple providers (e.g., "gpt-5.2" under both "openai" and
-  // "azure-openai-responses") and the wrong one matches first.
-  if (piAuthProvider) {
-    const exact = modelRegistry.find(piAuthProvider, bareId);
+  // "azure") and the wrong one matches first.
+  if (sdkProvider) {
+    const exact = modelRegistry.find(sdkProvider, bareId);
     if (exact) {
       // MiniMax CN API rejects model IDs with the 'MiniMax-' prefix (e.g. 500 for
       // 'MiniMax-M2.5-highspeed') but accepts bare names ('M2.5-highspeed').
-      if (piAuthProvider === 'minimax-cn' && exact.id.startsWith('MiniMax-')) {
+      if (sdkProvider === 'minimax-cn' && exact.id.startsWith('MiniMax-')) {
         return { ...exact, id: exact.id.slice('MiniMax-'.length) };
       }
       return exact;
@@ -72,13 +75,13 @@ export function resolvePiModel(
   // Fallback: search all available models.
   // When piAuthProvider is set, only return models from the same provider
   // (or 'custom-endpoint'). Without this guard, a model that exists under
-  // a different provider (e.g. "gpt-5.4" under "azure-openai-responses"
+  // a different provider (e.g. "gpt-5.4" under "azure"
   // when authed as "github-copilot") would be returned, and the Pi SDK
   // would fail with "No API key found for <wrong-provider>".
   const allModels = modelRegistry.getAll();
   const match = allModels.find(m =>
     (m.id === bareId || m.name === bareId) &&
-    (!piAuthProvider || (m as any).provider === piAuthProvider || (m as any).provider === 'custom-endpoint'),
+    (!sdkProvider || (m as any).provider === sdkProvider || (m as any).provider === 'custom-endpoint'),
   );
   if (match) return match;
 
@@ -86,7 +89,7 @@ export function resolvePiModel(
   const providers = ['custom-endpoint', 'anthropic', 'openai', 'google'];
   for (const provider of providers) {
     // Skip providers incompatible with the authenticated provider
-    if (piAuthProvider && provider !== piAuthProvider && provider !== 'custom-endpoint') continue;
+    if (sdkProvider && provider !== sdkProvider && provider !== 'custom-endpoint') continue;
     const model = provider === 'custom-endpoint'
       ? findCustomEndpointModel(modelRegistry, bareId)
       : modelRegistry.find(provider, bareId);

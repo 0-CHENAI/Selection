@@ -16,6 +16,7 @@
 import { getProviders, getModels } from '@earendil-works/pi-ai/compat';
 import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
+import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
 
 // ============================================
 // PI MODEL DISCOVERY
@@ -88,7 +89,7 @@ function isBareBedrockClaudeModel(modelId: string): boolean {
  */
 export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
   try {
-    const models = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
+    const models = getModels(toPiProviderId(piAuthProvider) as Parameters<typeof getModels>[0]);
     if (models.length > 0) {
       return models
         .filter(m => !isExcludedPiModel(m.id))
@@ -182,6 +183,7 @@ function formatProviderName(key: string): string {
  */
 export function getPiApiKeyProviders(): PiProviderInfo[] {
   return getProviders()
+    .map(fromPiProviderId)
     .filter(p => !PI_EXCLUDED_PROVIDERS.has(p))
     .map(p => {
       const display = PI_PROVIDER_DISPLAY[p];
@@ -207,7 +209,7 @@ export function getPiApiKeyProviders(): PiProviderInfo[] {
  */
 export function getPiProviderBaseUrl(provider: string): string | undefined {
   try {
-    const models = getModels(provider as Parameters<typeof getModels>[0]);
+    const models = getModels(toPiProviderId(provider) as Parameters<typeof getModels>[0]);
     return models[0]?.baseUrl || undefined;
   } catch {
     return undefined;

@@ -6,7 +6,14 @@ import { resolvePiSessionPaths } from './session-paths.ts'
 
 /**
  * In-memory Pi settings that do not trust the workspace `.pi` directory.
- * Project extensions, skills, and settings stay out of Craft sessions.
+ * Project extensions, skills, and settings stay out of Selection sessions.
+ *
+ * Pi 0.99+ ships built-in extensions (mcp, codemode, tool-search, llama.cpp).
+ * The CLI flag `--no-extensions` disables those too, but it also skips every
+ * on-disk extension. SDK sessions only load a built-in when its factory is
+ * passed in, and `createAgentSession` does not pass them. Leaving
+ * `noExtensions` unset keeps an explicit `agentDir` able to load the
+ * extensions placed there.
  */
 export function createIsolatedPiSettings(
   settings?: Parameters<typeof PiSettingsManager.inMemory>[0],
