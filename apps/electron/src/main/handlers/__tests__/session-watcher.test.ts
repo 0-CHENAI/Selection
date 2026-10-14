@@ -92,9 +92,18 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
   return { clientId, workspaceId, webContentsId: null }
 }
 
-async function waitForPush(predicate: () => boolean): Promise<void> {
+async function waitForPush(predicate: () => boolean, trigger: () => void): Promise<void> {
   const deadline = Date.now() + 2000
-  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
+  let nextWriteAt = 0
+  while (!predicate() && Date.now() < deadline) {
+    if (Date.now() >= nextWriteAt) {
+      // Native recursive watchers can miss a write during OS subscription
+      // startup. Retry the stimulus, leaving the 100ms debounce time to fire.
+      trigger()
+      nextWriteAt = Date.now() + 250
+    }
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
   expect(predicate()).toBe(true)
 }
 
@@ -103,7 +112,10 @@ async function waitForPush(predicate: () => boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe('session file watcher isolation', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    const { cleanupSessionFileWatchForClient } = await import('@craft-agent/server-core/handlers/rpc')
+    cleanupSessionFileWatchForClient('client-a')
+    cleanupSessionFileWatchForClient('client-b')
     for (const dir of tempDirs) {
       try { rmSync(dir, { recursive: true, force: true }) } catch {}
     }
@@ -126,11 +138,8 @@ describe('session file watcher isolation', () => {
     await watchHandler(makeCtx('client-a'), 's1')
     await watchHandler(makeCtx('client-b'), 's2')
 
-    // Trigger a change in s1
-    writeFileSync(join(dir1, 'output.txt'), 'hello')
-
-    // fs.watch delivery can exceed a fixed delay under full-suite load.
-    await waitForPush(() => pushCalls.some(p => p.target?.clientId === 'client-a'))
+    await waitForPush(() => pushCalls.some(p => p.target?.clientId === 'client-a'),
+      () => writeFileSync(join(dir1, 'output.txt'), 'hello'))
 
     // Only client-a should have received the notification
     const clientAPushes = pushCalls.filter(p => p.target?.clientId === 'client-a')
@@ -149,8 +158,8 @@ describe('session file watcher isolation', () => {
     pushCalls.length = 0
 
     // Trigger a change in s2
-    writeFileSync(join(dir2, 'data.json'), '{}')
-    await waitForPush(() => pushCalls.some(p => p.target?.clientId === 'client-b'))
+    await waitForPush(() => pushCalls.some(p => p.target?.clientId === 'client-b'),
+      () => writeFileSync(join(dir2, 'data.json'), '{}'))
 
     // Client B should still receive notifications
     const clientBAfter = pushCalls.filter(p => p.target?.clientId === 'client-b')
@@ -190,8 +199,8 @@ describe('session file watcher isolation', () => {
     expect(s1Pushes.length).toBe(0)
 
     // Write to s2 — should trigger notification
-    writeFileSync(join(dir2, 'new.txt'), 'fresh')
-    await waitForPush(() => pushCalls.some(p => p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED))
+    await waitForPush(() => pushCalls.some(p => p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED),
+      () => writeFileSync(join(dir2, 'new.txt'), 'fresh'))
 
     const s2Pushes = pushCalls.filter(p =>
       p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
@@ -220,8 +229,8 @@ describe('session file watcher isolation', () => {
     expect(pushCalls.length).toBe(0)
 
     // Write a normal file — should trigger notification
-    writeFileSync(join(dir, 'result.txt'), 'output')
-    await waitForPush(() => pushCalls.length > 0)
+    await waitForPush(() => pushCalls.length > 0,
+      () => writeFileSync(join(dir, 'result.txt'), 'output'))
 
     expect(pushCalls.length).toBeGreaterThanOrEqual(1)
 
