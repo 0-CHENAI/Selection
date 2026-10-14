@@ -42,6 +42,15 @@ interface BrowserPageMetrics {
 export const PASSWORD_FILL_MARKER = 'Filled password field';
 /** Result line for `type` or `paste` into the focused password field. */
 export const PASSWORD_TEXT_MARKER = 'Entered text into a password field';
+/** `fill` ran, but page metrics did not say whether the field was a password. */
+export const UNCONFIRMED_FILL_MARKER = 'Filled field without page metrics';
+/** `type` or `paste` ran, but page metrics did not say whether focus was a password field. */
+export const UNCONFIRMED_TEXT_MARKER = 'Entered text without page metrics';
+
+function passwordFieldState(metrics: BrowserPageMetrics | null): 'password' | 'plain' | 'unknown' {
+  if (!metrics || typeof metrics.activeElementIsPassword !== 'boolean') return 'unknown';
+  return metrics.activeElementIsPassword ? 'password' : 'plain';
+}
 
 export function getBrowserToolHelp(): string {
   return [
@@ -1060,13 +1069,15 @@ async function executeSingleCommand(args: {
     const after = await getPageMetrics(fns);
 
     // fill focuses its target, so the focused field afterwards is the one filled. Echo the
-    // value only when that field is known not to be a password. If metrics are missing,
-    // report the length only so a secret is not written into the transcript.
-    const summary = after?.activeElementIsPassword
+    // value only when that field is known not to be a password. Missing metrics cannot
+    // prove the field is safe, so the line names the ref without the value and the
+    // session layer replaces the stored input with a placeholder.
+    const fieldState = passwordFieldState(after);
+    const summary = fieldState === 'password'
       ? [`${PASSWORD_FILL_MARKER} ${ref} (${value.length} characters)`]
-      : after
+      : fieldState === 'plain'
         ? [`Filled element ${ref} with "${value}"`, `Value length: ${value.length} characters`]
-        : [`Filled element ${ref} (${value.length} characters)`];
+        : [`${UNCONFIRMED_FILL_MARKER} ${ref} (${value.length} characters)`];
 
     return {
       output: [
@@ -1086,11 +1097,14 @@ async function executeSingleCommand(args: {
     await fns.type(text);
     const after = await getPageMetrics(fns);
 
+    const fieldState = passwordFieldState(after);
     return {
       output: [
-        after?.activeElementIsPassword
+        fieldState === 'password'
           ? `${PASSWORD_TEXT_MARKER} (${text.length} characters)`
-          : `Typed ${text.length} characters into focused element`,
+          : fieldState === 'unknown'
+            ? `${UNCONFIRMED_TEXT_MARKER} (${text.length} characters)`
+            : `Typed ${text.length} characters into focused element`,
         `Active element before: ${describeActive(before)}`,
         `Active element after: ${describeActive(after)}`,
       ].join('\n'),
@@ -1211,13 +1225,18 @@ async function executeSingleCommand(args: {
     const isMac = platform === 'darwin';
     await fns.sendKey({ key: 'v', modifiers: [isMac ? 'meta' : 'control'] });
     const after = await getPageMetrics(fns);
+    const fieldState = passwordFieldState(after);
 
     const lineCount = text.length === 0 ? 0 : text.split(/\r?\n/).length;
     const tabCount = (text.match(/\t/g) ?? []).length;
 
     return {
       output: [
-        after?.activeElementIsPassword ? `${PASSWORD_TEXT_MARKER} (${text.length} characters)` : `Pasted ${text.length} characters`,
+        fieldState === 'password'
+          ? `${PASSWORD_TEXT_MARKER} (${text.length} characters)`
+          : fieldState === 'unknown'
+            ? `${UNCONFIRMED_TEXT_MARKER} (${text.length} characters)`
+            : `Pasted ${text.length} characters`,
         `Shortcut used: ${isMac ? 'Cmd+V' : 'Ctrl+V'}`,
         `Lines: ${lineCount}, tabs: ${tabCount}`,
       ].join('\n'),

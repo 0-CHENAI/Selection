@@ -410,7 +410,8 @@ describe('createBrowserTools', () => {
       const result = await executeTool(tools, 'browser_tool', { command: 'fill @e2 hello world' })
       expect(filledRef).toBe('@e2')
       expect(filledValue).toBe('hello world')
-      expect(result.content[0].text).toContain('Filled element @e2')
+      expect(result.content[0].text).toContain('Filled field without page metrics @e2')
+      expect(result.content[0].text).not.toContain('hello world')
     })
 
     it('supports semicolon command batching', async () => {
@@ -427,7 +428,8 @@ describe('createBrowserTools', () => {
         'fill:@e2:password123',
         'click:@e3',
       ])
-      expect(result.content[0].text).toContain('Filled element @e1')
+      expect(result.content[0].text).toContain('Filled field without page metrics @e1')
+      expect(result.content[0].text).not.toContain('password123')
       expect(result.content[0].text).toContain('Clicked element @e3')
     })
 
@@ -444,7 +446,8 @@ describe('createBrowserTools', () => {
         'fill:@e1:a;b;c',
         'click:@e2',
       ])
-      expect(result.content[0].text).toContain('Filled element @e1')
+      expect(result.content[0].text).toContain('Filled field without page metrics @e1')
+      expect(result.content[0].text).not.toContain('a;b;c')
       expect(result.content[0].text).toContain('Clicked element @e2')
     })
 
@@ -472,7 +475,8 @@ describe('createBrowserTools', () => {
       mockFns.type = async (text) => { typedText = text }
       const result = await executeTool(tools, 'browser_tool', { command: 'type Hello World' })
       expect(typedText).toBe('Hello World')
-      expect(result.content[0].text).toContain('Typed 11 characters into focused element')
+      expect(result.content[0].text).toContain('Entered text without page metrics (11 characters)')
+      expect(result.content[0].text).not.toContain('Hello World')
     })
 
     it('returns error for type with no text', async () => {
@@ -662,7 +666,8 @@ describe('createBrowserTools', () => {
       const result = await executeTool(tools, 'browser_tool', { command: 'paste Hello World' })
       expect(clipboardText).toBe('Hello World')
       expect(keySent).toBe('v')
-      expect(result.content[0].text).toContain('Pasted 11 characters')
+      expect(result.content[0].text).toContain('Entered text without page metrics (11 characters)')
+      expect(result.content[0].text).not.toContain('Hello World')
     })
 
     it('decodes escaped tab/newline sequences for paste', async () => {
@@ -675,7 +680,7 @@ describe('createBrowserTools', () => {
       })
       expect(clipboardText).toBe('Hello\tWorld\nFoo\tBar')
       expect(keySent).toBe('v')
-      expect(result.content[0].text).toContain('Pasted 19 characters')
+      expect(result.content[0].text).toContain('Entered text without page metrics (19 characters)')
     })
 
     it('returns error for paste with no text', async () => {
@@ -994,7 +999,7 @@ describe('createBrowserTools', () => {
         command: ['paste', 'Name\tAge\nAlice\t30'],
       })
       expect(clipboardText).toBe('Name\tAge\nAlice\t30')
-      expect(result.content[0].text).toContain('Pasted')
+      expect(result.content[0].text).toContain('Entered text without page metrics (17 characters)')
     })
 
     it('set-clipboard preserves semicolons and special characters', async () => {
@@ -1032,7 +1037,7 @@ describe('createBrowserTools', () => {
         command: ['type', 'Hello\tWorld'],
       })
       expect(typedText).toBe('Hello\tWorld')
-      expect(result.content[0].text).toContain('Typed')
+      expect(result.content[0].text).toContain('Entered text without page metrics (11 characters)')
     })
 
     it('--help works in array mode', async () => {

@@ -13844,7 +13844,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const parentToolUseId = existingToolMsg?.parentToolUseId || event.parentToolUseId
 
         // A browser_tool fill's input still holds the typed value. Once the result says the
-        // field was a password, keep that value out of the stored transcript and the renderer.
+        // field was a password, or that page metrics could not confirm the field, keep that
+        // value out of the stored transcript and the renderer.
         // Use the raw result: truncation or path rewriting must not hide the marker.
         const redactedToolInput = existingToolMsg
           ? redactBrowserPasswordFills(existingToolMsg.toolName || toolName, existingToolMsg.toolInput, event.result)

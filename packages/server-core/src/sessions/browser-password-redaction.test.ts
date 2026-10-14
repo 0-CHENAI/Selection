@@ -65,6 +65,24 @@ describe('browser password redaction on tool_result', () => {
     })
   })
 
+  it('stores a placeholder when page metrics could not confirm the field', async () => {
+    const session = setup('fill @e1 user@example.com; fill @e2 hunter2')
+    await finish(session, 'Filled field without page metrics @e1 (16 characters)\nFilled field without page metrics @e2 (7 characters)')
+
+    expect(session.managed.messages[0]?.toolInput).toEqual({
+      command: 'fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 7 characters]',
+    })
+    expect(JSON.stringify(session.managed.messages)).not.toContain('hunter2')
+    expect(JSON.stringify(session.managed.messages)).not.toContain('user@example.com')
+    expect(session.events.filter(event => event.type === 'tool_result')).toEqual([
+      expect.objectContaining({
+        toolInput: {
+          command: 'fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 7 characters]',
+        },
+      }),
+    ])
+  })
+
   it('leaves an ordinary fill and a non-browser tool alone', async () => {
     const ordinary = setup('fill @e2 hunter2')
     await finish(ordinary, 'Filled element @e2 with "hunter2"')

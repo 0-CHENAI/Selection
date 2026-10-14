@@ -195,11 +195,66 @@ describe('redaction beyond a plain fill', () => {
     expect(redactBrowserPasswordFills('browser_tool', { command }, output)).toBeUndefined()
   })
 
+  it('redacts fills and typed text when page metrics are missing', async () => {
+    const fns = {
+      fill: async () => {},
+      type: async () => {},
+      setClipboard: async () => {},
+      sendKey: async () => {},
+      click: async () => {},
+      detectChallenge: async () => ({ detected: false, provider: 'none', signals: [] }),
+      evaluate: async () => null,
+    } as unknown as BrowserPaneFns
+    const fill = 'fill @e1 user@example.com; fill @e2 hunter2-secret'
+    const filled = await executeBrowserToolCommand({ command: fill, fns, sessionId: 'test-session' })
+    expect(filled.output).toContain('Filled field without page metrics @e1')
+    expect(filled.output).toContain('Filled field without page metrics @e2')
+    expect(filled.output).not.toContain('user@example.com')
+    expect(filled.output).not.toContain('hunter2-secret')
+    expect(redactBrowserPasswordFills('browser_tool', { command: fill }, filled.output)).toEqual({
+      command: 'fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 14 characters]',
+    })
+    expect(redactBrowserPasswordFills('browser_tool', { command: fill }, claudeStoredResult(filled.output))?.command)
+      .toBe('fill @e1 [redacted: 16 characters]; fill @e2 [redacted: 14 characters]')
+
+    const typed = 'type hunter2; paste more secret'
+    const entered = await executeBrowserToolCommand({ command: typed, fns, sessionId: 'test-session' })
+    expect(entered.output).toContain('Entered text without page metrics (7 characters)')
+    expect(entered.output).toContain('Entered text without page metrics (11 characters)')
+    expect(entered.output).not.toContain('hunter2')
+    expect(redactBrowserPasswordFills('browser_tool', { command: typed }, entered.output)).toEqual({
+      command: 'type [redacted: 7 characters]; paste [redacted: 11 characters]',
+    })
+    expect(redactBrowserToolInput({ command: ['fill', '@e2', 'hunter2'] }, [], { unconfirmedRefs: ['@e2'] }))
+      .toEqual({ command: ['fill', '@e2', '[redacted: 7 characters]'] })
+  })
+
+  it('keeps an unconfirmed fill line when a later batch command fails', async () => {
+    const fns = {
+      fill: async () => {},
+      click: async () => { throw new Error('Element @e404 not found') },
+      detectChallenge: async () => ({ detected: false, provider: 'none', signals: [] }),
+      evaluate: async () => null,
+    } as unknown as BrowserPaneFns
+    const command = 'fill @e2 hunter2-secret; click @e404'
+    const error = await executeBrowserToolCommand({ command, fns, sessionId: 'test-session' }).then(() => undefined, (e: unknown) => e) as Error
+    expect(error.message).toContain('Filled field without page metrics @e2')
+    expect(error.message).not.toContain('hunter2-secret')
+    expect(redactBrowserPasswordFills('browser_tool', { command }, error.message))
+      .toEqual({ command: 'fill @e2 [redacted: 14 characters]; click @e404' })
+  })
+
   it('keeps password-entry lines when a result is replaced by a summary', () => {
     const original = 'Filled password field @e2 (7 characters)\nEntered text into a password field (3 characters)\nScreenshot captured'
     const kept = keepPasswordEntryLines(original, '[Structured media assets extracted and saved]')
     expect(redactBrowserPasswordFills('browser_tool', { command: 'fill @e2 hunter2; type abc; screenshot' }, kept))
       .toEqual({ command: 'fill @e2 [password: 7 characters]; type [password: 3 characters]; screenshot' })
+    const unconfirmed = keepPasswordEntryLines(
+      'Filled field without page metrics @e1 (16 characters)\nEntered text without page metrics (4 characters)',
+      'summary',
+    )
+    expect(redactBrowserPasswordFills('browser_tool', { command: 'fill @e1 user@example.com; type abcd' }, unconfirmed))
+      .toEqual({ command: 'fill @e1 [redacted: 16 characters]; type [redacted: 4 characters]' })
     expect(keepPasswordEntryLines('Screenshot captured', 'summary')).toBe('summary')
   })
 })
