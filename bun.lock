@@ -132,7 +132,7 @@
     },
     "apps/electron": {
       "name": "@craft-agent/electron",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/messaging-gateway": "workspace:*",
@@ -233,7 +233,7 @@
     },
     "packages/core": {
       "name": "@craft-agent/core",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "devDependencies": {
         "@types/uuid": "^11.0.0",
       },
@@ -243,7 +243,7 @@
     },
     "packages/messaging-gateway": {
       "name": "@craft-agent/messaging-gateway",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/server-core": "workspace:*",
@@ -257,7 +257,7 @@
     },
     "packages/pi-agent-server": {
       "name": "@craft-agent/pi-agent-server",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "bin": {
         "pi-agent-server": "./dist/index.js",
       },
@@ -279,7 +279,7 @@
     },
     "packages/server": {
       "name": "@craft-agent/server",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "bin": {
         "craft-server": "src/index.ts",
       },
@@ -297,7 +297,7 @@
     },
     "packages/server-core": {
       "name": "@craft-agent/server-core",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/shared": "workspace:*",
@@ -316,7 +316,7 @@
     },
     "packages/session-mcp-server": {
       "name": "@craft-agent/session-mcp-server",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "bin": {
         "session-mcp-server": "./dist/index.js",
       },
@@ -332,7 +332,7 @@
     },
     "packages/session-tools-core": {
       "name": "@craft-agent/session-tools-core",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "beautiful-mermaid": "*",
         "gray-matter": "^4.0.3",
@@ -346,7 +346,7 @@
     },
     "packages/shared": {
       "name": "@craft-agent/shared",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/session-tools-core": "workspace:*",
@@ -380,7 +380,7 @@
     },
     "packages/ui": {
       "name": "@craft-agent/ui",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/shared": "workspace:*",
