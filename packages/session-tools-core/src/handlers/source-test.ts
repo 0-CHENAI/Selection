@@ -20,6 +20,13 @@ import {
   getSourceGuidePath,
   getSourcePath,
 } from '../source-helpers.ts';
+import {
+  apiAuthSpecFromConfig,
+  appendQueryAuth,
+  buildApiAuthHeaders,
+  isMultiHeaderCredential,
+  parseStoredApiCredential,
+} from '../api-auth.ts';
 
 export interface SourceTestArgs {
   sourceSlug: string;
@@ -510,71 +517,42 @@ async function testApiConnectionWithAuth(
     return { lines: [], success: false, hasError: false, attempted: false };
   }
 
-  // Build auth headers based on authType
-  const headers: Record<string, string> = {};
-  let urlWithAuth = testUrl;
+  // Assemble auth the same way api_<source> tools do, so a passing test means
+  // the generated tool sends the same headers (including unwrapping a JSON
+  // header map stored against a single headerName).
+  const api = source.api!;
+  const authSpec = apiAuthSpecFromConfig(api);
+  const credential = parseStoredApiCredential(token, {
+    authType: api.authType,
+    headerName: api.headerName,
+    headerNames: api.headerNames,
+  });
 
-  switch (source.api!.authType) {
-    case 'bearer':
-    case 'oauth':
-      // Generic OAuth tokens are sent as Bearer tokens
-      headers['Authorization'] = `Bearer ${token}`;
-      break;
-    case 'basic': {
-      // Vault value for source_basic is JSON `{"username","password"}` (written by
-      // source_credential_prompt / WebUI). Parse and base64-encode to match what
-      // api-tools.ts buildHeaders does at runtime. Fall through if the token is
-      // already a non-JSON string (legacy / hand-edited vault entries).
-      try {
-        const parsed = JSON.parse(token);
-        if (parsed && typeof parsed === 'object' && parsed.username && parsed.password) {
-          const encoded = Buffer.from(`${parsed.username}:${parsed.password}`).toString('base64');
-          headers['Authorization'] = `Basic ${encoded}`;
-          break;
-        }
-      } catch {
-        // Not JSON — pass through
-      }
-      headers['Authorization'] = `Basic ${token}`;
-      break;
-    }
-    case 'header':
-      // Custom header name
-      if (source.api!.headerName) {
-        headers[source.api!.headerName] = token;
-      } else if (source.api!.headerNames && source.api!.headerNames.length > 0) {
-        // Multi-header auth: token is JSON with header values
-        const headerNames = source.api!.headerNames;
-        try {
-          const headerValues = JSON.parse(token) as Record<string, string>;
-          for (const headerName of headerNames) {
-            if (headerValues[headerName]) {
-              headers[headerName] = headerValues[headerName];
-            }
-          }
-        } catch {
-          // Token is not valid JSON - this is a configuration error for multi-header auth
-          const firstHeader = headerNames[0] || 'Header';
-          return {
-            lines: [`✗ Multi-header auth requires JSON token with header values`],
-            success: false,
-            hasError: true,
-            error: `Expected JSON token like {"${firstHeader}": "value"} but got non-JSON string`,
-            attempted: true,
-          };
-        }
-      } else {
-        // Fallback to X-API-Key if no header name specified
-        headers['X-API-Key'] = token;
-      }
-      break;
-    case 'query':
-      // Add token as query parameter
-      const paramName = source.api!.queryParam || 'api_key';
-      const separator = testUrl.includes('?') ? '&' : '?';
-      urlWithAuth = `${testUrl}${separator}${paramName}=${encodeURIComponent(token)}`;
-      break;
+  const configuredHeaderNames = api.headerNames?.filter(Boolean) ?? [];
+  const requiresHeaderMap =
+    configuredHeaderNames.length > 1 ||
+    (configuredHeaderNames.length === 1 && configuredHeaderNames[0] !== api.headerName);
+  if (requiresHeaderMap && !isMultiHeaderCredential(credential)) {
+    const firstHeader = configuredHeaderNames[0] || 'Header';
+    return {
+      lines: [`✗ Multi-header auth requires one stored value per header (${configuredHeaderNames.join(', ')})`],
+      success: false,
+      hasError: true,
+      error: `Expected a stored credential like {"${firstHeader}": "value"} covering every header in headerNames; re-run source_credential_prompt`,
+      attempted: true,
+    };
   }
+
+  const headers = buildApiAuthHeaders(authSpec, credential, api.defaultHeaders);
+  // Drop the JSON default. GETs should not grow a Content-Type, and a body
+  // or testEndpoint header restores it below. Endpoint Content-Type wins.
+  if (headers['Content-Type'] === 'application/json') {
+    const defaultsSetContentType = Object.keys(api.defaultHeaders ?? {}).some(
+      (key) => key.toLowerCase() === 'content-type',
+    );
+    if (!defaultsSetContentType) delete headers['Content-Type'];
+  }
+  const urlWithAuth = appendQueryAuth(testUrl, authSpec, credential);
 
   // Make authenticated request
   try {

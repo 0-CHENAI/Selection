@@ -264,6 +264,8 @@
   "chat.attach": "Attach",
   "chat.attachFiles": "Attach Files",
   "chat.attachFilesTooltip": "Attach files",
+  "chat.attachmentFileTooLarge": "{{name}} is {{size}}, over the {{limit}} limit for one message. Send a smaller file.",
+  "chat.attachmentsTotalTooLarge": "These attachments total {{size}}, over the {{limit}} limit for one message. Send them in smaller batches.",
   "chat.authenticationRequired": "Authentication Required",
   "chat.backgroundSessionFinished": "Finished in the background",
   "chat.bearerToken": "Bearer Token",

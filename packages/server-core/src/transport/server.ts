@@ -20,6 +20,7 @@ import {
   DISCONNECTED_CLIENT_TTL_MS,
   requestTimeoutMsForChannel,
   isErrorCode,
+  runtimeMaxMessageBytes,
   type MessageEnvelope,
   type PushTarget,
   type ErrorCode,
@@ -282,7 +283,7 @@ export class WsRpcServer implements RpcServer {
           this.httpHandler,
         )
 
-        this.wss = new WebSocketServer({ server: this.httpsServer })
+        this.wss = new WebSocketServer({ server: this.httpsServer, maxPayload: runtimeMaxMessageBytes() })
 
         this.httpsServer.on('error', (err) => reject(err))
 
@@ -298,7 +299,7 @@ export class WsRpcServer implements RpcServer {
         // Plain WS + HTTP handler: create an HTTP server for both.
         this._protocol = 'ws'
         this.httpServer = createHttpServer(this.httpHandler)
-        this.wss = new WebSocketServer({ server: this.httpServer })
+        this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: runtimeMaxMessageBytes() })
 
         this.httpServer.on('error', (err) => reject(err))
 
@@ -316,6 +317,7 @@ export class WsRpcServer implements RpcServer {
         this.wss = new WebSocketServer({
           host: this.host,
           port: this.requestedPort,
+          maxPayload: runtimeMaxMessageBytes(),
         })
 
         this.wss.on('listening', () => {
@@ -492,15 +494,7 @@ export class WsRpcServer implements RpcServer {
               if (canReplay) {
                 const replayEvents = prevClient.eventBuffer.filter(e => e.seq > lastSeq)
 
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
-                  reconnected: true,
-                }
+                const ack = this.handshakeAck(envelope.id, prevClient.id, { reconnected: true })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 // Replay missed events in order
@@ -515,16 +509,7 @@ export class WsRpcServer implements RpcServer {
                 })
               } else {
                 // Buffer evicted — client must full-refresh
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
-                  reconnected: true,
-                  stale: true,
-                }
+                const ack = this.handshakeAck(envelope.id, prevClient.id, { reconnected: true, stale: true })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 transportLog.info('Client reconnected as stale', {
@@ -576,14 +561,7 @@ export class WsRpcServer implements RpcServer {
         handshakeCompleted = true
 
         // Send handshake_ack
-        const ack: MessageEnvelope = {
-          id: envelope.id,
-          type: 'handshake_ack',
-          protocolVersion: PROTOCOL_VERSION,
-          serverVersion: this.serverVersion || undefined,
-          clientId,
-          registeredChannels: [...this.handlers.keys()],
-        }
+        const ack = this.handshakeAck(envelope.id, clientId)
         this.safeSend(ws, serializeEnvelope(ack))
 
         // Notify lifecycle listener
@@ -880,6 +858,19 @@ export class WsRpcServer implements RpcServer {
       ;(err as any).code = 'CLIENT_DISCONNECTED'
       pending.reject(err)
       this.pendingInvokes.delete(id)
+    }
+  }
+
+  private handshakeAck(id: string, clientId: string, extra: Partial<MessageEnvelope> = {}): MessageEnvelope {
+    return {
+      id,
+      type: 'handshake_ack',
+      protocolVersion: PROTOCOL_VERSION,
+      serverVersion: this.serverVersion || undefined,
+      clientId,
+      registeredChannels: [...this.handlers.keys()],
+      maxMessageBytes: runtimeMaxMessageBytes(),
+      ...extra,
     }
   }
 

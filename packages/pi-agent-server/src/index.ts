@@ -35,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
 import { homedir } from 'node:os';
 
 // Pi SDK
@@ -352,6 +353,19 @@ type OutboundMessage =
 let piSession: AgentSession | null = null;
 let piModelRegistry: PiModelRegistry | null = null;
 let piSettingsManager: PiSettingsManager | null = null;
+let scratchQueryAgentDir: string | undefined;
+
+/** Empty agent dir for sessionless queryLlm calls, reused so scratch dirs do not pile up. */
+function isolatedQueryAgentDir(): string {
+  if (initConfig?.sessionPath || initConfig?.agentDir) {
+    return resolveIsolatedAgentDir({
+      sessionPath: initConfig.sessionPath,
+      agentDir: initConfig.agentDir,
+    });
+  }
+  scratchQueryAgentDir ??= resolveIsolatedAgentDir({});
+  return scratchQueryAgentDir;
+}
 let moduleCredentialStore: InMemoryCredentialStore | null = null;
 type AuthenticatedRuntime = {
   modelRuntime: PiModelRuntime;
@@ -809,14 +823,18 @@ async function ensureSession(): Promise<AgentSession> {
     tools: toolAllowlist,
   };
 
-  // Extension isolation: set agentDir to a temp directory under session path
-  // to prevent loading global Pi extensions from ~/.pi/agent
+  // Keep Pi off ~/.pi/agent and off a trusted cwd `.pi` (extensions, skills, settings).
+  // Session paths still get an empty `<session>/.pi-agent`; an explicit agentDir is honored.
+  const isolatedAgentDir = resolveIsolatedAgentDir({
+    sessionPath: initConfig.sessionPath,
+    agentDir: initConfig.agentDir,
+  });
+  sessionOptions.agentDir = isolatedAgentDir;
+  piSettingsManager = createIsolatedPiSettings();
+  sessionOptions.settingsManager = piSettingsManager;
+
   if (initConfig.sessionPath) {
-    const { agentDir, sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
-    mkdirSync(agentDir, { recursive: true });
-    sessionOptions.agentDir = agentDir;
-    piSettingsManager = PiSettingsManager.create(cwd, agentDir);
-    sessionOptions.settingsManager = piSettingsManager;
+    const { sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
 
     // Session resume: use a per-Craft-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
@@ -865,7 +883,7 @@ async function ensureSession(): Promise<AgentSession> {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
 
-  piSettingsManager ??= PiSettingsManager.inMemory();
+  piSettingsManager ??= createIsolatedPiSettings();
   sessionOptions.settingsManager = piSettingsManager;
   piSettingsManager.setCompactionEnabled(true);
   applyCompactionPolicy(sessionOptions.model, true);
@@ -1309,10 +1327,14 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
     };
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),
+      agentDir: isolatedQueryAgentDir(),
       modelRuntime,
       tools: [],
       sessionManager: PiSessionManager.inMemory(),
-      ...(strict ? { resourceLoader: isolatedResources, settingsManager: PiSettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }) } : {}),
+      settingsManager: createIsolatedPiSettings(
+        strict ? { compaction: { enabled: false }, retry: { enabled: false } } : undefined,
+      ),
+      ...(strict ? { resourceLoader: isolatedResources } : {}),
       model: piModel,
     };
 

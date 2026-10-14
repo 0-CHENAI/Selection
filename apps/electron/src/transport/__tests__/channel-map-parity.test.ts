@@ -17,6 +17,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'performOAuth'
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
+  | 'getMaxMessageBytes'
   | 'onTransportConnectionStateChanged'
   | 'onConfirmDialog' // renderer callback registered directly in preload
   | 'reconnectTransport'

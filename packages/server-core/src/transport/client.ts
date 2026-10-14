@@ -14,6 +14,8 @@ import {
   REQUEST_TIMEOUT_MS,
   requestTimeoutMsForChannel,
   SEQUENCE_ACK_INTERVAL_MS,
+  DEFAULT_MAX_MESSAGE_BYTES,
+  utf8ByteLength,
   isErrorCode,
   type ErrorCode,
   type MessageEnvelope,
@@ -116,6 +118,7 @@ export class WsRpcClient implements RpcClient {
   private anyEventListeners = new Set<(channel: string, ...args: any[]) => void>()
   private clientId: string | null = null
   private _serverVersion: string | null = null
+  private _maxMessageBytes: number | null = null
   private connected = false
   private reconnectAttempt = 0
   private lastSeenSeq = 0
@@ -203,8 +206,17 @@ export class WsRpcClient implements RpcClient {
         channel,
         args,
       }
+      const serialized = serializeEnvelope(envelope)
+      const bytes = utf8ByteLength(serialized)
+      const limit = this.getMaxMessageBytes()
+      if (bytes > limit) {
+        this.pending.delete(id)
+        if (timeout) clearTimeout(timeout)
+        reject(new Error(`Message too large for ${channel}: ${bytes} bytes exceeds the ${limit}-byte limit`))
+        return
+      }
 
-      if (!this.trySendEnvelope(this.ws, envelope)) {
+      if (!this.sendSerialized(this.ws, serialized)) {
         this.pending.delete(id)
         if (timeout) clearTimeout(timeout)
         reject(new Error(`Not connected (channel: ${channel})`))
@@ -245,6 +257,14 @@ export class WsRpcClient implements RpcClient {
   /** Server version from handshake_ack (null if server didn't send one / not yet connected). */
   getServerVersion(): string | null {
     return this._serverVersion
+  }
+
+  /**
+   * Largest frame this server accepts. Until handshake_ack advertises one,
+   * assume the smaller Bun limit so an older server is not disconnected.
+   */
+  getMaxMessageBytes(): number {
+    return this._maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES
   }
 
   getConnectionState(): TransportConnectionState {
@@ -526,6 +546,9 @@ export class WsRpcClient implements RpcClient {
         this.pendingReconnect = null
         this.clientId = envelope.clientId ?? null
         this._serverVersion = envelope.serverVersion ?? null
+        if (typeof envelope.maxMessageBytes === 'number' && envelope.maxMessageBytes > 0) {
+          this._maxMessageBytes = envelope.maxMessageBytes
+        }
         this.serverChannels = envelope.registeredChannels
           ? new Set(envelope.registeredChannels)
           : null
@@ -817,10 +840,14 @@ export class WsRpcClient implements RpcClient {
 
   /** Best-effort send that skips closing/closed sockets and swallows send races. */
   private trySendEnvelope(ws: WebSocket | null, envelope: MessageEnvelope): boolean {
+    return this.sendSerialized(ws, serializeEnvelope(envelope))
+  }
+
+  private sendSerialized(ws: WebSocket | null, serialized: string): boolean {
     if (!ws || ws.readyState !== ws.OPEN) return false
 
     try {
-      ws.send(serializeEnvelope(envelope))
+      ws.send(serialized)
       return true
     } catch {
       return false

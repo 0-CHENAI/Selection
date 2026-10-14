@@ -270,6 +270,8 @@ export interface ApiSourceConfig {
   headerNames?: string[];
   queryParam?: string;
   authScheme?: string;
+  /** Headers sent on every request, matching the runtime API tool config. */
+  defaultHeaders?: Record<string, string>;
   testEndpoint?: {
     method: 'GET' | 'POST';
     path: string;

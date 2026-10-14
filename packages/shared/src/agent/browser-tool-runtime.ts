@@ -35,6 +35,21 @@ interface BrowserPageMetrics {
   activeElementRole?: string;
   activeElementId?: string;
   activeElementName?: string;
+  activeElementIsPassword?: boolean;
+}
+
+/** Result line that names a password field `fill` wrote. The session layer redacts that input. */
+export const PASSWORD_FILL_MARKER = 'Filled password field';
+/** Result line for `type` or `paste` into the focused password field. */
+export const PASSWORD_TEXT_MARKER = 'Entered text into a password field';
+/** `fill` ran, but page metrics did not say whether the field was a password. */
+export const UNCONFIRMED_FILL_MARKER = 'Filled field without page metrics';
+/** `type` or `paste` ran, but page metrics did not say whether focus was a password field. */
+export const UNCONFIRMED_TEXT_MARKER = 'Entered text without page metrics';
+
+function passwordFieldState(metrics: BrowserPageMetrics | null): 'password' | 'plain' | 'unknown' {
+  if (!metrics || typeof metrics.activeElementIsPassword !== 'boolean') return 'unknown';
+  return metrics.activeElementIsPassword ? 'password' : 'plain';
 }
 
 export function getBrowserToolHelp(): string {
@@ -190,6 +205,9 @@ async function getPageMetrics(fns: BrowserPaneFns): Promise<BrowserPageMetrics |
       const scrollX = window.scrollX || window.pageXOffset || 0;
       const scrollY = window.scrollY || window.pageYOffset || 0;
       const active = document.activeElement;
+      // Focus inside an open shadow root reports the host; look through to the field itself.
+      let field = active;
+      while (field?.shadowRoot?.activeElement) field = field.shadowRoot.activeElement;
       return {
         url: window.location.href,
         title: document.title || '',
@@ -205,6 +223,11 @@ async function getPageMetrics(fns: BrowserPaneFns): Promise<BrowserPageMetrics |
         activeElementRole: active?.getAttribute?.('role') || '',
         activeElementId: active?.id || '',
         activeElementName: active?.getAttribute?.('name') || active?.getAttribute?.('aria-label') || active?.textContent?.trim?.().slice(0, 80) || '',
+        activeElementIsPassword: !!field && (
+          field.type === 'password'
+          || /password/i.test(field.getAttribute?.('autocomplete') || '')
+          || (window.getComputedStyle(field).webkitTextSecurity || 'none') !== 'none'
+        ),
       };
     })()`
   );
@@ -361,7 +384,7 @@ function decodeEscapes(input: string): string {
   });
 }
 
-function splitBatchCommands(input: string): string[] {
+export function splitBatchCommands(input: string): string[] {
   const commands: string[] = [];
   let current = '';
   let inSingle = false;
@@ -418,7 +441,7 @@ function splitBatchCommands(input: string): string[] {
   return commands;
 }
 
-function tokenizeCommand(input: string): string[] {
+export function tokenizeCommand(input: string): string[] {
   const tokens: string[] = [];
   let current = '';
   let tokenStarted = false;
@@ -659,7 +682,16 @@ async function executeBatchCommands(args: {
 
   for (let i = 0; i < args.commands.length; i++) {
     const command = args.commands[i]!;
-    const result = await executeSingleCommand({ ...args, command });
+    let result: BrowserCommandResult;
+    try {
+      result = await executeSingleCommand({ ...args, command });
+    } catch (error) {
+      // Keep earlier output: a password fill's line is what lets the host redact the stored input.
+      // The failing command itself is not quoted, because it may hold the value.
+      if (outputs.length === 0 || !(error instanceof Error)) throw error;
+      error.message = `${outputs.join('\n')}\n\nCommand ${i + 1} of ${args.commands.length} failed: ${error.message}`;
+      throw error;
+    }
 
     outputs.push(result.output);
     if (result.image) lastImage = result.image;
@@ -1036,10 +1068,20 @@ async function executeSingleCommand(args: {
     await fns.fill(ref, value);
     const after = await getPageMetrics(fns);
 
+    // fill focuses its target, so the focused field afterwards is the one filled. Echo the
+    // value only when that field is known not to be a password. Missing metrics cannot
+    // prove the field is safe, so the line names the ref without the value and the
+    // session layer replaces the stored input with a placeholder.
+    const fieldState = passwordFieldState(after);
+    const summary = fieldState === 'password'
+      ? [`${PASSWORD_FILL_MARKER} ${ref} (${value.length} characters)`]
+      : fieldState === 'plain'
+        ? [`Filled element ${ref} with "${value}"`, `Value length: ${value.length} characters`]
+        : [`${UNCONFIRMED_FILL_MARKER} ${ref} (${value.length} characters)`];
+
     return {
       output: [
-        `Filled element ${ref} with "${value}"`,
-        `Value length: ${value.length} characters`,
+        ...summary,
         `Active element before: ${describeActive(before)}`,
         `Active element after: ${describeActive(after)}`,
       ].join('\n'),
@@ -1055,9 +1097,14 @@ async function executeSingleCommand(args: {
     await fns.type(text);
     const after = await getPageMetrics(fns);
 
+    const fieldState = passwordFieldState(after);
     return {
       output: [
-        `Typed ${text.length} characters into focused element`,
+        fieldState === 'password'
+          ? `${PASSWORD_TEXT_MARKER} (${text.length} characters)`
+          : fieldState === 'unknown'
+            ? `${UNCONFIRMED_TEXT_MARKER} (${text.length} characters)`
+            : `Typed ${text.length} characters into focused element`,
         `Active element before: ${describeActive(before)}`,
         `Active element after: ${describeActive(after)}`,
       ].join('\n'),
@@ -1177,13 +1224,19 @@ async function executeSingleCommand(args: {
     const platform = args.platform ?? process.platform;
     const isMac = platform === 'darwin';
     await fns.sendKey({ key: 'v', modifiers: [isMac ? 'meta' : 'control'] });
+    const after = await getPageMetrics(fns);
+    const fieldState = passwordFieldState(after);
 
     const lineCount = text.length === 0 ? 0 : text.split(/\r?\n/).length;
     const tabCount = (text.match(/\t/g) ?? []).length;
 
     return {
       output: [
-        `Pasted ${text.length} characters`,
+        fieldState === 'password'
+          ? `${PASSWORD_TEXT_MARKER} (${text.length} characters)`
+          : fieldState === 'unknown'
+            ? `${UNCONFIRMED_TEXT_MARKER} (${text.length} characters)`
+            : `Pasted ${text.length} characters`,
         `Shortcut used: ${isMac ? 'Cmd+V' : 'Ctrl+V'}`,
         `Lines: ${lineCount}, tabs: ${tabCount}`,
       ].join('\n'),

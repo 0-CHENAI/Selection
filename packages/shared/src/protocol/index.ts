@@ -1,4 +1,5 @@
 export * from './types'
+export * from './message-limits'
 export * from './channels'
 export * from './dto'
 export * from './events'

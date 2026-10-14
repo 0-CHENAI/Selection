@@ -48,6 +48,7 @@ import { GET_WINDOW_RESIZE_STATE, WINDOW_RESIZE_STATE } from '../shared/window-r
 
 interface TransportClient extends RpcClient {
   isChannelAvailable(channel: string): boolean
+  getMaxMessageBytes(): number
   getConnectionState(): TransportConnectionState
   onConnectionStateChanged(callback: (state: TransportConnectionState) => void): () => void
   reconnectNow(): void
@@ -197,6 +198,7 @@ const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailabl
 ;(api as ElectronAPI).onConfirmDialog = handler => confirmationBridge.register(handler)
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
+;(api as ElectronAPI).getMaxMessageBytes = () => client.getMaxMessageBytes()
 
 if (process.platform === 'darwin' || process.platform === 'win32') {
   ;(api as ElectronAPI).onWindowResizeStateChange = callback => {

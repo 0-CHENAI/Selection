@@ -97,6 +97,7 @@ import { windowsCaptionInsetStyle } from '@/lib/windows-caption-inset'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
+import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
 import { assessDelegateCommandSubmission } from '@/components/app-shell/input/delegate-command'
 import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 
@@ -1353,6 +1354,11 @@ export default function App() {
       let processedAttachments: FileAttachment[] | undefined
 
       if (attachments?.length) {
+        const tooLarge = findAttachmentSizeProblem(attachments)
+        if (tooLarge) {
+          toast.warning(formatAttachmentSizeProblem(tooLarge, t))
+          return false
+        }
         // Store each attachment to disk and generate image thumbnails.
         // Use allSettled so one failure doesn't kill all attachments
         const storeResults = await Promise.allSettled(
@@ -1522,7 +1528,7 @@ export default function App() {
       }))
       return locallyCommitted
     }
-  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext])
+  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext, t])
 
   /**
    * Unified handler for all session option changes.

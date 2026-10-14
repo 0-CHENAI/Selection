@@ -60,6 +60,8 @@ export interface MessageEnvelope {
   stale?: boolean
   /** Server app version, sent in handshake_ack. Clients can use this for compatibility checks. */
   serverVersion?: string
+  /** Largest accepted WebSocket frame, sent in handshake_ack. Clients refuse bigger requests before send. */
+  maxMessageBytes?: number
 }
 
 export interface WireError {

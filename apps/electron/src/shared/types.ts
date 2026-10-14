@@ -386,6 +386,8 @@ export interface ElectronAPI {
   getVersions(): { node: string; chrome: string; electron: string }
   /** Returns the renderer host environment without going through RPC. */
   getRuntimeEnvironment(): 'electron' | 'web'
+  /** Largest WebSocket frame the connected server accepts. Falls back until handshake. */
+  getMaxMessageBytes(): number
   getHomeDir(): Promise<string>
   isDebugMode(): Promise<boolean>
 

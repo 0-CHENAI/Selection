@@ -264,6 +264,8 @@
   "chat.attach": "附加",
   "chat.attachFiles": "附加文件",
   "chat.attachFilesTooltip": "附加文件",
+  "chat.attachmentFileTooLarge": "{{name}} 为 {{size}}，超过单条消息 {{limit}} 的限制。请改用更小的文件。",
+  "chat.attachmentsTotalTooLarge": "这些附件合计 {{size}}，超过单条消息 {{limit}} 的限制。请分批发送。",
   "chat.authenticationRequired": "需要身份验证",
   "chat.backgroundSessionFinished": "已在后台完成",
   "chat.bearerToken": "Bearer 令牌",

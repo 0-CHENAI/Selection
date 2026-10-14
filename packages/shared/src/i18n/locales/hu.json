@@ -264,6 +264,8 @@
   "chat.attach": "Csatolás",
   "chat.attachFiles": "Fájlok csatolása",
   "chat.attachFilesTooltip": "Fájlok csatolása",
+  "chat.attachmentFileTooLarge": "A(z) {{name}} {{size}}, ami meghaladja az egy üzenetre jutó {{limit}} korlátot. Küldj kisebb fájlt.",
+  "chat.attachmentsTotalTooLarge": "Ezek a mellékletek együtt {{size}}, ami meghaladja az egy üzenetre jutó {{limit}} korlátot. Küldd őket kisebb adagokban.",
   "chat.authenticationRequired": "Hitelesítés szükséges",
   "chat.backgroundSessionFinished": "Befejeződött a háttérben",
   "chat.bearerToken": "Bearer token",

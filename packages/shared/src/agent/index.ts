@@ -167,6 +167,13 @@ export {
   isBrowserToolNameOrAlias,
 } from './browser-tool-names.ts';
 
+export {
+  keepPasswordEntryLines,
+  passwordFillRefs,
+  redactBrowserPasswordFills,
+  redactBrowserToolInput,
+} from './browser-tool-redaction.ts';
+
 // Export PowerShell validator root setter (for Electron startup on Windows)
 export { setPowerShellValidatorRoot } from './powershell-validator.ts';
 
