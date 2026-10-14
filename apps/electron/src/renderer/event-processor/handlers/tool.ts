@@ -112,6 +112,7 @@ export function handleToolResult(
       toolPurpose: event.toolPurpose ?? existingMessage?.toolPurpose,
       answerRunId: event.answerRunId ?? existingMessage?.answerRunId,
       answerProtocol: event.answerProtocol ?? existingMessage?.answerProtocol,
+      ...(event.toolInput ? { toolInput: event.toolInput } : {}),
       toolResult: event.result,
       // A tool_result is authoritative for this execution. Explicitly clear
       // live multimodal blocks when a replacement event has none, otherwise a

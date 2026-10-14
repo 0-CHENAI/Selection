@@ -56,7 +56,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { readFileSync, existsSync, statSync } from 'fs'
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, redactBrowserPasswordFills, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -13843,6 +13843,13 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // parentToolUseId comes from CraftAgent (SDK-authoritative) or existing message
         const parentToolUseId = existingToolMsg?.parentToolUseId || event.parentToolUseId
 
+        // A browser_tool fill's input still holds the typed value. Once the result says the
+        // field was a password, keep that value out of the stored transcript and the renderer.
+        // Use the raw result: truncation or path rewriting must not hide the marker.
+        const redactedToolInput = existingToolMsg
+          ? redactBrowserPasswordFills(existingToolMsg.toolName || toolName, existingToolMsg.toolInput, event.result)
+          : undefined
+
         if (existingToolMsg) {
           // Keep lightweight status text in `content` and store full payload in `toolResult` only.
           existingToolMsg.toolPurpose = toolPurpose
@@ -13850,6 +13857,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
           existingToolMsg.sourceRead = inferredError ? undefined : event.sourceRead
+          if (redactedToolInput) existingToolMsg.toolInput = redactedToolInput
           // If message doesn't have parent set, use event's parentToolUseId
           if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
             existingToolMsg.parentToolUseId = event.parentToolUseId
@@ -13883,10 +13891,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           managed.messages.push(toolMessage)
         }
 
-        // Send event to renderer if: (a) first completion, or (b) result content changed
-        // (e.g., safety net auto-completed with empty result, then real result arrived later)
+        // Send event to renderer if: (a) first completion, (b) result content changed
+        // (e.g., safety net auto-completed with empty result, then real result arrived later),
+        // or (c) the input was redacted, so the renderer replaces its tool_start copy.
         const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
-        if (!wasAlreadyComplete || resultChanged) {
+        if (!wasAlreadyComplete || resultChanged || redactedToolInput) {
           // Use existing tool message timestamp, or fallback message timestamp for ordering
           const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
           this.sendEvent({
@@ -13897,6 +13906,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             toolPurpose,
             result: formattedResult,
             ...(event.content && event.content.length > 0 ? { content: event.content } : {}),
+            ...(redactedToolInput ? { toolInput: redactedToolInput } : {}),
             turnId: event.turnId,
             parentToolUseId,
             isError: inferredError,

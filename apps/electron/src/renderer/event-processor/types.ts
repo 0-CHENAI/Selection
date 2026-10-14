@@ -110,6 +110,8 @@ export interface ToolResultEvent {
   result: string
   /** Live-only multimodal blocks; handlers intentionally do not persist Base64. */
   content?: AgentToolResultContent[]
+  /** Replaces the tool_start input when the host redacted a secret (browser password fills). */
+  toolInput?: Record<string, unknown>
   isError?: boolean
   turnId?: string
   parentToolUseId?: string
