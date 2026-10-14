@@ -3,6 +3,7 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
+import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
 import {
   Paperclip,
   ArrowUp,
@@ -1386,6 +1387,11 @@ export function FreeFormInput({
 
   // Helper to read a File using FileReader API
   const readFileAsAttachment = async (file: File, overrideName?: string): Promise<FileAttachment | null> => {
+    const tooLarge = findAttachmentSizeProblem([{ name: overrideName || file.name, size: file.size, type: file.type }])
+    if (tooLarge) {
+      toast.warning(formatAttachmentSizeProblem(tooLarge, t))
+      return null
+    }
     // Capture the absolute OS path at attach time. Works for <input type="file"> and
     // OS drag-drop; returns null for clipboard paste and web-drag (no disk origin).
     // When null, the draft layer falls back to persisting content inline (Track C).
@@ -1525,6 +1531,14 @@ export function FreeFormInput({
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
+
+    if (attachments.length > 0) {
+      const tooLarge = findAttachmentSizeProblem(attachments)
+      if (tooLarge) {
+        toast.warning(formatAttachmentSizeProblem(tooLarge, t))
+        return false
+      }
+    }
 
     submitLockRef.current = true
 

@@ -264,6 +264,8 @@
   "chat.attach": "添付",
   "chat.attachFiles": "ファイルを添付",
   "chat.attachFilesTooltip": "ファイルを添付",
+  "chat.attachmentFileTooLarge": "{{name}} は {{size}} で、1件のメッセージの上限 {{limit}} を超えています。より小さいファイルを送ってください。",
+  "chat.attachmentsTotalTooLarge": "添付ファイルの合計は {{size}} で、1件のメッセージの上限 {{limit}} を超えています。分けて送信してください。",
   "chat.authenticationRequired": "認証が必要です",
   "chat.backgroundSessionFinished": "バックグラウンドで完了しました",
   "chat.bearerToken": "Bearer トークン",
