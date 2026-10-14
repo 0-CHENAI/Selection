@@ -901,7 +901,9 @@ export class SourceCredentialManager {
    * - Microsoft rotates refresh tokens, so concurrent refreshes could cause token invalidation
    */
   async refresh(source: LoadedSource): Promise<string | null> {
-    const key = source.config.slug;
+    // Same key as the stored credential. Two workspaces can share a slug and must
+    // not share an in-flight refresh or each other's access token.
+    const key = `${source.workspaceId}::${source.config.slug}`;
 
     // Return existing refresh promise if one is in progress
     const pending = this.pendingRefreshes.get(key);
