@@ -22,7 +22,9 @@ export class AnswerBoundary {
   private preludeClosed = false
   private preludeId: string
   private answerId: string
-  constructor(nextId: () => string, private diagnostic: (name: string) => void = () => {}) {
+  /** `native` tags host-committed answer turns, whose events are routed by phase alone. */
+  constructor(nextId: () => string, private diagnostic: (name: string) => void = () => {},
+    private protocol: 'marker-v1' | 'native' = 'marker-v1') {
     this.preludeId = nextId()
     this.answerId = nextId()
   }
@@ -46,13 +48,13 @@ export class AnswerBoundary {
     const turnId = this.final ? this.answerId : this.preludeId
     const last = this.events.at(-1)
     if (last?.type === 'text_delta' && last.turnId === turnId) last.text += text
-    else this.events.push({ type: 'text_delta', text, phase, turnId, presentationProtocol: 'marker-v1' })
+    else this.events.push({ type: 'text_delta', text, phase, turnId, presentationProtocol: this.protocol })
   }
   private complete(text: string, turnId: string, intermediate: boolean, sdkMessageId?: string) {
     // Whitespace deltas still opened a commentary stream: close it so the
     // renderer cannot retain a pending Thinking row after the boundary.
     if (text.length && (intermediate || text.trim())) this.events.push({ type: 'text_complete', text, turnId, isIntermediate: intermediate,
-      phase: intermediate ? 'intermediate' : 'final', presentationProtocol: 'marker-v1', sdkMessageId,
+      phase: intermediate ? 'intermediate' : 'final', presentationProtocol: this.protocol, sdkMessageId,
       ...(this.preludeClosed && turnId === this.answerId ? { relatedTurnIds: [this.preludeId] } : {}) })
   }
   private endLine(newline: string) {
@@ -86,6 +88,14 @@ export class AnswerBoundary {
       this.pending += ch
       const possible = couldBeMarker(this.pending, FINAL_ANSWER_MARKER)
         || (this.final && couldBeMarker(this.pending, END_ANSWER_MARKER))
+      if (!possible && !this.final && !this.fence && this.pending.startsWith(FINAL_ANSWER_MARKER)) {
+        // Models sometimes continue the answer on the marker line. Honour the
+        // boundary instead of leaking the marker into visible prose.
+        const rest = this.pending.slice(FINAL_ANSWER_MARKER.length).replace(/^[ \t]+/, '')
+        this.final = true; this.pending = ''; this.candidate = false
+        this.emit(rest)
+        continue
+      }
       if (!possible || this.pending.length > 256) {
         this.emit(this.pending); this.pending = ''; this.candidate = false
       }

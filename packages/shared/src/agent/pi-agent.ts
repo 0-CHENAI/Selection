@@ -773,11 +773,10 @@ export class PiAgent extends BaseAgent {
   }
 
   private registerSessionToolsWithSubprocess(): void {
-    let sessionToolDefs = getSessionToolProxyDefs({ executionSession: this.config.session });
+    // natural-v1 commits the final tool-free message; no delivery tool exists.
+    let sessionToolDefs = getSessionToolProxyDefs({ executionSession: this.config.session })
+      .filter(def => !isSubmitAnswer(def.name));
     const includeAnswerDelivery = !!this.answerDelivery || !!this.config.explicitAnswerDelivery;
-    if (!includeAnswerDelivery) {
-      sessionToolDefs = sessionToolDefs.filter(def => !isSubmitAnswer(def.name));
-    }
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
     // the built-in browser tool. Without this filter, Pi would still advertise
@@ -2641,6 +2640,9 @@ export class PiAgent extends BaseAgent {
     this.currentUserMessage = message;
     this.adapter.startTurn();
     this.adapter.setPresentationProtocol(this.config.presentationProtocol ?? 'legacy');
+    // natural-v1: the final tool-free message is the answer. The boundary only
+    // strips a stray legacy marker; display no longer depends on it.
+    this.adapter.setHostAnswerBoundary(!!this.answerDelivery && !this.answerDelivery.coordinationOnly);
 
     // Refresh session-scoped tool callbacks (for SubmitPlan, source auth, etc.)
     // IMPORTANT: merge (don't replace) so SessionManager-provided browserPaneFns

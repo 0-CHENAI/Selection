@@ -29,7 +29,6 @@ body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
   width: clamp(80px, 16vw, 128px);
   height: auto;
   flex-shrink: 0;
-  transform: translateY(3px);
   --pro-glass-ink: oklch(0.42 0.075 80);
   --pro-glass-highlight: oklch(0.52 0.065 80);
   --pro-glass-reflection: oklch(0.64 0.08 84);
@@ -38,9 +37,7 @@ body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
   /* Keep the ink reveal in CSS so GSAP never has to parse OKLCH colors. */
   color: color-mix(in srgb, var(--muted-foreground), var(--pro-glass-ink) var(--pro-ink-progress, 100%));
   overflow: visible;
-  font-size: 34px;
-  font-weight: 400;
-  letter-spacing: 0.22em;
+  /* CATHALIE outlines carry the type size and tracking, without font fallback. */
 }
 .dark .pro-identity-mode {
   --pro-glass-ink: var(--pro-accent);

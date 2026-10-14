@@ -25,8 +25,8 @@ export function acceptsTurnCompletion(name: string, result: { isError?: boolean;
 
 /** Scope model-visible tools for this turn; the caller restores the full set next turn. */
 export function answerTurnToolNames(names: string[], state: { runId?: string; recovery?: boolean; coordinationOnly?: boolean }): string[] {
-  return names.filter(name => state.recovery ? isAnswerTool(name)
-    : state.runId && !state.coordinationOnly ? true : !isAnswerTool(name));
+  // natural-v1: recovery is a text-only step and no delivery tool is exposed.
+  return state.recovery ? [] : names.filter(name => !isAnswerTool(name));
 }
 
 /** Guard the entire SDK tool batch, before any permission or execution request. */
@@ -39,21 +39,8 @@ export function answerExecutionError(state: {
   answerCalls?: number
 }, toolName: string): string | undefined {
   if (state.accepted) return 'Answer already delivered. No further tools may execute.';
-  if (state.recovery && !isAnswerTool(toolName)) return 'Only submit_answer is allowed during answer recovery.';
+  if (state.recovery) return 'Tools are unavailable during answer recovery. Write the final answer as plain text.';
+  if (isAnswerTool(toolName)) return 'There is no answer submission tool. Write the final answer as plain text.';
   if (isCoordinatorDecisionTool(toolName) && state.batchSize !== 1) return 'Call the coordinator decision alone, after all other tools have finished.';
-  if (isAnswerTool(toolName) && !canAcceptAnswer(state)) {
-    return 'Call submit_answer alone, after all other tools have finished.';
-  }
   return undefined;
-}
-
-function canAcceptAnswer(state: {
-  runId?: string
-  batchSize: number
-  siblingsSettled?: boolean
-  answerCalls?: number
-}): boolean {
-  if (!state.runId) return false
-  if (state.batchSize === 1) return true
-  return !!state.siblingsSettled && (state.answerCalls ?? 1) === 1
 }

@@ -24,7 +24,7 @@ describe('semantic reveal preserves the whole document', () => {
   it('keeps long paragraphs and selection text complete on the first frame', () => {
     const paragraph = '长段落 mixed English 🙂 '.repeat(300)
     const html = renderToStaticMarkup(<Markdown revealStartTime={Date.now()}>{paragraph}</Markdown>)
-    expect(html.replace(/<span data-stream-chunk="">|<\/span>/g, '')).toContain(paragraph.trim())
+    expect(html.replace(/<span data-stream-chunk=""[^>]*>|<\/span>/g, '')).toContain(paragraph.trim())
     expect(SEMANTIC_REVEAL_MAX_MS).toBeLessThanOrEqual(6000)
   })
   it('selects outer semantic units, without nested paragraph/list/preview animations', () => {
@@ -37,21 +37,33 @@ describe('semantic reveal preserves the whole document', () => {
     const root = { querySelectorAll: () => elements, contains: (node: unknown) => elements.includes(node as typeof paragraph) }
     expect(getRevealUnits(root as unknown as HTMLElement)).toEqual([paragraph, listItem, preview])
   })
+  it('loads historical responses with bold labels and nested list punctuation', () => {
+    const source = '1. **两扇门的身世不同**：\n   - 最初选择概率 1/3\n   - 剩下那扇概率 2/3\n\n结论。'
+    for (const mode of ['minimal', 'full', 'terminal'] as const) {
+      const html = renderToStaticMarkup(<Markdown mode={mode}>{source}</Markdown>)
+      expect(html).toContain('<strong')
+      expect(html).toContain('两扇门的身世不同')
+      expect(html).toContain('：\n')
+      expect(html).toContain('最初选择概率 1/3')
+      expect(html).toContain('剩下那扇概率 2/3')
+    }
+  })
 })
 
 it('renders received Markdown tails live, with identical live and completed chrome', async () => {
   const { ResponseCard } = await import('../../chat/TurnCard')
   const prose = renderToStaticMarkup(<ResponseCard text={'未完成的一段'} isStreaming isTurnComplete={false} />)
-  expect(prose).toContain('bg-background ring-1 ring-inset ring-foreground/5')
+  // Replies are frameless while streaming and after completion.
+  expect(prose).not.toContain('ring-foreground/5')
   expect(prose).toContain('未完成的一段')
   const live = renderToStaticMarkup(<ResponseCard text={'第一段。\n\n未完成的尾部'} isStreaming isTurnComplete={false} />)
   expect(live).toContain('第一段。')
   expect(live).toContain('未完成的尾部')
-  expect(live).toContain('bg-background ring-1 ring-inset ring-foreground/5')
+  expect(live).not.toContain('ring-foreground/5')
   const held = renderToStaticMarkup(<ResponseCard text={'说明\n\n```ts\nconst x = 1'} isStreaming isTurnComplete={false} />)
   expect(held).toContain('说明')
   expect(held).toContain('const x = 1')
   const complete = renderToStaticMarkup(<ResponseCard text={'第一段。\n\n未完成的尾部'} isStreaming={false} isTurnComplete />)
   expect(complete).toContain('未完成的尾部')
-  expect(complete).toContain('bg-background ring-1 ring-inset ring-foreground/5')
+  expect(complete).not.toContain('ring-foreground/5')
 })

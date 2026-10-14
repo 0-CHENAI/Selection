@@ -87,3 +87,21 @@ it('keeps a closing tag when it is quoted, fenced, or followed by more answer te
   const events = [...p.push(`${marker}\n${body}`), ...p.finish(true)]
   expect(events.filter(e => e.type === 'text_complete').map(e => e.text)).toEqual([body])
 })
+it('honours a marker followed by answer text on the same line, at every transport split', () => {
+  const text = `检查完毕。\n${marker} 结论：换门胜率 2/3。\n\n细节。`
+  for (let i = 0; i <= text.length; i++) {
+    const p = create(); const events = [...p.push(text.slice(0, i)), ...p.push(text.slice(i)), ...p.finish(true, 'sdk')]
+    const complete = events.filter(e => e.type === 'text_complete')
+    expect(complete.map(e => [e.text, e.phase])).toEqual([['检查完毕。\n', 'intermediate'], ['结论：换门胜率 2/3。\n\n细节。', 'final']])
+    expect(events.some(e => (e.type === 'text_delta' || e.type === 'text_complete') && e.text.includes(marker))).toBe(false)
+  }
+})
+it('tags host-committed answer turns as native and treats an unmarked terminal body as final', () => {
+  let id = 0
+  const p = new AnswerBoundary(() => `m-${++id}`, () => {}, 'native')
+  const events = [...p.push('直接给出的完整答案。'), ...p.finish(true, 'sdk')]
+  expect(events.filter(e => e.type === 'text_delta').map(e => [e.phase, e.presentationProtocol])).toEqual([['intermediate', 'native']])
+  expect(events.filter(e => e.type === 'text_complete')).toEqual([
+    expect.objectContaining({ text: '直接给出的完整答案。', isIntermediate: false, phase: 'final', presentationProtocol: 'native', sdkMessageId: 'sdk' }),
+  ])
+})

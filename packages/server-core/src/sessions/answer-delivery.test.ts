@@ -330,46 +330,79 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(events.find(event => event.type === 'text_complete' && event.answerCommitted)?.artifactVersions).toEqual([])
   })
 
-  it('keeps marker-mode model prose private until the durable answer is committed', async () => {
+  it('streams progress notes and commits the final tool-free message in place (natural-v1)', async () => {
     const body = '润色与重构已完成。\n\n交付结果：[新报告](report.docx)'
     install(async function* () {
+      yield { type: 'text_delta', text: '我先检查报告。', phase: 'intermediate', presentationProtocol: 'native', turnId: 'note' }
+      yield { type: 'text_complete', text: '我先检查报告。', isIntermediate: true, phase: 'intermediate', presentationProtocol: 'native', turnId: 'note' }
       yield { type: 'tool_start', toolUseId: 'read', toolName: 'Read', input: {} }
       yield { type: 'tool_result', toolUseId: 'read', toolName: 'Read', result: 'checked', isError: false }
-      yield { type: 'text_delta', text: body, phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft' }
-      yield { type: 'text_complete', text: body, phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft', sdkMessageId: 'draft-sdk' }
-      expect(events.some(event => event.type === 'text_delta' || event.type === 'text_complete')).toBe(false)
-      await control!.submit({ ...submission, markdown: body })
+      yield { type: 'text_delta', text: body.slice(0, 5), phase: 'final', presentationProtocol: 'native', turnId: 'answer' }
+      ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+      // The answer streams before any commit.
+      expect(events.filter(event => event.type === 'text_delta').map(event => [event.delta, event.phase])).toEqual([
+        ['我先检查报告。', 'intermediate'], [body.slice(0, 5), 'final'],
+      ])
+      yield { type: 'text_delta', text: body.slice(5), phase: 'final', presentationProtocol: 'native', turnId: 'answer' }
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'answer', sdkMessageId: 'answer-sdk' }
+      yield { type: 'pi_turn_anchor', sdkMessageId: 'answer-sdk', sdkTurnAnchor: 'answer-anchor' }
+      // The candidate stays a live stream in the renderer until the run ends.
+      expect(events.filter(event => event.type === 'text_complete').map(event => event.text)).toEqual(['我先检查报告。'])
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '更新报告')
+    expect(prompts).toHaveLength(1)
     expect(events.some(event => event.type === 'tool_start' && event.toolUseId === 'read')).toBe(true)
-    expect(events.filter(event => event.type === 'text_complete')).toEqual([
-      expect.objectContaining({ text: body, answerCommitted: true }),
+    const completes = events.filter(event => event.type === 'text_complete')
+    expect(completes.map(event => [event.text, !!event.isIntermediate, !!event.answerCommitted, event.turnId])).toEqual([
+      ['我先检查报告。', true, false, 'note'], [body, false, true, 'answer'],
     ])
-    expect(events.some(event => event.type === 'text_delta')).toBe(false)
-    expect(managed.messages.find(message => message.content === body && message.isIntermediate)?.hidden).toBe(true)
-    expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).find(message => message.content === body && message.isIntermediate)?.hidden).toBe(true)
+    const answer = managed.messages.find(message => message.answerCommitted)!
+    expect(completes[1].messageId).toBe(answer.id)
+    expect(answer).toMatchObject({ content: body, isIntermediate: false, phase: 'final', turnId: 'answer' })
+    expect(answer.hidden).toBeFalsy()
+    expect(answer.answerSalvaged).toBeFalsy()
+    expect(managed.messages.filter(message => message.content === body)).toHaveLength(1)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('answer-anchor')
+    const stored = loadStoredSession(root, managed.id)!.messages.map(storedToMessage)
+    expect(stored.filter(message => message.answerCommitted).map(message => message.content)).toEqual([body])
+    expect(stored.find(message => message.content === '我先检查报告。')).toMatchObject({ isIntermediate: true })
   })
 
-  it('keeps an unmarked final draft out of the work chain before submit_answer', async () => {
+  it('commits an unmarked final message without a recovery call', async () => {
     const body = '交付完成：[新报告](report.docx)'
     install(async function* () {
-      yield { type: 'text_delta', text: body.slice(0, 4), turnId: 'draft' }
+      yield { type: 'text_delta', text: body.slice(0, 4), phase: 'intermediate', presentationProtocol: 'native', turnId: 'draft' }
       ;(manager as any).flushDelta(managed.id, managed.workspace.id)
-      yield { type: 'text_delta', text: body.slice(4), turnId: 'draft' }
-      yield { type: 'text_complete', text: body, turnId: 'draft', sdkMessageId: 'draft-sdk' }
-      expect(events.some(event => event.type === 'text_delta' || event.type === 'text_complete')).toBe(false)
-      await control!.submit({ ...submission, markdown: body })
+      yield { type: 'text_delta', text: body.slice(4), phase: 'intermediate', presentationProtocol: 'native', turnId: 'draft' }
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: 'draft', sdkMessageId: 'draft-sdk' }
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '更新报告')
+    expect(prompts).toHaveLength(1)
+    expect(events.filter(event => event.type === 'text_delta').map(event => event.delta).join('')).toBe(body)
     expect(events.filter(event => event.type === 'text_complete')).toEqual([
-      expect.objectContaining({ text: body, answerCommitted: true }),
+      expect.objectContaining({ text: body, answerCommitted: true, turnId: 'draft' }),
     ])
-    expect(managed.messages.find(message => message.isIntermediate && message.content === body)?.hidden).toBe(true)
+    expect(managed.messages.filter(message => message.content === body)).toHaveLength(1)
   })
 
-  it('streams provider-classified commentary while keeping the submitted answer separate', async () => {
+  it('reveals a refused candidate as process text when a later tool runs', async () => {
+    install(async function* () {
+      yield { type: 'text_complete', text: '初稿答案', isIntermediate: false, phase: 'final', turnId: 'early' }
+      yield { type: 'tool_start', toolUseId: 'late', toolName: 'Bash', input: {} }
+      yield { type: 'tool_result', toolUseId: 'late', toolName: 'Bash', result: 'ok', isError: false }
+      yield { type: 'text_complete', text: '最终答案', isIntermediate: false, phase: 'final', turnId: 'final' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释')
+    expect(events.filter(event => event.type === 'text_complete').map(event => [event.text, !!event.isIntermediate, !!event.answerCommitted])).toEqual([
+      ['初稿答案', true, false], ['最终答案', false, true],
+    ])
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['最终答案'])
+  })
+
+  it('streams provider-classified commentary while keeping the answer separate', async () => {
     install(async function* () {
       yield { type: 'text_delta', text: '正在', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress' }
       ;(manager as any).flushDelta(managed.id, managed.workspace.id)
@@ -401,17 +434,18 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'text_complete', text: '检查中', isIntermediate: true, turnId: 'progress' }))
   })
 
-  it('can salvage a private draft if both formal delivery attempts fail', async () => {
-    install(async function* () {
-      yield { type: 'text_complete', text: '可交付正文', phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft' }
+  it('salvages the latest progress note when the recovery step also writes nothing', async () => {
+    install(async function* (index) {
+      if (index === 1) yield { type: 'text_complete', text: '可交付正文', isIntermediate: true, phase: 'intermediate', turnId: 'draft' }
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '解释结果')
     expect(prompts).toHaveLength(2)
     expect(events.filter(event => event.type === 'text_complete')).toEqual([
+      expect.objectContaining({ text: '可交付正文', isIntermediate: true }),
       expect.objectContaining({ text: '可交付正文', answerCommitted: true, answerSalvaged: true }),
     ])
-    expect(managed.messages.find(message => message.isIntermediate)?.hidden).toBe(true)
+    expect(managed.messages.filter(message => message.content === '可交付正文')).toHaveLength(1)
   })
 
   it('records ordinary chat file edits and publishes the same snapshot identity as the saved answer', async () => {
@@ -547,9 +581,9 @@ describe('explicit answer delivery lifecycle (#330)', () => {
             && stored.messages.some(message => message.id === resultId && message.answerCommitted)
         }
       })
-      install(async function* () {
-        yield { type: 'text_complete', text: markdown }
-        if (!salvaged) await control!.submit(submission)
+      install(async function* (index) {
+        // natural: the final message commits. salvaged: only a note, then an empty recovery.
+        if (index === 1) yield { type: 'text_complete', text: markdown, isIntermediate: salvaged }
         yield { type: 'complete' }
       })
       await manager.sendMessage(managed.id, 'Revise the paragraph', undefined, undefined, {
@@ -641,19 +675,26 @@ describe('explicit answer delivery lifecycle (#330)', () => {
   }
   it('recovers once in the retained task and persists the recovery attempt', async () => {
     install(async function* (index) {
-      if (index === 1) yield { type: 'text_complete', text: explanation }
-      else { expect(control?.recovery).toBe(true); await control!.submit(submission) }
+      if (index === 1) {
+        yield { type: 'tool_start', toolUseId: 'sim', toolName: 'Bash', input: {} }
+        yield { type: 'tool_result', toolUseId: 'sim', toolName: 'Bash', result: '0.667', isError: false }
+      } else {
+        expect(control?.recovery).toBe(true)
+        yield { type: 'text_complete', text: markdown, isIntermediate: false, phase: 'final' }
+      }
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '解释并验证')
     expect(prompts).toHaveLength(2)
-    expect(prompts[1]).toContain('Only submit_answer')
+    expect(prompts[1]).toContain('Tools are unavailable')
+    expect(prompts[1]).toContain('plain text')
+    expect(managed.messages.find(m => m.answerCommitted)?.answerSalvaged).toBeFalsy()
     expect(managed.messages.filter(m => m.role === 'user')).toHaveLength(1)
     expect(loadStoredSession(root, managed.id)?.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(true)
     expect(managed.messages.find(m => m.answerCommitted)?.content).toBe(markdown)
   })
   it('promotes the latest draft when recovery also omits delivery (#403)', async () => {
-    install(async function* () { yield { type: 'text_complete', text: '一句补充' }; yield { type: 'complete' } })
+    install(async function* () { yield { type: 'text_complete', text: '一句补充', isIntermediate: true }; yield { type: 'complete' } })
     await manager.sendMessage(managed.id, '解释并验证')
     expect(prompts).toHaveLength(2)
     const committed = managed.messages.filter(m => m.answerCommitted)
@@ -686,13 +727,15 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '解释并验证')
+    // The explanation after the failed searches is the final tool-free message.
+    expect(prompts).toHaveLength(1)
     const answer = managed.messages.find(m => m.answerCommitted)!
-    expect(answer.content).toBe(markdown)
-    expect(answer.answerSalvaged).toBe(true)
+    expect(answer.content).toBe(explanation)
+    expect(answer.answerSalvaged).toBeFalsy()
     expect(managed.messages.filter(m => m.role === 'tool' && m.isError)).toHaveLength(4)
     expect(managed.messages.some(m => m.role === 'error')).toBe(false)
-    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('recovery-anchor')
-    expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === answer.id)?.content).toBe(markdown)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('draft-anchor')
+    expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === answer.id)?.content).toBe(explanation)
   })
   it('durably recovers a regenerated draft with its SDK anchor before publication', async () => {
     managed.messages = [
@@ -706,7 +749,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       events.push(event)
       if (event.answerCommitted) {
         expect(managed.regenerateTransaction).toBeUndefined()
-        expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === event.messageId)?.content).toBe(markdown)
+        expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === event.messageId)?.content).toBe(explanation)
       }
     })
     install(async function* (index) {
@@ -716,10 +759,11 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '解释', undefined, undefined, undefined, 'user')
+    expect(prompts).toHaveLength(1)
     const answer = managed.messages.find(m => m.answerCommitted)!
-    expect(answer.content).toBe(markdown)
-    expect(answer.answerSalvaged).toBe(true)
-    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('anchor-2')
+    expect(answer.content).toBe(explanation)
+    expect(answer.answerSalvaged).toBeFalsy()
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('anchor-1')
     expect(managed.messages.some(m => m.id === 'old')).toBe(false)
     expect(loadStoredSession(root, managed.id)?.sdkSessionId).toBe('new-sdk')
     expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
@@ -727,7 +771,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
   for (const waitingFor of ['tool', 'worker', 'aggregation'] as const) {
     it(`does not salvage around an unfinished ${waitingFor} during recovery`, async () => {
       install(async function* (index) {
-        yield { type: 'text_complete', text: markdown }
+        yield { type: 'text_complete', text: markdown, isIntermediate: index === 1 }
         if (index === 2) {
           if (waitingFor === 'tool') yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'pending', input: {} }
           else if (waitingFor === 'worker') (manager as any).pendingSwarmChildren.set(managed.id, 1)
@@ -752,7 +796,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
         yield { type: 'complete' }
       })
       manager.flushSession = async id => {
-        if (managed.messages.some(m => m.answerSalvaged)) {
+        if (managed.messages.some(m => m.answerCommitted)) {
           if (failure === 'cancel') managed.stopRequested = true
           else throw new Error('disk unavailable')
         }
@@ -822,6 +866,30 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     install(async function* () { yield { type: 'error', message: 'provider unavailable' }; yield { type: 'complete' } })
     await manager.sendMessage(managed.id, '解释')
     expect(prompts).toHaveLength(1)
+  })
+  it('recovers a legacy tool receipt instead of committing text the renderer rejects', async () => {
+    install(async function* (index) {
+      yield { type: 'text_complete', text: index === 1 ? 'Answer delivered. Stop here.' : '真实的最终正文。',
+        isIntermediate: false, phase: 'final', turnId: `receipt-${index}` }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '说明结果')
+    expect(prompts).toHaveLength(2)
+    expect(events.filter(event => event.type === 'text_complete' && event.answerCommitted).map(event => event.text)).toEqual(['真实的最终正文。'])
+    expect(loadStoredSession(root, managed.id)?.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['真实的最终正文。'])
+  })
+  it('commits a successful continuation without treating retained errors as new failures', async () => {
+    install(async function* (index) {
+      if (index === 1) yield { type: 'error', message: 'prior connection failure' }
+      else yield { type: 'text_complete', text: '恢复后得到的完整结果。', isIntermediate: false, phase: 'final', turnId: 'resumed' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '执行任务')
+    expect(managed.messages.some(message => message.role === 'error')).toBe(true)
+    await manager.sendMessage(managed.id, '从保留结果继续', undefined, undefined, { hidden: true }, undefined, true)
+    expect(prompts).toHaveLength(2)
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual(['恢复后得到的完整结果。'])
+    expect(events.filter(event => event.type === 'text_complete' && event.answerCommitted).map(event => event.text)).toEqual(['恢复后得到的完整结果。'])
   })
   it('does not recover a stopped turn or accept an obsolete submission', async () => {
     install(async function* () { managed.stopRequested = true; await expect(control!.submit(submission)).rejects.toThrow('no longer'); yield { type: 'complete' } })

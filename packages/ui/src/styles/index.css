@@ -24,6 +24,7 @@
  */
 
 @import "tailwindcss";
+@import "./streaming-text.css";
 @plugin "@tailwindcss/typography";
 
 /* =============================================================================

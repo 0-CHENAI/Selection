@@ -1047,7 +1047,7 @@ function wrapSingleTool(
       inputObj = stripCraftMetadata(inputObj);
 
       if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
-      if (answerRecovery && !isAnswerTool(sdkToolName)) throw new Error('Only submit_answer is allowed during answer recovery.');
+      if (answerRecovery) throw new Error('Tools are unavailable during answer recovery. Write the final answer as plain text.');
       // Execute original tool with (potentially modified) input
       const fileOperation = registeredRecoveryClass(tool) === 'file-verifiable'
         && (sdkToolName === 'Write' || sdkToolName === 'Edit');

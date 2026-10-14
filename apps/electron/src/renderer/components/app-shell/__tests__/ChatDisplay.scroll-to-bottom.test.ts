@@ -15,6 +15,7 @@ import {
   shouldLoadEarlierTurns,
   followStickyViewportToBottom,
   snapStickyViewportToBottom,
+  createStickyScrollFollow,
   readScrollMetrics,
   isAtBottom,
   type ScrollMetrics,
@@ -49,7 +50,6 @@ describe('virtual history preserves reader intent and streaming', () => {
 
 describe('streaming resize follows frames and reader intent (#328)', () => {
   const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
-  const body = source.match(/const resizeObserver = new ResizeObserver\(\(\) => \{([\s\S]*?)\n    \}\)/)?.[1]
 
   test('upward wheel input suspends follow before native scrolling fires', () => {
     const wheelBody = source.match(/const handleWheel = \(event: WheelEvent\) => \{([\s\S]*?)\n    \}/)?.[1]
@@ -65,31 +65,93 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
   })
 
   test('resize follows until reader pauses, including when the panel loses focus', () => {
-    const resize = new Function('isStickToBottomRef', 'snapStickyViewportToBottom', 'viewport', 'isFocusedPanelRef', body!)
-    const sticky = { current: true }
-    const focused = { current: true }
-    const viewport = { scrollTop: 0, scrollHeight: 1200, clientHeight: 600 }
-    resize(sticky, snapStickyViewportToBottom, viewport, focused)
-    expect(viewport.scrollTop).toBe(600)
+    let sticky = true
+    let id = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    const viewport = { scrollTop: 550, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => sticky, reduceMotion: () => false,
+      requestFrame: callback => { frames.set(++id, callback); return id },
+      cancelFrame: frame => { frames.delete(frame) },
+    })
+    follow.resize()
+    follow.resize()
+    expect(frames.size).toBe(1)
+    let time = 0
+    const tick = () => {
+      const [frame, callback] = frames.entries().next().value!
+      frames.delete(frame)
+      callback(time += 16.67)
+    }
+    tick()
+    expect(viewport.scrollTop).toBeGreaterThan(550)
+    expect(viewport.scrollTop).toBeLessThan(600)
+    viewport.scrollHeight += 24
+    follow.resize()
+    expect(frames.size).toBe(1)
+    for (let i = 0; frames.size && i < 100; i++) tick()
+    expect(viewport.scrollTop).toBe(624)
     viewport.clientHeight = 400
-    resize(sticky, snapStickyViewportToBottom, viewport, focused)
-    expect(viewport.scrollTop).toBe(800)
-    sticky.current = false
-    focused.current = false
+    follow.resize()
+    sticky = false
     viewport.scrollTop = 300
-    viewport.scrollHeight = 1500
-    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    tick()
     expect(viewport.scrollTop).toBe(300)
+    expect(frames.size).toBe(0)
+    sticky = true
+    follow.resize()
+    follow.dispose()
+    expect(frames.size).toBe(0)
   })
 
-  test('pins growth before paint without translating the transcript', () => {
-    expect(body).toBeDefined()
-    expect(source).toContain('snapStickyViewportToBottom')
-    expect(body).toContain('snapStickyViewportToBottom')
-    expect(body).not.toContain('requestAnimationFrame')
-    expect(body).not.toContain('applyFollowPaintTransform')
-    expect(body).not.toContain('compensateFollowPaintShift')
+  test('uses one follow controller without translating the transcript', () => {
+    expect(source).toContain('follow.resize()')
+    expect(source).toContain('follow.dispose()')
     expect(source).not.toContain('applyFollowPaintTransform')
+    expect(source).toContain('stickyFollowRef.current.resize(resolved)')
+  })
+
+  test('explicit smooth scrolling shares the follow loop, and instant requests cancel it', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    let cancelled = 0
+    const viewport = { scrollTop: 0, scrollHeight: 4000, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined; cancelled++ },
+    })
+    follow.resize('smooth')
+    expect(viewport.scrollTop).toBe(0)
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(0)
+    expect(viewport.scrollTop).toBeLessThan(3400)
+    viewport.scrollHeight += 24
+    const before = viewport.scrollTop
+    follow.resize()
+    expect(viewport.scrollTop).toBe(before)
+    follow.resize('instant')
+    expect(viewport.scrollTop).toBe(3424)
+    expect(nextFrame).toBeUndefined()
+    expect(cancelled).toBe(1)
+    follow.dispose()
+  })
+
+  test('reduced motion and viewport-sized bursts snap without scheduling work', () => {
+    let scheduled = 0
+    let reduced = true
+    const viewport = { scrollTop: 500, scrollHeight: 1200, clientHeight: 600 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => reduced,
+      requestFrame: () => { scheduled++; return 1 }, cancelFrame: () => {},
+    })
+    follow.resize()
+    expect(viewport.scrollTop).toBe(600)
+    reduced = false
+    viewport.scrollHeight += 2000
+    follow.resize()
+    expect(viewport.scrollTop).toBe(2600)
+    expect(scheduled).toBe(0)
+    follow.dispose()
   })
 })
 

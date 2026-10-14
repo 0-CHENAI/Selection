@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { usePlatform } from '@craft-agent/ui'
 import swan from '@/assets/selection-swan-trimmed.svg'
 import wordmark from '@/assets/selection-wordmark.svg'
+import { selectionProGlyphPath } from '@/assets/selection-pro-glyph'
 
 gsap.registerPlugin(CustomEase)
 const microScaleEase = CustomEase.create('proMicroScaleFade', '0.32,0.72,0,1')
@@ -88,11 +89,11 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
         <div className="pro-identity-brand flex shrink-0 items-end">
           {/* Animate the wrappers so blur never overrides the image's theme inversion. */}
           <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
-          <div className="pro-identity-label flex items-center">
+          <div className="pro-identity-label flex items-end">
             <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
-            <svg className="pro-identity-mode font-cathalie" viewBox="32 10 104 34">
+            <svg className="pro-identity-mode" viewBox="32 10 104 30.5">
               <defs>
-                <text id={`${glassId}-glyph`} x="84" y="40" textAnchor="middle">PRO</text>
+                <path id={`${glassId}-glyph`} d={selectionProGlyphPath} />
                 <linearGradient id={`${glassId}-body`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0" stopColor="var(--pro-glass-highlight)" />
                   <stop offset="0.24" stopColor="currentColor" stopOpacity="0.85" />

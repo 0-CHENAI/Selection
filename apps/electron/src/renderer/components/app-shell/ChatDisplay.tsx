@@ -105,6 +105,7 @@ import {
   resolveStickToBottomState,
   shouldApplyUserScroll,
   snapStickyViewportToBottom,
+  createStickyScrollFollow,
   type ScrollMetrics,
 } from "./ChatDisplay.scroll-to-bottom"
 
@@ -650,14 +651,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         : { sessionId: sessionIdRef.current, show: next.showButton }
     ))
   }, [])
+  const stickyFollowRef = React.useRef<ReturnType<typeof createStickyScrollFollow> | null>(null)
   const scrollToLatest = React.useCallback((behavior: ScrollBehavior) => {
-    virtualHistoryRef.current?.scrollToLatest()
+    if (!stickyFollowRef.current) virtualHistoryRef.current?.scrollToLatest()
     const resolved: ScrollBehavior = reduceMotion || behavior === 'instant' ? 'instant' : behavior
     applyStickState(null, {
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs(resolved),
     })
     const viewport = scrollViewportRef.current
+    if (stickyFollowRef.current) {
+      virtualHistoryRef.current?.cancelScroll()
+      stickyFollowRef.current.resize(resolved)
+      return
+    }
     if (resolved === 'instant' && viewport) {
       snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
       return
@@ -667,6 +674,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
+  const reduceMotionRef = React.useRef(reduceMotion)
+  reduceMotionRef.current = reduceMotion
   // Track message commit boundaries so we can auto-scroll when a new user message
   // actually lands in state (important when attachments delay optimistic insertion).
   const prevLastMessageIdRef = React.useRef<string | null>(null)
@@ -1277,6 +1286,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!viewport) return
     const cancelProgrammaticLock = () => {
       ignoreScrollUnstickUntilRef.current = 0
+      virtualHistoryRef.current?.cancelScroll()
     }
     const handleWheel = (event: WheelEvent) => {
       cancelProgrammaticLock()
@@ -1339,14 +1349,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const previousOverflowAnchor = viewport.style.overflowAnchor
     viewport.style.overflowAnchor = 'none'
     const content = viewport.firstElementChild
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => isStickToBottomRef.current,
+      reduceMotion: () => !!reduceMotionRef.current,
+    })
+    stickyFollowRef.current = follow
     const resizeObserver = new ResizeObserver(() => {
-      if (!isStickToBottomRef.current) return
-      // Match content growth before paint: an eased scroll lets the card's
-      // bottom drift away from the composer. Only the new content fades in.
-      snapStickyViewportToBottom(viewport, {
-        focused: isFocusedPanelRef.current,
-        sticky: isStickToBottomRef.current,
-      })
+      // The virtualizer's initial/end reconciliation must not compete with
+      // live following. Reader/search navigation retains its own target.
+      if (isStickToBottomRef.current) virtualHistoryRef.current?.cancelScroll()
+      follow.resize()
     })
 
     if (content) {
@@ -1359,6 +1371,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return () => {
       viewport.style.overflowAnchor = previousOverflowAnchor
       resizeObserver.disconnect()
+      follow.dispose()
+      if (stickyFollowRef.current === follow) stickyFollowRef.current = null
     }
   }, [session?.id, applyStickState])
 
@@ -2057,6 +2071,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       {renderWorkStatus(index)}
                       <TurnCard
                         sessionId={session.id}
+                        hasExternalWorkStatus
                         sessionFolderPath={session.sessionFolderPath}
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}

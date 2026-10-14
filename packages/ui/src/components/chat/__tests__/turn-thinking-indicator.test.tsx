@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; hasExternalWorkStatus?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -56,6 +56,7 @@ async function renderTurn(
         activities={activities}
         isStreaming={options.isStreaming ?? true}
         isComplete={options.isComplete ?? false}
+        hasExternalWorkStatus={options.hasExternalWorkStatus}
         defaultExpanded={options.expanded ?? true}
         onOpenActivityDetails={options.onOpenActivityDetails}
         workControls={options.workControls}
@@ -239,6 +240,36 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   })
 
+  it('lets the chat work status own loading before the first tool and between tools', async () => {
+    const cases: ActivityItem[][] = [
+      [],
+      [{ id: 'thinking', type: 'thinking', status: 'running', timestamp: 1, content: '' }],
+      [{ id: 'intermediate', type: 'intermediate', status: 'running', timestamp: 1, content: '' }],
+      [{ id: 'read', type: 'tool', toolName: 'Read', status: 'completed', timestamp: 1 }],
+    ]
+    for (const expanded of [false, true]) {
+      for (const activities of cases) {
+        const html = await renderTurn('zh-Hans', activities, { hasExternalWorkStatus: true, expanded })
+        expect(html).not.toContain('data-status="working"')
+        expect(html).not.toContain('data-thinking-slot')
+        if (activities.some(activity => activity.type === 'tool')) expect(html).toContain('读取文件')
+      }
+    }
+    const buffering = await renderTurn('zh-Hans', [], { hasExternalWorkStatus: true,
+      response: { text: '', isStreaming: true } })
+    expect(buffering).not.toContain('data-status="working"')
+    expect(buffering).not.toContain('data-thinking-slot')
+  })
+
+  it('retains real running tool indicators when the parent owns the generic status', async () => {
+    const html = await renderTurn('zh-Hans', [{ id: 'read', type: 'tool', toolName: 'Read', status: 'running', timestamp: 1 }], {
+      hasExternalWorkStatus: true, expanded: true,
+    })
+    expect(html).toContain('读取文件')
+    expect(countOccurrences(html, 'data-status="working"')).toBe(1)
+    expect(html).not.toContain('data-thinking-slot')
+  })
+
   it('shows the latest step in the header with one gap spinner after a tool completes', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'tool-1',
@@ -324,7 +355,9 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(presence).toContain("height: 'auto'")
     expect(presence).toContain('exit=')
     expect(src).toContain('<WorkChrome')
-    expect(src).toMatch(/<HeightPresence\s+key="response"/)
+    // A transient progress note and the answer card are separate presences.
+    expect(src).toContain("key={`stream-${response.streamKey ?? response.messageId ?? 'response'}`}")
+    expect(presence).toContain("'merge-into-chain'")
     // Root spacing sits inside the tweened blocks, never as a sibling margin.
     expect(src).not.toContain('<div className="space-y-1">')
     const chatDisplay = readFileSync(

@@ -7,7 +7,6 @@ import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { formatUserMessageTime } from './UserMessageBubble'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
-import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
 import { extractDeliveredResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
@@ -338,6 +337,12 @@ export interface ResponseContent {
    * reply arrives. Keeps the streamed body readable when the next tool starts.
    */
   isCommentary?: boolean
+  /**
+   * Identity of the underlying text stream (its sub-turn id). Stable when a
+   * live note is promoted into the answer or committed with a server id, so
+   * the same block morphs instead of remounting.
+   */
+  streamKey?: string
 }
 
 // ============================================================================
@@ -370,6 +375,8 @@ export interface TurnCardProps {
   isStreaming: boolean
   /** Whether this turn is fully complete */
   isComplete: boolean
+  /** Parent owns the turn's loading status; omit generic thinking placeholders. */
+  hasExternalWorkStatus?: boolean
   /** Start in expanded state */
   defaultExpanded?: boolean
   /** Controlled expansion state (overrides internal state) */
@@ -936,6 +943,7 @@ export function HeightPresence({
   containerRef,
   animateIn,
   reduceMotion,
+  exitMode,
   className,
   children,
   ...rest
@@ -943,6 +951,11 @@ export function HeightPresence({
   containerRef?: React.RefObject<HTMLDivElement>
   animateIn: boolean
   reduceMotion: boolean | null
+  /**
+   * `merge-into-chain`: text that turned out to be process commentary lifts
+   * toward the work header, blurs out, then releases its height.
+   */
+  exitMode?: 'merge-into-chain'
   className?: string
   children: React.ReactNode
 } & Record<`data-${string}`, string>) {
@@ -956,14 +969,27 @@ export function HeightPresence({
     ref.current.style.overflow = ''
     ref.current.style.height = ''
   }
+  const exit = instant ? undefined : exitMode === 'merge-into-chain'
+    // Height uses the work header's exact tween, so when the header mounts with
+    // this merge the turn's total height shrinks monotonically (never bounces).
+    ? { height: 0, opacity: 0, y: -10, scale: 0.985, filter: 'blur(2px)', transition: {
+        opacity: { duration: 0.18, ease: WORK_CHAIN_EASE },
+        y: tween,
+        scale: tween,
+        filter: { duration: 0.18, ease: WORK_CHAIN_EASE },
+        height: tween,
+      } }
+    : { height: 0, opacity: 0 }
   return (
     <motion.div
       ref={ref}
       initial={instant || !animateIn ? false : { height: 0, opacity: 0 }}
       animate={{ height: 'auto', opacity: 1 }}
-      exit={instant ? undefined : { height: 0, opacity: 0 }}
+      exit={exit}
       transition={{ height: tween, opacity: { duration: instant ? 0 : 0.2, ease: WORK_CHAIN_EASE } }}
-      onAnimationStart={instant || !animateIn ? undefined : clip}
+      // Exits always clip: collapsing text must not paint over the next block.
+      onAnimationStart={instant || (!animateIn && !exitMode) ? undefined : clip}
+      style={exitMode === 'merge-into-chain' ? { transformOrigin: 'top left' } : undefined}
       onAnimationComplete={unclip}
       className={className}
       {...rest}
@@ -2001,8 +2027,7 @@ export function ResponseCard({
     () => showArtifacts ? extractDeliveredResponseArtifacts(artifactVersions) : [],
     [showArtifacts, artifactVersions],
   )
-  const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
-  const presentationStreaming = isStreaming || paced.revealing
+  const presentationStreaming = isStreaming
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
@@ -2799,8 +2824,8 @@ export function ResponseCard({
   )
 
   const isCompleted = isTurnComplete ?? !isStreaming
-  // A network completion leaves received text in the presentation queue.
-  const bodyText = paced.text
+  // Render every received delta immediately; reveal effects never queue text.
+  const bodyText = responseText
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
   const showCompletedChrome = !isProgress && ((isCompleted && !isCommentary)
@@ -2821,10 +2846,14 @@ export function ResponseCard({
           role={isProgress ? 'note' : undefined}
           data-response-kind={isProgress ? 'progress' : variant}
           className={cn("relative group transition-colors duration-200",
-            isProgress ? "ml-[9px]" : taskPreview && !isPlan ? "" : "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5")}
+            // Replies are frameless: whether streamed text is the answer or
+            // process commentary is unknown until the model stops, so both
+            // look the same. Plans keep their framed header card.
+            isProgress ? "ml-[9px]" : isPlan ? "rounded-[8px] overflow-hidden bg-background ring-1 ring-inset ring-foreground/5" : "")}
         >
           {/* Center the marker in the first line after the body padding and paragraph margin. */}
           {isProgress && <MessageCircleDashed aria-hidden="true" className="absolute left-px top-[calc(1rem+0.5lh-0.375rem)] size-3 text-[13px] leading-relaxed text-muted-foreground" />}
+
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
             <div
@@ -2846,7 +2875,8 @@ export function ResponseCard({
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
-            className={cn(isProgress ? "pl-[22px] pr-4 py-2 text-[13px] text-foreground/70" : taskPreview && !isPlan ? "px-4 py-1 text-sm" : "pl-[22px] pr-4 py-3 text-sm")}
+            className={cn(isProgress ? "pl-[22px] pr-4 py-2 text-[13px] text-foreground/70" : taskPreview && !isPlan ? "px-4 py-1 text-sm"
+              : isPlan ? "pl-[22px] pr-4 py-3 text-sm" : "px-2.5 py-1 text-sm")}
           >
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
@@ -2887,15 +2917,16 @@ export function ResponseCard({
               Streaming reserves the same row so completion only reveals actions. */}
           {reserveDesktopFooter && (
             <div
+              data-response-actions=""
               aria-hidden={!actionsVisible}
               style={{ opacity: actionsVisible ? 1 : 0 }}
               className={cn(
-              "pl-4 pr-2.5 py-2 border-t flex items-center justify-between transition-opacity duration-[650ms] ease-in-out motion-reduce:transition-none",
-              showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent",
+              "h-10 shrink-0 overflow-x-auto whitespace-nowrap flex items-center justify-between gap-3 transition-opacity duration-[400ms] ease-in-out motion-reduce:transition-none",
+              isPlan ? cn("pl-4 pr-2.5 border-t", showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent") : "px-2.5",
               SIZE_CONFIG.fontSize
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
-              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
+              <div className={cn("flex shrink-0 items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
@@ -2945,7 +2976,7 @@ export function ResponseCard({
               </div>
 
               {/* Right side */}
-              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
+              <div className={cn("flex shrink-0 items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {/* Accept Plan dropdown (plan variant only, last response) */}
                 {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
                   <div
@@ -3120,6 +3151,7 @@ export const TurnCard = React.memo(function TurnCard({
   response,
   intent,
   isComplete,
+  hasExternalWorkStatus = false,
   defaultExpanded = false,
   isExpanded: externalIsExpanded,
   onExpandedChange,
@@ -3367,21 +3399,25 @@ export const TurnCard = React.memo(function TurnCard({
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const showGenericThinkingIndicator = previewText !== thinkingStatusLabel() && shouldShowGenericThinkingIndicator(
+  const showGenericThinkingIndicator = !hasExternalWorkStatus
+    && previewText !== thinkingStatusLabel() && shouldShowGenericThinkingIndicator(
     turnPhase,
     isBuffering && !(response && hasVisibleResponse),
     renderedActivityRows,
   )
   // Header chrome stays for every turn with real work records (live or complete).
-  // Before the first record it doubles as the thinking row for the live turn.
+  // Before the first record it doubles as the thinking row only when the
+  // parent does not already render a work status (e.g. standalone viewers).
   const showLiveThinkingHeader = !animateResponse
+    && !hasExternalWorkStatus
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
   const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
   const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
-  // Keep one status slot across tool -> awaiting -> tool transitions. Toggling
+  // Standalone viewers keep one status slot across tool -> awaiting -> tool transitions. Toggling
   // its visibility must not repeatedly expand and collapse the work chain.
   const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
+    && !hasExternalWorkStatus
     && !(response && hasVisibleResponse)
   // True once the header has been on screen for a committed render, so a badge
   // that arrives later slides in while a header that mounts with its badge does not.
@@ -3667,9 +3703,16 @@ export const TurnCard = React.memo(function TurnCard({
       <AnimatePresence>
       {response && hasVisibleResponse && (
         <HeightPresence
-          key="response"
+          // A progress note and the answer are different blocks: the note fades
+          // and folds while the answer card grows, instead of one card morphing.
+          // One block per text stream: a note promoted to the answer (or committed
+          // with its server id) keeps this key and morphs in place.
+          key={`stream-${response.streamKey ?? response.messageId ?? 'response'}`}
           animateIn={animateLiveBlocks}
           reduceMotion={reduceMotion}
+          // Every streamed text block may still turn out to be commentary; if it
+          // does, it merges into the work chain instead of just vanishing.
+          exitMode={response.isPlan ? undefined : 'merge-into-chain'}
           className="select-text"
         >
           {/* Gap lives inside the tween; border-box padding on the tweened
@@ -3694,7 +3737,7 @@ export const TurnCard = React.memo(function TurnCard({
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
-            revealIdentity={`${sessionId}:${turnId}:response`}
+            revealIdentity={`${sessionId}:${turnId}:${response.streamKey ?? 'response'}`}
             messageId={response.messageId}
             annotations={response.annotations}
             onAddAnnotation={onAddAnnotation}

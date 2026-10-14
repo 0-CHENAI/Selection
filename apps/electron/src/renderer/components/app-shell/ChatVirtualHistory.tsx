@@ -5,6 +5,7 @@ import type { Turn } from '@craft-agent/ui'
 export interface ChatVirtualHistoryHandle {
   scrollToTurn: (index: number) => void
   scrollToLatest: () => void
+  cancelScroll: () => void
 }
 
 interface Props {
@@ -87,6 +88,7 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
   React.useImperativeHandle(ref, () => ({
     scrollToTurn: index => virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' }),
     scrollToLatest: () => virtualizer.scrollToEnd({ behavior: 'auto' }),
+    cancelScroll: () => virtualizer.cancelScroll(),
   }), [virtualizer])
   const rows = virtualizer.getVirtualItems()
   for (const row of rows) retainedKeys.current.add(String(row.key))

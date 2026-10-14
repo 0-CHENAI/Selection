@@ -1,22 +1,19 @@
-export const SEMANTIC_REVEAL_MS = 560
+export const SEMANTIC_REVEAL_MS = 180
 export const SEMANTIC_REVEAL_MAX_MS = 1600
-export const SEMANTIC_REVEAL_EASING = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
-const REVEAL_STAGGER_MS = 60
-const MAX_REVEAL_DELAY_MS = 180
+export const SEMANTIC_REVEAL_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 const MAX_UNITS_PER_FRAME = 32
 
-export function semanticRevealFrames() {
-  return [0, 0.2, 0.4, 0.6, 0.8, 1].map(offset => ({
-    offset,
-    opacity: offset,
-  }))
+export function semanticRevealFrames(blur = '0px') {
+  if (parseFloat(blur) === 0) return [{ opacity: 0 }, { opacity: 1 }]
+  return [{ opacity: 0, filter: `blur(${blur})` }, { opacity: 1, filter: 'blur(0px)' }]
 }
 
-export function semanticRevealTiming(index = 0, textRun = false) {
+export function semanticRevealTiming(duration = SEMANTIC_REVEAL_MS, easing = SEMANTIC_REVEAL_EASING) {
   return {
-    duration: SEMANTIC_REVEAL_MS,
-    delay: Math.min(textRun ? 240 : MAX_REVEAL_DELAY_MS, Math.max(0, index) * (textRun ? 20 : REVEAL_STAGGER_MS)),
-    easing: SEMANTIC_REVEAL_EASING,
+    duration,
+    // Arrival cadence comes from the server, never a word-by-word replay queue.
+    delay: 0,
+    easing,
     fill: 'backwards' as FillMode,
   }
 }
@@ -53,6 +50,13 @@ type UnitState = {
 
 /** Owns visual effects only. Source, DOM identity and document layout stay intact. */
 export function createSemanticReveal(root: HTMLElement, animateInitial: boolean) {
+  // Read shared motion tokens once per admitted message, not on each delta.
+  const style = getComputedStyle(root)
+  const fade = style.getPropertyValue('--stream-fade').trim()
+  const parsedDuration = parseFloat(fade) * (fade.endsWith('ms') ? 1 : 1000)
+  const duration = Number.isFinite(parsedDuration) ? Math.max(0, parsedDuration) : SEMANTIC_REVEAL_MS
+  const blur = style.getPropertyValue('--stream-blur').trim() || '0px'
+  const easing = style.getPropertyValue('--stream-ease').trim() || SEMANTIC_REVEAL_EASING
   const states = new WeakMap<HTMLElement, UnitState>()
   const pending = new Set<HTMLElement>()
   const active = new Map<HTMLElement, Animation>()
@@ -65,10 +69,12 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
   let frame: number | undefined
   let disposed = false
   let completionExpired = false
+  let source: string | undefined
 
   const expose = (unit: HTMLElement) => {
     active.get(unit)?.cancel()
     active.delete(unit)
+    unit.classList.remove('t-stream-w', 'is-in')
     const state = states.get(unit)
     if (state?.pending) {
       unit.style.clipPath = state.clip
@@ -92,7 +98,7 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
   // A below-viewport unit remains pending until the scroller brings it into view.
   // No global scroll/key listeners: typing and reading other panels are unrelated.
   const schedule = () => {
-    if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; update(streaming, enabled) })
+    if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; update(streaming, enabled, source) })
   }
   // Syntax highlighting and previews can finish after React's layout effect.
   // Observe content only, never our own animation/style writes.
@@ -101,8 +107,11 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     if (entries.some(entry => entry.isIntersecting)) schedule()
   }, { root: viewport })
 
-  function update(isStreaming: boolean, canAnimate: boolean) {
+  function update(isStreaming: boolean, canAnimate: boolean, content?: string) {
     if (disposed) return
+    const frontier = source?.length ?? 0
+    const append = source == null || content == null || content.startsWith(source)
+    source = content
     if (isStreaming && !streaming) {
       clearTimeout(deadline)
       deadline = undefined
@@ -142,7 +151,15 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     ])
     for (const candidate of changed) {
       const { unit, text, previous } = candidate
-      if (immediate || !budget.has(candidate) || typeof unit.animate !== 'function') {
+      const start = unit.getAttribute?.('data-stream-start')
+      const end = unit.getAttribute?.('data-stream-end')
+      // AST restructuring replaces DOM nodes (e.g. closing ** / a link or a
+      // table delimiter). Source ranges, not DOM identity, decide what is new.
+      // Unmapped/generated nodes are conservative after the initial commit.
+      const newSource = content == null || (append && (frontier === 0 || (
+        start != null && end != null && Number(start) >= frontier && Number(end) > frontier
+      )))
+      if (immediate || !append || (!previous && !newSource) || !budget.has(candidate) || typeof unit.animate !== 'function') {
         expose(unit)
         states.set(unit, { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath })
         continue
@@ -156,7 +173,6 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
       states.set(unit, state)
       measurements.push({ unit, state, height: rect.height, width: rect.width, inset, below: rect.top >= bottom, animate: rect.bottom > top && rect.height > 0 })
     }
-    let admitted = 0
     measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
       state.height = height
       state.width = width
@@ -172,9 +188,17 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
       if (inset <= 0) return
       expose(unit)
       if (!animate) return
-      const animation = unit.animate(semanticRevealFrames(), semanticRevealTiming(admitted++, unit.hasAttribute?.('data-stream-chunk')))
+      // Fade new arrivals without wiping/reflowing previously shown text.
+      // Blur is opt-in; the default creates no filter animation layers.
+      unit.classList.add('t-stream-w', 'is-in')
+      const animation = unit.animate(semanticRevealFrames(blur), semanticRevealTiming(duration, easing))
       active.set(unit, animation)
-      animation.onfinish = () => { if (active.get(unit) === animation) active.delete(unit) }
+      animation.onfinish = () => {
+        if (active.get(unit) !== animation) return
+        active.delete(unit)
+        // Do not leave filter layers attached to completed/history text.
+        unit.classList.remove('t-stream-w', 'is-in')
+      }
     })
     initial = false
     // The deadline starts once, not again for each delta/IntersectionObserver.

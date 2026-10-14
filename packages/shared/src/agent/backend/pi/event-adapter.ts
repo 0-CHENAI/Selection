@@ -110,7 +110,7 @@ function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean
 }
 
 function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase | undefined {
-  if (!isCodexResponsesMessage(message) || !Array.isArray(message?.content)) return undefined;
+  if (!Array.isArray(message?.content)) return undefined;
   const phases = message.content
     .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
     .map((part) => getTextPhase((part as { textSignature?: unknown }).textSignature));
@@ -138,14 +138,33 @@ export class PiEventAdapter extends BaseEventAdapter {
   private boundary?: AnswerBoundary;
   private boundaryStreamed = false;
   private markerAnswerStarted = false;
+  /** Host-committed answer turns split prose at the optional final-answer marker. */
+  private hostAnswerBoundary = false;
   setPresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
     this.presentationProtocol = protocol;
     this.boundary = undefined;
     this.boundaryStreamed = false;
   }
+  setHostAnswerBoundary(enabled: boolean): void {
+    if (this.hostAnswerBoundary === enabled) return;
+    this.hostAnswerBoundary = enabled;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+  }
+  private usesAnswerBoundary(message?: AssistantMessage): boolean {
+    // Native commentary/final_answer signatures remain authoritative even if
+    // a forwarded event omits api/provider fields. Optional legacy markers
+    // must not concatenate process text into the host-committed final answer.
+    if (this.hostAnswerBoundary && (isCodexResponsesMessage(message) || (
+      Array.isArray(message?.content) && message.content.some(part =>
+        part.type === 'text' && getTextPhase((part as { textSignature?: unknown }).textSignature) !== undefined)
+    ))) return false;
+    return this.presentationProtocol === 'marker-v1' || this.hostAnswerBoundary;
+  }
   private answerBoundary(): AnswerBoundary {
     return this.boundary ??= new AnswerBoundary(() => this.nextSubTurnId('m'),
-      name => console.warn('[answer-boundary]', name));
+      name => console.warn('[answer-boundary]', name),
+      this.hostAnswerBoundary ? 'native' : 'marker-v1');
   }
 
   // Track tool names from execution_start for proper tool_result correlation
@@ -414,7 +433,8 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.currentTurnId = null;
         this.hasStreamedDeltas = false;
         this.hasEmittedFinalText = false;
-        this.subTurnCounter = 0;
+        // Keep counting across model calls of one chat run: every text stream
+        // gets a unique sub-turn id, which the renderer uses as its block key.
         this.messageSubTurnId = null;
         this.streamingTextPhase = undefined;
         break;
@@ -454,7 +474,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
         }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
-          if (this.presentationProtocol === 'marker-v1') {
+          if (this.usesAnswerBoundary(amEvent.partial)) {
             this.boundaryStreamed = true;
             const chunks = this.answerBoundary().push(amEvent.delta);
             if (chunks.some(chunk => chunk.type === 'text_delta' && chunk.phase === 'final')) this.markerAnswerStarted = true;
@@ -577,7 +597,7 @@ export class PiEventAdapter extends BaseEventAdapter {
                 : segment.phase === this.streamingTextPhase
             ))
           : -1;
-        if (this.presentationProtocol === 'marker-v1') {
+        if (this.usesAnswerBoundary(event.message as AssistantMessage)) {
           if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
           yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId, userStopped);
           if (messageIsIntermediate) this.markerAnswerStarted = false;

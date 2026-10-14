@@ -15,11 +15,6 @@ export function useSemanticReveal(
   const controller = React.useRef<ReturnType<typeof createSemanticReveal>>()
   const liveIdentity = React.useRef<string | undefined>()
   const sawLive = React.useRef(false)
-  if (liveIdentity.current !== identity) {
-    liveIdentity.current = identity
-    sawLive.current = false
-  }
-  if (streaming) sawLive.current = true
   const admission = React.useRef<{ identity?: string; initial: boolean }>()
   useBrowserLayoutEffect(() => {
     if (!root.current) return
@@ -46,12 +41,17 @@ export function useSemanticReveal(
     // Admission belongs to the message lifetime; content updates use the effect below.
   }, [root, identity])
   useBrowserLayoutEffect(() => {
+    if (liveIdentity.current !== identity) {
+      liveIdentity.current = identity
+      sawLive.current = false
+    }
+    if (streaming) sawLive.current = true
     // A live response retains its admission through completion so the last
     // paragraph can finish fading. Restored history remains immediate.
     const enabled = streaming || sawLive.current || !!admission.current?.initial
     if (enabled && !controller.current && root.current) {
       controller.current = createSemanticReveal(root.current, !!admission.current?.initial)
     }
-    controller.current?.update(streaming, enabled)
+    controller.current?.update(streaming, enabled, content)
   }, [root, content, startTime, streaming, identity])
 }

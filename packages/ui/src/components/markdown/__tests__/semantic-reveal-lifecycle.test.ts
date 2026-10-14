@@ -17,10 +17,11 @@ function events() {
 const motion = Object.assign(events(), {matches:false});
 globalThis.window = Object.assign(events(), {innerHeight:800, matchMedia:()=>motion, getSelection:()=>null});
 globalThis.document = events();
-globalThis.getComputedStyle = () => ({overflowY:'visible'});
+globalThis.getComputedStyle = () => ({overflowY:'visible',getPropertyValue:()=>''});
 let reads=0, animations=[], operations=[];
 function unit(text='first', height=22) {
   const el = {textContent:text, height, top:0, width:600, parentElement:null, style:{clipPath:''},
+    classList: { add() {}, remove() {} },
     getBoundingClientRect() { reads++; operations.push('read'); return {top:this.top,bottom:this.top+this.height,height:this.height,width:this.width}; },
     animate(frames, options) { operations.push('write'); const a={frames, options, cancelled:false,cancel(){this.cancelled=true}}; animations.push(a); return a; },
   };return el;
@@ -45,7 +46,8 @@ assert.deepEqual(animations[1].frames, semanticRevealFrames());
 assert.equal(animations[1].options.duration, SEMANTIC_REVEAL_MS);
 assert.equal(animations[1].options.easing, SEMANTIC_REVEAL_EASING);
 assert.ok(!('transform' in animations[1].frames[0]), 'new paragraphs fade in place; they must not lift');
-assert.ok(animations[1].frames[1].opacity < 0.45, 'early fade stays translucent');
+assert.ok(!('filter' in animations[1].frames[0]), 'default fades must not create filter layers');
+assert.equal(semanticRevealFrames('1px')[0].filter, 'blur(1px)', 'blur remains opt-in');
 reads=0;
 first.textContent+=' third line'; first.height=66;
 c.update(true,true);
@@ -77,8 +79,7 @@ reads=0; operations=[];
 const large=createSemanticReveal(root,true);large.update(true,true);
 assert.equal(reads,32);
 assert.equal(animations.slice(-32)[0].options.delay, 0);
-assert.ok(animations.slice(-32).some(a => a.options.delay > 0), 'burst paragraphs enter in sequence');
-assert.ok(animations.slice(-32).every(a => a.options.delay <= 180), 'burst delay stays bounded');
+assert.ok(animations.slice(-32).every(a => a.options.delay === 0), 'received text must not wait in a stagger queue');
 const firstWrite=operations.indexOf('write');
 assert.ok(firstWrite>=0);assert.ok(!operations.slice(firstWrite).includes('read'));
 large.update(false,true);
@@ -86,6 +87,35 @@ assert.equal(animations.at(-1).cancelled, false, 'completion must not cut off th
 await new Promise(resolve=>setTimeout(resolve,SEMANTIC_REVEAL_MAX_MS + 20));
 assert.equal(animations.at(-1).cancelled, false, 'completion deadline must not truncate active tail animations');
 large.dispose();
+units=[];
+const arrivals=createSemanticReveal(root,true);
+for(let i=0;i<40;i++) { units.push(unit('arrival'+i)); arrivals.update(true,true); }
+assert.ok(animations.slice(-40).every(a=>!a.cancelled), 'new arrivals must not cut short earlier fades');
+assert.ok(animations.slice(-40).every(a=>a.options.duration===SEMANTIC_REVEAL_MS && a.options.delay===0));
+arrivals.dispose();
+// A completed Markdown delimiter changes the tree without adding visible text.
+const ranged=(text,start,end)=>Object.assign(unit(text),{getAttribute:n=>n==='data-stream-start'?String(start):n==='data-stream-end'?String(end):null});
+units=[ranged('**old',0,5)];
+const syntax=createSemanticReveal(root,true);syntax.update(true,true,'**old');
+const syntaxCount=animations.length;
+units=[ranged('old',2,5),ranged(' new',7,11)];
+syntax.update(true,true,'**old** new');
+assert.equal(animations.length,syntaxCount+1,'only appended source fades after a DOM replacement');
+units=[ranged('old',2,5),ranged(' new',7,11)];
+syntax.update(true,true,'**old** new');
+assert.equal(animations.length,syntaxCount+1,'an async re-mount with the same source must not replay');
+units=[ranged('replacement',0,11)];syntax.update(true,true,'replacement');
+assert.equal(animations.length,syntaxCount+1,'edits and preprocessing changes show immediately');
+syntax.dispose();
+// An offscreen unit may already exist in the DOM when an edit replaces its
+// source. It must stop waiting for IntersectionObserver and become visible.
+globalThis.IntersectionObserver=class {observe(){}unobserve(){}disconnect(){}};
+const offscreen=ranged('original',0,8);offscreen.top=900;units=[offscreen];
+const edited=createSemanticReveal(root,true);edited.update(true,true,'original');
+assert.equal(offscreen.style.clipPath,'inset(0 0 100% 0)');
+offscreen.textContent='replacement';edited.update(true,true,'replacement');
+assert.equal(offscreen.style.clipPath,'','replacing a pending offscreen unit must expose it immediately');
+edited.dispose();
 assert.equal(appendedRevealInset(60,80),25);
 assert.equal(appendedRevealInset(80,80),0);
 assert.equal(appendedRevealInset(80,40),0);

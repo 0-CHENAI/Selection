@@ -284,17 +284,21 @@ function isLiveCardStream(message: Message): boolean {
   if (!(message.isStreaming || message.isPending)) return false
   if (!hasRenderableAssistantText(message.content)) return false
   if (message.presentationProtocol === 'marker-v1') return false
+  // natural-v1: whether live text is the answer is unknown until the model
+  // stops, so every live stream occupies the (frameless) reply slot. Text that
+  // ends in a tool call then merges into the work chain.
   if (isLiveAnswerDraft(message)) return true
   // Legacy senders flag process text with isIntermediate alone (no phase).
   return message.phase !== 'intermediate' && !message.isIntermediate
 }
 
-/** explicit-v1: live tokens are the reply; a finished uncommitted draft is process text. */
+/** Host-committed answers: live tokens are the reply; a finished uncommitted draft is process text. */
 function classifyForTurnGrouping(message: Message): Message {
   if (message.answerCommitted || message.answerPreview) return message
   if (!isLiveAnswerDraft(message)) return message
   const live = !!(message.isStreaming || message.isPending)
-  return message.isIntermediate === !live ? message : { ...message, isIntermediate: !live }
+  const intermediate = !live
+  return message.isIntermediate === intermediate ? message : { ...message, isIntermediate: intermediate }
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -1180,6 +1184,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             isCommentary: false,
             streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
             messageId: message.id,
+            streamKey: message.turnId ?? message.id,
             annotations: message.annotations,
           }
           currentTurn.isStreaming = !!(message.isStreaming || message.isPending)
@@ -1228,6 +1233,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
         completedRevealStartTime: message.isStreaming ? undefined : message.completedRevealStartTime,
         messageId: message.id,
+        streamKey: message.turnId ?? message.id,
         annotations: message.annotations,
       }
       currentTurn.isStreaming = !!message.isStreaming

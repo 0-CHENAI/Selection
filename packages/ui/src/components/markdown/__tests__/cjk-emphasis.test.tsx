@@ -8,7 +8,7 @@ const { Markdown } = await import('../Markdown')
 
 function render(content: string, props: object = {}) {
   return renderToStaticMarkup(<Markdown {...props}>{content}</Markdown>)
-    .replace(/<span data-stream-chunk="">([\s\S]*?)<\/span>/g, '$1')
+    .replace(/<span data-stream-chunk=""[^>]*>([\s\S]*?)<\/span>/g, '$1')
 }
 
 describe('CJK emphasis in shared Markdown rendering', () => {

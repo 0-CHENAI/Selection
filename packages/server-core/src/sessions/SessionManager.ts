@@ -9447,78 +9447,98 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   }
 
   /**
-   * Promote the newest substantive draft of this run into the final answer when
-   * the model never submits one, even after the single recovery call (#403).
-   * The run's recorded work stays in the transcript; the salvaged answer is
-   * marked so clients can tell it was not formally delivered.
+   * natural-v1 commit. The answer is an existing draft message, promoted in
+   * place so its streamed DOM, SDK anchor and id stay the same:
+   * - `natural`: the run's final tool-free message (nothing but status rows after it);
+   * - `salvage`: the newest substantive draft, after recovery also failed (#403).
+   * The draft is persisted and read back before the answer is published.
    */
-  private async salvageUndeliveredAnswer(
+  private async commitDraftAnswer(
     managed: ManagedSession,
     state: NonNullable<ManagedSession['answerDelivery']>,
+    mode: 'natural' | 'salvage',
   ): Promise<Message | undefined> {
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) return undefined
-    const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
-      m.role === 'assistant' && m.isIntermediate
-      && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
+    const run = managed.messages.slice(userIndex + 1)
+    const isDraft = (m: Message) => m.role === 'assistant' && !!m.isIntermediate && !m.answerCommitted
+      && m.answerRunId === state.runId && hasRenderableAssistantText(m.content) && !isAnswerDeliveryReceipt(m.content)
+    let draft: Message | undefined
+    if (mode === 'natural') {
+      const last = [...run].reverse().find(m => m.role === 'tool' || (m.role === 'assistant' && hasRenderableAssistantText(m.content)))
+      if (last && isDraft(last) && last.phase === 'final') draft = last
+    } else {
+      draft = [...run].reverse().find(isDraft)
+    }
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
     catch { return undefined }
     const regenerateTransaction = managed.regenerateTransaction
     const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-    const draftAnchor = (await loadPiTurnAnchors(sessionPath)).anchors[draft.id]
     // A regenerated answer must retain a real SDK branch boundary.
-    if (regenerateTransaction && !draftAnchor) return undefined
+    if (regenerateTransaction && !(await loadPiTurnAnchors(sessionPath)).anchors[draft.id]) return undefined
     const isActive = () => managed.answerDelivery === state && managed.isProcessing
       && !managed.stopRequested && managed.processingGeneration === state.generation
-    if (!isActive()) return undefined
+    if (!isActive() || state.committedMessageId || state.accepting) return undefined
+    state.accepting = true
     const previousLastRole = managed.lastMessageRole
     const previousFinalId = managed.lastFinalMessageId
-    const answer: Message = {
-      id: generateMessageId(), role: 'assistant', content: draft.content,
-      timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
-      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerRoutingVersion: state.answerRoutingVersion, answerCommitted: true,
-      answerSalvaged: true,
-      turnId: `answer-${state.runId}`,
-    }
+    const previousIndex = managed.messages.indexOf(draft)
+    const previous = { isIntermediate: draft.isIntermediate, hidden: draft.hidden, phase: draft.phase,
+      answerCommitted: draft.answerCommitted, answerSalvaged: draft.answerSalvaged,
+      artifactVersions: draft.artifactVersions, timestamp: draft.timestamp }
     let rollbackFeedback: (() => void) | undefined
     try {
-      if (draftAnchor) await savePiTurnAnchor(sessionPath, answer.id, draftAnchor)
-      if (!isActive()) return undefined
-      this.assertAnswerReady(managed, state, draft.content)
-      rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
-        (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, answer.content)
+      const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, draft.content)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
-      managed.messages.push(answer)
-      state.committedMessageId = answer.id
+      this.assertAnswerReady(managed, state, draft.content)
+      Object.assign(draft, { isIntermediate: false, hidden: undefined, phase: 'final' as const,
+        answerCommitted: true, answerSalvaged: mode === 'salvage' ? true : undefined, artifactVersions })
+      rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, draft,
+        (content, hash) => saveBodyFeedbackVersion(sessionPath, content, hash))
+      // The committed answer closes the run, after every note and tool row.
+      draft.timestamp = this.monotonic()
+      if (previousIndex !== managed.messages.length - 1) {
+        managed.messages.splice(previousIndex, 1)
+        managed.messages.push(draft)
+      }
+      state.committedMessageId = draft.id
       managed.lastMessageRole = 'assistant'
-      managed.lastFinalMessageId = answer.id
-      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = answer.id
+      managed.lastFinalMessageId = draft.id
+      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = draft.id
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
-      const stored = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
+      const stored = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === draft!.id)
       if (!stored?.answerCommitted || stored.answerRunId !== state.runId || !hasRenderableAssistantText(stored.content)) {
-        throw new Error('Salvaged answer could not be persisted.')
+        throw new Error('Answer could not be persisted. No answer was published.')
       }
       if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
       rollbackFeedback?.()
-      if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
-      if (isActive()) state.persistenceFailed = true
-      sessionLog.warn('Answer salvage failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
-      managed.messages = managed.messages.filter(m => m.id !== answer.id)
+      if (regenerateTransaction?.pendingAnswerId === draft.id) regenerateTransaction.pendingAnswerId = undefined
+      if (isActive()) {
+        state.persistenceFailed = true
+        sessionLog.error('Answer persistence failed', { sessionId: managed.id, answerRunId: state.runId, mode, error: error instanceof Error ? error.message : String(error) })
+      }
+      Object.assign(draft, previous)
+      const currentIndex = managed.messages.indexOf(draft)
+      if (currentIndex !== previousIndex && currentIndex >= 0) {
+        managed.messages.splice(currentIndex, 1)
+        managed.messages.splice(previousIndex, 0, draft)
+      }
       state.committedMessageId = undefined
-      if (managed.lastFinalMessageId === answer.id) {
+      if (managed.lastFinalMessageId === draft.id) {
         managed.lastMessageRole = previousLastRole
         managed.lastFinalMessageId = previousFinalId
       }
       this.persistSession(managed)
-      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Salvaged answer rollback persistence failed', rollbackError))
+      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Answer rollback persistence failed', rollbackError))
       return undefined
+    } finally {
+      state.accepting = false
     }
-    return answer
+    return draft
   }
 
   private isCanonicalCoordinatorWaiting(managed: ManagedSession): boolean {
@@ -9537,18 +9557,31 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): AsyncGenerator<AgentEvent> {
     const state = managed.answerDelivery
     if (!state) { yield* initial; return }
+    // Auth/source/progress continuation retains the original request and its
+    // error history. Only errors from this execution block a new answer.
+    const priorErrors = new Set(managed.messages.filter(message => message.role === 'error').map(message => message.id))
     let complete: Extract<AgentEvent, { type: 'complete' }> | undefined
     for await (const event of initial) {
       if (event.type === 'complete') complete = event
       else yield event
     }
+    const active = () => managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
+      && managed.processingGeneration === state.generation
+    const runHasError = () => managed.messages.some(message => message.role === 'error' && !priorErrors.has(message.id))
     const owner = managed.messages.find(m => m.id === state.userMessageId)
-    const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
     const waiting = (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')
       || (owner?.hidden && (owner.taskContext?.kind === 'coordination' || this.isCanonicalCoordinatorWaiting(managed)))
-    if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
-      && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
-      && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
+    const commitNatural = async (): Promise<boolean> => {
+      if (state.committedMessageId || state.persistenceFailed || runHasError() || !active()) return false
+      const answer = await this.commitDraftAnswer(managed, state, 'natural')
+      if (answer) this.publishCommittedAnswer(managed, answer)
+      return !!answer
+    }
+    if (complete && !waiting && !managed.authRetryInProgress && !(await commitNatural())
+      && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !runHasError() && active()) {
+      // The run ended without a final tool-free message. Close any refused
+      // candidate as process text, then ask once for the answer as plain text.
+      this.revealHiddenDrafts(managed)
       // Account for the first call before starting the one allowed recovery call.
       await this.processEvent(managed, complete)
       state.recovery = true
@@ -9557,28 +9590,28 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       await this.flushSession(managed.id)
       // Cancellation or a replacement turn can arrive while the checkpoint flushes.
       // The first completion was already accounted for above; do not replay it.
-      if (!managed.isProcessing || managed.stopRequested || managed.answerDelivery !== state
-        || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
+      if (!active() || managed.authRetryInProgress) return
       agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
       complete = undefined
       for await (const event of this.runProgressExecution(managed, agent, ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
         if (event.type === 'complete') complete = event
         else yield event
       }
+      if (complete) await commitNatural()
     }
-    if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && managed.isProcessing && !managed.stopRequested
-      && managed.answerDelivery === state && managed.processingGeneration === state.generation
-      && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
-      const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
+    if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && active() && !runHasError()) {
+      this.revealHiddenDrafts(managed)
+      const salvaged = state.persistenceFailed ? undefined : await this.commitDraftAnswer(managed, state, 'salvage')
       if (salvaged) {
         this.publishCommittedAnswer(managed, salvaged)
-      } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
-        && managed.processingGeneration === state.generation) {
+      } else if (active()) {
         yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
-          ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
-          : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
+          ? '答案保存失败：系统未能保存最终正文。已保留执行记录；请先排查存储问题。'
+          : '未完成答案交付：模型没有输出最终正文。已保留执行记录，请继续此任务。' }) }
       }
     }
+    // A candidate left private by a stop, error or wait is closed as process text.
+    if (!state.committedMessageId && !this.isCoordinatorAnswerTurn(managed)) this.revealHiddenDrafts(managed)
     if (complete) yield complete
     else if (state.committedMessageId) yield { type: 'complete' }
   }
@@ -13388,10 +13421,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const content = managed.streamingText
     const presentationProtocol = managed.streamingPresentationProtocol
-    // Keep only unclassified prose private. Provider-classified commentary
-    // already streamed into the work chain and must be closed on interruption.
-    const hideDraft = !!managed.answerDelivery
-      && !(managed.streamingPhase === 'intermediate' && presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
+    // natural-v1 already streamed this text; an interrupted body closes as a
+    // visible work-chain note and never becomes the answer by itself.
+    const hideDraft = this.coordinatorProseHidden(managed, managed.streamingPhase, presentationProtocol)
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
     this.flushDelta(managed.id, managed.workspace.id)
@@ -13434,18 +13466,41 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }, managed.workspace.id)
   }
 
-  /** Recovery permits only answer delivery, so its prose can use the same live
-   * preview as submit_answer arguments without committing commentary as an answer. */
-  private previewRecoveryAnswer(managed: ManagedSession, text: string): void {
+  /**
+   * Internal coordinator checkpoints are not answer turns: their prose stays
+   * private exactly as before (only provider-classified commentary is shown).
+   */
+  private isCoordinatorAnswerTurn(managed: ManagedSession): boolean {
+    const state = managed.answerDelivery
+    if (!state) return false
+    const owner = managed.messages.find(message => message.id === state.userMessageId)
+    return !!owner?.hidden && owner.taskContext?.kind === 'coordination'
+  }
+
+  private coordinatorProseHidden(managed: ManagedSession, phase: TextStreamPhase | undefined, protocol: string | undefined): boolean {
+    return this.isCoordinatorAnswerTurn(managed)
+      && !(phase === 'intermediate' && protocol !== 'marker-v1' && !managed.answerDelivery!.recovery)
+  }
+
+  /**
+   * A private answer candidate that did not become the answer (a later tool ran,
+   * or the commit was refused) is ordinary process text. Close its live stream
+   * in the renderer as a work-chain note.
+   */
+  private revealHiddenDrafts(managed: ManagedSession): void {
     const delivery = managed.answerDelivery
-    if (!delivery?.recovery || delivery.committedMessageId || delivery.persistenceFailed
-      || managed.stopRequested || !managed.isProcessing
-      || delivery.generation !== managed.processingGeneration || !hasRenderableAssistantText(text)) return
-    try { this.assertAnswerReady(managed, delivery, text) }
-    catch { return }
-    this.sendEvent({ type: 'answer_preview', sessionId: managed.id,
-      answerRunId: delivery.runId, userMessageId: delivery.userMessageId,
-      toolCallId: `recovery-${delivery.runId}`, text }, managed.workspace.id)
+    if (!delivery) return
+    for (const draft of managed.messages) {
+      if (draft.role !== 'assistant' || !draft.hidden || !draft.isIntermediate
+        || draft.answerRunId !== delivery.runId) continue
+      draft.hidden = false
+      draft.phase = 'intermediate'
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: draft.content,
+        isIntermediate: true, phase: 'intermediate', presentationProtocol: draft.presentationProtocol,
+        answerProtocol: draft.answerProtocol, answerRunId: draft.answerRunId,
+        answerRoutingVersion: draft.answerRoutingVersion, turnId: draft.turnId,
+        timestamp: draft.timestamp, messageId: draft.id }, managed.workspace.id)
+    }
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
@@ -13492,11 +13547,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
         const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
-        // Provider-classified commentary is safe to show as it streams. An
-        // unclassified body may be a final draft, so keep that private until
-        // submit_answer commits it.
-        const hideDraft = !!managed.answerDelivery
-          && !(event.phase === 'intermediate' && event.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
+        // natural-v1: text from a message that called tools is a progress note
+        // and is shown. The final tool-free message is the answer candidate; it
+        // stays a private draft (the renderer keeps its live stream) until the
+        // run ends and the host commits it in place.
+        const answerCandidate = !!managed.answerDelivery && !event.isIntermediate && event.phase !== 'intermediate' && !this.isCoordinatorAnswerTurn(managed)
+        const hideDraft = answerCandidate || this.coordinatorProseHidden(managed, event.phase, event.presentationProtocol)
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -13504,9 +13560,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
-        // Recovery previews are reserved for visible native text. Structured
-        // drafts stay private until the durable delivery decision is made.
-        this.previewRecoveryAnswer(managed, content)
         // A boundary can close commentary before the SDK id arrives. Attach
         // the original message identity once, without re-emitting its text.
         if (event.sdkMessageId && event.relatedTurnIds?.length) {
@@ -13523,7 +13576,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           timestamp: this.monotonic(),
           isIntermediate,
           ...(hideDraft ? { hidden: true } : {}),
-          phase: event.phase,
+          phase: answerCandidate ? 'final' : event.phase,
           presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
           turnId: event.turnId,
@@ -13625,20 +13678,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Format tool input paths to relative for better readability
         const previousTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
-        if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) {
-          // A following business tool proves earlier prose was process commentary.
-          // Reveal it now; prose followed by submit_answer stays a private draft.
-          for (const draft of managed.messages) {
-            if (draft.role !== 'assistant' || !draft.hidden || !draft.isIntermediate
-              || draft.answerRunId !== managed.answerDelivery.runId) continue
-            draft.hidden = false
-            this.sendEvent({ type: 'text_complete', sessionId, text: draft.content,
-              isIntermediate: true, phase: 'intermediate', presentationProtocol: draft.presentationProtocol,
-              answerProtocol: draft.answerProtocol, answerRunId: draft.answerRunId,
-              answerRoutingVersion: draft.answerRoutingVersion, turnId: draft.turnId,
-              timestamp: draft.timestamp, messageId: draft.id }, workspaceId)
-          }
-        }
+        // A following tool proves an earlier answer candidate was process text.
+        if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) this.revealHiddenDrafts(managed)
         const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
@@ -14607,11 +14648,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const pending = this.pendingDeltas.get(sessionId)
     if (pending && pending.delta) {
       this.pendingDeltas.delete(sessionId)
+      // natural-v1 streams every delta: progress notes as transient bubbles,
+      // marked answer text straight into the answer card.
       const managed = this.sessions.get(sessionId)
-      if (managed?.answerDelivery && !(pending.phase === 'intermediate' && pending.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)) {
-        this.previewRecoveryAnswer(managed, managed.streamingText)
-        return
-      }
+      if (managed && this.coordinatorProseHidden(managed, pending.phase, pending.presentationProtocol)) return
       this.sendEvent({
         type: 'text_delta',
         sessionId,
@@ -14620,7 +14660,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         presentationProtocol: pending.presentationProtocol,
         turnId: pending.turnId
       }, workspaceId)
-      if (managed) this.previewRecoveryAnswer(managed, managed.streamingText)
     }
   }
 

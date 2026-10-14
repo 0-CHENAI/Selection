@@ -34,7 +34,15 @@ import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
 import { useSemanticReveal } from './useSemanticReveal'
-import { rehypeStreamChunks } from './rehype-stream-chunks'
+import { createStreamArrivalChunks, rehypeStreamChunks } from './rehype-stream-chunks'
+import { splitOpenRichFence } from './streaming-rich-fence'
+import { useFrameContent } from './useFrameContent'
+import { createStreamingMarkdownCache, remarkStreamingCache } from './remark-streaming-cache'
+import type { PluggableList } from 'unified'
+
+// Parent cards still receive every event. A pending frame must not rerun the
+// Markdown/KaTeX/HTML pipeline with unchanged painted content.
+const MemoizedReactMarkdown = React.memo(ReactMarkdown)
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -622,7 +630,9 @@ export function Markdown({
   isStreaming = false,
 }: MarkdownProps) {
   const revealRoot = React.useRef<HTMLDivElement>(null)
-  useSemanticReveal(revealRoot, children, revealStartTime, isStreaming, id)
+  const arrivalChunks = React.useMemo(() => ({ split: createStreamArrivalChunks() }), [id])
+  const parseCache = React.useMemo(() => ({ parse: createStreamingMarkdownCache() }), [id])
+  const frameContent = useFrameContent(children, isStreaming, id)
   // Get collapsible context if enabled
   const collapsibleContext = useCollapsibleMarkdown()
 
@@ -644,37 +654,54 @@ export function Markdown({
     [mode, onUrlClick, onFileClick, collapsible, collapsibleContext, hideFirstMermaidExpand, disablePreviewBlocks]
   )
 
+  // A table/diagram still being written renders as a small placeholder, not as
+  // raw source that grows and then collapses into the finished block.
+  const streamingSplit = React.useMemo(
+    () => isStreaming ? splitOpenRichFence(frameContent) : { body: frameContent },
+    [frameContent, isStreaming]
+  )
   // Linkify first, then shield currency `$` so `$A$` can be inline math.
   const processedContent = React.useMemo(
-    () => protectCurrencyDollars(preprocessLinks(promoteBarePreviewBlocks(children))),
-    [children]
+    () => protectCurrencyDollars(preprocessLinks(promoteBarePreviewBlocks(streamingSplit.body))),
+    [streamingSplit.body]
   )
+  useSemanticReveal(revealRoot, processedContent, revealStartTime, isStreaming, id)
 
   // Parse CJK punctuation beside emphasis markers without rewriting message text.
   // Conditionally include the collapsible sections plugin.
-  const remarkPlugins = React.useMemo(
+  const remarkPlugins = React.useMemo<PluggableList>(
     () => {
       const mathPlugin: [typeof remarkMath, typeof MARKDOWN_MATH_OPTIONS] = [
         remarkMath,
         MARKDOWN_MATH_OPTIONS
       ]
       return collapsible
-        ? [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections]
-        : [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin]
+        ? [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections, [remarkStreamingCache, parseCache]]
+        : [remarkGfm, remarkCjkFriendly, remarkFileMentions, remarkLiteralTildes, mathPlugin, [remarkStreamingCache, parseCache]]
     },
-    [collapsible]
+    [collapsible, parseCache]
   )
+  const rehypePlugins = React.useMemo<PluggableList>(() => [
+    [rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw, [rehypeStreamChunks, arrivalChunks],
+  ], [arrivalChunks])
 
   return (
     <div ref={revealRoot} className={cn('markdown-content', className)}>
-      <ReactMarkdown
+      <MemoizedReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw, rehypeStreamChunks]}
+        rehypePlugins={rehypePlugins}
         components={components}
         urlTransform={markdownUrlTransform}
       >
         {processedContent}
-      </ReactMarkdown>
+      </MemoizedReactMarkdown>
+      {streamingSplit.pending && (
+        <div
+          data-streaming-block-placeholder={streamingSplit.pending}
+          aria-hidden="true"
+          className="my-2 h-12 rounded-[8px] bg-foreground/[0.04] motion-safe:animate-pulse"
+        />
+      )}
     </div>
   )
 }

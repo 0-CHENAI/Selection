@@ -2,6 +2,39 @@ import { expect, it } from 'bun:test'
 import { PiEventAdapter } from './event-adapter'
 import { messageToStored, storedToMessage } from '@craft-agent/core'
 
+it('preserves Codex native text phases in host-committed answer turns', () => {
+ const adapter = new PiEventAdapter(); adapter.startTurn(); adapter.setHostAnswerBoundary(true)
+ const message = {role:'assistant',id:'sdk',api:'openai-codex-responses',stopReason:'stop',content:[
+  {type:'text',text:'正在检查',textSignature:JSON.stringify({phase:'commentary'})},
+  {type:'text',text:'最终答案',textSignature:JSON.stringify({phase:'final_answer'})},
+ ]}
+ const events=[...adapter.adaptEvent({type:'message_end',message} as never)]
+ expect(events.filter(e=>e.type==='text_complete')).toEqual([
+  expect.objectContaining({text:'正在检查',isIntermediate:true,phase:'intermediate'}),
+  expect.objectContaining({text:'最终答案',isIntermediate:false,phase:'final'}),
+ ])
+})
+
+it('keeps authoritative text phases and stream identity when the completed event omits provider metadata', () => {
+ for (const api of ['openai-codex-responses', undefined]) {
+ const adapter = new PiEventAdapter(); adapter.startTurn(); adapter.setHostAnswerBoundary(true)
+ const finalPart = {type:'text',text:'最终答案',textSignature:JSON.stringify({phase:'final_answer'})}
+ const streamed = [...adapter.adaptEvent({type:'message_update',assistantMessageEvent:{
+  type:'text_delta',delta:'最终答案',partial:{role:'assistant',api,content:[finalPart]},
+ }} as never)]
+ const stream = streamed.find(event => event.type === 'text_delta')
+ const streamId = stream?.type === 'text_delta' ? stream.turnId : undefined
+ expect(streamId).toBeDefined()
+ const completed = [...adapter.adaptEvent({type:'message_end',message:{role:'assistant',id:'sdk',stopReason:'stop',content:[
+  {type:'text',text:'正在检查',textSignature:JSON.stringify({phase:'commentary'})},finalPart,
+ ]}} as never)].filter(event => event.type === 'text_complete')
+ expect(completed).toEqual([
+  expect.objectContaining({text:'正在检查',isIntermediate:true,phase:'intermediate'}),
+  expect.objectContaining({text:'最终答案',isIntermediate:false,phase:'final',turnId:streamId}),
+ ])
+ }
+})
+
 it('segments raw SDK text once and preserves final identity and persisted protocol', () => {
  const adapter = new PiEventAdapter(); adapter.startTurn(); adapter.setPresentationProtocol('marker-v1')
  const raw = '进展\n<<<FINAL_ANSWER>>>\n第一段\n\n第二段'

@@ -181,7 +181,17 @@ export function handleTextComplete(
     msgIndex = findAssistantMessage(session.messages, event.turnId)
   }
 
-  if (event.answerCommitted) msgIndex = -1
+  // natural-v1 commits the streamed draft in place: same id (a revealed note)
+  // or the still-live stream of that turn. Sub-turn ids repeat across model
+  // calls, so a completed message is only matched by its authoritative id.
+  if (event.answerCommitted) {
+    msgIndex = event.messageId ? session.messages.findIndex(m => m.id === event.messageId && m.role === 'assistant') : -1
+    if (msgIndex === -1 && event.turnId) {
+      msgIndex = session.messages.findIndex(m => m.role === 'assistant' && m.turnId === event.turnId
+        && (m.isStreaming || m.isPending) && !m.answerPreview && (!m.answerRunId || m.answerRunId === event.answerRunId))
+    }
+  }
+  const committedInPlace = !!event.answerCommitted && msgIndex !== -1
 
   if (msgIndex !== -1) {
     const existingMsg = session.messages[msgIndex]
@@ -199,15 +209,20 @@ export function handleTextComplete(
     const shouldUpdateTimestamp = !event.isIntermediate
     const existingMsg = session.messages[msgIndex]
     // Prefer a renderable complete payload; recover truncation from the stream (#81).
-    const resolvedContent = preferRicherAssistantText(
+    // A committed answer is authoritative: it is exactly what was persisted.
+    const resolvedContent = committedInPlace ? event.text : preferRicherAssistantText(
       event.text,
       streamingContentForTurn(streaming, event.turnId),
       existingMsg?.content,
     )
-    const nextTimestamp = timestampAfterVisibleUser(
-      session.messages,
-      event.timestamp ?? (event.isIntermediate ? existingMsg.timestamp : Date.now()),
-    )
+    // An in-place commit closes the run: order it after every other visible
+    // row, but never by its own (renderer-clock) streaming timestamp.
+    const nextTimestamp = committedInPlace
+      ? timestampAfterVisibleUser(session.messages.filter((_, index) => index !== msgIndex), event.timestamp ?? Date.now())
+      : timestampAfterVisibleUser(
+        session.messages,
+        event.timestamp ?? (event.isIntermediate ? existingMsg.timestamp : Date.now()),
+      )
     const updatedSession = updateMessageAt(session, msgIndex, {
       // Replace temporary renderer-generated ID with authoritative main-process ID
       // so branchFromMessageId always resolves against persisted session.jsonl.
@@ -217,7 +232,7 @@ export function handleTextComplete(
       isPending: false,
       isIntermediate: event.isIntermediate,
       phase: event.phase,
-      presentationProtocol: event.presentationProtocol,
+      presentationProtocol: event.presentationProtocol ?? (committedInPlace ? existingMsg.presentationProtocol : undefined),
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
       answerRoutingVersion: event.answerRoutingVersion,
@@ -225,7 +240,7 @@ export function handleTextComplete(
       answerSalvaged: event.answerSalvaged,
       artifactVersions: event.artifactVersions,
       completedRevealStartTime: session.isProcessing && !event.isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
-      turnId: event.turnId,
+      turnId: event.turnId ?? existingMsg.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
     }, shouldUpdateTimestamp)

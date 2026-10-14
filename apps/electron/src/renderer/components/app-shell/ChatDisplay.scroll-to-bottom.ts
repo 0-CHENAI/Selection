@@ -91,6 +91,57 @@ export function followStickyViewportToBottom(
   return true
 }
 
+/** One follow loop for all content/viewport resizes; never restart a tween per token. */
+export function createStickyScrollFollow(
+  viewport: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>,
+  options: {
+    sticky: () => boolean
+    reduceMotion: () => boolean
+    requestFrame?: (callback: FrameRequestCallback) => number
+    cancelFrame?: (id: number) => void
+  },
+) {
+  const request = options.requestFrame ?? requestAnimationFrame
+  const cancel = options.cancelFrame ?? cancelAnimationFrame
+  let frame: number | undefined
+  let target = 0
+  let lastTime: number | undefined
+  let disposed = false
+  let manualSmooth = false
+  const stop = () => {
+    if (frame != null) cancel(frame)
+    frame = undefined
+    lastTime = undefined
+    manualSmooth = false
+  }
+  const follow = (time: number) => {
+    frame = undefined
+    if (disposed || !options.sticky()) { stop(); return }
+    const elapsedMs = lastTime == null ? 16.67 : Math.min(STICKY_FOLLOW_MAX_DT_MS, Math.max(0, time - lastTime))
+    lastTime = time
+    const more = followStickyViewportToBottom(viewport, {
+      focused: true, sticky: true, reduceMotion: options.reduceMotion(), elapsedMs, target,
+    })
+    if (more) frame = request(follow)
+    else { lastTime = undefined; manualSmooth = false }
+  }
+  return {
+    resize(behavior?: ScrollBehavior) {
+      if (disposed || !options.sticky()) { stop(); return }
+      if (behavior === 'smooth') manualSmooth = true
+      // Geometry is read once per resize, not on every animation frame.
+      target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+      if (options.reduceMotion() || behavior === 'instant' || behavior === 'auto' || (
+        !manualSmooth && Math.abs(target - viewport.scrollTop) > viewport.clientHeight
+      )) {
+        stop()
+        viewport.scrollTop = target
+      } else if (frame == null) frame = request(follow)
+    },
+    dispose() { disposed = true; stop() },
+  }
+}
+
 /** Growth is added in full so a same-frame pin + transform cancel the wrap jump. */
 export function compensateFollowPaintShift(state: FollowPaintState, growthPx: number): FollowPaintState {
   if (growthPx <= 0) return state
