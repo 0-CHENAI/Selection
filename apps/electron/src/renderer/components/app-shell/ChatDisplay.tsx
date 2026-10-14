@@ -24,6 +24,7 @@ import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
 import { ChatVirtualHistory, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
+import { getWorkTimings } from './ChatDisplay.work-status'
 import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -399,34 +400,58 @@ interface ProcessingIndicatorProps {
   startTime?: number
   /** Override cycling messages with explicit status (e.g., "Compacting...") */
   statusMessage?: string
+  isProcessing?: boolean
+  endTime?: number
+  interrupted?: boolean
+  /** Exact start time supplied by the completed backend execution. */
+  completedStartTime?: number
 }
 
 /**
  * ProcessingIndicator - Shows cycling status messages with elapsed time
  * Matches TurnCard header layout for visual continuity
  */
-function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorProps) {
+function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, endTime, interrupted = false, completedStartTime }: ProcessingIndicatorProps) {
   const { t } = useTranslation()
-  const [elapsed, setElapsed] = React.useState(0)
+  const clock = React.useRef({
+    start: startTime ?? Date.now(),
+    end: isProcessing ? undefined : (endTime ?? startTime ?? Date.now()),
+  })
+  const [elapsed, setElapsed] = React.useState(() =>
+    Math.max(0, Math.floor(((clock.current.end ?? Date.now()) - clock.current.start) / 1000)),
+  )
   const [messageIndex, setMessageIndex] = React.useState(() =>
     Math.floor(Math.random() * PROCESSING_MESSAGE_KEYS.length)
   )
 
   // Update elapsed time every second using provided startTime
   React.useEffect(() => {
-    const start = startTime || Date.now()
-    // Set initial elapsed immediately
-    setElapsed(Math.floor((Date.now() - start) / 1000))
+    if (isProcessing) {
+      clock.current.start = startTime ?? clock.current.start
+      clock.current.end = undefined
+    } else if (completedStartTime !== undefined && endTime !== undefined) {
+      // The backend clock survives regeneration, lazy mounting and reopening
+      // the session. It must replace a historical user-message fallback.
+      clock.current.start = completedStartTime
+      clock.current.end = endTime
+    } else {
+      // Completion clears the session's start timestamp. Retain the live
+      // clock and capture its stop time once, rather than restarting it.
+      clock.current.end ??= Date.now()
+    }
+    const update = () => setElapsed(Math.max(0,
+      Math.floor(((clock.current.end ?? Date.now()) - clock.current.start) / 1000),
+    ))
+    update()
+    if (!isProcessing) return
 
-    const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000))
-    }, 1000)
+    const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
-  }, [startTime])
+  }, [startTime, isProcessing, completedStartTime, endTime])
 
   // Cycle through messages every 10 seconds (only when not showing status)
   React.useEffect(() => {
-    if (statusMessage) return  // Don't cycle when showing status
+    if (statusMessage || !isProcessing) return
     const interval = setInterval(() => {
       setMessageIndex(prev => {
         // Pick a random different message
@@ -438,17 +463,19 @@ function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorPr
       })
     }, 10000)
     return () => clearInterval(interval)
-  }, [statusMessage])
+  }, [statusMessage, isProcessing])
 
   // Use status message if provided, otherwise cycle through default messages
-  const displayMessage = statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
+  const displayMessage = isProcessing
+    ? statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
+    : t('chat.processing.worked')
 
   return (
     // No -mb-1: a margin outside the presence tween pops 4px on unmount.
-    <div className="flex items-center gap-2 px-3 py-1 text-[13px] text-muted-foreground">
+    <div data-chat-processing={isProcessing ? 'running' : 'completed'} className="flex items-center gap-2 px-3 pt-1 pb-3 text-[14px] text-muted-foreground">
       {/* Spinner in same location as TurnCard chevron */}
-      <div className="w-3 h-3 flex items-center justify-center shrink-0">
-        <Spinner className="text-[10px]" />
+      <div className="size-3.5 flex items-center justify-center shrink-0">
+        <Spinner className="text-[14px]" status={isProcessing ? 'working' : interrupted ? 'error' : 'done'} />
       </div>
       {/* Label with crossfade animation on content change only */}
       <span className="relative h-5 flex items-center">
@@ -463,7 +490,7 @@ function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorPr
             {displayMessage}
           </motion.span>
         </AnimatePresence>
-        {elapsed >= 1 && (
+        {(elapsed >= 1 || !isProcessing) && (
           <span className="text-muted-foreground/60 ml-1 tabular-nums">
             {formatElapsed(elapsed)}
           </span>
@@ -1554,6 +1581,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Bind recovery to the current user turn's latest error, never a historical error.
   const latestUserIndex = allTurns.findLastIndex(turn => turn.type === 'user')
+  const processingTurnIndex = allTurns.findLastIndex((turn, index) =>
+    turn.type === 'assistant' && index > latestUserIndex,
+  )
+  const completedRun = session?.tokenUsage?.lastTurn
+  const currentRun = session?.tokenUsage?.currentTurn
+  const workTimings = useMemo(() => getWorkTimings(allTurns, completedRun, currentRun), [allTurns, completedRun, currentRun])
   const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
   const recoveryErrorId = recoveryErrorTurn?.type === 'system' && turns.includes(recoveryErrorTurn) ? recoveryErrorTurn.message.id : undefined
   const executionRecovery = session?.runtimeRecovery && ['recovering', 'blocked'].includes(session.runtimeRecovery.phase)
@@ -1717,6 +1750,39 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   })
   const showNavigationRail = shouldShowConversationNavigation(showRecordNavigation, navigationItems.length)
   const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
+  // Keep the live status above the current reply as its body grows. Before
+  // the first assistant turn exists, it follows the latest user message.
+  const renderWorkStatus = (index: number) => {
+    const timing = workTimings.get(index)
+    if (!timing) return null
+    const isProcessing = sessionBusy && index === processingTurnIndex
+    return (
+      <HeightPresence key="work-status" animateIn={isProcessing} reduceMotion={reduceMotion}>
+        <ProcessingIndicator
+          isProcessing={isProcessing}
+          startTime={isProcessing
+            ? session?.processingStartedAt ?? session?.tokenUsage?.currentTurn?.startedAt ?? timing.startTime
+            : timing.startTime}
+          endTime={timing.endTime}
+          completedStartTime={timing.recorded ? timing.startTime : undefined}
+          interrupted={timing.interrupted}
+          statusMessage={isProcessing ? session?.currentStatus?.message : undefined}
+        />
+      </HeightPresence>
+    )
+  }
+  const processingIndicator = (
+    <AnimatePresence initial={false}>
+      {sessionBusy && !hasMoreBelow && (
+        <HeightPresence key="processing-indicator" animateIn reduceMotion={reduceMotion}>
+          <ProcessingIndicator
+            startTime={session?.processingStartedAt ?? session?.tokenUsage?.currentTurn?.startedAt ?? session?.messages.findLast(m => m.role === 'user' && !m.isQueued)?.timestamp}
+            statusMessage={session?.currentStatus?.message}
+          />
+        </HeightPresence>
+      )}
+    </AnimatePresence>
+  )
 
   return (
     <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat"
@@ -1897,6 +1963,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
                         >
+                          {renderWorkStatus(index)}
                           <MemoizedMessageBubble
                             message={turn.message}
                             onOpenFile={onOpenFile}
@@ -1987,6 +2054,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                         )}
                       >
+                      {renderWorkStatus(index)}
                       <TurnCard
                         sessionId={session.id}
                         sessionFolderPath={session.sessionFolderPath}
@@ -2242,25 +2310,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {/* Processing Indicator - visible on the latest page while processing.
-                    Slides in/out on the same curve as the turn card blocks so the
-                    turn boundary does not pop the transcript by one row. */}
-                <AnimatePresence initial={false}>
-                {sessionBusy && !hasMoreBelow && (() => {
-                  // Prefer the turn-start clock. Regenerating reuses the original
-                  // user-message timestamp, which would otherwise keep counting
-                  // from the first send.
-                  const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user' && !m.isQueued)
-                  return (
-                    <HeightPresence key="processing-indicator" animateIn reduceMotion={reduceMotion}>
-                      <ProcessingIndicator
-                        startTime={session.processingStartedAt ?? lastUserMsg?.timestamp}
-                        statusMessage={session.currentStatus?.message}
-                      />
-                    </HeightPresence>
-                  )
-                })()}
-                </AnimatePresence>
+                {processingTurnIndex === -1 && processingIndicator}
                 {/* Scroll Anchor: For auto-scroll to bottom */}
                 <div ref={messagesEndRef} />
               </div>
