@@ -60,6 +60,7 @@ import {
   refreshGenericOAuthToken,
 } from '../auth/generic-oauth.ts';
 import { debug } from '../utils/debug.ts';
+import { parseStoredApiCredential } from '@craft-agent/session-tools-core/api-auth';
 import { markSourceAuthenticated, loadSourceConfig, saveSourceConfig } from './storage.ts';
 
 /**
@@ -251,43 +252,17 @@ export class SourceCredentialManager {
    */
   async getApiCredential(source: LoadedSource): Promise<ApiCredential | null> {
     const cred = await this.load(source);
+    const api = source.config.api;
     // Check both API and MCP headerNames (same credential store pattern)
-    const headerNames = source.config.api?.headerNames || source.config.mcp?.headerNames;
+    const headerNames = api?.headerNames || source.config.mcp?.headerNames;
     debug(`[SourceCredentialManager] getApiCredential for ${source.config.slug}: cred.value exists=${!!cred?.value}, headerNames=${JSON.stringify(headerNames)}`);
     if (!cred?.value) return null;
 
-    // Check for multi-header auth (JSON with header names as keys)
-    // Works for both API sources (api.headerNames) and MCP sources (mcp.headerNames)
-    if (headerNames?.length) {
-      debug(`[SourceCredentialManager] Attempting multi-header parse for ${source.config.slug}, raw value length=${cred.value.length}`);
-      try {
-        const parsed = JSON.parse(cred.value);
-        debug(`[SourceCredentialManager] Parsed JSON keys: ${Object.keys(parsed).join(', ')}`);
-        // Validate all required headers are present
-        const hasAllHeaders = headerNames.every((h) => h in parsed);
-        debug(`[SourceCredentialManager] hasAllHeaders=${hasAllHeaders}`);
-        if (hasAllHeaders) {
-          return parsed as MultiHeaderCredential;
-        }
-      } catch (e) {
-        // Not JSON, fall through to other auth types
-        debug(`[SourceCredentialManager] JSON parse failed: ${e}`);
-      }
-    }
-
-    // Check for basic auth (JSON with username/password)
-    if (source.config.api?.authType === 'basic') {
-      try {
-        const parsed = JSON.parse(cred.value);
-        if (parsed.username && parsed.password) {
-          return parsed as BasicAuthCredential;
-        }
-      } catch {
-        // Not JSON, treat as regular credential
-      }
-    }
-
-    return cred.value;
+    return parseStoredApiCredential(cred.value, {
+      authType: api?.authType,
+      headerName: api?.headerName,
+      headerNames,
+    });
   }
 
   // ============================================================

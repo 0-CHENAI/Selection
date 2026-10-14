@@ -781,3 +781,79 @@ describe('source_test basic-auth header (regression for #824)', () => {
     expect(authHeader()).toBe('Basic not-json');
   });
 });
+
+describe('source_test header credential matches the runtime request', () => {
+  let tempDir: string;
+  const origFetch = globalThis.fetch;
+  let captured: { url: string; init: RequestInit } | null = null;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'source-test-header-'));
+    captured = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured = { url, init };
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeHeaderSource(slug: string, api: Record<string, unknown>): void {
+    const sourcePath = join(tempDir, 'sources', slug);
+    mkdirSync(sourcePath, { recursive: true });
+    const config = {
+      id: slug,
+      slug,
+      name: `Test ${slug}`,
+      enabled: true,
+      provider: 'test',
+      type: 'api',
+      tagline: 'Header auth API source',
+      icon: '🧪',
+      isAuthenticated: true,
+      api: { baseUrl: 'https://api.example.test', testEndpoint: { method: 'GET', path: '/ping' }, ...api },
+    } as unknown as SourceConfig;
+    writeFileSync(join(sourcePath, 'config.json'), JSON.stringify(config, null, 2));
+    writeFileSync(join(sourcePath, 'guide.md'), '# Guide\n\n' + 'word '.repeat(60));
+  }
+
+  function sentHeaders(): Record<string, string> {
+    return (captured?.init.headers ?? {}) as Record<string, string>;
+  }
+
+  it('unwraps a single headerName stored as a JSON object', async () => {
+    const key = 'AIzaSy' + 'k'.repeat(33);
+    writeHeaderSource('gemini', { authType: 'header', headerName: 'x-goog-api-key' });
+    const cred = makeCredentialManager({ cachedToken: JSON.stringify({ 'x-goog-api-key': key }) });
+    const ctx = createCtx(tempDir, { credentialManager: cred.manager });
+
+    await handleSourceTest(ctx, { sourceSlug: 'gemini', autoEnable: false });
+
+    expect(sentHeaders()['x-goog-api-key']).toBe(key);
+    expect(sentHeaders()['x-goog-api-key']).not.toContain('{');
+    expect(cred.refreshCalls).toBe(0);
+  });
+
+  it('sends every configured header and refuses a partial map', async () => {
+    writeHeaderSource('datadog', {
+      authType: 'header',
+      headerNames: ['DD-API-KEY', 'DD-APPLICATION-KEY'],
+    });
+    const cred = makeCredentialManager({
+      cachedToken: JSON.stringify({ 'DD-API-KEY': 'api', 'DD-APPLICATION-KEY': 'app' }),
+    });
+    const ctx = createCtx(tempDir, { credentialManager: cred.manager });
+    await handleSourceTest(ctx, { sourceSlug: 'datadog', autoEnable: false });
+    expect(sentHeaders()['DD-API-KEY']).toBe('api');
+    expect(sentHeaders()['DD-APPLICATION-KEY']).toBe('app');
+
+    const partial = makeCredentialManager({ cachedToken: JSON.stringify({ 'DD-API-KEY': 'api' }) });
+    const partialCtx = createCtx(tempDir, { credentialManager: partial.manager });
+    const result = await handleSourceTest(partialCtx, { sourceSlug: 'datadog', autoEnable: false });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('Multi-header auth requires');
+  });
+});

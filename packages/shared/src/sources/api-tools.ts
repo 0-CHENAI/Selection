@@ -12,32 +12,12 @@ import { debug } from '../utils/debug.ts';
 import { guardLargeResult } from '../utils/large-response.ts';
 import { MAX_DOWNLOAD_SIZE, formatBytes } from '../utils/binary-detection.ts';
 import type { ApiCredential, BasicAuthCredential } from './credential-manager.ts';
-import { isMultiHeaderCredential } from './credential-manager.ts';
+import { buildApiAuthHeaders } from '@craft-agent/session-tools-core/api-auth';
+
+export { buildAuthorizationHeader } from '@craft-agent/session-tools-core/api-auth';
 
 // Re-export for convenience
 export type { ApiCredential, BasicAuthCredential } from './credential-manager.ts';
-
-/**
- * Build an Authorization header value for bearer-style authentication.
- *
- * Supports three cases:
- * - `authScheme: undefined` → defaults to "Bearer {token}"
- * - `authScheme: "Token"` → "Token {token}" (custom prefix)
- * - `authScheme: ""` → "{token}" (no prefix, for APIs that expect raw tokens)
- *
- * The empty string case is needed for APIs like some GraphQL endpoints or
- * internal services that expect the raw JWT/token without a "Bearer" prefix.
- *
- * @param authScheme - The auth scheme prefix (undefined defaults to "Bearer", empty string means no prefix)
- * @param token - The authentication token
- * @returns The full Authorization header value
- */
-export function buildAuthorizationHeader(authScheme: string | undefined, token: string): string {
-  // Use nullish coalescing (??) so empty string "" is preserved, only undefined/null falls back to 'Bearer'
-  const scheme = authScheme ?? 'Bearer';
-  // If scheme is empty string, return just the token; otherwise prefix with scheme
-  return scheme ? `${scheme} ${token}` : token;
-}
 
 /**
  * API credential source — either a static credential value or a function that
@@ -64,13 +44,6 @@ export type ApiCredentialSource =
   | (() => Promise<ApiCredential | null>);
 
 /**
- * Type guard to check if credential is BasicAuthCredential
- */
-function isBasicAuthCredential(cred: ApiCredential): cred is BasicAuthCredential {
-  return typeof cred === 'object' && cred !== null && 'username' in cred && 'password' in cred;
-}
-
-/**
  * Type guard to check if credential source is a token getter function.
  * Both narrow shapes (Promise<string> and Promise<ApiCredential | null>) flow
  * through the same call site and are normalized by the caller.
@@ -93,51 +66,7 @@ export function buildHeaders(
   credential: ApiCredential,
   defaultHeaders?: Record<string, string>
 ): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    // Merge default headers (e.g., beta feature flags)
-    ...defaultHeaders,
-  };
-
-  // No auth needed for type='none' or missing auth
-  if (!auth || auth.type === 'none') {
-    return headers;
-  }
-
-  // Basic auth requires username:password credential
-  if (auth.type === 'basic') {
-    if (isBasicAuthCredential(credential)) {
-      const encoded = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
-      headers['Authorization'] = `Basic ${encoded}`;
-    }
-    return headers;
-  }
-
-  // Handle header auth (supports both single and multi-header)
-  if (auth.type === 'header') {
-    // Multi-header: credential is { headerName: value, ... }
-    if (isMultiHeaderCredential(credential)) {
-      Object.assign(headers, credential);
-    }
-    // Single header: existing behavior
-    else if (typeof credential === 'string' && credential) {
-      headers[auth.headerName || 'x-api-key'] = credential;
-    }
-    return headers;
-  }
-
-  // Other types use string credential (API key/token)
-  const apiKey = typeof credential === 'string' ? credential : '';
-  if (!apiKey) {
-    return headers;
-  }
-
-  if (auth.type === 'bearer') {
-    headers['Authorization'] = buildAuthorizationHeader(auth.authScheme, apiKey);
-  }
-  // Query type is handled in buildUrl
-
-  return headers;
+  return buildApiAuthHeaders(auth, credential, defaultHeaders);
 }
 
 /**
