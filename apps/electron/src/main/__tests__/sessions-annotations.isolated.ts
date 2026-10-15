@@ -110,4 +110,41 @@ describe('SessionManager annotation validation', () => {
     expect(h.persistCalls).toBe(0)
     expect(h.events).toHaveLength(0)
   })
+
+  it('rejects edits and deletes while a follow-up is processing', () => {
+    const existing = [makeAnnotation('ann-1', {
+      followUp: { status: 'running', requestMessageId: 'request', text: 'Keep this question' },
+    })]
+    const h = createHarness(existing)
+
+    expect(() => h.manager.updateMessageAnnotation('session-1', 'msg-1', 'ann-1', {
+      body: [{ type: 'note', text: 'changed' }],
+    })).toThrow('Follow-up is processing and cannot be edited or deleted')
+    expect(() => h.manager.removeMessageAnnotation('session-1', 'msg-1', 'ann-1')).toThrow('Follow-up is processing and cannot be edited or deleted')
+
+    expect(h.managed.messages[0].annotations).toHaveLength(1)
+    expect(h.managed.messages[0].annotations[0]?.meta?.followUp).toMatchObject({
+      status: 'running',
+      text: 'Keep this question',
+    })
+    expect(h.persistCalls).toBe(0)
+    expect(h.events).toHaveLength(0)
+  })
+
+  it('still allows edits and deletes after a follow-up has been answered', () => {
+    const existing = [makeAnnotation('ann-1', {
+      followUp: { status: 'delivered', requestMessageId: 'request', text: 'Answered question' },
+    })]
+    const h = createHarness(existing)
+
+    h.manager.updateMessageAnnotation('session-1', 'msg-1', 'ann-1', {
+      body: [{ type: 'note', text: 'note only', format: 'plain' }],
+    })
+    expect(h.managed.messages[0].annotations[0]?.body).toEqual([{ type: 'note', text: 'note only', format: 'plain' }])
+    expect(h.persistCalls).toBe(1)
+
+    h.manager.removeMessageAnnotation('session-1', 'msg-1', 'ann-1')
+    expect(h.managed.messages[0].annotations).toHaveLength(0)
+    expect(h.persistCalls).toBe(2)
+  })
 })

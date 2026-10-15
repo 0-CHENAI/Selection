@@ -66,3 +66,17 @@ export function getAnnotationFeedbackStatus(annotation: AnnotationV1 | null | un
     default: return undefined
   }
 }
+
+/**
+ * A tracked follow-up has already been sent. The confirmation card is
+ * display-only for every one of these statuses, including processing and
+ * answered. Unsent drafts have no status.
+ */
+export function isTrackedFollowUp(annotation: AnnotationV1 | null | undefined): boolean {
+  return getAnnotationFeedbackStatus(annotation) !== undefined
+}
+
+/** Processing (`running` / 处理中) rejects every edit and delete entry point. */
+export function isAnnotationFollowUpProcessing(annotation: AnnotationV1 | null | undefined): boolean {
+  return getAnnotationFeedbackStatus(annotation) === 'running'
+}

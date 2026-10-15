@@ -27,10 +27,10 @@ async function renderBubble(props: {
   attachments?: StoredAttachment[]
   isQueued?: boolean
   timestamp?: number
-}) {
+}, language: 'en' | 'zh-Hans' = 'en') {
   const testI18n = createInstance()
   await testI18n.use(initReactI18next).init({
-    lng: 'en',
+    lng: language,
     fallbackLng: 'en',
     resources: {
       en: {
@@ -38,9 +38,18 @@ async function renderBubble(props: {
           'common.copy': 'Copy',
           'common.copied': 'Copied!',
           'chat.queuedBadge': 'Queued',
+          'chat.followUps': 'Follow-ups',
           'chat.artifactVersions.restore': 'Restore this version',
           'chat.artifactVersions.previousVersion': 'Previous version',
           'chat.artifactVersions.version': 'Version {{number}}',
+        },
+      },
+      'zh-Hans': {
+        translation: {
+          'common.copy': '复制',
+          'common.copied': '已复制',
+          'chat.queuedBadge': '排队中',
+          'chat.followUps': '追问',
         },
       },
     },
@@ -135,5 +144,29 @@ describe('UserMessageBubble copy control (#372)', () => {
     expect(html).toContain('Previous version')
     expect(html).toContain('font-medium text-success">Version 1')
     expect(html).not.toContain('Version 2')
+  })
+})
+
+const followUpMessage = [
+  '**Follow-ups**',
+  '',
+  '> [#1] yuzeguitarist/deck/deckclip',
+  '→ 可是我现在没有安装deck，这个要删除么?',
+].join('\n')
+
+describe('UserMessageBubble follow-up heading', () => {
+  it('shows 追问 in zh-CN and keeps the quoted reference', async () => {
+    const html = await renderBubble({ content: followUpMessage }, 'zh-Hans')
+    expect(html).toContain('追问')
+    expect(html).not.toContain('Follow-ups')
+    expect(html).toContain('yuzeguitarist/deck/deckclip')
+    expect(html).toContain('可是我现在没有安装deck，这个要删除么?')
+  })
+
+  it('keeps Follow-ups in English', async () => {
+    const html = await renderBubble({ content: followUpMessage }, 'en')
+    expect(html).toContain('Follow-ups')
+    expect(html).not.toContain('追问')
+    expect(html).toContain('[#1] yuzeguitarist/deck/deckclip')
   })
 })

@@ -333,6 +333,7 @@
   "chat.followUpRecoveredResult": "復元された回答を見る",
   "chat.followUpRevisionResult": "修正結果を見る",
   "chat.followUpSaveAndSend": "保存して送信",
+  "chat.followUps": "フォローアップ",
   "chat.goToRecord": "履歴 {{number}} に移動：{{title}}",
   "chat.hideTechnicalDetails": "技術的な詳細を非表示",
   "chat.imageLoadFailed": "画像を読み込めませんでした",

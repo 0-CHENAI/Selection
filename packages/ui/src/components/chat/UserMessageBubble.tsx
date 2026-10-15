@@ -25,6 +25,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../too
 import { useTranslation } from 'react-i18next'
 import { getUserMessageCopyText } from './visible-user-message-text'
 import { parseArtifactRestoreDisplay } from './artifact-restore-display'
+import { localizeFollowUpSectionHeading } from './follow-up-display'
 
 // Fallback text icons for badges without iconDataUrl
 // Using simple characters since SVG rendering may not work in all contexts
@@ -228,8 +229,12 @@ export function renderContentWithBadges(
   content: string,
   badges: ContentBadge[],
   onUrlClick?: (url: string) => void,
-  onFileClick?: (path: string) => void
+  onFileClick?: (path: string) => void,
+  followUpHeading?: string,
 ): ReactNode {
+  const renderText = (text: string) => followUpHeading
+    ? localizeFollowUpSectionHeading(text, followUpHeading)
+    : text
   if (badges.length === 0) {
     return (
       <Markdown
@@ -238,7 +243,7 @@ export function renderContentWithBadges(
         onFileClick={onFileClick}
         className="text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap"
       >
-        {content}
+        {renderText(content)}
       </Markdown>
     )
   }
@@ -252,7 +257,7 @@ export function renderContentWithBadges(
   sortedBadges.forEach((badge, i) => {
     // Add text before this badge
     if (badge.start > lastEnd) {
-      const textBefore = content.slice(lastEnd, badge.start)
+      const textBefore = renderText(content.slice(lastEnd, badge.start))
       if (textBefore.trim()) {
         elements.push(
           <Markdown
@@ -288,7 +293,7 @@ export function renderContentWithBadges(
 
   // Add remaining text after last badge
   if (lastEnd < content.length) {
-    const textAfter = content.slice(lastEnd)
+    const textAfter = renderText(content.slice(lastEnd))
     if (textAfter.trim()) {
       elements.push(
         <Markdown
@@ -357,13 +362,17 @@ export function UserMessageBubble({
   timestamp,
 }: UserMessageBubbleProps) {
   const { t, i18n } = useTranslation()
+  const followUpsLabel = t('chat.followUps')
   const { onCopyToClipboard } = usePlatform()
   const hasAttachments = attachments && attachments.length > 0
   const restoreDisplay = useMemo(
     () => !badges?.length ? parseArtifactRestoreDisplay(content) : null,
     [content, badges],
   )
-  const copyText = useMemo(() => getUserMessageCopyText(content, badges ?? []), [content, badges])
+  const copyText = useMemo(
+    () => getUserMessageCopyText(content, badges ?? [], followUpsLabel),
+    [content, badges, followUpsLabel],
+  )
   const canCopy = copyText.length > 0
   const timeLabel = timestamp != null && !compactMode
     ? formatUserMessageTime(timestamp, i18n.language)
@@ -568,7 +577,7 @@ export function UserMessageBubble({
             {restoreDisplay.summary && <p className="max-w-[260px] text-center text-xs leading-relaxed text-muted-foreground">{restoreDisplay.summary}</p>}
           </div>
         ) : hasInlineBadges
-          ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick)
+          ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick, followUpsLabel)
           : (
             <Markdown
               mode="minimal"
@@ -576,7 +585,7 @@ export function UserMessageBubble({
               onFileClick={onFileClick}
               className="text-sm [&_a]:underline [&_code]:bg-foreground/10 [&_p]:whitespace-pre-wrap"
             >
-              {displayContent}
+              {localizeFollowUpSectionHeading(displayContent, followUpsLabel)}
             </Markdown>
           )
         }
