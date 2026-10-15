@@ -5,6 +5,7 @@ import {
   clarificationContinuation,
   countClarificationRounds,
   decideClarification,
+  hasPendingOriginClarification,
   normalizeClarificationResponse,
   toggleClarificationSelection,
 } from './clarification.ts';
@@ -72,6 +73,21 @@ test('a response can be options, text, both, or skip', () => {
   if (skipped.ok && skipped.skipped) {
     expect(clarificationContinuation({ requestId: 'r', ...skipped })).toContain('skipped');
   }
+});
+
+test('a pending origin card blocks another ask, and a mirror does not', () => {
+  expect(hasPendingOriginClarification([card(1)])).toBe(true);
+  expect(hasPendingOriginClarification([card(1, true)])).toBe(false);
+  const answered = card(1);
+  answered.clarification!.status = 'answered';
+  expect(hasPendingOriginClarification([answered, card(2, true)])).toBe(false);
+});
+
+test('a malformed or oversized reply cannot submit an empty card', () => {
+  expect(normalizeClarificationResponse(ask, { skipped: false }).ok).toBe(false);
+  expect(normalizeClarificationResponse(ask, { skipped: false, optionIds: ['missing'], text: '  ' }).ok).toBe(false);
+  const long = normalizeClarificationResponse(ask, { skipped: false, text: 'x'.repeat(2500) });
+  expect(long).toMatchObject({ ok: true, text: 'x'.repeat(2000) });
 });
 
 test('single select replaces and multi select toggles', () => {

@@ -13,6 +13,11 @@ export const CLARIFICATION_HARD_CAP = 4;
 
 type ClarificationMessage = Pick<Message, 'role' | 'hidden' | 'clarification'>;
 
+export function hasPendingOriginClarification(messages: readonly ClarificationMessage[]): boolean {
+  return messages.some(message =>
+    message.role === 'clarification' && message.clarification?.status === 'pending' && !message.clarification.mirror);
+}
+
 export function countClarificationRounds(messages: readonly ClarificationMessage[]): number {
   let count = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -67,13 +72,14 @@ export function normalizeClarificationResponse(
   response: ClarificationResponseInput,
 ): { ok: true; skipped: boolean; optionIds: string[]; text: string; labels: string[] }
   | { ok: false; reason: string } {
-  if (response.skipped) return { ok: true, skipped: true, optionIds: [], text: '', labels: [] };
+  if (response?.skipped) return { ok: true, skipped: true, optionIds: [], text: '', labels: [] };
   const known = new Set(ask.options.map(option => option.id));
-  const optionIds = [...new Set((response.optionIds ?? []).filter(id => known.has(id)))];
+  const rawIds = Array.isArray(response?.optionIds) ? response.optionIds : [];
+  const optionIds = [...new Set(rawIds.filter(id => typeof id === 'string' && known.has(id)))];
   if (ask.selection === 'single' && optionIds.length > 1) {
     return { ok: false, reason: 'Choose at most one option.' };
   }
-  const text = (response.text ?? '').trim().slice(0, 2000);
+  const text = (typeof response?.text === 'string' ? response.text : '').trim().slice(0, 2000);
   if (!canSubmitClarification({ skipped: false, optionIds, text })) {
     return { ok: false, reason: 'Choose an option, type an answer, or skip.' };
   }

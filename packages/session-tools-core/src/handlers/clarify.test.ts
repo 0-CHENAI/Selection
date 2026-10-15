@@ -32,6 +32,36 @@ describe('handleClarify', () => {
     expect(result.content[0]?.text).toContain('Already asked 3');
   });
 
+  it('rejects duplicate option ids without asking the host', async () => {
+    let called = false;
+    const ctx = {
+      callbacks: { onClarifyRequest: () => { called = true; return { accepted: true, requestId: 'x', round: 1 }; } },
+    } as unknown as SessionToolContext;
+    const result = await handleClarify(ctx, {
+      ...ask,
+      options: [{ id: '2024', label: '2024' }, { id: '2024', label: '去年' }],
+    });
+    expect(result.isError).toBe(true);
+    expect(called).toBe(false);
+  });
+
+  it('accepts a text-only question and still asks the host', async () => {
+    let selection = '';
+    const ctx = {
+      callbacks: {
+        onClarifyRequest: (input: { selection: string; options: unknown[] }) => {
+          selection = input.selection;
+          expect(input.options).toEqual([]);
+          return { accepted: true, requestId: 'clarify-text', round: 1 };
+        },
+      },
+    } as unknown as SessionToolContext;
+    const result = await handleClarify(ctx, { question: '目标是什么？', ambiguity: 'goal' });
+    expect(result.isError).toBeFalsy();
+    expect(selection).toBe('single');
+    expect(result.content[0]?.text).toContain('clarify-text');
+  });
+
   it('accepts a critical extra round and tells the model to stop the turn', async () => {
     const ctx = {
       callbacks: {

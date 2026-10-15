@@ -2043,7 +2043,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         >
                           <ClarificationCard
                             message={turn.message}
-                            interactive={turn.message.clarification?.status === 'pending'}
+                            interactive={turn.message.clarification?.status === 'pending' && !!onRespondToClarification}
                             onRespond={(response) => {
                               const requestId = turn.message.clarification?.requestId
                               if (requestId) onRespondToClarification?.(session.id, requestId, response)

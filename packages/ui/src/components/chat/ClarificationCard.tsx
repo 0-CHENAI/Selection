@@ -21,7 +21,7 @@ export interface ClarificationCardProps {
  * This is not the final answer card.
  */
 export function ClarificationCard({ message, interactive = false, onRespond }: ClarificationCardProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const data = message.clarification
   const [selected, setSelected] = React.useState<string[]>(data?.selectedOptionIds ?? [])
   const [text, setText] = React.useState(data?.text ?? '')
@@ -111,7 +111,7 @@ export function ClarificationCard({ message, interactive = false, onRespond }: C
           ) : (
             <div data-clarification-answer="">
               <p className="text-xs text-muted-foreground">{t('chat.clarificationYourAnswer')}</p>
-              {labels.length > 0 && <p className="mt-1">{labels.join('、')}</p>}
+              {labels.length > 0 && <p className="mt-1">{labels.join(i18n.language?.startsWith('zh') ? '、' : ', ')}</p>}
               {data.text?.trim() && <p className="mt-1 whitespace-pre-wrap">{data.text}</p>}
             </div>
           )}

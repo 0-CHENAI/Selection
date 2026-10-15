@@ -12,7 +12,7 @@ import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, H
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
 import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
-import { buildClarificationState, clarificationContinuation, countClarificationRounds, decideClarification, normalizeClarificationResponse, type ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
+import { buildClarificationState, clarificationContinuation, countClarificationRounds, decideClarification, hasPendingOriginClarification, normalizeClarificationResponse, type ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
@@ -10809,6 +10809,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   private async processNextQueuedMessage(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed || this.inlineFeedbackSessions.has(sessionId) || this.handoverCapturing.has(sessionId) || managed.messageQueue.length === 0) return
+    if (hasPendingOriginClarification(managed.messages)) return
 
     const next = managed.messageQueue[0]!
     try {
@@ -12828,25 +12829,36 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       return false
     }
     const origin = this.sessions.get(ask.originSessionId)
-    if (!origin) return false
+    if (!origin || origin.deleting) {
+      this.settleClarification(requestId, { skipped: true, optionIds: [], text: '' })
+      return false
+    }
     const previous = this.snapshotClarification(requestId)
     this.settleClarification(requestId, normalized)
+    const continuation = clarificationContinuation({
+      requestId,
+      skipped: normalized.skipped,
+      labels: normalized.labels,
+      text: normalized.text,
+    })
     try {
-      await this.sendMessage(origin.id, clarificationContinuation({
-        requestId,
-        skipped: normalized.skipped,
-        labels: normalized.labels,
-        text: normalized.text,
-      }), undefined, undefined, { hidden: true })
+      await this.sendMessage(origin.id, continuation, undefined, undefined, { hidden: true })
       return true
     } catch (error) {
-      this.restoreClarification(previous)
+      const delivered = origin.messages.some(message => message.role === 'user' && message.hidden && message.content.includes(requestId))
+      if (!delivered) this.restoreClarification(previous)
       sessionLog.warn(`Clarification continuation failed for ${requestId}: ${error instanceof Error ? error.message : String(error)}`)
       return false
     }
   }
 
   private beginClarification(managed: ManagedSession, ask: ClarificationAsk): import('@craft-agent/session-tools-core').ClarificationGate {
+    if (hasPendingOriginClarification(managed.messages)) {
+      return {
+        accepted: false,
+        reason: 'A clarification card is already waiting for the user. Stop this turn. Do not call clarify again until they answer or skip.',
+      }
+    }
     const decision = decideClarification(countClarificationRounds(managed.messages), ask.critical === true)
     if (!decision.allow) return { accepted: false, reason: decision.reason }
     const requestId = `clarify-${generateMessageId()}`
