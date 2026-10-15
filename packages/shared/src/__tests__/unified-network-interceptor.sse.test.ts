@@ -248,6 +248,112 @@ describe('unified-network-interceptor SSE processors', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
+  /**
+   * Same rule as @earendil-works/pi-ai 1.2.0 anthropic-messages stream():
+   * text_delta is appended only when event.index still points at an open text block.
+   * content_block_stop clears that index, so later deltas on it are dropped.
+   */
+  function piVisibleText(sse: string): string {
+    const blocks: Array<{ type: string; index?: number }> = [];
+    let text = '';
+    let event = '';
+    let data = '';
+    const flush = () => {
+      if (!data) { event = ''; return; }
+      if (event === 'content_block_start' || event === 'content_block_delta' || event === 'content_block_stop') {
+        const parsed = JSON.parse(data) as {
+          index?: number;
+          content_block?: { type?: string };
+          delta?: { type?: string; text?: string };
+        };
+        if (event === 'content_block_start' && parsed.content_block?.type === 'text') {
+          blocks.push({ type: 'text', index: parsed.index });
+        } else if (event === 'content_block_start') {
+          blocks.push({ type: parsed.content_block?.type ?? 'other', index: parsed.index });
+        } else if (event === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          const block = blocks.find(item => item.index === parsed.index);
+          if (block?.type === 'text' && parsed.delta.text) text += parsed.delta.text;
+        } else if (event === 'content_block_stop') {
+          const block = blocks.find(item => item.index === parsed.index);
+          if (block) delete block.index;
+        }
+      }
+      event = '';
+      data = '';
+    };
+    for (const line of sse.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) { flush(); continue; }
+      if (trimmed.startsWith('event:')) event = trimmed.slice(6).trim();
+      else if (trimmed.startsWith('data:')) data = trimmed.slice(5).trim();
+    }
+    flush();
+    return text;
+  }
+
+  it('keeps Kimi answer text that arrives without an open text block', async () => {
+    const thinking = (token: string) =>
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: token } })}\n\n`;
+    const text = (token: string, index = 0) =>
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: token } })}\n\n`;
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      thinking('先想'),
+      // Answer tokens reuse the thinking index. Pi drops them.
+      text('正文'),
+      text('还在'),
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      // A later text block is closed early, then more tokens continue on that index.
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+      text('开头', 1),
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+      text('续写', 1),
+      text('未停', 1),
+    ];
+    const raw = sse.join('');
+    expect(piVisibleText(raw)).toBe('开头');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文还在开头续写未停');
+    expect(out).toContain('"index":1000000');
+    expect(out).toContain('"index":1000001');
+  });
+
+  it('does not rewrite a normal Anthropic text stream', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你好"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('你好');
+    expect(out).not.toContain('1000000');
+  });
+
+  it('releases Kimi events that omit the blank-line separator, including a split UTF-8 token', async () => {
+    const first = 'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n';
+    const second = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"中"}}\n';
+    const third = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"文"}}\n';
+    const bytes = encoder.encode(first + second + third);
+    const splitAt = encoder.encode(first).length + encoder.encode(second.slice(0, second.indexOf('中'))).length + 1;
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const collected: Uint8Array[] = [];
+    const drained = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        collected.push(item.value);
+      }
+    })();
+    await writer.write(bytes.slice(0, splitAt));
+    await writer.write(bytes.slice(splitAt));
+    await writer.close();
+    await drained;
+    const out = decoder.decode(Buffer.concat(collected));
+    expect(piVisibleText(out)).toBe('中文');
+  });
+
   describe('stripMetadataFieldsFromRawJson', () => {
     it('strips _intent and _displayName from valid JSON', () => {
       const input = '{"path":"/tmp","_intent":"Read file","_displayName":"Read Tmp"}';

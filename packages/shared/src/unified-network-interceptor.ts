@@ -460,10 +460,60 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
   const decoder = new TextDecoder();
 
   const trackedBlocks = new Map<number, TrackedToolBlock>();
+  /**
+   * Pi's Anthropic accumulator only appends a text_delta when that index still
+   * belongs to an open text block. Kimi Coding (Kimi K3 / K3-256K on
+   * api.kimi.com/coding) sometimes continues the answer after content_block_stop,
+   * or sends the answer on the still-open thinking index. Those deltas are
+   * otherwise dropped and the visible body freezes while the socket stays open.
+   */
+  const openBlockKinds = new Map<number, 'text' | 'thinking' | 'tool' | 'other'>();
+  const recoveredTextIndexes = new Map<number, number>();
+  let nextRecoveredIndex = 1_000_000;
   let lineBuffer = '';
   let currentEventType = '';
   let currentData = '';
   let eventCount = 0;
+
+  function blockKind(type: string | undefined): 'text' | 'thinking' | 'tool' | 'other' {
+    if (type === 'text') return 'text';
+    if (type === 'thinking' || type === 'redacted_thinking') return 'thinking';
+    if (type === 'tool_use') return 'tool';
+    return 'other';
+  }
+
+  function rememberBlock(index: number, type: string | undefined): void {
+    recoveredTextIndexes.delete(index);
+    openBlockKinds.set(index, blockKind(type));
+  }
+
+  function recoverOrphanTextDelta(
+    data: Record<string, unknown>,
+    controller: TransformStreamDefaultController<Uint8Array>,
+  ): boolean {
+    const delta = data.delta as { type?: string; text?: string } | undefined;
+    if (delta?.type !== 'text_delta' || typeof delta.text !== 'string' || delta.text.length === 0) return false;
+    const index = typeof data.index === 'number' ? data.index : 0;
+    if (openBlockKinds.get(index) === 'text') return false;
+
+    let target = recoveredTextIndexes.get(index);
+    if (target === undefined || openBlockKinds.get(target) !== 'text') {
+      target = nextRecoveredIndex++;
+      recoveredTextIndexes.set(index, target);
+      openBlockKinds.set(target, 'text');
+      emitSseEvent('content_block_start', JSON.stringify({
+        type: 'content_block_start',
+        index: target,
+        content_block: { type: 'text', text: '' },
+      }), controller);
+    }
+    emitSseEvent('content_block_delta', JSON.stringify({
+      ...data,
+      type: typeof data.type === 'string' ? data.type : 'content_block_delta',
+      index: target,
+    }), controller);
+    return true;
+  }
 
   function processEvent(eventType: string, dataStr: string, controller: TransformStreamDefaultController<Uint8Array>): void {
     eventCount++;
@@ -477,6 +527,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
 
     if (eventType === 'content_block_start') {
       const contentBlock = data.content_block as { type?: string; id?: string; name?: string } | undefined;
+      if (typeof data.index === 'number') rememberBlock(data.index, contentBlock?.type);
       if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null) {
         const index = data.index as number;
         trackedBlocks.set(index, {
@@ -494,6 +545,8 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
       const index = data.index as number;
       const delta = data.delta as { type?: string; partial_json?: string } | undefined;
 
+      if (recoverOrphanTextDelta(data, controller)) return;
+
       if (delta?.type === 'input_json_delta' && trackedBlocks.has(index)) {
         const block = trackedBlocks.get(index)!;
         block.bufferedJson += delta.partial_json ?? '';
@@ -506,6 +559,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
 
     if (eventType === 'content_block_stop') {
       const index = data.index as number;
+      if (typeof index === 'number') openBlockKinds.delete(index);
       const block = trackedBlocks.get(index);
 
       if (block) {
@@ -572,67 +626,50 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     controller.enqueue(encoder.encode(sseText));
   }
 
+  function acceptSseLine(line: string, controller: TransformStreamDefaultController<Uint8Array>): void {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      if (currentEventType && currentData) processEvent(currentEventType, currentData, controller);
+      currentEventType = '';
+      currentData = '';
+      return;
+    }
+
+    const eventMatch = trimmed.match(SSE_EVENT_RE);
+    if (eventMatch) {
+      // Some Kimi streams omit the blank line between SSE events. Holding the
+      // previous data until a later blank line stalls every following text delta.
+      if (currentEventType && currentData) {
+        processEvent(currentEventType, currentData, controller);
+        currentData = '';
+      }
+      currentEventType = eventMatch[1]!.trim();
+      return;
+    }
+
+    const dataMatch = trimmed.match(SSE_DATA_RE);
+    if (dataMatch) {
+      currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
+    }
+  }
+
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       const text = lineBuffer + decoder.decode(chunk, { stream: true });
       const lines = text.split('\n');
       lineBuffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-
-        if (trimmed === '') {
-          if (currentEventType && currentData) {
-            processEvent(currentEventType, currentData, controller);
-          }
-          currentEventType = '';
-          currentData = '';
-          continue;
-        }
-
-        const eventMatch = trimmed.match(SSE_EVENT_RE);
-        if (eventMatch) {
-          currentEventType = eventMatch[1]!.trim();
-          continue;
-        }
-
-        const dataMatch = trimmed.match(SSE_DATA_RE);
-        if (dataMatch) {
-          currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          continue;
-        }
-      }
+      for (const line of lines) acceptSseLine(line, controller);
     },
 
     flush(controller) {
-      if (lineBuffer.trim()) {
-        const lines = lineBuffer.split('\n');
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed === '') {
-            if (currentEventType && currentData) {
-              processEvent(currentEventType, currentData, controller);
-            }
-            currentEventType = '';
-            currentData = '';
-            continue;
-          }
-          const eventMatch = trimmed.match(SSE_EVENT_RE);
-          if (eventMatch) {
-            currentEventType = eventMatch[1]!.trim();
-            continue;
-          }
-          const dataMatch = trimmed.match(SSE_DATA_RE);
-          if (dataMatch) {
-            currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          }
-        }
-
-        if (currentEventType && currentData) {
-          processEvent(currentEventType, currentData, controller);
-        }
+      const tail = decoder.decode();
+      if (tail) lineBuffer += tail;
+      if (lineBuffer) {
+        for (const line of lineBuffer.split('\n')) acceptSseLine(line, controller);
       }
+      // The last event often has no trailing blank line. Emit it anyway so the
+      // answer is not held until the socket closes.
+      if (currentEventType && currentData) processEvent(currentEventType, currentData, controller);
 
       for (const [index, block] of trackedBlocks) {
         emitBufferedBlock(block, index, controller);
