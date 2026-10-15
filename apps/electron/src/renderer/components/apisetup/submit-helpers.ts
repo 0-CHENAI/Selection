@@ -39,8 +39,14 @@ const PI_AUTH_PROVIDER_ALIASES: Record<string, string> = {
   'minimax-global': 'minimax',
 }
 
-/** Anthropic Messages gateways do not expose OpenAI's GET /v1/models. */
-export function shouldProbeOpenAiModelCatalog(customApi: CustomEndpointApi): boolean {
+/**
+ * Automatic catalog probes send the API key as soon as it is pasted.
+ * A custom endpoint waits for the Fetch models button, which can read
+ * either an OpenAI or an Anthropic model list. Branded OpenAI presets
+ * still probe on their own.
+ */
+export function shouldAutoProbeModelCatalog(activePreset: string, customApi: CustomEndpointApi): boolean {
+  if (activePreset === 'custom') return false
   return customApi !== 'anthropic-messages'
 }
 

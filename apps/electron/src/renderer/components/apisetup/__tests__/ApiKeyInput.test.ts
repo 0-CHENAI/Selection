@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
-  shouldProbeOpenAiModelCatalog,
+  shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
@@ -123,10 +123,15 @@ describe('resolvePresetStateForBaseUrlChange', () => {
   })
 })
 
-describe('shouldProbeOpenAiModelCatalog', () => {
-  it('does not send the API key to /v1/models for Anthropic Messages', () => {
-    expect(shouldProbeOpenAiModelCatalog('openai-completions')).toBe(true)
-    expect(shouldProbeOpenAiModelCatalog('anthropic-messages')).toBe(false)
+describe('shouldAutoProbeModelCatalog', () => {
+  it('waits for the Fetch models button on a custom endpoint', () => {
+    expect(shouldAutoProbeModelCatalog('custom', 'openai-completions')).toBe(false)
+    expect(shouldAutoProbeModelCatalog('custom', 'anthropic-messages')).toBe(false)
+  })
+
+  it('still probes branded OpenAI presets and skips Anthropic Messages', () => {
+    expect(shouldAutoProbeModelCatalog('order-openai', 'openai-completions')).toBe(true)
+    expect(shouldAutoProbeModelCatalog('manifest', 'anthropic-messages')).toBe(false)
   })
 })
 

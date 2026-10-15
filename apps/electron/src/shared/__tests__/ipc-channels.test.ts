@@ -176,6 +176,7 @@ const EXPECTED_CHANNELS: string[] = [
   'onboarding:validateMcp',
   'permissions:defaultsChanged',
   'permissions:getDefaults',
+  'pi:fetchCustomEndpointModels',
   'pi:getApiKeyProviders',
   'pi:getProviderBaseUrl',
   'pi:getProviderModels',

@@ -1,4 +1,5 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
+import { fetchCustomEndpointModels, type FetchCustomEndpointModelsInput } from '@craft-agent/shared/config'
 import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
@@ -43,6 +44,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.kimi.CANCEL_OAUTH,
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
   RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
+  RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS,
   RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
   RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL,
   RPC_CHANNELS.pi.GET_PROVIDER_MODELS,
@@ -422,6 +424,29 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_MODELS, async (_ctx, provider: string) => {
     const { listPiProviderPickerModels } = await import('@craft-agent/shared/config')
     return listPiProviderPickerModels(provider)
+  })
+
+  // Custom-endpoint model catalog. The API key is sent on the request and
+  // never included in logs or in the error returned to the renderer.
+  server.handle(RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS, async (_ctx, input: FetchCustomEndpointModelsInput) => {
+    const baseUrl = input && typeof input === 'object' && typeof input.baseUrl === 'string' ? input.baseUrl : ''
+    const apiKey = input && typeof input === 'object' && typeof input.apiKey === 'string' ? input.apiKey : ''
+    const api = input && typeof input === 'object' ? input.api : undefined
+    if (api !== 'openai-completions' && api !== 'anthropic-messages') {
+      return { ok: false as const, error: 'missing_input' as const }
+    }
+    try {
+      return await fetchCustomEndpointModels({ baseUrl, apiKey, api })
+    } catch {
+      let host = 'invalid-url'
+      try {
+        if (baseUrl.trim()) host = new URL(baseUrl).host
+      } catch {
+        host = 'invalid-url'
+      }
+      deps.platform.logger?.warn(`[fetchCustomEndpointModels] failed host=${host}`)
+      return { ok: false as const, error: 'unavailable' as const }
+    }
   })
 
   // ============================================================
