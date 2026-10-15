@@ -65,12 +65,33 @@ describe('resolvePiAuthProviderForSubmit', () => {
 })
 
 describe('resolvePresetStateForBaseUrlChange', () => {
-  it('updates the remembered provider when the typed URL matches a known preset', () => {
+  it('keeps Custom when the typed URL matches a known preset', () => {
+    expect(resolvePresetStateForBaseUrlChange({
+      matchedPreset: 'kimi-coding',
+      activePreset: 'custom',
+      activePresetHasEmptyUrl: true,
+      lastNonCustomPreset: 'openai',
+    })).toEqual({
+      activePreset: 'custom',
+      lastNonCustomPreset: 'openai',
+    })
     expect(resolvePresetStateForBaseUrlChange({
       matchedPreset: 'openrouter',
       activePreset: 'custom',
       activePresetHasEmptyUrl: true,
       lastNonCustomPreset: 'openai',
+    })).toEqual({
+      activePreset: 'custom',
+      lastNonCustomPreset: 'openai',
+    })
+  })
+
+  it('switches a non-custom preset when the typed URL matches another known preset', () => {
+    expect(resolvePresetStateForBaseUrlChange({
+      matchedPreset: 'openrouter',
+      activePreset: 'azure-openai-responses',
+      activePresetHasEmptyUrl: true,
+      lastNonCustomPreset: 'azure-openai-responses',
     })).toEqual({
       activePreset: 'openrouter',
       lastNonCustomPreset: 'openrouter',

@@ -77,6 +77,17 @@ export function resolvePresetStateForBaseUrlChange(params: {
 }): { activePreset: PresetKey; lastNonCustomPreset: PresetKey | null } {
   const { matchedPreset, activePreset, activePresetHasEmptyUrl, lastNonCustomPreset } = params
 
+  // A custom endpoint keeps the format buttons. Matching a built-in URL
+  // (Kimi Coding, OpenRouter, api.anthropic.com, …) must not leave Custom,
+  // or the OpenAI / Anthropic choice disappears and the URL is treated as
+  // that preset's fixed protocol.
+  if (activePreset === 'custom') {
+    return {
+      activePreset: 'custom',
+      lastNonCustomPreset,
+    }
+  }
+
   if (matchedPreset !== 'custom') {
     return {
       activePreset: matchedPreset,
