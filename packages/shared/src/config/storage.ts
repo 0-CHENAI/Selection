@@ -2479,6 +2479,12 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     if (migrateCustomAnthropicMessagesAuth(config)) {
       needsSave = true;
     }
+    // The auth hint is applied after the first model backfill. Run it again so
+    // a connection that just gained piAuthProvider gets its mode in the same
+    // save; otherwise the next startup rewrites the file.
+    if (backfillAllConnectionModels(config)) {
+      needsSave = true;
+    }
     // Phase 1k: Normalize legacy Opus IDs introduced by provider-type migration.
     // Important for old Bedrock connections: they become Pi+Bedrock first, then can
     // fall back from Opus 4.8 to 4.7 while Pi's catalog lacks 4.8.

@@ -50,6 +50,19 @@ describe('unified-network-interceptor validators (#613)', () => {
       expect(preferAnthropicBearerAuth('https://api.minimax.io/anthropic/v1/messages', {
         'X-Api-Key': 'sk-mini',
       })).toEqual({ 'X-Api-Key': 'sk-mini' });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com.evil.example/v1/messages', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        Authorization: 'Bearer secret-key',
+      });
+      expect(preferAnthropicBearerAuth('https://example.com/v1/tools', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      });
     });
   });
 

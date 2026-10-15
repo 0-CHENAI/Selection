@@ -742,6 +742,10 @@ describe('leftover Anthropic connections are not rewritten onto Pi', () => {
     expect(findConnection(configPath, 'official-messages').piAuthProvider).toBe('anthropic')
     expect(findConnection(configPath, 'official-messages').providerType).toBe('pi_compat')
     expect(findConnection(configPath, 'keyless-local').piAuthProvider).toBeUndefined()
+
+    const once = readFileSync(configPath, 'utf-8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf-8')).toBe(once)
   })
 
   it('moves the global default off leftover Anthropic when a supported connection exists', () => {

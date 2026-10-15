@@ -411,10 +411,22 @@ function bearerToken(value: string | undefined): string | undefined {
  * document Bearer and can reject `x-api-key`, so that header is removed when
  * Bearer is already present. Header values are not logged.
  */
+function isAnthropicMessagesRequest(url: string): boolean {
+  if (isOfficialAnthropicApiUrl(url)) return true;
+  try {
+    return new URL(url).pathname.toLowerCase().includes('/messages');
+  } catch {
+    return false;
+  }
+}
+
 export function preferAnthropicBearerAuth(
   url: string,
   headers: Record<string, string>,
 ): Record<string, string> {
+  // The Anthropic adapter also sees unrelated POSTs while that model is active.
+  // Leave those headers alone.
+  if (!isAnthropicMessagesRequest(url)) return headers;
   if (isOfficialAnthropicApiUrl(url)) return officialAnthropicApiKeyHeaders(headers);
   const authorization = headerNames(headers, 'authorization')
     .map(name => headers[name])
