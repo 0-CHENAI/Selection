@@ -248,6 +248,334 @@ describe('unified-network-interceptor SSE processors', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
+  /**
+   * Same rule as @earendil-works/pi-ai 1.2.0 anthropic-messages stream():
+   * text_delta is appended only when event.index still points at an open text block.
+   * content_block_stop clears that index, so later deltas on it are dropped.
+   */
+  function piVisibleText(sse: string): string {
+    const blocks: Array<{ type: string; index?: number }> = [];
+    let text = '';
+    let event = '';
+    let data = '';
+    const flush = () => {
+      if (!data) { event = ''; return; }
+      if (event === 'content_block_start' || event === 'content_block_delta' || event === 'content_block_stop') {
+        const parsed = JSON.parse(data) as {
+          index?: number;
+          content_block?: { type?: string };
+          delta?: { type?: string; text?: string };
+        };
+        if (event === 'content_block_start' && parsed.content_block?.type === 'text') {
+          blocks.push({ type: 'text', index: parsed.index });
+        } else if (event === 'content_block_start') {
+          blocks.push({ type: parsed.content_block?.type ?? 'other', index: parsed.index });
+        } else if (event === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          const block = blocks.find(item => item.index === parsed.index);
+          if (block?.type === 'text' && parsed.delta.text) text += parsed.delta.text;
+        } else if (event === 'content_block_stop') {
+          const block = blocks.find(item => item.index === parsed.index);
+          if (block) delete block.index;
+        }
+      }
+      event = '';
+      data = '';
+    };
+    for (const line of sse.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) { flush(); continue; }
+      if (trimmed.startsWith('event:')) event = trimmed.slice(6).trim();
+      else if (trimmed.startsWith('data:')) {
+        const value = trimmed.slice(5).trim();
+        data = data ? `${data}\n${value}` : value;
+      }
+    }
+    flush();
+    return text;
+  }
+
+  it('keeps Kimi answer text that arrives without an open text block', async () => {
+    const thinking = (token: string) =>
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: token } })}\n\n`;
+    const text = (token: string, index = 0) =>
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: token } })}\n\n`;
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      thinking('先想'),
+      // Answer tokens reuse the thinking index. Pi drops them.
+      text('正文'),
+      text('还在'),
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      // A later text block is closed early, then more tokens continue on that index.
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+      text('开头', 1),
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+      text('续写', 1),
+      text('未停', 1),
+    ];
+    const raw = sse.join('');
+    expect(piVisibleText(raw)).toBe('开头');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文还在开头续写未停');
+    expect(out).toContain('"index":1000000');
+    expect(out).toContain('"index":1000001');
+  });
+
+  it('does not rewrite a normal Anthropic text stream', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你好"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('你好');
+    expect(out).not.toContain('1000000');
+  });
+
+  it('releases Kimi events that omit the blank-line separator, including a split UTF-8 token', async () => {
+    const first = 'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n';
+    const second = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"中"}}\n';
+    const third = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"文"}}\n';
+    const bytes = encoder.encode(first + second + third);
+    const splitAt = encoder.encode(first).length + encoder.encode(second.slice(0, second.indexOf('中'))).length + 1;
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const collected: Uint8Array[] = [];
+    const drained = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        collected.push(item.value);
+      }
+    })();
+    await writer.write(bytes.slice(0, splitAt));
+    await writer.write(bytes.slice(splitAt));
+    await writer.close();
+    await drained;
+    const out = decoder.decode(Buffer.concat(collected));
+    expect(piVisibleText(out)).toBe('中文');
+  });
+
+  it('forwards a full Anthropic Messages stream, including ping, signature, usage, errors, and unknown events', async () => {
+    const sse = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg","usage":{"input_tokens":3,"output_tokens":1}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"先想"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"redacted"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+      'event: ping\ndata: {"type":"ping"}\n\n',
+      ': keepalive\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"正文"}}\n\n',
+      'event: vendor_extension\ndata: {"type":"vendor_extension","note":"ignore"}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_1","name":"Read"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"/tmp\\"}"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":3}\n\n',
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"busy"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":12}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文');
+    expect(out).toContain('"signature":"sig-1"');
+    expect(out).toContain('"type":"redacted_thinking"');
+    expect(out).toContain('event: ping');
+    expect(out).toContain('event: vendor_extension');
+    expect(out).toContain('event: error');
+    expect(out).toContain('"message":"busy"');
+    expect(out).toContain('"stop_reason":"end_turn"');
+    expect(out).toContain('"output_tokens":12');
+    expect(out).toContain('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    expect(out).not.toContain('1000000');
+  });
+
+  it('normalizes third-party reasoning aliases onto Pi thinking blocks', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"reasoning","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"reasoning_delta","reasoning":"推理"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature","signature":"sig-2"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"text","text":"答案"}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(out).toContain('"type":"thinking"');
+    expect(out).toContain('"type":"thinking_delta"');
+    expect(out).toContain('"thinking":"推理"');
+    expect(out).toContain('"type":"signature_delta"');
+    expect(out).toContain('"signature":"sig-2"');
+    expect(out).not.toContain('"type":"reasoning_delta"');
+    expect(out).not.toContain('undefined');
+    expect(piVisibleText(out)).toBe('答案');
+  });
+
+  it('keeps a normal Anthropic stream event-for-event', async () => {
+    const sse = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg","usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你好"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join('');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(out).toBe(sse);
+  });
+
+  it('parses CRLF, bare CR, and a CR/LF split across chunks', async () => {
+    const crlf = 'event: content_block_start\r\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\r\n\r\n'
+      + 'event: content_block_delta\r\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}\r\n\r\n';
+    const cr = 'event: content_block_delta\rdata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"B"}}\r\r';
+    const split = encoder.encode('event: content_block_delta\r\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"C"}}\r\n\r\n');
+    const breakAt = split.indexOf(0x0d);
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const collected: Uint8Array[] = [];
+    const drained = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        collected.push(item.value);
+      }
+    })();
+    await writer.write(encoder.encode(crlf + cr));
+    await writer.write(split.slice(0, breakAt + 1));
+    await writer.write(split.slice(breakAt + 1));
+    await writer.close();
+    await drained;
+    expect(piVisibleText(decoder.decode(Buffer.concat(collected)))).toBe('ABC');
+  });
+
+  it('joins multi-line data and emits it as separate data fields', async () => {
+    const sse = [
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {',
+      'data:   "type": "content_block_delta",',
+      'data:   "index": 0,',
+      'data:   "delta": {"type": "text_delta", "text": "a\\nb"}',
+      'data: }',
+      '',
+    ].join('\n');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('a\nb');
+    const delta = out.split('\n\n').find(frame => frame.includes('content_block_delta') && frame.includes('text_delta'));
+    expect(delta?.split('\n').filter(line => line.startsWith('data:')).length).toBeGreaterThan(1);
+    expect(delta).not.toContain('\n  "type"');
+  });
+
+  it('infers the event name when a gateway sends data only', async () => {
+    const sse = 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
+      + 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"仅数据"}}\n\n';
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('仅数据');
+    expect(out).toContain('event: content_block_delta');
+  });
+
+  it('does not concatenate a data-only event into the next event line', async () => {
+    const sse = 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n'
+      + 'event: content_block_delta\n'
+      + 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"分开"}}\n\n';
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('分开');
+  });
+
+  it('coerces string indexes and keeps interleaved text, thinking, and tool blocks apart', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":"0","content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":"0","delta":{"type":"text_delta","text":"甲"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"乙"}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_2","name":"Read"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":"0","delta":{"type":"text_delta","text":"丙"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":2}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\\"/tmp\\"}"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('甲丙');
+    expect(out).toContain('"thinking":"乙"');
+    expect(out).toContain('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    const stopAt = out.indexOf('"stop_reason":"tool_use"');
+    const toolJsonAt = out.indexOf('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    expect(toolJsonAt).toBeGreaterThan(-1);
+    expect(stopAt).toBeGreaterThan(toolJsonAt);
+  });
+
+  it('closes recovered blocks before stop_reason and drops an empty orphan signature', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"正文"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":""}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文');
+    const textStop = out.indexOf('"index":1000000');
+    const stopReason = out.indexOf('"stop_reason":"end_turn"');
+    expect(out.slice(0, stopReason)).toContain('"type":"content_block_stop"');
+    expect(textStop).toBeGreaterThan(-1);
+    expect(stopReason).toBeGreaterThan(textStop);
+    expect(out.match(/"type":"thinking"/g)).toEqual(['"type":"thinking"']);
+  });
+
+  it('forwards a mid-stream error after closing recovered text', async () => {
+    const sse = [
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"半截"}}\n\n',
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"busy"}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('半截');
+    expect(out.indexOf('content_block_stop')).toBeLessThan(out.indexOf('event: error'));
+    expect(out).toContain('"message":"busy"');
+  });
+
+  it('fails a huge SSE line without echoing the payload', async () => {
+    const huge = 'x'.repeat(80);
+    const sse = `event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"${huge}"}}\n\n`;
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream({ maxBufferChars: 40 }), [sse]);
+    expect(out).toContain('event: error');
+    expect(out).toContain('maximum size');
+    expect(out).not.toContain(huge);
+  });
+
+  it('keeps a message_stop that arrives without a data payload', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"完"}}\n\n',
+      'event: ping\n\n',
+      'event: message_stop\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('完');
+    expect(out).toContain('event: ping');
+    expect(out).toContain('event: message_stop');
+    expect(out).toContain('{"type":"message_stop"}');
+  });
+
+  it('drops buffered tool arguments when the reader cancels', async () => {
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const firstWrite = writer.write(encoder.encode(
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_x","name":"Read"}}\n\n',
+    ));
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await firstWrite;
+    const cancel = reader.cancel();
+    await writer.close().catch(() => {});
+    await cancel;
+    const after = await reader.read();
+    expect(after.done).toBe(true);
+  });
+
   describe('stripMetadataFieldsFromRawJson', () => {
     it('strips _intent and _displayName from valid JSON', () => {
       const input = '{"path":"/tmp","_intent":"Read file","_displayName":"Read Tmp"}';

@@ -419,11 +419,14 @@ interface TrackedToolBlock {
   id: string;
   name: string;
   index: number;
-  bufferedJson: string;
+  /** Argument fragments. Joined once when the block is emitted. */
+  jsonParts: string[];
 }
 
-const SSE_EVENT_RE = /^event:\s*(.+)$/;
-const SSE_DATA_RE = /^data:\s*(.+)$/;
+const SSE_LINE_BREAK = /\r\n|\n|\r/;
+/** Synthetic block indexes stay far above Anthropic's 0-based content indexes. */
+const SYNTHETIC_BLOCK_INDEX_BASE = 1_000_000;
+const DEFAULT_MAX_SSE_BUFFER_CHARS = 32 * 1024 * 1024;
 
 /** Observe decoded previews without changing the SDK tool-call stream. */
 function createAnswerPreviewEmitter() {
@@ -454,16 +457,206 @@ function createAnswerPreviewEmitter() {
  * buffers tool_use input deltas, extracts _intent/_displayName into the metadata
  * store, and re-emits clean events without those fields.
  */
-export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+export function createAnthropicSseStrippingStream(options?: {
+  /** Cap for one SSE line or one event payload, in UTF-16 code units. */
+  maxBufferChars?: number;
+}): TransformStream<Uint8Array, Uint8Array> {
   const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
+  const maxBufferChars = options?.maxBufferChars ?? DEFAULT_MAX_SSE_BUFFER_CHARS;
 
   const trackedBlocks = new Map<number, TrackedToolBlock>();
+  /**
+   * Pi only appends a delta when that index still belongs to an open block of
+   * the same kind. Third-party Anthropic Messages endpoints (Kimi Coding,
+   * MiniMax, GLM, DeepSeek, Qwen, and other gateways) sometimes continue after
+   * content_block_stop, reuse a thinking index for text, or name the block
+   * `reasoning`. Those deltas would otherwise disappear while the socket stays
+   * open. Ping, errors, usage, and unknown events are forwarded unchanged.
+   */
+  const openBlockKinds = new Map<number, 'text' | 'thinking' | 'tool' | 'other'>();
+  const recoveredTextIndexes = new Map<number, number>();
+  const recoveredThinkingIndexes = new Map<number, number>();
+  const syntheticIndexes = new Set<number>();
+  const pendingToolStops: Array<{ block: TrackedToolBlock; index: number; dataStr: string }> = [];
+  let nextRecoveredIndex = SYNTHETIC_BLOCK_INDEX_BASE;
   let lineBuffer = '';
-  let currentEventType = '';
-  let currentData = '';
+  let heldCarriageReturn = false;
+  let stripBom = true;
+  let eventName = '';
+  let dataLines: string[] = [];
+  let dataChars = 0;
   let eventCount = 0;
+  let overflowed = false;
+
+  function blockKind(type: string | undefined): 'text' | 'thinking' | 'tool' | 'other' {
+    if (type === 'text') return 'text';
+    if (type === 'thinking' || type === 'redacted_thinking' || type === 'reasoning' || type === 'reasoning_content') return 'thinking';
+    if (type === 'tool_use') return 'tool';
+    return 'other';
+  }
+
+  function rememberBlock(index: number, type: string | undefined): void {
+    recoveredTextIndexes.delete(index);
+    recoveredThinkingIndexes.delete(index);
+    openBlockKinds.set(index, blockKind(type));
+  }
+
+  function firstString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      if (typeof value === 'string') return value;
+    }
+    return undefined;
+  }
+
+  /** Accept numeric indexes and decimal strings. Pi compares indexes with ===. */
+  function readIndex(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
+    if (typeof value === 'string' && /^\d+$/.test(value)) {
+      const parsed = Number(value);
+      if (Number.isSafeInteger(parsed)) return parsed;
+    }
+    return undefined;
+  }
+
+  function allocateSyntheticIndex(): number {
+    while (
+      openBlockKinds.has(nextRecoveredIndex)
+      || trackedBlocks.has(nextRecoveredIndex)
+      || syntheticIndexes.has(nextRecoveredIndex)
+    ) {
+      nextRecoveredIndex++;
+    }
+    const index = nextRecoveredIndex++;
+    syntheticIndexes.add(index);
+    return index;
+  }
+
+  function closeSynthetic(index: number, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (!syntheticIndexes.delete(index)) return;
+    for (const aliases of [recoveredTextIndexes, recoveredThinkingIndexes]) {
+      for (const [source, target] of aliases) {
+        if (target === index) aliases.delete(source);
+      }
+    }
+    if (!openBlockKinds.delete(index)) return;
+    emitSseEvent('content_block_stop', JSON.stringify({
+      type: 'content_block_stop',
+      index,
+    }), controller);
+  }
+
+  function closeRecoveredAliases(sourceIndex: number, controller: TransformStreamDefaultController<Uint8Array>): void {
+    for (const aliases of [recoveredTextIndexes, recoveredThinkingIndexes]) {
+      const target = aliases.get(sourceIndex);
+      if (target !== undefined) closeSynthetic(target, controller);
+    }
+  }
+
+  function closeAllSynthetic(controller: TransformStreamDefaultController<Uint8Array>): void {
+    for (const index of [...syntheticIndexes]) closeSynthetic(index, controller);
+  }
+
+  /**
+   * Map gateway aliases onto the delta types Pi's Anthropic parser accepts.
+   * Always include a string field: Pi appends with `+=`, and a missing field
+   * becomes the literal text "undefined".
+   */
+  function canonicalDelta(delta: Record<string, unknown>): Record<string, unknown> | undefined {
+    const type = delta.type;
+    if (type === 'text') {
+      return { type: 'text_delta', text: firstString(delta.text, delta.content) ?? '' };
+    }
+    if (type === 'thinking') {
+      return { type: 'thinking_delta', thinking: firstString(delta.thinking, delta.text, delta.content) ?? '' };
+    }
+    if (type === 'signature') {
+      return { type: 'signature_delta', signature: firstString(delta.signature) ?? '' };
+    }
+    if (type === 'reasoning_delta' || type === 'reasoning') {
+      return {
+        type: 'thinking_delta',
+        thinking: firstString(delta.thinking, delta.reasoning, delta.reasoning_content, delta.text, delta.content) ?? '',
+      };
+    }
+    return undefined;
+  }
+
+  function recoverOrphanDelta(
+    data: Record<string, unknown>,
+    kind: 'text' | 'thinking',
+    controller: TransformStreamDefaultController<Uint8Array>,
+  ): boolean {
+    const delta = data.delta as { type?: string; text?: string; thinking?: string; signature?: string } | undefined;
+    const index = readIndex(data.index);
+    // A missing index must not attach to whatever block happens to be 0.
+    const source = index ?? -1;
+    if (index !== undefined && openBlockKinds.get(index) === kind) return false;
+    const isText = kind === 'text' && delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0;
+    const isThinkingDelta = kind === 'thinking' && delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0;
+    const isSignature = kind === 'thinking' && delta?.type === 'signature_delta' && typeof delta.signature === 'string';
+    const aliases = kind === 'text' ? recoveredTextIndexes : recoveredThinkingIndexes;
+    const existing = aliases.get(source);
+    const hasOpenAlias = existing !== undefined && openBlockKinds.get(existing) === kind;
+    if (isSignature && delta.signature!.length === 0 && !hasOpenAlias) return false;
+    if (!isText && !isThinkingDelta && !isSignature) return false;
+
+    const target = hasOpenAlias ? existing! : allocateSyntheticIndex();
+    if (!hasOpenAlias) {
+      aliases.set(source, target);
+      openBlockKinds.set(target, kind);
+      emitSseEvent('content_block_start', JSON.stringify({
+        type: 'content_block_start',
+        index: target,
+        content_block: kind === 'text'
+          ? { type: 'text', text: '' }
+          : { type: 'thinking', thinking: '', signature: '' },
+      }), controller);
+    }
+    emitSseEvent('content_block_delta', JSON.stringify({
+      ...data,
+      type: typeof data.type === 'string' ? data.type : 'content_block_delta',
+      index: target,
+    }), controller);
+    return true;
+  }
+
+  function toolArguments(block: TrackedToolBlock): string {
+    return block.jsonParts.join('');
+  }
+
+  function flushPendingToolStops(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (pendingToolStops.length === 0) return;
+    const pending = pendingToolStops.splice(0);
+    for (const item of pending) {
+      openBlockKinds.delete(item.index);
+      emitBufferedBlock(item.block, item.index, controller);
+      emitSseEvent('content_block_stop', item.dataStr, controller);
+    }
+  }
+
+  function previewToolArguments(block: TrackedToolBlock): void {
+    // Joining is only needed for the answer preview. Other tool streams can be
+    // megabytes of file contents, and joining on every delta is quadratic.
+    if (!/^(?:mcp__session__|session__)?submit_answer$/.test(block.name)) return;
+    previewCall({ id: block.id, name: block.name, arguments: toolArguments(block) });
+  }
+
+  function absorbLateToolDelta(index: number | undefined, partialJson: string | undefined): boolean {
+    if (index === undefined) return false;
+    const pending = pendingToolStops.find(item => item.index === index);
+    if (!pending) return false;
+    const fragment = typeof partialJson === 'string' ? partialJson : '';
+    pending.block.jsonParts.push(fragment);
+    previewToolArguments(pending.block);
+    return true;
+  }
+
+  function finishOpenBlocks(controller: TransformStreamDefaultController<Uint8Array>): void {
+    closeAllSynthetic(controller);
+    flushPendingToolStops(controller);
+  }
 
   function processEvent(eventType: string, dataStr: string, controller: TransformStreamDefaultController<Uint8Array>): void {
     eventCount++;
@@ -471,47 +664,115 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     try {
       data = JSON.parse(dataStr);
     } catch {
-      emitSseEvent(eventType, dataStr, controller);
-      return;
-    }
-
-    if (eventType === 'content_block_start') {
-      const contentBlock = data.content_block as { type?: string; id?: string; name?: string } | undefined;
-      if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null) {
-        const index = data.index as number;
-        trackedBlocks.set(index, {
-          id: contentBlock.id,
-          name: contentBlock.name,
-          index,
-          bufferedJson: '',
-        });
+      if (eventType === 'message_delta' || eventType === 'message_stop' || eventType === 'error') {
+        finishOpenBlocks(controller);
       }
       emitSseEvent(eventType, dataStr, controller);
       return;
     }
 
     if (eventType === 'content_block_delta') {
-      const index = data.index as number;
-      const delta = data.delta as { type?: string; partial_json?: string } | undefined;
-
-      if (delta?.type === 'input_json_delta' && trackedBlocks.has(index)) {
-        const block = trackedBlocks.get(index)!;
-        block.bufferedJson += delta.partial_json ?? '';
-        previewCall({ id: block.id, name: block.name, arguments: block.bufferedJson });
+      const earlyDelta = data.delta as { type?: string; partial_json?: string } | undefined;
+      if (earlyDelta?.type === 'input_json_delta' && absorbLateToolDelta(readIndex(data.index), earlyDelta.partial_json)) {
         return;
       }
+    }
+    flushPendingToolStops(controller);
+
+    if (eventType === 'message_delta' || eventType === 'message_stop' || eventType === 'error') {
+      closeAllSynthetic(controller);
       emitSseEvent(eventType, dataStr, controller);
       return;
     }
 
-    if (eventType === 'content_block_stop') {
-      const index = data.index as number;
-      const block = trackedBlocks.get(index);
+    if (eventType === 'content_block_start') {
+      const contentBlock = data.content_block as {
+        type?: string;
+        id?: string;
+        name?: string;
+        thinking?: unknown;
+        reasoning?: unknown;
+        text?: unknown;
+        signature?: unknown;
+      } | undefined;
+      const reasoningAlias = contentBlock?.type === 'reasoning' || contentBlock?.type === 'reasoning_content';
+      const normalizedType = reasoningAlias ? 'thinking' : contentBlock?.type;
+      let startData: Record<string, unknown> = data;
+      if (reasoningAlias && contentBlock) {
+        startData = {
+          ...data,
+          content_block: {
+            type: 'thinking',
+            thinking: firstString(contentBlock.thinking, contentBlock.reasoning, contentBlock.text) ?? '',
+            signature: firstString(contentBlock.signature) ?? '',
+          },
+        };
+      }
+      const index = readIndex(data.index);
+      if (index !== undefined) {
+        if (syntheticIndexes.has(index)) closeSynthetic(index, controller);
+        closeRecoveredAliases(index, controller);
+        rememberBlock(index, normalizedType);
+        startData = startData === data && data.index === index ? data : { ...startData, index };
+      }
+      if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null && index !== undefined) {
+        trackedBlocks.set(index, {
+          id: contentBlock.id,
+          name: contentBlock.name,
+          index,
+          jsonParts: [],
+        });
+      }
+      const unchanged = startData === data;
+      emitSseEvent(eventType, unchanged ? dataStr : JSON.stringify(startData), controller);
+      return;
+    }
 
-      if (block) {
+    if (eventType === 'content_block_delta') {
+      const rawDelta = data.delta;
+      const normalizedDelta = rawDelta && typeof rawDelta === 'object'
+        ? canonicalDelta(rawDelta as Record<string, unknown>)
+        : undefined;
+      const index = readIndex(data.index);
+      const payload: Record<string, unknown> = normalizedDelta ? { ...data, delta: normalizedDelta } : { ...data };
+      if (index !== undefined) payload.index = index;
+      const delta = payload.delta as { type?: string; partial_json?: string } | undefined;
+
+      if (recoverOrphanDelta(payload, 'text', controller)) return;
+      if (recoverOrphanDelta(payload, 'thinking', controller)) return;
+
+      if (delta?.type === 'input_json_delta' && index !== undefined && trackedBlocks.has(index)) {
+        const block = trackedBlocks.get(index)!;
+        const fragment = typeof delta.partial_json === 'string' ? delta.partial_json : '';
+        block.jsonParts.push(fragment);
+        previewToolArguments(block);
+        return;
+      }
+      const rewritten = normalizedDelta !== undefined || (index !== undefined && data.index !== index);
+      emitSseEvent(eventType, rewritten ? JSON.stringify(payload) : dataStr, controller);
+      return;
+    }
+
+    if (eventType === 'content_block_stop') {
+      const index = readIndex(data.index);
+      if (index !== undefined && syntheticIndexes.has(index)) {
+        closeSynthetic(index, controller);
+        return;
+      }
+      if (index !== undefined) {
+        closeRecoveredAliases(index, controller);
+        openBlockKinds.delete(index);
+      }
+      const block = index === undefined ? undefined : trackedBlocks.get(index);
+      if (block && index !== undefined) {
         trackedBlocks.delete(index);
-        emitBufferedBlock(block, index, controller);
-        emitSseEvent(eventType, dataStr, controller);
+        // Hold the stop so argument deltas that arrive after it still join
+        // the same tool call. A well-formed stream flushes on the next event.
+        pendingToolStops.push({
+          block,
+          index,
+          dataStr: data.index === index ? dataStr : JSON.stringify({ ...data, index }),
+        });
         return;
       }
       emitSseEvent(eventType, dataStr, controller);
@@ -526,12 +787,13 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     index: number,
     controller: TransformStreamDefaultController<Uint8Array>,
   ): void {
-    if (!block.bufferedJson) {
+    const bufferedJson = toolArguments(block);
+    if (!bufferedJson) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(block.bufferedJson);
+      const parsed = JSON.parse(bufferedJson);
 
       captureMetadataFromInput(block.id, block.name, parsed);
       delete parsed._intent;
@@ -550,7 +812,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
       emitSseEvent('content_block_delta', JSON.stringify(deltaEvent), controller);
     } catch {
       debugLog(`[SSE Strip] Failed to parse buffered JSON for ${block.name} (${block.id}), stripping via regex`);
-      const stripped = stripMetadataFieldsFromRawJson(block.bufferedJson);
+      const stripped = stripMetadataFieldsFromRawJson(bufferedJson);
       const deltaEvent = {
         type: 'content_block_delta',
         index,
@@ -568,78 +830,165 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
     dataStr: string,
     controller: TransformStreamDefaultController<Uint8Array>,
   ): void {
-    const sseText = `event: ${eventType}\ndata: ${dataStr}\n\n`;
-    controller.enqueue(encoder.encode(sseText));
+    // A raw newline inside one data line splits the SSE frame. Spec joins
+    // repeated data fields with LF, so split them back out.
+    const data = dataStr.split('\n').map(line => `data: ${line}`).join('\n');
+    controller.enqueue(encoder.encode(`event: ${eventType}\n${data}\n\n`));
+  }
+
+  function failOverflow(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed) return;
+    overflowed = true;
+    lineBuffer = '';
+    heldCarriageReturn = false;
+    eventName = '';
+    dataLines = [];
+    dataChars = 0;
+    trackedBlocks.clear();
+    pendingToolStops.length = 0;
+    // The discarded bytes can contain tool arguments or user text. Do not echo them.
+    processEvent('error', JSON.stringify({
+      type: 'error',
+      error: { type: 'api_error', message: 'SSE event exceeded the maximum size' },
+    }), controller);
+  }
+
+  function takeData(): string {
+    const data = dataLines.join('\n');
+    dataLines = [];
+    dataChars = 0;
+    return data;
+  }
+
+  function inferEventName(data: string): string {
+    if (!data) return '';
+    try {
+      const parsed = JSON.parse(data) as { type?: unknown };
+      return typeof parsed.type === 'string' ? parsed.type : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Some gateways end the stream with `event: message_stop` and no data line.
+   * Dropping that event makes Pi report that the stream ended before message_stop.
+   * Only these terminal/keepalive names are valid without a JSON body.
+   */
+  function emptyEventData(type: string): string {
+    if (type === 'message_stop' || type === 'ping') return JSON.stringify({ type });
+    if (type === 'error') {
+      return JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: 'The upstream stream reported an error.' },
+      });
+    }
+    return '';
+  }
+
+  function dispatchEvent(controller: TransformStreamDefaultController<Uint8Array>): void {
+    const data = takeData();
+    const type = eventName || inferEventName(data);
+    eventName = '';
+    if (!type) return;
+    const payload = data || emptyEventData(type);
+    if (!payload) return;
+    processEvent(type, payload, controller);
+  }
+
+  function acceptSseLine(line: string, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed) return;
+    if (stripBom) {
+      stripBom = false;
+      if (line.charCodeAt(0) === 0xfeff) line = line.slice(1);
+    }
+    if (line === '') {
+      if (eventName || dataLines.length > 0) dispatchEvent(controller);
+      return;
+    }
+    if (line.startsWith(':')) return;
+
+    const colon = line.indexOf(':');
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+
+    if (field === 'event') {
+      // Kimi sometimes omits the blank line. A new event field after data
+      // ends the previous event. A second event field before any data only
+      // replaces the name, which matches the SSE spec.
+      if (dataLines.length > 0) dispatchEvent(controller);
+      eventName = value;
+      return;
+    }
+    if (field === 'data') {
+      const nextChars = dataChars + value.length + (dataLines.length > 0 ? 1 : 0);
+      if (nextChars > maxBufferChars) {
+        failOverflow(controller);
+        return;
+      }
+      dataChars = nextChars;
+      dataLines.push(value);
+    }
+  }
+
+  function consumeText(text: string, controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (overflowed || !text && !heldCarriageReturn) return;
+    let input = heldCarriageReturn ? `\r${text}` : text;
+    heldCarriageReturn = false;
+    if (input.endsWith('\r')) {
+      heldCarriageReturn = true;
+      input = input.slice(0, -1);
+    }
+    if (!input) return;
+    const parts = input.split(SSE_LINE_BREAK);
+    lineBuffer += parts[0] ?? '';
+    if (lineBuffer.length > maxBufferChars) {
+      failOverflow(controller);
+      return;
+    }
+    for (let i = 1; i < parts.length; i++) {
+      acceptSseLine(lineBuffer, controller);
+      if (overflowed) return;
+      lineBuffer = parts[i] ?? '';
+      if (lineBuffer.length > maxBufferChars) {
+        failOverflow(controller);
+        return;
+      }
+    }
+  }
+
+  function finishStream(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (heldCarriageReturn) {
+      acceptSseLine(lineBuffer, controller);
+      lineBuffer = '';
+      heldCarriageReturn = false;
+    } else if (lineBuffer) {
+      acceptSseLine(lineBuffer, controller);
+      lineBuffer = '';
+    }
+    if (!overflowed && (eventName || dataLines.length > 0)) dispatchEvent(controller);
+    if (!overflowed) {
+      finishOpenBlocks(controller);
+      for (const [index, block] of trackedBlocks) {
+        emitBufferedBlock(block, index, controller);
+        emitSseEvent('content_block_stop', JSON.stringify({ type: 'content_block_stop', index }), controller);
+      }
+    }
+    trackedBlocks.clear();
+    lineBuffer = '';
+    debugLog(`[SSE] Stream flush complete. Total events processed: ${eventCount}`);
   }
 
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      const text = lineBuffer + decoder.decode(chunk, { stream: true });
-      const lines = text.split('\n');
-      lineBuffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-
-        if (trimmed === '') {
-          if (currentEventType && currentData) {
-            processEvent(currentEventType, currentData, controller);
-          }
-          currentEventType = '';
-          currentData = '';
-          continue;
-        }
-
-        const eventMatch = trimmed.match(SSE_EVENT_RE);
-        if (eventMatch) {
-          currentEventType = eventMatch[1]!.trim();
-          continue;
-        }
-
-        const dataMatch = trimmed.match(SSE_DATA_RE);
-        if (dataMatch) {
-          currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          continue;
-        }
-      }
+      if (overflowed) return;
+      consumeText(decoder.decode(chunk, { stream: true }), controller);
     },
 
     flush(controller) {
-      if (lineBuffer.trim()) {
-        const lines = lineBuffer.split('\n');
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed === '') {
-            if (currentEventType && currentData) {
-              processEvent(currentEventType, currentData, controller);
-            }
-            currentEventType = '';
-            currentData = '';
-            continue;
-          }
-          const eventMatch = trimmed.match(SSE_EVENT_RE);
-          if (eventMatch) {
-            currentEventType = eventMatch[1]!.trim();
-            continue;
-          }
-          const dataMatch = trimmed.match(SSE_DATA_RE);
-          if (dataMatch) {
-            currentData = currentData ? `${currentData}\n${dataMatch[1]!}` : dataMatch[1]!;
-          }
-        }
-
-        if (currentEventType && currentData) {
-          processEvent(currentEventType, currentData, controller);
-        }
-      }
-
-      for (const [index, block] of trackedBlocks) {
-        emitBufferedBlock(block, index, controller);
-      }
-      trackedBlocks.clear();
-      lineBuffer = '';
-      debugLog(`[SSE] Stream flush complete. Total events processed: ${eventCount}`);
+      if (!overflowed) consumeText(decoder.decode(), controller);
+      finishStream(controller);
     },
   });
 }
