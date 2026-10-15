@@ -32,13 +32,20 @@ describe('unified-network-interceptor validators (#613)', () => {
       });
     });
 
-    it('keeps x-api-key for the official Anthropic host and when Bearer is absent', () => {
+    it('sends only x-api-key and anthropic-version to the official Anthropic host', () => {
       expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
         'x-api-key': 'sk-ant',
         Authorization: 'Bearer sk-ant',
       })).toEqual({
         'x-api-key': 'sk-ant',
-        Authorization: 'Bearer sk-ant',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
+        Authorization: 'Bearer sk-from-bearer',
+        'anthropic-version': '2023-06-01',
+      })).toEqual({
+        'x-api-key': 'sk-from-bearer',
+        'anthropic-version': '2023-06-01',
       });
       expect(preferAnthropicBearerAuth('https://api.minimax.io/anthropic/v1/messages', {
         'X-Api-Key': 'sk-mini',

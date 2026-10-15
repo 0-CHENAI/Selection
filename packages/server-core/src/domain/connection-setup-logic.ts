@@ -12,7 +12,6 @@ import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
   defaultMidStreamBehavior,
-  isOfficialAnthropicApiUrl,
   isOrderGatewayUrl,
   ORDER_CONNECTION_NAME,
 } from '@craft-agent/shared/config'
@@ -60,14 +59,10 @@ export function validateSetupTestInput(params: {
   baseUrl?: string
   piAuthProvider?: string
 }): { valid: true } | { valid: false; error: string } {
-  if (
-    params.provider === 'anthropic'
-    || isOfficialAnthropicApiUrl(params.baseUrl)
-    || (params.piAuthProvider === 'anthropic' && !params.baseUrl?.trim())
-  ) {
+  if (params.provider === 'anthropic' || (params.piAuthProvider === 'anthropic' && !params.baseUrl?.trim())) {
     return {
       valid: false,
-      error: 'Anthropic official API and Claude Max are no longer supported. Use an Anthropic-compatible custom endpoint or another Selection Backend provider.',
+      error: 'Anthropic official login and Claude Max are no longer supported. Use an Anthropic Messages custom endpoint, including api.anthropic.com with an API key, or another Selection Backend provider.',
     }
   }
   const hasCustomEndpoint = !!params.baseUrl?.trim()

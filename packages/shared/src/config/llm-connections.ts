@@ -16,7 +16,6 @@ import {
   ANTHROPIC_MODELS,
   normalizeDeprecatedModelId,
 } from './models';
-import { isOfficialAnthropicApiUrl } from './anthropic-api-host';
 import {
   connectionModelIdsMatch,
   inferModelSupportsImages,
@@ -485,20 +484,18 @@ export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
 
 /**
  * Connections that must not create a backend or stay selectable: official
- * Anthropic API key / Claude Max, and Pi sessions pinned to the Anthropic
- * provider. Custom endpoints that speak Anthropic Messages stay available so
- * third-party gateways (Kimi, MiniMax, GLM, DeepSeek, Qwen) can be configured.
+ * Anthropic login / Claude Max (`providerType: 'anthropic'`), and Pi sessions
+ * pinned to the Anthropic provider without a custom endpoint. A custom
+ * Anthropic Messages endpoint stays available, including one whose URL is
+ * https://api.anthropic.com. That path still uses the custom-endpoint runtime,
+ * not the built-in Anthropic provider.
  */
 export function isUnsupportedLlmConnection(
   connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'> & { baseUrl?: string },
 ): boolean {
   if (connection.providerType === 'anthropic') return true;
   const customAnthropicMessages = connection.providerType === 'pi_compat'
-    && connection.customEndpoint?.api === 'anthropic-messages'
-    && !isOfficialAnthropicApiUrl(connection.baseUrl);
-  if (connection.customEndpoint?.api === 'anthropic-messages' && isOfficialAnthropicApiUrl(connection.baseUrl)) {
-    return true;
-  }
+    && connection.customEndpoint?.api === 'anthropic-messages';
   if (connection.piAuthProvider === 'anthropic' && !customAnthropicMessages) return true;
   return false;
 }

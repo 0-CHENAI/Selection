@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER（Anthropic）",
   "apiSetup.preset.orderOpenai": "ORDER（OpenAI）",
   "apiSetup.protocol": "プロトコル",
-  "apiSetup.protocolHint": "OpenAI 互換は Ollama、vLLM、DashScope 向けです。Anthropic 互換は Anthropic Messages を話す Kimi、MiniMax、GLM、DeepSeek、Qwen などのゲートウェイ向けです。Anthropic 公式 API キーや Claude Max は有効になりません。",
+  "apiSetup.protocolHint": "OpenAI 互換は Ollama、vLLM、DashScope 向けです。Anthropic 互換は Anthropic Messages を話す Kimi、MiniMax、GLM、DeepSeek、Qwen などのゲートウェイと、api.anthropic.com へ向ける公式 API キー向けです。Anthropic 公式ログインや Claude Max は有効になりません。",
   "apiSetup.reasoning": "推論",
   "apiSetup.required": "必須",
   "apiSetup.retryLoadModels": "再試行",

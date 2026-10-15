@@ -39,22 +39,22 @@ describe('isUnsupportedLlmConnection', () => {
     }))).toBe(true)
   })
 
-  it('keeps Anthropic Messages custom endpoints available', () => {
+  it('keeps Anthropic Messages custom endpoints available, including the official host', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi_compat',
       piAuthProvider: 'anthropic',
       baseUrl: 'https://api.kimi.com/coding/',
       customEndpoint: { api: 'anthropic-messages' },
     }))).toBe(false)
-  })
-
-  it('rejects the official Anthropic host and Pi auth that is not a custom endpoint', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi_compat',
       piAuthProvider: 'anthropic',
       baseUrl: 'https://api.anthropic.com/v1/messages',
       customEndpoint: { api: 'anthropic-messages' },
-    }))).toBe(true)
+    }))).toBe(false)
+  })
+
+  it('rejects Pi Anthropic auth that is not a custom endpoint', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi',
       piAuthProvider: 'anthropic',

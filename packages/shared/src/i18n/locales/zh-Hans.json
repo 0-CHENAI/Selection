@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER（Anthropic）",
   "apiSetup.preset.orderOpenai": "ORDER（OpenAI）",
   "apiSetup.protocol": "协议",
-  "apiSetup.protocolHint": "OpenAI 兼容适用于 Ollama、vLLM、DashScope。Anthropic 兼容适用于使用 Anthropic Messages 的 Kimi、MiniMax、GLM、DeepSeek、Qwen 等网关。这里不会启用 Anthropic 官方 API Key 或 Claude Max。",
+  "apiSetup.protocolHint": "OpenAI 兼容适用于 Ollama、vLLM、DashScope。Anthropic 兼容适用于使用 Anthropic Messages 的 Kimi、MiniMax、GLM、DeepSeek、Qwen 等网关，也可以用官方 API Key 直连 api.anthropic.com。这里不会启用 Anthropic 官方登录或 Claude Max。",
   "apiSetup.reasoning": "推理",
   "apiSetup.required": "必填",
   "apiSetup.retryLoadModels": "重试",

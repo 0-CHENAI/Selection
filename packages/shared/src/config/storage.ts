@@ -18,7 +18,6 @@ import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.
 import { debug } from '../utils/debug.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
-import { isOfficialAnthropicApiUrl } from './anthropic-api-host.ts';
 import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
@@ -2241,7 +2240,7 @@ function migrateLegacyProviderTypes(config: StoredConfig): boolean {
       connection.customEndpoint = { api: 'anthropic-messages' };
       // authType 'api_key_with_endpoint' stays; baseUrl and models are preserved.
       // The auth hint is what lets the runtime load this connection's own key.
-      if (!connection.piAuthProvider && connection.authType !== 'none' && !isOfficialAnthropicApiUrl(connection.baseUrl)) {
+      if (!connection.piAuthProvider && connection.authType !== 'none') {
         connection.piAuthProvider = 'anthropic';
       }
       changed = true;
@@ -2288,7 +2287,6 @@ function migrateCustomAnthropicMessagesAuth(config: StoredConfig): boolean {
     if (connection.customEndpoint?.api !== 'anthropic-messages') continue;
     if (connection.piAuthProvider) continue;
     if (connection.authType === 'none') continue;
-    if (isOfficialAnthropicApiUrl(connection.baseUrl)) continue;
     connection.piAuthProvider = 'anthropic';
     changed = true;
   }
@@ -2551,7 +2549,7 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     } else if (legacyAuthType === 'api_key') {
       // Anthropic API Key - check if custom endpoint (compat mode → pi_compat)
       const hasCustomEndpoint = !!legacyBaseUrl;
-      if (hasCustomEndpoint && !isOfficialAnthropicApiUrl(legacyBaseUrl)) {
+      if (hasCustomEndpoint) {
         migrated = {
           slug: 'anthropic-api',
           name: 'Custom Anthropic-Compatible',

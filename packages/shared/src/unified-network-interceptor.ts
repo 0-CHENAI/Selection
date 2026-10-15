@@ -392,27 +392,52 @@ function appendBetaHeader(headers: HeadersInitType | undefined, beta: string): R
   return headerObj;
 }
 
+const ANTHROPIC_API_VERSION = '2023-06-01';
+
+function headerNames(headers: Record<string, string>, target: string): string[] {
+  return Object.keys(headers).filter(name => name.toLowerCase() === target);
+}
+
+function bearerToken(value: string | undefined): string | undefined {
+  const match = /^Bearer\s+(\S+)/i.exec(value ?? '');
+  return match?.[1];
+}
+
 /**
- * Kimi and MiniMax document `Authorization: Bearer` for Anthropic Messages.
- * The Anthropic SDK also sends `x-api-key` from the apiKey argument. Kimi
- * rejects that header, and MiniMax CN can fail the request when it is present.
- * Official api.anthropic.com keeps `x-api-key`. Header values are not logged.
+ * Choose Anthropic Messages auth from the host.
+ *
+ * api.anthropic.com accepts `x-api-key` plus `anthropic-version` and must not
+ * also receive `Authorization: Bearer`. Third-party gateways (Kimi, MiniMax)
+ * document Bearer and can reject `x-api-key`, so that header is removed when
+ * Bearer is already present. Header values are not logged.
  */
 export function preferAnthropicBearerAuth(
   url: string,
   headers: Record<string, string>,
 ): Record<string, string> {
-  if (isOfficialAnthropicApiUrl(url)) return headers;
-  let authorization = '';
-  const apiKeyNames: string[] = [];
-  for (const [name, value] of Object.entries(headers)) {
-    const lower = name.toLowerCase();
-    if (lower === 'authorization') authorization = value;
-    else if (lower === 'x-api-key' && value.trim()) apiKeyNames.push(name);
-  }
-  if (!/^Bearer\s+\S/i.test(authorization) || apiKeyNames.length === 0) return headers;
+  if (isOfficialAnthropicApiUrl(url)) return officialAnthropicApiKeyHeaders(headers);
+  const authorization = headerNames(headers, 'authorization')
+    .map(name => headers[name])
+    .find(value => bearerToken(value));
+  const apiKeyNames = headerNames(headers, 'x-api-key').filter(name => headers[name]?.trim());
+  if (!authorization || apiKeyNames.length === 0) return headers;
   const next = { ...headers };
   for (const name of apiKeyNames) delete next[name];
+  return next;
+}
+
+function officialAnthropicApiKeyHeaders(headers: Record<string, string>): Record<string, string> {
+  const next = { ...headers };
+  const apiKeyName = headerNames(next, 'x-api-key').find(name => next[name]?.trim());
+  const apiKey = apiKeyName
+    ? next[apiKeyName]!.trim()
+    : bearerToken(headerNames(next, 'authorization').map(name => next[name]).find(Boolean));
+  for (const name of headerNames(next, 'authorization')) delete next[name];
+  for (const name of headerNames(next, 'x-api-key')) delete next[name];
+  if (apiKey) next['x-api-key'] = apiKey;
+  if (headerNames(next, 'anthropic-version').length === 0) {
+    next['anthropic-version'] = ANTHROPIC_API_VERSION;
+  }
   return next;
 }
 

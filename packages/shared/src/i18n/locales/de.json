@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER (Anthropic)",
   "apiSetup.preset.orderOpenai": "ORDER (OpenAI)",
   "apiSetup.protocol": "Protokoll",
-  "apiSetup.protocolHint": "OpenAI-kompatibel gilt für Ollama, vLLM und DashScope. Anthropic-kompatibel gilt für Kimi-, MiniMax-, GLM-, DeepSeek- und Qwen-Gateways mit Anthropic Messages. Der offizielle Anthropic-API-Schlüssel und Claude Max werden dadurch nicht aktiviert.",
+  "apiSetup.protocolHint": "OpenAI-kompatibel gilt für Ollama, vLLM und DashScope. Anthropic-kompatibel gilt für Kimi-, MiniMax-, GLM-, DeepSeek- und Qwen-Gateways mit Anthropic Messages, einschließlich eines offiziellen API-Schlüssels für api.anthropic.com. Die offizielle Anthropic-Anmeldung und Claude Max werden dadurch nicht aktiviert.",
   "apiSetup.reasoning": "Reasoning",
   "apiSetup.required": "erforderlich",
   "apiSetup.retryLoadModels": "Erneut versuchen",

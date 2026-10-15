@@ -1,6 +1,6 @@
 /**
- * Official Anthropic API host. Custom Anthropic Messages endpoints must not
- * use this host: that would turn the removed API-key path back on.
+ * Anthropic's own Messages host. Custom endpoints on this host use `x-api-key`.
+ * Every other host is a third-party gateway and keeps Bearer auth.
  */
 export function isOfficialAnthropicApiUrl(value: string | undefined): boolean {
   if (!value?.trim()) return false;

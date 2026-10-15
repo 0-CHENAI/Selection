@@ -714,7 +714,7 @@ describe('leftover Anthropic connections are not rewritten onto Pi', () => {
     expect(config.llmConnections).toHaveLength(4)
   })
 
-  it('does not attach an Anthropic auth hint to the official API host', () => {
+  it('attaches an Anthropic auth hint to a custom endpoint on the official API host', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
     writeRootConfig(configPath, workspaceRoot, [
       {
@@ -739,7 +739,8 @@ describe('leftover Anthropic connections are not rewritten onto Pi', () => {
 
     runMigration(configDir)
 
-    expect(findConnection(configPath, 'official-messages').piAuthProvider).toBeUndefined()
+    expect(findConnection(configPath, 'official-messages').piAuthProvider).toBe('anthropic')
+    expect(findConnection(configPath, 'official-messages').providerType).toBe('pi_compat')
     expect(findConnection(configPath, 'keyless-local').piAuthProvider).toBeUndefined()
   })
 
