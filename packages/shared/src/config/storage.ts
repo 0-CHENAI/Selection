@@ -1677,15 +1677,87 @@ function modelSetEquals(a: string[], b: string[]): boolean {
   return true;
 }
 
+/**
+ * Best/Balanced/Fast submissions are three ids. A longer list made only of
+ * catalog ids is a previous full-catalog sync, not a custom tier.
+ */
+const USER_DEFINED_TIER_SIZE = 3;
+
+/**
+ * How many catalog ids a stored list may lack and still count as a previous
+ * full sync. Covers a small SDK addition such as gpt-6.1-sol without treating
+ * a short custom subset of a large catalog as automatic.
+ */
+const STALE_CATALOG_MAX_MISSING = 2;
+
+function canonicalizeAgainstCatalog(id: string, allowed: Set<string>): string {
+  if (allowed.has(id)) return id;
+  if (!id.startsWith('pi/')) {
+    const prefixed = `pi/${id}`;
+    if (allowed.has(prefixed)) return prefixed;
+  }
+  return id;
+}
+
+function uniqueCanonicalModelIds(currentIds: string[], providerDefaultModelIds: string[]): string[] {
+  const allowed = new Set(providerDefaultModelIds);
+  return [...new Set(currentIds.map(id => canonicalizeAgainstCatalog(id, allowed)))];
+}
+
+function matchesProviderCatalog(currentIds: string[], providerDefaultModelIds: string[]): boolean {
+  if (providerDefaultModelIds.length === 0) return false;
+  if (modelSetEquals(currentIds, providerDefaultModelIds)) return true;
+  return modelSetEquals(uniqueCanonicalModelIds(currentIds, providerDefaultModelIds), providerDefaultModelIds);
+}
+
+/**
+ * A stored list is a previous full-catalog sync when every id still belongs
+ * to the provider catalog, it is longer than a 3-tier pick, and it is missing
+ * only a few catalog ids (models added after that snapshot).
+ */
+export function isPreviousFullCatalogSnapshot(
+  currentIds: string[],
+  providerDefaultModelIds: string[],
+): boolean {
+  if (providerDefaultModelIds.length === 0 || currentIds.length === 0) return false;
+  const unique = uniqueCanonicalModelIds(currentIds, providerDefaultModelIds);
+  if (unique.length <= USER_DEFINED_TIER_SIZE) return false;
+  const allowed = new Set(providerDefaultModelIds);
+  if (unique.some(id => !allowed.has(id))) return false;
+  const missing = providerDefaultModelIds.length - unique.length;
+  return missing > 0 && missing <= STALE_CATALOG_MAX_MISSING;
+}
+
 export function inferModelSelectionMode(
   connection: Pick<LlmConnection, 'models'>,
   providerDefaultModelIds: string[],
 ): 'automaticallySyncedFromProvider' | 'userDefined3Tier' {
   const currentIds = normalizeModelIds(connection.models);
   if (currentIds.length === 0) return 'automaticallySyncedFromProvider';
-  return modelSetEquals(currentIds, providerDefaultModelIds)
-    ? 'automaticallySyncedFromProvider'
-    : 'userDefined3Tier';
+  // Exact catalog match, including a pi/ prefix drift, stays automatic.
+  // A previous full sync that is only missing newly added ids must not be
+  // frozen as userDefined3Tier — that is what dropped gpt-6.1-sol.
+  if (
+    matchesProviderCatalog(currentIds, providerDefaultModelIds)
+    || isPreviousFullCatalogSnapshot(currentIds, providerDefaultModelIds)
+  ) {
+    return 'automaticallySyncedFromProvider';
+  }
+  return 'userDefined3Tier';
+}
+
+/**
+ * ChatGPT/Codex connections that were inferred into userDefined3Tier from a
+ * full-catalog snapshot should receive newly added catalog ids. A real
+ * Best/Balanced/Fast pick (at most three ids) is left alone.
+ */
+export function shouldRestoreOpenAiCodexCatalogSync(
+  connection: Pick<LlmConnection, 'piAuthProvider' | 'modelSelectionMode' | 'models'>,
+  providerDefaultModelIds: string[],
+): boolean {
+  if (connection.piAuthProvider !== 'openai-codex') return false;
+  if (connection.modelSelectionMode !== 'userDefined3Tier') return false;
+  return isPreviousFullCatalogSnapshot(normalizeModelIds(connection.models), providerDefaultModelIds);
 }
 
 function backfillAllConnectionModels(config: StoredConfig): boolean {
@@ -1721,7 +1793,11 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       // models are enabled), so force automaticallySyncedFromProvider regardless
       // of what inferModelSelectionMode would compute from stale static SDK data.
       const isCopilot = connection.piAuthProvider === 'github-copilot';
-      const mode = isCopilot
+      // Already-persisted userDefined3Tier is not re-inferred. Restore only
+      // Codex lists that are a stale full catalog, then let the auto branch
+      // merge the current catalog (including ids added since the snapshot).
+      const restoreCodexCatalog = shouldRestoreOpenAiCodexCatalogSync(connection, providerDefaultModelIds);
+      const mode = isCopilot || restoreCodexCatalog
         ? 'automaticallySyncedFromProvider' as const
         : (connection.modelSelectionMode ?? inferModelSelectionMode(connection, providerDefaultModelIds));
       if (connection.modelSelectionMode !== mode) {

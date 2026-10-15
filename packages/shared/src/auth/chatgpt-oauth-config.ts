@@ -45,6 +45,12 @@ export const CHATGPT_OAUTH_CONFIG = {
   SCOPES: 'openid profile email offline_access',
 
   /**
+   * Authorize-url originator. Matches the Pi SDK Codex client (`originator=pi`).
+   * Do not send the official Codex CLI originator.
+   */
+  ORIGINATOR: 'pi',
+
+  /**
    * OpenID Connect issuer for token validation
    */
   ISSUER: 'https://auth.openai.com',

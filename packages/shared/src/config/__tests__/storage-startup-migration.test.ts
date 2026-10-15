@@ -229,6 +229,64 @@ describe('startup migration (integration)', () => {
     expect(connection.defaultModel).toBe(modelIds[0])
   })
 
+  it('merges new Codex catalog ids into a stale full-catalog userDefined list', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const catalogIds = getPiModelsForAuthProvider('openai-codex').map(model => model.id)
+    expect(catalogIds).toContain('pi/gpt-6.1-sol')
+    const staleIds = catalogIds.filter(id => id !== 'pi/gpt-6.1-sol')
+    expect(staleIds.length).toBeGreaterThan(3)
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: staleIds,
+        defaultModel: 'pi/gpt-5.6-sol',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    const modelIds = modelIdsOf(connection)
+    expect(modelIds).toContain('pi/gpt-6.1-sol')
+    expect(new Set(modelIds)).toEqual(new Set(catalogIds))
+    expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
+  })
+
+  it('does not overwrite a genuine Codex Best/Balanced/Fast tier list', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const tier = ['pi/gpt-5.5', 'pi/gpt-5.6-sol', 'pi/gpt-5.6-luna']
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: tier,
+        defaultModel: tier[0],
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('userDefined3Tier')
+    expect(connection.models).toEqual(tier)
+    expect(connection.defaultModel).toBe(tier[0])
+    expect(modelIdsOf(connection)).not.toContain('pi/gpt-6.1-sol')
+  })
+
   it('normalizes legacy unprefixed userDefined3Tier model IDs instead of resetting', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
 
