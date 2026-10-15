@@ -55,7 +55,7 @@ function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false) {
 }
 
 describe('thinking effort thumb', () => {
-  it('uses a circle the same size as the track, centered on the stop', () => {
+  it('uses a 26px circle centered on the 22px track', () => {
     expect(css).toContain('.prompt-effort-track {\n  position: relative;\n  height: 22px;')
     const rule = thumbRule()
     expect(rule).toContain('top: 50%;')
@@ -64,16 +64,26 @@ describe('thinking effort thumb', () => {
     expect(rule).toContain('margin-top: calc(var(--prompt-effort-thumb) / -2);')
     expect(rule).toContain('margin-left: calc(var(--prompt-effort-thumb) / -2);')
     expect(rule).toContain('border-radius: 50%;')
+    expect(rule).toContain('transform: scale(1);')
     expect(rule).not.toContain('height: 28px')
     expect(rule).not.toContain('border-radius: 7px')
   })
 
-  it('keeps hover, focus, disabled, and max-effort treatments', () => {
+  it('lifts on hover and drag, and stays still when motion is reduced', () => {
+    expect(css).toContain('.prompt-effort-track:hover .prompt-effort-thumb { transform: scale(1.06); }')
+    expect(css).toContain('.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: scale(1.15); }')
+    expect(css).toContain(".prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb")
+    expect(css).toContain('.dark .prompt-effort-thumb {')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('.prompt-effort-thumb { transition: background-color 300ms ease; }')
+    expect(reduced).toContain('.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }')
+  })
+
+  it('keeps focus, disabled, and max-effort treatments', () => {
     expect(css).toContain('.prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb')
     expect(css).toContain(".prompt-effort-track[aria-disabled='true'] { cursor: default; }")
     expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb { background: var(--prompt-spark); }')
     expect(css).toContain('.dark .prompt-effort-settings')
-    expect(css).toContain('.prompt-effort-thumb { transition: background-color 300ms ease; }')
   })
 
   it('aligns the fill with the circular thumb and centers the value', () => {
@@ -81,9 +91,10 @@ describe('thinking effort thumb', () => {
     expect(html).toContain('思考强度')
     expect(html).toContain('中等')
     expect(html).toContain('class="prompt-effort-thumb"')
-    expect(html).toContain('--prompt-effort-thumb:22px')
-    // Medium is index 2 of 6. Fill reaches the thumb's right edge (center + 11px).
-    expect(html).toContain('--prompt-effort-fill:calc(calc(11px + (100% - 22px) * 0.4) + 11px)')
+    expect(html).toContain('--prompt-effort-thumb:26px')
+    expect(html).not.toContain('data-dragging')
+    // Medium is index 2 of 6. Stops stay inset by 11px; fill reaches the 26px thumb's right edge.
+    expect(html).toContain('--prompt-effort-fill:calc(calc(11px + (100% - 22px) * 0.4) + 13px)')
     expect(html).toContain('aria-disabled="false"')
 
     const maxed = renderSettings('max')

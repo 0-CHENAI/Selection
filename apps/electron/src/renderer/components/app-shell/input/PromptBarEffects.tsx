@@ -11,8 +11,8 @@ import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
 const EFFORT_EDGE = 11
-// Thumb diameter matches the track height so the circle stays flush and centered.
-const EFFORT_THUMB = EFFORT_EDGE * 2
+// Slightly larger than the 22px track so the knob reads as floating above it.
+const EFFORT_THUMB = 26
 
 export function PromptThinkingSettings({
   value, levels, workMode, disabled, onChange,
@@ -24,10 +24,12 @@ export function PromptThinkingSettings({
   onChange: (level: ThinkingLevel) => void
 }) {
   const { t } = useTranslation()
+  const [dragging, setDragging] = React.useState(false)
   const index = Math.max(0, levels.findIndex(level => level.id === value))
   const maxed = levels.length > 1 && value === levels.at(-1)?.id
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
+  const stopDragging = () => setDragging(false)
   const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / Math.max(1, levels.length - 1)})`
   const setIndex = (next: number) => {
     if (inactive) return
@@ -81,6 +83,7 @@ export function PromptThinkingSettings({
           aria-valuenow={index}
           aria-valuetext={t(getThinkingLevelNameKey(value))}
           aria-disabled={inactive}
+          data-dragging={dragging || undefined}
           style={{
             '--prompt-effort-x': stepAt(index),
             '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
@@ -90,9 +93,13 @@ export function PromptThinkingSettings({
             if (event.button !== 0 || inactive) return
             event.currentTarget.setPointerCapture(event.pointerId)
             event.currentTarget.focus({ preventScroll: true })
+            setDragging(true)
             fromPointer(event)
           }}
           onPointerMove={event => { if (event.buttons & 1) fromPointer(event) }}
+          onPointerUp={stopDragging}
+          onPointerCancel={stopDragging}
+          onLostPointerCapture={stopDragging}
           onKeyDown={onKeyDown}
         >
           <span className="prompt-effort-fill" aria-hidden="true" />
