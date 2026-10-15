@@ -2,15 +2,39 @@
  * OAuth callback page HTML generation.
  * This module is browser-safe (no Node.js dependencies) so it can be used
  * in both the callback server and the playground preview.
+ *
+ * ChatGPT/Codex, Google, Slack, Microsoft, generic/MCP source OAuth, and the
+ * WebUI relay all render this page. GitHub Copilot uses a device-code flow
+ * and does not serve a local callback page.
  */
 
-import { CRAFT_LOGO_HTML } from '../branding.ts';
+import { APP_DISPLAY_NAME, selectionSwanDataUri, selectionSwanSvg } from '../branding.ts';
+import { CATHALIE_FONT_BASE64 } from './cathalie-font.ts';
 
 export type AppType = 'terminal' | 'electron';
 
+const LOGO_SVG = selectionSwanSvg({
+  className: 'logo',
+  fill: 'currentColor',
+  labelled: false,
+});
+
+// Favicons cannot inherit page CSS, so light and dark tabs get explicit fills
+// matching selection-swan-black.svg and selection-swan-white.svg.
+const FAVICON_LIGHT = selectionSwanDataUri('#000000');
+const FAVICON_DARK = selectionSwanDataUri('#ffffff');
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /**
  * Generate a minimal, clean callback page matching the app's design system.
- * Logo at top, status message in a card below.
+ * Swan logo at top, status message in a card below.
  */
 export function generateCallbackPage(options: {
   title: string;
@@ -20,6 +44,7 @@ export function generateCallbackPage(options: {
   deeplinkUrl?: string;
 }): string {
   const { title, isSuccess, errorDetail, deeplinkUrl } = options;
+  const safeTitle = escapeHtml(title);
 
   // Status message based on success/error
   const statusMessage = isSuccess
@@ -27,6 +52,7 @@ export function generateCallbackPage(options: {
     : errorDetail
       ? `Authorization failed: ${errorDetail}`
       : 'Authorization failed';
+  const safeStatusMessage = escapeHtml(statusMessage);
 
   // Generate deeplink redirect and auto-close for success
   const autoCloseScript = isSuccess
@@ -43,8 +69,19 @@ export function generateCallbackPage(options: {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Selection - ${title}</title>
+  <title>${APP_DISPLAY_NAME} - ${safeTitle}</title>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_LIGHT}">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_LIGHT}" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DARK}" media="(prefers-color-scheme: dark)">
   <style>
+    @font-face {
+      font-family: "CATHALIE";
+      src: url("data:font/otf;base64,${CATHALIE_FONT_BASE64}") format("opentype");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -59,17 +96,31 @@ export function generateCallbackPage(options: {
       justify-content: center;
     }
 
-    .logo {
-      /* Purple accent: oklch(0.62 0.13 293) */
-      color: #8b5fb3;
-      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
-      font-size: 6px;
-      line-height: 1;
-      white-space: pre;
-      /* Negative letter-spacing to close gaps between block characters */
-      letter-spacing: -0.05em;
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       /* 48px above the card */
       margin-bottom: 48px;
+      color: #000000;
+    }
+
+    .logo {
+      height: 64px;
+      width: auto;
+      display: block;
+    }
+
+    .brand-name {
+      margin-top: 16px;
+      /* Same treatment as SelectionWord: CATHALIE, regular weight, slight tracking. */
+      font-family: "CATHALIE", sans-serif;
+      font-size: 32px;
+      font-weight: 400;
+      font-style: normal;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      color: inherit;
     }
 
     .content {
@@ -136,9 +187,8 @@ export function generateCallbackPage(options: {
       body {
         background-color: #1a1a1a;
       }
-      .logo {
-        /* Brighter purple in dark mode: oklch(0.68 0.13 293) */
-        color: #a882c9;
+      .brand {
+        color: #ffffff;
       }
       .card {
         ${isSuccess
@@ -170,12 +220,15 @@ export function generateCallbackPage(options: {
 </head>
 <body>
   <div class="content">
-    <pre class="logo">${CRAFT_LOGO_HTML}</pre>
+    <div class="brand">
+      ${LOGO_SVG}
+      <div class="brand-name">${APP_DISPLAY_NAME}</div>
+    </div>
     <div class="card">
-      <div class="status">${statusMessage}</div>
+      <div class="status">${safeStatusMessage}</div>
     </div>
     <div class="hint">${isSuccess ? 'You can now return to the application.' : 'Please close this window and try again.'}</div>
-    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">Selection</a>` : ''}
+    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">${APP_DISPLAY_NAME}</a>` : ''}
   </div>
   <script>${autoCloseScript}</script>
 </body>
