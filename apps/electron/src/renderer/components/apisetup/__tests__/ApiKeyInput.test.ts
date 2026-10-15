@@ -3,6 +3,7 @@ import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
   shouldProbeOpenAiModelCatalog,
+  showCustomFormatPicker,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
 } from '../submit-helpers'
@@ -108,6 +109,15 @@ describe('shouldProbeOpenAiModelCatalog', () => {
   })
 })
 
+describe('showCustomFormatPicker', () => {
+  it('shows OpenAI and Anthropic format buttons for a custom endpoint before a URL is entered', () => {
+    expect(showCustomFormatPicker('custom')).toBe(true)
+    expect(showCustomFormatPicker('manifest')).toBe(false)
+    expect(showCustomFormatPicker('order-openai')).toBe(false)
+    expect(showCustomFormatPicker('kimi-coding')).toBe(false)
+  })
+})
+
 describe('resolveCustomEndpointPayload', () => {
   const BRANDED = new Set(['manifest'])
 
@@ -121,6 +131,29 @@ describe('resolveCustomEndpointPayload', () => {
     })).toEqual({
       customEndpoint: { api: 'openai-completions' },
       piAuthProvider: 'openai',
+    })
+  })
+
+  it('uses the button the user pressed and does not infer the format from the URL', () => {
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'custom',
+      baseUrl: 'https://api.anthropic.com',
+      customApi: 'openai-completions',
+      brandedOpenAiCompatPresets: BRANDED,
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'openai-completions' },
+      piAuthProvider: 'openai',
+    })
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'custom',
+      baseUrl: 'https://api.kimi.com/coding/',
+      customApi: 'anthropic-messages',
+      brandedOpenAiCompatPresets: BRANDED,
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'anthropic-messages' },
+      piAuthProvider: 'anthropic',
     })
   })
 

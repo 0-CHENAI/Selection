@@ -44,6 +44,15 @@ export function shouldProbeOpenAiModelCatalog(customApi: CustomEndpointApi): boo
   return customApi !== 'anthropic-messages'
 }
 
+/**
+ * Custom endpoints ask the user which wire format to use.
+ * The URL is not consulted: api.anthropic.com and third-party gateways can
+ * both speak either protocol, and guessing from the host gets it wrong.
+ */
+export function showCustomFormatPicker(activePreset: string): boolean {
+  return activePreset === 'custom'
+}
+
 export function resolvePiAuthProviderForSubmit(
   activePreset: PresetKey,
   lastNonCustomPreset: PresetKey | null

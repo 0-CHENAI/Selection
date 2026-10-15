@@ -40,6 +40,7 @@ import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
   shouldProbeOpenAiModelCatalog,
+  showCustomFormatPicker,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   type PresetKey,
@@ -904,7 +905,7 @@ export function ApiKeyInput({
             />
           </div>
         )}
-        {activePreset === 'custom' && baseUrl.trim() && (
+        {showCustomFormatPicker(activePreset) && (
           <div className="space-y-1.5">
             <Label>{t('apiSetup.protocol')}</Label>
             <div className={cn(
