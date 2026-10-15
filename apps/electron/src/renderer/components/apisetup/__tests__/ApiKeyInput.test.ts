@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
+  shouldProbeOpenAiModelCatalog,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
 } from '../submit-helpers'
@@ -97,6 +98,13 @@ describe('resolvePresetStateForBaseUrlChange', () => {
       activePreset: 'custom',
       lastNonCustomPreset: 'openrouter',
     })
+  })
+})
+
+describe('shouldProbeOpenAiModelCatalog', () => {
+  it('does not send the API key to /v1/models for Anthropic Messages', () => {
+    expect(shouldProbeOpenAiModelCatalog('openai-completions')).toBe(true)
+    expect(shouldProbeOpenAiModelCatalog('anthropic-messages')).toBe(false)
   })
 })
 

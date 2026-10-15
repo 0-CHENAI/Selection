@@ -39,6 +39,7 @@ import { pickTierDefaults, resolveTierModels, type PiModelInfo } from "./tier-mo
 import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
+  shouldProbeOpenAiModelCatalog,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   type PresetKey,
@@ -470,7 +471,10 @@ export function ApiKeyInput({
   // Custom OpenAI-compatible endpoints: read /v1/models after the user pastes a key.
   // ORDER uses the catalog for the picker; custom/Manifest use it to prefill limits.
   useEffect(() => {
-    if (!isCustomEndpointForm) {
+    if (!isCustomEndpointForm || !shouldProbeOpenAiModelCatalog(customApi)) {
+      // Anthropic Messages gateways do not speak GET /v1/models. Skip the
+      // probe so the API key is not sent to that OpenAI route.
+      remoteModelsAbortRef.current?.abort()
       setRemoteModels([])
       setRemoteModelsError(null)
       setRemoteModelsFailed(false)
@@ -530,7 +534,7 @@ export function ApiKeyInput({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [isCustomEndpointForm, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
+  }, [isCustomEndpointForm, customApi, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
 
   // Whether to show 3 tier dropdowns instead of text input
   const hasPiModels = isPiApiKeyFlow
@@ -915,6 +919,7 @@ export function ApiKeyInput({
                   key={value}
                   type="button"
                   disabled={isDisabled}
+                  aria-pressed={customApi === value}
                   onClick={() => setCustomApi(value)}
                   className={cn(
                     "flex-1 py-1.5 text-[12px] font-medium transition-colors",

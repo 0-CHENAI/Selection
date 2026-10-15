@@ -57,6 +57,18 @@ describe('validateSetupTestInput', () => {
       piAuthProvider: 'anthropic',
     })).toEqual({ valid: true })
   })
+
+  it('rejects the official Anthropic API host even as a custom URL', () => {
+    const result = validateSetupTestInput({
+      provider: 'pi',
+      baseUrl: 'https://api.anthropic.com/v1',
+      piAuthProvider: 'anthropic',
+    })
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.error).toContain('no longer supported')
+    }
+  })
 })
 
 describe('setup test API key requirements', () => {

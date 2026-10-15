@@ -16,6 +16,7 @@ import {
   ANTHROPIC_MODELS,
   normalizeDeprecatedModelId,
 } from './models';
+import { isOfficialAnthropicApiUrl } from './anthropic-api-host';
 import {
   connectionModelIdsMatch,
   inferModelSupportsImages,
@@ -489,10 +490,16 @@ export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
  * third-party gateways (Kimi, MiniMax, GLM, DeepSeek, Qwen) can be configured.
  */
 export function isUnsupportedLlmConnection(
-  connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>,
+  connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'> & { baseUrl?: string },
 ): boolean {
   if (connection.providerType === 'anthropic') return true;
-  if (connection.providerType === 'pi' && connection.piAuthProvider === 'anthropic' && connection.customEndpoint?.api !== 'anthropic-messages') return true;
+  const customAnthropicMessages = connection.providerType === 'pi_compat'
+    && connection.customEndpoint?.api === 'anthropic-messages'
+    && !isOfficialAnthropicApiUrl(connection.baseUrl);
+  if (connection.customEndpoint?.api === 'anthropic-messages' && isOfficialAnthropicApiUrl(connection.baseUrl)) {
+    return true;
+  }
+  if (connection.piAuthProvider === 'anthropic' && !customAnthropicMessages) return true;
   return false;
 }
 

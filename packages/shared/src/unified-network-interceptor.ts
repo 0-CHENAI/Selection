@@ -36,6 +36,7 @@ import {
 } from './interceptor-common.ts';
 import { FEATURE_FLAGS } from './feature-flags.ts';
 import { resolveRequestContext } from './interceptor-request-utils.ts';
+import { isOfficialAnthropicApiUrl } from './config/anthropic-api-host.ts';
 
 // Type alias for fetch's HeadersInit
 type HeadersInitType = Headers | Record<string, string> | string[][];
@@ -389,6 +390,30 @@ function appendBetaHeader(headers: HeadersInitType | undefined, beta: string): R
   headerObj['anthropic-beta'] = existing ? `${existing},${beta}` : beta;
 
   return headerObj;
+}
+
+/**
+ * Kimi and MiniMax document `Authorization: Bearer` for Anthropic Messages.
+ * The Anthropic SDK also sends `x-api-key` from the apiKey argument. Kimi
+ * rejects that header, and MiniMax CN can fail the request when it is present.
+ * Official api.anthropic.com keeps `x-api-key`. Header values are not logged.
+ */
+export function preferAnthropicBearerAuth(
+  url: string,
+  headers: Record<string, string>,
+): Record<string, string> {
+  if (isOfficialAnthropicApiUrl(url)) return headers;
+  let authorization = '';
+  const apiKeyNames: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower === 'authorization') authorization = value;
+    else if (lower === 'x-api-key' && value.trim()) apiKeyNames.push(name);
+  }
+  if (!/^Bearer\s+\S/i.test(authorization) || apiKeyNames.length === 0) return headers;
+  const next = { ...headers };
+  for (const name of apiKeyNames) delete next[name];
+  return next;
 }
 
 /**
@@ -752,15 +777,19 @@ const anthropicAdapter: ApiAdapter = {
 
   stripsSseMetadata: true,
 
-  modifyRequest(_url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
+  modifyRequest(url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
     sanitizeEmptyTextCacheControl(body);
     upgradePromptCacheTtl(body);
 
     // Official Anthropic 1M beta is not used. Strip it if an SDK injects it.
     debugLog('[Anthropic] Stripping context-1m beta header');
+    const headers = preferAnthropicBearerAuth(
+      url,
+      stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
+    );
     init = {
       ...init,
-      headers: stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
+      headers,
     };
 
     const fastMode = shouldEnableFastMode(body.model);

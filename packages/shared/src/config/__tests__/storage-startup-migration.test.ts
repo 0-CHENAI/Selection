@@ -710,7 +710,37 @@ describe('leftover Anthropic connections are not rewritten onto Pi', () => {
     expect(findConnection(configPath, 'pi-anthropic').piAuthProvider).toBe('anthropic')
     expect(findConnection(configPath, 'compat-messages').providerType).toBe('pi_compat')
     expect(findConnection(configPath, 'compat-messages').customEndpoint).toEqual({ api: 'anthropic-messages' })
+    expect(findConnection(configPath, 'compat-messages').piAuthProvider).toBe('anthropic')
     expect(config.llmConnections).toHaveLength(4)
+  })
+
+  it('does not attach an Anthropic auth hint to the official API host', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'official-messages',
+        name: 'Official host',
+        providerType: 'pi_compat',
+        authType: 'api_key_with_endpoint',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'https://api.anthropic.com',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'keyless-local',
+        name: 'Local',
+        providerType: 'pi_compat',
+        authType: 'none',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'http://127.0.0.1:8080',
+        createdAt: Date.now(),
+      },
+    ])
+
+    runMigration(configDir)
+
+    expect(findConnection(configPath, 'official-messages').piAuthProvider).toBeUndefined()
+    expect(findConnection(configPath, 'keyless-local').piAuthProvider).toBeUndefined()
   })
 
   it('moves the global default off leftover Anthropic when a supported connection exists', () => {

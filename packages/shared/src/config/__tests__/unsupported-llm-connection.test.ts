@@ -43,8 +43,28 @@ describe('isUnsupportedLlmConnection', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi_compat',
       piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.kimi.com/coding/',
       customEndpoint: { api: 'anthropic-messages' },
     }))).toBe(false)
+  })
+
+  it('rejects the official Anthropic host and Pi auth that is not a custom endpoint', () => {
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com/v1/messages',
+      customEndpoint: { api: 'anthropic-messages' },
+    }))).toBe(true)
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.minimaxi.com/anthropic',
+      customEndpoint: { api: 'anthropic-messages' },
+    }))).toBe(true)
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+    }))).toBe(true)
   })
 
   it('keeps OpenAI Compatible and other Pi providers supported', () => {

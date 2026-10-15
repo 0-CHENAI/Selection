@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { getPiApiKeyProviders, getPiModelsForAuthProvider } from '../src/config/models-pi.ts';
-import { fromPiProviderId, toPiProviderId } from '../src/config/pi-provider-ids.ts';
+import { fromPiProviderId, piRuntimeProviderId, toPiProviderId } from '../src/config/pi-provider-ids.ts';
 
 describe('models-pi filtering', () => {
   it('excludes codex-mini-latest for openai models', () => {
@@ -50,6 +50,9 @@ describe('models-pi filtering', () => {
     expect(toPiProviderId('openai')).toBe('openai');
     expect(fromPiProviderId('openai')).toBe('openai');
     expect(toPiProviderId('azure')).toBe('azure');
+    expect(piRuntimeProviderId('anthropic', 'anthropic-messages')).toBe('custom-endpoint');
+    expect(piRuntimeProviderId('anthropic')).toBe('anthropic');
+    expect(piRuntimeProviderId('openai', 'openai-completions')).toBe('openai');
 
     expect(getPiModelsForAuthProvider('azure-openai-responses').length).toBeGreaterThan(0);
     const providers = getPiApiKeyProviders();

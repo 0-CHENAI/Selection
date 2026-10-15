@@ -18,6 +18,7 @@ import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.
 import { debug } from '../utils/debug.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
+import { isOfficialAnthropicApiUrl } from './anthropic-api-host.ts';
 import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
@@ -2238,7 +2239,11 @@ function migrateLegacyProviderTypes(config: StoredConfig): boolean {
     if (providerStr === 'anthropic_compat') {
       (connection as { providerType: LlmProviderType }).providerType = 'pi_compat';
       connection.customEndpoint = { api: 'anthropic-messages' };
-      // authType 'api_key_with_endpoint' stays; baseUrl and models are preserved
+      // authType 'api_key_with_endpoint' stays; baseUrl and models are preserved.
+      // The auth hint is what lets the runtime load this connection's own key.
+      if (!connection.piAuthProvider && connection.authType !== 'none' && !isOfficialAnthropicApiUrl(connection.baseUrl)) {
+        connection.piAuthProvider = 'anthropic';
+      }
       changed = true;
       continue;
     }
@@ -2267,6 +2272,26 @@ function migrateLegacyProviderTypes(config: StoredConfig): boolean {
     }
   }
 
+  return changed;
+}
+
+/**
+ * Custom Anthropic Messages connections saved before the protocol could be
+ * selected have the endpoint, but no piAuthProvider. Without the hint the
+ * runtime never loads that connection's API key.
+ */
+function migrateCustomAnthropicMessagesAuth(config: StoredConfig): boolean {
+  if (!config.llmConnections) return false;
+  let changed = false;
+  for (const connection of config.llmConnections) {
+    if (connection.providerType !== 'pi_compat') continue;
+    if (connection.customEndpoint?.api !== 'anthropic-messages') continue;
+    if (connection.piAuthProvider) continue;
+    if (connection.authType === 'none') continue;
+    if (isOfficialAnthropicApiUrl(connection.baseUrl)) continue;
+    connection.piAuthProvider = 'anthropic';
+    changed = true;
+  }
   return changed;
 }
 
@@ -2453,6 +2478,9 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     if (migrateLegacyProviderTypes(config)) {
       needsSave = true;
     }
+    if (migrateCustomAnthropicMessagesAuth(config)) {
+      needsSave = true;
+    }
     // Phase 1k: Normalize legacy Opus IDs introduced by provider-type migration.
     // Important for old Bedrock connections: they become Pi+Bedrock first, then can
     // fall back from Opus 4.8 to 4.7 while Pi's catalog lacks 4.8.
@@ -2523,12 +2551,13 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     } else if (legacyAuthType === 'api_key') {
       // Anthropic API Key - check if custom endpoint (compat mode → pi_compat)
       const hasCustomEndpoint = !!legacyBaseUrl;
-      if (hasCustomEndpoint) {
+      if (hasCustomEndpoint && !isOfficialAnthropicApiUrl(legacyBaseUrl)) {
         migrated = {
           slug: 'anthropic-api',
           name: 'Custom Anthropic-Compatible',
           providerType: 'pi_compat',
           authType: 'api_key_with_endpoint',
+          piAuthProvider: 'anthropic',
           customEndpoint: { api: 'anthropic-messages' },
           models: getDefaultModelsForConnection('pi_compat'),
           createdAt: Date.now(),

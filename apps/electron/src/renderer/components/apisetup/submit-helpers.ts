@@ -39,6 +39,11 @@ const PI_AUTH_PROVIDER_ALIASES: Record<string, string> = {
   'minimax-global': 'minimax',
 }
 
+/** Anthropic Messages gateways do not expose OpenAI's GET /v1/models. */
+export function shouldProbeOpenAiModelCatalog(customApi: CustomEndpointApi): boolean {
+  return customApi !== 'anthropic-messages'
+}
+
 export function resolvePiAuthProviderForSubmit(
   activePreset: PresetKey,
   lastNonCustomPreset: PresetKey | null
