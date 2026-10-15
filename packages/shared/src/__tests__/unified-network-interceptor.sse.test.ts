@@ -354,6 +354,59 @@ describe('unified-network-interceptor SSE processors', () => {
     expect(piVisibleText(out)).toBe('中文');
   });
 
+  it('forwards a full Anthropic Messages stream, including ping, signature, usage, errors, and unknown events', async () => {
+    const sse = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg","usage":{"input_tokens":3,"output_tokens":1}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"先想"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"redacted"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n',
+      'event: ping\ndata: {"type":"ping"}\n\n',
+      ': keepalive\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"正文"}}\n\n',
+      'event: vendor_extension\ndata: {"type":"vendor_extension","note":"ignore"}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_1","name":"Read"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"/tmp\\"}"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":3}\n\n',
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"busy"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":12}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文');
+    expect(out).toContain('"signature":"sig-1"');
+    expect(out).toContain('"type":"redacted_thinking"');
+    expect(out).toContain('event: ping');
+    expect(out).toContain('event: vendor_extension');
+    expect(out).toContain('event: error');
+    expect(out).toContain('"message":"busy"');
+    expect(out).toContain('"stop_reason":"end_turn"');
+    expect(out).toContain('"output_tokens":12');
+    expect(out).toContain('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    expect(out).not.toContain('1000000');
+  });
+
+  it('normalizes third-party reasoning aliases onto Pi thinking blocks', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"reasoning","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"reasoning_delta","reasoning":"推理"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature","signature":"sig-2"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"text","text":"答案"}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(out).toContain('"type":"thinking"');
+    expect(out).toContain('"type":"thinking_delta"');
+    expect(out).toContain('"thinking":"推理"');
+    expect(out).toContain('"type":"signature_delta"');
+    expect(out).toContain('"signature":"sig-2"');
+    expect(out).not.toContain('"type":"reasoning_delta"');
+    expect(piVisibleText(out)).toBe('答案');
+  });
+
   describe('stripMetadataFieldsFromRawJson', () => {
     it('strips _intent and _displayName from valid JSON', () => {
       const input = '{"path":"/tmp","_intent":"Read file","_displayName":"Read Tmp"}';

@@ -461,14 +461,16 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
 
   const trackedBlocks = new Map<number, TrackedToolBlock>();
   /**
-   * Pi's Anthropic accumulator only appends a text_delta when that index still
-   * belongs to an open text block. Kimi Coding (Kimi K3 / K3-256K on
-   * api.kimi.com/coding) sometimes continues the answer after content_block_stop,
-   * or sends the answer on the still-open thinking index. Those deltas are
-   * otherwise dropped and the visible body freezes while the socket stays open.
+   * Pi only appends a delta when that index still belongs to an open block of
+   * the same kind. Third-party Anthropic Messages endpoints (Kimi Coding,
+   * MiniMax, GLM, DeepSeek, Qwen, and other gateways) sometimes continue after
+   * content_block_stop, reuse a thinking index for text, or name the block
+   * `reasoning`. Those deltas would otherwise disappear while the socket stays
+   * open. Ping, errors, usage, and unknown events are forwarded unchanged.
    */
   const openBlockKinds = new Map<number, 'text' | 'thinking' | 'tool' | 'other'>();
   const recoveredTextIndexes = new Map<number, number>();
+  const recoveredThinkingIndexes = new Map<number, number>();
   let nextRecoveredIndex = 1_000_000;
   let lineBuffer = '';
   let currentEventType = '';
@@ -477,34 +479,64 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
 
   function blockKind(type: string | undefined): 'text' | 'thinking' | 'tool' | 'other' {
     if (type === 'text') return 'text';
-    if (type === 'thinking' || type === 'redacted_thinking') return 'thinking';
+    if (type === 'thinking' || type === 'redacted_thinking' || type === 'reasoning') return 'thinking';
     if (type === 'tool_use') return 'tool';
     return 'other';
   }
 
   function rememberBlock(index: number, type: string | undefined): void {
     recoveredTextIndexes.delete(index);
+    recoveredThinkingIndexes.delete(index);
     openBlockKinds.set(index, blockKind(type));
   }
 
-  function recoverOrphanTextDelta(
+  function firstString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      if (typeof value === 'string') return value;
+    }
+    return undefined;
+  }
+
+  /** Map gateway aliases onto the delta types Pi's Anthropic parser accepts. */
+  function canonicalDelta(delta: Record<string, unknown>): Record<string, unknown> | undefined {
+    const type = delta.type;
+    if (type === 'text') return { ...delta, type: 'text_delta' };
+    if (type === 'thinking') return { ...delta, type: 'thinking_delta' };
+    if (type === 'signature') return { ...delta, type: 'signature_delta' };
+    if (type === 'reasoning_delta' || type === 'reasoning') {
+      const thinking = firstString(delta.thinking, delta.reasoning, delta.reasoning_content);
+      return { ...delta, type: 'thinking_delta', ...(thinking !== undefined ? { thinking } : {}) };
+    }
+    return undefined;
+  }
+
+  function recoverOrphanDelta(
     data: Record<string, unknown>,
+    kind: 'text' | 'thinking',
     controller: TransformStreamDefaultController<Uint8Array>,
   ): boolean {
-    const delta = data.delta as { type?: string; text?: string } | undefined;
-    if (delta?.type !== 'text_delta' || typeof delta.text !== 'string' || delta.text.length === 0) return false;
+    const delta = data.delta as { type?: string; text?: string; thinking?: string; signature?: string } | undefined;
     const index = typeof data.index === 'number' ? data.index : 0;
-    if (openBlockKinds.get(index) === 'text') return false;
+    if (openBlockKinds.get(index) === kind) return false;
+    const isText = kind === 'text' && delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0;
+    const isThinking = kind === 'thinking' && (
+      (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0)
+      || delta?.type === 'signature_delta'
+    );
+    if (!isText && !isThinking) return false;
 
-    let target = recoveredTextIndexes.get(index);
-    if (target === undefined || openBlockKinds.get(target) !== 'text') {
+    const aliases = kind === 'text' ? recoveredTextIndexes : recoveredThinkingIndexes;
+    let target = aliases.get(index);
+    if (target === undefined || openBlockKinds.get(target) !== kind) {
       target = nextRecoveredIndex++;
-      recoveredTextIndexes.set(index, target);
-      openBlockKinds.set(target, 'text');
+      aliases.set(index, target);
+      openBlockKinds.set(target, kind);
       emitSseEvent('content_block_start', JSON.stringify({
         type: 'content_block_start',
         index: target,
-        content_block: { type: 'text', text: '' },
+        content_block: kind === 'text'
+          ? { type: 'text', text: '' }
+          : { type: 'thinking', thinking: '', signature: '' },
       }), controller);
     }
     emitSseEvent('content_block_delta', JSON.stringify({
@@ -527,7 +559,11 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
 
     if (eventType === 'content_block_start') {
       const contentBlock = data.content_block as { type?: string; id?: string; name?: string } | undefined;
-      if (typeof data.index === 'number') rememberBlock(data.index, contentBlock?.type);
+      const normalizedType = contentBlock?.type === 'reasoning' ? 'thinking' : contentBlock?.type;
+      const startData = normalizedType !== contentBlock?.type && contentBlock
+        ? { ...data, content_block: { ...contentBlock, type: normalizedType } }
+        : data;
+      if (typeof data.index === 'number') rememberBlock(data.index, normalizedType);
       if (contentBlock?.type === 'tool_use' && contentBlock.id && contentBlock.name != null) {
         const index = data.index as number;
         trackedBlocks.set(index, {
@@ -537,15 +573,21 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
           bufferedJson: '',
         });
       }
-      emitSseEvent(eventType, dataStr, controller);
+      emitSseEvent(eventType, startData === data ? dataStr : JSON.stringify(startData), controller);
       return;
     }
 
     if (eventType === 'content_block_delta') {
-      const index = data.index as number;
-      const delta = data.delta as { type?: string; partial_json?: string } | undefined;
+      const rawDelta = data.delta;
+      const normalizedDelta = rawDelta && typeof rawDelta === 'object'
+        ? canonicalDelta(rawDelta as Record<string, unknown>)
+        : undefined;
+      const payload = normalizedDelta ? { ...data, delta: normalizedDelta } : data;
+      const index = payload.index as number;
+      const delta = payload.delta as { type?: string; partial_json?: string } | undefined;
 
-      if (recoverOrphanTextDelta(data, controller)) return;
+      if (recoverOrphanDelta(payload, 'text', controller)) return;
+      if (recoverOrphanDelta(payload, 'thinking', controller)) return;
 
       if (delta?.type === 'input_json_delta' && trackedBlocks.has(index)) {
         const block = trackedBlocks.get(index)!;
@@ -553,7 +595,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
         previewCall({ id: block.id, name: block.name, arguments: block.bufferedJson });
         return;
       }
-      emitSseEvent(eventType, dataStr, controller);
+      emitSseEvent(eventType, normalizedDelta ? JSON.stringify(payload) : dataStr, controller);
       return;
     }
 
