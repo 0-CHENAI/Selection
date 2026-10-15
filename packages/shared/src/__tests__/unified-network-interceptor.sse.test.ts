@@ -545,6 +545,20 @@ describe('unified-network-interceptor SSE processors', () => {
     expect(out).not.toContain(huge);
   });
 
+  it('keeps a message_stop that arrives without a data payload', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"完"}}\n\n',
+      'event: ping\n\n',
+      'event: message_stop\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('完');
+    expect(out).toContain('event: ping');
+    expect(out).toContain('event: message_stop');
+    expect(out).toContain('{"type":"message_stop"}');
+  });
+
   it('drops buffered tool arguments when the reader cancels', async () => {
     const processor = createAnthropicSseStrippingStream();
     const writer = processor.writable.getWriter();

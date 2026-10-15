@@ -636,13 +636,20 @@ export function createAnthropicSseStrippingStream(options?: {
     }
   }
 
+  function previewToolArguments(block: TrackedToolBlock): void {
+    // Joining is only needed for the answer preview. Other tool streams can be
+    // megabytes of file contents, and joining on every delta is quadratic.
+    if (!/^(?:mcp__session__|session__)?submit_answer$/.test(block.name)) return;
+    previewCall({ id: block.id, name: block.name, arguments: toolArguments(block) });
+  }
+
   function absorbLateToolDelta(index: number | undefined, partialJson: string | undefined): boolean {
     if (index === undefined) return false;
     const pending = pendingToolStops.find(item => item.index === index);
     if (!pending) return false;
-    const fragment = partialJson ?? '';
+    const fragment = typeof partialJson === 'string' ? partialJson : '';
     pending.block.jsonParts.push(fragment);
-    previewCall({ id: pending.block.id, name: pending.block.name, arguments: toolArguments(pending.block) });
+    previewToolArguments(pending.block);
     return true;
   }
 
@@ -736,9 +743,9 @@ export function createAnthropicSseStrippingStream(options?: {
 
       if (delta?.type === 'input_json_delta' && index !== undefined && trackedBlocks.has(index)) {
         const block = trackedBlocks.get(index)!;
-        const fragment = delta.partial_json ?? '';
+        const fragment = typeof delta.partial_json === 'string' ? delta.partial_json : '';
         block.jsonParts.push(fragment);
-        previewCall({ id: block.id, name: block.name, arguments: toolArguments(block) });
+        previewToolArguments(block);
         return;
       }
       const rewritten = normalizedDelta !== undefined || (index !== undefined && data.index !== index);
@@ -863,12 +870,30 @@ export function createAnthropicSseStrippingStream(options?: {
     }
   }
 
+  /**
+   * Some gateways end the stream with `event: message_stop` and no data line.
+   * Dropping that event makes Pi report that the stream ended before message_stop.
+   * Only these terminal/keepalive names are valid without a JSON body.
+   */
+  function emptyEventData(type: string): string {
+    if (type === 'message_stop' || type === 'ping') return JSON.stringify({ type });
+    if (type === 'error') {
+      return JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: 'The upstream stream reported an error.' },
+      });
+    }
+    return '';
+  }
+
   function dispatchEvent(controller: TransformStreamDefaultController<Uint8Array>): void {
     const data = takeData();
     const type = eventName || inferEventName(data);
     eventName = '';
-    if (!type || !data) return;
-    processEvent(type, data, controller);
+    if (!type) return;
+    const payload = data || emptyEventData(type);
+    if (!payload) return;
+    processEvent(type, payload, controller);
   }
 
   function acceptSseLine(line: string, controller: TransformStreamDefaultController<Uint8Array>): void {
