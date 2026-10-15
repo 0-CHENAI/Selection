@@ -5,6 +5,7 @@ let validateOpenAiResponsesBody: typeof import('../unified-network-interceptor.t
 let MalformedBodyError: typeof import('../unified-network-interceptor.ts').MalformedBodyError;
 let sanitizeOpenAiHistoryInPlace: typeof import('../unified-network-interceptor.ts').sanitizeOpenAiHistoryInPlace;
 let rewriteDeveloperRolesToSystem: typeof import('../unified-network-interceptor.ts').rewriteDeveloperRolesToSystem;
+let preferAnthropicBearerAuth: typeof import('../unified-network-interceptor.ts').preferAnthropicBearerAuth;
 
 describe('unified-network-interceptor validators (#613)', () => {
   beforeAll(async () => {
@@ -15,6 +16,54 @@ describe('unified-network-interceptor validators (#613)', () => {
     MalformedBodyError = mod.MalformedBodyError;
     sanitizeOpenAiHistoryInPlace = mod.sanitizeOpenAiHistoryInPlace;
     rewriteDeveloperRolesToSystem = mod.rewriteDeveloperRolesToSystem;
+    preferAnthropicBearerAuth = mod.preferAnthropicBearerAuth;
+  });
+
+  describe('Anthropic auth headers', () => {
+    it('drops x-api-key when a non-official host already has Authorization Bearer', () => {
+      const headers = preferAnthropicBearerAuth('https://api.kimi.com/coding/v1/messages', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(headers).toEqual({
+        Authorization: 'Bearer secret-key',
+        'anthropic-version': '2023-06-01',
+      });
+    });
+
+    it('sends only x-api-key and anthropic-version to the official Anthropic host', () => {
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
+        'x-api-key': 'sk-ant',
+        Authorization: 'Bearer sk-ant',
+      })).toEqual({
+        'x-api-key': 'sk-ant',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com/v1/messages', {
+        Authorization: 'Bearer sk-from-bearer',
+        'anthropic-version': '2023-06-01',
+      })).toEqual({
+        'x-api-key': 'sk-from-bearer',
+        'anthropic-version': '2023-06-01',
+      });
+      expect(preferAnthropicBearerAuth('https://api.minimax.io/anthropic/v1/messages', {
+        'X-Api-Key': 'sk-mini',
+      })).toEqual({ 'X-Api-Key': 'sk-mini' });
+      expect(preferAnthropicBearerAuth('https://api.anthropic.com.evil.example/v1/messages', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        Authorization: 'Bearer secret-key',
+      });
+      expect(preferAnthropicBearerAuth('https://example.com/v1/tools', {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      })).toEqual({
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer secret-key',
+      });
+    });
   });
 
   describe('developer role rewrite', () => {

@@ -108,9 +108,9 @@ describe('buildCustomEndpointModelDef', () => {
     expect(model.compat).toEqual({ supportsStore: false, supportsDeveloperRole: false })
   })
 
-  it('does not attach OpenAI compatibility flags to Anthropic endpoints', () => {
+  it('keeps empty thinking signatures on Anthropic-compatible custom endpoints', () => {
     const model = buildCustomEndpointModelDef('anthropic-gateway', undefined, undefined, 'anthropic-messages')
-    expect(model).not.toHaveProperty('compat')
+    expect(model.compat).toEqual({ allowEmptySignature: true })
   })
 })
 

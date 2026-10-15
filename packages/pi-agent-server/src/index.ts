@@ -37,7 +37,7 @@ import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { createIsolatedPiSettings, resolveIsolatedAgentDir } from './pi-isolation.ts';
 import { applyProviderEndpointEnv } from './provider-endpoint-env.ts';
-import { toPiProviderId } from '../../shared/src/config/pi-provider-ids.ts';
+import { piRuntimeProviderId } from '../../shared/src/config/pi-provider-ids.ts';
 import { homedir } from 'node:os';
 
 // Pi SDK
@@ -1742,8 +1742,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // ============================================================
 
 /** Wire auth with the provider id the Pi SDK knows. Stored configs stay unchanged. */
-function toPiAuth<T extends { provider: string }>(piAuth: T): T {
-  return { ...piAuth, provider: toPiProviderId(piAuth.provider) };
+function toPiAuth<T extends { provider: string }>(piAuth: T, customEndpointApi?: string): T {
+  return { ...piAuth, provider: piRuntimeProviderId(piAuth.provider, customEndpointApi) };
 }
 
 /**
@@ -1785,7 +1785,7 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   // Stored provider ids (azure-openai-responses) become Pi SDK ids (azure) once,
   // so credentials, model lookup, and the endpoint env all see the same id.
   // The connection record itself is not rewritten.
-  initConfig = msg.piAuth ? { ...msg, piAuth: toPiAuth(msg.piAuth) } : msg;
+  initConfig = msg.piAuth ? { ...msg, piAuth: toPiAuth(msg.piAuth, msg.customEndpoint?.api) } : msg;
   syncProviderEndpointEnv(initConfig);
 
   // Start callback server for call_llm (idempotent — skips if already running)
@@ -2346,7 +2346,7 @@ async function processMessage(msg: InboundMessage): Promise<void> {
         debugLog('token_update received before init; ignoring');
         break;
       }
-      initConfig.piAuth = toPiAuth(msg.piAuth);
+      initConfig.piAuth = toPiAuth(msg.piAuth, initConfig.customEndpoint?.api);
       syncProviderEndpointEnv(initConfig);
       if (moduleCredentialStore) {
         const { provider, credential } = initConfig.piAuth;

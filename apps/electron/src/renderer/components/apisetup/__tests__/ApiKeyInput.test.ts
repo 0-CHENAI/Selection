@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
+  shouldAutoProbeModelCatalog,
+  showCustomFormatPicker,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
 } from '../submit-helpers'
@@ -63,12 +65,33 @@ describe('resolvePiAuthProviderForSubmit', () => {
 })
 
 describe('resolvePresetStateForBaseUrlChange', () => {
-  it('updates the remembered provider when the typed URL matches a known preset', () => {
+  it('keeps Custom when the typed URL matches a known preset', () => {
+    expect(resolvePresetStateForBaseUrlChange({
+      matchedPreset: 'kimi-coding',
+      activePreset: 'custom',
+      activePresetHasEmptyUrl: true,
+      lastNonCustomPreset: 'openai',
+    })).toEqual({
+      activePreset: 'custom',
+      lastNonCustomPreset: 'openai',
+    })
     expect(resolvePresetStateForBaseUrlChange({
       matchedPreset: 'openrouter',
       activePreset: 'custom',
       activePresetHasEmptyUrl: true,
       lastNonCustomPreset: 'openai',
+    })).toEqual({
+      activePreset: 'custom',
+      lastNonCustomPreset: 'openai',
+    })
+  })
+
+  it('switches a non-custom preset when the typed URL matches another known preset', () => {
+    expect(resolvePresetStateForBaseUrlChange({
+      matchedPreset: 'openrouter',
+      activePreset: 'azure-openai-responses',
+      activePresetHasEmptyUrl: true,
+      lastNonCustomPreset: 'azure-openai-responses',
     })).toEqual({
       activePreset: 'openrouter',
       lastNonCustomPreset: 'openrouter',
@@ -100,6 +123,27 @@ describe('resolvePresetStateForBaseUrlChange', () => {
   })
 })
 
+describe('shouldAutoProbeModelCatalog', () => {
+  it('waits for the Fetch models button on a custom endpoint', () => {
+    expect(shouldAutoProbeModelCatalog('custom', 'openai-completions')).toBe(false)
+    expect(shouldAutoProbeModelCatalog('custom', 'anthropic-messages')).toBe(false)
+  })
+
+  it('still probes branded OpenAI presets and skips Anthropic Messages', () => {
+    expect(shouldAutoProbeModelCatalog('order-openai', 'openai-completions')).toBe(true)
+    expect(shouldAutoProbeModelCatalog('manifest', 'anthropic-messages')).toBe(false)
+  })
+})
+
+describe('showCustomFormatPicker', () => {
+  it('shows OpenAI and Anthropic format buttons for a custom endpoint before a URL is entered', () => {
+    expect(showCustomFormatPicker('custom')).toBe(true)
+    expect(showCustomFormatPicker('manifest')).toBe(false)
+    expect(showCustomFormatPicker('order-openai')).toBe(false)
+    expect(showCustomFormatPicker('kimi-coding')).toBe(false)
+  })
+})
+
 describe('resolveCustomEndpointPayload', () => {
   const BRANDED = new Set(['manifest'])
 
@@ -116,7 +160,30 @@ describe('resolveCustomEndpointPayload', () => {
     })
   })
 
-  it('forces OpenAI Compatible for the generic custom preset', () => {
+  it('uses the button the user pressed and does not infer the format from the URL', () => {
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'custom',
+      baseUrl: 'https://api.anthropic.com',
+      customApi: 'openai-completions',
+      brandedOpenAiCompatPresets: BRANDED,
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'openai-completions' },
+      piAuthProvider: 'openai',
+    })
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'custom',
+      baseUrl: 'https://api.kimi.com/coding/',
+      customApi: 'anthropic-messages',
+      brandedOpenAiCompatPresets: BRANDED,
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'anthropic-messages' },
+      piAuthProvider: 'anthropic',
+    })
+  })
+
+  it('keeps Anthropic Messages for the generic custom preset', () => {
     expect(resolveCustomEndpointPayload({
       activePreset: 'custom',
       baseUrl: 'https://my-endpoint.example.com',
@@ -124,8 +191,8 @@ describe('resolveCustomEndpointPayload', () => {
       brandedOpenAiCompatPresets: BRANDED,
       fallbackPiAuthProvider: undefined,
     })).toEqual({
-      customEndpoint: { api: 'openai-completions' },
-      piAuthProvider: 'openai',
+      customEndpoint: { api: 'anthropic-messages' },
+      piAuthProvider: 'anthropic',
     })
   })
 

@@ -36,6 +36,7 @@ import {
 } from './interceptor-common.ts';
 import { FEATURE_FLAGS } from './feature-flags.ts';
 import { resolveRequestContext } from './interceptor-request-utils.ts';
+import { isOfficialAnthropicApiUrl } from './config/anthropic-api-host.ts';
 
 // Type alias for fetch's HeadersInit
 type HeadersInitType = Headers | Record<string, string> | string[][];
@@ -389,6 +390,67 @@ function appendBetaHeader(headers: HeadersInitType | undefined, beta: string): R
   headerObj['anthropic-beta'] = existing ? `${existing},${beta}` : beta;
 
   return headerObj;
+}
+
+const ANTHROPIC_API_VERSION = '2023-06-01';
+
+function headerNames(headers: Record<string, string>, target: string): string[] {
+  return Object.keys(headers).filter(name => name.toLowerCase() === target);
+}
+
+function bearerToken(value: string | undefined): string | undefined {
+  const match = /^Bearer\s+(\S+)/i.exec(value ?? '');
+  return match?.[1];
+}
+
+/**
+ * Choose Anthropic Messages auth from the host.
+ *
+ * api.anthropic.com accepts `x-api-key` plus `anthropic-version` and must not
+ * also receive `Authorization: Bearer`. Third-party gateways (Kimi, MiniMax)
+ * document Bearer and can reject `x-api-key`, so that header is removed when
+ * Bearer is already present. Header values are not logged.
+ */
+function isAnthropicMessagesRequest(url: string): boolean {
+  if (isOfficialAnthropicApiUrl(url)) return true;
+  try {
+    return new URL(url).pathname.toLowerCase().includes('/messages');
+  } catch {
+    return false;
+  }
+}
+
+export function preferAnthropicBearerAuth(
+  url: string,
+  headers: Record<string, string>,
+): Record<string, string> {
+  // The Anthropic adapter also sees unrelated POSTs while that model is active.
+  // Leave those headers alone.
+  if (!isAnthropicMessagesRequest(url)) return headers;
+  if (isOfficialAnthropicApiUrl(url)) return officialAnthropicApiKeyHeaders(headers);
+  const authorization = headerNames(headers, 'authorization')
+    .map(name => headers[name])
+    .find(value => bearerToken(value));
+  const apiKeyNames = headerNames(headers, 'x-api-key').filter(name => headers[name]?.trim());
+  if (!authorization || apiKeyNames.length === 0) return headers;
+  const next = { ...headers };
+  for (const name of apiKeyNames) delete next[name];
+  return next;
+}
+
+function officialAnthropicApiKeyHeaders(headers: Record<string, string>): Record<string, string> {
+  const next = { ...headers };
+  const apiKeyName = headerNames(next, 'x-api-key').find(name => next[name]?.trim());
+  const apiKey = apiKeyName
+    ? next[apiKeyName]!.trim()
+    : bearerToken(headerNames(next, 'authorization').map(name => next[name]).find(Boolean));
+  for (const name of headerNames(next, 'authorization')) delete next[name];
+  for (const name of headerNames(next, 'x-api-key')) delete next[name];
+  if (apiKey) next['x-api-key'] = apiKey;
+  if (headerNames(next, 'anthropic-version').length === 0) {
+    next['anthropic-version'] = ANTHROPIC_API_VERSION;
+  }
+  return next;
 }
 
 /**
@@ -1101,15 +1163,19 @@ const anthropicAdapter: ApiAdapter = {
 
   stripsSseMetadata: true,
 
-  modifyRequest(_url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
+  modifyRequest(url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
     sanitizeEmptyTextCacheControl(body);
     upgradePromptCacheTtl(body);
 
     // Official Anthropic 1M beta is not used. Strip it if an SDK injects it.
     debugLog('[Anthropic] Stripping context-1m beta header');
+    const headers = preferAnthropicBearerAuth(
+      url,
+      stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
+    );
     init = {
       ...init,
-      headers: stripBetaHeader(init?.headers as HeadersInitType | undefined, 'context-1m-2025-08-07'),
+      headers,
     };
 
     const fastMode = shouldEnableFastMode(body.model);

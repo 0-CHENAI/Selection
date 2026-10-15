@@ -16,6 +16,7 @@ interface RemoteModelsPickerProps {
   error?: string | null
   hint?: string
   waitingForKey?: boolean
+  hideLabel?: boolean
   onToggle: (id: string) => void
   onRetry?: () => void
 }
@@ -28,6 +29,7 @@ export function RemoteModelsPicker({
   error,
   hint,
   waitingForKey,
+  hideLabel,
   onToggle,
   onRetry,
 }: RemoteModelsPickerProps) {
@@ -60,10 +62,12 @@ export function RemoteModelsPicker({
 
   return (
     <div className="space-y-2">
-      <Label className="text-muted-foreground font-normal">
-        {t('apiSetup.defaultModel')}{' '}
-        <span className="text-foreground/30">· {t('apiSetup.required')}</span>
-      </Label>
+      {!hideLabel && (
+        <Label className="text-muted-foreground font-normal">
+          {t('apiSetup.defaultModel')}{' '}
+          <span className="text-foreground/30">· {t('apiSetup.required')}</span>
+        </Label>
+      )}
 
       {loading ? (
         <div className="flex h-9 items-center gap-2 rounded-md bg-foreground-2 px-3 text-muted-foreground shadow-minimal">

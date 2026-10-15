@@ -54,7 +54,7 @@ Pi is the only agent runtime. Packaged Electron builds still resolve the Pi agen
 
 ### 2. Authentication
 
-Pi connections resolve credentials from the encrypted credential store at session start. Leftover Anthropic / Claude Max / `anthropic-messages` connections are marked unavailable and do not inject `ANTHROPIC_*` or `CLAUDE_CODE_OAUTH_TOKEN`.
+Pi connections resolve credentials from the encrypted credential store at session start. Official Anthropic login / Claude Max connections stay unavailable and do not inject `ANTHROPIC_*` or `CLAUDE_CODE_OAUTH_TOKEN`. Custom Anthropic Messages endpoints are Pi-compatible connections and use the endpoint's own API key, including an official API key pointed at `https://api.anthropic.com`.
 
 ### 3. AgentEvent Type Mismatches
 

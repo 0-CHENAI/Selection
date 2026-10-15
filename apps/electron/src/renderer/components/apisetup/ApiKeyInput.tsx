@@ -1,5 +1,11 @@
 import { parseTokenCount, formatTokenInput } from './token-count-input'
 import { MIN_CUSTOM_CONTEXT_WINDOW, MAX_CUSTOM_CONTEXT_WINDOW, MIN_CUSTOM_MAX_TOKENS, MAX_CUSTOM_MAX_TOKENS } from '@config/model-image-support'
+import {
+  CUSTOM_MODEL_FETCH_DEBOUNCE_MS,
+  customEndpointModelsBlockSave,
+  customModelFieldMode,
+  selectionAfterAutoFetch,
+} from '@config/custom-endpoint-models'
 import { THINKING_LEVELS, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 /**
  * ApiKeyInput - Reusable API key entry form control
@@ -39,6 +45,8 @@ import { pickTierDefaults, resolveTierModels, type PiModelInfo } from "./tier-mo
 import {
   buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
+  shouldAutoProbeModelCatalog,
+  showCustomFormatPicker,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
   type PresetKey,
@@ -351,7 +359,9 @@ export function ApiKeyInput({
   )
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
   const [customApi, setCustomApi] = useState<CustomEndpointApi>(() => {
-    if (initialValues?.customApi === 'openai-completions') return initialValues.customApi
+    if (initialValues?.customApi === 'anthropic-messages' || initialValues?.customApi === 'openai-completions') {
+      return initialValues.customApi
+    }
     return 'openai-completions'
   })
   const [modelError, setModelError] = useState<string | null>(null)
@@ -380,6 +390,13 @@ export function ApiKeyInput({
   const [remoteModelsFailed, setRemoteModelsFailed] = useState(false)
   const [remoteModelsNonce, setRemoteModelsNonce] = useState(0)
   const remoteModelsAbortRef = useRef<AbortController | null>(null)
+  const fetchModelsAbortRef = useRef<AbortController | null>(null)
+  const fetchRequestSignatureRef = useRef('')
+  const modelsEditedRef = useRef(false)
+  const [modelsEdited, setModelsEdited] = useState(() => Boolean(initialValues?.connectionDefaultModel?.trim()))
+  const [fetchModelsPhase, setFetchModelsPhase] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle')
+  const [modelFetchNonce, setModelFetchNonce] = useState(0)
+  modelsEditedRef.current = modelsEdited
   const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
     () => ({ ...initialValues?.modelImageCaps }),
   )
@@ -465,14 +482,18 @@ export function ApiKeyInput({
     loadPiModels(activePreset)
   }, [activePreset, loadPiModels])
 
-  // Custom OpenAI-compatible endpoints: read /v1/models after the user pastes a key.
-  // ORDER uses the catalog for the picker; custom/Manifest use it to prefill limits.
+  // Branded OpenAI presets still read /v1/models after the key is pasted.
+  // Custom endpoints use the debounced server fetch below.
   useEffect(() => {
-    if (!isCustomEndpointForm) {
+    if (activePreset === 'custom') return
+
+    if (!isCustomEndpointForm || !shouldAutoProbeModelCatalog(activePreset, customApi)) {
+      remoteModelsAbortRef.current?.abort()
       setRemoteModels([])
       setRemoteModelsError(null)
       setRemoteModelsFailed(false)
       setRemoteModelsLoading(false)
+      setFetchModelsPhase('idle')
       return
     }
 
@@ -528,7 +549,7 @@ export function ApiKeyInput({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [isCustomEndpointForm, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
+  }, [activePreset, isCustomEndpointForm, customApi, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
 
   // Whether to show 3 tier dropdowns instead of text input
   const hasPiModels = isPiApiKeyFlow
@@ -546,6 +567,13 @@ export function ApiKeyInput({
     }
     if (preset.key === 'custom') {
       setBaseUrl('')
+      setModelsEdited(false)
+      setConnectionDefaultModel('')
+      setRemoteModels([])
+      setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
+      setFetchModelsPhase('idle')
+      fetchRequestSignatureRef.current = ''
     } else {
       setBaseUrl(preset.url)
     }
@@ -570,9 +598,10 @@ export function ApiKeyInput({
     } else if (preset.key === 'order-openai') {
       // Same hint for both ORDER endpoints — user fills Opus / Laufry / Maylo etc.
       setConnectionDefaultModel('')
+    } else if (preset.key === 'custom') {
+      setConnectionDefaultModel('')
     } else if (
-      preset.key === 'custom'
-      || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
+      OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
       || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
     ) {
       setConnectionDefaultModel(
@@ -607,11 +636,105 @@ export function ApiKeyInput({
         setConnectionDefaultModel(COMPAT_MINIMAX_DEFAULTS)
       } else if (presetKey === 'kimi-coding') {
         setConnectionDefaultModel(COMPAT_KIMI_DEFAULTS)
-      } else if (presetKey === 'openrouter' || presetKey === 'vercel-ai-gateway' || presetKey === 'custom') {
+      } else if (presetKey === 'openrouter' || presetKey === 'vercel-ai-gateway') {
         setConnectionDefaultModel(providerType === 'openai' ? COMPAT_OPENAI_DEFAULTS : COMPAT_ANTHROPIC_DEFAULTS)
       }
     }
   }
+
+  const handleFetchModels = useCallback(async (controller: AbortController) => {
+    const endpoint = baseUrl.trim()
+    const key = apiKey.trim()
+    if (!endpoint || !key) return
+    const signature = `${customApi}|${endpoint}|${key}`
+    fetchRequestSignatureRef.current = signature
+    setFetchModelsPhase('loading')
+    setRemoteModelsError(null)
+    setRemoteModelsFailed(false)
+    setRemoteModelsLoading(true)
+    try {
+      const fetchModels = window.electronAPI?.fetchCustomEndpointModels
+      if (!fetchModels) {
+        if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+        setFetchModelsPhase('error')
+        setRemoteModelsFailed(true)
+        setRemoteModels([])
+        return
+      }
+      const result = await fetchModels({ baseUrl: endpoint, apiKey: key, api: customApi })
+      if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+      if (!result.ok) {
+        setFetchModelsPhase('error')
+        setRemoteModelsFailed(true)
+        setRemoteModels([])
+        return
+      }
+      const models = result.models
+      setRemoteModels(models)
+      setRemoteModelsFailed(false)
+      if (models.length === 0) {
+        setFetchModelsPhase('empty')
+        return
+      }
+      setConnectionDefaultModel((prev) => selectionAfterAutoFetch({
+        current: prev,
+        fetchedIds: models.map((model) => model.id),
+        preserveExisting: modelsEditedRef.current,
+      }))
+      setModelImageCaps((prev) => {
+        const next = { ...prev }
+        for (const model of models) {
+          if (next[model.id] === undefined && typeof model.supportsImages === 'boolean') {
+            next[model.id] = model.supportsImages
+          }
+        }
+        return next
+      })
+      setModelError(null)
+      setFetchModelsPhase('ready')
+    } catch {
+      if (controller.signal.aborted || fetchRequestSignatureRef.current !== signature) return
+      setFetchModelsPhase('error')
+      setRemoteModelsFailed(true)
+      setRemoteModels([])
+    } finally {
+      if (!controller.signal.aborted && fetchRequestSignatureRef.current === signature) {
+        setRemoteModelsLoading(false)
+      }
+    }
+  }, [apiKey, baseUrl, customApi])
+
+  useEffect(() => {
+    if (activePreset !== 'custom') return
+    const endpoint = baseUrl.trim()
+    const key = apiKey.trim()
+    if (!endpoint || !key) {
+      fetchModelsAbortRef.current?.abort()
+      fetchRequestSignatureRef.current = ''
+      setFetchModelsPhase('idle')
+      setRemoteModelsLoading(false)
+      setRemoteModels([])
+      setRemoteModelsFailed(false)
+      setRemoteModelsError(null)
+      if (!modelsEditedRef.current) setConnectionDefaultModel('')
+      return
+    }
+    setFetchModelsPhase('loading')
+    setRemoteModels([])
+    setRemoteModelsFailed(false)
+    setRemoteModelsError(null)
+    if (!modelsEditedRef.current) setConnectionDefaultModel('')
+    const controller = new AbortController()
+    fetchModelsAbortRef.current?.abort()
+    fetchModelsAbortRef.current = controller
+    const timer = setTimeout(() => {
+      void handleFetchModels(controller)
+    }, CUSTOM_MODEL_FETCH_DEBOUNCE_MS)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [activePreset, apiKey, baseUrl, customApi, handleFetchModels, modelFetchNonce])
 
   const resolveEditableLimits = (id: string) => {
     const remote = findRemoteModel(remoteModels, id)
@@ -743,7 +866,20 @@ export function ApiKeyInput({
 
     const isUsingDefaultEndpoint = isDefaultProviderPreset || !effectiveBaseUrl
     const requiresModel = !isDefaultProviderPreset && !!effectiveBaseUrl
-    if (requiresModel && parsedModels.length === 0) {
+    if (activePreset === 'custom' && effectiveBaseUrl) {
+      const block = customEndpointModelsBlockSave({
+        hasSelection: parsedModels.length > 0,
+        phase: fetchModelsPhase,
+      })
+      if (block === 'pending') {
+        setModelError(t('apiSetup.modelsAwaitingFetch'))
+        return
+      }
+      if (block === 'missing') {
+        setModelError(t('apiSetup.defaultModelRequired'))
+        return
+      }
+    } else if (requiresModel && parsedModels.length === 0) {
       setModelError(t('apiSetup.defaultModelRequired'))
       return
     }
@@ -896,6 +1032,37 @@ export function ApiKeyInput({
               className="border-0 bg-transparent shadow-none"
               disabled={isDisabled}
             />
+          </div>
+        )}
+        {showCustomFormatPicker(activePreset) && (
+          <div className="space-y-1.5">
+            <Label>{t('apiSetup.protocol')}</Label>
+            <div className={cn(
+              "flex rounded-md shadow-minimal overflow-hidden bg-foreground-2",
+              isDisabled && "opacity-50 pointer-events-none",
+            )}>
+              {([
+                { value: 'openai-completions' as const, label: t('apiSetup.format.openaiCompatible') },
+                { value: 'anthropic-messages' as const, label: t('apiSetup.format.anthropicCompatible') },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={isDisabled}
+                  aria-pressed={customApi === value}
+                  onClick={() => setCustomApi(value)}
+                  className={cn(
+                    "flex-1 py-1.5 text-[12px] font-medium transition-colors",
+                    customApi === value
+                      ? "bg-background text-foreground shadow-minimal"
+                      : "text-foreground/50 hover:text-foreground/70",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">{t('apiSetup.protocolHint')}</p>
           </div>
         )}
       </div>
@@ -1156,6 +1323,89 @@ export function ApiKeyInput({
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}
         />
+      ) : !isDefaultProviderPreset && showCustomFormatPicker(activePreset) ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-muted-foreground font-normal">
+              {t('apiSetup.defaultModel')}{' '}
+              <span className="text-foreground/30">· {baseUrl.trim() ? t('apiSetup.required') : t('common.optional')}</span>
+            </Label>
+            <button
+              type="button"
+              onClick={() => setModelFetchNonce((n) => n + 1)}
+              disabled={isDisabled || fetchModelsPhase === 'loading' || !baseUrl.trim() || !apiKey.trim()}
+              aria-busy={fetchModelsPhase === 'loading'}
+              className={cn(
+                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] bg-background px-2.5 text-[12px] font-medium text-foreground shadow-minimal",
+                "hover:bg-foreground/5 disabled:pointer-events-none disabled:opacity-40",
+              )}
+            >
+              {fetchModelsPhase === 'loading' && <Loader2 className="size-3 animate-spin" />}
+              {fetchModelsPhase === 'loading' ? t('apiSetup.fetchingModels') : t('apiSetup.refetchModels')}
+            </button>
+          </div>
+          {customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'picker' ? (
+            <RemoteModelsPicker
+              hideLabel
+              models={remoteModels}
+              value={connectionDefaultModel}
+              loading={false}
+              disabled={isDisabled}
+              hint={`${t('apiSetup.fetchModelsReady', { count: remoteModels.length })} ${t('apiSetup.modelListHint')}`}
+              onToggle={(id) => {
+                setModelsEdited(true)
+                setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
+                setModelError(null)
+                setLimitError(null)
+              }}
+            />
+          ) : customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'manual' ? (
+            <>
+              <div className={cn(
+                "rounded-md shadow-minimal transition-colors",
+                "bg-foreground-2 focus-within:bg-background",
+                modelError && "ring-1 ring-destructive/40"
+              )}>
+                <Input
+                  id="connection-default-model"
+                  type="text"
+                  value={connectionDefaultModel}
+                  onChange={(e) => {
+                    setConnectionDefaultModel(e.target.value)
+                    setModelsEdited(true)
+                    setModelError(null)
+                    setLimitError(null)
+                  }}
+                  placeholder={t('apiSetup.modelListPlaceholder')}
+                  className="border-0 bg-transparent shadow-none"
+                  disabled={isDisabled}
+                />
+              </div>
+              <p className={cn(
+                "text-xs",
+                fetchModelsPhase === 'error' ? "text-destructive" : "text-muted-foreground",
+              )}>
+                {fetchModelsPhase === 'error' ? t('apiSetup.fetchModelsUnavailable') : t('apiSetup.fetchModelsEmpty')}
+              </p>
+              <p className="text-xs text-foreground/30">{t('apiSetup.modelListHint')}</p>
+            </>
+          ) : (
+            <div className="flex min-h-9 items-center gap-2 rounded-md bg-foreground-2 px-3 text-muted-foreground shadow-minimal">
+              {fetchModelsPhase === 'loading' && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+              <span className="text-xs">
+                {fetchModelsPhase === 'loading'
+                  ? t('apiSetup.fetchingModels')
+                  : t('apiSetup.modelsAwaitingFetch')}
+              </span>
+            </div>
+          )}
+          {connectionDefaultModel.trim() && customModelFieldMode(fetchModelsPhase, remoteModels.length) === 'pending' && (
+            <p className="text-xs text-foreground/70">{connectionDefaultModel}</p>
+          )}
+          {modelError && (
+            <p className="text-xs text-destructive">{modelError}</p>
+          )}
+        </div>
       ) : !isDefaultProviderPreset && (
         <div className="space-y-2">
           <Label htmlFor="connection-default-model" className="text-muted-foreground font-normal">
@@ -1175,6 +1425,7 @@ export function ApiKeyInput({
               value={connectionDefaultModel}
               onChange={(e) => {
                 setConnectionDefaultModel(e.target.value)
+                setModelsEdited(true)
                 setModelError(null)
                 setLimitError(null)
               }}
@@ -1193,7 +1444,7 @@ export function ApiKeyInput({
           <p className="text-xs text-foreground/30">
             {t('apiSetup.modelListHint')}
           </p>
-          {(activePreset === 'custom' || !activePreset) && (
+          {!activePreset && (
             <p className="text-xs text-foreground/30">
               {t('apiSetup.customEndpointRequired')}
             </p>

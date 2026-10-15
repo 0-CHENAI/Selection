@@ -59,17 +59,17 @@ export function validateSetupTestInput(params: {
   baseUrl?: string
   piAuthProvider?: string
 }): { valid: true } | { valid: false; error: string } {
-  if (params.provider === 'anthropic' || params.piAuthProvider === 'anthropic') {
+  if (params.provider === 'anthropic' || (params.piAuthProvider === 'anthropic' && !params.baseUrl?.trim())) {
     return {
       valid: false,
-      error: 'Anthropic connections are no longer supported. Use OpenAI Compatible or another Selection Backend provider.',
+      error: 'Anthropic official login and Claude Max are no longer supported. Use an Anthropic Messages custom endpoint, including api.anthropic.com with an API key, or another Selection Backend provider.',
     }
   }
   const hasCustomEndpoint = !!params.baseUrl?.trim()
   if (params.provider === 'pi' && hasCustomEndpoint && !params.piAuthProvider) {
     return {
       valid: false,
-      error: 'Custom endpoint requires selecting a provider preset or using OpenAI Compatible protocol.',
+      error: 'Custom endpoint requires selecting a provider preset or choosing OpenAI Compatible or Anthropic Compatible.',
     }
   }
 
@@ -143,7 +143,7 @@ export function resolveCustomEndpointSetup(input: {
   }
   return {
     authType: 'api_key_with_endpoint',
-    piAuthProvider: 'openai',
+    piAuthProvider: input.customEndpointApi === 'anthropic-messages' ? 'anthropic' : 'openai',
   }
 }
 

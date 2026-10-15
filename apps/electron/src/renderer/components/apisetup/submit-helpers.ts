@@ -39,6 +39,26 @@ const PI_AUTH_PROVIDER_ALIASES: Record<string, string> = {
   'minimax-global': 'minimax',
 }
 
+/**
+ * Automatic catalog probes send the API key as soon as it is pasted.
+ * A custom endpoint waits for the Fetch models button, which can read
+ * either an OpenAI or an Anthropic model list. Branded OpenAI presets
+ * still probe on their own.
+ */
+export function shouldAutoProbeModelCatalog(activePreset: string, customApi: CustomEndpointApi): boolean {
+  if (activePreset === 'custom') return false
+  return customApi !== 'anthropic-messages'
+}
+
+/**
+ * Custom endpoints ask the user which wire format to use.
+ * The URL is not consulted: api.anthropic.com and third-party gateways can
+ * both speak either protocol, and guessing from the host gets it wrong.
+ */
+export function showCustomFormatPicker(activePreset: string): boolean {
+  return activePreset === 'custom'
+}
+
 export function resolvePiAuthProviderForSubmit(
   activePreset: PresetKey,
   lastNonCustomPreset: PresetKey | null
@@ -62,6 +82,17 @@ export function resolvePresetStateForBaseUrlChange(params: {
   lastNonCustomPreset: PresetKey | null
 }): { activePreset: PresetKey; lastNonCustomPreset: PresetKey | null } {
   const { matchedPreset, activePreset, activePresetHasEmptyUrl, lastNonCustomPreset } = params
+
+  // A custom endpoint keeps the format buttons. Matching a built-in URL
+  // (Kimi Coding, OpenRouter, api.anthropic.com, …) must not leave Custom,
+  // or the OpenAI / Anthropic choice disappears and the URL is treated as
+  // that preset's fixed protocol.
+  if (activePreset === 'custom') {
+    return {
+      activePreset: 'custom',
+      lastNonCustomPreset,
+    }
+  }
 
   if (matchedPreset !== 'custom') {
     return {
@@ -88,6 +119,7 @@ export function resolvePresetStateForBaseUrlChange(params: {
  *
  * Submit branches:
  *  - branded openai-compat preset (Manifest, ORDER OpenAI) → openai-completions
+ *  - generic custom preset with Anthropic Messages         → anthropic-messages
  *  - generic custom preset with a base URL                 → openai-completions
  *  - everything else                                       → no customEndpoint, passthrough piAuth
  */
@@ -114,11 +146,14 @@ export function resolveCustomEndpointPayload(params: {
   const isBrandedOpenAiCompat = brandedOpenAiCompatPresets.has(activePreset) && !!baseUrl
   const isCustomEndpoint =
     (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat
+  const api: CustomEndpointApi = activePreset === 'custom' && customApi === 'anthropic-messages'
+    ? 'anthropic-messages'
+    : 'openai-completions'
 
   return {
-    customEndpoint: isCustomEndpoint ? { api: 'openai-completions' } : undefined,
+    customEndpoint: isCustomEndpoint ? { api } : undefined,
     piAuthProvider: isCustomEndpoint
-      ? 'openai'
+      ? (api === 'anthropic-messages' ? 'anthropic' : 'openai')
       : fallbackPiAuthProvider,
   }
 }

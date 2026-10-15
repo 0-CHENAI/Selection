@@ -259,6 +259,7 @@ export const RPC_CHANNELS = {
     GET_SERVER_STATUS: 'settings:getServerStatus',
   },
   pi: {
+    FETCH_CUSTOM_ENDPOINT_MODELS: 'pi:fetchCustomEndpointModels',
     GET_API_KEY_PROVIDERS: 'pi:getApiKeyProviders',
     GET_PROVIDER_BASE_URL: 'pi:getProviderBaseUrl',
     GET_PROVIDER_MODELS: 'pi:getProviderModels',

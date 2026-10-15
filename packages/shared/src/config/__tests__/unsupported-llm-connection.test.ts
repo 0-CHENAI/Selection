@@ -39,10 +39,40 @@ describe('isUnsupportedLlmConnection', () => {
     }))).toBe(true)
   })
 
-  it('marks anthropic-messages custom endpoints unsupported', () => {
+  it('keeps Anthropic Messages custom endpoints available, including the official host', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.kimi.com/coding/',
       customEndpoint: { api: 'anthropic-messages' },
+    }))).toBe(false)
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com/v1/messages',
+      customEndpoint: { api: 'anthropic-messages' },
+    }))).toBe(false)
+  })
+
+  it('keeps ORDER aliases selectable when an older save still hints Anthropic auth', () => {
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://order.ai.jxepdi.top/v1',
+      models: ['Opus', 'Laufry'],
+    }))).toBe(false)
+  })
+
+  it('rejects Pi Anthropic auth that is not a custom endpoint', () => {
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://api.minimaxi.com/anthropic',
+      customEndpoint: { api: 'anthropic-messages' },
+    }))).toBe(true)
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
     }))).toBe(true)
   })
 
@@ -77,7 +107,7 @@ describe('isSessionConnectionUnavailable', () => {
 
     expect(isSessionConnectionUnavailable('anthropic-api', connections)).toBe(true)
     expect(isSessionConnectionUnavailable('pi-anthropic', connections)).toBe(true)
-    expect(isSessionConnectionUnavailable('compat-messages', connections)).toBe(true)
+    expect(isSessionConnectionUnavailable('compat-messages', connections)).toBe(false)
     expect(isSessionConnectionUnavailable('openai', connections)).toBe(false)
     expect(isSessionConnectionUnavailable('deleted', connections)).toBe(true)
   })

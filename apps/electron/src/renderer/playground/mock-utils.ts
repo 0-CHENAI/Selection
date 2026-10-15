@@ -160,6 +160,20 @@ export const mockElectronAPI = {
     { key: 'deepseek', label: 'DeepSeek', placeholder: 'sk-...' },
   ],
   getPiProviderBaseUrl: async () => '',
+  fetchCustomEndpointModels: async () => {
+    // Playground stand-in for the main-process catalog. Do not log the key.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return {
+      ok: true as const,
+      source: 'anthropic' as const,
+      models: [
+        { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', contextWindow: 200_000 },
+        { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', contextWindow: 200_000 },
+        { id: 'kimi-k2', name: 'Kimi K2', contextWindow: 262_144 },
+        { id: 'moonshot-v1-128k', name: 'Moonshot v1 128K', contextWindow: 131_072 },
+      ],
+    }
+  },
   getPiProviderModels: async (provider: string) => {
     const MOCK_MODELS: Record<string, Array<{ id: string; name: string; costInput: number; costOutput: number; contextWindow: number; reasoning: boolean }>> = {
       'openrouter': [
