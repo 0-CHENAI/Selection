@@ -88,6 +88,7 @@ export function resolvePresetStateForBaseUrlChange(params: {
  *
  * Submit branches:
  *  - branded openai-compat preset (Manifest, ORDER OpenAI) → openai-completions
+ *  - generic custom preset with Anthropic Messages         → anthropic-messages
  *  - generic custom preset with a base URL                 → openai-completions
  *  - everything else                                       → no customEndpoint, passthrough piAuth
  */
@@ -114,11 +115,14 @@ export function resolveCustomEndpointPayload(params: {
   const isBrandedOpenAiCompat = brandedOpenAiCompatPresets.has(activePreset) && !!baseUrl
   const isCustomEndpoint =
     (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat
+  const api: CustomEndpointApi = activePreset === 'custom' && customApi === 'anthropic-messages'
+    ? 'anthropic-messages'
+    : 'openai-completions'
 
   return {
-    customEndpoint: isCustomEndpoint ? { api: 'openai-completions' } : undefined,
+    customEndpoint: isCustomEndpoint ? { api } : undefined,
     piAuthProvider: isCustomEndpoint
-      ? 'openai'
+      ? (api === 'anthropic-messages' ? 'anthropic' : 'openai')
       : fallbackPiAuthProvider,
   }
 }

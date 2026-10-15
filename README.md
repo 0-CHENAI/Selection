@@ -387,13 +387,13 @@ Additional providers are supported through a **Selection Backend API Key** or an
 | **OpenRouter** | `https://openrouter.ai/api` | Access Claude, GPT, Llama, Gemini, and hundreds of other models through a single API key. Use `provider/model-name` format (e.g. `anthropic/claude-opus-4.7`). |
 | **Vercel AI Gateway** | `https://ai-gateway.vercel.sh` | Route requests through Vercel's AI Gateway with built-in observability and caching. |
 | **Ollama** | `http://localhost:11434` | Run open-source models locally. No API key required. |
-| **Custom** | Any URL | Any OpenAI Compatible endpoint. |
+| **Custom** | Any URL | OpenAI Compatible or Anthropic Messages endpoints (Kimi, MiniMax, GLM, DeepSeek, Qwen, and other gateways). |
 
 ### Architecture
 
 Selection uses a single agent runtime:
 
-- **Pi** — powered by the Pi SDK. ChatGPT Plus (Codex OAuth), GitHub Copilot OAuth, OpenAI API keys, Bedrock, and OpenAI Compatible custom endpoints all run through this backend. Anthropic official API / Claude Max OAuth / `anthropic-messages` are no longer supported.
+- **Pi** — powered by the Pi SDK. ChatGPT Plus (Codex OAuth), GitHub Copilot OAuth, OpenAI API keys, Bedrock, OpenAI Compatible custom endpoints, and Anthropic Messages custom endpoints all run through this backend. Anthropic's official API key and Claude Max OAuth are not supported.
 
 ## Configuration
 

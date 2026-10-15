@@ -483,16 +483,16 @@ export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
   'This connection is no longer supported. Reconfigure it with OpenAI Compatible or another Selection Backend provider.';
 
 /**
- * Connections that must not create a backend or stay selectable after the
- * Anthropic runtime was removed: official Anthropic, Pi-routed Anthropic keys,
- * and custom endpoints that speak anthropic-messages.
+ * Connections that must not create a backend or stay selectable: official
+ * Anthropic API key / Claude Max, and Pi sessions pinned to the Anthropic
+ * provider. Custom endpoints that speak Anthropic Messages stay available so
+ * third-party gateways (Kimi, MiniMax, GLM, DeepSeek, Qwen) can be configured.
  */
 export function isUnsupportedLlmConnection(
   connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>,
 ): boolean {
   if (connection.providerType === 'anthropic') return true;
-  if (connection.providerType === 'pi' && connection.piAuthProvider === 'anthropic') return true;
-  if (connection.customEndpoint?.api === 'anthropic-messages') return true;
+  if (connection.providerType === 'pi' && connection.piAuthProvider === 'anthropic' && connection.customEndpoint?.api !== 'anthropic-messages') return true;
   return false;
 }
 

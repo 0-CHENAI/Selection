@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER (Anthropic)",
   "apiSetup.preset.orderOpenai": "ORDER (OpenAI)",
   "apiSetup.protocol": "Protokół",
-  "apiSetup.protocolHint": "Większość API zewnętrznych (Ollama, vLLM, DashScope) używa zgodności z OpenAI.",
+  "apiSetup.protocolHint": "Zgodność z OpenAI obejmuje Ollama, vLLM i DashScope. Zgodność z Anthropic obejmuje bramki Kimi, MiniMax, GLM, DeepSeek i Qwen mówiące Anthropic Messages. Nie włącza to oficjalnego klucza Anthropic ani Claude Max.",
   "apiSetup.reasoning": "rozumowanie",
   "apiSetup.required": "wymagane",
   "apiSetup.retryLoadModels": "Ponów",

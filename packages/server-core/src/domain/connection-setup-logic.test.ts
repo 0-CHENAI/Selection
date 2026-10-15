@@ -27,7 +27,7 @@ describe('validateSetupTestInput', () => {
 
     expect(result.valid).toBe(false)
     if (!result.valid) {
-      expect(result.error).toContain('requires selecting a provider preset')
+      expect(result.error).toContain('OpenAI Compatible or Anthropic Compatible')
     }
   })
 
@@ -39,7 +39,7 @@ describe('validateSetupTestInput', () => {
     })).toEqual({ valid: true })
   })
 
-  it('rejects leftover Anthropic provider and Pi+Anthropic auth', () => {
+  it('rejects leftover Anthropic provider and Pi+Anthropic auth without a custom URL', () => {
     expect(validateSetupTestInput({
       provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
@@ -48,6 +48,14 @@ describe('validateSetupTestInput', () => {
       provider: 'pi',
       piAuthProvider: 'anthropic',
     }).valid).toBe(false)
+  })
+
+  it('allows an Anthropic Messages custom endpoint test', () => {
+    expect(validateSetupTestInput({
+      provider: 'pi',
+      baseUrl: 'https://api.minimaxi.com/anthropic',
+      piAuthProvider: 'anthropic',
+    })).toEqual({ valid: true })
   })
 })
 
@@ -95,14 +103,14 @@ describe('resolveCustomEndpointSetup', () => {
     expect(result.name).toBeUndefined()
   })
 
-  it('forces OpenAI Compatible routing even when the leftover anthropic-messages protocol is passed', () => {
+  it('keeps Anthropic Messages custom endpoints on the Anthropic auth hint', () => {
     const result = resolveCustomEndpointSetup({
       baseUrl: 'http://127.0.0.1:8080',
       credential: 'sk-ant-local',
       customEndpointApi: 'anthropic-messages',
     })
 
-    expect(result).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
+    expect(result).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'anthropic' })
   })
 
   it('treats remote endpoints with a credential as keyed custom endpoints', () => {

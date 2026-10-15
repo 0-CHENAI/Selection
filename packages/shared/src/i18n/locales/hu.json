@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER (Anthropic)",
   "apiSetup.preset.orderOpenai": "ORDER (OpenAI)",
   "apiSetup.protocol": "Protokoll",
-  "apiSetup.protocolHint": "A legtöbb harmadik féltől származó API (Ollama, vLLM, DashScope) OpenAI-kompatibilis.",
+  "apiSetup.protocolHint": "Az OpenAI-kompatibilis mód az Ollama, vLLM és DashScope végpontokhoz való. Az Anthropic-kompatibilis mód a Kimi, MiniMax, GLM, DeepSeek és Qwen Anthropic Messages átjáróihoz való. Ez nem kapcsolja be az Anthropic hivatalos API-kulcsát vagy a Claude Maxot.",
   "apiSetup.reasoning": "gondolkodás",
   "apiSetup.required": "kötelező",
   "apiSetup.retryLoadModels": "Újra",

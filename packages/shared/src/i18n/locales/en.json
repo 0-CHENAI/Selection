@@ -56,7 +56,7 @@
   "apiSetup.preset.orderAnthropic": "ORDER (Anthropic)",
   "apiSetup.preset.orderOpenai": "ORDER (OpenAI)",
   "apiSetup.protocol": "Protocol",
-  "apiSetup.protocolHint": "Most third-party APIs (Ollama, vLLM, DashScope) use OpenAI Compatible.",
+  "apiSetup.protocolHint": "OpenAI Compatible covers Ollama, vLLM, and DashScope. Anthropic Compatible covers Kimi, MiniMax, GLM, DeepSeek, and Qwen gateways that speak Anthropic Messages. This does not enable Anthropic's official API key or Claude Max.",
   "apiSetup.reasoning": "reasoning",
   "apiSetup.required": "required",
   "apiSetup.retryLoadModels": "Retry",

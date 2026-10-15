@@ -39,11 +39,12 @@ describe('isUnsupportedLlmConnection', () => {
     }))).toBe(true)
   })
 
-  it('marks anthropic-messages custom endpoints unsupported', () => {
+  it('keeps Anthropic Messages custom endpoints available', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
       customEndpoint: { api: 'anthropic-messages' },
-    }))).toBe(true)
+    }))).toBe(false)
   })
 
   it('keeps OpenAI Compatible and other Pi providers supported', () => {
@@ -77,7 +78,7 @@ describe('isSessionConnectionUnavailable', () => {
 
     expect(isSessionConnectionUnavailable('anthropic-api', connections)).toBe(true)
     expect(isSessionConnectionUnavailable('pi-anthropic', connections)).toBe(true)
-    expect(isSessionConnectionUnavailable('compat-messages', connections)).toBe(true)
+    expect(isSessionConnectionUnavailable('compat-messages', connections)).toBe(false)
     expect(isSessionConnectionUnavailable('openai', connections)).toBe(false)
     expect(isSessionConnectionUnavailable('deleted', connections)).toBe(true)
   })

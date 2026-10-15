@@ -141,7 +141,7 @@ describe('validateSetupTestInput', () => {
     })
     expect(result.valid).toBe(false)
     if (!result.valid) {
-      expect(result.error).toContain('requires selecting a provider preset')
+      expect(result.error).toContain('OpenAI Compatible or Anthropic Compatible')
     }
   })
 

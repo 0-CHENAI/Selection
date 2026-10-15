@@ -112,6 +112,9 @@ export function buildCustomEndpointModelDef(
     maxTokens,
     // `store` is an OpenAI-only field. `developer` is the reasoning-model
     // alias for a system prompt; compatible gateways reject that role.
+    // Third-party Anthropic Messages endpoints often return thinking blocks
+    // with an empty signature and require that block on the next turn.
     ...(api === 'openai-completions' ? { compat: { supportsStore: false, supportsDeveloperRole: false } } : {}),
+    ...(api === 'anthropic-messages' ? { compat: { allowEmptySignature: true } } : {}),
   }
 }

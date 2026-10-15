@@ -116,7 +116,7 @@ describe('resolveCustomEndpointPayload', () => {
     })
   })
 
-  it('forces OpenAI Compatible for the generic custom preset', () => {
+  it('keeps Anthropic Messages for the generic custom preset', () => {
     expect(resolveCustomEndpointPayload({
       activePreset: 'custom',
       baseUrl: 'https://my-endpoint.example.com',
@@ -124,8 +124,8 @@ describe('resolveCustomEndpointPayload', () => {
       brandedOpenAiCompatPresets: BRANDED,
       fallbackPiAuthProvider: undefined,
     })).toEqual({
-      customEndpoint: { api: 'openai-completions' },
-      piAuthProvider: 'openai',
+      customEndpoint: { api: 'anthropic-messages' },
+      piAuthProvider: 'anthropic',
     })
   })
 

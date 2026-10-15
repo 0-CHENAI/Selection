@@ -351,7 +351,9 @@ export function ApiKeyInput({
   )
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
   const [customApi, setCustomApi] = useState<CustomEndpointApi>(() => {
-    if (initialValues?.customApi === 'openai-completions') return initialValues.customApi
+    if (initialValues?.customApi === 'anthropic-messages' || initialValues?.customApi === 'openai-completions') {
+      return initialValues.customApi
+    }
     return 'openai-completions'
   })
   const [modelError, setModelError] = useState<string | null>(null)
@@ -896,6 +898,36 @@ export function ApiKeyInput({
               className="border-0 bg-transparent shadow-none"
               disabled={isDisabled}
             />
+          </div>
+        )}
+        {activePreset === 'custom' && baseUrl.trim() && (
+          <div className="space-y-1.5">
+            <Label>{t('apiSetup.protocol')}</Label>
+            <div className={cn(
+              "flex rounded-md shadow-minimal overflow-hidden bg-foreground-2",
+              isDisabled && "opacity-50 pointer-events-none",
+            )}>
+              {([
+                { value: 'openai-completions' as const, label: t('apiSetup.format.openaiCompatible') },
+                { value: 'anthropic-messages' as const, label: t('apiSetup.format.anthropicCompatible') },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={isDisabled}
+                  onClick={() => setCustomApi(value)}
+                  className={cn(
+                    "flex-1 py-1.5 text-[12px] font-medium transition-colors",
+                    customApi === value
+                      ? "bg-background text-foreground shadow-minimal"
+                      : "text-foreground/50 hover:text-foreground/70",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">{t('apiSetup.protocolHint')}</p>
           </div>
         )}
       </div>

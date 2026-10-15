@@ -367,10 +367,11 @@ export function resolveSetupTestConnectionHint(args: {
 }): Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'> {
   if (args.provider === 'pi') {
     if (args.customEndpoint && args.baseUrl?.trim()) {
+      const anthropicMessages = args.customEndpoint.api === 'anthropic-messages';
       return {
         providerType: 'pi_compat',
-        piAuthProvider: 'openai',
-        customEndpoint: { ...args.customEndpoint, api: 'openai-completions' },
+        piAuthProvider: anthropicMessages ? 'anthropic' : 'openai',
+        customEndpoint: { ...args.customEndpoint, api: anthropicMessages ? 'anthropic-messages' : 'openai-completions' },
       };
     }
 
