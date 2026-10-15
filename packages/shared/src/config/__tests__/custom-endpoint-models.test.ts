@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
   anthropicCompatibleModelsUrl,
   fetchCustomEndpointModels,
+  customEndpointModelsBlockSave,
+  customModelFieldMode,
   mergeFetchedModelSelection,
   modelListAuthHeaders,
+  selectionAfterAutoFetch,
   openaiCompatibleModelsUrl,
   planCustomEndpointModelRequests,
   sameHostOpenAiModelsUrl,
@@ -241,6 +244,42 @@ describe('fetchCustomEndpointModels', () => {
     })
     expect(called).toBe(false)
     expect(result).toEqual({ ok: false, error: 'missing_input' })
+  })
+})
+
+describe('custom model field after an automatic fetch', () => {
+  test('uses a picker only when the catalog has models', () => {
+    expect(customModelFieldMode('ready', 3)).toBe('picker')
+    expect(customModelFieldMode('loading', 3)).toBe('picker')
+    expect(customModelFieldMode('loading', 0)).toBe('pending')
+    expect(customModelFieldMode('idle', 0)).toBe('pending')
+    expect(customModelFieldMode('empty', 0)).toBe('manual')
+    expect(customModelFieldMode('error', 4)).toBe('manual')
+  })
+
+  test('preselects the fetched list and keeps the first id as the default', () => {
+    expect(selectionAfterAutoFetch({
+      current: 'claude-opus-4-8, claude-sonnet-4-6',
+      fetchedIds: ['kimi-k2', 'moonshot-v1-128k'],
+      preserveExisting: false,
+    })).toBe('kimi-k2, moonshot-v1-128k')
+  })
+
+  test('does not replace models already saved or typed', () => {
+    expect(selectionAfterAutoFetch({
+      current: 'my-model, gpt-4o',
+      fetchedIds: ['kimi-k2', 'gpt-4o'],
+      preserveExisting: true,
+    })).toBe('my-model, gpt-4o')
+  })
+
+  test('blocks save until a fetch finishes or the user types a model', () => {
+    expect(customEndpointModelsBlockSave({ hasSelection: false, phase: 'idle' })).toBe('pending')
+    expect(customEndpointModelsBlockSave({ hasSelection: false, phase: 'loading' })).toBe('pending')
+    expect(customEndpointModelsBlockSave({ hasSelection: false, phase: 'error' })).toBe('missing')
+    expect(customEndpointModelsBlockSave({ hasSelection: false, phase: 'empty' })).toBe('missing')
+    expect(customEndpointModelsBlockSave({ hasSelection: true, phase: 'loading' })).toBeNull()
+    expect(customEndpointModelsBlockSave({ hasSelection: true, phase: 'error' })).toBeNull()
   })
 })
 

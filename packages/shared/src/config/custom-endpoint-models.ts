@@ -173,6 +173,43 @@ export function dedupeListedModels(models: readonly ProviderListedModel[]): Prov
  * that are not already present. When the field is still the untouched
  * suggestion, replace it with the fetched list.
  */
+export const CUSTOM_MODEL_FETCH_DEBOUNCE_MS = 400
+
+export type CustomModelFetchPhase = 'idle' | 'loading' | 'ready' | 'empty' | 'error'
+
+/** Picker when a catalog is available. Manual entry only after an empty or failed fetch. */
+export function customModelFieldMode(
+  phase: CustomModelFetchPhase,
+  fetchedCount: number,
+): 'pending' | 'picker' | 'manual' {
+  if (phase === 'empty' || phase === 'error') return 'manual'
+  if (fetchedCount > 0 && (phase === 'ready' || phase === 'loading')) return 'picker'
+  return 'pending'
+}
+
+/**
+ * A fresh catalog preselects every fetched id. The first id is the default
+ * model. A saved or hand-edited selection is returned unchanged.
+ */
+export function selectionAfterAutoFetch(opts: {
+  current: string
+  fetchedIds: readonly string[]
+  preserveExisting: boolean
+}): string {
+  if (opts.preserveExisting) return opts.current
+  return opts.fetchedIds.map((id) => id.trim()).filter(Boolean).join(', ')
+}
+
+/** Block save when a custom endpoint has no selected models yet. */
+export function customEndpointModelsBlockSave(opts: {
+  hasSelection: boolean
+  phase: CustomModelFetchPhase
+}): 'pending' | 'missing' | null {
+  if (opts.hasSelection) return null
+  if (opts.phase === 'idle' || opts.phase === 'loading') return 'pending'
+  return 'missing'
+}
+
 export function mergeFetchedModelSelection(
   current: string,
   fetchedIds: readonly string[],
