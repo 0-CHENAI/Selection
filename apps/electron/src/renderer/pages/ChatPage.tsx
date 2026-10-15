@@ -82,6 +82,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     workspaces,
     onRespondToPermission,
     onRespondToCredential,
+    onRespondToClarification,
     onMarkSessionRead,
     onMarkSessionUnread,
     onSetActiveViewingSession,
@@ -874,6 +875,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   onRespondToPermission={onRespondToPermission}
                   pendingCredential={undefined}
                   onRespondToCredential={onRespondToCredential}
+                  onRespondToClarification={onRespondToClarification}
                   thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
                   onThinkingLevelChange={handleThinkingLevelChange}
                   permissionMode={sessionOpts.permissionMode}
@@ -966,6 +968,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               onRespondToPermission={onRespondToPermission}
               pendingCredential={pendingCredential}
               onRespondToCredential={onRespondToCredential}
+              onRespondToClarification={onRespondToClarification}
               thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
               onThinkingLevelChange={handleThinkingLevelChange}
               permissionMode={sessionOpts.permissionMode}

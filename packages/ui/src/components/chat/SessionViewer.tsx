@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils'
 import { CHAT_LAYOUT, CHAT_CLASSES } from '../../lib/layout'
 import { PlatformProvider, type PlatformActions } from '../../context'
 import { TurnCard } from './TurnCard'
+import { ClarificationCard } from './ClarificationCard'
 import { UserMessageBubble } from './UserMessageBubble'
 import { SystemMessage } from './SystemMessage'
 import { SelectionMark } from '../SelectionMark'
@@ -166,6 +167,14 @@ export function SessionViewer({
                     content={turn.message.content}
                     type={msgType}
                   />
+                )
+              }
+
+              if (turn.type === 'clarification') {
+                return (
+                  <div key={turn.message.id} className="mt-2">
+                    <ClarificationCard message={turn.message} interactive={false} />
+                  </div>
                 )
               }
 

@@ -1784,6 +1784,7 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   'session_history',               // Read active-session source messages
   'task_context',                  // Session-local task notes, like TodoWrite
   'SubmitPlan',                     // Plan submission
+  'clarify',                        // User clarification card
   'LSP',                            // Language server (read-only)
   // Browser automation tool (canonical wrapper)
   'browser_tool',

@@ -933,7 +933,7 @@ export function EditPopover({
   }, [open])
 
   // Use App context for session management (same code path as main chat)
-  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential } = useAppShellContext()
+  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToClarification } = useAppShellContext()
   const creationJobs = useAtomValue(creationJobsAtom)
   const beginCreationAttempt = useSetAtom(beginCreationJobAttemptAtom)
   const claimCreationJob = useSetAtom(claimCreationJobAtom)
@@ -1714,6 +1714,7 @@ export function EditPopover({
                   onRespondToPermission={onRespondToPermission}
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
+                  onRespondToClarification={onRespondToClarification}
                   compactMode={true}
                   showRecordNavigation={false}
                   compactInputMaxHeight={getCompactInputMaxHeight(expandedSizeRef.current.height)}

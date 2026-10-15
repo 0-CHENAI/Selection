@@ -658,6 +658,8 @@ export interface AgentBackend {
 
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
+  /** Called when the agent asks the user to clarify. The host may reject over the round cap. */
+  onClarifyRequest: ((ask: import('@craft-agent/session-tools-core').ClarificationAsk) => import('@craft-agent/session-tools-core').ClarificationGate) | null;
   configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
   configurePresentationProtocol?: (protocol: 'native' | 'marker-v1' | 'legacy') => void;
 

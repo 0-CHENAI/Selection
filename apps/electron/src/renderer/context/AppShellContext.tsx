@@ -10,6 +10,7 @@ import * as React from 'react'
 import { createContext, useContext, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import type { ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
+import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type {
   Session,
   Workspace,
@@ -111,6 +112,11 @@ export interface AppShellContextType {
     sessionId: string,
     requestId: string,
     response: CredentialResponse
+  ) => void
+  onRespondToClarification?: (
+    sessionId: string,
+    requestId: string,
+    response: ClarificationResponseInput
   ) => void
 
   // File/URL handlers - these can open in tabs or external apps

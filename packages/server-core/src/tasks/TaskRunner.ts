@@ -3678,7 +3678,7 @@ class ActiveRun {
     this.log({ kind: 'node-finished', nodeId, sessionId, state: 'waiting-help', reason: input.problem });
     const root = this.opts.orchestratorSessionId;
     void Promise.resolve().then(() => this.deps.host.sendMessage(root,
-      `Structured worker help (only node ${JSON.stringify(nodeId)} is waiting): ${JSON.stringify(request)}\nInspect current run revision and answer with task_help. Resolve within existing authority; if the goal, locked decisions or permissions need change, record needs-user and ask the user. Unrelated tasks continue. A reply never grants permissions.`, undefined, undefined, { hidden: true })).catch(error => conductorLog.warn('help-notification-failed', { id, error }));
+      `Structured worker help (only node ${JSON.stringify(nodeId)} is waiting): ${JSON.stringify(request)}\nInspect current run revision and answer with task_help. Resolve within existing authority; if the goal, locked decisions or permissions need change, record needs-user and call clarify so the user gets the shared clarification card. Do not ask that decision in free text. Unrelated tasks continue. A reply never grants permissions.`, undefined, undefined, { hidden: true })).catch(error => conductorLog.warn('help-notification-failed', { id, error }));
     this.scheduleReady(); this.emitChanged();
     return promise;
   }

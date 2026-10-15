@@ -14,6 +14,8 @@ import { CONFIG_DIR } from '../config/paths.ts';
 import type {
   SessionToolContext,
   SessionToolCallbacks,
+  ClarificationAsk,
+  ClarificationGate,
   FileSystemInterface,
   CredentialManagerInterface,
   ValidatorInterface,
@@ -77,6 +79,7 @@ export interface ClaudeContextOptions {
   workingDirectory?: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
+  onClarifyRequest?: (ask: ClarificationAsk) => ClarificationGate;
   /** Current model image capability. Omit when unknown. */
   supportsImages?: boolean;
   /** Current session permission mode. */
@@ -94,7 +97,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, supportsImages, permissionMode } = options;
+  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, onClarifyRequest, supportsImages, permissionMode } = options;
 
   // File system implementation
   const fs: FileSystemInterface = {
@@ -117,6 +120,10 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const callbacks: SessionToolCallbacks = {
     onPlanSubmitted,
     onAuthRequest: (request) => onAuthRequest(request),
+    onClarifyRequest: onClarifyRequest ?? (() => ({
+      accepted: false,
+      reason: 'Clarification is not available in this context. Continue with your best current understanding.',
+    })),
   };
 
   // Validators implementation

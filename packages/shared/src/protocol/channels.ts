@@ -31,6 +31,7 @@ export const RPC_CHANNELS = {
     KILL_SHELL: 'sessions:killShell',
     RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
+    RESPOND_TO_CLARIFICATION: 'sessions:respondToClarification',
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',

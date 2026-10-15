@@ -80,6 +80,16 @@ function createFullMessage(): Message {
     authSourceUrl: 'https://linear.app',
     authPasswordRequired: false,
     authError: 'Invalid token',
+    clarification: {
+      requestId: 'clarify-1',
+      question: '范围是哪一年？',
+      ambiguity: 'scope',
+      selection: 'single',
+      options: [{ id: '2024', label: '2024' }],
+      round: 1,
+      status: 'pending',
+      originSessionId: 'session-1',
+    },
     authEmail: 'user@test.com',
     authWorkspace: 'test-workspace',
     isQueued: false,
@@ -130,7 +140,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
       'isError', 'attachments', 'badges', 'annotations',
       'isIntermediate', 'turnId', 'infoLevel',
       'errorCode', 'errorTitle', 'errorDetails', 'errorOriginal', 'errorCanRetry',
-      'planPath',
+      'planPath', 'clarification',
       'authRequestId', 'authRequestType', 'authSourceSlug', 'authSourceName',
       'authStatus', 'authCredentialMode', 'authHeaderName', 'authHeaderNames',
       'authLabels', 'authDescription', 'authHint', 'authSourceUrl',
@@ -179,6 +189,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
     expect(restored.errorOriginal).toBe(original.errorOriginal)
     expect(restored.errorCanRetry).toBe(original.errorCanRetry)
     expect(restored.planPath).toBe(original.planPath)
+    expect(restored.clarification).toEqual(original.clarification)
     expect(restored.authRequestId).toBe(original.authRequestId)
     expect(restored.authRequestType).toBe(original.authRequestType)
     expect(restored.authSourceSlug).toBe(original.authSourceSlug)
@@ -201,7 +212,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
   })
 
   it('role ↔ type mapping works for each MessageRole', () => {
-    const roles: MessageRole[] = ['user', 'assistant', 'tool', 'error', 'info', 'warning', 'plan', 'auth-request']
+    const roles: MessageRole[] = ['user', 'assistant', 'tool', 'error', 'info', 'warning', 'plan', 'auth-request', 'clarification']
 
     for (const role of roles) {
       const msg = createMinimalMessage(role)

@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
+import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
 import type { ManagedArtifact } from '@craft-agent/shared/protocol'
@@ -1741,6 +1742,10 @@ export default function App() {
     }
   }, [])
 
+  const handleRespondToClarification = useCallback(async (sessionId: string, requestId: string, response: ClarificationResponseInput) => {
+    await window.electronAPI.respondToClarification(sessionId, requestId, response)
+  }, [])
+
   const handleRespondToCredential = useCallback(async (sessionId: string, requestId: string, response: CredentialResponse) => {
     const success = await window.electronAPI.respondToCredential(sessionId, requestId, response)
 
@@ -2002,6 +2007,7 @@ export default function App() {
     onDeleteSession: handleDeleteSession,
     onRespondToPermission: handleRespondToPermission,
     onRespondToCredential: handleRespondToCredential,
+    onRespondToClarification: handleRespondToClarification,
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
@@ -2049,6 +2055,7 @@ export default function App() {
     handleDeleteSession,
     handleRespondToPermission,
     handleRespondToCredential,
+    handleRespondToClarification,
     handleOpenFile,
     handleOpenUrl,
     handleSelectWorkspace,

@@ -2102,6 +2102,10 @@ export class PiAgent extends BaseAgent {
       onAuthRequest: (request: unknown) => {
         this.onAuthRequest?.(request as any);
       },
+      onClarifyRequest: (ask) => this.onClarifyRequest?.(ask) ?? {
+        accepted: false,
+        reason: 'Clarification is not available in this context. Continue with your best current understanding.',
+      },
     });
     this._sessionToolContext.consumeDeveloperFeedbackApproval = (approvalToken: string, message: string) => {
       if (this.approvedDeveloperFeedbackMessages.get(approvalToken) !== message) return false;
@@ -2863,10 +2867,9 @@ export class PiAgent extends BaseAgent {
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes('abort')) {
-        if (this.abortReason === AbortReason.PlanSubmitted) {
-          return;
-        }
-        if (this.abortReason === AbortReason.AuthRequest) {
+        if (this.abortReason === AbortReason.PlanSubmitted
+          || this.abortReason === AbortReason.AuthRequest
+          || this.abortReason === AbortReason.Clarification) {
           return;
         }
         return;
@@ -3083,7 +3086,7 @@ export class PiAgent extends BaseAgent {
     this.readToolInputsByCallId.clear();
 
     // For PlanSubmitted and AuthRequest, just interrupt the turn
-    if (reason === AbortReason.PlanSubmitted || reason === AbortReason.AuthRequest) {
+    if (reason === AbortReason.PlanSubmitted || reason === AbortReason.AuthRequest || reason === AbortReason.Clarification) {
       return;
     }
 

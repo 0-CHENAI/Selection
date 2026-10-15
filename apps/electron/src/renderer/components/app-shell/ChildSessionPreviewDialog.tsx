@@ -122,6 +122,7 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
     onOpenUrl,
     onRespondToPermission,
     onRespondToCredential,
+    onRespondToClarification,
     workspaces,
   } = useAppShellContext()
   const session = useSession(sessionId)
@@ -189,6 +190,7 @@ export function ChildSessionPreviewContent({ sessionId }: { sessionId: string })
         onRespondToPermission={onRespondToPermission}
         pendingCredential={pendingCredential}
         onRespondToCredential={onRespondToCredential}
+        onRespondToClarification={onRespondToClarification}
         compactMode
         taskPreview
         disableSend
