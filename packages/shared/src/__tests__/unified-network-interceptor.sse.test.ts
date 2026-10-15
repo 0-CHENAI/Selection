@@ -285,7 +285,10 @@ describe('unified-network-interceptor SSE processors', () => {
       const trimmed = line.trim();
       if (!trimmed) { flush(); continue; }
       if (trimmed.startsWith('event:')) event = trimmed.slice(6).trim();
-      else if (trimmed.startsWith('data:')) data = trimmed.slice(5).trim();
+      else if (trimmed.startsWith('data:')) {
+        const value = trimmed.slice(5).trim();
+        data = data ? `${data}\n${value}` : value;
+      }
     }
     flush();
     return text;
@@ -404,7 +407,159 @@ describe('unified-network-interceptor SSE processors', () => {
     expect(out).toContain('"type":"signature_delta"');
     expect(out).toContain('"signature":"sig-2"');
     expect(out).not.toContain('"type":"reasoning_delta"');
+    expect(out).not.toContain('undefined');
     expect(piVisibleText(out)).toBe('答案');
+  });
+
+  it('keeps a normal Anthropic stream event-for-event', async () => {
+    const sse = [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg","usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你好"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join('');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(out).toBe(sse);
+  });
+
+  it('parses CRLF, bare CR, and a CR/LF split across chunks', async () => {
+    const crlf = 'event: content_block_start\r\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\r\n\r\n'
+      + 'event: content_block_delta\r\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}\r\n\r\n';
+    const cr = 'event: content_block_delta\rdata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"B"}}\r\r';
+    const split = encoder.encode('event: content_block_delta\r\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"C"}}\r\n\r\n');
+    const breakAt = split.indexOf(0x0d);
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const collected: Uint8Array[] = [];
+    const drained = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        collected.push(item.value);
+      }
+    })();
+    await writer.write(encoder.encode(crlf + cr));
+    await writer.write(split.slice(0, breakAt + 1));
+    await writer.write(split.slice(breakAt + 1));
+    await writer.close();
+    await drained;
+    expect(piVisibleText(decoder.decode(Buffer.concat(collected)))).toBe('ABC');
+  });
+
+  it('joins multi-line data and emits it as separate data fields', async () => {
+    const sse = [
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {',
+      'data:   "type": "content_block_delta",',
+      'data:   "index": 0,',
+      'data:   "delta": {"type": "text_delta", "text": "a\\nb"}',
+      'data: }',
+      '',
+    ].join('\n');
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('a\nb');
+    const delta = out.split('\n\n').find(frame => frame.includes('content_block_delta') && frame.includes('text_delta'));
+    expect(delta?.split('\n').filter(line => line.startsWith('data:')).length).toBeGreaterThan(1);
+    expect(delta).not.toContain('\n  "type"');
+  });
+
+  it('infers the event name when a gateway sends data only', async () => {
+    const sse = 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
+      + 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"仅数据"}}\n\n';
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('仅数据');
+    expect(out).toContain('event: content_block_delta');
+  });
+
+  it('does not concatenate a data-only event into the next event line', async () => {
+    const sse = 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n'
+      + 'event: content_block_delta\n'
+      + 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"分开"}}\n\n';
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), [sse]);
+    expect(piVisibleText(out)).toBe('分开');
+  });
+
+  it('coerces string indexes and keeps interleaved text, thinking, and tool blocks apart', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":"0","content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":"0","delta":{"type":"text_delta","text":"甲"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"乙"}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_2","name":"Read"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":"0","delta":{"type":"text_delta","text":"丙"}}\n\n',
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":2}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\\"/tmp\\"}"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('甲丙');
+    expect(out).toContain('"thinking":"乙"');
+    expect(out).toContain('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    const stopAt = out.indexOf('"stop_reason":"tool_use"');
+    const toolJsonAt = out.indexOf('"partial_json":"{\\"path\\":\\"/tmp\\"}"');
+    expect(toolJsonAt).toBeGreaterThan(-1);
+    expect(stopAt).toBeGreaterThan(toolJsonAt);
+  });
+
+  it('closes recovered blocks before stop_reason and drops an empty orphan signature', async () => {
+    const sse = [
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"正文"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":""}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('正文');
+    const textStop = out.indexOf('"index":1000000');
+    const stopReason = out.indexOf('"stop_reason":"end_turn"');
+    expect(out.slice(0, stopReason)).toContain('"type":"content_block_stop"');
+    expect(textStop).toBeGreaterThan(-1);
+    expect(stopReason).toBeGreaterThan(textStop);
+    expect(out.match(/"type":"thinking"/g)).toEqual(['"type":"thinking"']);
+  });
+
+  it('forwards a mid-stream error after closing recovered text', async () => {
+    const sse = [
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"半截"}}\n\n',
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"busy"}}\n\n',
+    ];
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream(), sse);
+    expect(piVisibleText(out)).toBe('半截');
+    expect(out.indexOf('content_block_stop')).toBeLessThan(out.indexOf('event: error'));
+    expect(out).toContain('"message":"busy"');
+  });
+
+  it('fails a huge SSE line without echoing the payload', async () => {
+    const huge = 'x'.repeat(80);
+    const sse = `event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"${huge}"}}\n\n`;
+    const out = await runThroughProcessor(createAnthropicSseStrippingStream({ maxBufferChars: 40 }), [sse]);
+    expect(out).toContain('event: error');
+    expect(out).toContain('maximum size');
+    expect(out).not.toContain(huge);
+  });
+
+  it('drops buffered tool arguments when the reader cancels', async () => {
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const firstWrite = writer.write(encoder.encode(
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_x","name":"Read"}}\n\n',
+    ));
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await firstWrite;
+    const cancel = reader.cancel();
+    await writer.close().catch(() => {});
+    await cancel;
+    const after = await reader.read();
+    expect(after.done).toBe(true);
   });
 
   describe('stripMetadataFieldsFromRawJson', () => {
