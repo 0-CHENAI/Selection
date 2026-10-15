@@ -39,6 +39,7 @@ export {
   toCustomEndpointModelPayload,
 } from './model-image-support';
 import type { CredentialManager } from '../credentials/manager.ts';
+import { isOrderGatewayUrl } from './order-gateway.ts';
 
 // ============================================================
 // Pi Model Resolver (dependency injection to avoid Pi SDK in renderer)
@@ -489,11 +490,16 @@ export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
  * Anthropic Messages endpoint stays available, including one whose URL is
  * https://api.anthropic.com. That path still uses the custom-endpoint runtime,
  * not the built-in Anthropic provider.
+ *
+ * ORDER keeps its own aliases (Opus, Laufry). Older saves still store
+ * `piAuthProvider: 'anthropic'` on that gateway; that hint is not the
+ * built-in Anthropic provider and must not hide the catalog.
  */
 export function isUnsupportedLlmConnection(
   connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'> & { baseUrl?: string },
 ): boolean {
   if (connection.providerType === 'anthropic') return true;
+  if (connection.providerType === 'pi_compat' && isOrderGatewayUrl(connection.baseUrl)) return false;
   const customAnthropicMessages = connection.providerType === 'pi_compat'
     && connection.customEndpoint?.api === 'anthropic-messages';
   if (connection.piAuthProvider === 'anthropic' && !customAnthropicMessages) return true;
@@ -776,15 +782,16 @@ export function getDefaultModelForConnection(providerType: LlmProviderType, piAu
  * @returns The resolved slug, or undefined when no connections exist
  */
 type ConnectionSlugResolveInput = Pick<LlmConnectionWithStatus, 'slug' | 'isDefault'> &
-  Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>>
+  Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint' | 'baseUrl'>>
 
 function isListedConnectionUnsupported(
-  conn: Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>>,
+  conn: Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint' | 'baseUrl'>>,
 ): boolean {
   return !!conn.providerType && isUnsupportedLlmConnection({
     providerType: conn.providerType,
     piAuthProvider: conn.piAuthProvider,
     customEndpoint: conn.customEndpoint,
+    baseUrl: conn.baseUrl,
   })
 }
 

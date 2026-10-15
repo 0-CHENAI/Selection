@@ -54,6 +54,15 @@ describe('isUnsupportedLlmConnection', () => {
     }))).toBe(false)
   })
 
+  it('keeps ORDER aliases selectable when an older save still hints Anthropic auth', () => {
+    expect(isUnsupportedLlmConnection(conn({
+      providerType: 'pi_compat',
+      piAuthProvider: 'anthropic',
+      baseUrl: 'https://order.ai.jxepdi.top/v1',
+      models: ['Opus', 'Laufry'],
+    }))).toBe(false)
+  })
+
   it('rejects Pi Anthropic auth that is not a custom endpoint', () => {
     expect(isUnsupportedLlmConnection(conn({
       providerType: 'pi',
