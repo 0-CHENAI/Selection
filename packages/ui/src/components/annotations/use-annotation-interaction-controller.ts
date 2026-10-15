@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { usePlatform } from '../../context/PlatformContext'
 import { hashAnnotationSource } from './annotation-core'
+import { isTrackedFollowUp } from './follow-up-state'
 import type { AnnotationV1 } from '@craft-agent/core'
 import {
   annotationInteractionActions,
@@ -152,7 +153,9 @@ export function useAnnotationInteractionController(namespace = '') {
       anchorY: request.anchorY ?? params.fallbackAnchor.y,
     }
 
-    openFromAnnotation(detail, noteText, request.mode, JSON.stringify([annotation.meta?.sourceContentHash, annotation.target.selectors]))
+    // A sent follow-up opens display-only, even if the caller asked to edit.
+    const mode = isTrackedFollowUp(annotation) ? 'view' : request.mode
+    openFromAnnotation(detail, noteText, mode, JSON.stringify([annotation.meta?.sourceContentHash, annotation.target.selectors]))
     return true
   }, [openFromAnnotation])
 

@@ -17,8 +17,12 @@ import {
   type AnnotationOverlayRect,
 } from '../annotations/annotation-core'
 import {
+  asRecord,
   getAnnotationNoteText,
   formatAnnotationFollowUpTooltipText,
+  getAnnotationFeedbackStatus,
+  isAnnotationFollowUpProcessing,
+  isTrackedFollowUp,
 } from '../annotations/follow-up-state'
 import {
   type PointerSnapshot,
@@ -169,6 +173,7 @@ export function AnnotatableMarkdownDocument({
     if (!activeAnnotationDetail) return null
     return (annotations ?? []).find(annotation => annotation.id === activeAnnotationDetail.annotationId) ?? null
   }, [annotations, activeAnnotationDetail])
+  const activeFollowUp = asRecord(activeAnnotation?.meta?.followUp)
 
   React.useEffect(() => {
     const root = contentLayerRef.current
@@ -245,11 +250,13 @@ export function AnnotatableMarkdownDocument({
   }, [pendingSelection, openFollowUpFromSelection])
 
   const handleRequestFollowUpEdit = React.useCallback(() => {
+    if (isTrackedFollowUp(activeAnnotation)) return
     requestEdit()
-  }, [requestEdit])
+  }, [requestEdit, activeAnnotation])
 
   const handleSubmitFollowUp = React.useCallback(async (note: string) => {
     if (savingFollowUp.current) return
+    if (activeAnnotationDetail && isTrackedFollowUp(activeAnnotation)) return
     savingFollowUp.current = true
     setFollowUpError(undefined)
     try {
@@ -312,9 +319,10 @@ export function AnnotatableMarkdownDocument({
 
   const handleDeleteActiveAnnotation = React.useCallback(() => {
     if (!onRemoveAnnotation || !activeAnnotationDetail) return
+    if (isAnnotationFollowUpProcessing(activeAnnotation)) return
     onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
     markDeleteSuccess()
-  }, [onRemoveAnnotation, activeAnnotationDetail, messageId, markDeleteSuccess])
+  }, [onRemoveAnnotation, activeAnnotationDetail, activeAnnotation, messageId, markDeleteSuccess])
 
   const handleOpenAnnotationDetail = React.useCallback((
     annotationId: string,
@@ -325,10 +333,11 @@ export function AnnotatableMarkdownDocument({
   ) => {
     const annotation = (annotations ?? []).find(item => item.id === annotationId)
     const noteText = annotation ? getAnnotationNoteText(annotation) : ''
+    const openMode: AnnotationIslandMode = isTrackedFollowUp(annotation) ? 'view' : mode
 
     setSelectionMenuTransitionConfig(buildAnnotationChipEntryTransition())
     triggerSelectionMenuEntryReplay()
-    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
+    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, openMode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
     selectionMenuOpenedAtRef.current = Date.now()
   }, [annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
@@ -651,6 +660,12 @@ export function AnnotatableMarkdownDocument({
       onRequestEdit={handleRequestFollowUpEdit}
       onSubmit={handleSubmitFollowUp}
       onDelete={activeAnnotationDetail ? handleDeleteActiveAnnotation : undefined}
+      feedbackStatus={getAnnotationFeedbackStatus(activeAnnotation)}
+      feedbackResolved={activeFollowUp?.userResolved === true}
+      onResolveFeedback={onUpdateAnnotation && activeAnnotation && activeFollowUp?.status === 'delivered'
+        ? () => Promise.resolve(onUpdateAnnotation(messageId, activeAnnotation.id, {
+            meta: { ...activeAnnotation.meta, followUp: { ...activeFollowUp, userResolved: true } },
+          })) : undefined}
       sendMessageKey={sendMessageKey}
       transitionConfig={selectionMenuTransitionConfig}
       onExitComplete={handleSelectionMenuExitComplete}

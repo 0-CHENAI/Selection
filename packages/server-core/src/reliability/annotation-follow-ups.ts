@@ -2,6 +2,17 @@ import { createHash } from 'node:crypto'
 import type { AnnotationFeedbackStatus, AnnotationV1, Message } from '@craft-agent/core/types'
 import type { SendMessageOptions } from '@craft-agent/shared/protocol'
 
+export const FOLLOW_UP_PROCESSING_LOCKED_ERROR = 'Follow-up is processing and cannot be edited or deleted'
+
+/** Processing follow-ups stay immutable until the runtime leaves `running`. */
+export function assertFollowUpMutable(annotation: { meta?: { followUp?: unknown } } | null | undefined): void {
+  const followUp = annotation?.meta?.followUp
+  if (!followUp || typeof followUp !== 'object' || Array.isArray(followUp)) return
+  if ((followUp as { status?: unknown }).status === 'running') {
+    throw new Error(FOLLOW_UP_PROCESSING_LOCKED_ERROR)
+  }
+}
+
 /** A rendered-text range is only valid against the raw message version it was selected from. */
 export function assertAnnotationSource(content: string, annotation: AnnotationV1): string {
   const hash = createHash('sha256').update(content).digest('hex')

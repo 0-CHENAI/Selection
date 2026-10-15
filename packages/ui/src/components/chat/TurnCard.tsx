@@ -80,6 +80,8 @@ import {
   formatAnnotationFollowUpTooltipText,
   getAnnotationNoteText,
   getAnnotationFeedbackStatus,
+  isAnnotationFollowUpProcessing,
+  isTrackedFollowUp,
 } from '../annotations/follow-up-state'
 import {
   ANNOTATION_PREFIX_SUFFIX_WINDOW,
@@ -2313,8 +2315,10 @@ export function ResponseCard({
   }, [pendingSelection, openFollowUpFromSelection])
 
   const handleRequestFollowUpEdit = useCallback(() => {
+    // A sent follow-up stays display-only, including while it is processing.
+    if (isTrackedFollowUp(activeAnnotation)) return
     requestEdit()
-  }, [requestEdit])
+  }, [requestEdit, activeAnnotation])
 
   const savingFollowUp = useRef(false)
   const saveFollowUp = useCallback(async (note: string): Promise<{
@@ -2324,6 +2328,7 @@ export function ResponseCard({
     selectedText: string
   } | null> => {
     if (savingFollowUp.current) return null
+    if (activeAnnotationDetail && isTrackedFollowUp(activeAnnotation)) return null
     savingFollowUp.current = true
     try {
     const normalizedNote = note.trim()
@@ -2476,12 +2481,13 @@ export function ResponseCard({
 
     const annotation = (annotations ?? []).find(item => item.id === annotationId)
     const noteText = annotation ? getAnnotationNoteText(annotation) : ''
+    const openMode: AnnotationIslandMode = isTrackedFollowUp(annotation) ? 'view' : mode
 
     const transition = buildAnnotationChipEntryTransition()
 
     setSelectionMenuTransitionConfig(transition)
     triggerSelectionMenuEntryReplay()
-    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
+    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, openMode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
   }, [allowAnnotationIsland, annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
   useEffect(() => {
@@ -2515,10 +2521,11 @@ export function ResponseCard({
 
   const handleDeleteActiveAnnotation = useCallback(() => {
     if (!onRemoveAnnotation || !messageId || !activeAnnotationDetail) return
+    if (isAnnotationFollowUpProcessing(activeAnnotation)) return
 
     onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
     markDeleteSuccess()
-  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, markDeleteSuccess])
+  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, activeAnnotation, markDeleteSuccess])
 
   const handleSelectionPointerDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     selectionStartedInContentRef.current = true

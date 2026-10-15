@@ -17,7 +17,7 @@ import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperat
 import { assertOfficeRevisionTool } from '../reliability/office-tool-policy'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
-import { assertAnnotationSource, linkAnnotationFollowUpResults, prepareAnnotationFollowUps, setAnnotationFeedbackStatus } from '../reliability/annotation-follow-ups'
+import { assertAnnotationSource, assertFollowUpMutable, linkAnnotationFollowUpResults, prepareAnnotationFollowUps, setAnnotationFeedbackStatus } from '../reliability/annotation-follow-ups'
 import { runtimeProtectedVersions } from '../reliability/version-retention'
 import { requiresProjectValidation } from '../reliability/project-validation-scope'
 import { deliverySnapshot } from '../reliability/delivery-snapshot'
@@ -6626,6 +6626,9 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    const current = existing[idx]!
+    assertFollowUpMutable(current)
+
     if (patch.target?.source?.messageId && patch.target.source.messageId !== messageId) {
       sessionLog.warn(`Cannot update annotation: target source.messageId mismatch in patch (${patch.target.source.messageId} !== ${messageId})`)
       return
@@ -6636,7 +6639,6 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    const current = existing[idx]!
     const resolution = (patch.meta?.followUp as Record<string, unknown> | undefined)?.userResolved === true
     const followUp = current.meta?.followUp as Record<string, unknown> | undefined
     const requestedFollowUp = patch.meta?.followUp as Record<string, unknown> | undefined
@@ -6743,11 +6745,13 @@ export class SessionManager implements ISessionManager {
     }
 
     const existing = message.annotations ?? []
-    if (!existing.some(a => a.id === annotationId)) {
+    const current = existing.find(a => a.id === annotationId)
+    if (!current) {
       sessionLog.warn(`Cannot remove annotation: annotation ${annotationId} not found on message ${messageId}`)
       return
     }
 
+    assertFollowUpMutable(current)
     message.annotations = existing.filter(a => a.id !== annotationId)
     this.persistSession(managed)
     this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)

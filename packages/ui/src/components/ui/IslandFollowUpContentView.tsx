@@ -1,6 +1,6 @@
 import type { AnnotationFeedbackStatus } from '@craft-agent/core'
 import * as React from 'react'
-import { ChevronDown, Send, LoaderCircle, Clock3, AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react'
+import { ChevronDown, Send, LoaderCircle, Clock3, AlertCircle, CheckCircle2, PauseCircle, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { IslandContentView, type IslandMorphTarget } from './Island'
 import {
@@ -90,7 +90,11 @@ export function IslandFollowUpContentView({
   const [resolutionError, setResolutionError] = React.useState<string>()
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const measureTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
-  const isViewMode = mode === 'view'
+  // Any tracked status means the follow-up was sent (processing, answered, or
+  // another terminal/queued state). That card is display-only. Unsent drafts
+  // have no status and keep delete / cancel / edit.
+  const isSentFollowUp = Boolean(feedbackStatus)
+  const isViewMode = mode === 'view' || isSentFollowUp
   const isEmpty = !isViewMode && value.trim().length === 0
   const canSubmitAndSend = !isViewMode && !!onSubmitAndSend
   const minInputHeight = isViewMode ? 20 : 44
@@ -154,8 +158,19 @@ export function IslandFollowUpContentView({
   return (
     <IslandContentView id={id} anchorX="center" anchorY="top" morphFrom={morphFrom} lockScroll={lockScroll} blockOutsideInteraction={blockOutsideInteraction}>
       <div className="w-[330px] px-3 pb-3 pt-3 space-y-2.5 select-none">
-        <div className="flex items-center">
+        <div className="flex items-center justify-between gap-2">
           <div className="pl-[4px] text-sm font-medium">{title}</div>
+          {isSentFollowUp && (
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label={t('common.close')}
+              title={t('common.close')}
+              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-foreground/55 hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
         </div>
 
         {isViewMode && feedbackStatus && feedbackStatusLabel && (
@@ -250,7 +265,7 @@ export function IslandFollowUpContentView({
               .finally(() => { resolving.current = false; setResolutionPending(false) })
           }}>{t('chat.artifactVersions.resolve')}</button>}
 
-        <div className="flex justify-between items-center pt-1 shrink-0">
+        {!isSentFollowUp && <div className="flex justify-between items-center pt-1 shrink-0">
           <div>
             {onDelete && (
               <button
@@ -336,7 +351,7 @@ export function IslandFollowUpContentView({
               </button>
             )}
           </div>
-        </div>
+        </div>}
       </div>
     </IslandContentView>
   )

@@ -333,6 +333,7 @@
   "chat.followUpRecoveredResult": "Zobacz odzyskaną odpowiedź",
   "chat.followUpRevisionResult": "Zobacz poprawkę",
   "chat.followUpSaveAndSend": "Zapisz i wyślij",
+  "chat.followUps": "Dopytania",
   "chat.goToRecord": "Przejdź do wpisu {{number}}: {{title}}",
   "chat.hideTechnicalDetails": "Ukryj szczegóły techniczne",
   "chat.imageLoadFailed": "Nie udało się wczytać obrazu",

@@ -333,6 +333,7 @@
   "chat.followUpRecoveredResult": "查看恢复的答案",
   "chat.followUpRevisionResult": "查看修订结果",
   "chat.followUpSaveAndSend": "保存并发送",
+  "chat.followUps": "追问",
   "chat.goToRecord": "跳转到第 {{number}} 条记录：{{title}}",
   "chat.hideTechnicalDetails": "隐藏技术详情",
   "chat.imageLoadFailed": "图片加载失败",

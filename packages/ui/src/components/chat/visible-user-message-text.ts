@@ -2,6 +2,7 @@ import type { ContentBadge } from '@craft-agent/core'
 import { sanitizeUserMessageForDisplay } from '@craft-agent/shared/agent/user-message-sanitize'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { parseArtifactRestoreDisplay } from './artifact-restore-display'
+import { localizeFollowUpSectionHeading } from './follow-up-display'
 
 function isHiddenCopyRange(badge: ContentBadge): boolean {
   return badge.type === 'context'
@@ -47,6 +48,9 @@ export function getVisibleUserMessageSource(
 export function getUserMessageCopyText(
   content: string,
   badges: readonly ContentBadge[] = [],
+  followUpHeading?: string,
 ): string {
-  return markdownToPlainText(getVisibleUserMessageSource(content, badges))
+  const visible = getVisibleUserMessageSource(content, badges)
+  const localized = followUpHeading ? localizeFollowUpSectionHeading(visible, followUpHeading) : visible
+  return markdownToPlainText(localized)
 }

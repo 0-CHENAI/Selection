@@ -333,6 +333,7 @@
   "chat.followUpRecoveredResult": "Helyreállított válasz megtekintése",
   "chat.followUpRevisionResult": "Módosítás megtekintése",
   "chat.followUpSaveAndSend": "Mentés és küldés",
+  "chat.followUps": "Követő kérdések",
   "chat.goToRecord": "Ugrás a(z) {{number}}. bejegyzéshez: {{title}}",
   "chat.hideTechnicalDetails": "Technikai részletek elrejtése",
   "chat.imageLoadFailed": "A kép betöltése nem sikerült",
