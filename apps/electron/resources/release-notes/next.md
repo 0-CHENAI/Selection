@@ -72,6 +72,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **OAuth callback pages use the Selection swan** — After ChatGPT, Google, Slack, Microsoft, MCP, and WebUI authorization, the local success and error pages still showed the Craft pixel logo. Those pages now use the Selection swan for the logo and favicon. The label under the swan reads Selection in the bundled CATHALIE face, and the browser tab title says Selection.
+
 - **Faster mode switching** — Switching between NORM and PRO opens the selected mode's new-conversation composer instead of restoring its last conversation. Each mode keeps its own draft and input settings. Content cross-fades in 150 ms without large-area blur; navigation cancellation, reduced-motion support and older-runtime fallback remain available.
 
 - **Virtualized long conversations** — Messages load on first approach to the viewport. Already loaded content keeps its DOM and component state throughout the conversation; offscreen content skips layout and paint. Switching conversations releases the previous cache. Measured row heights preserve the full scrollbar and reading position. Search, conversation records and annotation jumps retain full-history indexing. Returning to the bottom resumes streaming follow. Unchanged reply Markdown is memoized; restored history skips paragraph reveal scans, empty annotation updates and repeated outline text parsing.
