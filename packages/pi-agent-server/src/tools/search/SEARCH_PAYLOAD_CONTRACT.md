@@ -14,11 +14,13 @@ Endpoint:
 Required headers:
 - `Authorization: Bearer <oauth-access-token>`
 - `chatgpt-account-id: <JWT claim https://api.openai.com/auth.chatgpt_account_id>`
+- `originator: pi` (Pi SDK Codex client identity; not `codex_cli_rs`)
+- `User-Agent: pi (<platform> <release>; <arch>)` from `getPiUserAgent()`
 - `OpenAI-Beta: responses=experimental`
 - `Content-Type: application/json`
 
 Known-good body fields for search:
-- `model: "gpt-5.3-codex"`
+- `model`: active connection model, else `PI_PREFERRED_DEFAULTS['openai-codex']` (leads with `gpt-6.1-sol`)
 - `store: false`
 - `stream: true`
 - `instructions: string`

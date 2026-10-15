@@ -80,6 +80,7 @@ export function prepareChatGptOAuth(): ChatGptPreparedFlow {
     state,
     codex_cli_simplified_flow: 'true',
     id_token_add_organizations: 'true',
+    originator: CHATGPT_OAUTH_CONFIG.ORIGINATOR,
   });
 
   return {

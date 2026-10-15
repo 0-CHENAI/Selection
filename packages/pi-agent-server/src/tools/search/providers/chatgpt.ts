@@ -13,6 +13,7 @@ import type { WebSearchProvider, WebSearchResult } from '../types.ts';
 import { parseResponsesApiResults, type ResponsesApiResponse } from './responses-api-parser.ts';
 import { isModelRejectionError } from '../../../model-resolution.ts';
 import { stripPiPrefix } from '../../../custom-endpoint-models.ts';
+import { getPiUserAgent } from '@earendil-works/pi-ai/utils/pi-user-agent';
 import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-connections.ts';
 
 /**
@@ -21,6 +22,7 @@ import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-conn
  * - store: false
  * - stream: true (backend may return JSON or SSE)
  * - instructions + tool_choice + text.verbosity
+ * - originator: pi and Pi's User-Agent (same identity as the Pi SDK Codex client)
  * - OpenAI-Beta: responses=experimental header
  *
  * If this payload changes, update:
@@ -28,7 +30,9 @@ import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-conn
  *   - ../SEARCH_PAYLOAD_CONTRACT.md
  */
 const CODEX_SEARCH_MODELS: readonly string[] = PI_PREFERRED_DEFAULTS['openai-codex'] ?? [];
-const FALLBACK_SEARCH_MODEL = CODEX_SEARCH_MODELS[0] ?? 'gpt-5.6-sol';
+const FALLBACK_SEARCH_MODEL = CODEX_SEARCH_MODELS[0] ?? 'gpt-6.1-sol';
+/** Same originator the Pi SDK sends on Codex Responses requests. */
+const CODEX_ORIGINATOR = 'pi';
 const MAX_MODEL_CANDIDATES = 4;
 const API_BASE = 'https://chatgpt.com/backend-api/codex';
 const JWT_CLAIM_PATH = 'https://api.openai.com/auth';
@@ -109,6 +113,8 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.accessToken}`,
             'chatgpt-account-id': this.accountId,
+            originator: CODEX_ORIGINATOR,
+            'User-Agent': getPiUserAgent(),
             'OpenAI-Beta': 'responses=experimental',
           },
           body: JSON.stringify(requestBody),

@@ -90,7 +90,9 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledUrl).toBe('https://chatgpt.com/backend-api/codex/responses');
     expect(calledHeaders.Authorization).toBe('Bearer my-access-token');
     expect(calledHeaders['chatgpt-account-id']).toBe('acc_12345');
-    expect(calledBody.model).toBe('gpt-5.6-sol');
+    expect(calledHeaders.originator).toBe('pi');
+    expect(calledHeaders['User-Agent']).toMatch(/^pi \(/);
+    expect(calledBody.model).toBe('gpt-6.1-sol');
     expect(calledBody.store).toBe(false);
     expect(calledBody.stream).toBe(true);
     expect(calledBody.instructions).toContain('web search assistant');
