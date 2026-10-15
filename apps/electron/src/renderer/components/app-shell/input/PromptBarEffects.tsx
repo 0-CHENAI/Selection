@@ -11,6 +11,8 @@ import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
 const EFFORT_EDGE = 11
+// Thumb diameter matches the track height so the circle stays flush and centered.
+const EFFORT_THUMB = EFFORT_EDGE * 2
 
 export function PromptThinkingSettings({
   value, levels, workMode, disabled, onChange,
@@ -81,7 +83,8 @@ export function PromptThinkingSettings({
           aria-disabled={inactive}
           style={{
             '--prompt-effort-x': stepAt(index),
-            '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + 7px)`,
+            '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
+            '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + ${EFFORT_THUMB / 2}px)`,
           } as React.CSSProperties}
           onPointerDown={event => {
             if (event.button !== 0 || inactive) return
