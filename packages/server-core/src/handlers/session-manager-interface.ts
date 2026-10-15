@@ -183,6 +183,7 @@ export interface ISessionManager {
     options?: PermissionResponseOptions,
   ): boolean
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
+  respondToClarification(sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput): Promise<boolean>
   getSessionPermissionModeState(sessionId: string): PermissionModeState | null
 
   // ---------------------------------------------------------------------------

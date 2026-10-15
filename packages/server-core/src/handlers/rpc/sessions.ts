@@ -291,6 +291,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
+  server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION, async (_ctx, sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput) => {
+    return sessionManager.respondToClarification(sessionId, requestId, response)
+  })
+
   // ==========================================================================
   // Consolidated Command Handlers
   // ==========================================================================

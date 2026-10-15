@@ -1075,6 +1075,42 @@ export function handleSessionUnshared(
   }
 }
 
+/** Append a clarification card. Only the asking session pauses. */
+export function handleClarificationRequest(
+  state: SessionState,
+  event: import('../types').ClarificationRequestEvent
+): ProcessResult {
+  const { session, streaming } = state
+  if (session.messages.some(message => message.id === event.message.id)) return { state, effects: [] }
+  return {
+    state: {
+      session: {
+        ...appendMessage(session, event.message),
+        ...(event.pause ? { isProcessing: false, processingStartedAt: undefined } : {}),
+      },
+      streaming: event.pause ? null : streaming,
+    },
+    effects: [],
+  }
+}
+
+export function handleClarificationResolved(
+  state: SessionState,
+  event: import('../types').ClarificationResolvedEvent
+): ProcessResult {
+  const { session, streaming } = state
+  return {
+    state: {
+      session: {
+        ...session,
+        messages: session.messages.map(message => message.id === event.message.id ? event.message : message),
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
 /**
  * Handle auth_request - add auth-request message to session
  * This is the unified auth flow - execution is paused until auth completes

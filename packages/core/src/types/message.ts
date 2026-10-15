@@ -14,7 +14,8 @@ export type MessageRole =
   | 'info'
   | 'warning'
   | 'plan'
-  | 'auth-request';
+  | 'auth-request'
+  | 'clarification';
 
 /**
  * Credential input modes for different auth types
@@ -301,6 +302,26 @@ export interface SourceReadProof {
   returnedTextHash: string;
 }
 
+export type ClarificationAmbiguity = 'goal' | 'scope' | 'constraints';
+export type ClarificationSelectionMode = 'single' | 'multi';
+export type ClarificationStatus = 'pending' | 'answered' | 'skipped';
+
+/** One clarification card. Not a final answer. */
+export interface ClarificationState {
+  requestId: string;
+  question: string;
+  ambiguity: ClarificationAmbiguity;
+  selection: ClarificationSelectionMode;
+  options: Array<{ id: string; label: string }>;
+  round: number;
+  status: ClarificationStatus;
+  selectedOptionIds?: string[];
+  text?: string;
+  originSessionId: string;
+  /** Copy shown on the execution root while a worker is asking. Excluded from the round cap. */
+  mirror?: boolean;
+}
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -449,6 +470,8 @@ export interface Message {
   authError?: string;             // Error message if auth failed
   authEmail?: string;             // Authenticated email (for OAuth)
   authWorkspace?: string;         // Authenticated workspace (for Slack)
+  /** Clarification card (role='clarification'). Not a final answer. */
+  clarification?: ClarificationState;
 }
 
 /**
@@ -555,6 +578,8 @@ export interface StoredMessage {
   authError?: string;
   authEmail?: string;
   authWorkspace?: string;
+  /** Clarification card (role='clarification'). Not a final answer. */
+  clarification?: ClarificationState;
   // Queued: user message that is waiting to be processed (persisted for recovery)
   isQueued?: boolean;
   /** Skill selection captured when this queued message was submitted. */

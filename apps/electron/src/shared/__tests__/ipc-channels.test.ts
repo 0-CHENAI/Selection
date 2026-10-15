@@ -241,6 +241,7 @@ const EXPECTED_CHANNELS: string[] = [
   'sessions:importRemoteTransfer',
   'sessions:killShell',
   'sessions:markAllRead',
+  'sessions:respondToClarification',
   'sessions:respondToCredential',
   'sessions:respondToPermission',
   'sessions:searchContent',

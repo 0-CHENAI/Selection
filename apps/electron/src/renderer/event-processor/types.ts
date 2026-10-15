@@ -523,6 +523,19 @@ export interface AuthRequestEvent {
   request: AuthRequest
 }
 
+export interface ClarificationRequestEvent {
+  type: 'clarification_request'
+  sessionId: string
+  message: Message
+  pause: boolean
+}
+
+export interface ClarificationResolvedEvent {
+  type: 'clarification_resolved'
+  sessionId: string
+  message: Message
+}
+
 /**
  * Auth completed event - auth request was completed (success, failure, or cancelled)
  * Updates the auth-request message status
@@ -626,6 +639,8 @@ export type AgentEvent =
   | SessionUnsharedEvent
   | AuthRequestEvent
   | AuthCompletedEvent
+  | ClarificationRequestEvent
+  | ClarificationResolvedEvent
   | SourceActivatedEvent
   | UsageUpdateEvent
   | RegenerateStartedEvent

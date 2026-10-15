@@ -7,6 +7,7 @@
  * This enables writing tool handlers once and running them in both environments.
  */
 
+import type { ClarificationAsk, ClarificationGate } from './clarification.ts';
 import type {
   AuthRequest,
   ToolResult,
@@ -56,6 +57,12 @@ export interface SessionToolCallbacks {
    * Codex: sends __CALLBACK__ message to stderr
    */
   onAuthRequest(request: AuthRequest): void;
+
+  /**
+   * Ask the user with the shared clarification card.
+   * The host enforces the round cap and pauses only when it accepts.
+   */
+  onClarifyRequest?(ask: ClarificationAsk): ClarificationGate;
 }
 
 // ============================================================

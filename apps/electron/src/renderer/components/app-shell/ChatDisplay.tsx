@@ -79,6 +79,7 @@ import {
   type UserTurn,
   type SystemTurn,
   type AuthRequestTurn,
+  ClarificationCard,
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
@@ -159,6 +160,7 @@ function getTurnKey(turn: Turn, index: number): string {
   if (turn.type === 'user') return `user-${turn.message.id}`
   if (turn.type === 'system') return `system-${turn.message.id}`
   if (turn.type === 'auth-request') return `auth-${turn.message.id}`
+  if (turn.type === 'clarification') return `clarification-${turn.message.id}`
   // Completion replaces message IDs and timestamps; neither is a React identity.
   return getAssistantTurnUiKey(turn, index)
 }
@@ -193,6 +195,7 @@ interface ChatDisplayProps {
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
   onRespondToCredential?: (sessionId: string, requestId: string, response: CredentialResponse) => void
+  onRespondToClarification?: (sessionId: string, requestId: string, response: { skipped: boolean; optionIds: string[]; text: string }) => void
   // Thinking level (session-level setting)
   /** Current thinking level ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel
@@ -544,6 +547,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onRespondToPermission,
   pendingCredential,
   onRespondToCredential,
+  onRespondToClarification,
   // Thinking level
   thinkingLevel = 'medium',
   onThinkingLevelChange,
@@ -2020,6 +2024,30 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                                 onSendMessage(lastUserMsg.content)
                               }
                             } : undefined}
+                          />
+                        </div>
+                      )
+                    }
+
+                    if (turn.type === 'clarification') {
+                      return (
+                        <div
+                          key={turnKey}
+                          data-chat-turn-key={turnKey}
+                          ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          className={cn(
+                            "mt-2 rounded-lg transition-all duration-200",
+                            isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                            isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
+                          )}
+                        >
+                          <ClarificationCard
+                            message={turn.message}
+                            interactive={turn.message.clarification?.status === 'pending'}
+                            onRespond={(response) => {
+                              const requestId = turn.message.clarification?.requestId
+                              if (requestId) onRespondToClarification?.(session.id, requestId, response)
+                            }}
                           />
                         </div>
                       )

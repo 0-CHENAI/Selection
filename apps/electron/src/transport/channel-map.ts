@@ -57,6 +57,7 @@ export const CHANNEL_MAP = {
   onTaskRunChanged: listener(RPC_CHANNELS.tasks.RUN_CHANGED),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
+  respondToClarification: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CLARIFICATION),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),
   exportSession: invoke(RPC_CHANNELS.sessions.EXPORT),
   importSession: invoke(RPC_CHANNELS.sessions.IMPORT),

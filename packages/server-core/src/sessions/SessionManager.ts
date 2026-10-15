@@ -12,6 +12,8 @@ import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, H
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
 import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
+import { buildClarificationState, clarificationContinuation, countClarificationRounds, decideClarification, normalizeClarificationResponse, type ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
+import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { assertOfficeRevisionTool } from '../reliability/office-tool-policy'
@@ -5072,6 +5074,8 @@ export class SessionManager implements ISessionManager {
         }
       }
 
+      managed.agent.onClarifyRequest = (ask) => this.beginClarification(managed, ask)
+
       // Wire up onAuthRequest to add auth message to conversation and pause execution
       managed.agent.onAuthRequest = (request) => {
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
@@ -7010,6 +7014,9 @@ export class SessionManager implements ISessionManager {
     if (this.officeRevisionRuns.has(sessionId)) throw new Error('请等待 Office 修改结束后再发送消息')
     if (managed.runtimeRecovery?.reason === 'unsupported' || managed.runtimeRecovery?.reason === 'corrupt') {
       throw new Error('Execution checkpoint requires repair or a compatible application version. Start a separate session to continue safely.')
+    }
+    if (!options?.hidden && !_isInlineFeedback && !_isProgressContinuation && !_isSourceContinuationReplay) {
+      this.supersedePendingClarification(managed)
     }
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
@@ -10533,7 +10540,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const feedbackCompletionReason = cancellationRequested() ? 'interrupted' : completionReason
       const waitingForUser = !!managed.pendingAuthRequest || managed.messages.slice(
         managed.messages.findIndex(message => message.id === feedbackOwner) + 1,
-      ).some(message => message.role === 'plan' || (message.role === 'auth-request' && message.authStatus === 'pending'))
+      ).some(message => message.role === 'plan' || (message.role === 'auth-request' && message.authStatus === 'pending') || (message.role === 'clarification' && message.clarification?.status === 'pending' && !message.clarification.mirror))
       await this.transitionAnnotationFeedback(managed, feedbackOwner,
         feedbackCompletionReason === 'interrupted' || feedbackCompletionReason === 'timeout' ? 'interrupted'
           : feedbackCompletionReason === 'complete' && waitingForUser ? 'waiting-user' : 'failed')
@@ -12802,6 +12809,149 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     } else {
       sessionLog.warn(`Cannot respond to permission - no agent for session ${sessionId}`)
       return false
+    }
+  }
+
+  /**
+   * Accept or skip a pending clarification card and continue the asking session.
+   * A mirror card on the execution root resumes the worker that asked.
+   */
+  async respondToClarification(sessionId: string, requestId: string, response: ClarificationResponseInput): Promise<boolean> {
+    const named = this.sessions.get(sessionId)
+    const namedMessage = named?.messages.find(item => item.clarification?.requestId === requestId)
+    const located = named && namedMessage ? { managed: named, message: namedMessage } : this.findClarification(requestId)
+    if (!located || located.message.clarification?.status !== 'pending') return false
+    const ask = located.message.clarification
+    const normalized = normalizeClarificationResponse(ask, response)
+    if (!normalized.ok) {
+      sessionLog.warn(`Clarification response rejected for ${requestId}: ${normalized.reason}`)
+      return false
+    }
+    const origin = this.sessions.get(ask.originSessionId)
+    if (!origin) return false
+    const previous = this.snapshotClarification(requestId)
+    this.settleClarification(requestId, normalized)
+    try {
+      await this.sendMessage(origin.id, clarificationContinuation({
+        requestId,
+        skipped: normalized.skipped,
+        labels: normalized.labels,
+        text: normalized.text,
+      }), undefined, undefined, { hidden: true })
+      return true
+    } catch (error) {
+      this.restoreClarification(previous)
+      sessionLog.warn(`Clarification continuation failed for ${requestId}: ${error instanceof Error ? error.message : String(error)}`)
+      return false
+    }
+  }
+
+  private beginClarification(managed: ManagedSession, ask: ClarificationAsk): import('@craft-agent/session-tools-core').ClarificationGate {
+    const decision = decideClarification(countClarificationRounds(managed.messages), ask.critical === true)
+    if (!decision.allow) return { accepted: false, reason: decision.reason }
+    const requestId = `clarify-${generateMessageId()}`
+    const state = buildClarificationState(ask, { requestId, round: decision.round, originSessionId: managed.id })
+    const message: Message = {
+      id: generateMessageId(),
+      role: 'clarification',
+      content: ask.question,
+      timestamp: this.monotonic(),
+      clarification: state,
+    }
+    const toolMessage = [...managed.messages].reverse().find(item => item.toolStatus === 'executing' && /(^|__)clarify$/.test(item.toolName ?? ''))
+    if (toolMessage) {
+      toolMessage.toolStatus = 'completed'
+      toolMessage.content = 'Waiting for clarification'
+      toolMessage.toolResult = 'Waiting for clarification'
+    }
+    managed.messages.push(message)
+    this.sendEvent({ type: 'clarification_request', sessionId: managed.id, message, pause: true }, managed.workspace.id)
+    const rootId = managed.executionRootSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId
+    if (rootId && rootId !== managed.id) {
+      const root = this.sessions.get(rootId)
+      if (root?.messagesLoaded) {
+        const mirror: Message = {
+          id: generateMessageId(),
+          role: 'clarification',
+          content: ask.question,
+          timestamp: this.monotonic(),
+          clarification: buildClarificationState(ask, { requestId, round: decision.round, originSessionId: managed.id, mirror: true }),
+        }
+        root.messages.push(mirror)
+        this.sendEvent({ type: 'clarification_request', sessionId: root.id, message: mirror, pause: false }, root.workspace.id)
+        this.persistSession(root)
+      }
+    }
+    if (managed.isProcessing && managed.agent) {
+      sessionLog.info(`Interrupting for clarification in session ${managed.id}`)
+      managed.agent.interruptForHandoff(AbortReason.Clarification)
+      this.setProcessing(managed, false)
+      const feedbackOwner = managed.answerDelivery?.userMessageId
+      if (feedbackOwner) void this.transitionAnnotationFeedback(managed, feedbackOwner, 'waiting-user')
+      void releaseBrowserOwnershipOnForcedStop(
+        (sid) => this.getBrowserPaneManagerForSession(sid),
+        managed.id,
+      )
+      this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage, backgroundTasksAlive: this.keepBackgroundTasksAlive }, managed.workspace.id)
+    }
+    this.persistSession(managed)
+    return { accepted: true, requestId, round: decision.round }
+  }
+
+  private findClarification(requestId: string): { managed: ManagedSession; message: Message } | undefined {
+    for (const managed of this.sessions.values()) {
+      const message = managed.messages.find(item => item.clarification?.requestId === requestId)
+      if (message) return { managed, message }
+    }
+    return undefined
+  }
+
+  private snapshotClarification(requestId: string): Array<{ message: Message; clarification: NonNullable<Message['clarification']> }> {
+    const snapshot: Array<{ message: Message; clarification: NonNullable<Message['clarification']> }> = []
+    for (const managed of this.sessions.values()) {
+      for (const message of managed.messages) {
+        if (message.clarification?.requestId === requestId) snapshot.push({ message, clarification: { ...message.clarification } })
+      }
+    }
+    return snapshot
+  }
+
+  private restoreClarification(snapshot: Array<{ message: Message; clarification: NonNullable<Message['clarification']> }>): void {
+    const sessions = new Set<ManagedSession>()
+    for (const item of snapshot) {
+      item.message.clarification = item.clarification
+      const managed = [...this.sessions.values()].find(session => session.messages.includes(item.message))
+      if (!managed) continue
+      sessions.add(managed)
+      this.sendEvent({ type: 'clarification_resolved', sessionId: managed.id, message: item.message }, managed.workspace.id)
+    }
+    for (const managed of sessions) this.persistSession(managed)
+  }
+
+  private settleClarification(requestId: string, result: { skipped: boolean; optionIds: string[]; text: string }): void {
+    for (const managed of this.sessions.values()) {
+      let changed = false
+      for (const message of managed.messages) {
+        if (message.clarification?.requestId !== requestId || message.clarification.status !== 'pending') continue
+        message.clarification = {
+          ...message.clarification,
+          status: result.skipped ? 'skipped' : 'answered',
+          selectedOptionIds: result.optionIds,
+          text: result.text,
+        }
+        changed = true
+        this.sendEvent({ type: 'clarification_resolved', sessionId: managed.id, message }, managed.workspace.id)
+      }
+      if (changed) this.persistSession(managed)
+    }
+  }
+
+  private supersedePendingClarification(managed: ManagedSession): void {
+    const requestIds = managed.messages
+      .filter(message => message.role === 'clarification' && message.clarification?.status === 'pending' && !message.clarification.mirror)
+      .map(message => message.clarification!.requestId)
+    for (const requestId of requestIds) {
+      this.settleClarification(requestId, { skipped: true, optionIds: [], text: '' })
     }
   }
 

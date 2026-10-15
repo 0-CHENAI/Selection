@@ -34,6 +34,9 @@ export enum AbortReason {
   /** Auth request triggered (OAuth, credential prompt) */
   AuthRequest = 'auth_request',
 
+  /** Clarification card is waiting for the user */
+  Clarification = 'clarification',
+
   /** New message sent while processing (silent redirect) */
   Redirect = 'redirect',
 

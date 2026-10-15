@@ -271,6 +271,7 @@ export interface ElectronAPI {
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
+  respondToClarification(sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput): Promise<boolean>
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number } | import('@craft-agent/shared/protocol').HandoverResult>

@@ -321,6 +321,7 @@ export abstract class BaseAgent implements AgentBackend {
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
+  onClarifyRequest: ((ask: import('@craft-agent/session-tools-core').ClarificationAsk) => import('@craft-agent/session-tools-core').ClarificationGate) | null = null;
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
   onSkillsListChange: ((skills: LoadedSkill[]) => void) | null = null;

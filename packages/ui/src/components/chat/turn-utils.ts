@@ -102,7 +102,14 @@ export interface AuthRequestTurn {
   timestamp: number
 }
 
-export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
+/** A clarification card. It is not the final answer. */
+export interface ClarificationTurn {
+  type: 'clarification'
+  message: Message
+  timestamp: number
+}
+
+export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn | ClarificationTurn
 
 /**
  * Build a stable UI identity key for an assistant turn card.
@@ -965,6 +972,17 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       flushCurrentTurn()
       turns.push({
         type: 'auth-request',
+        message,
+        timestamp: message.timestamp,
+      })
+      continue
+    }
+
+    if (message.role === 'clarification') {
+      if (currentTurn) currentTurn.isComplete = true
+      flushCurrentTurn()
+      turns.push({
+        type: 'clarification',
         message,
         timestamp: message.timestamp,
       })

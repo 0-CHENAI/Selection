@@ -52,6 +52,8 @@ import {
   handleSessionUnshared,
   handleAuthRequest,
   handleAuthCompleted,
+  handleClarificationRequest,
+  handleClarificationResolved,
   handleUsageUpdate,
 } from './handlers/session'
 
@@ -71,7 +73,7 @@ export function processEvent(
 ): ProcessResult {
   const hadAnswerPreview = event.type === 'text_complete' && event.answerCommitted
     && state.session.messages.some(message => message.answerPreview && message.answerRunId === event.answerRunId)
-  if (['complete', 'error', 'typed_error', 'interrupted', 'plan_submitted', 'auth_request', 'regenerate_started', 'messages_restored', 'messages_truncated'].includes(event.type)
+  if (['complete', 'error', 'typed_error', 'interrupted', 'plan_submitted', 'auth_request', 'clarification_request', 'clarification_resolved', 'regenerate_started', 'messages_restored', 'messages_truncated'].includes(event.type)
     || (event.type === 'text_complete' && event.answerCommitted)) {
     state = { ...state, session: { ...state.session, messages: state.session.messages.filter(m => !m.answerPreview) } }
   }
@@ -228,6 +230,12 @@ export function processEvent(
 
     case 'auth_completed':
       return handleAuthCompleted(state, event)
+
+    case 'clarification_request':
+      return handleClarificationRequest(state, event)
+
+    case 'clarification_resolved':
+      return handleClarificationResolved(state, event)
 
     case 'source_activated':
       // Server-side handles the auto-retry now (craft-agents-oss#804); the renderer
