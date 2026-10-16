@@ -68,8 +68,23 @@ export function clarificationSummaryLabel(
   return t('chat.clarificationAnswered_one')
 }
 
+function clarificationSummaryPreview(messages: readonly Message[], language: string | undefined): string | null {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const message of messages) {
+    const data = message.clarification
+    const line = data?.question.trim() || data?.text?.trim()
+    if (!line || seen.has(line)) continue
+    seen.add(line)
+    lines.push(line)
+  }
+  if (lines.length === 0) return null
+  if (lines.length === 1) return lines[0] ?? null
+  return lines.join(language?.startsWith('zh') ? '、' : ' · ')
+}
+
 export function ClarificationSummary({ messages, defaultExpanded = false }: ClarificationSummaryProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const settled = messages.filter(message => {
     const status = message.clarification?.status
     return status === 'answered' || status === 'skipped'
@@ -79,37 +94,42 @@ export function ClarificationSummary({ messages, defaultExpanded = false }: Clar
   const counts = clarificationOutcomeCounts(settled)
   const label = clarificationSummaryLabel(counts, t)
   const status = counts.skipped === 0 ? 'answered' : counts.answered === 0 ? 'skipped' : 'mixed'
+  const preview = clarificationSummaryPreview(settled, i18n.language)
   return (
     <section
       data-clarification-summary=""
       data-clarification-card=""
       data-clarification-status={status}
       data-clarification-open={open ? 'true' : 'false'}
-      className="mb-2 rounded-xl border border-border bg-background text-foreground"
+      className="mb-2 overflow-hidden rounded-xl border border-border bg-background text-foreground"
     >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
         className={cn(
-          'flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50',
-          'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-          open ? 'rounded-t-xl' : 'rounded-xl',
+          'flex w-full items-center gap-3 px-4 py-3 text-left',
+          'transition-colors duration-150 ease-out hover:bg-muted/40 motion-reduce:transition-none',
+          'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
         )}
       >
+        <span className="min-w-0 flex-1">
+          <span data-clarification-badge="" className="block text-sm font-medium text-foreground">
+            {label}
+          </span>
+          {!open && preview && (
+            <span data-clarification-preview="" className="mt-1 block truncate text-sm text-muted-foreground">
+              {preview}
+            </span>
+          )}
+        </span>
         <ChevronRight
           aria-hidden="true"
           className={cn(
-            'h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
+            'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
             open && 'rotate-90',
           )}
         />
-        <span
-          data-clarification-badge=""
-          className="rounded-[5px] bg-foreground/[0.06] px-1.5 py-0.5 text-[12px] font-medium leading-4 text-foreground"
-        >
-          {label}
-        </span>
       </button>
       {open && (
         <div className="flex flex-col divide-y divide-border border-t border-border">
@@ -132,6 +152,7 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
   const labels = data.options.filter(option => selected.has(option.id)).map(option => option.label)
   const skipped = data.status === 'skipped'
   const answerText = data.text?.trim()
+  const joined = labels.join(i18n.language?.startsWith('zh') ? '、' : ', ')
   return (
     <div data-clarification-detail="" data-clarification-status={data.status}>
       {showStatus && (
@@ -139,10 +160,9 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
           {clarificationSummaryLabel(skipped ? { answered: 0, skipped: 1 } : { answered: 1, skipped: 0 }, t)}
         </p>
       )}
-      <p className={cn('text-xs text-muted-foreground', showStatus && 'mt-2')}>{t('chat.clarificationTitle')}</p>
-      <h3 className="mt-1 text-sm font-medium text-foreground">{data.question}</h3>
+      <h3 className={cn('text-sm font-medium text-foreground', showStatus && 'mt-1')}>{data.question}</h3>
       {data.options.length > 0 && (
-        <ul data-clarification-options="" className="mt-2 flex flex-col gap-1">
+        <ul data-clarification-options="" className="mt-3 flex flex-col gap-2">
           {data.options.map(option => {
             const chosen = selected.has(option.id)
             return (
@@ -150,7 +170,10 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
                 key={option.id}
                 data-clarification-option={option.id}
                 data-selected={chosen ? 'true' : 'false'}
-                className={cn('text-sm', chosen ? 'font-medium text-foreground' : 'text-muted-foreground')}
+                className={cn(
+                  'rounded-lg border px-3 py-2 text-sm',
+                  chosen ? 'border-foreground bg-foreground/5 font-medium text-foreground' : 'border-border text-muted-foreground',
+                )}
               >
                 {option.label}
               </li>
@@ -159,11 +182,13 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
         </ul>
       )}
       {skipped ? (
-        <p data-clarification-skipped="" className="mt-2 text-sm text-foreground">{t('chat.clarificationSkipped')}</p>
+        <p data-clarification-skipped="" className="mt-3 rounded-[10px] bg-foreground/[0.04] px-3 py-2 text-sm text-foreground">
+          {t('chat.clarificationSkipped')}
+        </p>
       ) : (labels.length > 0 || answerText) && (
-        <div data-clarification-answer="" className="mt-2 text-sm text-foreground">
+        <div data-clarification-answer="" className="mt-3 rounded-[10px] bg-foreground/[0.04] px-3 py-2 text-sm text-foreground">
           <p className="text-xs text-muted-foreground">{t('chat.clarificationYourAnswer')}</p>
-          {labels.length > 0 && <p className="mt-1">{labels.join(i18n.language?.startsWith('zh') ? '、' : ', ')}</p>}
+          {labels.length > 0 && <p className="mt-1">{joined}</p>}
           {answerText && <p className="mt-1 whitespace-pre-wrap">{answerText}</p>}
         </div>
       )}
