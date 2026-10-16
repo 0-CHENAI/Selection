@@ -466,6 +466,14 @@ const todosAlmostDone: TodoItem[] = [
   { content: 'Run test suite and verify', status: 'in_progress', activeForm: 'Running tests' },
 ]
 
+/** Stopped on the active step */
+const todosInterrupted: TodoItem[] = [
+  { content: 'Analyze authentication system', status: 'completed', activeForm: 'Analyzing authentication system' },
+  { content: 'Implement token refresh logic', status: 'interrupted', activeForm: 'Implementing token refresh' },
+  { content: 'Add unit tests for auth flow', status: 'pending', activeForm: 'Adding unit tests' },
+  { content: 'Update API documentation', status: 'pending', activeForm: 'Updating documentation' },
+]
+
 /** All completed - task done */
 const todosAllCompleted: TodoItem[] = [
   { content: 'Analyze current implementation', status: 'completed', activeForm: 'Analyzing implementation' },
@@ -853,6 +861,18 @@ export const turnCardComponents: ComponentEntry[] = [
           isComplete: true,
           defaultExpanded: true,
           todos: todosMixed,
+        },
+      },
+      {
+        name: 'Task List: Interrupted',
+        description: 'Task List stopped on the active step, with later items still pending',
+        props: {
+          activities: [completedGrepActivity, completedReadActivity1],
+          response: undefined,
+          isStreaming: false,
+          isComplete: false,
+          defaultExpanded: true,
+          todos: todosInterrupted,
         },
       },
       // Todo: Almost done
