@@ -6,17 +6,20 @@ import { useTranslation } from 'react-i18next'
 import { WebsiteIcon } from '../markdown/WebsiteIcon'
 import type { ResponseSource } from './response-sources'
 import { collectSourceMetadata, sourcePlainText, sourceUrlKey, type SourceToolMessage } from './source-metadata'
+import { isSourcesPanelShown } from './sources-panel'
 
 const SourcesPanelContext = React.createContext<((sources: ResponseSource[]) => void) | null>(null)
 export const useSourcesPanel = () => React.useContext(SourcesPanelContext)
 
 /** A sibling column in the chat layout, never an overlay over the conversation. */
-export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHeader, resizeHandle: ResizeHandle = 'div' }: {
+export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHeader, suspended = false, resizeHandle: ResizeHandle = 'div' }: {
   children: React.ReactNode
   messages: SourceToolMessage[]
   onOpenUrl?: (url: string) => void
   resizeHandle?: React.ElementType<React.HTMLAttributes<HTMLDivElement>>
   renderHeader?: (title: string, onClose: () => void) => React.ReactNode
+  /** Hide the column without clearing its sources or width. */
+  suspended?: boolean
 }) {
   const { t } = useTranslation()
   const [sources, setSources] = React.useState<ResponseSource[] | null>(null)
@@ -47,10 +50,10 @@ export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHea
   }, [panelPresent])
   return (
     <SourcesPanelContext.Provider value={openSources}>
-      <div ref={layoutRef} data-source-layout={panelPresent ? "open" : undefined} className="flex h-full min-h-0 min-w-0 overflow-x-auto">
-        <div className={panelPresent ? "min-w-[320px] flex-1 overflow-hidden rounded-[10px] bg-foreground-2 shadow-middle" : "min-w-[320px] flex-1"}>{children}</div>
+      <div ref={layoutRef} data-source-layout={panelPresent && !suspended ? "open" : undefined} className="flex h-full min-h-0 min-w-0 overflow-x-auto">
+        <div className={panelPresent && !suspended ? "min-w-[320px] flex-1 overflow-hidden rounded-[10px] bg-foreground-2 shadow-middle" : "min-w-[320px] flex-1"}>{children}</div>
         <AnimatePresence initial={false} onExitComplete={() => { if (!sources) setPanelPresent(false) }}>
-        {sources && (
+        {isSourcesPanelShown(!!sources, suspended) && sources && (
           <motion.div key="reference-sources" className="flex h-full shrink-0 overflow-hidden"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: panelWidth + 6, opacity: 1 }}

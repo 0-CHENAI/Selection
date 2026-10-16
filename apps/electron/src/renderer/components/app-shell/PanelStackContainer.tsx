@@ -56,6 +56,8 @@ interface PanelStackContainerProps {
   /** Compact mode: single-panel, list/content toggle (mobile or narrow window) */
   isCompact?: boolean
   isResizing?: boolean
+  /** Center the conversation after the side columns are collapsed. */
+  immersive?: boolean
 }
 
 export function PanelStackContainer({
@@ -67,6 +69,7 @@ export function PanelStackContainer({
   isRightSidebarVisible,
   isCompact = false,
   isResizing,
+  immersive = false,
 }: PanelStackContainerProps) {
   const panelStack = useAtomValue(panelStackAtom)
   const focusedPanelId = useAtomValue(focusedPanelIdAtom)
@@ -167,6 +170,7 @@ export function PanelStackContainer({
                 isAtRightEdge={!isRightSidebarVisible}
                 proportion={focusedEntry.proportion}
                 isCompact={true}
+                immersive={false}
               />
             </div>
           </CompactPanelTransition>
@@ -194,7 +198,7 @@ export function PanelStackContainer({
       }}
     >
       <motion.div
-        className="flex h-full"
+        className={cn('flex h-full', immersive && 'w-full justify-center')}
         initial={false}
         animate={{ paddingLeft: !hasSidebar ? PANEL_EDGE_INSET : 0 }}
         transition={transition}
@@ -259,6 +263,7 @@ export function PanelStackContainer({
               isAtRightEdge={index === visiblePanels.length - 1 && !isRightSidebarVisible}
               proportion={entry.proportion}
               isCompact={false}
+              immersive={immersive}
               sash={index > 0 ? (
                 <PanelResizeSash
                   leftIndex={index - 1}

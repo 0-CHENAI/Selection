@@ -26,6 +26,9 @@ export const KEYS = {
   // Focus mode
   focusModeEnabled: 'focus-mode-enabled',
 
+  // Immersive mode — conversation only. Column widths stay in their own keys.
+  immersiveModeEnabled: 'immersive-mode-enabled',
+
   // Session files panel state
   sessionFilesExpandedFolders: 'session-files-expanded', // Expanded folders in session files tree (keyed by sessionId)
   officePreviewState: 'office-preview-state', // Open file and reading position (workspace + session scoped)

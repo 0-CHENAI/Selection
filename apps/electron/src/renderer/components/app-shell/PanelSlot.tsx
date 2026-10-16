@@ -24,6 +24,7 @@ import { useAppShellContext, AppShellProvider } from '@/context/AppShellContext'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { MainContentPanel } from './MainContentPanel'
 import { PANEL_MIN_WIDTH, RADIUS_EDGE, RADIUS_INNER } from './panel-constants'
+import { IMMERSIVE_CHAT_MAX_WIDTH } from './immersive-mode'
 
 interface PanelSlotProps {
   entry: PanelStackEntry
@@ -41,6 +42,8 @@ interface PanelSlotProps {
   sash?: React.ReactNode
   /** Compact (mobile) mode — shows back button in panel header */
   isCompact?: boolean
+  /** Center this conversation at a reading width. Only the single content panel uses it. */
+  immersive?: boolean
 }
 
 export function PanelSlot({
@@ -53,6 +56,7 @@ export function PanelSlot({
   proportion,
   sash,
   isCompact,
+  immersive = false,
 }: PanelSlotProps) {
   const { t } = useTranslation()
   const closePanel = useSetAtom(closePanelAtom)
@@ -111,6 +115,7 @@ export function PanelSlot({
         onPointerDown={handlePointerDown}
         data-panel-role="content"
         data-compact={isCompact || undefined}
+        data-immersive-layout={immersive && isOnly ? 'on' : undefined}
         className={cn(
           'h-full overflow-hidden relative @container/panel',
           !isOnly && isFocusedPanel ? 'shadow-panel-focused z-[1]' : 'shadow-middle z-0',
@@ -133,7 +138,17 @@ export function PanelSlot({
           borderBottomLeftRadius: isCompact && isAtRightEdge ? 0 : (isAtLeftEdge ? RADIUS_EDGE : RADIUS_INNER),
           borderTopRightRadius: RADIUS_INNER,
           borderBottomRightRadius: isCompact && isAtRightEdge ? 0 : (isAtRightEdge ? RADIUS_EDGE : RADIUS_INNER),
-          ...(isOnly
+          ...(immersive && isOnly
+            ? {
+                flexGrow: 0,
+                flexShrink: 1,
+                flexBasis: 'auto',
+                width: '100%',
+                maxWidth: IMMERSIVE_CHAT_MAX_WIDTH,
+                minWidth: 0,
+                marginInline: 'auto',
+              }
+            : isOnly
             ? { flexGrow: 1, minWidth: 0 }
             : { flexGrow: proportion, flexShrink: 1, flexBasis: 0, minWidth: PANEL_MIN_WIDTH }
           ),
