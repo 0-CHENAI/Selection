@@ -95,8 +95,8 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     return false
   }
 
-  // A below-viewport unit remains pending until the scroller brings it into view.
-  // No global scroll/key listeners: typing and reading other panels are unrelated.
+  // Offscreen units stay readable. No global scroll/key listeners: typing and
+  // reading other panels are unrelated.
   const schedule = () => {
     if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; update(streaming, enabled, source) })
   }
@@ -176,13 +176,15 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
       state.height = height
       state.width = width
-      if (below && observer && inset === 100) {
-        // Preserve any old lines when the active paragraph grows below viewport.
-        if (!state.pending) state.clip = unit.style.clipPath
-        state.pending = true
-        unit.style.clipPath = `inset(0 0 ${inset}% 0)`
-        pending.add(unit)
-        observer.observe(unit)
+      if (below && inset === 100) {
+        // A live tail is often below the viewport. Clipping it fully hid the
+        // rest of the reply for the whole stream: the completion deadline does
+        // not start while streaming, and a fully clipped box may never
+        // intersect. Keep the text readable and skip the offscreen fade.
+        expose(unit)
+        state.pending = false
+        state.clip = ''
+        unit.style.clipPath = ''
         return
       }
       if (inset <= 0) return

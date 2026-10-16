@@ -78,6 +78,19 @@ describe('SessionManager text stream phases (#87)', () => {
     ])
   })
 
+  it('coalesces characters that arrive in the same turn, and releases the next paced character on its own', async () => {
+    const { manager, managed, events } = setupSession('session-paced-deltas')
+    const send = (text: string) => (manager as any).processEvent(managed, {
+      type: 'text_delta', text, phase: 'unclassified', turnId: 'message-1',
+    })
+    await send('你')
+    await send('好')
+    await Bun.sleep(20)
+    await send('，')
+    await Bun.sleep(20)
+    expect(events.filter((event) => event.type === 'text_delta').map((event) => event.delta)).toEqual(['你好', '，'])
+  })
+
   it('consumes streamed text only when the completed segment has the same turn id', async () => {
     const { manager, managed } = setupSession('session-segment-correlation')
 

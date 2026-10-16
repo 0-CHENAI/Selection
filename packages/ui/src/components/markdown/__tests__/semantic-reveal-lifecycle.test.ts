@@ -107,14 +107,16 @@ assert.equal(animations.length,syntaxCount+1,'an async re-mount with the same so
 units=[ranged('replacement',0,11)];syntax.update(true,true,'replacement');
 assert.equal(animations.length,syntaxCount+1,'edits and preprocessing changes show immediately');
 syntax.dispose();
-// An offscreen unit may already exist in the DOM when an edit replaces its
-// source. It must stop waiting for IntersectionObserver and become visible.
+// Offscreen text stays readable while the reply is still streaming. A full
+// clip used to hide the tail until streaming ended.
 globalThis.IntersectionObserver=class {observe(){}unobserve(){}disconnect(){}};
 const offscreen=ranged('original',0,8);offscreen.top=900;units=[offscreen];
 const edited=createSemanticReveal(root,true);edited.update(true,true,'original');
-assert.equal(offscreen.style.clipPath,'inset(0 0 100% 0)');
+assert.equal(offscreen.style.clipPath,'','offscreen text must stay visible while streaming');
+assert.equal(offscreen.textContent,'original');
 offscreen.textContent='replacement';edited.update(true,true,'replacement');
-assert.equal(offscreen.style.clipPath,'','replacing a pending offscreen unit must expose it immediately');
+assert.equal(offscreen.style.clipPath,'','replacing an offscreen unit must keep it visible');
+assert.equal(offscreen.textContent,'replacement');
 edited.dispose();
 assert.equal(appendedRevealInset(60,80),25);
 assert.equal(appendedRevealInset(80,80),0);
