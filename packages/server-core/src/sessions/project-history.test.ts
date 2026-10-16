@@ -7,7 +7,7 @@ import { projectHistory } from './project-history';
 
 test('G memory authorization, cross-workspace isolation, sibling independence, exact expansion, revocation and deletion', () => {
   const root = mkdtempSync(join(tmpdir(), 'selection-memory-')), other = mkdtempSync(join(tmpdir(), 'selection-memory-other-'));
-  const project = createProject(root, { name: '验收项目' });
+  const project = createProject(root, { name: '验收项目', workingDirectory: join(root, 'work') });
   const requester = { id: 'reader', workMode: 'PRO' as const, projectId: project.id, executionRootSessionId: 'root' };
   const write = (id: string, content: string, extra = {}, directory = root) => {
     mkdirSync(join(directory, 'sessions', id), { recursive: true });

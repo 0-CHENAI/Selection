@@ -30,6 +30,7 @@ import { taskEditorComponents } from './task-editor'
 import { taskEditorLiveComponents } from './task-editor-live'
 import { automaticTaskGraphComponents } from './automatic-task-graph'
 import { x6TaskGraphComponents } from './x6-task-graph'
+import { projectSettingsComponents } from './project-settings'
 
 export * from './types'
 
@@ -66,10 +67,11 @@ export const componentRegistry: ComponentEntry[] = [
   ...transportBannerComponents,
   ...containerTransitionsComponents,
   ...imageSupportComponents,
+  ...projectSettingsComponents,
 ]
 
 export function getCategories(): CategoryGroup[] {
-  const categoryOrder: Category[] = ['Mobile WebUI', 'Automations', 'Onboarding', 'Agent Setup', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Kanban', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'OAuth', 'Messaging']
+  const categoryOrder: Category[] = ['Mobile WebUI', 'Automations', 'Onboarding', 'Agent Setup', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Kanban', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'Settings', 'OAuth', 'Messaging']
   const categoryMap = new Map<Category, ComponentEntry[]>()
 
   for (const entry of componentRegistry) {

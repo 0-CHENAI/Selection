@@ -12,12 +12,17 @@ export function draftSessionOptionsId(workspaceId: string, projectId: string | u
   return `${DRAFT_SESSION_OPTIONS_ID}:${JSON.stringify([workspaceId, projectId ?? null, mode])}`
 }
 
-/** Display inherited defaults without turning them into explicit creation overrides. */
+/**
+ * Display inherited defaults without turning them into explicit creation overrides.
+ * A project draft is locked to the project folder and ignores a session-level choice.
+ */
 export function resolveDraftWorkingDirectory(
   override: string | undefined,
   projectDirectory: string | undefined,
   workspaceDirectory: string | undefined,
+  lockedToProject = false,
 ): string | undefined {
+  if (lockedToProject) return projectDirectory?.trim() || undefined
   if (override === 'none') return undefined
   if (override !== undefined && override !== 'user_default') return override
   return projectDirectory || workspaceDirectory || undefined

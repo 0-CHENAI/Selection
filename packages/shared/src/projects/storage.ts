@@ -31,6 +31,7 @@ import type {
   CreateProjectInput,
   ProjectPromptContext,
 } from './types.ts';
+import { applyWorkingDirectoryPatch, requireCreateProjectFields } from './working-directory.ts';
 
 // ============================================================
 // Directory Utilities
@@ -314,15 +315,16 @@ export function createProject(
   workspaceRootPath: string,
   input: CreateProjectInput,
 ): ProjectConfig {
-  const slug = generateProjectSlug(workspaceRootPath, input.name);
+  const fields = requireCreateProjectFields(input);
+  const slug = generateProjectSlug(workspaceRootPath, fields.name);
   const now = Date.now();
 
   const config: ProjectConfig = {
     id: `proj_${randomUUID().slice(0, 8)}`,
     slug,
-    name: input.name,
+    name: fields.name,
     description: input.description,
-    workingDirectory: input.workingDirectory,
+    workingDirectory: fields.workingDirectory,
     details: input.details,
     colorTheme: input.colorTheme,
     createdAt: now,
@@ -349,9 +351,11 @@ export function updateProject(
     throw new Error(`Project not found: ${projectSlug}`);
   }
 
+  const nextPatch = applyWorkingDirectoryPatch(existing.workingDirectory, patch);
+
   const updated: ProjectConfig = {
     ...existing,
-    ...patch,
+    ...nextPatch,
     id: existing.id,
     slug: existing.slug,
     createdAt: existing.createdAt,

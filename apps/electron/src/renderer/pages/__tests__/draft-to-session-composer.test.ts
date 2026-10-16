@@ -11,11 +11,13 @@ describe('draft to live session composer', () => {
   it('keeps inherited directories out of explicit creation overrides (#406)', () => {
     const chatPage = read('../ChatPage.tsx')
     // Both the initial submission and draft-reset submission read this ref.
-    expect(chatPage.match(/workingDirectory: draftWorkingDirectoryOverride,/g)).toHaveLength(2)
+    // Project drafts defer to the server so an inherited folder is not an explicit override.
+    expect(chatPage.match(/workingDirectory: orchestrationProjectId \? 'user_default' : draftWorkingDirectoryOverride,/g)).toHaveLength(2)
     expect(chatPage.match(/workingDirectory: ctx.workingDirectory \?\? 'user_default'/g)).toHaveLength(2)
     expect(chatPage).toContain('workspaceWorkingDirectory: settings?.workingDirectory')
     expect(chatPage).not.toContain('setDraftWorkingDirectory(settings.workingDirectory)')
-    expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory')
+    expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)')
+    expect(chatPage).toContain('draftProject?.config.workingDirectory')
     expect(chatPage).toContain('draftSessionOptionsId(activeWorkspaceId')
   })
 

@@ -101,6 +101,8 @@ import {
 } from '@craft-agent/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@craft-agent/core/types'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
+import { loadProjectById } from '@craft-agent/shared/projects'
+import { isProjectConversation, projectConversationDirectoryUpdates, requiredProjectConversationDirectory } from '@craft-agent/shared/projects/working-directory'
 import {
   // Session persistence functions
   listSessions as listStoredSessions,
@@ -2488,6 +2490,7 @@ export class SessionManager implements ISessionManager {
             } catch { /* Preserve the origin and stop recovery when it cannot be trusted. */ }
             managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: 'unsupported', completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
           }
+          this.alignLoadedProjectConversation(managed)
 
           // Initialize session metadata in AutomationSystem for diffing
           const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -3635,7 +3638,17 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         resolvedProjectId = project.config.id
-        if (
+        const requiredDirectory = requiredProjectConversationDirectory({
+          projectId: resolvedProjectId,
+          hidden: options?.hidden,
+          parentSessionId: options?.parentSessionId,
+          orchestrationRole: options?.orchestrationRole,
+        }, project.config.workingDirectory)
+        // Ordinary project conversations always use the project folder.
+        // A path sent by the client cannot point them somewhere else.
+        if (requiredDirectory !== null) {
+          resolvedWorkingDir = requiredDirectory
+        } else if (
           (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
           project.config.workingDirectory
         ) {
@@ -6406,6 +6419,65 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Point every ordinary conversation in a project at the project's folder.
+   * sdkCwd is left unchanged so an existing transcript stays findable.
+   * Workers, reviewers, and isolated sandboxes are not rewritten.
+   */
+  async alignProjectConversationDirectories(workspaceId: string, projectId: string, workingDirectory: string): Promise<void> {
+    const folder = workingDirectory.trim()
+    if (!folder) return
+    const workspace = this.getWorkspaces().find(item => item.id === workspaceId) ?? getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return
+    const listed = listStoredSessions(workspace.rootPath)
+      .filter(session => session.projectId === projectId)
+      .map(session => ({
+        id: session.id,
+        projectId: session.projectId,
+        hidden: session.hidden,
+        parentSessionId: session.parentSessionId,
+        orchestrationRole: session.orchestrationRole,
+        workingDirectory: session.workingDirectory,
+      }))
+    const live = this.getSessions(workspaceId)
+      .filter(session => session.projectId === projectId)
+      .map(session => {
+        const managed = this.sessions.get(session.id)
+        return {
+          id: session.id,
+          projectId: session.projectId,
+          hidden: managed?.hidden,
+          parentSessionId: managed?.parentSessionId,
+          orchestrationRole: managed?.orchestrationRole,
+          workingDirectory: managed?.workingDirectory ?? session.workingDirectory,
+          isolated: !!managed?.isolatedWorkspace,
+        }
+      })
+    const ids = new Set(projectConversationDirectoryUpdates({
+      projectId,
+      workingDirectory: folder,
+      sessions: [...listed, ...live],
+    }))
+    for (const id of ids) {
+      const managed = this.sessions.get(id)
+      if (managed) {
+        this.updateWorkingDirectory(id, folder, { preserveSdkCwd: true })
+        continue
+      }
+      await updateSessionMetadata(workspace.rootPath, id, { workingDirectory: folder })
+    }
+  }
+
+  /** Startup alignment. Does not move sdkCwd and skips an open isolation sandbox. */
+  private alignLoadedProjectConversation(managed: ManagedSession): void {
+    if (managed.isolatedWorkspace || !managed.projectId || !isProjectConversation(managed)) return
+    const project = loadProjectById(managed.workspace.rootPath, managed.projectId)
+    const required = project?.config.workingDirectory?.trim()
+    if (!required || managed.workingDirectory === required) return
+    managed.workingDirectory = required
+    void updateSessionMetadata(managed.workspace.rootPath, managed.id, { workingDirectory: required })
+  }
+
+  /**
    * Update the working directory for a session.
    *
    * If no messages have been sent yet (no SDK interaction), also updates sdkCwd
@@ -6413,9 +6485,23 @@ export class SessionManager implements ISessionManager {
    * confusing "bash shell runs from a different directory" warning when the user
    * changes the working directory before their first message.
    */
-  updateWorkingDirectory(sessionId: string, path: string): void {
+  updateWorkingDirectory(sessionId: string, path: string, options?: { preserveSdkCwd?: boolean }): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      if (isProjectConversation(managed) && !managed.isolatedWorkspace && managed.projectId) {
+        const project = loadProjectById(managed.workspace.rootPath, managed.projectId)
+        const required = project?.config.workingDirectory?.trim()
+        if (!required) {
+          this.sendEvent({
+            type: 'working_directory_error',
+            sessionId,
+            error: 'Project working folder is not set',
+          }, managed.workspace.id)
+          return
+        }
+        path = required
+      }
+      if (managed.workingDirectory === path) return
       const validation = isValidWorkingDirectory(path)
       if (!validation.valid) {
         sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" — ${validation.reason}`)
@@ -6436,6 +6522,7 @@ export class SessionManager implements ISessionManager {
       // Check if we can also update sdkCwd (safe if no SDK interaction yet)
       // Conditions: no messages sent AND no agent created yet (no SDK session)
       const shouldUpdateSdkCwd =
+        !options?.preserveSdkCwd &&
         managed.messages.length === 0 &&
         !managed.sdkSessionId &&
         !managed.agent

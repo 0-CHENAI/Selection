@@ -10,7 +10,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAtomValue } from 'jotai'
-import { FolderKanban, FolderOpen, Plus, Trash2, Upload } from 'lucide-react'
+import { FolderKanban, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
@@ -19,15 +19,13 @@ import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import {
   Info_Page,
   Info_Section,
-  Info_Table,
 } from '@/components/info'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import { PROJECT_COLOR_PALETTE } from '@/utils/project-colors'
-import { InlineColorPickerRow } from '@/components/ui/inline-color-picker-row'
+import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
+import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
+import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel'
+import { projectWorkingDirectorySaveIssue } from '@craft-agent/shared/projects/working-directory'
 import type { LoadedProject, ProjectAsset } from '@craft-agent/shared/projects/types'
 
 interface ProjectInfoPageProps {
@@ -55,6 +53,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editHistorySearch, setEditHistorySearch] = useState(false)
   const [editColor, setEditColor] = useState<string>('')
   const [saving, setSaving] = useState(false)
+  const [folderError, setFolderError] = useState<'cleared' | null>(null)
 
   // Load project (and re-load on broadcast)
   const loadProject = useCallback(async () => {
@@ -137,19 +136,31 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     }
   }, [workspaceId, project, onCreateSession, t])
 
-  const handlePickWorkingDirectory = useCallback(async () => {
-    try {
-      const picked = await window.electronAPI.openFolderDialog?.()
-      if (typeof picked === 'string' && picked.trim()) {
-        setEditWorkingDir(picked)
-      }
-    } catch (err) {
-      console.error('[ProjectInfoPage] Folder picker failed:', err)
-    }
+  const handlePickWorkingDirectory = useCallback((path: string) => {
+    if (!path.trim()) return
+    setEditWorkingDir(path)
+    setFolderError(null)
   }, [])
+
+  const {
+    pickDirectory,
+    showServerBrowser,
+    serverBrowserMode,
+    cancelServerBrowser,
+    confirmServerBrowser,
+  } = useDirectoryPicker(handlePickWorkingDirectory)
 
   const handleSaveSettings = useCallback(async () => {
     if (!workspaceId || !project) return
+    const issue = projectWorkingDirectorySaveIssue({
+      storedWorkingDirectory: project.config.workingDirectory,
+      nextWorkingDirectory: editWorkingDir,
+    })
+    if (issue === 'cleared') {
+      setFolderError('cleared')
+      return
+    }
+    setFolderError(null)
     setSaving(true)
     try {
       await window.electronAPI.updateProject(workspaceId, project.config.slug, {
@@ -325,104 +336,36 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
 
           {/* Settings tab */}
           {tab === 'settings' && (
-            <Info_Section title={t('projectInfo.tabSettings')}>
-              <div className="space-y-4 px-4 py-3">
-                <Field label={t('projectInfo.title')}>
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder={project.config.name}
-                  />
-                </Field>
-                <Field label={t('projectInfo.description')}>
-                  <Input
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    placeholder={t('projectInfo.descriptionPlaceholder')}
-                  />
-                </Field>
-                <Field label={t('projectInfo.workingDirectory')}>
-                  <div className="flex gap-2">
-                    <Input
-                      value={editWorkingDir}
-                      onChange={(e) => setEditWorkingDir(e.target.value)}
-                      placeholder={t('projectInfo.workingDirectoryPlaceholder')}
-                      className="flex-1"
-                    />
-                    <Button size="sm" variant="outline" onClick={handlePickWorkingDirectory}>
-                      <FolderOpen className="h-3.5 w-3.5 mr-1" />
-                      {t('projectInfo.workingDirectoryPicker')}
-                    </Button>
-                  </div>
-                </Field>
-                <Field
-                  label={t('projectInfo.color')}
-                  hint={t('projectInfo.colorHint')}
-                >
-                  <InlineColorPickerRow
-                    value={editColor}
-                    onChange={setEditColor}
-                    presets={PROJECT_COLOR_PALETTE}
-                    onClear={() => setEditColor('')}
-                    clearLabel={t('projectInfo.colorClear')}
-                    customAriaLabel={t('projectInfo.colorCustom')}
-                  />
-                </Field>
-                <Field
-                  label={t('projectInfo.details')}
-                  hint={t('projectInfo.detailsHelpText')}
-                >
-                  <Textarea
-                    value={editDetails}
-                    onChange={(e) => setEditDetails(e.target.value)}
-                    rows={6}
-                    placeholder={t('projectInfo.detailsPlaceholder')}
-                  />
-                </Field>
-                <Field label={t('projectInfo.historySearch')} hint={t('projectInfo.historySearchHint')}>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-primary" checked={editHistorySearch} onChange={event => setEditHistorySearch(event.target.checked)} />{t('projectInfo.historySearchEnable')}</label>
-                </Field>
-                <div className="flex justify-between pt-2">
-                  <Button
-                    variant="ghost"
-                    onClick={handleDeleteProject}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    {t('projectInfo.deleteProject')}
-                  </Button>
-                  <Button onClick={handleSaveSettings} disabled={saving}>
-                    {saving ? t('common.saving') : t('common.save')}
-                  </Button>
-                </div>
-              </div>
-            </Info_Section>
+            <ProjectSettingsPanel
+              name={editName}
+              description={editDescription}
+              storedWorkingDirectory={project.config.workingDirectory}
+              workingDirectory={editWorkingDir}
+              details={editDetails}
+              historySearch={editHistorySearch}
+              color={editColor}
+              slug={project.config.slug}
+              folderPath={project.folderPath}
+              saving={saving}
+              folderError={folderError}
+              onNameChange={setEditName}
+              onDescriptionChange={setEditDescription}
+              onDetailsChange={setEditDetails}
+              onHistorySearchChange={setEditHistorySearch}
+              onColorChange={setEditColor}
+              onPickFolder={pickDirectory}
+              onSave={handleSaveSettings}
+              onDelete={handleDeleteProject}
+              onOpenLocation={() => onOpenFile(project.folderPath)}
+            />
           )}
-
-          {/* Metadata read-out for quick reference */}
-          <Info_Section title={t('projectInfo.metadata')}>
-            <Info_Table>
-              <Info_Table.Row label={t('common.slug')} value={project.config.slug} />
-              <Info_Table.Row label={t('common.location')}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="flex-1 min-w-0 truncate font-mono text-xs">{project.folderPath}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => onOpenFile(project.folderPath)}
-                        className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded text-foreground/50 hover:text-foreground hover:bg-foreground/5 transition-colors"
-                        aria-label={t('projectInfo.openLocation')}
-                      >
-                        <FolderOpen className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t('projectInfo.openLocation')}</TooltipContent>
-                  </Tooltip>
-                </div>
-              </Info_Table.Row>
-            </Info_Table>
-          </Info_Section>
+          <ServerDirectoryBrowser
+            open={showServerBrowser}
+            mode={serverBrowserMode}
+            onSelect={confirmServerBrowser}
+            onCancel={cancelServerBrowser}
+            initialPath={editWorkingDir || undefined}
+          />
         </Info_Page.Content>
       )}
     </Info_Page>
@@ -454,20 +397,3 @@ function TabButton({
   )
 }
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: React.ReactNode
-  hint?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <label className="block">
-      <div className="text-xs font-medium text-foreground/70 mb-1">{label}</div>
-      {children}
-      {hint && <div className="mt-1 text-xs text-foreground/50">{hint}</div>}
-    </label>
-  )
-}

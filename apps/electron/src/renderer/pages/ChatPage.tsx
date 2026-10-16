@@ -32,6 +32,7 @@ import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, draftSessionOptionsId } from '@/lib/draft-session'
+import { isProjectConversation } from '@craft-agent/shared/projects/working-directory'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
@@ -259,10 +260,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const draftConnection = draftComposer.connection
   const projects = useAtomValue(projectsAtom)
   const draftWorkingDirectoryOverride = draftComposer.workingDirectory
+  const draftProject = projects.find(project => project.config.id === orchestrationProjectId)
   const draftWorkingDirectory = resolveDraftWorkingDirectory(
     draftWorkingDirectoryOverride,
-    projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory,
+    draftProject?.config.workingDirectory,
     draftComposer.workspaceWorkingDirectory,
+    !!orchestrationProjectId,
   )
   const draftSwarmEnabled = draftWorkMode === 'PRO' && draftComposer.swarmEnabled
   const draftSourceSlugs = draftComposer.sourceSlugs
@@ -280,7 +283,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
-    workingDirectory: draftWorkingDirectoryOverride,
+    workingDirectory: orchestrationProjectId ? 'user_default' : draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
   })
@@ -293,7 +296,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
-    workingDirectory: draftWorkingDirectoryOverride,
+    workingDirectory: orchestrationProjectId ? 'user_default' : draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
   }
@@ -520,20 +523,33 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const draftThinkingLevel = constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))
   draftCreateRef.current.thinkingLevel = draftThinkingLevel
 
-  // Working directory for this session
-  const workingDirectory = isDraft ? draftWorkingDirectory : session?.workingDirectory
+  // Project conversations display the project folder. Other sessions keep their own.
+  const conversationIdentity = isDraft
+    ? { projectId: orchestrationProjectId ?? undefined }
+    : {
+        projectId: session?.projectId ?? sessionMeta?.projectId,
+        hidden: session?.hidden ?? sessionMeta?.hidden,
+        parentSessionId: session?.parentSessionId ?? sessionMeta?.parentSessionId,
+        orchestrationRole: session?.orchestrationRole ?? sessionMeta?.orchestrationRole,
+      }
+  const workingDirectoryLocked = isProjectConversation(conversationIdentity)
+  const boundProject = projects.find(project => project.config.id === conversationIdentity.projectId)
+  const workingDirectory = workingDirectoryLocked
+    ? (boundProject?.config.workingDirectory?.trim() || undefined)
+    : (isDraft ? draftWorkingDirectory : session?.workingDirectory ?? sessionMeta?.workingDirectory)
   const activeWorkspace = React.useMemo(
     () => workspaces.find((w) => w.id === activeWorkspaceId) || null,
     [workspaces, activeWorkspaceId]
   )
   const handleWorkingDirectoryChange = React.useCallback(async (path: string) => {
+    if (workingDirectoryLocked) return
     if (isDraft) {
       setDraftWorkingDirectory(path)
       return
     }
     if (!session) return
     await window.electronAPI.sessionCommand(session.id, { type: 'updateWorkingDirectory', dir: path })
-  }, [isDraft, session, setDraftWorkingDirectory])
+  }, [workingDirectoryLocked, isDraft, session, setDraftWorkingDirectory])
 
   const { openArtifact: handleOpenArtifact, openFile: handleOpenFile } = useGeneratedFileActions({
     sessionId: session?.id,
@@ -898,9 +914,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   orchestrationWorkControls={orchestrationWorkControls}
                   workspaceId={activeWorkspaceId || undefined}
                   onSourcesChange={handleSourcesChange}
-                  workingDirectory={sessionMeta.workingDirectory}
+                  workingDirectory={workingDirectory}
+                  workingDirectoryLocked={workingDirectoryLocked}
                   composerSessionId={sessionId}
-                  onWorkingDirectoryChange={handleWorkingDirectoryChange}
+                  onWorkingDirectoryChange={workingDirectoryLocked ? undefined : handleWorkingDirectoryChange}
                   messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}
                   messagesLoadError={messageLoadState.error}
                   messagesRetrying={messagesRetrying}
@@ -992,7 +1009,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               workspaceId={activeWorkspaceId || undefined}
               onSourcesChange={handleSourcesChange}
               workingDirectory={workingDirectory}
-              onWorkingDirectoryChange={handleWorkingDirectoryChange}
+              workingDirectoryLocked={workingDirectoryLocked}
+              onWorkingDirectoryChange={workingDirectoryLocked ? undefined : handleWorkingDirectoryChange}
               sessionFolderPath={session?.sessionFolderPath}
               composerSessionId={sessionId}
               messagesLoading={messageLoadState.messagesLoading || (messagesRetrying && !messageLoadState.messagesReady)}

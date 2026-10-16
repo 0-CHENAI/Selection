@@ -1611,11 +1611,11 @@ function AppShellContent({
     if (!activeWorkspace?.id) return
     setCreateProjectDialogOpen(true)
   }, [activeWorkspace?.id])
-  const handleCreateProjectSubmit = useCallback(async (name: string) => {
+  const handleCreateProjectSubmit = useCallback(async (input: { name: string; workingDirectory: string }) => {
     if (!activeWorkspace?.id) return
     setCreateProjectDialogOpen(false)
     try {
-      const project = await window.electronAPI.createProject(activeWorkspace.id, { name })
+      const project = await window.electronAPI.createProject(activeWorkspace.id, input)
       navigate(routes.view.projects(project.slug))
     } catch (err) {
       console.error('[AppShell] Failed to create project:', err)

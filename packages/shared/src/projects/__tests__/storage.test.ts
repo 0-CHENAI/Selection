@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function makeProjectSlug(name = 'Memory Test'): string {
-  return createProject(workspaceRoot, { name }).slug;
+  return createProject(workspaceRoot, { name, workingDirectory: join(tempDir, 'work') }).slug;
 }
 
 describe('sanitizeAssetFilename', () => {
@@ -95,6 +95,7 @@ describe('loadProjectPromptContext', () => {
       name: 'Isolated Project',
       description: 'Visible project description',
       details: 'Visible project details',
+      workingDirectory: join(tempDir, 'work'),
     });
     writeFileSync(getProjectMemoryPath(workspaceRoot, project.slug), 'CANARY_ISOLATED_SECRET');
 
@@ -109,8 +110,8 @@ describe('loadProjectPromptContext', () => {
   });
 
   it('loads only the selected project memory in shared mode', () => {
-    const projectA = createProject(workspaceRoot, { name: 'Project A' });
-    const projectB = createProject(workspaceRoot, { name: 'Project B' });
+    const projectA = createProject(workspaceRoot, { name: 'Project A', workingDirectory: join(tempDir, 'a') });
+    const projectB = createProject(workspaceRoot, { name: 'Project B', workingDirectory: join(tempDir, 'b') });
     writeFileSync(getProjectMemoryPath(workspaceRoot, projectA.slug), 'CANARY_PROJECT_A');
     writeFileSync(getProjectMemoryPath(workspaceRoot, projectB.slug), 'CANARY_PROJECT_B');
 

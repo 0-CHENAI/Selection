@@ -74,7 +74,8 @@ export interface ProjectAsset {
 export interface CreateProjectInput {
   name: string;
   description?: string;
-  workingDirectory?: string;
+  /** Absolute folder. Required: a project cannot be created without one. */
+  workingDirectory: string;
   details?: string;
   colorTheme?: string;
   color?: string;
