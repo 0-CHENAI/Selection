@@ -104,6 +104,12 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(frames.size).toBe(0)
   })
 
+  test('a streaming row reports its real height instead of an estimated box', () => {
+    const history = readFileSync(new URL('../ChatVirtualHistory.tsx', import.meta.url), 'utf8')
+    expect(history).toContain('data-chat-virtual-streaming')
+    expect(history).toContain('streaming ? undefined : { contentVisibility:')
+  })
+
   test('uses one follow controller without translating the transcript', () => {
     expect(source).toContain('follow.resize()')
     expect(source).toContain('follow.dispose()')
@@ -133,6 +139,21 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(viewport.scrollTop).toBe(3424)
     expect(nextFrame).toBeUndefined()
     expect(cancelled).toBe(1)
+    follow.dispose()
+  })
+
+  test('the next frame follows growth that arrived after the last resize', () => {
+    let nextFrame: FrameRequestCallback | undefined
+    const viewport = { scrollTop: 1190, scrollHeight: 2000, clientHeight: 800 }
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true, reduceMotion: () => false,
+      requestFrame: callback => { nextFrame = callback; return 1 },
+      cancelFrame: () => { nextFrame = undefined },
+    })
+    follow.resize()
+    viewport.scrollHeight = 4000
+    nextFrame!(16.67)
+    expect(viewport.scrollTop).toBeGreaterThan(1200)
     follow.dispose()
   })
 

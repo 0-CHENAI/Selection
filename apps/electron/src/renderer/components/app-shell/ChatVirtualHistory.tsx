@@ -100,14 +100,22 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
   return (
     <div ref={listRef} data-chat-virtual-history data-chat-virtual-scrolling={virtualizer.isScrolling} className="relative min-w-0">
       <div ref={virtualizer.containerRef} className="relative w-full">
-        {retainedRows.map(row => (
+        {retainedRows.map(row => {
+          const turn = turns[row.index]!
+          // A live row must report its real height. content-visibility keeps the
+          // estimated box, so growth paints past the viewport and the stick
+          // follow never sees a taller transcript until the stream ends.
+          const streaming = turn.type === 'assistant' && turn.isStreaming
+          return (
           <div key={row.key} data-index={row.index} ref={virtualizer.measureElement}
             data-chat-virtual-visible={row.index >= start && row.index < end}
+            data-chat-virtual-streaming={streaming ? '' : undefined}
             className="absolute left-0 top-0 w-full min-w-0"
-            style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }}>
-            {children(turns[row.index]!, row.index)}
+            style={streaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }}>
+            {children(turn, row.index)}
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

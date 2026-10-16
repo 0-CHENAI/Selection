@@ -1202,30 +1202,41 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
     }
   }
 
-  // Intermediate messages (LLM commentary) - render with dashed circle icon
-  // Show "Thinking" while streaming, stripped markdown content when complete
-  if (activity.type === 'intermediate') {
-    const isThinking = activity.status === 'running'
-    const displayContent = stripMarkdown(activity.content || '') || (isThinking ? thinkingStatusLabel() : '')
+  // Commentary and model reasoning stay in the chain as steps.
+  // A running reasoning row keeps the live text; a finished row is one line
+  // that opens the same details popup as any other step.
+  if (activity.type === 'intermediate' || activity.type === 'thinking') {
+    const isRunning = activity.status === 'running'
+    const liveThinking = activity.type === 'thinking' && isRunning && hasRenderableAssistantText(activity.content)
+    const displayContent = stripMarkdown(activity.content || '') || (isRunning ? thinkingStatusLabel() : '')
     const isComplete = activity.status === 'completed'
     return (
-      <div className="flex items-stretch">
+      <div
+        className="flex items-stretch"
+        data-thinking-step={activity.type === 'thinking' ? '' : undefined}
+      >
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
+          data-thinking-live={liveThinking ? '' : undefined}
           className={cn(
-            "group/row flex items-center gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            liveThinking ? "items-start" : "items-center",
             SIZE_CONFIG.fontSize
           )}
           onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
         >
-          {isThinking ? (
-            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+          {isRunning ? (
+            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0", liveThinking && "mt-0.5")}>
               <Spinner className={SIZE_CONFIG.spinnerSize} />
             </div>
           ) : (
             <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
           )}
-          <span className={cn("truncate flex-1", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayContent}</span>
+          <span className={cn(
+            "flex-1",
+            liveThinking ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "truncate",
+            onOpenDetails && isComplete && "group-hover/row:underline",
+          )}>{liveThinking ? activity.content : displayContent}</span>
           {/* Open details button */}
           {onOpenDetails && isComplete && (
             <div
@@ -1299,7 +1310,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
   const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
     : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
-    : toolDisplay.name || (activity.type === 'thinking' ? thinkingStatusLabel() : 'Processing')
+    : toolDisplay.name || 'Processing'
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -3287,6 +3298,20 @@ export const TurnCard = React.memo(function TurnCard({
     if (!isComplete) wasLiveRef.current = true
   }, [isComplete])
 
+  // Open the chain once while reasoning is still arriving, so the live
+  // text is a step the reader can see. A later manual collapse stays closed.
+  const revealedThinking = useRef(false)
+  useEffect(() => {
+    if (revealedThinking.current || hasUserToggled.current || isExpanded) return
+    const live = activities.some(activity => activity.type === 'thinking'
+      && activity.status === 'running'
+      && hasRenderableAssistantText(activity.content))
+    if (!live) return
+    revealedThinking.current = true
+    if (onExpandedChange) onExpandedChange(true)
+    else setLocalExpandedTurns(prev => new Set(prev).add(turnId))
+  }, [activities, isExpanded, onExpandedChange, turnId])
+
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
     const newExpanded = !isExpanded
@@ -3379,6 +3404,7 @@ export const TurnCard = React.memo(function TurnCard({
   // The live commentary card already shows this body. Hiding the mirrored
   // row keeps the work chain from inserting a duplicate line (or appearing
   // at all) until a tool or older commentary actually needs a row.
+  // Reasoning stays in this list: it is a step, not a disclosure under the chain.
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
       activity => !isAnswerDeliveryTool(activity)
@@ -3456,8 +3482,9 @@ export const TurnCard = React.memo(function TurnCard({
       if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
-      // Intermediate activities must have no meaningful content
-      if (a.type === 'intermediate') return !hasRenderableAssistantText(a.content)
+      // Intermediate activities must have no meaningful content.
+      // A finished reasoning block is the record of that wait, not an empty turn.
+      if (a.type === 'intermediate' || a.type === 'thinking') return !hasRenderableAssistantText(a.content)
       // Plan activities are meaningful work
       if (a.type === 'plan') return false
       // Other activity types - consider as no meaningful work
@@ -3613,6 +3640,7 @@ export const TurnCard = React.memo(function TurnCard({
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
                   ref={activitiesContainerRef}
+                  data-process-chain=""
                   className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
                 >
                   {/* Rows joining a header that is already on screen slide in;

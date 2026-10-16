@@ -9,6 +9,7 @@ import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } 
 import type { Message } from '../../../shared/types'
 import type { TextStreamPhase } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
+import { streamTrace } from '@craft-agent/shared/stream-trace'
 import {
   findStreamingMessage,
   findAssistantMessage,
@@ -66,6 +67,7 @@ export function handleTextDelta(
   event: TextDeltaEvent
 ): SessionState {
   const { session, streaming } = state
+  streamTrace('react-delta', { chars: event.delta.length, phase: event.phase ?? '' })
 
   if (event.answerRunId && session.messages.some(m => m.answerCommitted && m.answerRunId === event.answerRunId)) {
     return state

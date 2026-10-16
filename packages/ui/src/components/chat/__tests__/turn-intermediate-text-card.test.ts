@@ -73,6 +73,38 @@ function assistantTurn(turns: ReturnType<typeof groupMessagesByTurn>): Assistant
   return turn
 }
 
+describe('thinking and commentary stay in the work chain across tool rounds', () => {
+  it('keeps each thinking segment and the following text as steps, and the last text as the reply', () => {
+    const note = (id: string, content: string, timestamp: number, turnId: string): Message => ({
+      id, role: 'assistant', content, timestamp, isIntermediate: true, phase: 'intermediate', turnId,
+    })
+    const messages: Message[] = [
+      user('排查 Zen'),
+      note('think-1', '先看安装情况', 2, 'pi-turn-0__think0'),
+      note('note-1', 'Zen 1.23.2b installed, and there are two fresh crash reports.', 3, 'pi-turn-0__m1'),
+      tool('completed', 4, 'Bash'),
+      note('think-2', '签名已经失效', 5, 'pi-turn-0__think2'),
+      note('note-2', 'Crash reason: Code Signature Invalid', 6, 'pi-turn-0__m3'),
+      tool('completed', 7, 'Bash'),
+      finalAssistant('final', 'Key finding: spctl says the seal is missing.', 8),
+    ]
+    const turn = assistantTurn(groupMessagesByTurn(messages, { isSessionProcessing: false }))
+    expect(turn.response?.text).toBe('Key finding: spctl says the seal is missing.')
+    expect(turn.activities.map(activity => activity.type)).toEqual([
+      'thinking', 'intermediate', 'tool', 'thinking', 'intermediate', 'tool',
+    ])
+    expect(turn.activities.filter(activity => activity.type === 'thinking').map(activity => activity.content)).toEqual([
+      '先看安装情况', '签名已经失效',
+    ])
+    expect(turn.activities.filter(activity => activity.type === 'intermediate').map(activity => activity.content)).toEqual([
+      'Zen 1.23.2b installed, and there are two fresh crash reports.',
+      'Crash reason: Code Signature Invalid',
+    ])
+    expect(turn.response?.text).not.toContain('Zen 1.23.2b')
+    expect(turn.response?.text).not.toContain('Crash reason')
+  })
+})
+
 describe('issue #58 — text then tools keeps the body readable', () => {
   it('pending tokens stay on the response card, not a thought row', () => {
     const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)

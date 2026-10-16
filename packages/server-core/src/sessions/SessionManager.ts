@@ -16,6 +16,7 @@ import { buildClarificationState, clarificationContinuation, countClarificationR
 import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { streamTrace } from '../../../shared/src/stream-trace.ts'
 import { assertOfficeRevisionTool } from '../reliability/office-tool-policy'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
@@ -1483,8 +1484,10 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
   } as Session
 }
 
-// Performance: Batch IPC delta events to reduce renderer load
-const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
+// Coalesce only deltas that arrive in the same turn (one socket read of many
+// SSE events). A 50ms hold glued separately paced tokens back into visible
+// blocks after the parser had already released them one at a time.
+const DELTA_BATCH_INTERVAL_MS = 0
 
 interface PendingDelta {
   delta: string
@@ -13691,7 +13694,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
         managed.streamingPhase = event.phase ?? 'unclassified'
         managed.streamingPresentationProtocol = event.presentationProtocol
-        // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
+        // Queue delta. Same-turn bursts still coalesce; paced tokens are not held.
         this.queueDelta(
           sessionId,
           workspaceId,
@@ -14766,8 +14769,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   }
 
   /**
-   * Queue a text delta for batched sending (performance optimization)
-   * Instead of sending 50+ IPC events per second, batches deltas and flushes every 50ms
+   * Queue a text delta. Deltas that arrive in the same turn share one IPC
+   * event. The flush is scheduled immediately, so a token that arrives later
+   * is not merged into the previous paint.
    */
   private queueDelta(
     sessionId: string,
@@ -14825,6 +14829,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const pending = this.pendingDeltas.get(sessionId)
     if (pending && pending.delta) {
       this.pendingDeltas.delete(sessionId)
+      streamTrace('ipc-delta', { chars: pending.delta.length, phase: pending.phase })
       // natural-v1 streams every delta: progress notes as transient bubbles,
       // marked answer text straight into the answer card.
       const managed = this.sessions.get(sessionId)

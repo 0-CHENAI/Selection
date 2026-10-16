@@ -23,6 +23,7 @@ import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
 import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
+import { streamTrace } from '../stream-trace.ts';
 
 import type {
   BackendConfig,
@@ -1152,6 +1153,9 @@ export class PiAgent extends BaseAgent {
    */
   private handleLine(line: string): void {
     if (!line.trim()) return;
+    if (line.includes('"text_delta"') || line.includes('"thinking_delta"')) {
+      streamTrace('stdout-read', { bytes: line.length });
+    }
 
     let msg: Record<string, unknown>;
     try {
