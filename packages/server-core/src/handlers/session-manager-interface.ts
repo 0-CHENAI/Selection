@@ -93,6 +93,8 @@ export interface ISessionManager {
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
+  /** Rewrite ordinary project conversations onto the project's folder. sdkCwd stays put. */
+  alignProjectConversationDirectories?(workspaceId: string, projectId: string, workingDirectory: string): Promise<void>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   /** Apply the reserved Task labeling (mint / inherit the per-task item label under the Task

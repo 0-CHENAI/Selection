@@ -36,7 +36,7 @@ function setup() {
     sessionManager: manager,
     platform: { logger: { info() {}, warn() {}, error() {} } },
   } as unknown as HandlerDeps)
-  const project = createProject(root, { name: 'Delete me' })
+  const project = createProject(root, { name: 'Delete me', workingDirectory: join(root, 'work') })
   async function session(projectId?: string, live = false) {
     const created = await createSession(root)
     const stored = loadSession(root, created.id)!

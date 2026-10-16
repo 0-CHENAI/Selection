@@ -49,11 +49,11 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { createProject } = await import('@craft-agent/shared/projects')
     const project = createProject(workspace.rootPath, {
-      name: input.name?.trim() || 'New Project',
-      description: input.description,
-      workingDirectory: input.workingDirectory,
-      details: input.details,
-      colorTheme: input.colorTheme,
+      name: input?.name ?? '',
+      description: input?.description,
+      workingDirectory: input?.workingDirectory ?? '',
+      details: input?.details,
+      colorTheme: input?.colorTheme,
     })
     await broadcastChanged(workspaceId, workspace.rootPath)
     log.info(`Created project: ${project.slug}`)
@@ -69,8 +69,14 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
   ) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { updateProject } = await import('@craft-agent/shared/projects')
+    const { loadProject, updateProject } = await import('@craft-agent/shared/projects')
+    const existing = loadProject(workspace.rootPath, projectSlug)
     const updated = updateProject(workspace.rootPath, projectSlug, patch)
+    const nextDirectory = updated.workingDirectory?.trim()
+    const previousDirectory = existing?.config.workingDirectory?.trim()
+    if (nextDirectory && nextDirectory !== previousDirectory) {
+      await deps.sessionManager.alignProjectConversationDirectories?.(workspace.id, updated.id, nextDirectory)
+    }
     await broadcastChanged(workspaceId, workspace.rootPath)
     return updated
   })

@@ -256,6 +256,8 @@ interface ChatDisplayProps {
   workingDirectory?: string
   /** Callback when working directory changes */
   onWorkingDirectoryChange?: (path: string) => void
+  /** Project conversations display the project folder and cannot switch it. */
+  workingDirectoryLocked?: boolean
   /** Session folder path (for "Reset to Session Root" option) */
   sessionFolderPath?: string
   /**
@@ -587,6 +589,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Working directory
   workingDirectory,
   onWorkingDirectoryChange,
+  workingDirectoryLocked = false,
   sessionFolderPath,
   composerSessionId,
   // Lazy loading
@@ -2528,7 +2531,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               skills,
               workspaceId,
               workingDirectory,
-              onWorkingDirectoryChange,
+              onWorkingDirectoryChange: workingDirectoryLocked ? undefined : onWorkingDirectoryChange,
+              workingDirectoryLocked,
               disableSend: disableSend || connectionUnavailable,
               connectionUnavailable,
               isEmptySession: session.messages.length === 0,

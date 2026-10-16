@@ -93,6 +93,7 @@ import {
   addRecentWorkingDir,
 } from './working-directory-history'
 import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirectorySelector'
+import { ProjectWorkingDirectoryMark } from './ProjectWorkingDirectoryMark'
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
@@ -361,6 +362,8 @@ export interface FreeFormInputProps {
   workingDirectory?: string
   /** Callback when working directory changes */
   onWorkingDirectoryChange?: (path: string) => void
+  /** Project conversations show the project folder and cannot change it here. */
+  workingDirectoryLocked?: boolean
   /** Session folder path (for "Reset to Session Root" option) */
   sessionFolderPath?: string
   /** Session ID for scoping events like approve-plan */
@@ -455,6 +458,7 @@ export function FreeFormInput({
   workspaceId,
   workingDirectory,
   onWorkingDirectoryChange,
+  workingDirectoryLocked = false,
   sessionFolderPath,
   sessionId,
   currentSessionStatus,
@@ -2223,7 +2227,9 @@ export function FreeFormInput({
               />
             </div>
           )}
-          {onWorkingDirectoryChange && (
+          {workingDirectoryLocked ? (
+            <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} />
+          ) : onWorkingDirectoryChange && (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
@@ -2331,7 +2337,9 @@ export function FreeFormInput({
           )}
 
           {/* 3. Working Directory Selector Badge */}
-          {onWorkingDirectoryChange && (
+          {workingDirectoryLocked ? (
+            <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} isEmptySession={isEmptySession} />
+          ) : onWorkingDirectoryChange && (
             <WorkingDirectoryBadge
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}

@@ -59,10 +59,15 @@ test('project drafts display the project directory before workspace settings arr
 })
 
 test('manual draft directory survives asynchronous default hydration', () => {
-  expect(resolveDraftWorkingDirectory('/chosen', projectDirectory, undefined)).toBe('/chosen')
-  expect(resolveDraftWorkingDirectory('/chosen', projectDirectory, '/workspace')).toBe('/chosen')
-  expect(resolveDraftWorkingDirectory('none', projectDirectory, '/workspace')).toBeUndefined()
-  expect(resolveDraftWorkingDirectory('user_default', projectDirectory, '/workspace')).toBe(projectDirectory)
+  expect(resolveDraftWorkingDirectory('/chosen', undefined, '/workspace')).toBe('/chosen')
+  expect(resolveDraftWorkingDirectory('none', undefined, '/workspace')).toBeUndefined()
+  expect(resolveDraftWorkingDirectory('user_default', undefined, '/workspace')).toBe('/workspace')
+})
+
+test('project drafts ignore a session-level directory', () => {
+  expect(resolveDraftWorkingDirectory('/chosen', projectDirectory, '/workspace', true)).toBe(projectDirectory)
+  expect(resolveDraftWorkingDirectory('none', projectDirectory, '/workspace', true)).toBe(projectDirectory)
+  expect(resolveDraftWorkingDirectory(undefined, undefined, '/workspace', true)).toBeUndefined()
 })
 
 test('switching project defaults and missing defaults resolve without stale project directories', () => {

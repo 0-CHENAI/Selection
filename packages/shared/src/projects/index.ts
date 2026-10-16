@@ -45,3 +45,16 @@ export {
 } from './storage.ts';
 
 export type { UploadProjectAssetInput } from './storage.ts';
+
+export {
+  folderNameFromPath,
+  suggestProjectNameFromFolder,
+  createProjectBlocker,
+  projectWorkingDirectorySaveIssue,
+  requireCreateProjectFields,
+  applyWorkingDirectoryPatch,
+  isProjectConversation,
+  requiredProjectConversationDirectory,
+  projectConversationDirectoryUpdates,
+} from './working-directory.ts';
+export type { ProjectConversationIdentity } from './working-directory.ts';
