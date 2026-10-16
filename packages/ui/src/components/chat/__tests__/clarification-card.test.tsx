@@ -34,8 +34,8 @@ await i18n.use(initReactI18next).init({
   resources: {
     'zh-Hans': {
       translation: {
-        'chat.clarificationAnswered_one': '已澄清',
-        'chat.clarificationAnswered_other': '{{count}} 个已澄清',
+        'chat.clarificationAnswered_one': '{{count}} 个问题已澄清',
+        'chat.clarificationAnswered_other': '{{count}} 个问题已澄清',
         'chat.clarificationContinue': '继续',
         'chat.clarificationFreeText': '补充说明',
         'chat.clarificationFreeTextPlaceholder': '直接写下答案，或补充你的选择',
@@ -43,9 +43,9 @@ await i18n.use(initReactI18next).init({
         'chat.clarificationSingleHint': '选择一项，也可以直接填写，或两者一起',
         'chat.clarificationSkip': '跳过',
         'chat.clarificationSkipped': '已跳过，按当前理解继续',
-        'chat.clarificationSkippedCount_one': '已跳过',
-        'chat.clarificationSkippedCount_other': '{{count}} 个跳过',
-        'chat.clarificationSummaryMixed': '{{answered}} 个已澄清，{{skipped}} 个跳过',
+        'chat.clarificationSkippedCount_one': '{{count}} 个问题已跳过',
+        'chat.clarificationSkippedCount_other': '{{count}} 个问题已跳过',
+        'chat.clarificationSummaryMixed': '{{answered}} 个问题已澄清，{{skipped}} 个已跳过',
         'chat.clarificationTextHint': '写下答案，或跳过',
         'chat.clarificationTitle': '需要确认',
         'chat.clarificationYourAnswer': '你的回答',
@@ -184,7 +184,8 @@ describe('clarification card', () => {
     expect(collapsed).toContain('data-clarification-brief')
     expect(collapsed).toContain('data-clarification-status="answered"')
     expect(collapsed).toContain('data-clarification-open="false"')
-    expect(collapsed).toContain('>已澄清<')
+    expect(collapsed).toContain('>1 个问题已澄清<')
+    expect(collapsed).not.toContain('>已澄清<')
     expect(collapsed).toContain('Check attachments')
     expect(collapsed).not.toContain('data-clarification-card')
     expect(collapsed).not.toContain('data-clarification-summary')
@@ -194,7 +195,7 @@ describe('clarification card', () => {
     expect(collapsed).not.toContain('Waiting for clarification')
     const header = collapsed.match(/<button[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
     expect(header.indexOf('data-clarification-brief')).toBeGreaterThan(-1)
-    expect(header.indexOf('>已澄清<')).toBeLessThan(header.indexOf('Check attachments'))
+    expect(header.indexOf('>1 个问题已澄清<')).toBeLessThan(header.indexOf('Check attachments'))
 
     const html = renderFold([answered], true)
     expect(html).toContain('data-clarification-open="true"')
@@ -217,7 +218,7 @@ describe('clarification card', () => {
     expect(rowAt).toBeGreaterThan(early)
     expect(later).toBeGreaterThan(rowAt)
     const row = html.slice(rowAt, html.indexOf('</button>', rowAt))
-    expect(row.indexOf('data-clarification-icon')).toBeLessThan(row.indexOf('>已澄清<'))
+    expect(row.indexOf('data-clarification-icon')).toBeLessThan(row.indexOf('>1 个问题已澄清<'))
 
     const popup = renderPopup(answered)
     expect(popup).toContain('data-clarification-popup')
@@ -233,21 +234,22 @@ describe('clarification card', () => {
 
   it('summarizes several settled questions inside the same fold', () => {
     const translate = i18n.t.bind(i18n)
-    expect(clarificationSummaryLabel({ answered: 1, skipped: 0 }, translate)).toBe('已澄清')
-    expect(clarificationSummaryLabel({ answered: 3, skipped: 0 }, translate)).toBe('3 个已澄清')
-    expect(clarificationSummaryLabel({ answered: 0, skipped: 1 }, translate)).toBe('已跳过')
-    expect(clarificationSummaryLabel({ answered: 0, skipped: 2 }, translate)).toBe('2 个跳过')
-    expect(clarificationSummaryLabel({ answered: 2, skipped: 1 }, translate)).toBe('2 个已澄清，1 个跳过')
-    expect(clarificationBriefTitle('Check attachments', '已澄清', ['步骤已完成'])).toBe('已澄清 · Check attachments')
-    expect(clarificationBriefTitle('步骤已完成', '已跳过', ['步骤已完成'])).toBe('已跳过')
-    expect(clarificationBriefTitle('正在回复', '3 个已澄清', ['正在回复', '思考中…'])).toBe('3 个已澄清')
+    expect(clarificationSummaryLabel({ answered: 1, skipped: 0 }, translate)).toBe('1 个问题已澄清')
+    expect(clarificationSummaryLabel({ answered: 3, skipped: 0 }, translate)).toBe('3 个问题已澄清')
+    expect(clarificationSummaryLabel({ answered: 0, skipped: 1 }, translate)).toBe('1 个问题已跳过')
+    expect(clarificationSummaryLabel({ answered: 0, skipped: 2 }, translate)).toBe('2 个问题已跳过')
+    expect(clarificationSummaryLabel({ answered: 2, skipped: 1 }, translate)).toBe('2 个问题已澄清，1 个已跳过')
+    expect(clarificationBriefTitle('Check attachments', '1 个问题已澄清', ['步骤已完成'])).toBe('1 个问题已澄清 · Check attachments')
+    expect(clarificationBriefTitle('步骤已完成', '1 个问题已跳过', ['步骤已完成'])).toBe('1 个问题已跳过')
+    expect(clarificationBriefTitle('正在回复', '3 个问题已澄清', ['正在回复', '思考中…'])).toBe('3 个问题已澄清')
 
     const answered = card({ status: 'answered', selectedOptionIds: ['2025'], text: '用 2025' })
     const skipped = card({ status: 'skipped', requestId: 'req-2', question: '要附录吗？' })
     skipped.id = 'card-2'
     const collapsed = renderFold([answered, skipped], false)
     expect(collapsed).toContain('data-clarification-status="mixed"')
-    expect(collapsed).toContain('1 个已澄清，1 个跳过')
+    expect(collapsed).toContain('1 个问题已澄清，1 个已跳过')
+    expect(collapsed).not.toContain('>已澄清<')
     expect(collapsed).not.toContain('data-clarification-detail')
     expect(collapsed).not.toContain('data-clarification-card')
 
@@ -255,6 +257,10 @@ describe('clarification card', () => {
     expect(open.match(/data-clarification-row/g)?.length).toBe(2)
     expect(open).toContain('data-clarification-status="answered"')
     expect(open).toContain('data-clarification-status="skipped"')
+    expect(open).toContain('>1 个问题已澄清<')
+    expect(open).toContain('>1 个问题已跳过<')
+    expect(open).not.toContain('>已澄清<')
+    expect(open).not.toContain('>已跳过<')
     expect(open).not.toContain('data-clarification-detail')
     expect(open).not.toContain('data-clarification-card')
     expect(open).not.toContain('要附录吗？')

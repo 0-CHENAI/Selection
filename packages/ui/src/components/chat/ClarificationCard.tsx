@@ -54,7 +54,7 @@ export function clarificationOutcomeCounts(messages: readonly Message[]): { answ
   return { answered, skipped }
 }
 
-/** One settled question uses the short badge. Mixed groups always include both counts. */
+/** Every settled title includes the question count, including a single question. */
 export function clarificationSummaryLabel(
   counts: { answered: number; skipped: number },
   t: TFunction,
@@ -62,9 +62,9 @@ export function clarificationSummaryLabel(
   const { answered, skipped } = counts
   if (answered > 0 && skipped > 0) return t('chat.clarificationSummaryMixed', { answered, skipped })
   if (skipped > 1) return t('chat.clarificationSkippedCount_other', { count: skipped })
-  if (skipped === 1) return t('chat.clarificationSkippedCount_one')
+  if (skipped === 1) return t('chat.clarificationSkippedCount_one', { count: skipped })
   if (answered > 1) return t('chat.clarificationAnswered_other', { count: answered })
-  return t('chat.clarificationAnswered_one')
+  return t('chat.clarificationAnswered_one', { count: answered })
 }
 
 export function clarificationSummaryStatus(
