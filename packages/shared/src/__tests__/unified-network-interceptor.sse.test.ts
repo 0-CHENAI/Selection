@@ -559,6 +559,132 @@ describe('unified-network-interceptor SSE processors', () => {
     expect(out).toContain('{"type":"message_stop"}');
   });
 
+  /**
+   * Moonshot's Anthropic-compatible endpoint frames each SSE event as
+   * `data:{json}` and a single LF. There is no `event:` line and no blank
+   * line. Tokens must be visible after the chunk that completes them, and
+   * the flushed text must equal the full answer.
+   */
+  it('streams Kimi data-only Anthropic events incrementally and keeps the full answer', async () => {
+    const head = '# 周报\n\n';
+    const midA = '- 已完成流式修复\n';
+    const midB = '- 最终内容完整\n\n';
+    const tail = '详见 `code` 与 {括号}。';
+    const answer = head + midA + midB + tail;
+    const thinkingSeed = '先整理结构';
+    const thinkingMore = '，再写正文';
+    const line = (event: unknown) => `data:${JSON.stringify(event)}\n`;
+    const messageStart = {
+      type: 'message_start',
+      message: { id: 'msg_kimi', usage: { input_tokens: 11, output_tokens: 0 } },
+    };
+    const thinkStart = {
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'thinking', thinking: thinkingSeed, signature: '' },
+    };
+    const thinkDelta = {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'thinking_delta', thinking: thinkingMore },
+    };
+    const signature = {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'signature_delta', signature: 'sig-kimi' },
+    };
+    const thinkStop = { type: 'content_block_stop', index: 0 };
+    const textStart = {
+      type: 'content_block_start',
+      index: 1,
+      content_block: { type: 'text', text: head },
+    };
+    const textMidA = {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'text_delta', text: midA },
+    };
+    const textMidB = {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'text_delta', text: midB },
+    };
+    const textTail = {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'text_delta', text: tail },
+    };
+    const textStop = { type: 'content_block_stop', index: 1 };
+    const usage = {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 24 },
+    };
+    const stop = { type: 'message_stop' };
+
+    const thinkBytes = encoder.encode(line(thinkDelta));
+    const thinkCut = Math.floor(thinkBytes.length / 2);
+    const tailBytes = encoder.encode(line(textTail));
+    const tailCut = Math.floor(tailBytes.length / 2);
+    const chunks: Array<string | Uint8Array> = [
+      line(messageStart) + line(thinkStart).replace(/\n$/, '\r\n'),
+      thinkBytes.slice(0, thinkCut),
+      thinkBytes.slice(thinkCut),
+      line(signature) + line(thinkStop) + 'data: {"type":"ping"}\n',
+      line(textStart),
+      `data:${JSON.stringify(textMidA)}${JSON.stringify(textMidB)}\n`,
+      tailBytes.slice(0, tailCut),
+      tailBytes.slice(tailCut),
+      `${line(textStop)}${line(usage)}data:${JSON.stringify(stop)}`,
+    ];
+    const expected = [
+      '',
+      '',
+      '',
+      '',
+      head,
+      head + midA + midB,
+      head + midA + midB,
+      answer,
+      answer,
+    ];
+
+    const processor = createAnthropicSseStrippingStream();
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    const parts: string[] = [];
+    const reading = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        parts.push(decoder.decode(item.value));
+      }
+    })();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const seen: string[] = [];
+    for (const chunk of chunks) {
+      const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+      await writer.write(bytes);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      seen.push(piVisibleText(parts.join('')));
+    }
+    expect(seen).toEqual(expected);
+    await writer.close();
+    await reading;
+    const out = parts.join('');
+    expect(piVisibleText(out)).toBe(answer);
+    expect(out).toContain(`"thinking":"${thinkingSeed}"`);
+    expect(out).toContain(`"thinking":"${thinkingMore}"`);
+    expect(out).toContain('"text":""');
+    expect(out).toContain('"thinking":""');
+    expect(out).toContain('"signature":"sig-kimi"');
+    expect(out).toContain('event: ping');
+    expect(out).toContain('"output_tokens":24');
+    expect(out).toContain('"stop_reason":"end_turn"');
+    expect(out).toContain('event: message_stop');
+    expect(out).not.toContain('1000000');
+  });
+
   it('drops buffered tool arguments when the reader cancels', async () => {
     const processor = createAnthropicSseStrippingStream();
     const writer = processor.writable.getWriter();

@@ -490,6 +490,76 @@ const SSE_LINE_BREAK = /\r\n|\n|\r/;
 const SYNTHETIC_BLOCK_INDEX_BASE = 1_000_000;
 const DEFAULT_MAX_SSE_BUFFER_CHARS = 32 * 1024 * 1024;
 
+/**
+ * End index of the object that starts at `start` (`{`), or -1 if it is cut off.
+ * Braces inside strings do not count.
+ */
+function scanJsonObjectEnd(input: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < input.length; i++) {
+    const char = input[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === '\\') {
+        escape = true;
+        continue;
+      }
+      if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split a buffer into top-level JSON objects.
+ * Pretty-printed Anthropic data stays one object. Kimi's `data:{...}\\ndata:{...}`
+ * (no blank line) is several objects, which `JSON.parse` would otherwise reject.
+ */
+function splitTopLevelJsonObjects(input: string): { objects: string[]; rest: string } | null {
+  const objects: string[] = [];
+  let index = 0;
+  const skipSpace = () => {
+    while (index < input.length && /\s/.test(input.charAt(index))) index++;
+  };
+  skipSpace();
+  if (index >= input.length || input.charAt(index) !== '{') return null;
+
+  while (index < input.length) {
+    skipSpace();
+    if (index >= input.length) break;
+    if (input.charAt(index) !== '{') return { objects, rest: input.slice(index) };
+    const end = scanJsonObjectEnd(input, index);
+    if (end < 0) return { objects, rest: input.slice(index) };
+    const slice = input.slice(index, end);
+    try {
+      const parsed = JSON.parse(slice) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return objects.length > 0 ? { objects, rest: input.slice(index) } : null;
+      }
+    } catch {
+      return objects.length > 0 ? { objects, rest: input.slice(index) } : null;
+    }
+    objects.push(slice);
+    index = end;
+  }
+  return objects.length > 0 ? { objects, rest: '' } : null;
+}
+
 /** Observe decoded previews without changing the SDK tool-call stream. */
 function createAnswerPreviewEmitter() {
   const previewObserver = answerPreviewContext.getStore();
@@ -536,6 +606,11 @@ export function createAnthropicSseStrippingStream(options?: {
    * content_block_stop, reuse a thinking index for text, or name the block
    * `reasoning`. Those deltas would otherwise disappear while the socket stays
    * open. Ping, errors, usage, and unknown events are forwarded unchanged.
+   *
+   * Kimi's Anthropic gateway also frames each event as `data:{json}` plus a
+   * single LF and no blank line. Holding every data line until a blank line
+   * glues those objects into one payload, `JSON.parse` fails, and the reply
+   * is dropped. A finished JSON object is therefore its own event.
    */
   const openBlockKinds = new Map<number, 'text' | 'thinking' | 'tool' | 'other'>();
   const recoveredTextIndexes = new Map<number, number>();
@@ -785,8 +860,42 @@ export function createAnthropicSseStrippingStream(options?: {
           jsonParts: [],
         });
       }
+      // Pi stores content_block_start text/thinking but only emits text_start /
+      // thinking_start. Selection forwards text_delta, so a gateway that puts
+      // the first tokens on the start event would not stream them. Move a
+      // non-empty seed into a delta and leave the start block empty. Official
+      // Anthropic sends "" here and stays byte-identical.
+      const started = (startData.content_block && typeof startData.content_block === 'object'
+        ? startData.content_block
+        : undefined) as { type?: string; text?: unknown; thinking?: unknown } | undefined;
+      const seedText = index !== undefined && started?.type === 'text' ? firstString(started.text) : undefined;
+      const seedThinking = index !== undefined && started?.type === 'thinking' ? firstString(started.thinking) : undefined;
+      if (seedText || seedThinking) {
+        startData = {
+          ...startData,
+          content_block: {
+            ...started,
+            ...(seedText ? { text: '' } : {}),
+            ...(seedThinking ? { thinking: '' } : {}),
+          },
+        };
+      }
       const unchanged = startData === data;
       emitSseEvent(eventType, unchanged ? dataStr : JSON.stringify(startData), controller);
+      if (seedText) {
+        emitSseEvent('content_block_delta', JSON.stringify({
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'text_delta', text: seedText },
+        }), controller);
+      }
+      if (seedThinking) {
+        emitSseEvent('content_block_delta', JSON.stringify({
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'thinking_delta', thinking: seedThinking },
+        }), controller);
+      }
       return;
     }
 
@@ -948,10 +1057,31 @@ export function createAnthropicSseStrippingStream(options?: {
     return '';
   }
 
+  function dataBufferIsComplete(): boolean {
+    if (dataLines.length === 0) return false;
+    const split = splitTopLevelJsonObjects(dataLines.join('\n'));
+    return !!split && split.objects.length > 0 && split.rest.trim() === '';
+  }
+
   function dispatchEvent(controller: TransformStreamDefaultController<Uint8Array>): void {
     const data = takeData();
-    const type = eventName || inferEventName(data);
+    const name = eventName;
     eventName = '';
+    const split = data ? splitTopLevelJsonObjects(data) : null;
+    // One object keeps the original payload so a normal Anthropic frame stays
+    // byte-identical. Several objects are separate events (Kimi omits the
+    // blank line, so they would otherwise be joined and discarded).
+    if (split && split.objects.length > 1 && split.rest.trim() === '') {
+      for (let i = 0; i < split.objects.length; i++) {
+        const object = split.objects[i];
+        if (!object) continue;
+        const type = (i === 0 && name) || inferEventName(object);
+        if (!type) continue;
+        processEvent(type, object, controller);
+      }
+      return;
+    }
+    const type = name || inferEventName(data);
     if (!type) return;
     const payload = data || emptyEventData(type);
     if (!payload) return;
@@ -991,6 +1121,10 @@ export function createAnthropicSseStrippingStream(options?: {
       }
       dataChars = nextChars;
       dataLines.push(value);
+      // Release a finished object before the next network chunk. Waiting for
+      // a blank line drops Kimi's single-LF frames and, when a later frame
+      // does end a group, paints that whole group at once.
+      if (dataBufferIsComplete()) dispatchEvent(controller);
     }
   }
 
