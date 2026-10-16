@@ -114,20 +114,26 @@ export function CreateProjectDialog({ open, onCancel, onSubmit, pickFolder }: Cr
           <div className="space-y-1.5">
             <div className="text-sm font-medium">{t('projectsList.createDialogFolderLabel')}</div>
             <div
+              role="group"
+              aria-invalid={showFolderError || undefined}
+              aria-describedby="create-project-folder-hint"
               className={cn(
                 'flex items-center gap-3 rounded-xl border bg-background px-3 py-3',
                 showFolderError ? 'border-destructive/60' : 'border-border/60',
               )}
             >
               <FolderOpen className="h-4 w-4 shrink-0 text-foreground/70" />
-              <p className={cn('min-w-0 flex-1 truncate text-sm', folder ? 'font-mono text-foreground' : 'text-muted-foreground')}>
+              <p
+                className={cn('min-w-0 flex-1 truncate text-sm', folder ? 'font-mono text-foreground' : 'text-muted-foreground')}
+                title={folder || undefined}
+              >
                 {folder || t('projectsList.createDialogFolderPlaceholder')}
               </p>
               <Button type="button" variant="outline" size="sm" onClick={handleChooseFolder}>
                 {t('projectsList.createDialogFolderButton')}
               </Button>
             </div>
-            <p className={cn('text-xs', showFolderError ? 'text-destructive' : 'text-muted-foreground')}>
+            <p id="create-project-folder-hint" className={cn('text-xs', showFolderError ? 'text-destructive' : 'text-muted-foreground')}>
               {showFolderError ? t('projectsList.createDialogFolderRequired') : t('projectsList.createDialogFolderHint')}
             </p>
           </div>
@@ -142,6 +148,8 @@ export function CreateProjectDialog({ open, onCancel, onSubmit, pickFolder }: Cr
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('projectsList.createDialogNamePlaceholder')}
+              aria-invalid={attempted && blocker === 'name' || undefined}
+              aria-describedby={attempted && blocker === 'name' ? 'create-project-name-error' : undefined}
               onCompositionStart={() => {
                 isComposingRef.current = true
               }}
@@ -158,8 +166,8 @@ export function CreateProjectDialog({ open, onCancel, onSubmit, pickFolder }: Cr
                 }
               }}
             />
-              {attempted && blocker === 'name' && (
-              <p className="text-xs text-destructive">{t('projectsList.createDialogNameRequired')}</p>
+            {attempted && blocker === 'name' && (
+              <p id="create-project-name-error" className="text-xs text-destructive">{t('projectsList.createDialogNameRequired')}</p>
             )}
           </div>
         </div>

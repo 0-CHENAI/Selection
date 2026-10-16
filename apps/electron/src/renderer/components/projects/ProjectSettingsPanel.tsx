@@ -83,11 +83,12 @@ export function ProjectSettingsPanel({
       >
         <SettingsCard>
           <div className="space-y-3 px-4 py-3.5">
-            <Field label={t('projectInfo.title')}>
-              <Input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder={name} />
+            <Field label={t('projectInfo.title')} htmlFor="project-settings-name">
+              <Input id="project-settings-name" value={name} onChange={(event) => onNameChange(event.target.value)} placeholder={name} />
             </Field>
-            <Field label={t('projectInfo.description')}>
+            <Field label={t('projectInfo.description')} htmlFor="project-settings-description">
               <Input
+                id="project-settings-description"
                 value={description}
                 onChange={(event) => onDescriptionChange(event.target.value)}
                 placeholder={t('projectInfo.descriptionPlaceholder')}
@@ -131,9 +132,18 @@ export function ProjectSettingsPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{t('projectInfo.workingDirectory')}</div>
-                <div className={cn('truncate text-xs', pathLabel ? 'font-mono text-foreground/80' : 'text-muted-foreground')}>
-                  {pathLabel || t('projectsList.createDialogFolderPlaceholder')}
-                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      tabIndex={pathLabel ? 0 : undefined}
+                      className={cn('truncate text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring', pathLabel ? 'font-mono text-foreground/80' : 'text-muted-foreground')}
+                      title={pathLabel || undefined}
+                    >
+                      {pathLabel || t('projectsList.createDialogFolderPlaceholder')}
+                    </div>
+                  </TooltipTrigger>
+                  {pathLabel && <TooltipContent className="max-w-sm break-all">{pathLabel}</TooltipContent>}
+                </Tooltip>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={onPickFolder}>
                 {pathLabel ? t('projectInfo.settingsFolderChange') : t('projectsList.createDialogFolderButton')}
@@ -234,17 +244,23 @@ export function ProjectSettingsPanel({
 function Field({
   label,
   hint,
+  htmlFor,
   children,
 }: {
   label: React.ReactNode
   hint?: React.ReactNode
+  htmlFor?: string
   children: React.ReactNode
 }) {
   return (
-    <label className="block">
-      <div className="mb-1 text-xs font-medium text-foreground/70">{label}</div>
+    <div className="block">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-foreground/70">{label}</label>
+      ) : (
+        <div className="mb-1 text-xs font-medium text-foreground/70">{label}</div>
+      )}
       {children}
       {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
-    </label>
+    </div>
   )
 }

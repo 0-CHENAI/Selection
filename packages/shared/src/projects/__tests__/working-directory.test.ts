@@ -12,6 +12,7 @@ import {
   projectWorkingDirectorySaveIssue,
   requiredProjectConversationDirectory,
   requireCreateProjectFields,
+  resolveCreatedWorkingDirectory,
   suggestProjectNameFromFolder,
 } from '../working-directory.ts'
 
@@ -120,6 +121,33 @@ describe('project working folder', () => {
         { id: 'sandbox', projectId: 'proj_1', isolated: true, workingDirectory: '/tmp/sandbox' },
       ],
     })).toEqual(['chat'])
+  })
+
+  it('keeps a resolved directory when a project conversation has no folder yet', () => {
+    expect(resolveCreatedWorkingDirectory({
+      resolved: '/workspace/default',
+      required: undefined,
+      requested: 'user_default',
+      projectWorkingDirectory: '  ',
+    })).toBe('/workspace/default')
+    expect(resolveCreatedWorkingDirectory({
+      resolved: '/chosen',
+      required: '/data/巡察',
+      requested: '/chosen',
+      projectWorkingDirectory: '/data/巡察',
+    })).toBe('/data/巡察')
+    expect(resolveCreatedWorkingDirectory({
+      resolved: '/worker/own',
+      required: null,
+      requested: '/worker/own',
+      projectWorkingDirectory: '/data/巡察',
+    })).toBe('/worker/own')
+    expect(resolveCreatedWorkingDirectory({
+      resolved: '/workspace/default',
+      required: null,
+      requested: 'user_default',
+      projectWorkingDirectory: '/data/巡察',
+    })).toBe('/data/巡察')
   })
 
   it('leaves a patch alone when it does not mention the folder', () => {

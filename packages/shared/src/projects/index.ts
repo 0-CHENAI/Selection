@@ -55,6 +55,7 @@ export {
   applyWorkingDirectoryPatch,
   isProjectConversation,
   requiredProjectConversationDirectory,
+  resolveCreatedWorkingDirectory,
   projectConversationDirectoryUpdates,
 } from './working-directory.ts';
 export type { ProjectConversationIdentity } from './working-directory.ts';

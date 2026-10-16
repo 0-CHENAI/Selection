@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel'
+import { mergeProjectSettingsRefresh, projectSettingsDraftDirty, projectSettingsDraftFromConfig } from '@/components/projects/project-settings-draft'
 import { projectWorkingDirectorySaveIssue } from '@craft-agent/shared/projects/working-directory'
 import type { LoadedProject, ProjectAsset } from '@craft-agent/shared/projects/types'
 
@@ -54,12 +55,33 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editColor, setEditColor] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [folderError, setFolderError] = useState<'cleared' | null>(null)
+  const projectRef = React.useRef(project)
+  const draftRef = React.useRef({
+    name: editName,
+    description: editDescription,
+    workingDirectory: editWorkingDir,
+    details: editDetails,
+    historySearch: editHistorySearch,
+    color: editColor,
+  })
+  projectRef.current = project
+  draftRef.current = {
+    name: editName,
+    description: editDescription,
+    workingDirectory: editWorkingDir,
+    details: editDetails,
+    historySearch: editHistorySearch,
+    color: editColor,
+  }
 
-  // Load project (and re-load on broadcast)
-  const loadProject = useCallback(async () => {
+  // Load project (and re-load on broadcast). A refresh must not replace the
+  // page with a spinner or discard unsaved edits.
+  const loadProject = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!workspaceId) return
-    setLoading(true)
-    setError(null)
+    if (mode === 'initial') {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const result = await window.electronAPI.getProject(workspaceId, projectSlug)
       if (!result) {
@@ -68,18 +90,31 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         return
       }
       const loaded = result as LoadedProject
+      const stored = projectSettingsDraftFromConfig(loaded.config)
+      const current = projectRef.current
+      const previous = current ? projectSettingsDraftFromConfig(current.config) : stored
+      const preserveEdits = mode === 'refresh' && !!current
+        && projectSettingsDraftDirty(previous, draftRef.current)
+      const nextDraft = preserveEdits
+        ? mergeProjectSettingsRefresh(previous, stored, draftRef.current)
+        : stored
       setProject(loaded)
-      setEditName(loaded.config.name)
-      setEditDescription(loaded.config.description ?? '')
-      setEditWorkingDir(loaded.config.workingDirectory ?? '')
-      setEditDetails(loaded.config.details ?? '')
-      setEditHistorySearch(loaded.config.historySearchEnabled === true)
-      setEditColor(loaded.config.color ?? '')
+      setEditName(nextDraft.name)
+      setEditDescription(nextDraft.description)
+      setEditWorkingDir(nextDraft.workingDirectory)
+      setEditDetails(nextDraft.details)
+      setEditHistorySearch(nextDraft.historySearch)
+      setEditColor(nextDraft.color)
+      if (!preserveEdits || nextDraft.workingDirectory === stored.workingDirectory) {
+        setFolderError(null)
+      }
     } catch (err) {
       console.error('[ProjectInfoPage] Failed to load project:', err)
-      setError(err instanceof Error ? err.message : String(err))
+      if (mode === 'initial' || !projectRef.current) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setLoading(false)
+      if (mode === 'initial') setLoading(false)
     }
   }, [workspaceId, projectSlug, t])
 
@@ -90,7 +125,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   useEffect(() => {
     if (!workspaceId) return
     const off = window.electronAPI.onProjectsChanged((wsId: string) => {
-      if (wsId === workspaceId) loadProject()
+      if (wsId === workspaceId) void loadProject('refresh')
     })
     return () => {
       if (typeof off === 'function') off()
