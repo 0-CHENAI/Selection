@@ -27,6 +27,21 @@ function sdkModelsForProvider(provider: string): PiProviderPickerModel[] {
   }))
 }
 
+/**
+ * Bare Bedrock Claude ids (`anthropic.claude-…`) are rejected by Bedrock.
+ * Regional inference profiles (`us.` / `eu.` / `global.` / …) stay selectable.
+ */
+export function isBareBedrockClaudePickerId(modelId: string): boolean {
+  const raw = modelId.startsWith('pi/') ? modelId.slice(3) : modelId
+  return raw.startsWith('anthropic.claude-')
+}
+
+function pickerModelsForProvider(provider: string): PiProviderPickerModel[] {
+  const models = sdkModelsForProvider(provider)
+  if (provider !== 'amazon-bedrock') return models
+  return models.filter((model) => !isBareBedrockClaudePickerId(model.id))
+}
+
 export async function listPiProviderPickerModels(
   provider: string,
   options: {
@@ -44,7 +59,7 @@ export async function listPiProviderPickerModels(
   }
 
   try {
-    return formatPiProviderPickerModels(sdkModelsForProvider(provider))
+    return formatPiProviderPickerModels(pickerModelsForProvider(provider))
   } catch {
     return { models: [], totalCount: 0 }
   }

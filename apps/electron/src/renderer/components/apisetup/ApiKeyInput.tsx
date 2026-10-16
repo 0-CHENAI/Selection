@@ -58,8 +58,11 @@ import {
   resolveCustomEndpointPayload,
   shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
+  bedrockModelFieldMode,
+  orderModelFieldMode,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
+  showsEndpointModelLimits,
   type PresetKey,
 } from "./submit-helpers"
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
@@ -469,6 +472,16 @@ export function ApiKeyInput({
     && !isBedrock
     && !OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
     && !ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+  const showBedrockCatalogPicker = isBedrock && bedrockModelFieldMode({
+    loading: piModelsLoading,
+    catalogCount: piModels.length,
+  }) === 'picker'
+  const showPiCatalogPicker = usesPiModelPicker && (piModelsLoading || piModels.length > 0)
+  const orderFieldMode = orderModelFieldMode({
+    remoteModelsLoading,
+    remoteModelCount: remoteModels.length,
+    apiKeyLength: apiKey.trim().length,
+  })
   const piRemoteModels = useMemo(() => piCatalogToRemoteModels(piModels), [piModels])
 
   const handlePresetSelect = (preset: Preset) => {
@@ -732,6 +745,16 @@ export function ApiKeyInput({
         return
       }
       const parsedModels = parseModelList(connectionDefaultModel)
+      if (piModels.length > 0 && parsedModels.length === 0) {
+        setModelError(t('apiSetup.defaultModelRequired'))
+        return
+      }
+      const catalogModels = piModels.length > 0
+        ? buildPiApiKeyModels(parsedModels, piModels, {
+          contextWindows: modelContextWindows,
+          maxTokens: modelMaxTokens,
+        })
+        : undefined
       onSubmit({
         apiKey: '',
         piAuthProvider: effectivePiAuthProvider,
@@ -745,7 +768,8 @@ export function ApiKeyInput({
           },
         } : {}),
         connectionDefaultModel: parsedModels[0],
-        models: parsedModels.length > 0 ? parsedModels : undefined,
+        models: catalogModels ?? (parsedModels.length > 0 ? parsedModels : undefined),
+        ...(catalogModels ? { modelSelectionMode: 'userDefined3Tier' as const } : {}),
       })
       return
     }
@@ -826,9 +850,11 @@ export function ApiKeyInput({
   }
 
   const selectedCustomModelIds = parseModelList(connectionDefaultModel)
-  const showCustomModelLimits = isCustomEndpointForm
-    && !isBedrock
-    && selectedCustomModelIds.length > 0
+  const showCustomModelLimits = showsEndpointModelLimits({
+    isCustomEndpointForm,
+    isBedrock,
+    selectedModelCount: selectedCustomModelIds.length,
+  })
   const selectedLimitRows = showCustomModelLimits
     ? selectedCustomModelIds.map((id) => ({ id, ...resolveEditableLimits(id) }))
     : []
@@ -1117,7 +1143,7 @@ export function ApiKeyInput({
       )}
 
       {/* Model selection — same multi-select as the OAuth / catalog picker */}
-      {usesPiModelPicker && (piModelsLoading || piModels.length > 0) ? (
+      {(showPiCatalogPicker || showBedrockCatalogPicker) ? (
         <div className="space-y-2">
           <RemoteModelsPicker
             models={piRemoteModels}
@@ -1133,7 +1159,7 @@ export function ApiKeyInput({
             }}
           />
         </div>
-      ) : isOrderPreset && (remoteModelsLoading || remoteModels.length > 0 || apiKey.trim().length < 8) ? (
+      ) : isOrderPreset && orderFieldMode === 'picker' ? (
         <RemoteModelsPicker
           models={remoteModels}
           value={connectionDefaultModel}

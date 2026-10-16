@@ -11,6 +11,7 @@ import { Check, ExternalLink } from "lucide-react"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
 import { OrderWordmark } from "@/components/icons/OrderWordmark"
+import { isOrderCredentialPrefill } from "./order-prefill"
 import {
   ApiKeyInput,
   type ApiKeyStatus,
@@ -249,9 +250,7 @@ export function CredentialsStep({
 
   // --- API Key flow ---
   const providerType = 'pi_api_key'
-  const isOrderPrefill =
-    editInitialValues?.activePreset === 'order-openai'
-    || (editInitialValues?.baseUrl?.includes('order.ai.jxepdi.top') ?? false)
+  const isOrderPrefill = isOrderCredentialPrefill(editInitialValues)
   const apiKeyDescription = isOrderPrefill
     ? t('onboarding.credentials.orderDesc')
     : isPiApiKey

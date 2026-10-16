@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  bedrockModelFieldMode,
   buildCustomEndpointModelSubmission,
+  orderModelFieldMode,
   resolveCustomEndpointPayload,
   shouldAutoProbeModelCatalog,
   showCustomFormatPicker,
+  showsEndpointModelLimits,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
 } from '../submit-helpers'
@@ -120,6 +123,39 @@ describe('resolvePresetStateForBaseUrlChange', () => {
       activePreset: 'custom',
       lastNonCustomPreset: 'openrouter',
     })
+  })
+})
+
+describe('ORDER and Bedrock model fields', () => {
+  it('keeps ORDER on the checkbox list until a fetch with a real key fails', () => {
+    expect(orderModelFieldMode({ remoteModelsLoading: false, remoteModelCount: 0, apiKeyLength: 3 })).toBe('picker')
+    expect(orderModelFieldMode({ remoteModelsLoading: true, remoteModelCount: 0, apiKeyLength: 20 })).toBe('picker')
+    expect(orderModelFieldMode({ remoteModelsLoading: false, remoteModelCount: 4, apiKeyLength: 20 })).toBe('picker')
+    expect(orderModelFieldMode({ remoteModelsLoading: false, remoteModelCount: 0, apiKeyLength: 20 })).toBe('manual')
+  })
+
+  it('shows context length once an ORDER model is selected', () => {
+    expect(showsEndpointModelLimits({
+      isCustomEndpointForm: true,
+      isBedrock: false,
+      selectedModelCount: 2,
+    })).toBe(true)
+    expect(showsEndpointModelLimits({
+      isCustomEndpointForm: true,
+      isBedrock: false,
+      selectedModelCount: 0,
+    })).toBe(false)
+    expect(showsEndpointModelLimits({
+      isCustomEndpointForm: false,
+      isBedrock: true,
+      selectedModelCount: 2,
+    })).toBe(false)
+  })
+
+  it('uses the Bedrock checkbox catalog when models can be listed', () => {
+    expect(bedrockModelFieldMode({ loading: true, catalogCount: 0 })).toBe('picker')
+    expect(bedrockModelFieldMode({ loading: false, catalogCount: 12 })).toBe('picker')
+    expect(bedrockModelFieldMode({ loading: false, catalogCount: 0 })).toBe('manual')
   })
 })
 

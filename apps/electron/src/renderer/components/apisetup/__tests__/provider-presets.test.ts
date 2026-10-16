@@ -27,6 +27,7 @@ describe('provider preset order', () => {
     expect(labels.indexOf('OpenAI EU')).toBeLessThan(labels.indexOf('OpenAI US'))
     expect(labels.indexOf('OpenAI US')).toBeLessThan(labels.indexOf('OpenRouter'))
     expect(labels.indexOf('OpenRouter')).toBeLessThan(labels.indexOf('ORDER (OpenAI)'))
+    expect(labels[0]).toBe('Amazon Bedrock')
     expect(labels.indexOf('xAI (Grok)')).toBeLessThan(labels.indexOf('z.ai (GLM)'))
     expect(labels.indexOf('Minimax CN')).toBeLessThan(labels.indexOf('Minimax Global'))
   })
@@ -43,6 +44,15 @@ describe('provider preset order', () => {
     expect(presetMonogram('Manifest')).toBe('M')
     expect(presetMonogram('自定义')).toBe('自')
     expect(presetMonogram('')).toBe('?')
+  })
+})
+
+describe('ORDER onboarding presets', () => {
+  it('keeps ORDER on its own preset instead of the alphabetical API list', () => {
+    const order = getPresetsForProvider('pi_api_key', 'order')
+    expect(order.map((preset) => preset.key)).toEqual(['order-openai'])
+    expect(order[0]?.url).toBe('https://order.ai.jxepdi.top/v1')
+    expect(getPresetsForProvider('pi_api_key')[0]?.key).toBe('amazon-bedrock')
   })
 })
 

@@ -20,7 +20,7 @@ import mistralIcon from '@/assets/provider-icons/mistral.svg'
 import ollamaIcon from '@/assets/provider-icons/ollama.svg'
 import openaiIcon from '@/assets/provider-icons/openai.svg'
 import openrouterIcon from '@/assets/provider-icons/openrouter.svg'
-import orderIcon from '@/assets/provider-icons/order.svg'
+import orderIcon from '@/assets/order-icon.svg'
 import piIcon from '@/assets/provider-icons/pi.svg'
 import vercelIcon from '@/assets/provider-icons/vercel.svg'
 import xaiIcon from '@/assets/provider-icons/xai.svg'
@@ -167,6 +167,33 @@ function piAuthProviderToIcon(piAuthProvider: string): ProviderIconKey | null {
     default:
       return null
   }
+}
+
+export type ConnectionBrandKind = 'order' | 'image' | 'fallback'
+
+/**
+ * Which mark to draw beside a connection name.
+ * ORDER always uses the filled order mark, including when the saved provider
+ * type would otherwise resolve to a different brand.
+ */
+export function resolveConnectionBrandIcon(connection: {
+  providerType?: string | null
+  type?: string | null
+  baseUrl?: string | null
+  piAuthProvider?: string | null
+}): { kind: ConnectionBrandKind; src: string | null } {
+  if (isOrderGatewayUrl(connection.baseUrl)) {
+    return { kind: 'order', src: providerIcons.order }
+  }
+
+  const src = getProviderIcon(
+    connection.providerType || connection.type || '',
+    connection.baseUrl,
+    connection.piAuthProvider,
+  )
+  if (!src) return { kind: 'fallback', src: null }
+  if (src === providerIcons.order) return { kind: 'order', src }
+  return { kind: 'image', src }
 }
 
 /**

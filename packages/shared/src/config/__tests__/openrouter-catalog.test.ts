@@ -4,7 +4,7 @@ import {
   formatPiProviderPickerModels,
   parseOpenRouterModelsPayload,
 } from '../openrouter-catalog.ts'
-import { listPiProviderPickerModels } from '../pi-provider-picker-models.ts'
+import { isBareBedrockClaudePickerId, listPiProviderPickerModels } from '../pi-provider-picker-models.ts'
 
 const LIVE_PAYLOAD = {
   data: [
@@ -150,6 +150,16 @@ describe('listPiProviderPickerModels', () => {
     })
     expect(result.totalCount).toBeGreaterThan(0)
     expect(result.models.some((model) => model.id === 'pi/openrouter/auto')).toBe(true)
+  })
+
+  it('lists Bedrock inference profiles and drops bare Claude ids', async () => {
+    const result = await listPiProviderPickerModels('amazon-bedrock')
+    expect(result.models.length).toBeGreaterThan(0)
+    expect(result.models.some((model) => model.contextWindow > 0)).toBe(true)
+    expect(result.models.some((model) => /claude/i.test(model.id))).toBe(true)
+    expect(result.models.some((model) => isBareBedrockClaudePickerId(model.id))).toBe(false)
+    expect(isBareBedrockClaudePickerId('anthropic.claude-opus-4-8')).toBe(true)
+    expect(isBareBedrockClaudePickerId('us.anthropic.claude-opus-4-8')).toBe(false)
   })
 
   it('falls back when the live catalog is empty', async () => {
