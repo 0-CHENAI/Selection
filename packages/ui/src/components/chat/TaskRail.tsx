@@ -116,15 +116,19 @@ export function TaskRail({ items }: TaskRailProps) {
     const list = listRef.current
     if (!list) return
     const listRect = list.getBoundingClientRect()
-    const next = items.map((item, index) => {
+    itemRefs.current.length = items.length
+    const next: RailNode[] = []
+    for (let index = 0; index < items.length; index++) {
       const element = itemRefs.current[index]
-      if (!element) return null
+      // A missing row would shift later nodes onto the wrong step. Wait for
+      // the next measure instead of painting a misaligned rail.
+      if (!element) return
       const rect = element.getBoundingClientRect()
-      return {
-        x: railNodeX(item.depth ?? 0),
+      next.push({
+        x: railNodeX(items[index]?.depth ?? 0),
         y: rect.top - listRect.top + rect.height / 2,
-      }
-    }).filter((node): node is RailNode => node !== null)
+      })
+    }
     const signature = `${listRect.width.toFixed(2)}x${listRect.height.toFixed(2)}|${next.map(node => `${node.x.toFixed(2)},${node.y.toFixed(2)}`).join(';')}`
     if (signature === signatureRef.current) return
     signatureRef.current = signature

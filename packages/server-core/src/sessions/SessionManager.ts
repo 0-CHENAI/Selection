@@ -102,7 +102,7 @@ import {
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@craft-agent/core/types'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import { loadProjectById } from '@craft-agent/shared/projects'
-import { isProjectConversation, projectConversationDirectoryUpdates, requiredProjectConversationDirectory } from '@craft-agent/shared/projects/working-directory'
+import { isProjectConversation, projectConversationDirectoryUpdates, requiredProjectConversationDirectory, resolveCreatedWorkingDirectory } from '@craft-agent/shared/projects/working-directory'
 import {
   // Session persistence functions
   listSessions as listStoredSessions,
@@ -1957,6 +1957,7 @@ export class SessionManager implements ISessionManager {
     if (managed.projectId !== header.projectId) {
       managed.projectId = header.projectId
       changed = true
+      if (header.projectId) this.alignLoadedProjectConversation(managed, { writeMetadata: false })
     }
 
     // Kanban column (mutable via drag; reconcile external/multi-window changes)
@@ -3414,10 +3415,9 @@ export class SessionManager implements ISessionManager {
       resolvedWorkingDir = options.workingDirectory
     }
 
-    // Resolve project binding. When a projectId is provided and the project has a
-    // workingDirectory configured, inherit it (only when the caller didn't pass an
-    // explicit override). This lets "+ New session in {project}" reuse the project's
-    // bound directory without duplicating logic on the renderer side.
+    // Resolve project binding. Ordinary conversations are locked to the project
+    // folder when one is set. Workers and children still inherit it only when
+    // the caller did not pass an explicit directory.
     // Subtasks inherit the parent's project when the caller didn't bind one explicitly.
     // A branch inherits its source project after the source is validated below.
     const inheritedProjectId = options?.parentSessionId
@@ -3644,16 +3644,16 @@ export class SessionManager implements ISessionManager {
           parentSessionId: options?.parentSessionId,
           orchestrationRole: options?.orchestrationRole,
         }, project.config.workingDirectory)
-        // Ordinary project conversations always use the project folder.
+        // Ordinary project conversations use the project folder when it exists.
         // A path sent by the client cannot point them somewhere else.
-        if (requiredDirectory !== null) {
-          resolvedWorkingDir = requiredDirectory
-        } else if (
-          (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
-          project.config.workingDirectory
-        ) {
-          resolvedWorkingDir = project.config.workingDirectory
-        }
+        // A legacy project with no folder keeps the resolved directory: writing
+        // undefined would make the agent fall back to the workspace storage root.
+        resolvedWorkingDir = resolveCreatedWorkingDirectory({
+          resolved: resolvedWorkingDir,
+          required: requiredDirectory,
+          requested: options?.workingDirectory,
+          projectWorkingDirectory: project.config.workingDirectory,
+        })
       }
     }
 
@@ -6428,6 +6428,10 @@ export class SessionManager implements ISessionManager {
     if (!folder) return
     const workspace = this.getWorkspaces().find(item => item.id === workspaceId) ?? getWorkspaceByNameOrId(workspaceId)
     if (!workspace) return
+    if (!isValidWorkingDirectory(folder).valid) {
+      sessionLog.warn(`Project ${projectId}: not moving conversations to "${folder}" because it is not a directory`)
+      return
+    }
     const listed = listStoredSessions(workspace.rootPath)
       .filter(session => session.projectId === projectId)
       .map(session => ({
@@ -6437,6 +6441,7 @@ export class SessionManager implements ISessionManager {
         parentSessionId: session.parentSessionId,
         orchestrationRole: session.orchestrationRole,
         workingDirectory: session.workingDirectory,
+        isolated: this.sessionHasIsolationRecord(workspace.rootPath, session.id),
       }))
     const live = this.getSessions(workspaceId)
       .filter(session => session.projectId === projectId)
@@ -6449,16 +6454,33 @@ export class SessionManager implements ISessionManager {
           parentSessionId: managed?.parentSessionId,
           orchestrationRole: managed?.orchestrationRole,
           workingDirectory: managed?.workingDirectory ?? session.workingDirectory,
-          isolated: !!managed?.isolatedWorkspace,
+          isolated: !!managed?.isolatedWorkspace || this.sessionHasIsolationRecord(workspace.rootPath, session.id),
         }
       })
+    // One row per session. A live sandbox must win over the disk header, which
+    // does not store the isolation flag. Otherwise the disk row is rewritten
+    // and updateWorkingDirectory then points the sandbox at the project folder.
+    const byId = new Map<string, (typeof listed)[number]>()
+    for (const session of listed) byId.set(session.id, session)
+    for (const session of live) {
+      const previous = byId.get(session.id)
+      // Loaded identity wins. Isolation is the union, so a sandbox flag that
+      // exists only on disk or only in memory still keeps the session put.
+      byId.set(session.id, {
+        ...session,
+        workingDirectory: session.workingDirectory ?? previous?.workingDirectory,
+        isolated: !!(session.isolated || previous?.isolated),
+      })
+    }
     const ids = new Set(projectConversationDirectoryUpdates({
       projectId,
       workingDirectory: folder,
-      sessions: [...listed, ...live],
+      sessions: [...byId.values()],
     }))
     for (const id of ids) {
+      if (this.sessionHasIsolationRecord(workspace.rootPath, id)) continue
       const managed = this.sessions.get(id)
+      if (managed?.isolatedWorkspace) continue
       if (managed) {
         this.updateWorkingDirectory(id, folder, { preserveSdkCwd: true })
         continue
@@ -6467,14 +6489,36 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  /** Startup alignment. Does not move sdkCwd and skips an open isolation sandbox. */
-  private alignLoadedProjectConversation(managed: ManagedSession): void {
+  private sessionHasIsolationRecord(rootPath: string, sessionId: string): boolean {
+    return existsSync(join(getSessionStoragePath(rootPath, sessionId), 'data', 'isolated-workspace.json'))
+  }
+
+  /**
+   * Point one ordinary project conversation at the project folder.
+   * Does not move sdkCwd, and skips isolation sandboxes and missing folders.
+   * A live agent is updated in place. A cold session only patches metadata,
+   * so startup does not hydrate every transcript.
+   */
+  private alignLoadedProjectConversation(managed: ManagedSession, options?: { writeMetadata?: boolean }): void {
     if (managed.isolatedWorkspace || !managed.projectId || !isProjectConversation(managed)) return
+    if (this.sessionHasIsolationRecord(managed.workspace.rootPath, managed.id)) return
     const project = loadProjectById(managed.workspace.rootPath, managed.projectId)
     const required = project?.config.workingDirectory?.trim()
     if (!required || managed.workingDirectory === required) return
+    if (!isValidWorkingDirectory(required).valid) {
+      sessionLog.warn(`Session ${managed.id}: project folder "${required}" is not usable, leaving ${managed.workingDirectory ?? 'unset'}`)
+      return
+    }
+    if (managed.agent || managed.messagesLoaded) {
+      this.updateWorkingDirectory(managed.id, required, { preserveSdkCwd: true })
+      return
+    }
     managed.workingDirectory = required
+    // Callers that persist the whole session must not also patch the header.
+    // The two writers race, and the header patch can land on a stale snapshot.
+    if (options?.writeMetadata === false) return
     void updateSessionMetadata(managed.workspace.rootPath, managed.id, { workingDirectory: required })
+      .catch(error => sessionLog.warn(`Session ${managed.id}: failed to store project folder`, error))
   }
 
   /**
@@ -13280,14 +13324,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   /**
    * Bind or unbind a session to/from a workspace project.
-   * Pass `null` to unbind. The session's working directory is NOT changed retroactively —
-   * the project binding is only used as a default for newly created sessions.
+   * Pass `null` to unbind. Binding an ordinary conversation moves it onto the
+   * project folder (sdkCwd stays put). Unbinding leaves the directory as it is.
+   * Workers, reviewers, children, and isolation sandboxes are not moved.
    */
   async setSessionProjectId(sessionId: string, projectId: string | null): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.projectId = projectId ?? undefined
       this.setMetadataWriteGuard(managed)
+      if (projectId) this.alignLoadedProjectConversation(managed, { writeMetadata: false })
 
       this.sendEvent({
         type: 'project_id_changed',

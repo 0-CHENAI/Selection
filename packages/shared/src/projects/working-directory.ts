@@ -104,6 +104,33 @@ export function requiredProjectConversationDirectory(
   return projectWorkingDirectory?.trim() || undefined
 }
 
+/**
+ * Directory stored on a newly created session.
+ *
+ * A project conversation with a folder always uses that folder.
+ * A project conversation whose folder is not chosen yet keeps the directory
+ * already resolved from the workspace default or an explicit path. Replacing
+ * it with `undefined` makes the agent fall back to the workspace storage root.
+ * Workers, reviewers, and children (`required === null`) inherit the project
+ * folder only when the caller did not choose one.
+ */
+export function resolveCreatedWorkingDirectory(input: {
+  resolved: string | undefined
+  required: string | null | undefined
+  requested?: string | null
+  projectWorkingDirectory?: string | null
+}): string | undefined {
+  if (typeof input.required === 'string') {
+    const folder = input.required.trim()
+    return folder || input.resolved
+  }
+  if (input.required === undefined) return input.resolved
+  const inherit = input.requested == null || input.requested === 'user_default'
+  const projectFolder = input.projectWorkingDirectory?.trim()
+  if (inherit && projectFolder) return projectFolder
+  return input.resolved
+}
+
 /** Session ids whose stored cwd should be rewritten to the project folder. */
 export function projectConversationDirectoryUpdates(input: {
   projectId: string

@@ -425,6 +425,8 @@ export interface FreeFormInputProps {
  * - Model selector
  * - Active option badges
  */
+const NO_SLASH_FOLDERS: string[] = []
+
 export function FreeFormInput({
   placeholder,
   disabled = false,
@@ -1219,7 +1221,9 @@ export function FreeFormInput({
     onSelectCommand: handleSlashCommand,
     onSelectFolder: handleSlashFolderSelect,
     activeCommands,
-    recentFolders,
+    // A project conversation cannot switch folders. Omit the recent-folder
+    // section so "/" does not offer a change that would be ignored.
+    recentFolders: workingDirectoryLocked ? NO_SLASH_FOLDERS : recentFolders,
     homeDir,
     skills,
     // Use workspace slug (not UUID) for SDK skill qualification

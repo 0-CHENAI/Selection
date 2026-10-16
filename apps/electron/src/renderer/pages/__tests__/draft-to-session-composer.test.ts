@@ -21,6 +21,12 @@ describe('draft to live session composer', () => {
     expect(chatPage).toContain('draftSessionOptionsId(activeWorkspaceId')
   })
 
+  it('does not offer a slash-menu folder switch inside a project conversation', () => {
+    const input = read('../../components/app-shell/input/FreeFormInput.tsx')
+    expect(input).toContain('recentFolders: workingDirectoryLocked ? NO_SLASH_FOLDERS : recentFolders')
+    expect(input).toContain('const NO_SLASH_FOLDERS: string[] = []')
+  })
+
   it('uses app and workspace thinking defaults and sends the displayed supported level', () => {
     const chatPage = read('../ChatPage.tsx')
     expect(chatPage).toContain('window.electronAPI.getDefaultThinkingLevel()')

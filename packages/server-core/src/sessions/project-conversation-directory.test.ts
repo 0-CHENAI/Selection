@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createProject } from '@craft-agent/shared/projects'
-import { loadSession } from '@craft-agent/shared/sessions'
+import { getSessionPath, loadSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager'
 
 const roots: string[] = []
@@ -82,10 +82,78 @@ test('changing the project folder rewrites stored project conversations only', a
     orchestrationRole: 'worker',
   })
 
+  const sandbox = await createSession(root, {
+    name: 'sandbox',
+    projectId: project.id,
+    workingDirectory: first,
+  })
+  const isolationDir = join(getSessionPath(root, sandbox.id), 'data')
+  mkdirSync(isolationDir, { recursive: true })
+  writeFileSync(join(isolationDir, 'isolated-workspace.json'), JSON.stringify({ version: 1, directory: first }))
+  const liveOnDisk = await createSession(root, {
+    name: 'live-sandbox',
+    projectId: project.id,
+    workingDirectory: first,
+  })
+  const liveSandbox = createManagedSession({
+    id: liveOnDisk.id,
+    projectId: project.id,
+    workingDirectory: first,
+    sdkCwd: first,
+    sdkSessionId: 'sdk-sandbox',
+    messages: [],
+  }, workspace as never, { messagesLoaded: true })
+  // The on-disk header has no isolation flag. The loaded session does.
+  ;(liveSandbox as { isolatedWorkspace?: { version: number } }).isolatedWorkspace = { version: 1 }
+  internal.sessions.set(liveOnDisk.id, liveSandbox)
+
   await manager.alignProjectConversationDirectories(workspace.id, project.id, next)
 
   const conversation = loadSession(root, stored.id)
   expect(conversation?.workingDirectory).toBe(next)
   expect(conversation?.sdkCwd).toBe(first)
   expect(loadSession(root, worker.id)?.workingDirectory).toBe(first)
+  expect(loadSession(root, sandbox.id)?.workingDirectory).toBe(first)
+  expect(liveSandbox.workingDirectory).toBe(first)
+  expect(liveSandbox.sdkCwd).toBe(first)
+})
+
+test('binding a session to a project moves it onto the project folder without moving sdkCwd', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'project-bind-'))
+  roots.push(root)
+  const projectFolder = join(root, '项目')
+  const previous = join(root, 'previous')
+  mkdirSync(projectFolder)
+  mkdirSync(previous)
+  const project = createProject(root, { name: '巡察', workingDirectory: projectFolder })
+  const workspace = { id: 'workspace', name: 'Workspace', slug: 'workspace', rootPath: root, createdAt: 1 }
+  const manager = new SessionManager()
+  const { createSession, updateSessionSdkId } = await import('@craft-agent/shared/sessions')
+  const stored = await createSession(root, { name: '迁入', workingDirectory: previous })
+  await updateSessionSdkId(root, stored.id, 'kept')
+  const conversation = createManagedSession({
+    id: stored.id,
+    workingDirectory: previous,
+    sdkCwd: previous,
+    sdkSessionId: 'kept',
+    messages: [{ id: 'm', role: 'user', content: 'hello', timestamp: 1 }],
+  }, workspace as never, { messagesLoaded: true })
+  const worker = createManagedSession({
+    id: 'worker',
+    orchestrationRole: 'worker',
+    workingDirectory: previous,
+    messages: [],
+  }, workspace as never, { messagesLoaded: true })
+  const internal = manager as unknown as { sessions: Map<string, unknown> }
+  internal.sessions.set(stored.id, conversation)
+  internal.sessions.set('worker', worker)
+
+  await manager.setSessionProjectId(stored.id, project.id)
+  await manager.setSessionProjectId('worker', project.id)
+
+  expect(conversation.workingDirectory).toBe(projectFolder)
+  expect(conversation.sdkCwd).toBe(previous)
+  expect(loadSession(root, stored.id)?.workingDirectory).toBe(projectFolder)
+  expect(loadSession(root, stored.id)?.sdkCwd).toBe(previous)
+  expect(worker.workingDirectory).toBe(previous)
 })
