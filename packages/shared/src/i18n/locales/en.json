@@ -2544,8 +2544,6 @@
   "turnCard.starting": "Starting...",
   "turnCard.stepsCompleted": "Steps Completed",
   "turnCard.thinking": "Thinking…",
-  "turnCard.thoughtDone": "Thought through",
-  "turnCard.thoughtFor": "Thought for {{seconds}}s",
   "turnCard.used": "Used",
   "viewer.clearSession": "Clear session",
   "webui.connectingToServer": "Connecting to server...",
