@@ -484,7 +484,7 @@ export function FreeFormInput({
     t("chatInput.placeholder.shiftTab"),
     t("chatInput.placeholder.mention"),
     t("chatInput.placeholder.newLine"),
-    t("chatInput.placeholder.sidebar", { key: cmdKey }),
+    t("chatInput.placeholder.immersiveMode", { key: cmdKey }),
     t("chatInput.placeholder.focusMode", { key: cmdKey }),
   ], [t])
 
@@ -593,7 +593,7 @@ export function FreeFormInput({
       const lower = entry.toLowerCase()
       return !lower.includes('shift + tab')
         && !lower.includes('shift + return')
-        && !lower.includes('toggle the sidebar')
+        && !lower.includes('immersive')
         && !lower.includes('focus mode')
         && !lower.includes('⌘')
         && !lower.includes('ctrl')

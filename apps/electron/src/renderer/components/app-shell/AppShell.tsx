@@ -1,7 +1,7 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
-import { useRef, useState, useEffect, useCallback, useMemo } from "react"
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
 import {
@@ -52,7 +52,7 @@ import { BoardListToggle } from "./kanban/BoardListToggle"
 import { PanelStackContainer } from "./PanelStackContainer"
 import type { ChatDisplayHandle } from "./ChatDisplay"
 import { LeftSidebar } from "./LeftSidebar"
-import { useSession } from "@/hooks/useSession"
+import { useSession, useIsMultiSelectActive } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
 import { AppShellProvider, type AppShellContextType } from "@/context/AppShellContext"
 import { EscapeInterruptProvider, useEscapeInterrupt } from "@/context/EscapeInterruptContext"
@@ -82,6 +82,12 @@ import { useContainerBreakpoint } from "@/hooks/useContainerBreakpoint"
 import { findLabelById, sortLabelsForDisplay } from "@craft-agent/shared/labels"
 import { resolveEntityColor } from "@craft-agent/shared/colors"
 import * as storage from "@/lib/local-storage"
+import {
+  immersiveDisplayWidths,
+  isConversationSurface,
+  shouldApplyImmersiveLayout,
+} from "./immersive-mode"
+import { immersiveLayoutActiveAtom, immersiveModeEnabledAtom } from "@/atoms/immersive-mode"
 import { toast } from "sonner"
 import { draftSessionNavigateOptions, navigate, routes } from "@/lib/navigate"
 import {
@@ -251,6 +257,13 @@ function AppShellContent({
     return isFocusedMode || storage.get(storage.KEYS.focusModeEnabled, false)
   })
 
+  // Immersive mode (the former sidebar button, still ⌘/Ctrl+B).
+  // The flag is persisted. Column widths are not rewritten, so turning it off
+  // restores the sidebar and list exactly as they were.
+  const [isImmersiveMode, setIsImmersiveMode] = React.useState(() => {
+    return storage.get(storage.KEYS.immersiveModeEnabled, false)
+  })
+
   // Auto-compact mode: shell width below mobile threshold hides sidebar/navigator
   // and switches to single-panel mode. Works in both webui (narrow viewport) and
   // desktop (narrow window or small screen).
@@ -277,6 +290,29 @@ function AppShellContent({
   // UNIFIED NAVIGATION STATE - single source of truth from NavigationContext
   // Derived from focused panel's route — all panels are peers
   const navState = useNavigationState()
+  const isMultiSelectActive = useIsMultiSelectActive()
+  const immersiveLayout = shouldApplyImmersiveLayout({
+    enabled: isImmersiveMode,
+    isConversation: isConversationSurface(navState),
+    isCompact: isAutoCompact,
+    isMultiSelect: isMultiSelectActive,
+  })
+  const chromeHidden = effectiveSidebarAndNavigatorHidden || immersiveLayout
+  const collapsedWidths = immersiveDisplayWidths(
+    {
+      sidebar: isSidebarVisible ? sidebarWidth : 0,
+      navigator: sessionListWidth,
+    },
+    immersiveLayout || isSidebarAndNavigatorHidden,
+  )
+  const displayedSidebarWidth = isAutoCompact ? 0 : collapsedWidths.sidebar
+  const displayedNavigatorWidth = isAutoCompact ? sessionListWidth : collapsedWidths.navigator
+  const setImmersiveModeEnabled = useSetAtom(immersiveModeEnabledAtom)
+  const setImmersiveLayoutActive = useSetAtom(immersiveLayoutActiveAtom)
+  useLayoutEffect(() => {
+    setImmersiveModeEnabled(isImmersiveMode)
+    setImmersiveLayoutActive(immersiveLayout)
+  }, [immersiveLayout, isImmersiveMode, setImmersiveLayoutActive, setImmersiveModeEnabled])
 
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
@@ -757,16 +793,12 @@ function AppShellContent({
     }
   })
 
-  const handleToggleSidebar = useCallback(() => {
-    if (isSidebarAndNavigatorHidden) {
-      setIsSidebarAndNavigatorHidden(false)
-      return
-    }
-    setIsSidebarVisible(v => !v)
-  }, [isSidebarAndNavigatorHidden])
+  const handleToggleImmersiveMode = useCallback(() => {
+    setIsImmersiveMode(value => !value)
+  }, [])
 
-  // Sidebar toggle (CMD+B)
-  useAction('view.toggleSidebar', handleToggleSidebar)
+  // Immersive mode (CMD+B). Escape stays bound to stop-processing / overlays.
+  useAction('view.toggleSidebar', handleToggleImmersiveMode)
 
   // Focus mode toggle (CMD+.) - hides both sidebars
   useAction('view.toggleFocusMode', () => setIsSidebarAndNavigatorHidden(v => !v))
@@ -1256,6 +1288,10 @@ function AppShellContent({
     storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
   }, [isSidebarAndNavigatorHidden])
 
+  React.useEffect(() => {
+    storage.set(storage.KEYS.immersiveModeEnabled, isImmersiveMode)
+  }, [isImmersiveMode])
+
   // Listen for focus mode toggle from menu (View → Focus Mode)
   React.useEffect(() => {
     const cleanup = window.electronAPI.onMenuToggleFocusMode?.(() => {
@@ -1264,13 +1300,13 @@ function AppShellContent({
     return cleanup
   }, [])
 
-  // Listen for sidebar toggle from menu (View → Toggle Sidebar)
+  // Listen for immersive mode from the menu (View → Immersive Mode, still ⌘/Ctrl+B)
   React.useEffect(() => {
     const cleanup = window.electronAPI.onMenuToggleSidebar?.(() => {
-      handleToggleSidebar()
+      handleToggleImmersiveMode()
     })
     return cleanup
-  }, [handleToggleSidebar])
+  }, [handleToggleImmersiveMode])
 
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1857,8 +1893,9 @@ function AppShellContent({
           onForward={goForward}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
-          onToggleSidebar={handleToggleSidebar}
+          onToggleSidebar={handleToggleImmersiveMode}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
+          immersive={isImmersiveMode}
           afterWorkspace={isSessionsNavigation(navState) ? (
             <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
@@ -1869,6 +1906,8 @@ function AppShellContent({
       <div
         ref={shellRef}
         className="flex items-stretch relative"
+        data-immersive={isImmersiveMode ? 'on' : 'off'}
+        data-immersive-layout={immersiveLayout ? 'on' : 'off'}
         style={{
           height: '100%',
           paddingRight: isAutoCompact || hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
@@ -2098,7 +2137,7 @@ function AppShellContent({
             </div>
           </div>
           }
-          sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
+          sidebarWidth={displayedSidebarWidth}
           navigatorSlot={
             <div
               data-work-mode-transition="list"
@@ -2345,15 +2384,16 @@ function AppShellContent({
             )}
             </div>
           }
-          navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
+          navigatorWidth={displayedNavigatorWidth}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
+          immersive={immersiveLayout}
           isRightSidebarVisible={hasTrailingPanel}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
 
         {/* Sidebar Resize Handle (absolute, hidden in focused mode) */}
-        {!effectiveSidebarAndNavigatorHidden && (
+        {!chromeHidden && (
         <div
           ref={resizeHandleRef}
           onMouseDown={(e) => { e.preventDefault(); setIsResizing('sidebar') }}
@@ -2386,7 +2426,7 @@ function AppShellContent({
         )}
 
         {/* Session List Resize Handle (absolute, hidden in focused mode) */}
-        {!effectiveSidebarAndNavigatorHidden && (
+        {!chromeHidden && (
         <div
           ref={sessionListHandleRef}
           onMouseDown={(e) => { e.preventDefault(); setIsResizing('session-list') }}

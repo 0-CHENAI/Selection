@@ -125,7 +125,8 @@ export const actions = {
   // ═══════════════════════════════════════════
   'view.toggleSidebar': {
     id: 'view.toggleSidebar',
-    label: 'Toggle Sidebar',
+    label: 'Immersive Mode',
+    description: 'Show only the conversation, centered. Press again to restore the layout.',
     defaultHotkey: 'mod+b',
     category: 'View',
   },

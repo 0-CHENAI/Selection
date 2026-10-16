@@ -11,7 +11,7 @@
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
-import { PanelLeftRounded } from "../icons/PanelLeftRounded"
+import { ImmersiveModeIcon } from "../icons/ImmersiveModeIcon"
 import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
@@ -48,6 +48,8 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
+  /** Immersive mode is on. The button stays in the top bar either way. */
+  immersive?: boolean
   /** Mode navigation rendered immediately after the workspace selector. */
   afterWorkspace?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
@@ -74,6 +76,7 @@ export function TopBar({
   canGoForward,
   onToggleSidebar,
   onToggleFocusMode,
+  immersive = false,
   afterWorkspace,
   isCompact,
 }: TopBarProps) {
@@ -143,11 +146,17 @@ export function TopBar({
         {!isCompact && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <TopBarButton onClick={onToggleSidebar} aria-label={t("menu.toggleSidebar")}>
-              <PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />
+            <TopBarButton
+              onClick={onToggleSidebar}
+              aria-label={t("menu.immersiveMode")}
+              aria-pressed={immersive}
+              data-immersive-toggle=""
+              isActive={immersive}
+            >
+              <ImmersiveModeIcon active={immersive} className={cn("h-[18px] w-[18px]", immersive ? "text-foreground" : "text-foreground/70")} />
             </TopBarButton>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{t("menu.toggleSidebar")}</TooltipContent>
+          <TooltipContent side="bottom">{t("menu.immersiveMode")}</TooltipContent>
         </Tooltip>
         )}
 
