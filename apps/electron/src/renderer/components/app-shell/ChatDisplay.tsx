@@ -85,7 +85,6 @@ import {
   type SystemTurn,
   type AuthRequestTurn,
   ClarificationCard,
-  ClarificationSummary,
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
@@ -2066,6 +2065,34 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         )
                       }
                       const settledMessages = settledClarifications.messages.get(index)
+                      if (settledMessages) {
+                        const foldKey = `clarification:${turn.message.id}`
+                        return (
+                          <div
+                            key={turnKey}
+                            data-chat-turn-key={turnKey}
+                            ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                            className={cn(
+                              "mt-2 rounded-lg transition-all duration-200",
+                              isCurrentMatch && "ring-2 ring-info ring-offset-2 ring-offset-background",
+                              isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
+                            )}
+                          >
+                            {renderWorkStatus(index)}
+                            <TurnCard
+                              sessionId={session.id}
+                              hasExternalWorkStatus
+                              turnId={foldKey}
+                              activities={[]}
+                              clarifications={settledMessages}
+                              isStreaming={false}
+                              isComplete
+                              isExpanded={expandedTurns.has(foldKey)}
+                              onExpandedChange={(expanded) => toggleTurn(foldKey, expanded)}
+                            />
+                          </div>
+                        )
+                      }
                       return (
                         <div
                           key={turnKey}
@@ -2078,18 +2105,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           )}
                         >
                           {renderWorkStatus(index)}
-                          {settledMessages ? (
-                            <ClarificationSummary messages={settledMessages} />
-                          ) : (
-                            <ClarificationCard
-                              message={turn.message}
-                              interactive={turn.message.clarification?.status === 'pending' && !!onRespondToClarification}
-                              onRespond={(response) => {
-                                const requestId = turn.message.clarification?.requestId
-                                if (requestId) onRespondToClarification?.(session.id, requestId, response)
-                              }}
-                            />
-                          )}
+                          {/* Pending stays an interactive card. Only answered or skipped folds into the chain. */}
+                          <ClarificationCard
+                            message={turn.message}
+                            interactive={turn.message.clarification?.status === 'pending' && !!onRespondToClarification}
+                            onRespond={(response) => {
+                              const requestId = turn.message.clarification?.requestId
+                              if (requestId) onRespondToClarification?.(session.id, requestId, response)
+                            }}
+                          />
                         </div>
                       )
                     }
@@ -2150,10 +2174,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         )}
                       >
                       {renderWorkStatus(index)}
-                      {settledMessages && <ClarificationSummary messages={settledMessages} />}
                       <TurnCard
                         sessionId={session.id}
                         hasExternalWorkStatus
+                        clarifications={settledMessages}
                         awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                         sessionFolderPath={session.sessionFolderPath}
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}

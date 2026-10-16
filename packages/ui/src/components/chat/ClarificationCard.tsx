@@ -1,6 +1,5 @@
 import * as React from 'react'
 import type { TFunction } from 'i18next'
-import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Message } from '@craft-agent/core/types'
 import { canSubmitClarification, toggleClarificationSelection } from '@craft-agent/shared/agent/clarification'
@@ -35,13 +34,10 @@ export interface ClarificationCardProps {
   message: Message
   interactive?: boolean
   onRespond?: (response: ClarificationResponse) => void
-  /** Test hook. Settled cards stay collapsed until the user opens them. */
-  defaultExpanded?: boolean
 }
 
 export interface ClarificationSummaryProps {
-  messages: Message[]
-  defaultExpanded?: boolean
+  messages: readonly Message[]
 }
 
 export function clarificationOutcomeCounts(messages: readonly Message[]): { answered: number; skipped: number } {
@@ -68,80 +64,61 @@ export function clarificationSummaryLabel(
   return t('chat.clarificationAnswered_one')
 }
 
-function clarificationSummaryPreview(messages: readonly Message[], language: string | undefined): string | null {
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const message of messages) {
-    const data = message.clarification
-    const line = data?.question.trim() || data?.text?.trim()
-    if (!line || seen.has(line)) continue
-    seen.add(line)
-    lines.push(line)
-  }
-  if (lines.length === 0) return null
-  if (lines.length === 1) return lines[0] ?? null
-  return lines.join(language?.startsWith('zh') ? '、' : ' · ')
+export function clarificationSummaryStatus(
+  counts: { answered: number; skipped: number },
+): 'answered' | 'skipped' | 'mixed' {
+  if (counts.answered > 0 && counts.skipped > 0) return 'mixed'
+  if (counts.skipped > 0) return 'skipped'
+  return 'answered'
 }
 
-export function ClarificationSummary({ messages, defaultExpanded = false }: ClarificationSummaryProps) {
-  const { t, i18n } = useTranslation()
-  const settled = messages.filter(message => {
+/** Keep a settled status readable in a process-fold title, without burying a real step label. */
+export function clarificationBriefTitle(
+  preview: string,
+  statusLabel: string | undefined,
+  genericLabels: readonly string[] = [],
+): string {
+  if (!statusLabel) return preview
+  const trimmed = preview.trim()
+  if (!trimmed || genericLabels.includes(trimmed)) return statusLabel
+  if (trimmed === statusLabel || trimmed.startsWith(`${statusLabel} · `)) return trimmed
+  return `${statusLabel} · ${trimmed}`
+}
+
+function settledClarificationMessages(messages: readonly Message[]): Message[] {
+  return messages.filter(message => {
     const status = message.clarification?.status
     return status === 'answered' || status === 'skipped'
   })
-  const [open, setOpen] = React.useState(defaultExpanded)
+}
+
+/**
+ * Question, options, and the answer or skip note. The process fold owns the
+ * status title; this is only the body revealed when that fold opens.
+ */
+export function ClarificationFoldDetails({
+  messages,
+  showStatus,
+}: {
+  messages: readonly Message[]
+  /** When entries are split along the timeline, still mark each one in a mixed group. */
+  showStatus?: boolean
+}) {
+  const settled = settledClarificationMessages(messages)
   if (settled.length === 0) return null
-  const counts = clarificationOutcomeCounts(settled)
-  const label = clarificationSummaryLabel(counts, t)
-  const status = counts.skipped === 0 ? 'answered' : counts.answered === 0 ? 'skipped' : 'mixed'
-  const preview = clarificationSummaryPreview(settled, i18n.language)
+  const markStatus = showStatus ?? settled.length > 1
   return (
-    <section
-      data-clarification-summary=""
-      data-clarification-card=""
-      data-clarification-status={status}
-      data-clarification-open={open ? 'true' : 'false'}
-      className="mb-2 overflow-hidden rounded-xl border border-border bg-background text-foreground"
-    >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
-        className={cn(
-          'flex w-full items-center gap-3 px-4 py-3 text-left',
-          'transition-colors duration-150 ease-out hover:bg-muted/40 motion-reduce:transition-none',
-          'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
-        )}
-      >
-        <span className="min-w-0 flex-1">
-          <span data-clarification-badge="" className="block text-sm font-medium text-foreground">
-            {label}
-          </span>
-          {!open && preview && (
-            <span data-clarification-preview="" className="mt-1 block truncate text-sm text-muted-foreground">
-              {preview}
-            </span>
-          )}
-        </span>
-        <ChevronRight
-          aria-hidden="true"
-          className={cn(
-            'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-            open && 'rotate-90',
-          )}
-        />
-      </button>
-      {open && (
-        <div className="flex flex-col divide-y divide-border border-t border-border">
-          {settled.map(message => (
-            <div key={message.id} className="px-4 py-3">
-              <ClarificationDetail message={message} showStatus={settled.length > 1} />
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+    <div data-clarification-fold="" className="flex flex-col gap-3 py-1">
+      {settled.map(message => (
+        <ClarificationDetail key={message.id} message={message} showStatus={markStatus} />
+      ))}
+    </div>
   )
+}
+
+/** Settled clarification body. The chat stream renders this inside the process fold. */
+export function ClarificationSummary({ messages }: ClarificationSummaryProps) {
+  return <ClarificationFoldDetails messages={messages} />
 }
 
 function ClarificationDetail({ message, showStatus }: { message: Message; showStatus: boolean }) {
@@ -200,11 +177,10 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
  * One clarification card: choices and a free-text field together.
  * This is not the final answer card.
  */
-export function ClarificationCard({ message, interactive = false, onRespond, defaultExpanded = false }: ClarificationCardProps) {
+export function ClarificationCard({ message, interactive = false, onRespond }: ClarificationCardProps) {
   const status = message.clarification?.status
-  if (status === 'answered' || status === 'skipped') {
-    return <ClarificationSummary messages={[message]} defaultExpanded={defaultExpanded} />
-  }
+  // Answered and skipped clarifications live in the process fold, not a second card.
+  if (status === 'answered' || status === 'skipped') return null
   return <PendingClarificationCard message={message} interactive={interactive} onRespond={onRespond} />
 }
 

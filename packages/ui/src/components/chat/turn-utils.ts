@@ -163,14 +163,14 @@ export function pendingClarificationLayout(turns: readonly Turn[]): PendingClari
 }
 
 export interface SettledClarificationGroup {
-  /** First process row, or the clarification itself when nothing precedes it. */
+  /** First process row, or the clarification itself when the request has no assistant turn. */
   anchorIndex: number
   clarificationIndexes: number[]
 }
 
 /**
- * Answered or skipped clarifications in one user request become one summary,
- * rendered above that request's process rows. A pending card keeps the waiting layout.
+ * Answered or skipped clarifications in one user request fold into that
+ * request's first process row. A pending card keeps the waiting layout.
  */
 export function settledClarificationGroups(turns: readonly Turn[]): SettledClarificationGroup[] {
   const groups: SettledClarificationGroup[] = []
@@ -188,8 +188,9 @@ export function settledClarificationGroups(turns: readonly Turn[]): SettledClari
     }
     const firstClarification = clarificationIndexes[0]
     if (firstClarification === undefined) return
+    // The process fold is the anchor, even when the clarification message landed first.
     groups.push({
-      anchorIndex: firstAssistant >= 0 ? Math.min(firstAssistant, firstClarification) : firstClarification,
+      anchorIndex: firstAssistant >= 0 ? firstAssistant : firstClarification,
       clarificationIndexes,
     })
   }
@@ -211,7 +212,43 @@ export function settledClarificationMessages(turns: readonly Turn[], group: Sett
   return messages
 }
 
-/** Move a request's work-status strip onto the clarification summary anchor. */
+export type ProcessChainRow = ActivityItem | ActivityGroup
+
+export type ProcessChainEntry =
+  | { kind: 'step'; row: ProcessChainRow }
+  | { kind: 'clarification'; message: Message }
+
+/**
+ * Place each settled clarification where it happened among the process steps.
+ * Earlier-or-same timestamps stay ahead of it; later steps stay behind it.
+ */
+export function interleaveSettledClarifications(
+  rows: readonly ProcessChainRow[],
+  messages: readonly Message[],
+): ProcessChainEntry[] {
+  const clarifications = messages
+    .filter(message => {
+      const status = message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    })
+    .slice()
+    .sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0) || left.id.localeCompare(right.id))
+  const entries: ProcessChainEntry[] = []
+  let cursor = 0
+  for (const row of rows) {
+    const at = isActivityGroup(row) ? row.parent.timestamp : row.timestamp
+    while (cursor < clarifications.length && (clarifications[cursor]?.timestamp ?? 0) < at) {
+      const message = clarifications[cursor]
+      if (message) entries.push({ kind: 'clarification', message })
+      cursor += 1
+    }
+    entries.push({ kind: 'step', row })
+  }
+  for (const message of clarifications.slice(cursor)) entries.push({ kind: 'clarification', message })
+  return entries
+}
+
+/** Move a request's work-status strip onto the process fold that holds the clarification. */
 export function anchorClarificationWorkStatus<T>(
   turns: readonly Turn[],
   timings: ReadonlyMap<number, T>,
@@ -1434,9 +1471,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 
-  return foldClarificationFragments(options.isTaskOrchestrationRoot
+  return unifySettledClarificationChains(foldClarificationFragments(options.isTaskOrchestrationRoot
     ? consolidateOrchestrationTurns(turns, !!options.isTaskOrchestrationRunning || !!options.isSessionProcessing)
-    : turns)
+    : turns))
 }
 
 /**
@@ -1470,6 +1507,84 @@ function foldClarificationFragments(turns: Turn[]): Turn[] {
     folded.push(absorbClarificationFragments(host, fragments.slice(0, -1)))
   }
   return folded
+}
+
+/**
+ * After an answer or skip, the request has one process chain again.
+ * A pending card still keeps the earlier bar and the later chain apart.
+ */
+function unifySettledClarificationChains(turns: Turn[]): Turn[] {
+  const unified: Turn[] = []
+  let index = 0
+  while (index < turns.length) {
+    const turn = turns[index]
+    if (!turn || turn.type === 'user') {
+      if (turn) unified.push(turn)
+      index += 1
+      continue
+    }
+    let end = index
+    while (end < turns.length && turns[end]?.type !== 'user') end += 1
+    const span = turns.slice(index, end)
+    const clarifications = span.filter((item): item is ClarificationTurn => item.type === 'clarification')
+    const settled = clarifications.length > 0 && clarifications.every(item => {
+      const status = item.message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    })
+    const assistants = span.filter((item): item is AssistantTurn => item.type === 'assistant')
+    if (!settled || assistants.length < 2) {
+      unified.push(...span)
+      index = end
+      continue
+    }
+    const merged = mergeSettledAssistants(assistants)
+    let placed = false
+    for (const item of span) {
+      if (item.type !== 'assistant') {
+        unified.push(item)
+        continue
+      }
+      if (!placed) {
+        unified.push(merged)
+        placed = true
+      }
+    }
+    index = end
+  }
+  return unified
+}
+
+function mergeSettledAssistants(assistants: readonly AssistantTurn[]): AssistantTurn {
+  const first = assistants[0]!
+  const last = assistants[assistants.length - 1]!
+  const activities: ActivityItem[] = []
+  const seen = new Set<string>()
+  for (const fragment of assistants) {
+    const donor: AssistantTurn = {
+      ...fragment,
+      activities: [...fragment.activities],
+      response: fragment.response ? { ...fragment.response } : undefined,
+    }
+    if (fragment !== last) demoteResponseToWorkChain(donor)
+    for (const activity of donor.activities) {
+      if (seen.has(activity.id)) continue
+      seen.add(activity.id)
+      activities.push(activity)
+    }
+  }
+  activities.sort((left, right) => left.timestamp - right.timestamp)
+  return {
+    ...last,
+    // Keep the opening card so the chain grows in place instead of becoming a second list.
+    turnId: first.turnId,
+    timestamp: first.timestamp,
+    intent: last.intent ?? first.intent,
+    activities,
+    response: last.response,
+    isStreaming: last.isStreaming,
+    isComplete: last.isComplete,
+    todos: last.todos ?? first.todos,
+  }
 }
 
 function absorbClarificationFragments(host: AssistantTurn, earlier: readonly AssistantTurn[]): AssistantTurn {
