@@ -21,6 +21,7 @@ import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi
 import { isContextOverflow, isRetryableAssistantError } from '@earendil-works/pi-ai';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { AnswerArgumentStream } from '../../../answer-argument-stream';
+import { streamTrace } from '../../../stream-trace.ts';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
@@ -186,6 +187,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   private activityAt = 0;
   private reasoningBytes = 0;
   private visibleBytes = 0;
+  /** Live reasoning is its own intermediate turn so it never joins the answer. */
+  private thinkingTurnId: string | null = null;
+  private thinkingText = '';
   // message_end precedes the SDK's retry decision. Keep transient failures out
   // of the durable transcript until agent_end confirms they are terminal.
   private pendingRetryError: CraftAgentEvent | null = null;
@@ -324,6 +328,41 @@ export class PiEventAdapter extends BaseEventAdapter {
     return `${base}__${prefix}${this.subTurnCounter++}`;
   }
 
+  /** Model reasoning, shown while it is still being produced. Not the reply. */
+  private *pushThinking(delta: string): Generator<CraftAgentEvent> {
+    if (!delta) return;
+    if (!this.thinkingTurnId) this.thinkingTurnId = this.nextSubTurnId('think');
+    this.thinkingText += delta;
+    streamTrace('adapter-delta', { event: 'thinking_delta', chars: delta.length });
+    yield {
+      type: 'text_delta',
+      text: delta,
+      phase: 'intermediate',
+      presentationProtocol: this.presentationProtocol,
+      turnId: this.thinkingTurnId,
+    };
+  }
+
+  private *finishThinking(): Generator<CraftAgentEvent> {
+    if (!this.thinkingTurnId || !this.thinkingText) {
+      this.thinkingTurnId = null;
+      this.thinkingText = '';
+      return;
+    }
+    const text = this.thinkingText;
+    const turnId = this.thinkingTurnId;
+    this.thinkingTurnId = null;
+    this.thinkingText = '';
+    yield {
+      type: 'text_complete',
+      text,
+      phase: 'intermediate',
+      isIntermediate: true,
+      presentationProtocol: this.presentationProtocol,
+      turnId,
+    };
+  }
+
   protected onTurnStart(): void {
     this.pendingRetryError = null;
     this.awaitingRetry = false;
@@ -337,6 +376,8 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
     this.streamingTextPhase = undefined;
+    this.thinkingTurnId = null;
+    this.thinkingText = '';
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -428,6 +469,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         break;
 
       case 'turn_end':
+        yield* this.finishThinking();
         // Don't emit 'complete' here — agent_end handles it.
         // Emitting from both causes duplicate messages in session persistence.
         this.currentTurnId = null;
@@ -452,6 +494,8 @@ export class PiEventAdapter extends BaseEventAdapter {
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
         if (amEvent.type === 'thinking_delta') this.reasoningBytes += new TextEncoder().encode(amEvent.delta).byteLength;
         if (amEvent.type === 'text_delta') this.visibleBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'thinking_delta' && amEvent.delta) yield* this.pushThinking(amEvent.delta);
+        if (amEvent.type === 'thinking_end') yield* this.finishThinking();
         if (amEvent.type === 'thinking_delta' && amEvent.delta && Date.now() - this.activityAt >= 1000) {
           this.activityAt = Date.now();
           yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes };
@@ -474,6 +518,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
         }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
+          yield* this.finishThinking();
           if (this.usesAnswerBoundary(amEvent.partial)) {
             this.boundaryStreamed = true;
             const chunks = this.answerBoundary().push(amEvent.delta);
@@ -494,6 +539,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.messageSubTurnId = this.nextSubTurnId('m');
           }
           this.streamingTextPhase = textPhase ?? 'unclassified';
+          streamTrace('adapter-delta', { event: 'text_delta', chars: amEvent.delta.length });
           yield {
             type: 'text_delta',
             presentationProtocol: this.presentationProtocol,
@@ -518,6 +564,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         // event to the Craft assistant message created here (#782).
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
+        yield* this.finishThinking();
         const transportDetails = Array.isArray(msg.craftTransportDiagnostics)
           ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
           : undefined;

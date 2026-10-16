@@ -2544,6 +2544,8 @@
   "turnCard.starting": "启动中…",
   "turnCard.stepsCompleted": "步骤已完成",
   "turnCard.thinking": "思考中…",
+  "turnCard.thoughtDone": "已深度思考",
+  "turnCard.thoughtFor": "已深度思考 {{seconds}}s",
   "turnCard.used": "已使用",
   "viewer.clearSession": "清除会话",
   "webui.connectingToServer": "正在连接服务器…",

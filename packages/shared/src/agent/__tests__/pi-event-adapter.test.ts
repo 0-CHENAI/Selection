@@ -249,6 +249,35 @@ describe('PiEventAdapter', () => {
       expect(completed[1].turnId).toBe(streamed[0].turnId);
     });
 
+    it('streams thinking as it arrives and closes it before the reply', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const first = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta: '先' },
+      } as any));
+      const second = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta: '想' },
+      } as any));
+      const closed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_end', content: '先想' },
+      } as any));
+      const answer = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '好' },
+      } as any));
+      const textEvents = (events: typeof first) => events.filter(event => event.type !== 'model_activity')
+      expect(textEvents(first).map(event => event.type === 'text_delta' ? event.text : event.type)).toEqual(['先']);
+      expect(textEvents(second).map(event => event.type === 'text_delta' ? event.text : event.type)).toEqual(['想']);
+      expect(first[0].phase).toBe('intermediate');
+      expect(String(first[0].turnId)).toContain('__think');
+      expect(second[0].turnId).toBe(first[0].turnId);
+      expect(closed).toMatchObject([{ type: 'text_complete', text: '先想', isIntermediate: true, phase: 'intermediate' }]);
+      expect(answer).toMatchObject([{ type: 'text_delta', text: '好', phase: 'unclassified' }]);
+      expect(answer[0].turnId).not.toBe(first[0].turnId);
+    });
+
     it('should skip message_update without text_delta type', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({

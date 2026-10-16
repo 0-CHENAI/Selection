@@ -451,3 +451,17 @@ it('does not repeat a thinking header in the status slot', async () => {
   }])
   expect(countOccurrences(html, '思考中…')).toBe(1)
 })
+
+it('shows model reasoning while it is still running, then the duration label', async () => {
+  const live = await renderTurn('zh-Hans', [{
+    id: 'think', type: 'thinking', status: 'running', content: '先整理结构', timestamp: Date.now(),
+  }], { expanded: false })
+  expect(live).toContain('data-thinking-live')
+  expect(live).toContain('先整理结构')
+  const done = await renderTurn('zh-Hans', [{
+    id: 'think', type: 'thinking', status: 'completed', content: '先整理结构', timestamp: 1, elapsedSeconds: 34,
+  }], { isComplete: true, isStreaming: false, expanded: false })
+  expect(done).toContain('data-thinking-done')
+  expect(done).toContain('已深度思考 34s')
+  expect(done).toContain('先整理结构')
+})

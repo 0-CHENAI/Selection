@@ -23,6 +23,7 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
  */
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
+import { streamTrace } from '../../shared/src/stream-trace.ts';
 import { createSessionHistoryTool } from './context-retention.ts';
 import { setModelRequestGate } from '../../shared/src/model-request-gate';
 import { createModelRequestSlots, type ModelRequestSlotMessage } from './model-request-slots';
@@ -438,6 +439,13 @@ let callbackPort = 0;
 
 function send(msg: OutboundMessage): void {
   const line = JSON.stringify(msg);
+  if (msg.type === 'event') {
+    const update = msg.event as { type?: string; assistantMessageEvent?: { type?: string; delta?: string } };
+    const kind = update.assistantMessageEvent?.type;
+    if (update.type === 'message_update' && (kind === 'text_delta' || kind === 'thinking_delta')) {
+      streamTrace('stdout-write', { event: kind, chars: update.assistantMessageEvent?.delta?.length ?? 0 });
+    }
+  }
   process.stdout.write(line + '\n');
 }
 
@@ -1548,6 +1556,13 @@ function extractToolExecutionMetadata(args: Record<string, unknown> | undefined)
 }
 
 function handleSessionEvent(event: AgentSessionEvent): void {
+  if (event.type === 'message_update') {
+    const kind = event.assistantMessageEvent?.type;
+    if (kind === 'text_delta' || kind === 'thinking_delta') {
+      const delta = event.assistantMessageEvent?.delta;
+      streamTrace('sdk-event', { event: kind, chars: typeof delta === 'string' ? delta.length : 0 });
+    }
+  }
   let forwardedEvent: OutboundAgentEvent = event;
   // abort() is how the SDK yields after the accepted tool receipt. Its empty
   // aborted assistant stub is not a provider interruption or another answer.

@@ -119,6 +119,8 @@ export function createStickyScrollFollow(
     if (disposed || !options.sticky()) { stop(); return }
     const elapsedMs = lastTime == null ? 16.67 : Math.min(STICKY_FOLLOW_MAX_DT_MS, Math.max(0, time - lastTime))
     lastTime = time
+    // A middle-row regenerate grows the transcript without another resize event.
+    target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
     const more = followStickyViewportToBottom(viewport, {
       focused: true, sticky: true, reduceMotion: options.reduceMotion(), elapsedMs, target,
     })

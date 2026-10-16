@@ -3,6 +3,7 @@ import { AnswerArgumentStream } from './answer-argument-stream.ts';
 import { beginRequestDiagnostic } from './request-diagnostics.ts';
 import { fetchWithModelRequestSlot } from './model-request-gate.ts';
 import { observeSseResponse } from './sse-diagnostics.ts';
+import { streamTrace } from './stream-trace.ts';
 /**
  * Unified fetch interceptor for all AI API requests (Anthropic + OpenAI format).
  *
@@ -1001,6 +1002,15 @@ export function createAnthropicSseStrippingStream(options?: {
     dataStr: string,
     controller: TransformStreamDefaultController<Uint8Array>,
   ): void {
+    if (eventType === 'content_block_delta') {
+      try {
+        const parsed = JSON.parse(dataStr) as { delta?: { type?: unknown; text?: unknown; thinking?: unknown } };
+        const delta = parsed?.delta;
+        const chars = typeof delta?.text === 'string' ? delta.text.length
+          : typeof delta?.thinking === 'string' ? delta.thinking.length : 0;
+        streamTrace('interceptor', { event: typeof delta?.type === 'string' ? delta.type : eventType, chars });
+      } catch { /* A trace must not change the frame. */ }
+    }
     // A raw newline inside one data line splits the SSE frame. Spec joins
     // repeated data fields with LF, so split them back out.
     const data = dataStr.split('\n').map(line => `data: ${line}`).join('\n');
@@ -1178,6 +1188,7 @@ export function createAnthropicSseStrippingStream(options?: {
 
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
+      streamTrace('net-read', { bytes: chunk.byteLength });
       if (overflowed) return;
       consumeText(decoder.decode(chunk, { stream: true }), controller);
     },
@@ -2705,6 +2716,14 @@ function synthesizeMalformedBodyResponse(
 
 const originalFetch = globalThis.fetch.bind(globalThis);
 
+/** Ask intermediaries not to gzip a live SSE body. Compression buffers tokens. */
+function withIdentityEncoding(init: RequestInit, body: string): RequestInit {
+  if (!/"stream"\s*:\s*true/.test(body)) return init;
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set('accept-encoding', 'identity');
+  return { ...init, headers };
+}
+
 async function interceptedFetch(
   input: string | URL | Request,
   init?: RequestInit
@@ -2771,11 +2790,11 @@ async function interceptedFetch(
 
         const proxy = getProxyForUrl(url);
         const finalBody = JSON.stringify(parsed);
-        const finalInit = {
+        const finalInit = withIdentityEncoding({
           ...modifiedInit,
           body: finalBody,
           ...(proxy ? { proxy } : {}),
-        };
+        }, finalBody);
 
         // Cache a sanitized request summary for the 400-empty-body diagnostic
         // pathway in captureApiError. Plain-text bodies (sensitive arguments)

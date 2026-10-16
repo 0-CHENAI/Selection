@@ -264,6 +264,40 @@ export const SIZE_CONFIG = {
 /** Product-standard label paired with the 3x3 grid activity indicator. */
 const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 
+/** Live model reasoning. Stays on screen while the work chain is folded. */
+function ThinkingBlock({ activity }: { activity: ActivityItem }) {
+  const { t } = useTranslation()
+  const running = activity.status === 'running'
+  const startedAt = useRef(activity.timestamp || Date.now())
+  const sawRunning = useRef(running)
+  if (running) sawRunning.current = true
+  const [seconds, setSeconds] = useState(() => Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)))
+  useEffect(() => {
+    if (!running) return
+    const update = () => setSeconds(Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)))
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [running])
+  const shown = activity.elapsedSeconds ?? (sawRunning.current ? Math.max(seconds, 1) : undefined)
+  if (running) {
+    return (
+      <div data-thinking-live="" className="mb-3 px-4 text-sm leading-relaxed text-foreground/80">
+        <div className="mb-1 text-xs text-muted-foreground">{t('turnCard.thinking')}</div>
+        <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{activity.content}</div>
+      </div>
+    )
+  }
+  return (
+    <details data-thinking-done="" className="mb-3 px-4 text-sm text-foreground/80">
+      <summary className="cursor-pointer text-xs text-muted-foreground">
+        {shown ? t('turnCard.thoughtFor', { seconds: shown }) : t('turnCard.thoughtDone')}
+      </summary>
+      <div className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{activity.content}</div>
+    </details>
+  )
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -3379,9 +3413,14 @@ export const TurnCard = React.memo(function TurnCard({
   // The live commentary card already shows this body. Hiding the mirrored
   // row keeps the work chain from inserting a duplicate line (or appearing
   // at all) until a tool or older commentary actually needs a row.
+  const thinkingActivities = useMemo(
+    () => sortedActivities.filter(activity => activity.type === 'thinking' && hasRenderableAssistantText(activity.content)),
+    [sortedActivities],
+  )
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
-      activity => !isAnswerDeliveryTool(activity)
+      activity => activity.type !== 'thinking'
+        && !isAnswerDeliveryTool(activity)
         // Aggregate status is a fallback, not a work record or the latest step.
         && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
@@ -3456,8 +3495,9 @@ export const TurnCard = React.memo(function TurnCard({
       if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
-      // Intermediate activities must have no meaningful content
-      if (a.type === 'intermediate') return !hasRenderableAssistantText(a.content)
+      // Intermediate activities must have no meaningful content.
+      // A finished reasoning block is the record of that wait, not an empty turn.
+      if (a.type === 'intermediate' || a.type === 'thinking') return !hasRenderableAssistantText(a.content)
       // Plan activities are meaningful work
       if (a.type === 'plan') return false
       // Other activity types - consider as no meaningful work
@@ -3731,6 +3771,8 @@ export const TurnCard = React.memo(function TurnCard({
           />
         </div>
       ))}
+
+      {thinkingActivities.map(activity => <ThinkingBlock key={activity.id} activity={activity} />)}
 
       <GrowingResponse>
       {/* Response Section — keep the white frame mounted once a final stream exists */}

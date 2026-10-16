@@ -16,6 +16,7 @@ import { buildClarificationState, clarificationContinuation, countClarificationR
 import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
 import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { streamTrace } from '../../../shared/src/stream-trace.ts'
 import { assertOfficeRevisionTool } from '../reliability/office-tool-policy'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
@@ -14828,6 +14829,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const pending = this.pendingDeltas.get(sessionId)
     if (pending && pending.delta) {
       this.pendingDeltas.delete(sessionId)
+      streamTrace('ipc-delta', { chars: pending.delta.length, phase: pending.phase })
       // natural-v1 streams every delta: progress notes as transient bubbles,
       // marked answer text straight into the answer card.
       const managed = this.sessions.get(sessionId)

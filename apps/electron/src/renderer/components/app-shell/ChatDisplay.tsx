@@ -1385,6 +1385,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
   }, [session?.id, applyStickState])
 
+  const liveTail = session?.messages.reduce((sum, message) => (
+    message.isStreaming || message.isPending ? sum + message.content.length : sum
+  ), 0) ?? 0
+  // ResizeObserver misses a virtual row whose estimated box does not change.
+  // Follow from the commit that appended text, including a regenerate mid-list.
+  React.useLayoutEffect(() => {
+    if (!isStickToBottomRef.current) return
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    if (stickyFollowRef.current) stickyFollowRef.current.resize()
+    else snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
+  }, [liveTail])
+
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay
   // optimistic message insertion (e.g., thumbnail generation/resizing).

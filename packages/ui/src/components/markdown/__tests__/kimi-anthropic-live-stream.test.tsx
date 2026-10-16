@@ -53,8 +53,12 @@ function sessionState(): SessionState {
 
 interface UiEvent {
   framing: string
-  type: 'text_delta' | 'text_complete' | 'model'
+  type: 'text_delta' | 'text_complete' | 'model' | 'headers'
   text?: string
+  phase?: string
+  turnId?: string
+  t?: number
+  arrived?: number
   deltas?: string[]
   stopReason?: string
   errorMessage?: string
@@ -80,10 +84,12 @@ async function readLiveUiEvents(): Promise<UiEvent[]> {
     const answers = { 'kimi-data': ${JSON.stringify(KIMI_ANSWER)}, 'anthropic-sse': ${JSON.stringify(OFFICIAL_ANSWER)} };
     let framing = 'kimi-data';
     const encoder = new TextEncoder();
+    let acceptEncoding = '';
     const server = Bun.serve({
       port: 0,
       idleTimeout: 30,
-      fetch() {
+      fetch(request) {
+        acceptEncoding = request.headers.get('accept-encoding') ?? acceptEncoding;
         const answer = answers[framing];
         const kimi = framing === 'kimi-data';
         return new Response(new ReadableStream({
@@ -134,10 +140,10 @@ async function readLiveUiEvents(): Promise<UiEvent[]> {
     manager.sessions.set(managed.id, managed);
     manager.persistSession = () => {};
     manager.captureChangedArtifacts = async () => [];
-    const emit = (value) => process.stdout.write('@@UI@@' + JSON.stringify(value) + '\\n');
+    const emit = (value) => process.stdout.write('@@UI@@' + JSON.stringify({ ...value, t: Date.now() }) + '\\n');
     manager.setEventSink((_channel, _target, event) => {
-      if (event.type === 'text_delta') emit({ framing, type: 'text_delta', text: event.delta });
-      if (event.type === 'text_complete') emit({ framing, type: 'text_complete', text: event.text });
+      if (event.type === 'text_delta') emit({ framing, type: 'text_delta', text: event.delta, phase: event.phase, turnId: event.turnId });
+      if (event.type === 'text_complete') emit({ framing, type: 'text_complete', text: event.text, phase: event.phase, turnId: event.turnId });
     });
     const adapt = (sdk) => {
       if (['text_start','text_delta','text_end','thinking_start','thinking_delta','thinking_end','toolcall_start','toolcall_delta','toolcall_end'].includes(sdk.type)) {
@@ -164,6 +170,7 @@ async function readLiveUiEvents(): Promise<UiEvent[]> {
         }
         emit({ framing, type: 'model', deltas: modelDeltas, stopReason: finalMessage && finalMessage.stopReason, errorMessage: finalMessage && finalMessage.errorMessage });
       }
+      emit({ framing: 'kimi-data', type: 'headers', text: acceptEncoding });
     } finally {
       server.stop(true);
     }
@@ -176,6 +183,7 @@ async function readLiveUiEvents(): Promise<UiEvent[]> {
       CRAFT_PI_MODEL_API: 'anthropic-messages',
       CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL: '0',
       CRAFT_DEBUG: '0',
+      CRAFT_STREAM_TRACE: '1',
       NO_PROXY: '127.0.0.1,localhost',
       no_proxy: '127.0.0.1,localhost',
     },
@@ -183,14 +191,40 @@ async function readLiveUiEvents(): Promise<UiEvent[]> {
     stderr: 'pipe',
   })
   const timeout = setTimeout(() => proc.kill(), 35_000)
+  const events: UiEvent[] = []
+  const started = Date.now()
+  const readStdout = (async () => {
+    const reader = proc.stdout.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let newline = buffer.indexOf('\n')
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline)
+        buffer = buffer.slice(newline + 1)
+        if (line.startsWith('@@UI@@')) {
+          events.push({ ...JSON.parse(line.slice(6)) as UiEvent, arrived: Date.now() - started })
+        }
+        newline = buffer.indexOf('\n')
+      }
+    }
+  })()
   try {
-    const [stdout, stderr, exit] = await Promise.all([
-      new Response(proc.stdout).text(),
+    const [stderr, exit] = await Promise.all([
       new Response(proc.stderr).text(),
       proc.exited,
+      readStdout,
     ])
-    const events = stdout.split('\n').filter(line => line.startsWith('@@UI@@')).map(line => JSON.parse(line.slice(6)) as UiEvent)
-    expect(exit, stderr || stdout).toBe(0)
+    expect(exit, stderr).toBe(0)
+    const traces = stderr.split('\n').filter(line => line.startsWith('@@STREAM@@')).map(line => JSON.parse(line.slice('@@STREAM@@'.length)) as { layer: string; chars?: number; event?: string })
+    const paced = traces.filter(trace => (trace.layer === 'interceptor' || trace.layer === 'ipc-delta' || trace.layer === 'adapter-delta') && (trace.event === 'text_delta' || trace.event === 'thinking_delta' || trace.layer === 'ipc-delta'))
+    expect(paced.length).toBeGreaterThan(0)
+    expect(paced.every(trace => trace.chars === 1), JSON.stringify(paced.slice(0, 8))).toBe(true)
+    const net = traces.filter(trace => trace.layer === 'net-read')
+    expect(net.length).toBeGreaterThan(10)
     return events
   } finally {
     clearTimeout(timeout)
@@ -210,20 +244,30 @@ function paint(content: string, streaming: boolean): string {
 describe('Kimi Anthropic live stream reaches the UI one character at a time', () => {
   it('paints each paced character and keeps the finished Markdown intact', async () => {
     const events = await readLiveUiEvents()
+    expect(events.find(event => event.type === 'headers')?.text).toBe('identity')
     for (const [framing, answer] of [['kimi-data', KIMI_ANSWER], ['anthropic-sse', OFFICIAL_ANSWER]] as const) {
       const mine = events.filter(event => event.framing === framing)
       const model = mine.find(event => event.type === 'model')
-      const deltas = mine.filter(event => event.type === 'text_delta').map(event => event.text ?? '')
-      const complete = mine.find(event => event.type === 'text_complete')
+      const deltas = mine.filter(event => event.type === 'text_delta')
+      const thinkingDeltas = deltas.filter(event => event.phase === 'intermediate')
+      const answerDeltas = deltas.filter(event => event.phase !== 'intermediate')
+      const completes = mine.filter(event => event.type === 'text_complete')
+      const complete = completes.find(event => !event.turnId?.includes('__think'))
       expect(model?.stopReason, JSON.stringify(model)).not.toBe('error')
       expect(model?.errorMessage ?? '', model?.errorMessage).toBe('')
       expect(model?.deltas, `${framing} parser`).toEqual([...answer])
-      expect(deltas, `${framing} UI deltas were coalesced`).toEqual([...answer])
+      expect(thinkingDeltas.map(event => event.text), `${framing} thinking was held`).toEqual([...THINKING])
+      expect(answerDeltas.map(event => event.text), `${framing} UI deltas were coalesced`).toEqual([...answer])
+      expect(completes.find(event => event.turnId?.includes('__think'))?.text).toBe(THINKING)
       expect(complete?.text).toBe(answer)
+      const firstAnswer = answerDeltas[0]?.arrived ?? 0
+      expect(thinkingDeltas.every(event => (event.arrived ?? 0) < firstAnswer)).toBe(true)
+      const gaps = answerDeltas.slice(1).map((event, index) => (event.arrived ?? 0) - (answerDeltas[index]?.arrived ?? 0))
+      expect(Math.max(...gaps, 0), `${framing} answer gaps ${gaps.join(',')}`).toBeLessThan(400)
 
       let state = sessionState()
       let seen = ''
-      for (const delta of deltas) {
+      for (const delta of answerDeltas.map(event => event.text ?? '')) {
         seen += delta
         state = handleTextDelta(state, {
           type: 'text_delta', sessionId: 'session-1', delta, phase: 'unclassified', turnId: framing,

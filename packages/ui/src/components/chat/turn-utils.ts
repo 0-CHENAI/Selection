@@ -458,6 +458,11 @@ function isAuthoritativeCommit(message: Message): message is Message & { answerR
  * Live tokens occupy the white card. Completed process text uses `isIntermediate`.
  * marker-v1 unclassified stays in the work chain until a final boundary.
  */
+/** Provider reasoning uses its own sub-turn so it never becomes the reply. */
+export function isModelThinkingTurn(turnId?: string): boolean {
+  return !!turnId && turnId.includes('__think')
+}
+
 function isLiveCardStream(message: Message): boolean {
   if (message.role !== 'assistant') return false
   if (!(message.isStreaming || message.isPending)) return false
@@ -557,6 +562,8 @@ export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): numbe
     // Delivery is the card body, not a numbered work step.
     .filter(activity => !isAnswerDeliveryTool(activity))
     .filter(activity => activity.statusType !== 'compaction_complete')
+    // Reasoning has its own block. It is not a numbered work step.
+    .filter(activity => activity.type !== 'thinking')
     // Empty live placeholders are transient indicators, not work records.
     .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
       || hasRenderableAssistantText(activity.content))
@@ -1349,11 +1356,12 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Include parentId for intermediate messages to support nesting within subagents
         const intermediateActivity: ActivityItem = {
           id: message.id,
-          type: 'intermediate',
+          type: isModelThinkingTurn(message.turnId) ? 'thinking' : 'intermediate',
           status: message.isPending ? 'running' : 'completed',
           content: message.content,
           timestamp: message.timestamp,
           parentId: message.parentToolUseId,
+          elapsedSeconds: message.elapsedSeconds,
         }
         // Calculate depth for intermediate messages too
         if (intermediateActivity.parentId) {
