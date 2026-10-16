@@ -4,6 +4,95 @@ import { CraftAgentsSymbol } from '@/components/icons/CraftAgentsSymbol'
 import { PanelLeftRounded } from '@/components/icons/PanelLeftRounded'
 import { SquarePenRounded } from '@/components/icons/SquarePenRounded'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
+import { SettingsCard, SettingsRow } from '@/components/settings'
+import { resolveSetupConnectionName } from '@config/connection-display-name'
+
+function ConnectionNameSamples() {
+  const existingNames: string[] = []
+  const created = [
+    {
+      id: 'deepseek',
+      piAuthProvider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      providerType: 'pi' as const,
+      isCustomEndpoint: false,
+      description: 'DeepSeek · api.deepseek.com',
+    },
+    {
+      id: 'deepseek-2',
+      piAuthProvider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      providerType: 'pi' as const,
+      isCustomEndpoint: false,
+      description: 'DeepSeek · api.deepseek.com',
+    },
+    {
+      id: 'order',
+      piAuthProvider: 'openai',
+      baseUrl: 'https://order.ai.jxepdi.top/v1',
+      providerType: 'pi_compat' as const,
+      isCustomEndpoint: true,
+      description: 'Jiangxi Institute private AI platform, keeping your data secure.',
+    },
+    {
+      id: 'custom',
+      piAuthProvider: 'openai',
+      baseUrl: 'https://gateway.example.com/v1',
+      providerType: 'pi_compat' as const,
+      isCustomEndpoint: true,
+      description: 'Selection Backend Compatible · gateway.example.com',
+    },
+  ].map((spec) => {
+    const name = resolveSetupConnectionName({
+      isNewConnection: true,
+      currentName: 'Selection Backend (API Key)',
+      existingNames,
+      piAuthProvider: spec.piAuthProvider,
+      baseUrl: spec.baseUrl,
+      isCustomEndpoint: spec.isCustomEndpoint,
+    }) ?? 'Selection Backend (API Key)'
+    existingNames.push(name)
+    return { ...spec, name }
+  })
+
+  const renamed = {
+    id: 'renamed',
+    name: '工作 DeepSeek',
+    piAuthProvider: 'deepseek',
+    baseUrl: 'https://api.deepseek.com',
+    providerType: 'pi' as const,
+    description: 'DeepSeek · api.deepseek.com',
+  }
+  const renamedAgain = resolveSetupConnectionName({
+    isNewConnection: false,
+    currentName: renamed.name,
+    existingNames: [renamed.name],
+    piAuthProvider: 'deepseek',
+    baseUrl: renamed.baseUrl,
+    isCustomEndpoint: false,
+  })
+
+  const rows = [...created, { ...renamed, name: renamedAgain ?? renamed.name }]
+
+  return (
+    <div className="w-[480px]">
+      <SettingsCard>
+        {rows.map((row) => (
+          <SettingsRow
+            key={row.id}
+            label={(
+              <span className="flex items-center gap-1">
+                <ConnectionIcon connection={row} size={14} />
+                <span>{row.name}</span>
+              </span>
+            )}
+            description={row.description}
+          />
+        ))}
+      </SettingsCard>
+    </div>
+  )
+}
 
 function ConnectionIconSamples() {
   const rows = [
@@ -37,6 +126,15 @@ function ConnectionIconSamples() {
 }
 
 export const iconComponents: ComponentEntry[] = [
+  {
+    id: 'connection-name-samples',
+    name: 'Connection names',
+    category: 'Icons',
+    description: 'Default API-key connection titles: provider brand, ORDER, hostname, and a kept rename',
+    component: ConnectionNameSamples,
+    props: [],
+    variants: [],
+  },
   {
     id: 'connection-icon-samples',
     name: 'Connection icons',

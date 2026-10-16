@@ -16,6 +16,10 @@ describe('piAuthProviderDisplayName', () => {
     expect(piAuthProviderDisplayName('moonshotai')).toBe('Moonshot AI')
     expect(piAuthProviderDisplayName('moonshotai-cn')).toBe('Moonshot AI (CN)')
   })
+
+  it('labels DeepSeek, which the old setup map omitted', () => {
+    expect(piAuthProviderDisplayName('deepseek')).toBe('DeepSeek')
+  })
 })
 
 describe('validateSetupTestInput', () => {

@@ -817,3 +817,64 @@ describe('leftover Anthropic connections are not rewritten onto Pi', () => {
     expect(config.llmConnections).toHaveLength(2)
   })
 })
+
+describe('generic API-key connection names', () => {
+  it('rewrites Selection Backend (API Key) N on startup and leaves other titles', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const stamp = Date.now()
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'pi-api-key',
+        name: 'Selection Backend (API Key)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-2',
+        name: 'Selection Backend (API Key) 2',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-3',
+        name: '工作 DeepSeek',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'deepseek',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+      {
+        slug: 'pi-api-key-4',
+        name: 'Selection Backend (OpenAI)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'openai',
+        createdAt: stamp,
+        models: [],
+        defaultModel: '',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      llmConnections: Array<{ slug: string; name: string }>
+    }
+    const names = Object.fromEntries(config.llmConnections.map((connection) => [connection.slug, connection.name]))
+    expect(names['pi-api-key']).toBe('DeepSeek')
+    expect(names['pi-api-key-2']).toBe('DeepSeek 2')
+    expect(names['pi-api-key-3']).toBe('工作 DeepSeek')
+    expect(names['pi-api-key-4']).toBe('Selection Backend (OpenAI)')
+  })
+})
