@@ -1350,9 +1350,60 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 
-  return options.isTaskOrchestrationRoot
+  return foldClarificationFragments(options.isTaskOrchestrationRoot
     ? consolidateOrchestrationTurns(turns, !!options.isTaskOrchestrationRunning || !!options.isSessionProcessing)
-    : turns
+    : turns)
+}
+
+/**
+ * A clarification message flushes the current turn. Commentary that lands
+ * after that flush keeps the old answer run, while the continuation starts a
+ * new one, so the two render as separate collapsed lists. Keep the later
+ * chain and pull the earlier fragment into it.
+ */
+function foldClarificationFragments(turns: Turn[]): Turn[] {
+  const folded: Turn[] = []
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index]
+    if (!turn) continue
+    if (turn.type !== 'clarification') {
+      folded.push(turn)
+      continue
+    }
+    folded.push(turn)
+    const fragments: AssistantTurn[] = []
+    while (turns[index + 1]?.type === 'assistant') {
+      index += 1
+      const fragment = turns[index]
+      if (fragment?.type === 'assistant') fragments.push(fragment)
+    }
+    const host = fragments[fragments.length - 1]
+    if (!host) continue
+    if (fragments.length === 1) {
+      folded.push(host)
+      continue
+    }
+    folded.push(absorbClarificationFragments(host, fragments.slice(0, -1)))
+  }
+  return folded
+}
+
+function absorbClarificationFragments(host: AssistantTurn, earlier: readonly AssistantTurn[]): AssistantTurn {
+  const activities = [...host.activities]
+  for (const fragment of earlier) {
+    const donor: AssistantTurn = {
+      ...fragment,
+      activities: [...fragment.activities],
+      response: fragment.response ? { ...fragment.response } : undefined,
+    }
+    demoteResponseToWorkChain(donor)
+    for (const activity of donor.activities) {
+      if (activities.some(existing => existing.id === activity.id)) continue
+      activities.push(activity)
+    }
+  }
+  activities.sort((left, right) => left.timestamp - right.timestamp)
+  return { ...host, activities }
 }
 
 /**

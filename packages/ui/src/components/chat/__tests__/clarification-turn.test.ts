@@ -63,6 +63,62 @@ test('answering or skipping restores the normal work-chain layout', () => {
   expect(pendingClarificationLayout(settled('skipped'))).toBeNull()
 })
 
+test('commentary after a clarification joins the continuation chain instead of its own list', () => {
+  const note = 'The user asked to solve "this task" but no task content or attachment was provided'
+  const turns = groupMessagesByTurn([
+    { ...user, answerRunId: 'run-1', answerProtocol: 'explicit-v1', answerRoutingVersion: 1 },
+    { ...clarifyTool, toolPurpose: 'work', answerRunId: 'run-1', answerProtocol: 'explicit-v1', answerRoutingVersion: 1 },
+    { ...clarification, clarification: { ...clarification.clarification!, status: 'answered', text: '在另一个会话里' } },
+    {
+      ...commentary,
+      content: note,
+      answerRunId: 'run-1',
+      answerProtocol: 'explicit-v1',
+      answerRoutingVersion: 1,
+    },
+    {
+      id: 'continue',
+      role: 'user',
+      content: 'Clarification req answered',
+      timestamp: 5,
+      hidden: true,
+      answerRunId: 'run-2',
+      answerProtocol: 'explicit-v1',
+      answerRoutingVersion: 1,
+    },
+    {
+      id: 'find',
+      role: 'tool',
+      content: 'sessions',
+      timestamp: 6,
+      toolName: 'Bash',
+      toolStatus: 'completed',
+      toolIntent: 'Find other sessions in the workspace',
+      toolPurpose: 'work',
+      answerRunId: 'run-2',
+      answerProtocol: 'explicit-v1',
+      answerRoutingVersion: 1,
+    },
+    {
+      ...answer,
+      timestamp: 7,
+      answerRunId: 'run-2',
+      answerProtocol: 'explicit-v1',
+      answerCommitted: true,
+      answerRoutingVersion: 1,
+    },
+  ], { isSessionProcessing: false })
+
+  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification', 'assistant'])
+  const lower = turns[3]
+  expect(lower?.type).toBe('assistant')
+  if (lower?.type !== 'assistant') return
+  expect(lower.activities.some(activity => activity.content?.includes('The user asked'))).toBe(true)
+  expect(lower.activities.some(activity => activity.intent === 'Find other sessions in the workspace')).toBe(true)
+  expect(lower.response?.text).toBe('按 2024 继续。')
+  expect(turns.filter(turn => turn.type === 'assistant' && turn.activities.some(activity => activity.content?.includes('The user asked')))).toHaveLength(1)
+})
+
 test('a pending card from an earlier request does not restyle the current turn', () => {
   const turns = groupMessagesByTurn([
     user,

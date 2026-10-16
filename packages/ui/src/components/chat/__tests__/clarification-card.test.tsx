@@ -9,9 +9,12 @@ mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.wo
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let ClarificationCard: typeof import('../ClarificationCard').ClarificationCard
+let clarificationNoteLayout: typeof import('../ClarificationCard').clarificationNoteLayout
 
 beforeAll(async () => {
-  ClarificationCard = (await import('../ClarificationCard')).ClarificationCard
+  const module = await import('../ClarificationCard')
+  ClarificationCard = module.ClarificationCard
+  clarificationNoteLayout = module.clarificationNoteLayout
 })
 
 const i18n = createInstance()
@@ -73,6 +76,13 @@ describe('clarification card', () => {
     expect(html).toContain('data-clarification-option="2025"')
     expect(html).toContain('data-clarification-text')
     expect(html).toContain('补充说明')
+    expect(html).toContain('直接写下答案，或补充你的选择')
+    const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? ''
+    expect(textarea).toContain('data-clarification-text')
+    expect(textarea).toContain('overflow-hidden')
+    expect(textarea).not.toContain('border-border')
+    expect(textarea).not.toContain('resize-y')
+    expect(html).toContain('data-clarification-note-fade="off"')
     expect(html).toContain('data-clarification-skip')
     expect(html).toContain('跳过')
     expect(html).toContain('disabled')
@@ -84,6 +94,17 @@ describe('clarification card', () => {
     expect(html).toContain('data-clarification-text')
     expect(html).not.toContain('data-clarification-options')
     expect(html).toContain('写下答案，或跳过')
+  })
+
+  it('caps the note at five lines and fades only the scrolled-away top', () => {
+    const line = 20
+    const pad = 16
+    const min = line * 2 + pad
+    const max = line * 5 + pad
+    expect(clarificationNoteLayout(min, 0)).toEqual({ height: min, overflows: false, fadeTop: false })
+    expect(clarificationNoteLayout(line * 4 + pad, 0)).toEqual({ height: line * 4 + pad, overflows: false, fadeTop: false })
+    expect(clarificationNoteLayout(line * 8 + pad, 0)).toEqual({ height: max, overflows: true, fadeTop: false })
+    expect(clarificationNoteLayout(line * 8 + pad, 24)).toEqual({ height: max, overflows: true, fadeTop: true })
   })
 
   it('shows a skipped card without asking again', () => {
