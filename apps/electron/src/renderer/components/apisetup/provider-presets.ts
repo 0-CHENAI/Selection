@@ -3,6 +3,7 @@
  *
  * The dropdown is sorted by the visible brand name (case-insensitive).
  * Icons come from `@lobehub/icons-static-svg`, one file per brand.
+ * Custom and Selection Backend use the in-app Selection mark.
  * Presets LobeHub does not publish stay on a letter placeholder.
  */
 
@@ -29,11 +30,16 @@ export function presetMonogram(label: string): string {
   return first ? first.toLocaleUpperCase() : '?'
 }
 
+/** In-app Selection mark. Not a LobeHub slug. */
+export const SELECTION_APP_ICON_SLUG = 'selection'
+
 /**
- * LobeHub static-svg slug for a setup preset or OAuth row.
- * Null means the brand is not in that library — render {@link presetMonogram}.
+ * Icon slug for a setup preset or OAuth row.
+ * `selection` is the bundled app mark. Null means a letter placeholder.
  */
 const PRESET_ICON_SLUG: Readonly<Record<string, string>> = {
+  custom: SELECTION_APP_ICON_SLUG,
+  pi: SELECTION_APP_ICON_SLUG,
   openai: 'openai',
   'openai-eu': 'openai',
   'openai-us': 'openai',

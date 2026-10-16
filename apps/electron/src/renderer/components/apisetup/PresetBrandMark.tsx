@@ -1,10 +1,12 @@
 /**
  * Brand mark for one API-setup preset.
  *
- * Each import is a single file from `@lobehub/icons-static-svg`, so the
- * renderer bundles only the marks this screen shows. Brands missing from
- * LobeHub use the same letter tile.
+ * Each provider import is a single file from `@lobehub/icons-static-svg`.
+ * Custom and Selection Backend use the bundled Selection mark. Other brands
+ * missing from LobeHub use the same letter tile.
  */
+
+import selectionIcon from '@/assets/selection-icon.svg'
 
 import aistudio from '@lobehub/icons-static-svg/icons/aistudio.svg'
 import azure from '@lobehub/icons-static-svg/icons/azure.svg'
@@ -23,7 +25,7 @@ import openrouter from '@lobehub/icons-static-svg/icons/openrouter.svg'
 import vercel from '@lobehub/icons-static-svg/icons/vercel.svg'
 import xai from '@lobehub/icons-static-svg/icons/xai.svg'
 import zai from '@lobehub/icons-static-svg/icons/zai.svg'
-import { presetMonogram } from './provider-presets'
+import { SELECTION_APP_ICON_SLUG, presetMonogram } from './provider-presets'
 
 const LOBE_ICONS: Readonly<Record<string, string>> = {
   aistudio,
@@ -52,7 +54,9 @@ interface PresetBrandMarkProps {
 }
 
 export function PresetBrandMark({ slug, label, size = 14 }: PresetBrandMarkProps) {
-  const src = slug ? LOBE_ICONS[slug] : undefined
+  const src = slug === SELECTION_APP_ICON_SLUG
+    ? selectionIcon
+    : (slug ? LOBE_ICONS[slug] : undefined)
   if (!src) {
     return (
       <span

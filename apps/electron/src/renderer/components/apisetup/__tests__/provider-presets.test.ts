@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { buildPiApiKeyModels } from '../pi-model-submission'
 import {
+  SELECTION_APP_ICON_SLUG,
   USED_LOBE_ICON_SLUGS,
   getPresetsForProvider,
   presetBrandSlug,
@@ -45,9 +46,19 @@ describe('provider preset order', () => {
 })
 
 describe('LobeHub preset icons', () => {
-  const letterFallback = new Set(['custom', 'manifest', 'order-openai', 'pi'])
+  const letterFallback = new Set(['manifest', 'order-openai'])
+  const selectionIconPath = new URL('../../../assets/selection-icon.svg', import.meta.url)
 
-  it('maps every dropdown preset to a real LobeHub svg or the letter placeholder', () => {
+  it('uses the bundled Selection mark for Custom and Selection Backend', () => {
+    expect(presetBrandSlug('custom')).toBe(SELECTION_APP_ICON_SLUG)
+    expect(presetBrandSlug('pi')).toBe(SELECTION_APP_ICON_SLUG)
+    expect(existsSync(selectionIconPath)).toBe(true)
+    const markSource = readFileSync(new URL('../PresetBrandMark.tsx', import.meta.url), 'utf8')
+    expect(markSource).toContain('selection-icon.svg')
+    expect(markSource).toContain('bg-current')
+  })
+
+  it('maps every dropdown preset to a real LobeHub svg, the Selection mark, or the letter placeholder', () => {
     const presets = [
       ...getPresetsForProvider('pi_api_key'),
       ...getPresetsForProvider('pi'),
@@ -63,6 +74,11 @@ describe('LobeHub preset icons', () => {
       const slug = presetBrandSlug(preset.key)
       if (letterFallback.has(preset.key)) {
         expect(slug).toBeNull()
+        continue
+      }
+      if (slug === SELECTION_APP_ICON_SLUG) {
+        expect(existsSync(selectionIconPath)).toBe(true)
+        expect(markSource).toContain('selection-icon.svg')
         continue
       }
       if (!slug) throw new Error(`missing LobeHub icon for ${preset.key}`)
