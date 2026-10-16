@@ -2,10 +2,12 @@
  * Brand mark for one API-setup preset.
  *
  * Each provider import is a single file from `@lobehub/icons-static-svg`.
- * Custom and Selection Backend use the bundled Selection mark. Other brands
- * missing from LobeHub use the same letter tile.
+ * Custom and Selection Backend use the bundled Selection mark.
+ * ORDER inlines its filled mark so `currentColor` and the evenodd cutout
+ * stay intact. Other brands missing from LobeHub use the same letter tile.
  */
 
+import orderIconSvg from '@/assets/order-icon.svg?raw'
 import selectionIcon from '@/assets/selection-icon.svg'
 
 import aistudio from '@lobehub/icons-static-svg/icons/aistudio.svg'
@@ -25,7 +27,7 @@ import openrouter from '@lobehub/icons-static-svg/icons/openrouter.svg'
 import vercel from '@lobehub/icons-static-svg/icons/vercel.svg'
 import xai from '@lobehub/icons-static-svg/icons/xai.svg'
 import zai from '@lobehub/icons-static-svg/icons/zai.svg'
-import { SELECTION_APP_ICON_SLUG, presetMonogram } from './provider-presets'
+import { ORDER_APP_ICON_SLUG, SELECTION_APP_ICON_SLUG, presetMonogram } from './provider-presets'
 
 const LOBE_ICONS: Readonly<Record<string, string>> = {
   aistudio,
@@ -54,6 +56,17 @@ interface PresetBrandMarkProps {
 }
 
 export function PresetBrandMark({ slug, label, size = 14 }: PresetBrandMarkProps) {
+  if (slug === ORDER_APP_ICON_SLUG) {
+    return (
+      <span
+        aria-hidden
+        className="inline-block shrink-0 text-current [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+        style={{ width: size, height: size }}
+        dangerouslySetInnerHTML={{ __html: orderIconSvg }}
+      />
+    )
+  }
+
   const src = slug === SELECTION_APP_ICON_SLUG
     ? selectionIcon
     : (slug ? LOBE_ICONS[slug] : undefined)

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { buildPiApiKeyModels } from '../pi-model-submission'
 import {
+  ORDER_APP_ICON_SLUG,
   SELECTION_APP_ICON_SLUG,
   USED_LOBE_ICON_SLUGS,
   getPresetsForProvider,
@@ -46,8 +47,9 @@ describe('provider preset order', () => {
 })
 
 describe('LobeHub preset icons', () => {
-  const letterFallback = new Set(['manifest', 'order-openai'])
+  const letterFallback = new Set(['manifest'])
   const selectionIconPath = new URL('../../../assets/selection-icon.svg', import.meta.url)
+  const orderIconPath = new URL('../../../assets/order-icon.svg', import.meta.url)
 
   it('uses the bundled Selection mark for Custom and Selection Backend', () => {
     expect(presetBrandSlug('custom')).toBe(SELECTION_APP_ICON_SLUG)
@@ -56,6 +58,21 @@ describe('LobeHub preset icons', () => {
     const markSource = readFileSync(new URL('../PresetBrandMark.tsx', import.meta.url), 'utf8')
     expect(markSource).toContain('selection-icon.svg')
     expect(markSource).toContain('bg-current')
+  })
+
+  it('uses the filled ORDER mark instead of a letter or the retired rings', () => {
+    expect(presetBrandSlug('order-openai')).toBe(ORDER_APP_ICON_SLUG)
+    const svg = readFileSync(orderIconPath, 'utf8')
+    expect(svg).toContain('viewBox="0 0 24 24"')
+    expect(svg).toContain('fill="currentColor"')
+    expect(svg).toContain('fill-rule="evenodd"')
+    expect(svg).toContain('M8.57 22.24')
+    expect(svg).toContain('17.54 21.03Z')
+    expect(svg).not.toContain('<circle')
+    expect(svg).not.toContain('<ellipse')
+    expect(svg).not.toContain('stroke-width')
+    const markSource = readFileSync(new URL('../PresetBrandMark.tsx', import.meta.url), 'utf8')
+    expect(markSource).toContain('order-icon.svg')
   })
 
   it('maps every dropdown preset to a real LobeHub svg, the Selection mark, or the letter placeholder', () => {
@@ -79,6 +96,12 @@ describe('LobeHub preset icons', () => {
       if (slug === SELECTION_APP_ICON_SLUG) {
         expect(existsSync(selectionIconPath)).toBe(true)
         expect(markSource).toContain('selection-icon.svg')
+        continue
+      }
+      if (slug === ORDER_APP_ICON_SLUG) {
+        expect(existsSync(orderIconPath)).toBe(true)
+        expect(readFileSync(orderIconPath, 'utf8')).toContain('fill-rule="evenodd"')
+        expect(markSource).toContain('order-icon.svg')
         continue
       }
       if (!slug) throw new Error(`missing LobeHub icon for ${preset.key}`)
