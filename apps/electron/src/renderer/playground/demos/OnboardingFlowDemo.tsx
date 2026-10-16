@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { ensureMockElectronAPI } from '../mock-utils'
 import { WelcomeStep } from '@/components/onboarding/WelcomeStep'
-import { ProviderSelectStep, type ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
+import { ProviderSelectStep, ORDER_OPENAI_BASE_URL, type ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
 import { CredentialsStep } from '@/components/onboarding/CredentialsStep'
 import { LocalModelStep } from '@/components/onboarding/LocalModelStep'
 import { CompletionStep } from '@/components/onboarding/CompletionStep'
@@ -171,6 +171,11 @@ export function OnboardingFlowDemo() {
             isWaitingForCode={false}
             onSubmitAuthCode={() => simulateOAuthSuccess()}
             onCancelOAuth={handleBack}
+            editInitialValues={providerChoice === 'order' ? {
+              activePreset: 'order-openai',
+              baseUrl: ORDER_OPENAI_BASE_URL,
+              customApi: 'openai-completions',
+            } : undefined}
             copilotDeviceCode={
               method === 'pi_copilot_oauth' && credStatus === 'validating'
                 ? { userCode: 'DEMO-1234', verificationUri: 'https://github.com/login/device' }

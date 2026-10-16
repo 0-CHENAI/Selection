@@ -835,6 +835,7 @@ export function useOnboarding({
       errorMessage: undefined,
     })
     setIsWaitingForCode(false)
+    setCredentialPrefill(undefined)
     // Clean up any pending OAuth state
     window.electronAPI.clearClaudeOAuthState().catch(() => {
       // Ignore errors - state may not exist

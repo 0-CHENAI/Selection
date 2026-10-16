@@ -48,6 +48,7 @@ import {
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { useWorkspaceIcon } from '@/hooks/useWorkspaceIcon'
 import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
+import { resolveSettingsApiSetupInitialValues } from './api-setup-initial-values'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
@@ -1248,7 +1249,11 @@ export default function AiSettingsPage() {
                   onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
                   onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
                   copilotDeviceCode={apiSetupOnboarding.copilotDeviceCode}
-                  editInitialValues={editInitialValues}
+                  editInitialValues={resolveSettingsApiSetupInitialValues({
+                    directEdit: isDirectEdit,
+                    editInitialValues,
+                    credentialPrefill: apiSetupOnboarding.credentialPrefill,
+                  })}
                   className="h-full"
                 />
                 <div

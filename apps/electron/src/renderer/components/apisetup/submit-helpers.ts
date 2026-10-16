@@ -157,3 +157,37 @@ export function resolveCustomEndpointPayload(params: {
       : fallbackPiAuthProvider,
   }
 }
+
+/**
+ * ORDER shows the checkbox catalog while the key is still short, while the
+ * list is loading, or once models have arrived. A failed fetch with a long
+ * enough key falls back to the comma-separated field.
+ */
+export function orderModelFieldMode(input: {
+  remoteModelsLoading: boolean
+  remoteModelCount: number
+  apiKeyLength: number
+}): 'picker' | 'manual' {
+  if (input.remoteModelsLoading || input.remoteModelCount > 0 || input.apiKeyLength < 8) return 'picker'
+  return 'manual'
+}
+
+/** Per-model context length and max output, for ORDER and other custom endpoints. */
+export function showsEndpointModelLimits(input: {
+  isCustomEndpointForm: boolean
+  isBedrock: boolean
+  selectedModelCount: number
+}): boolean {
+  return input.isCustomEndpointForm && !input.isBedrock && input.selectedModelCount > 0
+}
+
+/**
+ * Bedrock uses the same checkbox catalog as other Pi providers when the SDK
+ * list is available. An empty list keeps the comma-separated field.
+ */
+export function bedrockModelFieldMode(input: {
+  loading: boolean
+  catalogCount: number
+}): 'picker' | 'manual' {
+  return input.loading || input.catalogCount > 0 ? 'picker' : 'manual'
+}

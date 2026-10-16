@@ -2,7 +2,7 @@
  * ConnectionIcon
  *
  * Displays the provider logo for an LLM connection.
- * Falls back to the first letter of the connection name if no icon is available.
+ * ORDER uses the filled order mark. Other unknown providers fall back to a generic mark.
  *
  * Used in:
  * - AI Settings (connections list)
@@ -12,9 +12,9 @@
  */
 
 import { Brain } from 'lucide-react'
-import { getProviderIcon, providerIcons } from '@/lib/provider-icons'
+import orderIconSvg from '@/assets/order-icon.svg?raw'
+import { providerIcons, resolveConnectionBrandIcon } from '@/lib/provider-icons'
 import { getModelDisplayName } from '@config/models'
-import { isOrderGatewayUrl } from '@config/order-gateway'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import type { LlmConnectionWithStatus } from '../../../shared/types'
 
@@ -30,24 +30,29 @@ interface ConnectionIconProps {
 }
 
 export function ConnectionIcon({ connection, size = 16, className = '', showTooltip = false }: ConnectionIconProps) {
-  // ORDER is wordmark-only — no invented or letterform icon beside the name.
-  if (isOrderGatewayUrl(connection.baseUrl)) return null
+  const brand = resolveConnectionBrandIcon({
+    providerType: connection.providerType,
+    type: connection.type,
+    baseUrl: connection.baseUrl,
+    piAuthProvider: connection.piAuthProvider,
+  })
 
-  const providerIcon = getProviderIcon(
-    connection.providerType || connection.type || '',
-    connection.baseUrl,
-    connection.piAuthProvider
-  )
-
-  // Bundled marks are black monochrome except Claude's orange brand mark.
-  // External SVG images cannot inherit the surrounding foreground color.
-  const iconElement = providerIcon ? (
+  // ORDER's mark is currentColor + evenodd. Inline it so the cutout follows
+  // the surrounding text color. Other brands stay on <img> plus dark invert.
+  const iconElement = brand.kind === 'order' ? (
+    <span
+      aria-hidden
+      className={`inline-block shrink-0 text-foreground [&>svg]:block [&>svg]:h-full [&>svg]:w-full ${className}`}
+      style={{ width: size, height: size }}
+      dangerouslySetInnerHTML={{ __html: orderIconSvg }}
+    />
+  ) : brand.src ? (
     <img
-      src={providerIcon}
+      src={brand.src}
       alt=""
       width={size}
       height={size}
-      className={`rounded-[3px] flex-shrink-0 object-contain ${providerIcon !== providerIcons.anthropic ? 'dark:invert' : ''} ${className}`}
+      className={`rounded-[3px] flex-shrink-0 object-contain ${brand.src !== providerIcons.anthropic ? 'dark:invert' : ''} ${className}`}
       style={{ width: size, height: size }}
     />
   ) : (
