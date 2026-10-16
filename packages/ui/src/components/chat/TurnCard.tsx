@@ -379,6 +379,8 @@ export interface TurnCardProps {
   isComplete: boolean
   /** Parent owns the turn's loading status; omit generic thinking placeholders. */
   hasExternalWorkStatus?: boolean
+  /** This header is the single status bar while a clarification card is waiting. */
+  awaitingClarification?: boolean
   /** Start in expanded state */
   defaultExpanded?: boolean
   /** Controlled expansion state (overrides internal state) */
@@ -669,7 +671,9 @@ export function getPreviewText(
   activities: ActivityItem[],
   intent: string | undefined,
   turnPhase: TurnPhase,
+  options?: { awaitingClarification?: boolean },
 ): string {
+  if (options?.awaitingClarification) return i18n.t('chat.clarificationPending')
   if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
 
   // During an active turn, prefer the newest thinking/tool intent over the
@@ -869,11 +873,26 @@ function WorkHeaderIcon({
   expanded,
   reduceMotion,
 }: {
-  mode: 'spinner' | 'chevron'
+  mode: 'spinner' | 'chevron' | 'ellipsis'
   expanded: boolean
   reduceMotion: boolean | null
 }) {
   const instant = !!reduceMotion
+  // Three brand dots, centered in the same 12px slot as the chevron.
+  // They mean the turn is waiting, not that work is still running.
+  if (mode === 'ellipsis') {
+    return (
+      <span
+        data-clarification-ellipsis=""
+        aria-hidden="true"
+        className={cn(SIZE_CONFIG.iconSize, 'flex flex-row items-center justify-center gap-px shrink-0')}
+      >
+        <span className="size-[3px] rounded-full bg-accent" />
+        <span className="size-[3px] rounded-full bg-accent" />
+        <span className="size-[3px] rounded-full bg-accent" />
+      </span>
+    )
+  }
   // Same in-flow chevron as origin/main. An absolutely positioned 12px slot
   // clips the stroke against any rounded overflow ancestor.
   if (mode === 'chevron') {
@@ -3159,6 +3178,7 @@ export const TurnCard = React.memo(function TurnCard({
   intent,
   isComplete,
   hasExternalWorkStatus = false,
+  awaitingClarification = false,
   defaultExpanded = false,
   isExpanded: externalIsExpanded,
   onExpandedChange,
@@ -3292,8 +3312,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Compute preview text with cross-fade animation
   const previewText = useMemo(
-    () => getPreviewText(activities, intent, turnPhase),
-    [activities, intent, turnPhase]
+    () => getPreviewText(activities, intent, turnPhase, { awaitingClarification }),
+    [activities, intent, turnPhase, awaitingClarification]
   )
 
   // Sort activities by timestamp for correct chronological order
@@ -3419,7 +3439,7 @@ export const TurnCard = React.memo(function TurnCard({
     && !hasExternalWorkStatus
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
-  const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  const showWorkChrome = hasWorkRecords || showLiveThinkingHeader || awaitingClarification
   const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
   // Standalone viewers keep one status slot across tool -> awaiting -> tool transitions. Toggling
   // its visibility must not repeatedly expand and collapse the work chain.
@@ -3463,6 +3483,7 @@ export const TurnCard = React.memo(function TurnCard({
             aria-expanded={hasWorkRecords ? isExpanded : undefined}
             aria-disabled={!hasWorkRecords}
             tabIndex={hasWorkRecords ? 0 : -1}
+            data-work-status={awaitingClarification ? 'awaiting-clarification' : undefined}
             className={cn(
               "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
               SIZE_CONFIG.fontSize,
@@ -3473,15 +3494,17 @@ export const TurnCard = React.memo(function TurnCard({
             )}
           >
             <WorkHeaderIcon
-              mode={hasWorkRecords ? 'chevron' : 'spinner'}
+              mode={awaitingClarification ? 'ellipsis' : hasWorkRecords ? 'chevron' : 'spinner'}
               expanded={isExpanded}
               reduceMotion={reduceMotion}
             />
-            <WorkHeaderStepCount
-              count={stepCount}
-              animateIn={chromeWasMounted && !isComplete}
-              reduceMotion={reduceMotion}
-            />
+            {!awaitingClarification && (
+              <WorkHeaderStepCount
+                count={stepCount}
+                animateIn={chromeWasMounted && !isComplete}
+                reduceMotion={reduceMotion}
+              />
+            )}
 
             {/* Preview text with crossfade + inline failure count */}
             <span className="relative flex-1 min-w-0 h-5 flex items-center">

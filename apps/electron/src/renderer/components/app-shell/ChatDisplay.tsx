@@ -69,6 +69,7 @@ import {
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
   getAssistantTurnUiKey,
+  pendingClarificationLayout,
   asRecord,
   getAnnotationNoteText,
   isAnnotationFollowUpSent,
@@ -1605,6 +1606,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const completedRun = session?.tokenUsage?.lastTurn
   const currentRun = session?.tokenUsage?.currentTurn
   const workTimings = useMemo(() => getWorkTimings(allTurns, completedRun, currentRun), [allTurns, completedRun, currentRun])
+  const clarificationLayout = useMemo(() => pendingClarificationLayout(allTurns), [allTurns])
   const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
   const recoveryErrorId = recoveryErrorTurn?.type === 'system' && turns.includes(recoveryErrorTurn) ? recoveryErrorTurn.message.id : undefined
   const executionRecovery = session?.runtimeRecovery && ['recovering', 'blocked'].includes(session.runtimeRecovery.phase)
@@ -1771,6 +1773,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Keep the live status above the current reply as its body grows. Before
   // the first assistant turn exists, it follows the latest user message.
   const renderWorkStatus = (index: number) => {
+    if (clarificationLayout && (index === clarificationLayout.statusTurnIndex || clarificationLayout.hiddenTurnIndexes.has(index))) return null
     const timing = workTimings.get(index)
     if (!timing) return null
     const isProcessing = sessionBusy && index === processingTurnIndex
@@ -2084,6 +2087,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
                     // Assistant turns - render with TurnCard (buffered streaming)
                     const assistantUiKey = getAssistantTurnUiKey(turn, index)
+                    if (clarificationLayout?.hiddenTurnIndexes.has(index)) {
+                      return (
+                        <div
+                          key={turnKey}
+                          data-chat-turn-key={turnKey}
+                          data-clarification-suppressed=""
+                          ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                          hidden
+                        />
+                      )
+                    }
                     return (
                       <div
                         key={turnKey}
@@ -2100,6 +2114,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       <TurnCard
                         sessionId={session.id}
                         hasExternalWorkStatus
+                        awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                         sessionFolderPath={session.sessionFolderPath}
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}
@@ -2353,7 +2368,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {processingTurnIndex === -1 && processingIndicator}
+                {processingTurnIndex === -1 && !clarificationLayout && processingIndicator}
                 {/* Scroll Anchor: For auto-scroll to bottom */}
                 <div ref={messagesEndRef} />
               </div>

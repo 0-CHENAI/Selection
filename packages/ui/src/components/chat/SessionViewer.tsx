@@ -22,6 +22,7 @@ import {
   groupMessagesByTurn,
   storedToMessage,
   getAssistantTurnUiKey,
+  pendingClarificationLayout,
   type ActivityItem,
 } from './turn-utils'
 
@@ -72,6 +73,7 @@ export function SessionViewer({
     () => groupMessagesByTurn(session.messages.map(storedToMessage), { isSessionProcessing: false }),
     [session.messages]
   )
+  const clarificationLayout = useMemo(() => pendingClarificationLayout(turns), [turns])
 
   // Track expanded turns (for controlled state)
   const [expandedTurns, setExpandedTurns] = useState<Set<string>>(() => {
@@ -179,10 +181,12 @@ export function SessionViewer({
               }
 
               if (turn.type === 'assistant') {
+                if (clarificationLayout?.hiddenTurnIndexes.has(index)) return null
                 const assistantUiKey = getAssistantTurnUiKey(turn, index)
                 return (
                   <TurnCard
                     key={assistantUiKey}
+                    awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                     turnId={turn.turnId}
                     activities={turn.activities}
                     response={turn.response}

@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "Add a note",
   "chat.clarificationFreeTextPlaceholder": "Type an answer, or add to your choice",
   "chat.clarificationMultiHint": "Select any that apply, type a note, or both",
+  "chat.clarificationPending": "Awaiting clarification",
   "chat.clarificationSingleHint": "Select one, type a note, or both",
   "chat.clarificationSkip": "Skip",
   "chat.clarificationSkipped": "Skipped. Continuing with the current understanding.",

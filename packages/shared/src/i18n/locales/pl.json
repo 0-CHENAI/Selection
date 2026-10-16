@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "Dopisek",
   "chat.clarificationFreeTextPlaceholder": "Wpisz odpowiedź albo uzupełnij wybór",
   "chat.clarificationMultiHint": "Wybierz kilka, wpisz tekst albo zrób oba",
+  "chat.clarificationPending": "Do doprecyzowania",
   "chat.clarificationSingleHint": "Wybierz jedną, wpisz tekst albo zrób oba",
   "chat.clarificationSkip": "Pomiń",
   "chat.clarificationSkipped": "Pominięto. Kontynuacja według obecnego rozumienia.",

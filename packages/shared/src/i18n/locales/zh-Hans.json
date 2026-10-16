@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "补充说明",
   "chat.clarificationFreeTextPlaceholder": "直接写下答案，或补充你的选择",
   "chat.clarificationMultiHint": "可多选，也可以直接填写，或两者一起",
+  "chat.clarificationPending": "待澄清",
   "chat.clarificationSingleHint": "选择一项，也可以直接填写，或两者一起",
   "chat.clarificationSkip": "跳过",
   "chat.clarificationSkipped": "已跳过，按当前理解继续",

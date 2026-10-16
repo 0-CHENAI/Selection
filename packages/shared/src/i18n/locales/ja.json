@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "補足",
   "chat.clarificationFreeTextPlaceholder": "回答を入力するか、選択に補足する",
   "chat.clarificationMultiHint": "複数選択、入力、または両方",
+  "chat.clarificationPending": "確認待ち",
   "chat.clarificationSingleHint": "一つ選択、入力、または両方",
   "chat.clarificationSkip": "スキップ",
   "chat.clarificationSkipped": "スキップしました。現在の理解で続けます。",
