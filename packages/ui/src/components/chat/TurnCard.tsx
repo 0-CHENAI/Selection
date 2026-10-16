@@ -1310,7 +1310,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
   const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
     : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
-    : toolDisplay.name || (activity.type === 'thinking' ? thinkingStatusLabel() : 'Processing')
+    : toolDisplay.name || 'Processing'
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
