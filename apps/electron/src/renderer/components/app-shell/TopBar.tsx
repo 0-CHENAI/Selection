@@ -11,7 +11,7 @@
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
-import { ImmersiveModeIcon } from "../icons/ImmersiveModeIcon"
+import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
@@ -153,7 +153,7 @@ export function TopBar({
               data-immersive-toggle=""
               isActive={immersive}
             >
-              <ImmersiveModeIcon active={immersive} className={cn("h-[18px] w-[18px]", immersive ? "text-foreground" : "text-foreground/70")} />
+              <PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />
             </TopBarButton>
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("menu.immersiveMode")}</TooltipContent>
