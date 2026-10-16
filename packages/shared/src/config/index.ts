@@ -5,6 +5,7 @@ export * from './types.ts';
 export * from './paths.ts';
 export * from './llm-connections.ts';
 export * from './order-gateway.ts';
+export * from './connection-display-name.ts';
 export * from './llm-validation.ts';
 export * from './models.ts';
 export * from './models-pi.ts';

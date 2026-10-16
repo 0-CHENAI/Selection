@@ -1,6 +1,6 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
 import { fetchCustomEndpointModels, type FetchCustomEndpointModelsInput } from '@craft-agent/shared/config'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE, getDefaultModelsForConnection, getDefaultModelForConnection, resolveSetupConnectionName, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -9,7 +9,7 @@ import {
   validateStoredBackendConnection,
 } from '@craft-agent/shared/agent/backend'
 import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup, persistableLlmSetupCredential } from '@craft-agent/server-core/domain'
+import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup, persistableLlmSetupCredential } from '@craft-agent/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -91,6 +91,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       const persistableCredential = persistableLlmSetupCredential(setup.credential)
       const updates: Partial<LlmConnection> = {}
+      let localModelName: string | undefined
       const hasConfiguredBaseUrl = !!setup.baseUrl?.trim()
       if (setup.baseUrl !== undefined) {
         updates.baseUrl = setup.baseUrl?.trim() || undefined
@@ -126,18 +127,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
           preserveExistingCredential: !isNewConnection && connection.authType !== 'none',
         })
         updates.authType = branch.authType
-        // Only stamp the default "Local Model" name on first create — a later
-        // edit without a key must not rename a user-titled loopback connection.
-        if (isNewConnection && branch.name !== undefined) updates.name = branch.name
         if (branch.piAuthProvider !== undefined) updates.piAuthProvider = branch.piAuthProvider
-
-        // Brand-name override on first setup only (user-renamed connections aren't clobbered on re-save).
-        if (isNewConnection && !updates.name && setup.baseUrl?.toLowerCase().includes('manifest.build')) {
-          updates.name = 'Manifest'
-        }
-        if (isNewConnection && !updates.name && setup.baseUrl?.toLowerCase().includes('order.ai.jxepdi.top')) {
-          updates.name = 'ORDER'
-        }
+        if (branch.name !== undefined) localModelName = branch.name
       } else if (setup.baseUrl !== undefined) {
         // Base URL was explicitly updated without custom protocol config.
         // Treat this as non-custom mode and clear stale custom endpoint metadata.
@@ -154,11 +145,6 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Skip when custom endpoint protocol is driving routing.
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
-        // Update connection name to show the actual provider (e.g. "Selection Backend (Google AI Studio)")
-        const providerName = piAuthProviderDisplayName(setup.piAuthProvider)
-        if (providerName) {
-          updates.name = `Selection Backend (${providerName})`
-        }
         // Only set default models when using standard Pi provider AND user didn't pick explicit models
         if (!hasConfiguredBaseUrl && !setup.models?.length) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
@@ -166,6 +152,22 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
           updates.modelSelectionMode ??= 'automaticallySyncedFromProvider'
         }
       }
+
+      // Provider brand, ORDER, Manifest, or custom hostname. A title the user
+      // edited is kept; the generic "Selection Backend (API Key) N" template
+      // is replaced, including when an existing connection is saved again.
+      const nextName = resolveSetupConnectionName({
+        isNewConnection,
+        currentName: connection.name,
+        existingNames: getLlmConnections().map((item) => item.name),
+        piAuthProvider: isCustomEndpointCompat
+          ? (updates.piAuthProvider ?? connection.piAuthProvider)
+          : setup.piAuthProvider,
+        baseUrl: updates.baseUrl ?? setup.baseUrl ?? connection.baseUrl,
+        isCustomEndpoint: isCustomEndpointCompat,
+        localModelName,
+      })
+      if (nextName) updates.name = nextName
 
       // Pi+Bedrock auth method override — set authType for IAM or environment auth.
       // providerType stays 'pi' (Bedrock routes through Pi SDK).
