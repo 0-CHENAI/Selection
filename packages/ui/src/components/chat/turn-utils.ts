@@ -162,6 +162,90 @@ export function pendingClarificationLayout(turns: readonly Turn[]): PendingClari
   return { statusTurnIndex, hiddenTurnIndexes }
 }
 
+export interface SettledClarificationGroup {
+  /** First process row, or the clarification itself when nothing precedes it. */
+  anchorIndex: number
+  clarificationIndexes: number[]
+}
+
+/**
+ * Answered or skipped clarifications in one user request become one summary,
+ * rendered above that request's process rows. A pending card keeps the waiting layout.
+ */
+export function settledClarificationGroups(turns: readonly Turn[]): SettledClarificationGroup[] {
+  const groups: SettledClarificationGroup[] = []
+  let start = 0
+  const flush = (end: number) => {
+    const clarificationIndexes: number[] = []
+    let firstAssistant = -1
+    for (let index = start; index < end; index += 1) {
+      const turn = turns[index]
+      if (turn?.type === 'assistant' && firstAssistant < 0) firstAssistant = index
+      if (turn?.type !== 'clarification') continue
+      const status = turn.message.clarification?.status
+      if (status === 'pending') return
+      if (status === 'answered' || status === 'skipped') clarificationIndexes.push(index)
+    }
+    const firstClarification = clarificationIndexes[0]
+    if (firstClarification === undefined) return
+    groups.push({
+      anchorIndex: firstAssistant >= 0 ? Math.min(firstAssistant, firstClarification) : firstClarification,
+      clarificationIndexes,
+    })
+  }
+  turns.forEach((turn, index) => {
+    if (turn.type !== 'user') return
+    flush(index)
+    start = index + 1
+  })
+  flush(turns.length)
+  return groups
+}
+
+export function settledClarificationMessages(turns: readonly Turn[], group: SettledClarificationGroup): Message[] {
+  const messages: Message[] = []
+  for (const index of group.clarificationIndexes) {
+    const turn = turns[index]
+    if (turn?.type === 'clarification') messages.push(turn.message)
+  }
+  return messages
+}
+
+/** Move a request's work-status strip onto the clarification summary anchor. */
+export function anchorClarificationWorkStatus<T>(
+  turns: readonly Turn[],
+  timings: ReadonlyMap<number, T>,
+  groups: readonly SettledClarificationGroup[] = settledClarificationGroups(turns),
+): ReadonlyMap<number, T> {
+  if (groups.length === 0) return timings
+  let next: Map<number, T> | undefined
+  for (const group of groups) {
+    let start = group.anchorIndex
+    while (start > 0 && turns[start - 1]?.type !== 'user') start -= 1
+    let end = group.anchorIndex + 1
+    while (end < turns.length && turns[end]?.type !== 'user') end += 1
+    for (const index of [...(next ?? timings).keys()]) {
+      if (index === group.anchorIndex || index < start || index >= end) continue
+      const timing = (next ?? timings).get(index)
+      if (timing === undefined) continue
+      next ??= new Map(timings)
+      next.delete(index)
+      next.set(group.anchorIndex, timing)
+    }
+  }
+  return next ?? timings
+}
+
+export function sharesUserRequest(turns: readonly Turn[], left: number, right: number): boolean {
+  if (left < 0 || right < 0 || left >= turns.length || right >= turns.length) return false
+  const start = Math.min(left, right)
+  const end = Math.max(left, right)
+  for (let index = start + 1; index <= end; index += 1) {
+    if (turns[index]?.type === 'user') return false
+  }
+  return true
+}
+
 /**
  * Build a stable UI identity key for an assistant turn card.
  *

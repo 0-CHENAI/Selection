@@ -14,7 +14,7 @@ import { cn } from '../../lib/utils'
 import { CHAT_LAYOUT, CHAT_CLASSES } from '../../lib/layout'
 import { PlatformProvider, type PlatformActions } from '../../context'
 import { TurnCard } from './TurnCard'
-import { ClarificationCard } from './ClarificationCard'
+import { ClarificationCard, ClarificationSummary } from './ClarificationCard'
 import { UserMessageBubble } from './UserMessageBubble'
 import { SystemMessage } from './SystemMessage'
 import { SelectionMark } from '../SelectionMark'
@@ -23,6 +23,8 @@ import {
   storedToMessage,
   getAssistantTurnUiKey,
   pendingClarificationLayout,
+  settledClarificationGroups,
+  settledClarificationMessages,
   type ActivityItem,
 } from './turn-utils'
 
@@ -74,6 +76,17 @@ export function SessionViewer({
     [session.messages]
   )
   const clarificationLayout = useMemo(() => pendingClarificationLayout(turns), [turns])
+  const settledClarifications = useMemo(() => {
+    const messages = new Map<number, ReturnType<typeof settledClarificationMessages>>()
+    const hidden = new Set<number>()
+    for (const group of settledClarificationGroups(turns)) {
+      messages.set(group.anchorIndex, settledClarificationMessages(turns, group))
+      for (const index of group.clarificationIndexes) {
+        if (index !== group.anchorIndex) hidden.add(index)
+      }
+    }
+    return { messages, hidden }
+  }, [turns])
 
   // Track expanded turns (for controlled state)
   const [expandedTurns, setExpandedTurns] = useState<Set<string>>(() => {
@@ -173,19 +186,25 @@ export function SessionViewer({
               }
 
               if (turn.type === 'clarification') {
+                if (settledClarifications.hidden.has(index)) return null
+                const settledMessages = settledClarifications.messages.get(index)
                 return (
                   <div key={turn.message.id} className="mt-2">
-                    <ClarificationCard message={turn.message} interactive={false} />
+                    {settledMessages
+                      ? <ClarificationSummary messages={settledMessages} />
+                      : <ClarificationCard message={turn.message} interactive={false} />}
                   </div>
                 )
               }
 
               if (turn.type === 'assistant') {
                 if (clarificationLayout?.hiddenTurnIndexes.has(index)) return null
+                const settledMessages = settledClarifications.messages.get(index)
                 const assistantUiKey = getAssistantTurnUiKey(turn, index)
                 return (
+                  <div key={assistantUiKey}>
+                  {settledMessages && <ClarificationSummary messages={settledMessages} />}
                   <TurnCard
-                    key={assistantUiKey}
                     awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                     turnId={turn.turnId}
                     activities={turn.activities}
@@ -213,6 +232,7 @@ export function SessionViewer({
                     sessionFolderPath={sessionFolderPath}
                     annotationInteractionMode={mode === 'readonly' ? 'tooltip-only' : 'interactive'}
                   />
+                  </div>
                 )
               }
 

@@ -9,12 +9,16 @@ mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.wo
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let ClarificationCard: typeof import('../ClarificationCard').ClarificationCard
+let ClarificationSummary: typeof import('../ClarificationCard').ClarificationSummary
 let clarificationNoteLayout: typeof import('../ClarificationCard').clarificationNoteLayout
+let clarificationSummaryLabel: typeof import('../ClarificationCard').clarificationSummaryLabel
 
 beforeAll(async () => {
   const module = await import('../ClarificationCard')
   ClarificationCard = module.ClarificationCard
+  ClarificationSummary = module.ClarificationSummary
   clarificationNoteLayout = module.clarificationNoteLayout
+  clarificationSummaryLabel = module.clarificationSummaryLabel
 })
 
 const i18n = createInstance()
@@ -23,6 +27,8 @@ await i18n.use(initReactI18next).init({
   resources: {
     'zh-Hans': {
       translation: {
+        'chat.clarificationAnswered_one': '已澄清',
+        'chat.clarificationAnswered_other': '{{count}} 个已澄清',
         'chat.clarificationContinue': '继续',
         'chat.clarificationFreeText': '补充说明',
         'chat.clarificationFreeTextPlaceholder': '直接写下答案，或补充你的选择',
@@ -30,6 +36,9 @@ await i18n.use(initReactI18next).init({
         'chat.clarificationSingleHint': '选择一项，也可以直接填写，或两者一起',
         'chat.clarificationSkip': '跳过',
         'chat.clarificationSkipped': '已跳过，按当前理解继续',
+        'chat.clarificationSkippedCount_one': '已跳过',
+        'chat.clarificationSkippedCount_other': '{{count}} 个跳过',
+        'chat.clarificationSummaryMixed': '{{answered}} 个已澄清，{{skipped}} 个跳过',
         'chat.clarificationTextHint': '写下答案，或跳过',
         'chat.clarificationTitle': '需要确认',
         'chat.clarificationYourAnswer': '你的回答',
@@ -62,6 +71,14 @@ function render(props: ComponentProps<typeof ClarificationCard>) {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <ClarificationCard {...props} />
+    </I18nextProvider>,
+  )
+}
+
+function renderSummary(messages: ComponentProps<typeof ClarificationSummary>['messages'], defaultExpanded = false) {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <ClarificationSummary messages={messages} defaultExpanded={defaultExpanded} />
     </I18nextProvider>,
   )
 }
@@ -109,8 +126,57 @@ describe('clarification card', () => {
 
   it('shows a skipped card without asking again', () => {
     const html = render({ message: card({ status: 'skipped' }), interactive: true })
-    expect(html).toContain('已跳过，按当前理解继续')
+    expect(html).toContain('data-clarification-badge')
+    expect(html).toContain('已跳过')
+    expect(html).toContain('data-clarification-open="false"')
+    expect(html).not.toContain('按当前理解继续')
     expect(html).not.toContain('data-clarification-skip=""')
     expect(html).not.toContain('data-clarification-text')
+    expect(html).not.toContain('报告覆盖哪一年')
+  })
+
+  it('collapses an answered clarification and expands to the question, options, and answer', () => {
+    const answered = card({ status: 'answered', selectedOptionIds: ['2024'], text: '只要表格' })
+    const collapsed = render({ message: answered })
+    expect(collapsed).toContain('data-clarification-open="false"')
+    expect(collapsed).toContain('>已澄清<')
+    expect(collapsed).not.toContain('报告覆盖哪一年')
+    expect(collapsed).not.toContain('data-clarification-answer')
+
+    const html = render({ message: answered, defaultExpanded: true })
+    expect(html).toContain('data-clarification-open="true"')
+    expect(html).toContain('rotate-90')
+    expect(html).toContain('报告覆盖哪一年')
+    expect(html).toContain('data-clarification-option="2024"')
+    expect(html).toContain('data-selected="true"')
+    expect(html).toContain('data-clarification-option="2025"')
+    expect(html).toContain('data-selected="false"')
+    expect(html).toContain('你的回答')
+    expect(html).toContain('只要表格')
+  })
+
+  it('summarizes several settled questions, including a mix of answers and skips', () => {
+    const translate = i18n.t.bind(i18n)
+    expect(clarificationSummaryLabel({ answered: 1, skipped: 0 }, translate)).toBe('已澄清')
+    expect(clarificationSummaryLabel({ answered: 3, skipped: 0 }, translate)).toBe('3 个已澄清')
+    expect(clarificationSummaryLabel({ answered: 0, skipped: 1 }, translate)).toBe('已跳过')
+    expect(clarificationSummaryLabel({ answered: 0, skipped: 2 }, translate)).toBe('2 个跳过')
+    expect(clarificationSummaryLabel({ answered: 2, skipped: 1 }, translate)).toBe('2 个已澄清，1 个跳过')
+
+    const answered = card({ status: 'answered', selectedOptionIds: ['2025'], text: '用 2025' })
+    const skipped = card({ status: 'skipped', requestId: 'req-2', question: '要附录吗？' })
+    skipped.id = 'card-2'
+    const html = renderSummary([answered, skipped, { ...answered, id: 'card-3' }])
+    expect(html).toContain('data-clarification-summary')
+    expect(html).toContain('data-clarification-status="mixed"')
+    expect(html).toContain('2 个已澄清，1 个跳过')
+    expect(html).toContain('data-clarification-open="false"')
+    expect(html).not.toContain('data-clarification-detail')
+
+    const open = renderSummary([answered, skipped], true)
+    expect(open).toContain('data-clarification-detail')
+    expect(open).toContain('要附录吗？')
+    expect(open).toContain('已跳过，按当前理解继续')
+    expect(open).toContain('用 2025')
   })
 })

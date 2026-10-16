@@ -70,6 +70,10 @@ import {
   formatActivityAsMarkdown,
   getAssistantTurnUiKey,
   pendingClarificationLayout,
+  settledClarificationGroups,
+  settledClarificationMessages,
+  anchorClarificationWorkStatus,
+  sharesUserRequest,
   asRecord,
   getAnnotationNoteText,
   isAnnotationFollowUpSent,
@@ -81,6 +85,7 @@ import {
   type SystemTurn,
   type AuthRequestTurn,
   ClarificationCard,
+  ClarificationSummary,
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
@@ -1607,6 +1612,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const currentRun = session?.tokenUsage?.currentTurn
   const workTimings = useMemo(() => getWorkTimings(allTurns, completedRun, currentRun), [allTurns, completedRun, currentRun])
   const clarificationLayout = useMemo(() => pendingClarificationLayout(allTurns), [allTurns])
+  const settledGroups = useMemo(() => settledClarificationGroups(allTurns), [allTurns])
+  const settledClarifications = useMemo(() => {
+    const messages = new Map<number, ReturnType<typeof settledClarificationMessages>>()
+    const hidden = new Set<number>()
+    for (const group of settledGroups) {
+      messages.set(group.anchorIndex, settledClarificationMessages(allTurns, group))
+      for (const index of group.clarificationIndexes) {
+        if (index !== group.anchorIndex) hidden.add(index)
+      }
+    }
+    return { messages, hidden }
+  }, [allTurns, settledGroups])
+  const displayWorkTimings = useMemo(
+    () => anchorClarificationWorkStatus(allTurns, workTimings, settledGroups),
+    [allTurns, workTimings, settledGroups],
+  )
   const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
   const recoveryErrorId = recoveryErrorTurn?.type === 'system' && turns.includes(recoveryErrorTurn) ? recoveryErrorTurn.message.id : undefined
   const executionRecovery = session?.runtimeRecovery && ['recovering', 'blocked'].includes(session.runtimeRecovery.phase)
@@ -1774,9 +1795,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // the first assistant turn exists, it follows the latest user message.
   const renderWorkStatus = (index: number) => {
     if (clarificationLayout && (index === clarificationLayout.statusTurnIndex || clarificationLayout.hiddenTurnIndexes.has(index))) return null
-    const timing = workTimings.get(index)
+    const timing = displayWorkTimings.get(index)
     if (!timing) return null
-    const isProcessing = sessionBusy && index === processingTurnIndex
+    const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)
     return (
       <HeightPresence key="work-status" animateIn={isProcessing} reduceMotion={reduceMotion}>
         <ProcessingIndicator
@@ -2033,6 +2054,18 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     }
 
                     if (turn.type === 'clarification') {
+                      if (settledClarifications.hidden.has(index)) {
+                        return (
+                          <div
+                            key={turnKey}
+                            data-chat-turn-key={turnKey}
+                            data-clarification-grouped=""
+                            ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
+                            hidden
+                          />
+                        )
+                      }
+                      const settledMessages = settledClarifications.messages.get(index)
                       return (
                         <div
                           key={turnKey}
@@ -2044,14 +2077,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             isAnyMatch && !isCurrentMatch && "ring-1 ring-info/30"
                           )}
                         >
-                          <ClarificationCard
-                            message={turn.message}
-                            interactive={turn.message.clarification?.status === 'pending' && !!onRespondToClarification}
-                            onRespond={(response) => {
-                              const requestId = turn.message.clarification?.requestId
-                              if (requestId) onRespondToClarification?.(session.id, requestId, response)
-                            }}
-                          />
+                          {renderWorkStatus(index)}
+                          {settledMessages ? (
+                            <ClarificationSummary messages={settledMessages} />
+                          ) : (
+                            <ClarificationCard
+                              message={turn.message}
+                              interactive={turn.message.clarification?.status === 'pending' && !!onRespondToClarification}
+                              onRespond={(response) => {
+                                const requestId = turn.message.clarification?.requestId
+                                if (requestId) onRespondToClarification?.(session.id, requestId, response)
+                              }}
+                            />
+                          )}
                         </div>
                       )
                     }
@@ -2087,6 +2125,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
                     // Assistant turns - render with TurnCard (buffered streaming)
                     const assistantUiKey = getAssistantTurnUiKey(turn, index)
+                    const settledMessages = settledClarifications.messages.get(index)
                     if (clarificationLayout?.hiddenTurnIndexes.has(index)) {
                       return (
                         <div
@@ -2111,6 +2150,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         )}
                       >
                       {renderWorkStatus(index)}
+                      {settledMessages && <ClarificationSummary messages={settledMessages} />}
                       <TurnCard
                         sessionId={session.id}
                         hasExternalWorkStatus
