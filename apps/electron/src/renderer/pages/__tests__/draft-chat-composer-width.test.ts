@@ -22,7 +22,8 @@ describe('draft chat composer width', () => {
     // Mode changes go through the Full Takeover risk gate before reaching state.
     expect(chatPage).toContain('onPermissionModeChange={handlePermissionModeChange}')
     expect(chatPage).toContain("onSwarmEnabledChange={undefined}")
-    expect(chatPage).toContain('onWorkingDirectoryChange={handleWorkingDirectoryChange}')
+    // Project conversations pass undefined so the folder mark stays read-only.
+    expect(chatPage).toContain('onWorkingDirectoryChange={workingDirectoryLocked ? undefined : handleWorkingDirectoryChange}')
     expect(chatPage).toContain('onSourcesChange={handleSourcesChange}')
     expect(chatPage).not.toContain('max-w-[960px]')
     expect(inputZone).toContain('CHAT_CLASSES.composerColumn')
