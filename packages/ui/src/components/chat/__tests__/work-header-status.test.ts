@@ -10,6 +10,7 @@ it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', a
     'chat.processing.thinking': '思考中…',
     'turnCard.responding': '正在回复',
     'turnCard.stepsCompleted': '步骤已完成',
+    'chat.clarificationPending': '待澄清',
   } } } })
   const activities = [{ id: 'fetch', type: 'tool' as const, status: 'completed' as const,
     toolName: 'WebFetch', intent: '读取网页', timestamp: 1 }]
@@ -22,6 +23,8 @@ it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', a
     { id: 'ok', type: 'tool' as const, status: 'completed' as const, toolName: 'Read', timestamp: 1 },
     { id: 'err', type: 'tool' as const, status: 'error' as const, toolName: 'Write', timestamp: 2 },
   ], undefined, 'complete')).toBe('步骤已完成')
+  expect(getPreviewText(activities, '读取网页', 'complete', { awaitingClarification: true })).toBe('待澄清')
+  expect(getPreviewText(activities, '读取网页', 'complete')).toBe('读取网页')
 
   const progress = { id: 'progress', type: 'status' as const, status: 'completed' as const,
     statusType: 'task_progress', content: '子代理（2） · 2/2 · 已完成', timestamp: 1000 }

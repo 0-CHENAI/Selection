@@ -111,6 +111,57 @@ export interface ClarificationTurn {
 
 export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn | ClarificationTurn
 
+export interface PendingClarificationLayout {
+  /** Assistant header that stays visible and reads as「待澄清」. */
+  statusTurnIndex: number
+  /** Later assistant fragments in the same request, including the「已工作」strip. */
+  hiddenTurnIndexes: ReadonlySet<number>
+}
+
+/**
+ * While a clarification card is waiting, the transcript keeps one process bar:
+ * the assistant header immediately above that card. Assistant fragments that
+ * landed after the card are the duplicate collapsed chain and stay hidden
+ * until the user answers or skips.
+ */
+export function pendingClarificationLayout(turns: readonly Turn[]): PendingClarificationLayout | null {
+  let requestStart = -1
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.type === 'user') {
+      requestStart = index
+      break
+    }
+  }
+  let pendingIndex = -1
+  for (let index = turns.length - 1; index > requestStart; index -= 1) {
+    const turn = turns[index]
+    if (turn?.type === 'clarification' && turn.message.clarification?.status === 'pending') {
+      pendingIndex = index
+      break
+    }
+  }
+  if (pendingIndex < 0) return null
+
+  let statusTurnIndex = -1
+  for (let index = pendingIndex - 1; index > requestStart; index -= 1) {
+    if (turns[index]?.type === 'assistant') {
+      statusTurnIndex = index
+      break
+    }
+  }
+  const hiddenTurnIndexes = new Set<number>()
+  for (let index = pendingIndex + 1; index < turns.length; index += 1) {
+    if (turns[index]?.type === 'assistant') hiddenTurnIndexes.add(index)
+  }
+  if (statusTurnIndex < 0) {
+    const fallback = hiddenTurnIndexes.values().next().value
+    if (fallback === undefined) return null
+    hiddenTurnIndexes.delete(fallback)
+    statusTurnIndex = fallback
+  }
+  return { statusTurnIndex, hiddenTurnIndexes }
+}
+
 /**
  * Build a stable UI identity key for an assistant turn card.
  *

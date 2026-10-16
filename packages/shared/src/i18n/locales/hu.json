@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "Kiegészítés",
   "chat.clarificationFreeTextPlaceholder": "Írd be a választ, vagy egészítsd ki a kijelölést",
   "chat.clarificationMultiHint": "Többet is választhatsz, írhatsz, vagy mindkettő",
+  "chat.clarificationPending": "Tisztázásra vár",
   "chat.clarificationSingleHint": "Válassz egyet, írj, vagy mindkettő",
   "chat.clarificationSkip": "Kihagyás",
   "chat.clarificationSkipped": "Kihagyva. Folytatás a jelenlegi értelmezéssel.",

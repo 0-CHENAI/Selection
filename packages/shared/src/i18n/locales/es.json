@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "Añadir una nota",
   "chat.clarificationFreeTextPlaceholder": "Escribe una respuesta o completa tu elección",
   "chat.clarificationMultiHint": "Elige varias, escribe, o ambas",
+  "chat.clarificationPending": "Pendiente de aclarar",
   "chat.clarificationSingleHint": "Elige una, escribe, o ambas",
   "chat.clarificationSkip": "Omitir",
   "chat.clarificationSkipped": "Omitido. Se continúa con la comprensión actual.",

@@ -38,7 +38,7 @@ const resources = {
 async function renderTurn(
   language: keyof typeof resources,
   activities: ActivityItem[],
-  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; hasExternalWorkStatus?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
+  options: { isComplete?: boolean; isStreaming?: boolean; expanded?: boolean; hasExternalWorkStatus?: boolean; awaitingClarification?: boolean; onOpenActivityDetails?: (activity: ActivityItem) => void; workControls?: React.ReactNode; taskPreview?: boolean; response?: React.ComponentProps<typeof TurnCard>['response'] } = {},
 ) {
   await testI18n.use(initReactI18next).init({
     lng: language,
@@ -57,6 +57,7 @@ async function renderTurn(
         isStreaming={options.isStreaming ?? true}
         isComplete={options.isComplete ?? false}
         hasExternalWorkStatus={options.hasExternalWorkStatus}
+        awaitingClarification={options.awaitingClarification}
         defaultExpanded={options.expanded ?? true}
         onOpenActivityDetails={options.onOpenActivityDetails}
         workControls={options.workControls}
@@ -427,6 +428,21 @@ it('renders one thinking label after tools even when multiple SDK placeholders o
     expect(countOccurrences(html, '思考中…')).toBe(1)
     expect(countOccurrences(html, 'data-status="working"')).toBe(1)
   }
+})
+
+it('shows 待澄清 and three centered accent dots while a clarification is waiting', async () => {
+  const tool: ActivityItem = { id: 'clarify', type: 'tool', toolName: 'clarify', status: 'completed', timestamp: 1 }
+  const waiting = await renderTurn('zh-Hans', [tool], { isComplete: true, isStreaming: false, expanded: false, awaitingClarification: true })
+  expect(waiting).toContain('data-work-status="awaiting-clarification"')
+  expect(waiting).toContain('待澄清')
+  expect(waiting).not.toContain('步骤已完成')
+  expect(waiting).toContain('data-clarification-ellipsis')
+  expect(waiting).toContain('flex-row items-center justify-center')
+  expect(countOccurrences(waiting, 'rounded-full bg-accent')).toBe(3)
+  const settled = await renderTurn('zh-Hans', [tool], { isComplete: true, isStreaming: false, expanded: false })
+  expect(settled).toContain('步骤已完成')
+  expect(settled).not.toContain('data-clarification-ellipsis')
+  expect(settled).not.toContain('待澄清')
 })
 
 it('does not repeat a thinking header in the status slot', async () => {

@@ -293,6 +293,7 @@
   "chat.clarificationFreeText": "Ergänzung",
   "chat.clarificationFreeTextPlaceholder": "Antwort eingeben oder die Auswahl ergänzen",
   "chat.clarificationMultiHint": "Mehrere wählen, Text eingeben oder beides",
+  "chat.clarificationPending": "Klärung ausstehend",
   "chat.clarificationSingleHint": "Eine Option wählen, Text eingeben oder beides",
   "chat.clarificationSkip": "Überspringen",
   "chat.clarificationSkipped": "Übersprungen. Es wird mit dem aktuellen Verständnis fortgesetzt.",
