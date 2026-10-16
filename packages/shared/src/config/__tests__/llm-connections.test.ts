@@ -71,6 +71,21 @@ describe('getMiniModel', () => {
       models: ['Opus', 'DeepSeek-V4-Flash'],
     })).toBe('DeepSeek-V4-Flash')
   })
+
+  it('uses a mini, flash, or haiku model from the enabled set, then the default', () => {
+    expect(getMiniModel({
+      providerType: 'pi',
+      piAuthProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      models: ['deepseek-v4-pro', 'deepseek-flash'],
+    })).toBe('deepseek-flash')
+    expect(getMiniModel({
+      providerType: 'pi',
+      piAuthProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      models: ['deepseek-v4-pro'],
+    })).toBe('deepseek-v4-pro')
+  })
 })
 
 // ============================================================

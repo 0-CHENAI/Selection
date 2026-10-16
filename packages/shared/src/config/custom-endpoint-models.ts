@@ -13,6 +13,7 @@
 import { isOfficialAnthropicApiUrl } from './anthropic-api-host.ts'
 import type { CustomEndpointApi } from './llm-connections.ts'
 import { connectionModelIdsMatch } from './model-image-support.ts'
+import { enrichListedModelLimits } from './model-context-window.ts'
 import {
   parseOpenAiModelsPayload,
   type ProviderListedModel,
@@ -276,7 +277,9 @@ export async function fetchCustomEndpointModels(
       } catch {
         continue
       }
-      const models = sortListedModels(dedupeListedModels(parseOpenAiModelsPayload(json)))
+      const models = sortListedModels(dedupeListedModels(
+        parseOpenAiModelsPayload(json).map((model) => enrichListedModelLimits(model)),
+      ))
       return { ok: true, models, source: attempt.source }
     } catch {
       if (options?.signal?.aborted) return { ok: false, error: 'unavailable' }

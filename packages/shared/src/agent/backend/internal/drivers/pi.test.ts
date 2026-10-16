@@ -103,6 +103,37 @@ describe('piDriver.buildRuntime custom endpoint models', () => {
 
     expect(runtime.customModels).toEqual(['Opus', 'Laufry']);
   });
+
+  it('attaches a known preset context window to a string model id', () => {
+    const runtime = piDriver.buildRuntime({
+      context: {
+        provider: 'pi',
+        authType: 'api_key',
+        resolvedModel: 'deepseek-v4-flash',
+        capabilities: { needsHttpPoolServer: false },
+        connection: {
+          slug: 'deepseek',
+          name: 'DeepSeek',
+          providerType: 'pi',
+          authType: 'api_key',
+          piAuthProvider: 'deepseek',
+          models: ['deepseek-v4-flash'],
+          createdAt: Date.now(),
+        } as any,
+      },
+      coreConfig: {} as any,
+      hostRuntime: {} as any,
+      resolvedPaths: {
+        piServerPath: '/tmp/pi-agent-server.js',
+        interceptorBundlePath: '/tmp/interceptor.cjs',
+        nodeRuntimePath: '/usr/bin/node',
+      },
+    });
+
+    expect(runtime.customModels).toEqual([
+      { id: 'deepseek-v4-flash', contextWindow: 1_000_000, maxTokens: 384_000 },
+    ]);
+  });
 });
 
 describe('piDriver.fetchModels OpenRouter', () => {

@@ -44,6 +44,10 @@ import {
   inferModelSupportsImages,
   resolveCustomModelContextWindow,
 } from '../config/model-image-support.ts';
+import {
+  lookupKnownModelContextWindow,
+  resolveRuntimeModelContextWindow,
+} from '../config/model-context-window.ts';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 
 // BaseAgent provides common functionality
@@ -454,10 +458,12 @@ export class PiAgent extends BaseAgent {
 
   constructor(config: BackendConfig) {
     const resolvedModel = config.model || '';
-    const contextWindow = resolveCustomModelContextWindow(
-      getBackendRuntime(config).customModels,
-      resolvedModel,
-    ) ?? getModelById(resolvedModel)?.contextWindow;
+    const contextWindow = resolveRuntimeModelContextWindow({
+      modelId: resolvedModel,
+      stored: resolveCustomModelContextWindow(getBackendRuntime(config).customModels, resolvedModel),
+      known: lookupKnownModelContextWindow(resolvedModel),
+      registry: getModelById(resolvedModel)?.contextWindow,
+    });
     super(config, resolvedModel, contextWindow);
 
     this._supportsBranching = true;
@@ -2951,10 +2957,12 @@ export class PiAgent extends BaseAgent {
   }
 
   private applyCatalogContextWindow(modelId: string): void {
-    const contextWindow = resolveCustomModelContextWindow(
-      getBackendRuntime(this.config).customModels,
+    const contextWindow = resolveRuntimeModelContextWindow({
       modelId,
-    ) ?? getModelById(modelId)?.contextWindow;
+      stored: resolveCustomModelContextWindow(getBackendRuntime(this.config).customModels, modelId),
+      known: lookupKnownModelContextWindow(modelId),
+      registry: getModelById(modelId)?.contextWindow,
+    });
     if (!contextWindow) return;
     this.usageTracker.setContextWindow(contextWindow);
     this.adapter.setContextWindow(contextWindow);
