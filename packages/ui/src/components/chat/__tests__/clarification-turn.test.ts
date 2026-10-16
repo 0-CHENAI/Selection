@@ -4,8 +4,8 @@ import {
   anchorClarificationWorkStatus,
   groupMessagesByTurn,
   pendingClarificationLayout,
+  interleaveSettledClarifications,
   settledClarificationGroups,
-  sharesUserRequest,
   type Turn,
 } from '../turn-utils'
 
@@ -116,17 +116,18 @@ test('commentary after a clarification joins the continuation chain instead of i
     },
   ], { isSessionProcessing: false })
 
-  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification', 'assistant'])
-  const lower = turns[3]
-  expect(lower?.type).toBe('assistant')
-  if (lower?.type !== 'assistant') return
-  expect(lower.activities.some(activity => activity.content?.includes('The user asked'))).toBe(true)
-  expect(lower.activities.some(activity => activity.intent === 'Find other sessions in the workspace')).toBe(true)
-  expect(lower.response?.text).toBe('按 2024 继续。')
-  expect(turns.filter(turn => turn.type === 'assistant' && turn.activities.some(activity => activity.content?.includes('The user asked')))).toHaveLength(1)
+  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification'])
+  const chain = turns[1]
+  expect(chain?.type).toBe('assistant')
+  if (chain?.type !== 'assistant') return
+  expect(chain.activities.some(activity => activity.toolName === 'clarify')).toBe(true)
+  expect(chain.activities.some(activity => activity.content?.includes('The user asked'))).toBe(true)
+  expect(chain.activities.some(activity => activity.intent === 'Find other sessions in the workspace')).toBe(true)
+  expect(chain.response?.text).toBe('按 2024 继续。')
+  expect(turns.filter(turn => turn.type === 'assistant')).toHaveLength(1)
 })
 
-test('answered clarifications collapse above the process chain and hoist the work status', () => {
+test('answered clarifications fold into the first process row and hoist the work status', () => {
   const turns = groupMessagesByTurn([
     user,
     clarifyTool,
@@ -134,13 +135,19 @@ test('answered clarifications collapse above the process chain and hoist the wor
     commentary,
     answer,
   ], { isSessionProcessing: false })
-  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification', 'assistant'])
+  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification'])
+  expect(turns.filter(turn => turn.type === 'assistant')).toHaveLength(1)
+  const chain = turns[1]
+  expect(chain?.type).toBe('assistant')
+  if (chain?.type !== 'assistant') return
+  expect(chain.activities.some(activity => activity.toolName === 'clarify')).toBe(true)
+  expect(chain.activities.some(activity => activity.content?.includes('需要确认'))).toBe(true)
+  expect(chain.response?.text).toBe('按 2024 继续。')
   const groups = settledClarificationGroups(turns)
   expect(groups).toEqual([{ anchorIndex: 1, clarificationIndexes: [2] }])
-  const timings = anchorClarificationWorkStatus(turns, new Map([[3, 'worked']]), groups)
+  const timings = anchorClarificationWorkStatus(turns, new Map([[1, 'worked']]), groups)
   expect(timings.get(1)).toBe('worked')
-  expect(timings.has(3)).toBe(false)
-  expect(sharesUserRequest(turns, 1, 3)).toBe(true)
+  expect([...timings.keys()]).toEqual([1])
 })
 
 test('several settled questions in one flow share a summary without moving the next request', () => {
@@ -165,18 +172,18 @@ test('several settled questions in one flow share a summary without moving the n
   const groups = settledClarificationGroups(turns)
   expect(groups).toHaveLength(1)
   expect(groups[0]?.clarificationIndexes.map(index => turns[index]?.type)).toEqual(['clarification', 'clarification'])
-  expect(groups[0]!.anchorIndex).toBeLessThan(groups[0]!.clarificationIndexes[0]!)
   expect(groups[0]!.clarificationIndexes.every(index => index < secondUser)).toBe(true)
+  const assistantsBeforeNext = turns.filter((turn, index) => turn.type === 'assistant' && index < secondUser)
+  expect(assistantsBeforeNext).toHaveLength(1)
   const firstStatus = turns.findLastIndex((turn, index) => turn.type === 'assistant' && index < secondUser)
   const secondStatus = turns.findLastIndex(turn => turn.type === 'assistant')
+  expect(firstStatus).toBe(groups[0]!.anchorIndex)
   const timings = anchorClarificationWorkStatus(turns, new Map([[firstStatus, 'first'], [secondStatus, 'second']]))
-  expect(firstStatus).not.toBe(groups[0]!.anchorIndex)
   expect(timings.get(groups[0]!.anchorIndex)).toBe('first')
-  expect(timings.has(firstStatus)).toBe(false)
   expect(timings.get(secondStatus)).toBe('second')
 })
 
-test('a clarification that lands before any process still keeps the summary above that process', () => {
+test('a clarification that lands before the process joins that fold', () => {
   const turns = groupMessagesByTurn([
     user,
     { ...clarification, clarification: { ...clarification.clarification!, status: 'answered', text: '2024' } },
@@ -184,9 +191,36 @@ test('a clarification that lands before any process still keeps the summary abov
   ], { isSessionProcessing: false })
   expect(turns.map(turn => turn.type)).toEqual(['user', 'clarification', 'assistant'])
   const groups = settledClarificationGroups(turns)
-  expect(groups).toEqual([{ anchorIndex: 1, clarificationIndexes: [1] }])
+  expect(groups).toEqual([{ anchorIndex: 2, clarificationIndexes: [1] }])
   const timings = anchorClarificationWorkStatus(turns, new Map([[2, 'worked']]))
-  expect([...timings.keys()]).toEqual([1])
+  expect([...timings.keys()]).toEqual([2])
+  expect(timings.has(1)).toBe(false)
+})
+
+test('settled clarifications keep their place in the process timeline', () => {
+  const rows = [
+    { id: 'early', type: 'tool' as const, status: 'completed' as const, timestamp: 1 },
+    { id: 'late', type: 'tool' as const, status: 'completed' as const, timestamp: 5 },
+  ]
+  const earlyQuestion: Message = {
+    ...clarification,
+    id: 'c-early',
+    timestamp: 2,
+    clarification: { ...clarification.clarification!, status: 'answered' },
+  }
+  const lateQuestion: Message = {
+    ...clarification,
+    id: 'c-late',
+    timestamp: 6,
+    clarification: { ...clarification.clarification!, requestId: 'req-2', status: 'skipped' },
+  }
+  const entries = interleaveSettledClarifications(rows, [lateQuestion, clarification, earlyQuestion])
+  expect(entries.map(entry => entry.kind === 'step' ? entry.row.id : entry.message.id)).toEqual([
+    'early',
+    'c-early',
+    'late',
+    'c-late',
+  ])
 })
 
 test('a pending clarification does not fold into the settled summary', () => {

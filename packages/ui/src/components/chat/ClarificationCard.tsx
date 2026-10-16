@@ -1,10 +1,12 @@
 import * as React from 'react'
 import type { TFunction } from 'i18next'
-import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { ArrowUpRight, MessageCircleQuestionMark } from 'lucide-react'
 import type { Message } from '@craft-agent/core/types'
 import { canSubmitClarification, toggleClarificationSelection } from '@craft-agent/shared/agent/clarification'
 import { cn } from '../../lib/utils'
+import { ContentFrame } from '../overlay/ContentFrame'
+import { PreviewOverlay } from '../overlay/PreviewOverlay'
 
 const NOTE_LINE_PX = 20
 const NOTE_PAD_PX = 16
@@ -35,13 +37,10 @@ export interface ClarificationCardProps {
   message: Message
   interactive?: boolean
   onRespond?: (response: ClarificationResponse) => void
-  /** Test hook. Settled cards stay collapsed until the user opens them. */
-  defaultExpanded?: boolean
 }
 
 export interface ClarificationSummaryProps {
-  messages: Message[]
-  defaultExpanded?: boolean
+  messages: readonly Message[]
 }
 
 export function clarificationOutcomeCounts(messages: readonly Message[]): { answered: number; skipped: number } {
@@ -55,7 +54,7 @@ export function clarificationOutcomeCounts(messages: readonly Message[]): { answ
   return { answered, skipped }
 }
 
-/** One settled question uses the short badge. Mixed groups always include both counts. */
+/** Every settled title includes the question count, including a single question. */
 export function clarificationSummaryLabel(
   counts: { answered: number; skipped: number },
   t: TFunction,
@@ -63,84 +62,143 @@ export function clarificationSummaryLabel(
   const { answered, skipped } = counts
   if (answered > 0 && skipped > 0) return t('chat.clarificationSummaryMixed', { answered, skipped })
   if (skipped > 1) return t('chat.clarificationSkippedCount_other', { count: skipped })
-  if (skipped === 1) return t('chat.clarificationSkippedCount_one')
+  if (skipped === 1) return t('chat.clarificationSkippedCount_one', { count: skipped })
   if (answered > 1) return t('chat.clarificationAnswered_other', { count: answered })
-  return t('chat.clarificationAnswered_one')
+  return t('chat.clarificationAnswered_one', { count: answered })
 }
 
-function clarificationSummaryPreview(messages: readonly Message[], language: string | undefined): string | null {
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const message of messages) {
-    const data = message.clarification
-    const line = data?.question.trim() || data?.text?.trim()
-    if (!line || seen.has(line)) continue
-    seen.add(line)
-    lines.push(line)
-  }
-  if (lines.length === 0) return null
-  if (lines.length === 1) return lines[0] ?? null
-  return lines.join(language?.startsWith('zh') ? '、' : ' · ')
+export function clarificationSummaryStatus(
+  counts: { answered: number; skipped: number },
+): 'answered' | 'skipped' | 'mixed' {
+  if (counts.answered > 0 && counts.skipped > 0) return 'mixed'
+  if (counts.skipped > 0) return 'skipped'
+  return 'answered'
 }
 
-export function ClarificationSummary({ messages, defaultExpanded = false }: ClarificationSummaryProps) {
-  const { t, i18n } = useTranslation()
-  const settled = messages.filter(message => {
+/** Keep a settled status readable in a process-fold title, without burying a real step label. */
+export function clarificationBriefTitle(
+  preview: string,
+  statusLabel: string | undefined,
+  genericLabels: readonly string[] = [],
+): string {
+  if (!statusLabel) return preview
+  const trimmed = preview.trim()
+  if (!trimmed || genericLabels.includes(trimmed)) return statusLabel
+  if (trimmed === statusLabel || trimmed.startsWith(`${statusLabel} · `)) return trimmed
+  return `${statusLabel} · ${trimmed}`
+}
+
+function settledClarificationMessages(messages: readonly Message[]): Message[] {
+  return messages.filter(message => {
     const status = message.clarification?.status
     return status === 'answered' || status === 'skipped'
   })
-  const [open, setOpen] = React.useState(defaultExpanded)
+}
+
+/** Status line for one settled clarification. The fold header keeps the multi-count copy. */
+export function clarificationRowLabel(message: Message, t: TFunction): string {
+  const status = message.clarification?.status
+  if (status === 'skipped') return clarificationSummaryLabel({ answered: 0, skipped: 1 }, t)
+  return clarificationSummaryLabel({ answered: 1, skipped: 0 }, t)
+}
+
+/**
+ * Question, options, and the answer or skip note. Shown in the step detail
+ * popup, not as a block inside the process list.
+ */
+export function ClarificationFoldDetails({
+  messages,
+  showStatus,
+}: {
+  messages: readonly Message[]
+  /** When entries are split along the timeline, still mark each one in a mixed group. */
+  showStatus?: boolean
+}) {
+  const settled = settledClarificationMessages(messages)
   if (settled.length === 0) return null
-  const counts = clarificationOutcomeCounts(settled)
-  const label = clarificationSummaryLabel(counts, t)
-  const status = counts.skipped === 0 ? 'answered' : counts.answered === 0 ? 'skipped' : 'mixed'
-  const preview = clarificationSummaryPreview(settled, i18n.language)
+  const markStatus = showStatus ?? settled.length > 1
   return (
-    <section
-      data-clarification-summary=""
-      data-clarification-card=""
-      data-clarification-status={status}
-      data-clarification-open={open ? 'true' : 'false'}
-      className="mb-2 overflow-hidden rounded-xl border border-border bg-background text-foreground"
-    >
+    <div data-clarification-fold="" className="flex flex-col gap-3 py-1">
+      {settled.map(message => (
+        <ClarificationDetail key={message.id} message={message} showStatus={markStatus} />
+      ))}
+    </div>
+  )
+}
+
+/** Settled clarification body, used by the detail popup. */
+export function ClarificationSummary({ messages }: ClarificationSummaryProps) {
+  return <ClarificationFoldDetails messages={messages} />
+}
+
+/**
+ * One completed clarification in the process list: icon and status title.
+ * The question, options, and answer open in the same preview overlay as other steps.
+ */
+export function ClarificationChainRow({ message }: { message: Message }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = React.useState(false)
+  const status = message.clarification?.status
+  if (status !== 'answered' && status !== 'skipped') return null
+  const label = clarificationRowLabel(message, t)
+  return (
+    <>
       <button
         type="button"
+        data-clarification-row=""
+        data-clarification-status={status}
+        aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
+        onClick={() => setOpen(true)}
         className={cn(
-          'flex w-full items-center gap-3 px-4 py-3 text-left',
-          'transition-colors duration-150 ease-out hover:bg-muted/40 motion-reduce:transition-none',
-          'focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
+          'group/row flex w-full min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-[13px] text-muted-foreground',
+          'rounded-[6px] hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         )}
       >
-        <span className="min-w-0 flex-1">
-          <span data-clarification-badge="" className="block text-sm font-medium text-foreground">
-            {label}
-          </span>
-          {!open && preview && (
-            <span data-clarification-preview="" className="mt-1 block truncate text-sm text-muted-foreground">
-              {preview}
-            </span>
-          )}
+        <span data-clarification-icon="" className="flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
+          <MessageCircleQuestionMark className="h-3 w-3 shrink-0" />
         </span>
-        <ChevronRight
-          aria-hidden="true"
-          className={cn(
-            'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-            open && 'rotate-90',
-          )}
-        />
+        <span className="min-w-0 flex-1 truncate group-hover/row:underline">{label}</span>
+        <ArrowUpRight className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true" />
       </button>
       {open && (
-        <div className="flex flex-col divide-y divide-border border-t border-border">
-          {settled.map(message => (
-            <div key={message.id} className="px-4 py-3">
-              <ClarificationDetail message={message} showStatus={settled.length > 1} />
-            </div>
-          ))}
-        </div>
+        <ClarificationDetailsOverlay message={message} isOpen onClose={() => setOpen(false)} />
       )}
-    </section>
+    </>
+  )
+}
+
+/** Detail popup for one settled clarification. Matches the other step preview overlays. */
+export function ClarificationDetailsOverlay({
+  message,
+  isOpen,
+  onClose,
+  embedded = false,
+}: {
+  message: Message
+  isOpen: boolean
+  onClose: () => void
+  /** Render inline for tests and the playground, without a dialog portal. */
+  embedded?: boolean
+}) {
+  const { t } = useTranslation()
+  const label = clarificationRowLabel(message, t)
+  return (
+    <PreviewOverlay
+      isOpen={isOpen}
+      onClose={onClose}
+      embedded={embedded}
+      typeBadge={{ icon: MessageCircleQuestionMark, label, variant: 'blue' }}
+      title={label}
+    >
+      <div data-clarification-popup="">
+        <ContentFrame title={label}>
+          <div className="px-8 py-6">
+            <ClarificationFoldDetails messages={[message]} />
+          </div>
+        </ContentFrame>
+      </div>
+    </PreviewOverlay>
   )
 }
 
@@ -200,11 +258,10 @@ function ClarificationDetail({ message, showStatus }: { message: Message; showSt
  * One clarification card: choices and a free-text field together.
  * This is not the final answer card.
  */
-export function ClarificationCard({ message, interactive = false, onRespond, defaultExpanded = false }: ClarificationCardProps) {
+export function ClarificationCard({ message, interactive = false, onRespond }: ClarificationCardProps) {
   const status = message.clarification?.status
-  if (status === 'answered' || status === 'skipped') {
-    return <ClarificationSummary messages={[message]} defaultExpanded={defaultExpanded} />
-  }
+  // Answered and skipped clarifications live in the process fold, not a second card.
+  if (status === 'answered' || status === 'skipped') return null
   return <PendingClarificationCard message={message} interactive={interactive} onRespond={onRespond} />
 }
 

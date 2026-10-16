@@ -7,12 +7,20 @@ import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { formatUserMessageTime } from './UserMessageBubble'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
+import {
+  ClarificationChainRow,
+  clarificationBriefTitle,
+  clarificationOutcomeCounts,
+  clarificationSummaryLabel,
+  clarificationSummaryStatus,
+} from './ClarificationCard'
 import { ResponseArtifacts } from './ResponseArtifacts'
 import { extractDeliveredResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
+import type { Message } from '@craft-agent/core/types'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
@@ -57,6 +65,7 @@ import {
   computeLastChildSet,
   getRenderedActivityRows,
   groupActivitiesByParent,
+  interleaveSettledClarifications,
   isActivityGroup,
   formatDuration,
   formatOrchestrationToolSummary,
@@ -381,6 +390,11 @@ export interface TurnCardProps {
   hasExternalWorkStatus?: boolean
   /** This header is the single status bar while a clarification card is waiting. */
   awaitingClarification?: boolean
+  /**
+   * Answered or skipped clarifications for this process fold.
+   * The header brief title keeps the status; opening the fold shows the details.
+   */
+  clarifications?: readonly Message[]
   /** Start in expanded state */
   defaultExpanded?: boolean
   /** Controlled expansion state (overrides internal state) */
@@ -723,6 +737,10 @@ export function getPreviewText(
   }
 
   return i18n.t('turnCard.starting')
+}
+
+function isClarificationToolActivity(activity: Pick<ActivityItem, 'type' | 'toolName'>): boolean {
+  return activity.type === 'tool' && /(^|__)clarify$/i.test(activity.toolName ?? '')
 }
 
 
@@ -3179,6 +3197,7 @@ export const TurnCard = React.memo(function TurnCard({
   isComplete,
   hasExternalWorkStatus = false,
   awaitingClarification = false,
+  clarifications,
   defaultExpanded = false,
   isExpanded: externalIsExpanded,
   onExpandedChange,
@@ -3310,11 +3329,34 @@ export const TurnCard = React.memo(function TurnCard({
   const isBuffering = !!response?.isStreaming && !response.text.trim()
 
 
-  // Compute preview text with cross-fade animation
+  const settledClarifications = useMemo(
+    () => (clarifications ?? []).filter(message => {
+      const status = message.clarification?.status
+      return status === 'answered' || status === 'skipped'
+    }),
+    [clarifications],
+  )
+  const hasClarifications = settledClarifications.length > 0 && !awaitingClarification
+  const clarificationCounts = clarificationOutcomeCounts(settledClarifications)
+  const clarificationLabel = hasClarifications ? clarificationSummaryLabel(clarificationCounts, t) : undefined
+  const clarificationStatus = hasClarifications ? clarificationSummaryStatus(clarificationCounts) : undefined
+
+  // Compute preview text with cross-fade animation.
+  // A settled clarification keeps its status as the brief title; a real step
+  // label stays beside it, and a generic phase label does not.
   const previewText = useMemo(
     () => getPreviewText(activities, intent, turnPhase, { awaitingClarification }),
-    [activities, intent, turnPhase, awaitingClarification]
+    [activities, intent, turnPhase, awaitingClarification],
   )
+  const briefTitle = clarificationBriefTitle(previewText, clarificationLabel, [
+    t('turnCard.stepsCompleted'),
+    t('turnCard.starting'),
+    t('turnCard.responding'),
+    t('chat.processing.thinking'),
+  ])
+  const stepPreview = clarificationLabel
+    ? (briefTitle.startsWith(`${clarificationLabel} · `) ? briefTitle.slice(clarificationLabel.length + 3) : '')
+    : previewText
 
   // Sort activities by timestamp for correct chronological order
   // This handles the live streaming case (turn-utils sorts on flush for completed turns)
@@ -3346,9 +3388,11 @@ export const TurnCard = React.memo(function TurnCard({
         // The stable header/footer status owns their presentation.
         && !((activity.type === 'intermediate' || activity.type === 'thinking')
           && !hasRenderableAssistantText(activity.content))
-        && !isMirroredCommentaryActivity(activity, response, isComplete),
+        && !isMirroredCommentaryActivity(activity, response, isComplete)
+        // The settled row replaces this tool line. It only said "waiting".
+        && !(hasClarifications && isClarificationToolActivity(activity)),
     ),
-    [sortedActivities, response, isComplete],
+    [sortedActivities, response, isComplete, hasClarifications],
   )
 
   // PRO workers share one chronological chain with coordinator operations.
@@ -3380,12 +3424,20 @@ export const TurnCard = React.memo(function TurnCard({
     [visibleActivities, hasTaskSubagents]
   )
 
+  const chainEntries = useMemo(
+    () => interleaveSettledClarifications(
+      groupedActivities ?? visibleActivities,
+      hasClarifications ? settledClarifications : [],
+    ),
+    [groupedActivities, visibleActivities, hasClarifications, settledClarifications],
+  )
+
   const hasVisibleResponse = !!response && (
     hasRenderableAssistantText(response.text)
   )
 
   // Don't render if nothing to show and turn is complete
-  if (activities.length === 0 && !hasVisibleResponse && isComplete) {
+  if (activities.length === 0 && !hasVisibleResponse && isComplete && !hasClarifications) {
     return null
   }
 
@@ -3412,6 +3464,7 @@ export const TurnCard = React.memo(function TurnCard({
       return true
     })
     && !hasVisibleResponse
+    && !hasClarifications
   if (hasNoMeaningfulWork) {
     return null
   }
@@ -3439,7 +3492,8 @@ export const TurnCard = React.memo(function TurnCard({
     && !hasExternalWorkStatus
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
-  const showWorkChrome = hasWorkRecords || showLiveThinkingHeader || awaitingClarification
+  const canToggleFold = hasWorkRecords || hasClarifications
+  const showWorkChrome = canToggleFold || showLiveThinkingHeader || awaitingClarification
   const assignmentSummary = taskAssignmentSummary(activities.find(activity => activity.taskContext?.kind === 'assignment')?.taskContext)
   // Standalone viewers keep one status slot across tool -> awaiting -> tool transitions. Toggling
   // its visibility must not repeatedly expand and collapse the work chain.
@@ -3454,7 +3508,7 @@ export const TurnCard = React.memo(function TurnCard({
   // No space-y on the root: a sibling margin sits outside the height tweens and
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
-    <div>
+    <div data-clarification-folded={hasClarifications ? '' : undefined}>
       {assignmentSummary && (taskPreview ? <section className="mb-4 rounded-lg bg-foreground/[0.035] p-4 text-sm leading-relaxed [overflow-wrap:anywhere]" data-task-assignment-summary>
         <h3 className="flex items-center gap-2 text-xs font-medium text-foreground/70">
           <CornerDownRight className="size-4 shrink-0 text-accent" aria-hidden="true" />
@@ -3479,22 +3533,23 @@ export const TurnCard = React.memo(function TurnCard({
           {/* Collapsed Header / Toggle */}
           <button
             type="button"
-            onClick={hasWorkRecords ? toggleExpanded : undefined}
-            aria-expanded={hasWorkRecords ? isExpanded : undefined}
-            aria-disabled={!hasWorkRecords}
-            tabIndex={hasWorkRecords ? 0 : -1}
+            onClick={canToggleFold ? toggleExpanded : undefined}
+            aria-expanded={canToggleFold ? isExpanded : undefined}
+            aria-disabled={!canToggleFold}
+            tabIndex={canToggleFold ? 0 : -1}
             data-work-status={awaitingClarification ? 'awaiting-clarification' : undefined}
+            data-clarification-open={clarificationLabel ? (isExpanded ? 'true' : 'false') : undefined}
             className={cn(
               "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
               SIZE_CONFIG.fontSize,
               "text-muted-foreground",
-              hasWorkRecords && "hover:bg-muted/50 transition-colors",
-              !hasWorkRecords && "pointer-events-none",
+              canToggleFold && "hover:bg-muted/50 transition-colors",
+              !canToggleFold && "pointer-events-none",
               "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             )}
           >
             <WorkHeaderIcon
-              mode={awaitingClarification ? 'ellipsis' : hasWorkRecords ? 'chevron' : 'spinner'}
+              mode={awaitingClarification ? 'ellipsis' : canToggleFold ? 'chevron' : 'spinner'}
               expanded={isExpanded}
               reduceMotion={reduceMotion}
             />
@@ -3506,21 +3561,34 @@ export const TurnCard = React.memo(function TurnCard({
               />
             )}
 
-            {/* Preview text with crossfade + inline failure count */}
-            <span className="relative flex-1 min-w-0 h-5 flex items-center">
-              <AnimatePresence initial={false}>
-                <motion.span
-                  key={previewText}
-                  initial={reduceMotion ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  // Do not retain a fading thinking label when its status row takes over.
-                  exit={reduceMotion ? undefined : { opacity: 0, transition: previewText === thinkingStatusLabel() ? { duration: 0 } : undefined }}
-                  transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
-                  className="absolute inset-0 truncate"
+            {/* Status stays in the brief title. A real step label follows it. */}
+            <span className="relative flex min-w-0 flex-1 items-center gap-1.5 h-5">
+              {clarificationLabel && (
+                <span
+                  data-clarification-brief=""
+                  data-clarification-status={clarificationStatus}
+                  className="shrink-0 font-medium text-foreground"
                 >
-                  {previewText}
-                </motion.span>
-              </AnimatePresence>
+                  {clarificationLabel}
+                </span>
+              )}
+              {stepPreview && (
+                <span className="relative min-w-0 flex-1 h-5">
+                  <AnimatePresence initial={false}>
+                    <motion.span
+                      key={stepPreview}
+                      initial={reduceMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      // Do not retain a fading thinking label when its status row takes over.
+                      exit={reduceMotion ? undefined : { opacity: 0, transition: stepPreview === thinkingStatusLabel() ? { duration: 0 } : undefined }}
+                      transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
+                      className="absolute inset-0 truncate"
+                    >
+                      {stepPreview}
+                    </motion.span>
+                  </AnimatePresence>
+                </span>
+              )}
             </span>
 
             {!isExpanded && compactionTimes.length > 0 && (
@@ -3538,8 +3606,8 @@ export const TurnCard = React.memo(function TurnCard({
             ))}
           </button>
 
-          {/* Expanded Activity List — only after a real work record exists */}
-          {hasWorkRecords && (
+          {/* Expanded Activity List — work rows, or a settled clarification on its own */}
+          {canToggleFold && (
           <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
                 {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
@@ -3550,62 +3618,56 @@ export const TurnCard = React.memo(function TurnCard({
                   {/* Rows joining a header that is already on screen slide in;
                       history and a header mounting with its rows do not. */}
                   <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
-                  {/* Grouped view for Task subagents */}
-                  {groupedActivities ? (
-                    groupedActivities.map((item, index) => (
-                      isActivityGroup(item) ? (
+                  {chainEntries.map((entry, index) => {
+                    if (entry.kind === 'clarification') {
+                      if (!isExpanded) return null
+                      return (
                         <WorkChainRow
-                          key={item.parent.id}
+                          key={entry.message.id}
                           reduceMotion={reduceMotion}
                           stagger={!!staggerOnThisExpand}
                           staggerIndex={index}
                         >
-                          <ActivityGroupRow
-                            group={item}
-                            expandedGroups={expandedActivityGroups}
-                            onExpandedGroupsChange={handleExpandedActivityGroupsChange}
-                            onOpenActivityDetails={onOpenActivityDetails}
-                            animationIndex={index}
-                            animateEntrance={false}
-                            sessionFolderPath={sessionFolderPath}
-                            displayMode={displayMode}
-                          />
-                        </WorkChainRow>
-                      ) : (
-                        <WorkChainRow
-                          key={item.id}
-                          reduceMotion={reduceMotion}
-                          stagger={!!staggerOnThisExpand}
-                          staggerIndex={index}
-                        >
-                          <ActivityRow
-                            activity={item}
-                            onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
-                            sessionFolderPath={sessionFolderPath}
-                            displayMode={displayMode}
-                          />
+                          <ClarificationChainRow message={entry.message} />
                         </WorkChainRow>
                       )
-                    ))
-                  ) : (
-                    /* Flat view for simple tool calls */
-                    visibleActivities.map((activity, index) => (
+                    }
+                    const item = entry.row
+                    return isActivityGroup(item) ? (
                       <WorkChainRow
-                        key={activity.id}
+                        key={item.parent.id}
+                        reduceMotion={reduceMotion}
+                        stagger={!!staggerOnThisExpand}
+                        staggerIndex={index}
+                      >
+                        <ActivityGroupRow
+                          group={item}
+                          expandedGroups={expandedActivityGroups}
+                          onExpandedGroupsChange={handleExpandedActivityGroupsChange}
+                          onOpenActivityDetails={onOpenActivityDetails}
+                          animationIndex={index}
+                          animateEntrance={false}
+                          sessionFolderPath={sessionFolderPath}
+                          displayMode={displayMode}
+                        />
+                      </WorkChainRow>
+                    ) : (
+                      <WorkChainRow
+                        key={item.id}
                         reduceMotion={reduceMotion}
                         stagger={!!staggerOnThisExpand}
                         staggerIndex={index}
                       >
                         <ActivityRow
-                          activity={activity}
-                          onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
-                          isLastChild={lastChildSet.has(activity.id)}
+                          activity={item}
+                          onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
+                          isLastChild={lastChildSet.has(item.id)}
                           sessionFolderPath={sessionFolderPath}
                           displayMode={displayMode}
                         />
                       </WorkChainRow>
-                    ))
-                  )}
+                    )
+                  })}
                   {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {reserveThinkingSlot && (
@@ -3827,6 +3889,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false
+  if (prev.clarifications !== next.clarifications) return false
+  if (prev.awaitingClarification !== next.awaitingClarification) return false
   if (prev.researchSources !== next.researchSources) return false
   if (prev.workControls !== next.workControls) return false
 

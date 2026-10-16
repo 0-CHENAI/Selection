@@ -14,7 +14,7 @@ import { cn } from '../../lib/utils'
 import { CHAT_LAYOUT, CHAT_CLASSES } from '../../lib/layout'
 import { PlatformProvider, type PlatformActions } from '../../context'
 import { TurnCard } from './TurnCard'
-import { ClarificationCard, ClarificationSummary } from './ClarificationCard'
+import { ClarificationCard } from './ClarificationCard'
 import { UserMessageBubble } from './UserMessageBubble'
 import { SystemMessage } from './SystemMessage'
 import { SelectionMark } from '../SelectionMark'
@@ -188,11 +188,26 @@ export function SessionViewer({
               if (turn.type === 'clarification') {
                 if (settledClarifications.hidden.has(index)) return null
                 const settledMessages = settledClarifications.messages.get(index)
+                if (settledMessages) {
+                  const foldKey = `clarification:${turn.message.id}`
+                  return (
+                    <div key={turn.message.id} className="mt-2">
+                      <TurnCard
+                        turnId={foldKey}
+                        activities={[]}
+                        clarifications={settledMessages}
+                        isStreaming={false}
+                        isComplete
+                        isExpanded={expandedTurns.has(foldKey)}
+                        onExpandedChange={(expanded) => handleExpandedChange(foldKey, expanded)}
+                        sessionFolderPath={sessionFolderPath}
+                      />
+                    </div>
+                  )
+                }
                 return (
                   <div key={turn.message.id} className="mt-2">
-                    {settledMessages
-                      ? <ClarificationSummary messages={settledMessages} />
-                      : <ClarificationCard message={turn.message} interactive={false} />}
+                    <ClarificationCard message={turn.message} interactive={false} />
                   </div>
                 )
               }
@@ -203,8 +218,8 @@ export function SessionViewer({
                 const assistantUiKey = getAssistantTurnUiKey(turn, index)
                 return (
                   <div key={assistantUiKey}>
-                  {settledMessages && <ClarificationSummary messages={settledMessages} />}
                   <TurnCard
+                    clarifications={settledMessages}
                     awaitingClarification={clarificationLayout?.statusTurnIndex === index}
                     turnId={turn.turnId}
                     activities={turn.activities}
