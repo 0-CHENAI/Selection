@@ -562,9 +562,8 @@ export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): numbe
     // Delivery is the card body, not a numbered work step.
     .filter(activity => !isAnswerDeliveryTool(activity))
     .filter(activity => activity.statusType !== 'compaction_complete')
-    // Reasoning has its own block. It is not a numbered work step.
-    .filter(activity => activity.type !== 'thinking')
     // Empty live placeholders are transient indicators, not work records.
+    // Finished reasoning is a step, same as commentary between tools.
     .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
       || hasRenderableAssistantText(activity.content))
     .map(activity => activity.type === 'tool'

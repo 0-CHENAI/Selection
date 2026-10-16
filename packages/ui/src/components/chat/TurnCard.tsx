@@ -264,40 +264,6 @@ export const SIZE_CONFIG = {
 /** Product-standard label paired with the 3x3 grid activity indicator. */
 const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 
-/** Live model reasoning. Stays on screen while the work chain is folded. */
-function ThinkingBlock({ activity }: { activity: ActivityItem }) {
-  const { t } = useTranslation()
-  const running = activity.status === 'running'
-  const startedAt = useRef(activity.timestamp || Date.now())
-  const sawRunning = useRef(running)
-  if (running) sawRunning.current = true
-  const [seconds, setSeconds] = useState(() => Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)))
-  useEffect(() => {
-    if (!running) return
-    const update = () => setSeconds(Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)))
-    update()
-    const timer = setInterval(update, 1000)
-    return () => clearInterval(timer)
-  }, [running])
-  const shown = activity.elapsedSeconds ?? (sawRunning.current ? Math.max(seconds, 1) : undefined)
-  if (running) {
-    return (
-      <div data-thinking-live="" className="mb-3 px-4 text-sm leading-relaxed text-foreground/80">
-        <div className="mb-1 text-xs text-muted-foreground">{t('turnCard.thinking')}</div>
-        <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{activity.content}</div>
-      </div>
-    )
-  }
-  return (
-    <details data-thinking-done="" className="mb-3 px-4 text-sm text-foreground/80">
-      <summary className="cursor-pointer text-xs text-muted-foreground">
-        {shown ? t('turnCard.thoughtFor', { seconds: shown }) : t('turnCard.thoughtDone')}
-      </summary>
-      <div className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{activity.content}</div>
-    </details>
-  )
-}
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -1236,30 +1202,41 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
     }
   }
 
-  // Intermediate messages (LLM commentary) - render with dashed circle icon
-  // Show "Thinking" while streaming, stripped markdown content when complete
-  if (activity.type === 'intermediate') {
-    const isThinking = activity.status === 'running'
-    const displayContent = stripMarkdown(activity.content || '') || (isThinking ? thinkingStatusLabel() : '')
+  // Commentary and model reasoning stay in the chain as steps.
+  // A running reasoning row keeps the live text; a finished row is one line
+  // that opens the same details popup as any other step.
+  if (activity.type === 'intermediate' || activity.type === 'thinking') {
+    const isRunning = activity.status === 'running'
+    const liveThinking = activity.type === 'thinking' && isRunning && hasRenderableAssistantText(activity.content)
+    const displayContent = stripMarkdown(activity.content || '') || (isRunning ? thinkingStatusLabel() : '')
     const isComplete = activity.status === 'completed'
     return (
-      <div className="flex items-stretch">
+      <div
+        className="flex items-stretch"
+        data-thinking-step={activity.type === 'thinking' ? '' : undefined}
+      >
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
+          data-thinking-live={liveThinking ? '' : undefined}
           className={cn(
-            "group/row flex items-center gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            liveThinking ? "items-start" : "items-center",
             SIZE_CONFIG.fontSize
           )}
           onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
         >
-          {isThinking ? (
-            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+          {isRunning ? (
+            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0", liveThinking && "mt-0.5")}>
               <Spinner className={SIZE_CONFIG.spinnerSize} />
             </div>
           ) : (
             <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
           )}
-          <span className={cn("truncate flex-1", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayContent}</span>
+          <span className={cn(
+            "flex-1",
+            liveThinking ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "truncate",
+            onOpenDetails && isComplete && "group-hover/row:underline",
+          )}>{liveThinking ? activity.content : displayContent}</span>
           {/* Open details button */}
           {onOpenDetails && isComplete && (
             <div
@@ -3321,6 +3298,20 @@ export const TurnCard = React.memo(function TurnCard({
     if (!isComplete) wasLiveRef.current = true
   }, [isComplete])
 
+  // Open the chain once while reasoning is still arriving, so the live
+  // text is a step the reader can see. A later manual collapse stays closed.
+  const revealedThinking = useRef(false)
+  useEffect(() => {
+    if (revealedThinking.current || hasUserToggled.current || isExpanded) return
+    const live = activities.some(activity => activity.type === 'thinking'
+      && activity.status === 'running'
+      && hasRenderableAssistantText(activity.content))
+    if (!live) return
+    revealedThinking.current = true
+    if (onExpandedChange) onExpandedChange(true)
+    else setLocalExpandedTurns(prev => new Set(prev).add(turnId))
+  }, [activities, isExpanded, onExpandedChange, turnId])
+
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
     const newExpanded = !isExpanded
@@ -3413,14 +3404,10 @@ export const TurnCard = React.memo(function TurnCard({
   // The live commentary card already shows this body. Hiding the mirrored
   // row keeps the work chain from inserting a duplicate line (or appearing
   // at all) until a tool or older commentary actually needs a row.
-  const thinkingActivities = useMemo(
-    () => sortedActivities.filter(activity => activity.type === 'thinking' && hasRenderableAssistantText(activity.content)),
-    [sortedActivities],
-  )
+  // Reasoning stays in this list: it is a step, not a disclosure under the chain.
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
-      activity => activity.type !== 'thinking'
-        && !isAnswerDeliveryTool(activity)
+      activity => !isAnswerDeliveryTool(activity)
         // Aggregate status is a fallback, not a work record or the latest step.
         && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
@@ -3653,6 +3640,7 @@ export const TurnCard = React.memo(function TurnCard({
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
                   ref={activitiesContainerRef}
+                  data-process-chain=""
                   className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
                 >
                   {/* Rows joining a header that is already on screen slide in;
@@ -3771,8 +3759,6 @@ export const TurnCard = React.memo(function TurnCard({
           />
         </div>
       ))}
-
-      {thinkingActivities.map(activity => <ThinkingBlock key={activity.id} activity={activity} />)}
 
       <GrowingResponse>
       {/* Response Section — keep the white frame mounted once a final stream exists */}

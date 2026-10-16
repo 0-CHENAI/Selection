@@ -278,6 +278,74 @@ describe('PiEventAdapter', () => {
       expect(answer[0].turnId).not.toBe(first[0].turnId);
     });
 
+    it('keeps each thinking → text → tool round on its own step ids', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const rounds = [
+        { think: '先看安装情况', text: 'Zen 1.23.2b installed', tool: 'toolu_1' },
+        { think: '签名已经失效', text: 'Crash reason: Code Signature Invalid', tool: 'toolu_2' },
+      ];
+      const thinkingIds: string[] = [];
+      const textIds: string[] = [];
+      for (const round of rounds) {
+        const think = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_delta', delta: round.think },
+        } as any)).find(event => event.type === 'text_delta');
+        thinkingIds.push(String(think.turnId));
+        const closed = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_end' },
+        } as any));
+        expect(closed[0]).toMatchObject({ type: 'text_complete', text: round.think, isIntermediate: true, phase: 'intermediate' });
+        expect(String(closed[0].turnId)).toContain('__think');
+        const delta = collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: round.text },
+        } as any)).find(event => event.type === 'text_delta');
+        textIds.push(String(delta.turnId));
+        expect(String(delta.turnId)).not.toContain('__think');
+        const done = collect(adapter.adaptEvent({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            stopReason: 'toolUse',
+            content: [
+              { type: 'text', text: round.text },
+              { type: 'toolCall', id: round.tool, name: 'bash' },
+            ],
+          },
+        } as any));
+        const commentary = done.find(event => event.type === 'text_complete');
+        expect(commentary).toMatchObject({ text: round.text, isIntermediate: true, phase: 'intermediate' });
+        expect(String(commentary.turnId)).toBe(String(delta.turnId));
+        expect(String(commentary.turnId)).not.toContain('__think');
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_start',
+          toolCallId: round.tool,
+          toolName: 'bash',
+          args: { command: 'true' },
+        } as any));
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_end',
+          toolCallId: round.tool,
+          toolName: 'bash',
+          isError: false,
+          result: { content: [{ type: 'text', text: 'ok' }] },
+        } as any));
+      }
+      expect(new Set(thinkingIds).size).toBe(2);
+      expect(new Set(textIds).size).toBe(2);
+      const finalDone = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Key finding' }] },
+      } as any));
+      const reply = finalDone.find(event => event.type === 'text_complete');
+      expect(reply).toMatchObject({ text: 'Key finding', isIntermediate: false });
+      expect(String(reply.turnId)).not.toContain('__think');
+      expect(reply.text).not.toContain('Zen 1.23.2b');
+      expect(reply.text).not.toContain('Crash reason');
+    });
+
     it('should skip message_update without text_delta type', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({

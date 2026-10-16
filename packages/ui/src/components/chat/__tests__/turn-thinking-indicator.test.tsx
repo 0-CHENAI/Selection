@@ -452,16 +452,46 @@ it('does not repeat a thinking header in the status slot', async () => {
   expect(countOccurrences(html, '思考中…')).toBe(1)
 })
 
-it('shows model reasoning while it is still running, then the duration label', async () => {
+it('shows model reasoning inside the process chain while it is still running', async () => {
   const live = await renderTurn('zh-Hans', [{
     id: 'think', type: 'thinking', status: 'running', content: '先整理结构', timestamp: Date.now(),
-  }], { expanded: false })
-  expect(live).toContain('data-thinking-live')
-  expect(live).toContain('先整理结构')
-  const done = await renderTurn('zh-Hans', [{
-    id: 'think', type: 'thinking', status: 'completed', content: '先整理结构', timestamp: 1, elapsedSeconds: 34,
-  }], { isComplete: true, isStreaming: false, expanded: false })
-  expect(done).toContain('data-thinking-done')
-  expect(done).toContain('已深度思考 34s')
-  expect(done).toContain('先整理结构')
+  }], { expanded: true })
+  const chain = live.slice(live.indexOf('data-process-chain'))
+  expect(chain).toContain('data-thinking-live')
+  expect(chain).toContain('data-thinking-step')
+  expect(chain).toContain('先整理结构')
+  expect(live).not.toContain('data-thinking-done')
+  expect(live).not.toContain('<details')
+})
+
+it('keeps thinking and intermediate rounds inside the chain and the final reply below it', async () => {
+  const activities: ActivityItem[] = [
+    { id: 'think-1', type: 'thinking', status: 'completed', content: '先看安装情况', timestamp: 1 },
+    { id: 'note-1', type: 'intermediate', status: 'completed', content: 'Zen 1.23.2b installed, and there are two fresh crash reports.', timestamp: 2 },
+    { id: 'tool-1', type: 'tool', status: 'completed', toolName: 'Bash', intent: '检查 Zen 安装', timestamp: 3 },
+    { id: 'think-2', type: 'thinking', status: 'completed', content: '签名已经失效', timestamp: 4 },
+    { id: 'note-2', type: 'intermediate', status: 'completed', content: 'Crash reason: Code Signature Invalid', timestamp: 5 },
+    { id: 'tool-2', type: 'tool', status: 'completed', toolName: 'Bash', intent: '校验应用签名', timestamp: 6 },
+  ]
+  const html = await renderTurn('zh-Hans', activities, {
+    isComplete: true,
+    isStreaming: false,
+    expanded: true,
+    onOpenActivityDetails: () => {},
+    response: { text: 'Key finding: spctl says the seal is missing.', isStreaming: false, messageId: 'final' },
+  })
+  const chainStart = html.indexOf('data-process-chain')
+  const replyStart = html.indexOf('Key finding: spctl says the seal is missing.')
+  expect(chainStart).toBeGreaterThan(-1)
+  expect(replyStart).toBeGreaterThan(chainStart)
+  const chain = html.slice(chainStart, replyStart)
+  expect(chain).toContain('先看安装情况')
+  expect(chain).toContain('Zen 1.23.2b installed, and there are two fresh crash reports.')
+  expect(chain).toContain('Crash reason: Code Signature Invalid')
+  expect(countOccurrences(chain, 'data-thinking-step=""')).toBe(2)
+  expect(html.slice(replyStart)).not.toContain('data-thinking-step')
+  expect(html).not.toContain('data-thinking-done')
+  expect(html).not.toContain('<details')
+  expect(html).not.toContain('已深度思考')
+  expect(countOccurrences(chain, 'role="button"')).toBeGreaterThanOrEqual(2)
 })
