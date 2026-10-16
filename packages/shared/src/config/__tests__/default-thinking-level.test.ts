@@ -111,7 +111,8 @@ describe('default thinking level storage', () => {
       const output = runEval(configDir, "console.log(String(getDefaultThinkingLevel()))")
       expect(output).toBe(level)
     }
-  })
+    // Each level boots two processes. The default 5s budget is tight on a busy runner.
+  }, 20_000)
 
   it('migrates legacy "think" value to "medium"', () => {
     const { configDir, configPath } = setupWorkspaceConfigDir()
