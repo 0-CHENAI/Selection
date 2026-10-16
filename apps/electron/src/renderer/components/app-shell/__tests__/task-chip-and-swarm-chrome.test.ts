@@ -39,7 +39,9 @@ describe('running orchestration composer chrome', () => {
     expect(chatDisplaySrc).toContain('isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId)')
     expect(chatDisplaySrc).toContain('isProcessing: sessionBusy')
     expect(chatDisplaySrc).toContain('onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy')
-    expect(chatDisplaySrc).toContain('const isProcessing = sessionBusy && index === processingTurnIndex')
+    // A settled clarification hoists this strip above the last card. It stays
+    // in-flight for that same request, including while a swarm/DAG is running.
+    expect(chatDisplaySrc).toContain('const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)')
     expect(chatDisplaySrc).toContain('{sessionBusy && !hasMoreBelow && (')
     expect(chatDisplaySrc).toContain('stopTask')
     expect(chatDisplaySrc).toContain('stopSessionSwarm')

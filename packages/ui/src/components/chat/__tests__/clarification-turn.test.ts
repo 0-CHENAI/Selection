@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test'
 import type { Message } from '@craft-agent/core/types'
-import { groupMessagesByTurn, pendingClarificationLayout, type Turn } from '../turn-utils'
+import {
+  anchorClarificationWorkStatus,
+  groupMessagesByTurn,
+  pendingClarificationLayout,
+  settledClarificationGroups,
+  sharesUserRequest,
+  type Turn,
+} from '../turn-utils'
 
 const user: Message = { id: 'u', role: 'user', content: '做一份报告', timestamp: 1 }
 const clarification: Message = {
@@ -117,6 +124,75 @@ test('commentary after a clarification joins the continuation chain instead of i
   expect(lower.activities.some(activity => activity.intent === 'Find other sessions in the workspace')).toBe(true)
   expect(lower.response?.text).toBe('按 2024 继续。')
   expect(turns.filter(turn => turn.type === 'assistant' && turn.activities.some(activity => activity.content?.includes('The user asked')))).toHaveLength(1)
+})
+
+test('answered clarifications collapse above the process chain and hoist the work status', () => {
+  const turns = groupMessagesByTurn([
+    user,
+    clarifyTool,
+    { ...clarification, clarification: { ...clarification.clarification!, status: 'answered', text: '2024' } },
+    commentary,
+    answer,
+  ], { isSessionProcessing: false })
+  expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'clarification', 'assistant'])
+  const groups = settledClarificationGroups(turns)
+  expect(groups).toEqual([{ anchorIndex: 1, clarificationIndexes: [2] }])
+  const timings = anchorClarificationWorkStatus(turns, new Map([[3, 'worked']]), groups)
+  expect(timings.get(1)).toBe('worked')
+  expect(timings.has(3)).toBe(false)
+  expect(sharesUserRequest(turns, 1, 3)).toBe(true)
+})
+
+test('several settled questions in one flow share a summary without moving the next request', () => {
+  const skipped = {
+    ...clarification,
+    id: 'c2',
+    timestamp: 5,
+    content: '要附录吗？',
+    clarification: { ...clarification.clarification!, requestId: 'req-2', question: '要附录吗？', status: 'skipped' as const },
+  }
+  const turns = groupMessagesByTurn([
+    user,
+    clarifyTool,
+    { ...clarification, clarification: { ...clarification.clarification!, status: 'answered' } },
+    skipped,
+    commentary,
+    answer,
+    { ...user, id: 'u2', content: '再来一份', timestamp: 8 },
+    { ...answer, id: 'a2', timestamp: 9 },
+  ], { isSessionProcessing: false })
+  const secondUser = turns.findIndex((turn, index) => index > 0 && turn.type === 'user')
+  const groups = settledClarificationGroups(turns)
+  expect(groups).toHaveLength(1)
+  expect(groups[0]?.clarificationIndexes.map(index => turns[index]?.type)).toEqual(['clarification', 'clarification'])
+  expect(groups[0]!.anchorIndex).toBeLessThan(groups[0]!.clarificationIndexes[0]!)
+  expect(groups[0]!.clarificationIndexes.every(index => index < secondUser)).toBe(true)
+  const firstStatus = turns.findLastIndex((turn, index) => turn.type === 'assistant' && index < secondUser)
+  const secondStatus = turns.findLastIndex(turn => turn.type === 'assistant')
+  const timings = anchorClarificationWorkStatus(turns, new Map([[firstStatus, 'first'], [secondStatus, 'second']]))
+  expect(firstStatus).not.toBe(groups[0]!.anchorIndex)
+  expect(timings.get(groups[0]!.anchorIndex)).toBe('first')
+  expect(timings.has(firstStatus)).toBe(false)
+  expect(timings.get(secondStatus)).toBe('second')
+})
+
+test('a clarification that lands before any process still keeps the summary above that process', () => {
+  const turns = groupMessagesByTurn([
+    user,
+    { ...clarification, clarification: { ...clarification.clarification!, status: 'answered', text: '2024' } },
+    answer,
+  ], { isSessionProcessing: false })
+  expect(turns.map(turn => turn.type)).toEqual(['user', 'clarification', 'assistant'])
+  const groups = settledClarificationGroups(turns)
+  expect(groups).toEqual([{ anchorIndex: 1, clarificationIndexes: [1] }])
+  const timings = anchorClarificationWorkStatus(turns, new Map([[2, 'worked']]))
+  expect([...timings.keys()]).toEqual([1])
+})
+
+test('a pending clarification does not fold into the settled summary', () => {
+  const turns = groupMessagesByTurn([user, clarifyTool, clarification, commentary], { isSessionProcessing: false })
+  expect(settledClarificationGroups(turns)).toEqual([])
+  expect(anchorClarificationWorkStatus(turns, new Map([[1, 'waiting']])).get(1)).toBe('waiting')
 })
 
 test('a pending card from an earlier request does not restyle the current turn', () => {
