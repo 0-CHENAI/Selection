@@ -31,6 +31,7 @@ export {
 export {
   SessionViewer,
   TurnCard,
+  TaskRail,
   TurnCardActionsMenu,
   ResponseCard,
   UserMessageBubble,
@@ -69,6 +70,7 @@ export {
   type ActivityStatus,
   type ResponseContent,
   type TodoItem,
+  type TaskRailItem,
   type InlineExecutionProps,
   type InlineExecutionStatus,
   type InlineActivityItem,

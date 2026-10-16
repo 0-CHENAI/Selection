@@ -47,9 +47,16 @@ export function PlaygroundApp() {
     setWorkspaceColorTheme,
     setPreviewColorTheme,
     activeWorkspaceId,
+    setMode,
   } = useTheme()
+  const requestedAppearance = React.useMemo(
+    () => new URLSearchParams(window.location.search).get('appearance'),
+    [],
+  )
   const [presetThemes, setPresetThemes] = React.useState<PresetTheme[]>([])
   const [selectedId, setSelectedId] = React.useState<string | null>(() => {
+    const requested = new URLSearchParams(window.location.search).get('component')
+    if (requested && getComponentById(requested)) return requested
     // Try to restore from localStorage
     try {
       const stored = localStorage.getItem(SELECTED_STORAGE_KEY)
@@ -116,6 +123,10 @@ export function PlaygroundApp() {
   }, [presetThemes])
 
   React.useEffect(() => {
+    if (requestedAppearance === 'light' || requestedAppearance === 'dark') setMode(requestedAppearance)
+  }, [requestedAppearance, setMode])
+
+  React.useEffect(() => {
     return () => {
       setPreviewColorTheme(null)
     }
@@ -152,8 +163,13 @@ export function PlaygroundApp() {
       for (const prop of selectedComponent.props) {
         defaults[prop.name] = prop.defaultValue
       }
-      setProps(defaults)
-      setSelectedVariant(null)
+      const requestedId = new URLSearchParams(window.location.search).get('component')
+      const requestedVariant = new URLSearchParams(window.location.search).get('variant')
+      const variant = selectedComponent.id === requestedId
+        ? selectedComponent.variants?.find(entry => entry.name === requestedVariant)
+        : undefined
+      setProps({ ...defaults, ...variant?.props })
+      setSelectedVariant(variant?.name ?? null)
     }
   }, [selectedComponent])
 

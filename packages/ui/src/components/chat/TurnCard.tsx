@@ -34,10 +34,8 @@ import {
   ArrowUpRight,
   CornerDownRight,
   UsersRound,
-  Ban,
   Copy,
   Check,
-  CircleCheck,
   ListTodo,
   Pencil,
   FilePenLine,
@@ -47,6 +45,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { TaskRail } from './TaskRail'
 import { MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
@@ -3104,85 +3103,16 @@ export function ResponseCard({
 }
 
 // ============================================================================
-// TodoList Component (for TodoWrite tool visualization)
+// TodoList — read-only rail for conversation task progress
 // ============================================================================
-
-/** Status icon for a todo item - uses purple filled icon for completed */
-function TodoStatusIcon({ status }: { status: TodoStatus }) {
-  switch (status) {
-    case 'pending':
-      return <Circle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
-    case 'in_progress':
-      return (
-        <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-          <Spinner className={SIZE_CONFIG.spinnerSize} />
-        </div>
-      )
-    case 'completed':
-      return <CircleCheck className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
-    case 'interrupted':
-      return <Ban className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
-  }
-}
-
-/** Single todo row - styled like ActivityRow */
-function TodoRow({ todo }: { todo: TodoItem }) {
-  const displayText = todo.status === 'in_progress' && todo.activeForm
-    ? todo.activeForm
-    : todo.content
-
-  return (
-    <div className={cn(
-      "flex items-start gap-2 py-1 text-muted-foreground",
-      SIZE_CONFIG.fontSize,
-      todo.status === 'completed' && "opacity-80"
-    )}>
-      <span aria-label={i18n.t(`taskList.status.${todo.status}`)} role="img" className="mt-0.5 shrink-0"><TodoStatusIcon status={todo.status} /></span>
-      <span className={cn(
-        "whitespace-pre-wrap break-words flex-1 min-w-0"
-      )}>
-        {displayText}
-      </span>
-    </div>
-  )
-}
 
 interface TodoListProps {
   todos: TodoItem[]
 }
 
-/**
- * Task List - independent conversation progress card.
- * Legacy todo snapshots share this renderer.
- */
+/** Conversation task progress. Legacy todo snapshots share this renderer. */
 export function TodoList({ todos }: TodoListProps) {
-  const { t } = useTranslation()
-  const reduceMotion = !!useReducedMotion()
-  const allDone = todos.length > 0 && todos.every(todo => todo.status === 'completed')
-  const [expanded, setExpanded] = useState(!allDone)
-  const wasDone = useRef(allDone)
-  const panelId = React.useId()
-  useEffect(() => {
-    if (wasDone.current !== allDone) setExpanded(!allDone)
-    wasDone.current = allDone
-  }, [allDone])
-  const summary = allDone ? t('taskList.allCompleted') : (['in_progress', 'pending', 'completed', 'interrupted'] as const)
-    .filter(status => todos.some(todo => todo.status === status))
-    .map(status => t(`taskList.count.${status}`, { count: todos.filter(todo => todo.status === status).length })).join(' · ')
-  if (todos.length === 0) return null
-  return (
-    <section className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-1" aria-label={t('taskList.title')}>
-      <button type="button" className="flex w-full items-center gap-2 py-2 text-left text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(value => !value)}>
-        <motion.span animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}><ChevronRight className="size-3.5" /></motion.span>
-        <span className="min-w-0 break-words">{t('taskList.title')} {summary}</span>
-      </button>
-      <div id={panelId}>
-        <ExpandableHeightPanel open={expanded} reduceMotion={reduceMotion}>
-          <div className="pb-2 pl-5">{todos.map((todo, index) => <TodoRow key={todo.id ?? `${todo.content}-${index}`} todo={todo} />)}</div>
-        </ExpandableHeightPanel>
-      </div>
-    </section>
-  )
+  return <TaskRail items={todos} />
 }
 
 // ============================================================================
