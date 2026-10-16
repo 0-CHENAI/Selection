@@ -68,11 +68,15 @@ describe('immersive mode layout', () => {
     expect(topBar).toContain('{t("menu.immersiveMode")}')
     expect(topBar).toContain('aria-pressed={immersive}')
     expect(topBar).toContain('isActive={immersive}')
+    expect(topBar).toContain('<PanelLeftRounded className="h-[18px] w-[18px] text-foreground/70" />')
+    expect(topBar).not.toContain('ImmersiveModeIcon')
     expect(topBar).not.toContain('进入沉浸模式')
     expect(topBar).not.toContain('退出沉浸模式')
 
     const menu = read('../../../../shared/menu-schema.ts')
     expect(menu).toContain("labelKey: 'menu.immersiveMode'")
+    expect(menu).toContain("icon: 'PanelLeft'")
+    expect(menu).not.toContain('RectangleHorizontal')
     expect(menu).toContain("shortcut: 'CmdOrCtrl+B'")
     expect(menu).not.toContain('menu.toggleSidebar')
 

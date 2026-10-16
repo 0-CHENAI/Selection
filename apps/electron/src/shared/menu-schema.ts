@@ -190,7 +190,7 @@ export const VIEW_MENU: MenuSection = {
       shortcutDisplayMac: '⌘B',
       shortcutDisplayOther: 'Ctrl+B',
       ipcChannel: RPC_CHANNELS.menu.TOGGLE_SIDEBAR,
-      icon: 'RectangleHorizontal',
+      icon: 'PanelLeft',
     },
   ],
 }
