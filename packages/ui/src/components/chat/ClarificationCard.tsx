@@ -1,9 +1,12 @@
 import * as React from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
+import { ArrowUpRight, MessageCircleQuestionMark } from 'lucide-react'
 import type { Message } from '@craft-agent/core/types'
 import { canSubmitClarification, toggleClarificationSelection } from '@craft-agent/shared/agent/clarification'
 import { cn } from '../../lib/utils'
+import { ContentFrame } from '../overlay/ContentFrame'
+import { PreviewOverlay } from '../overlay/PreviewOverlay'
 
 const NOTE_LINE_PX = 20
 const NOTE_PAD_PX = 16
@@ -92,9 +95,16 @@ function settledClarificationMessages(messages: readonly Message[]): Message[] {
   })
 }
 
+/** Status line for one settled clarification. The fold header keeps the multi-count copy. */
+export function clarificationRowLabel(message: Message, t: TFunction): string {
+  const status = message.clarification?.status
+  if (status === 'skipped') return clarificationSummaryLabel({ answered: 0, skipped: 1 }, t)
+  return clarificationSummaryLabel({ answered: 1, skipped: 0 }, t)
+}
+
 /**
- * Question, options, and the answer or skip note. The process fold owns the
- * status title; this is only the body revealed when that fold opens.
+ * Question, options, and the answer or skip note. Shown in the step detail
+ * popup, not as a block inside the process list.
  */
 export function ClarificationFoldDetails({
   messages,
@@ -116,9 +126,80 @@ export function ClarificationFoldDetails({
   )
 }
 
-/** Settled clarification body. The chat stream renders this inside the process fold. */
+/** Settled clarification body, used by the detail popup. */
 export function ClarificationSummary({ messages }: ClarificationSummaryProps) {
   return <ClarificationFoldDetails messages={messages} />
+}
+
+/**
+ * One completed clarification in the process list: icon and status title.
+ * The question, options, and answer open in the same preview overlay as other steps.
+ */
+export function ClarificationChainRow({ message }: { message: Message }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = React.useState(false)
+  const status = message.clarification?.status
+  if (status !== 'answered' && status !== 'skipped') return null
+  const label = clarificationRowLabel(message, t)
+  return (
+    <>
+      <button
+        type="button"
+        data-clarification-row=""
+        data-clarification-status={status}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        className={cn(
+          'group/row flex w-full min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-[13px] text-muted-foreground',
+          'rounded-[6px] hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        )}
+      >
+        <span data-clarification-icon="" className="flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
+          <MessageCircleQuestionMark className="h-3 w-3 shrink-0" />
+        </span>
+        <span className="min-w-0 flex-1 truncate group-hover/row:underline">{label}</span>
+        <ArrowUpRight className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true" />
+      </button>
+      {open && (
+        <ClarificationDetailsOverlay message={message} isOpen onClose={() => setOpen(false)} />
+      )}
+    </>
+  )
+}
+
+/** Detail popup for one settled clarification. Matches the other step preview overlays. */
+export function ClarificationDetailsOverlay({
+  message,
+  isOpen,
+  onClose,
+  embedded = false,
+}: {
+  message: Message
+  isOpen: boolean
+  onClose: () => void
+  /** Render inline for tests and the playground, without a dialog portal. */
+  embedded?: boolean
+}) {
+  const { t } = useTranslation()
+  const label = clarificationRowLabel(message, t)
+  return (
+    <PreviewOverlay
+      isOpen={isOpen}
+      onClose={onClose}
+      embedded={embedded}
+      typeBadge={{ icon: MessageCircleQuestionMark, label, variant: 'blue' }}
+      title={label}
+    >
+      <div data-clarification-popup="">
+        <ContentFrame title={label}>
+          <div className="px-8 py-6">
+            <ClarificationFoldDetails messages={[message]} />
+          </div>
+        </ContentFrame>
+      </div>
+    </PreviewOverlay>
+  )
 }
 
 function ClarificationDetail({ message, showStatus }: { message: Message; showStatus: boolean }) {

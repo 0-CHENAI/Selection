@@ -8,7 +8,7 @@ import i18n from 'i18next'
 import { formatUserMessageTime } from './UserMessageBubble'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import {
-  ClarificationFoldDetails,
+  ClarificationChainRow,
   clarificationBriefTitle,
   clarificationOutcomeCounts,
   clarificationSummaryLabel,
@@ -3389,7 +3389,7 @@ export const TurnCard = React.memo(function TurnCard({
         && !((activity.type === 'intermediate' || activity.type === 'thinking')
           && !hasRenderableAssistantText(activity.content))
         && !isMirroredCommentaryActivity(activity, response, isComplete)
-        // The fold body shows the question and answer. The tool row only said "waiting".
+        // The settled row replaces this tool line. It only said "waiting".
         && !(hasClarifications && isClarificationToolActivity(activity)),
     ),
     [sortedActivities, response, isComplete, hasClarifications],
@@ -3628,10 +3628,7 @@ export const TurnCard = React.memo(function TurnCard({
                           stagger={!!staggerOnThisExpand}
                           staggerIndex={index}
                         >
-                          <ClarificationFoldDetails
-                            messages={[entry.message]}
-                            showStatus={settledClarifications.length > 1}
-                          />
+                          <ClarificationChainRow message={entry.message} />
                         </WorkChainRow>
                       )
                     }

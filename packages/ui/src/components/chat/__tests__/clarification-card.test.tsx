@@ -10,6 +10,7 @@ mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.wo
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let ClarificationCard: typeof import('../ClarificationCard').ClarificationCard
+let ClarificationDetailsOverlay: typeof import('../ClarificationCard').ClarificationDetailsOverlay
 let ClarificationFoldDetails: typeof import('../ClarificationCard').ClarificationFoldDetails
 let clarificationBriefTitle: typeof import('../ClarificationCard').clarificationBriefTitle
 let clarificationNoteLayout: typeof import('../ClarificationCard').clarificationNoteLayout
@@ -19,6 +20,7 @@ let TurnCard: typeof import('../TurnCard').TurnCard
 beforeAll(async () => {
   const module = await import('../ClarificationCard')
   ClarificationCard = module.ClarificationCard
+  ClarificationDetailsOverlay = module.ClarificationDetailsOverlay
   ClarificationFoldDetails = module.ClarificationFoldDetails
   clarificationBriefTitle = module.clarificationBriefTitle
   clarificationNoteLayout = module.clarificationNoteLayout
@@ -88,6 +90,14 @@ function renderDetails(messages: ComponentProps<typeof ClarificationFoldDetails>
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <ClarificationFoldDetails messages={messages} />
+    </I18nextProvider>,
+  )
+}
+
+function renderPopup(message: Message) {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <ClarificationDetailsOverlay message={message} isOpen embedded onClose={() => {}} />
     </I18nextProvider>,
   )
 }
@@ -166,7 +176,7 @@ describe('clarification card', () => {
     }
   })
 
-  it('keeps the settled status in the process-fold brief title and reveals details on expand', () => {
+  it('keeps the settled status in the process-fold brief title and a status row in the chain', () => {
     const answered = card({ status: 'answered', selectedOptionIds: ['2024'], text: '只要表格' })
     answered.timestamp = 3
     const collapsed = renderFold([answered], false)
@@ -179,6 +189,7 @@ describe('clarification card', () => {
     expect(collapsed).not.toContain('data-clarification-card')
     expect(collapsed).not.toContain('data-clarification-summary')
     expect(collapsed).not.toContain('data-clarification-detail')
+    expect(collapsed).not.toContain('data-clarification-row')
     expect(collapsed).not.toContain('只要表格')
     expect(collapsed).not.toContain('Waiting for clarification')
     const header = collapsed.match(/<button[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
@@ -187,23 +198,37 @@ describe('clarification card', () => {
 
     const html = renderFold([answered], true)
     expect(html).toContain('data-clarification-open="true"')
-    expect(html).toContain('data-clarification-fold')
+    expect(html).toContain('data-clarification-row')
+    expect(html).toContain('data-clarification-icon')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).not.toContain('data-clarification-fold=""')
+    expect(html).not.toContain('data-clarification-popup')
     expect(html).not.toContain('data-clarification-card')
-    expect(html).toContain('报告覆盖哪一年')
-    expect(html).toContain('data-clarification-option="2024"')
-    expect(html).toContain('data-selected="true"')
-    expect(html).toContain('data-clarification-option="2025"')
-    expect(html).toContain('data-selected="false"')
-    expect(html).toContain('你的回答')
-    expect(html).toContain('只要表格')
+    expect(html).not.toContain('报告覆盖哪一年')
+    expect(html).not.toContain('data-clarification-option')
+    expect(html).not.toContain('你的回答')
+    expect(html).not.toContain('只要表格')
     expect(html).toContain('Check attachments')
     expect(html).not.toContain('Waiting for clarification')
     const early = html.indexOf('Read the brief')
-    const foldAt = html.indexOf('data-clarification-fold=""')
+    const rowAt = html.indexOf('data-clarification-row')
     const later = html.lastIndexOf('Check attachments')
     expect(early).toBeGreaterThan(-1)
-    expect(foldAt).toBeGreaterThan(early)
-    expect(later).toBeGreaterThan(foldAt)
+    expect(rowAt).toBeGreaterThan(early)
+    expect(later).toBeGreaterThan(rowAt)
+    const row = html.slice(rowAt, html.indexOf('</button>', rowAt))
+    expect(row.indexOf('data-clarification-icon')).toBeLessThan(row.indexOf('>已澄清<'))
+
+    const popup = renderPopup(answered)
+    expect(popup).toContain('data-clarification-popup')
+    expect(popup).toContain('报告覆盖哪一年')
+    expect(popup).toContain('data-clarification-option="2024"')
+    expect(popup).toContain('data-selected="true"')
+    expect(popup).toContain('data-clarification-option="2025"')
+    expect(popup).toContain('data-selected="false"')
+    expect(popup).toContain('你的回答')
+    expect(popup).toContain('只要表格')
+    expect(popup).not.toContain('data-clarification-card')
   })
 
   it('summarizes several settled questions inside the same fold', () => {
@@ -226,12 +251,23 @@ describe('clarification card', () => {
     expect(collapsed).not.toContain('data-clarification-detail')
     expect(collapsed).not.toContain('data-clarification-card')
 
-    const open = renderDetails([answered, skipped])
-    expect(open).toContain('data-clarification-fold')
+    const open = renderFold([answered, skipped], true)
+    expect(open.match(/data-clarification-row/g)?.length).toBe(2)
+    expect(open).toContain('data-clarification-status="answered"')
+    expect(open).toContain('data-clarification-status="skipped"')
+    expect(open).not.toContain('data-clarification-detail')
     expect(open).not.toContain('data-clarification-card')
-    expect(open).toContain('data-clarification-detail')
-    expect(open).toContain('要附录吗？')
-    expect(open).toContain('已跳过，按当前理解继续')
-    expect(open).toContain('用 2025')
+    expect(open).not.toContain('要附录吗？')
+    expect(open).not.toContain('用 2025')
+
+    const details = renderDetails([answered, skipped])
+    expect(details).toContain('data-clarification-fold')
+    expect(details).toContain('要附录吗？')
+    expect(details).toContain('已跳过，按当前理解继续')
+    expect(details).toContain('用 2025')
+    const skippedPopup = renderPopup(skipped)
+    expect(skippedPopup).toContain('data-clarification-popup')
+    expect(skippedPopup).toContain('要附录吗？')
+    expect(skippedPopup).toContain('已跳过，按当前理解继续')
   })
 })
