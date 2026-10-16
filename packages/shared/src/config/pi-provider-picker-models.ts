@@ -1,5 +1,5 @@
 /**
- * Models shown in the Pi API-key 3-tier picker.
+ * Models shown in the Pi API-key model picker.
  *
  * OpenRouter is fetched live. Every other provider still uses the Pi SDK
  * snapshot because those catalogs are first-party and change with app upgrades.

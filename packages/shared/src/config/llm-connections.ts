@@ -22,6 +22,10 @@ import {
   resolveCustomModelContextWindow,
   resolveCustomModelMaxTokens,
 } from './model-image-support';
+import {
+  lookupKnownModelContextWindow,
+  resolveApiKeyModelContextWindow,
+} from './model-context-window.ts';
 export {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
   DEFAULT_CUSTOM_MAX_TOKENS,
@@ -115,7 +119,9 @@ export type LlmAuthType =
 /**
  * Ownership mode for a connection's model list.
  * - automaticallySyncedFromProvider: provider defaults are synced automatically.
- * - userDefined3Tier: user-picked Best/Balanced/Fast list is preserved.
+ * - userDefined3Tier: user-picked model subset is preserved.
+ *   The name is historical; new API-key setup stores the checked models,
+ *   not a Best/Balanced/Fast triple.
  */
 export type ModelSelectionMode = 'automaticallySyncedFromProvider' | 'userDefined3Tier';
 
@@ -190,7 +196,8 @@ export interface LlmConnection {
   /**
    * Ownership mode for the model list.
    * - automaticallySyncedFromProvider: provider defaults are kept in sync.
-   * - userDefined3Tier: preserve user-selected Best/Balanced/Fast list.
+   * - userDefined3Tier: preserve the models the user checked.
+   *   Historical name: this used to be the Best/Balanced/Fast triple.
    */
   modelSelectionMode?: ModelSelectionMode;
 
@@ -312,7 +319,8 @@ export function getSummarizationModel(
  *   - Pi: find "mini" or "flash"
  *   - Custom endpoints (`pi_compat`): the connection default (the model
  *     the user selected). A Flash/mini alias may live on another worker.
- *   - Otherwise: last model in the list
+ *   - Otherwise: a haiku/mini/flash model in the enabled list, then the
+ *     user's default model, then the last enabled model.
  *
  * Skips models denied by {@link isDeniedMiniModelId} for the connection's
  * auth flavor.
@@ -368,7 +376,19 @@ function findSmallModel(
     }
   }
 
-  // Fallback: last allowed model in the list, otherwise final entry.
+  // The model the user selected is the default. Utility calls use it when
+  // the enabled list has no haiku/mini/flash model, instead of assuming a
+  // third "fast" tier. Connections saved before that field existed still
+  // fall through to the last enabled model.
+  const defaultId = connection.defaultModel?.trim();
+  if (defaultId && !isDeniedMiniModelId(defaultId, connection.piAuthProvider)) {
+    const match = connection.models.find((model) => {
+      if (!isAllowedModel(model)) return false;
+      return connectionModelIdsMatch(toId(model), defaultId);
+    });
+    if (match) return toId(match);
+  }
+
   const fallback = [...connection.models].reverse().find(isAllowedModel);
   return fallback ? toId(fallback) : toId(connection.models[connection.models.length - 1]!);
 }
@@ -640,7 +660,10 @@ export function resolveConnectionModelContextWindow(
   connection: Pick<LlmConnection, 'models'> | null | undefined,
   modelId: string,
 ): number | undefined {
-  return resolveCustomModelContextWindow(connection?.models, modelId);
+  return resolveApiKeyModelContextWindow({
+    manual: resolveCustomModelContextWindow(connection?.models, modelId),
+    known: lookupKnownModelContextWindow(modelId),
+  });
 }
 
 /** Per-model max output tokens from the connection catalog (ORDER / custom endpoints). */

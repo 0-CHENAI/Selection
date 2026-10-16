@@ -4,6 +4,7 @@ import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/m
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 import { toPiProviderId } from '../../../../config/pi-provider-ids.ts';
 import { toCustomEndpointModelPayload } from '../../../../config/model-image-support.ts';
+import { withResolvedContextWindow } from '../../../../config/model-context-window.ts';
 import {
   fetchOpenRouterCatalog,
   openRouterCatalogToModelDefinitions,
@@ -294,7 +295,9 @@ export const piDriver: ProviderDriver = {
     piAuthProvider: providerOptions?.piAuthProvider || context.connection?.piAuthProvider,
     baseUrl: context.connection?.baseUrl,
     customEndpoint: context.connection?.customEndpoint,
-    customModels: context.connection?.models?.map(toCustomEndpointModelPayload),
+    customModels: context.connection?.models?.map((model) => (
+      toCustomEndpointModelPayload(withResolvedContextWindow(model))
+    )),
   }),
   fetchModels: async ({ connection, credentials, timeoutMs }) => {
     // Copilot OAuth: fetch models directly from the Copilot API via HTTP.
