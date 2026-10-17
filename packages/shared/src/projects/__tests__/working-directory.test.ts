@@ -156,6 +156,7 @@ describe('project working folder', () => {
 
   it('keeps the new settings strings in every locale', () => {
     const required = [
+      'projectInfo.assetsHint',
       'projectInfo.settingsBasic',
       'projectInfo.settingsFolder',
       'projectInfo.settingsFolderMissing',
@@ -180,9 +181,22 @@ describe('project working folder', () => {
       for (const key of required) {
         expect(messages[key]?.trim().length ?? 0).toBeGreaterThan(0)
       }
+      const lockedTitle = LOCKED_FOLDER_TITLE[file]
+      expect(lockedTitle).toBeTruthy()
+      expect(messages['chat.projectWorkingDirectory']).toBe(lockedTitle)
     }
   })
 })
+
+const LOCKED_FOLDER_TITLE: Record<string, string> = {
+  'zh-Hans.json': '项目文件夹，不可变更',
+  'en.json': 'Project folder, cannot be changed',
+  'ja.json': 'プロジェクトフォルダ、変更できません',
+  'es.json': 'Carpeta del proyecto, no se puede cambiar',
+  'de.json': 'Projektordner, kann nicht geändert werden',
+  'hu.json': 'Projektmappa, nem módosítható',
+  'pl.json': 'Folder projektu, nie można zmienić',
+}
 
 function writeLegacy(path: string, value: unknown) {
   writeFileSync(path, JSON.stringify(value, null, 2))

@@ -2,30 +2,29 @@ import { confirmAction } from '@/lib/confirmation'
 /**
  * ProjectInfoPage
  *
- * Workspace-project detail page with three tabs: Sessions, Assets, Settings.
- * v1 scope only — no memory tab, no provider selection, no plugin marketplace.
+ * One scrolling project page. Settings share a single save button; resources
+ * sit after it and apply on upload or delete. Sessions are not listed here.
+ * They stay on the session list, still bound by projectId. The sidebar
+ * project item opens that filtered list. The middle project column stays,
+ * because compact layout hides the sidebar and that column is the index.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState, useCallback, useMemo } from 'react'
-import { useAtomValue } from 'jotai'
-import { FolderKanban, Plus, Trash2, Upload } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { FolderKanban, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
-import { sessionMetaMapAtom } from '@/atoms/sessions'
-import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import {
   Info_Page,
-  Info_Section,
 } from '@/components/info'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel'
 import { mergeProjectSettingsRefresh, projectSettingsDraftDirty, projectSettingsDraftFromConfig } from '@/components/projects/project-settings-draft'
+import { SettingsCard, SettingsSection } from '@/components/settings'
 import { projectWorkingDirectorySaveIssue } from '@craft-agent/shared/projects/working-directory'
 import type { LoadedProject, ProjectAsset } from '@craft-agent/shared/projects/types'
 
@@ -33,19 +32,15 @@ interface ProjectInfoPageProps {
   projectSlug: string
 }
 
-type TabKey = 'sessions' | 'assets' | 'settings'
-
 export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const { t } = useTranslation()
   const workspace = useActiveWorkspace()
   const workspaceId = workspace?.id
-  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const { onCreateSession, onOpenFile } = useAppShellContext()
+  const { onOpenFile } = useAppShellContext()
 
   const [project, setProject] = useState<LoadedProject | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<TabKey>('sessions')
   const [assets, setAssets] = useState<ProjectAsset[]>([])
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
@@ -132,7 +127,6 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     }
   }, [workspaceId, loadProject])
 
-  // Load assets when entering Assets tab
   const refreshAssets = useCallback(async () => {
     if (!workspaceId) return
     try {
@@ -144,32 +138,8 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   }, [workspaceId, projectSlug])
 
   useEffect(() => {
-    if (tab === 'assets') refreshAssets()
-  }, [tab, refreshAssets])
-
-  const projectSessions = useMemo(() => {
-    if (!project) return []
-    const result: { id: string; name: string }[] = []
-    for (const meta of sessionMetaMap.values()) {
-      if (isOrdinarySessionVisible(meta) && meta.projectId === project.config.id) {
-        result.push({ id: meta.id, name: meta.name ?? meta.id })
-      }
-    }
-    return result
-  }, [project, sessionMetaMap])
-
-  const handleStartSession = useCallback(async () => {
-    if (!workspaceId || !project) return
-    try {
-      const session = await onCreateSession(workspaceId, { projectId: project.config.id })
-      if (session?.id) {
-        navigate(routes.view.allSessions(session.id))
-      }
-    } catch (err) {
-      console.error('[ProjectInfoPage] Failed to create session:', err)
-      toast.error(t('projectInfo.newSessionFailed'))
-    }
-  }, [workspaceId, project, onCreateSession, t])
+    void refreshAssets()
+  }, [refreshAssets])
 
   const handlePickWorkingDirectory = useCallback((path: string) => {
     if (!path.trim()) return
@@ -271,129 +241,82 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
             tagline={project.config.description ?? t('projectInfo.taglineFallback')}
           />
 
-          {/* Tab bar */}
-          <div className="flex items-center gap-1 border-b border-border/50 px-2 mb-4">
-            <TabButton active={tab === 'sessions'} onClick={() => setTab('sessions')}>
-              {t('projectInfo.tabSessions')}
-            </TabButton>
-            <TabButton active={tab === 'assets'} onClick={() => setTab('assets')}>
-              {t('projectInfo.tabAssets')}
-            </TabButton>
-            <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>
-              {t('projectInfo.tabSettings')}
-            </TabButton>
-          </div>
-
-          {/* Sessions tab */}
-          {tab === 'sessions' && (
-            <Info_Section
-              title={t('projectInfo.tabSessions')}
-              actions={
-                <Button size="sm" variant="ghost" onClick={handleStartSession}>
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  {t('projectInfo.newSessionButton', { name: project.config.name })}
-                </Button>
-              }
-            >
-              {projectSessions.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">
-                  {t('projectInfo.noSessions')}
-                </div>
-              ) : (
-                <ul className="divide-y divide-border/50">
-                  {projectSessions.map((s) => (
-                    <li key={s.id} className="px-4 py-2">
-                      <button
-                        type="button"
-                        className="text-sm text-foreground hover:underline text-left"
-                        onClick={() => navigate(routes.view.allSessions(s.id))}
-                      >
-                        {s.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Info_Section>
-          )}
-
-          {/* Assets tab */}
-          {tab === 'assets' && (
-            <Info_Section
-              title={t('projectInfo.tabAssets')}
-              actions={
-                <label
-                  className="inline-flex items-center gap-1 h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors cursor-pointer"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  {t('projectInfo.uploadAssets')}
-                  <input
-                    type="file"
-                    className="hidden"
-                    multiple
-                    onChange={async (e) => {
-                      const files = Array.from(e.target.files ?? [])
-                      for (const f of files) await handleUpload(f)
-                      e.target.value = ''
-                    }}
-                  />
-                </label>
-              }
-            >
-              {assets.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">
-                  {t('projectInfo.noAssets')}
-                </div>
-              ) : (
-                <ul className="divide-y divide-border/50">
-                  {assets.map((a) => (
-                    <li key={a.filename} className="px-4 py-2 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm truncate">{a.filename}</div>
-                        <div className="text-xs text-foreground/50">
-                          {(a.sizeBytes / 1024).toFixed(1)} KB · {a.mimeType}
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleDeleteAsset(a)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Info_Section>
-          )}
-
-          {/* Settings tab */}
-          {tab === 'settings' && (
-            <ProjectSettingsPanel
-              name={editName}
-              description={editDescription}
-              storedWorkingDirectory={project.config.workingDirectory}
-              workingDirectory={editWorkingDir}
-              details={editDetails}
-              historySearch={editHistorySearch}
-              color={editColor}
-              slug={project.config.slug}
-              folderPath={project.folderPath}
-              saving={saving}
-              folderError={folderError}
-              onNameChange={setEditName}
-              onDescriptionChange={setEditDescription}
-              onDetailsChange={setEditDetails}
-              onHistorySearchChange={setEditHistorySearch}
-              onColorChange={setEditColor}
-              onPickFolder={pickDirectory}
-              onSave={handleSaveSettings}
-              onDelete={handleDeleteProject}
-              onOpenLocation={() => onOpenFile(project.folderPath)}
-            />
-          )}
+          <ProjectSettingsPanel
+            name={editName}
+            description={editDescription}
+            storedWorkingDirectory={project.config.workingDirectory}
+            workingDirectory={editWorkingDir}
+            details={editDetails}
+            historySearch={editHistorySearch}
+            color={editColor}
+            slug={project.config.slug}
+            folderPath={project.folderPath}
+            saving={saving}
+            folderError={folderError}
+            onNameChange={setEditName}
+            onDescriptionChange={setEditDescription}
+            onDetailsChange={setEditDetails}
+            onHistorySearchChange={setEditHistorySearch}
+            onColorChange={setEditColor}
+            onPickFolder={pickDirectory}
+            onSave={handleSaveSettings}
+            onDelete={handleDeleteProject}
+            onOpenLocation={() => onOpenFile(project.folderPath)}
+            resources={(
+              <SettingsSection
+                title={t('projectInfo.tabAssets')}
+                description={t('projectInfo.assetsHint')}
+                action={(
+                  <Button variant="outline" size="sm" asChild>
+                    <label>
+                      <Upload />
+                      {t('projectInfo.uploadAssets')}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        multiple
+                        onChange={async (event) => {
+                          const files = Array.from(event.target.files ?? [])
+                          for (const file of files) await handleUpload(file)
+                          event.target.value = ''
+                        }}
+                      />
+                    </label>
+                  </Button>
+                )}
+              >
+                <SettingsCard divided={false}>
+                  {assets.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      {t('projectInfo.noAssets')}
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-border/50">
+                      {assets.map((asset) => (
+                        <li key={asset.filename} className="flex items-center gap-3 px-4 py-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm">{asset.filename}</div>
+                            <div className="text-xs text-foreground/50">
+                              {(asset.sizeBytes / 1024).toFixed(1)} KB · {asset.mimeType}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeleteAsset(asset)}
+                            className="text-destructive hover:text-destructive"
+                            aria-label={t('projectInfo.deleteAssetConfirm', { name: asset.filename })}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </SettingsCard>
+              </SettingsSection>
+            )}
+          />
           <ServerDirectoryBrowser
             open={showServerBrowser}
             mode={serverBrowserMode}
@@ -406,29 +329,3 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     </Info_Page>
   )
 }
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'px-3 py-1.5 text-sm rounded-t-md border-b-2',
-        active
-          ? 'border-foreground/80 text-foreground'
-          : 'border-transparent text-foreground/60 hover:text-foreground/80'
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
