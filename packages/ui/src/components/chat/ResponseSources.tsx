@@ -17,8 +17,8 @@ export function ResponseSources({ sources, pending = false }: { sources: Respons
     if (websites.length === 5) break
   }
   return (
-    <div data-response-sources="" aria-hidden={pending || undefined} className="px-4 pb-3 transition-opacity duration-200 motion-reduce:transition-none" style={{ opacity: pending ? 0 : 1 }}>
-      <button type="button" onClick={() => openPanel?.(sources)} disabled={pending || !openPanel} className="inline-flex items-center gap-2 rounded-lg bg-foreground/[0.04] px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground focus-visible:outline-none focus-visible:bg-foreground/[0.08]">
+    <div data-response-sources="" aria-hidden={pending || undefined} className="px-2.5 pb-3 transition-opacity duration-200 motion-reduce:transition-none" style={{ opacity: pending ? 0 : 1 }}>
+      <button type="button" onClick={() => openPanel?.(sources)} disabled={pending || !openPanel} className="inline-flex items-center gap-2 rounded-lg bg-foreground/[0.04] -ml-2 px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground focus-visible:outline-none focus-visible:bg-foreground/[0.08]">
         <BookOpen aria-hidden="true" className="size-4" />
         <span>{t('chat.sourcesLabel')}</span>
         <span aria-hidden="true" className="flex -space-x-1.5">

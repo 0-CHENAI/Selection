@@ -1,5 +1,7 @@
 import * as React from 'react'
 import { beforeAll, expect, it, mock } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { TooltipProvider } from '../../tooltip'
 import { ResponseSourcesLayout } from '../ResponseSourcesLayout'
@@ -60,6 +62,23 @@ it('keeps the model reply intact when it contains an explicit source list', () =
   expect(html).toContain('Sources:')
   expect(html).toContain('补充资料')
   expect(html).toContain('data-response-sources=""')
+})
+
+it('lines the source icon up with message actions and keeps the button padding', () => {
+  const html = render(false, true)
+  expect(html).toMatch(/data-response-sources=""[^>]*class="[^"]*\bpx-2\.5\b/)
+  expect(html).not.toMatch(/data-response-sources=""[^>]*class="[^"]*\bpx-4\b/)
+  const shelf = html.slice(html.indexOf('data-response-sources=""'))
+  expect(shelf.slice(0, shelf.indexOf('</button>'))).toContain('-ml-2')
+  expect(shelf.slice(0, shelf.indexOf('</button>'))).toContain('px-2')
+  expect(html).toMatch(/data-response-actions=""[^>]*class="[^"]*\bpx-2\.5\b/)
+
+  const artifacts = readFileSync(join(import.meta.dir, '../ResponseArtifacts.tsx'), 'utf8')
+  expect(artifacts).toContain('@container/artifacts px-2.5 pb-3 pt-1')
+  expect(artifacts).toContain('-ml-3 flex flex-wrap gap-2')
+  expect(artifacts).toContain('rounded-xl px-3 py-2.5')
+  const turn = readFileSync(join(import.meta.dir, '../TurnCard.tsx'), 'utf8')
+  expect(turn).toContain('"pl-2.5 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20"')
 })
 
 it('reserves the same source shelf before completion and keeps it non-interactive', () => {
