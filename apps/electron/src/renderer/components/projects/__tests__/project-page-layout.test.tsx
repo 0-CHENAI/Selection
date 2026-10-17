@@ -44,10 +44,15 @@ describe('project page is one scroll without a session list', () => {
     expect(page).not.toContain('projectSessions')
     expect(page).not.toContain('onCreateSession')
     expect(page).toContain('projectInfo.tabAssets')
-    expect(page).toContain('onSave={handleSaveSettings}')
+    expect(page).toContain('ProjectSettingsAutosaveController')
+    expect(page).toContain('blurText')
+    expect(page).toContain("addEventListener('pagehide'")
+    expect(page).not.toContain('onSave')
+    expect(page).not.toContain('handleSaveSettings')
+    expect(page).not.toContain('common.save')
   })
 
-  it('keeps one save button and a textarea that matches the other inputs', () => {
+  it('has no save button, and the textarea matches the other inputs', () => {
     const html = renderZh(
       <ProjectSettingsPanel
         name="Redundent"
@@ -59,7 +64,6 @@ describe('project page is one scroll without a session list', () => {
         color=""
         slug="redundent"
         folderPath="/Users/chenai/local/Selection/projects/redundent"
-        saving={false}
         folderError={null}
         onNameChange={() => {}}
         onDescriptionChange={() => {}}
@@ -67,7 +71,6 @@ describe('project page is one scroll without a session list', () => {
         onHistorySearchChange={() => {}}
         onColorChange={() => {}}
         onPickFolder={() => {}}
-        onSave={() => {}}
         onDelete={() => {}}
         onOpenLocation={() => {}}
         resources={<section>资源</section>}
@@ -80,7 +83,13 @@ describe('project page is one scroll without a session list', () => {
     expect(html).toContain('危险操作')
     expect(html).toContain('>资源<')
     expect(html).not.toContain('>会话<')
-    expect((html.match(/>保存</g) ?? []).length).toBe(1)
+    const retrieval = html.indexOf('检索')
+    const resources = html.indexOf('>资源<')
+    expect(retrieval).toBeGreaterThan(-1)
+    expect(resources).toBeGreaterThan(retrieval)
+    expect(html.slice(retrieval, resources)).not.toContain('保存')
+    expect((html.match(/>保存</g) ?? []).length).toBe(0)
+    expect(html).not.toContain('保存中')
     expect(html).toContain('data-slot="textarea"')
     expect(html).toContain('resize-none')
     expect(html).toContain('data-slot="input"')

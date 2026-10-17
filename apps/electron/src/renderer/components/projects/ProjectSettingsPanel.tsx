@@ -1,7 +1,7 @@
 /**
  * Project settings, grouped the same way as the rest of Settings:
- * basics, working folder, AI instructions, retrieval, then danger.
- * Metadata stays in a collapsed footer.
+ * basics, working folder, AI instructions, retrieval, resources, then danger.
+ * Edits save themselves. Metadata stays in a collapsed footer.
  */
 
 import * as React from 'react'
@@ -32,18 +32,18 @@ export interface ProjectSettingsPanelProps {
   color: string
   slug: string
   folderPath: string
-  saving: boolean
   folderError: 'cleared' | null
   onNameChange: (value: string) => void
   onDescriptionChange: (value: string) => void
   onDetailsChange: (value: string) => void
   onHistorySearchChange: (value: boolean) => void
   onColorChange: (value: string) => void
+  onTextFocus?: () => void
+  onTextBlur?: () => void
   onPickFolder: () => void
-  onSave: () => void
   onDelete: () => void
   onOpenLocation: () => void
-  /** Resources sit on the same page, after the single save action. */
+  /** Resources sit on the same page, after retrieval. */
   resources?: React.ReactNode
 }
 
@@ -57,15 +57,15 @@ export function ProjectSettingsPanel({
   color,
   slug,
   folderPath,
-  saving,
   folderError,
   onNameChange,
   onDescriptionChange,
   onDetailsChange,
   onHistorySearchChange,
   onColorChange,
+  onTextFocus,
+  onTextBlur,
   onPickFolder,
-  onSave,
   onDelete,
   onOpenLocation,
   resources,
@@ -87,13 +87,22 @@ export function ProjectSettingsPanel({
         <SettingsCard>
           <div className="space-y-3 px-4 py-3.5">
             <Field label={t('projectInfo.title')} htmlFor="project-settings-name">
-              <Input id="project-settings-name" value={name} onChange={(event) => onNameChange(event.target.value)} placeholder={name} />
+              <Input
+                id="project-settings-name"
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                onFocus={onTextFocus}
+                onBlur={onTextBlur}
+                placeholder={name}
+              />
             </Field>
             <Field label={t('projectInfo.description')} htmlFor="project-settings-description">
               <Input
                 id="project-settings-description"
                 value={description}
                 onChange={(event) => onDescriptionChange(event.target.value)}
+                onFocus={onTextFocus}
+                onBlur={onTextBlur}
                 placeholder={t('projectInfo.descriptionPlaceholder')}
               />
             </Field>
@@ -166,6 +175,8 @@ export function ProjectSettingsPanel({
               id="project-settings-instructions"
               value={details}
               onChange={(event) => onDetailsChange(event.target.value)}
+              onFocus={onTextFocus}
+              onBlur={onTextBlur}
               rows={6}
               placeholder={t('projectInfo.detailsPlaceholder')}
               className="min-h-32 resize-none border-foreground/15 bg-transparent shadow-none field-sizing-fixed focus-visible:border-foreground/15 focus-visible:ring-foreground/30 dark:bg-transparent"
@@ -187,12 +198,6 @@ export function ProjectSettingsPanel({
           />
         </SettingsCard>
       </SettingsSection>
-
-      <div className="flex justify-end">
-        <Button onClick={onSave} disabled={saving}>
-          {saving ? t('common.saving') : t('common.save')}
-        </Button>
-      </div>
 
       {resources}
 

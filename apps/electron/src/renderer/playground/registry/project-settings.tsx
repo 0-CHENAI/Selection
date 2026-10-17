@@ -70,7 +70,6 @@ function ProjectSettingsPreview() {
         color={color}
         slug="xuncha-ziliao"
         folderPath="/Users/demo/Selection/projects/xuncha-ziliao"
-        saving={false}
         folderError={null}
         onNameChange={setName}
         onDescriptionChange={setDescription}
@@ -78,7 +77,6 @@ function ProjectSettingsPreview() {
         onHistorySearchChange={setHistory}
         onColorChange={setColor}
         onPickFolder={() => setFolder('/Users/demo/巡察资料')}
-        onSave={() => setSaved(folder ? '已保存' : '已保存其他字段，仍需补选工作文件夹')}
         onDelete={() => setSaved('已请求删除')}
         onOpenLocation={() => setSaved('已打开存储位置')}
         resources={(
