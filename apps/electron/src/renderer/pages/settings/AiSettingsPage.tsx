@@ -22,6 +22,7 @@ import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
 import { motion, AnimatePresence } from 'motion/react'
 import type { LlmConnectionWithStatus, ThinkingLevel, WorkspaceSettings, Workspace } from '../../../shared/types'
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS, modelThinkingCapability, constrainThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import {
   DropdownMenu,
@@ -111,7 +112,8 @@ function getModelOptionsForConnection(
 
 function connectionThinkingLevels(connection: LlmConnectionWithStatus | undefined, modelId: string) {
   const model = connection?.models?.find(m => connectionModelIdsMatch(typeof m === 'string' ? m : m.id, modelId))
-  const capability = modelThinkingCapability(typeof model === 'object' ? model : (modelId ? { id: modelId } : undefined))
+  const base = typeof model === 'object' ? model : (modelId ? { id: modelId } : undefined)
+  const capability = modelThinkingCapability(base ? { ...base, provider: connection?.piAuthProvider } : undefined)
   if (capability.mode === 'unsupported') {
     return THINKING_LEVELS.filter(level => level.id === 'off').map(level => ({ ...level, descriptionKey: 'thinking.notSupported' }))
   }
@@ -482,6 +484,7 @@ const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>>
 
 function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, liveOpenRouterModels }: WorkspaceOverrideCardProps) {
   const { t } = useTranslation()
+  useThinkingCatalog()
   const [isExpanded, setIsExpanded] = useState(false)
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -700,6 +703,7 @@ function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMe
 // ============================================
 
 export default function AiSettingsPage() {
+  useThinkingCatalog()
   const { t } = useTranslation()
   const { llmConnections, refreshLlmConnections, activeWorkspaceId } = useAppShellContext()
 
@@ -958,7 +962,7 @@ export default function AiSettingsPage() {
       modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => {
         if (typeof m === 'string' || m.thinkingMode === 'always-on') return []
         if (m.supportedThinkingLevels === undefined && m.supportsThinking === undefined && !m.thinkingMode) return []
-        const capability = modelThinkingCapability(m)
+        const capability = modelThinkingCapability({ ...m, provider: connection.piAuthProvider })
         return [[m.id, capability.mode === 'levels' ? capability.levels : []]]
       })),
       modelThinkingModes: Object.fromEntries((connection.models ?? []).flatMap(m => (

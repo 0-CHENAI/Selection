@@ -4455,6 +4455,17 @@ export class SessionManager implements ISessionManager {
         denyExternalBrowsers: managed.isolatedWorkspace?.denyExternalBrowsers,
         documentSourceDirectory: managed.isolatedWorkspace?.sourceRoot,
         onSdkSessionIdUpdate,
+        onThinkingProbe: (probe) => {
+          this.sendEvent({
+            type: 'thinking_probe',
+            sessionId: managed.id,
+            modelId: probe.modelId,
+            provider: probe.provider,
+            mode: probe.mode,
+            levels: probe.levels,
+            level: probe.level,
+          }, managed.workspace.id)
+        },
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
         getRecoveryMessages,

@@ -57,6 +57,22 @@ describe('parseOpenRouterModelsPayload', () => {
     ])
   })
 
+  it('keeps reasoning.supported_efforts when OpenRouter publishes them', () => {
+    const [model] = parseOpenRouterModelsPayload({
+      data: [{
+        id: 'moonshotai/kimi-k3',
+        name: 'Kimi K3',
+        architecture: { output_modalities: ['text'] },
+        reasoning: { supported_efforts: ['max', 'high', 'low', 'none'], mandatory: false, default_effort: 'max' },
+      }],
+    })
+    expect(model?.supportedReasoningEfforts).toEqual(['max', 'high', 'low', 'none'])
+    expect(model?.reasoningMandatory).toBeUndefined()
+    expect(model?.reasoning).toBe(true)
+    const formatted = formatPiProviderPickerModels([model!])
+    expect(formatted.models[0]?.supportedReasoningEfforts).toEqual(['max', 'high', 'low', 'none'])
+  })
+
   it('drops models past their expiration date', () => {
     expect(parseOpenRouterModelsPayload({
       data: [

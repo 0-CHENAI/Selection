@@ -250,6 +250,18 @@ export interface CoreBackendConfig {
   /** Callback when SDK session ID is captured/updated */
   onSdkSessionIdUpdate?: (sdkSessionId: string) => void;
 
+  /**
+   * A provider rejected a thinking effort. `levels` is the set to keep offering.
+   * The main process caches it and the renderer hides the rejected stop.
+   */
+  onThinkingProbe?: (probe: {
+    modelId: string
+    provider?: string
+    mode: 'unsupported' | 'always-on' | 'levels'
+    levels: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>
+    level?: string
+  }) => void;
+
   /** Callback when SDK session ID is cleared (e.g., after failed resume) */
   onSdkSessionIdCleared?: () => void;
 

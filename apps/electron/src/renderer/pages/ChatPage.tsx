@@ -48,7 +48,8 @@ import { draftComposerAtomFamily, workModeViewAtom } from '@/atoms/work-mode'
 import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
-import { resolveSessionThinkingLevel, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import { resolveSessionThinkingLevel, type ThinkingLevel, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import { getSessionTitle } from '@/utils/session'
 import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import type { PermissionMode } from '../../shared/types'
@@ -516,11 +517,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const activeConnectionSlug = isDraft ? draftConnection : session?.llmConnection
   const activeConnectionDetails = llmConnections.find(c => c.slug === (activeConnectionSlug || workspaceDefaultLlmConnection))
   const activeModelId = isDraft ? draftModel : effectiveModel
+  useThinkingCatalog()
   const activeThinkingEntry = activeConnectionDetails?.models?.find(m =>
     connectionModelIdsMatch(typeof m === 'string' ? m : m.id, activeModelId))
-  const activeThinkingModel = typeof activeThinkingEntry === 'object'
-    ? activeThinkingEntry
-    : { id: typeof activeThinkingEntry === 'string' ? activeThinkingEntry : activeModelId }
+  const activeThinkingModel: ThinkingModelRef = typeof activeThinkingEntry === 'object'
+    ? { ...activeThinkingEntry, provider: activeConnectionDetails?.piAuthProvider }
+    : { id: typeof activeThinkingEntry === 'string' ? activeThinkingEntry : activeModelId, provider: activeConnectionDetails?.piAuthProvider }
   const activeThinkingLevel = resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)
   draftCreateRef.current.thinkingLevel = activeThinkingLevel
 

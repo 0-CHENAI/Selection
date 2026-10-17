@@ -1,4 +1,5 @@
-import { modelThinkingCapability, modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
+import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -13,7 +14,6 @@ import {
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
-  DrawerClose,
 } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
@@ -102,8 +102,8 @@ function CompactSwitcherModels({
             ? t('chat.modelPicker.unavailable')
             : pickerModelLimitCaption(model, t)
           return (
-            <DrawerClose asChild key={modelId}>
               <button
+                key={modelId}
                 type="button"
                 onClick={() => {
                   const next = chosenPickerModelId(
@@ -136,7 +136,6 @@ function CompactSwitcherModels({
                   <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
                 )}
               </button>
-            </DrawerClose>
           )
         })
       )}
@@ -236,10 +235,14 @@ export function CompactModelSelector({
     return model.name ?? stripPiPrefixForDisplay(model.id)
   }, [availableModels, currentModel])
 
-  const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
-  const thinkingModel = typeof configuredThinkingModel === 'object'
-    ? configuredThinkingModel
-    : (typeof configuredThinkingModel === 'string' ? { id: configuredThinkingModel } : (currentModel ? { id: currentModel } : undefined))
+  useThinkingCatalog()
+  const configuredThinkingModel = pickerCatalog.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+    ?? effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  const thinkingModel: ThinkingModelRef | undefined = typeof configuredThinkingModel === 'object'
+    ? { ...configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+    : (typeof configuredThinkingModel === 'string'
+      ? { id: configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+      : (currentModel ? { id: currentModel, provider: effectiveConnectionDetails?.piAuthProvider } : undefined))
   const thinkingCapability = modelThinkingCapability(thinkingModel)
   const availableThinkingLevels = modelThinkingLevels(thinkingModel)
   const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
@@ -268,7 +271,6 @@ export function CompactModelSelector({
   const handlePickFlatModel = React.useCallback(
     (modelId: string) => {
       onModelChange(modelId, effectiveConnection)
-      setOpen(false)
     },
     [onModelChange, effectiveConnection],
   )
@@ -280,10 +282,50 @@ export function CompactModelSelector({
         onConnectionChange(connSlug)
       }
       onModelChange(modelId, connSlug)
-      setOpen(false)
     },
     [onModelChange, onConnectionChange, effectiveConnection],
   )
+
+  const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
+    ? null
+    : (
+      <div className="pt-2">
+        {thinkingUnavailable === 'always-on' ? (
+          <div className="px-3 py-2 text-xs text-foreground/60">{t('thinking.alwaysOn')}</div>
+        ) : (
+          <>
+            <div className="px-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
+              {t('chat.modelPicker.thinkingSection')}
+            </div>
+            {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
+              const isSelected = thinkingLevel === id
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={thinkingDisabled}
+                  onClick={() => onThinkingLevelChange?.(id)}
+                  className={cn(
+                    'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
+                    thinkingDisabled && 'opacity-50 cursor-not-allowed',
+                    !thinkingDisabled && isSelected && 'bg-foreground/5',
+                    !thinkingDisabled && !isSelected && 'hover:bg-foreground/5',
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t(nameKey)}</div>
+                    <div className="text-xs text-foreground/50">{t(descriptionKey)}</div>
+                  </div>
+                  {isSelected && (
+                    <Check className="h-3 w-3 text-foreground/60 shrink-0 ml-3" />
+                  )}
+                </button>
+              )
+            })}
+          </>
+        )}
+      </div>
+    )
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
@@ -392,13 +434,16 @@ export function CompactModelSelector({
                         )}
                       </button>
                       {isAuthenticated && isExpanded && (
-                        <CompactSwitcherModels
-                          conn={conn}
-                          liveOpenRouterModels={liveOpenRouterModels}
-                          currentModel={currentModel}
-                          isCurrentConnection={isCurrentConnection}
-                          onPick={handlePickSwitcherModel}
-                        />
+                        <>
+                          <CompactSwitcherModels
+                            conn={conn}
+                            liveOpenRouterModels={liveOpenRouterModels}
+                            currentModel={currentModel}
+                            isCurrentConnection={isCurrentConnection}
+                            onPick={handlePickSwitcherModel}
+                          />
+                          {isCurrentConnection && thinkingControl}
+                        </>
                       )}
                     </React.Fragment>
                   )
@@ -438,8 +483,8 @@ export function CompactModelSelector({
                 ? t('chat.modelPicker.unavailable')
                 : [description, limitCaption].filter(Boolean).join(' · ')
               return (
-                <DrawerClose asChild key={modelId}>
                   <button
+                    key={modelId}
                     type="button"
                     onClick={() => {
                       const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
@@ -466,7 +511,6 @@ export function CompactModelSelector({
                       <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
                     )}
                   </button>
-                </DrawerClose>
               )
                 })
               )}
@@ -474,48 +518,7 @@ export function CompactModelSelector({
                 hiddenCount={visibleCatalog.hiddenCount}
                 searching={modelSearchQuery.trim().length > 0}
               />
-            </>
-          )}
-
-          {/* === Thinking section === */}
-          {thinkingUnavailable && pickerMode !== 'unavailable' && (
-            <div className="px-3 pt-4 pb-2 text-xs text-foreground/60">
-              {t(thinkingUnavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported')}
-            </div>
-          )}
-          {availableThinkingLevels.length > 0 && pickerMode !== 'unavailable' && (
-            <>
-              <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
-                {t('chat.modelPicker.thinkingSection')}
-              </div>
-              {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
-                const isSelected = thinkingLevel === id
-                return (
-                  <DrawerClose asChild key={id}>
-                    <button
-                      type="button"
-                      disabled={thinkingDisabled}
-                      onClick={() => onThinkingLevelChange?.(id)}
-                      className={cn(
-                        'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
-                        thinkingDisabled && 'opacity-50 cursor-not-allowed',
-                        !thinkingDisabled && isSelected && 'bg-foreground/5',
-                        !thinkingDisabled && !isSelected && 'hover:bg-foreground/5',
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium">{t(nameKey)}</div>
-                        <div className="text-xs text-foreground/50">
-                          {t(descriptionKey)}
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <Check className="h-3 w-3 text-foreground/60 shrink-0 ml-3" />
-                      )}
-                    </button>
-                  </DrawerClose>
-                )
-              })}
+              {thinkingControl}
             </>
           )}
         </div>

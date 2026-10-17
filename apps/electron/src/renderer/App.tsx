@@ -18,6 +18,8 @@ import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOpt
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
+import { applyThinkingProbe, noteThinkingEffortError } from '@craft-agent/shared/agent/thinking-levels'
+import { ensureModelsDevThinkingIndex } from '@craft-agent/shared/config/models-dev-thinking'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
 import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
@@ -311,6 +313,19 @@ export default function App() {
     window.electronAPI.isDebugMode().then((isDebug) => {
       initRendererPerf(isDebug)
     })
+  }, [])
+
+  useEffect(() => {
+    let storage: { read(): string | null; write(value: string): void } | undefined
+    try {
+      storage = {
+        read: () => localStorage.getItem('selection.models-dev-thinking.v1'),
+        write: (value) => localStorage.setItem('selection.models-dev-thinking.v1', value),
+      }
+    } catch {
+      storage = undefined
+    }
+    void ensureModelsDevThinkingIndex({ storage }).catch(() => {})
   }, [])
 
   // App state: loading -> check auth -> onboarding or ready
@@ -1011,6 +1026,20 @@ export default function App() {
       if (event.type === 'session_deleted') {
         removeSession(sessionId)
         return
+      }
+
+      if (event.type === 'thinking_probe') {
+        applyThinkingProbe(
+          { id: event.modelId, provider: event.provider },
+          { mode: event.mode, levels: event.levels },
+        )
+        return
+      }
+
+      if (event.type === 'error' || event.type === 'typed_error') {
+        const session = store.get(sessionAtomFamily(sessionId))
+        const message = event.type === 'error' ? event.error : (event.error.originalError || event.error.message)
+        if (session?.model && message) noteThinkingEffortError({ id: session.model }, message)
       }
 
       const agentEvent = event as unknown as AgentEvent

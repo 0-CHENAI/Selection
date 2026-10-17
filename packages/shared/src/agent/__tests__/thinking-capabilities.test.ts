@@ -5,9 +5,12 @@ import {
   levelsFromThinkingLevelMap,
   modelThinkingCapability,
   modelThinkingLevels,
+  noteThinkingEffortError,
   resolveSessionThinkingLevel,
   thinkingLevelMapForLevels,
 } from '../thinking-capabilities.ts'
+import { resetThinkingProbes } from '../thinking-probe.ts'
+import { clearModelsDevThinkingIndex, installModelsDevThinkingIndex } from '../../config/models-dev-thinking.ts'
 import { THINKING_LEVEL_IDS } from '../thinking-levels.ts'
 import { buildCustomEndpointModelDef } from '../../../../pi-agent-server/src/custom-endpoint-models.ts'
 
@@ -61,25 +64,35 @@ describe('thinking capabilities', () => {
   })
 
   it('uses the fallback table when the model list has no map', () => {
-    expect(fallbackThinkingCapability('claude-opus-4-8')?.levels).toEqual(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
+    expect(fallbackThinkingCapability('claude-opus-4-8')?.levels).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
     expect(fallbackThinkingCapability('pi/claude-fable-5')?.levels).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
     expect(fallbackThinkingCapability('us.anthropic.claude-haiku-4-5-20251001-v1:0')?.levels).toEqual(['off', 'low', 'medium', 'high'])
-    expect(fallbackThinkingCapability('gemini-2.5-flash')?.levels).toEqual(['off', 'minimal', 'low', 'medium', 'high'])
+    expect(fallbackThinkingCapability('gemini-2.5-flash')?.levels).toEqual(['low', 'medium', 'high'])
+    expect(fallbackThinkingCapability('gemini-2.5-flash-lite')?.levels).toEqual(['off', 'low', 'medium', 'high'])
     expect(fallbackThinkingCapability('gemini-3-flash-preview')?.levels).toEqual(['minimal', 'low', 'medium', 'high'])
     expect(fallbackThinkingCapability('deepseek-v4-pro')?.levels).toEqual(['off', 'high', 'max'])
     expect(fallbackThinkingCapability('deepseek-flash')?.levels).toEqual(['off', 'low', 'high', 'max'])
     expect(fallbackThinkingCapability('kimi-k3')?.levels).toEqual(['low', 'high', 'max'])
+    expect(fallbackThinkingCapability('k3-256k')?.levels).toEqual(['low', 'high', 'max'])
+    expect(fallbackThinkingCapability('pi/k3-256k')?.levels).toEqual(['low', 'high', 'max'])
+    expect(fallbackThinkingCapability('kimi-for-coding-highspeed')?.mode).toBe('always-on')
     expect(fallbackThinkingCapability('kimi-k2.6')).toMatchObject({ binary: true, levels: ['off', 'high'] })
     expect(fallbackThinkingCapability('kimi-k2.7')?.mode).toBe('always-on')
     expect(fallbackThinkingCapability('gpt-4o')?.mode).toBe('unsupported')
     expect(fallbackThinkingCapability('gpt-5')?.levels).toEqual(['minimal', 'low', 'medium', 'high'])
+    expect(fallbackThinkingCapability('gpt-5.2-chat-latest')?.levels).toEqual(['medium'])
     expect(fallbackThinkingCapability('gpt-5.4')?.levels).toEqual(['off', 'low', 'medium', 'high', 'xhigh'])
+    expect(fallbackThinkingCapability('grok-4.3')?.levels).toEqual(['off', 'low', 'medium', 'high'])
     expect(fallbackThinkingCapability('gpt-6-luna')?.levels).toContain('max')
     expect(modelThinkingLevels({ id: 'gpt-4o' })).toEqual([])
     expect(modelThinkingLevels({ id: 'claude-sonnet-4-6' }).map(level => level.id)).toEqual(['off', 'low', 'medium', 'high', 'max'])
-    // A live catalog row that reasons without a map keeps Pi's default stops, including minimal.
-    expect(modelThinkingCapability({ id: 'vendor-reasoner', reasoning: true }).levels)
-      .toEqual(['off', 'minimal', 'low', 'medium', 'high'])
+    // Unknown reasoning models stay on a binary switch. They do not inherit every stop.
+    expect(modelThinkingCapability({ id: 'vendor-reasoner', reasoning: true })).toMatchObject({
+      source: 'conservative',
+      binary: true,
+      levels: ['off', 'high'],
+    })
+    expect(modelThinkingCapability(undefined).mode).toBe('unsupported')
     expect(modelThinkingCapability({ id: 'claude-fable-5', reasoning: true, thinkingLevelMap: { off: null, xhigh: 'xhigh', max: 'max' }, api: 'anthropic-messages' }).levels)
       .toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
   })
@@ -97,7 +110,76 @@ describe('thinking capabilities', () => {
     expect(modelThinkingCapability({
       id: 'gpt-5.4',
       supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-    }).levels).toEqual(['off', 'low', 'medium', 'high', 'xhigh'])
+    })).toMatchObject({
+      source: 'provider-api',
+      levels: ['off', 'low', 'medium', 'high', 'xhigh'],
+    })
+  })
+
+  it('hides off when the provider says reasoning is mandatory', () => {
+    expect(modelThinkingCapability({
+      id: 'kimi-k3',
+      supportedReasoningEfforts: ['low', 'high', 'max'],
+      reasoningMandatory: true,
+    }).levels).toEqual(['low', 'high', 'max'])
+  })
+
+  it('drops a stale superset and keeps an explicit narrower list', () => {
+    expect(modelThinkingCapability({
+      id: 'k3-256k',
+      provider: 'kimi-coding',
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'],
+    })).toMatchObject({ source: 'static', levels: ['low', 'high', 'max'] })
+
+    expect(modelThinkingCapability({
+      id: 'gpt-5',
+      thinkingSource: 'explicit',
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    }).levels).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+  })
+
+  it('ignores a sparse thinking map and uses the static stops', () => {
+    expect(modelThinkingCapability({
+      id: 'claude-opus-4-8',
+      reasoning: true,
+      thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+      api: 'anthropic-messages',
+    })).toMatchObject({ source: 'static', levels: ['low', 'medium', 'high', 'xhigh', 'max'] })
+  })
+
+  it('prefers a loaded models.dev entry over the static table', () => {
+    installModelsDevThinkingIndex([{
+      provider: 'kimi-code-plan-global',
+      id: 'k3-256k',
+      mode: 'levels',
+      levels: ['low', 'high', 'max'],
+    }])
+    try {
+      expect(modelThinkingCapability({ id: 'k3-256k', provider: 'kimi-coding' })).toMatchObject({
+        source: 'models-dev',
+        levels: ['low', 'high', 'max'],
+      })
+    } finally {
+      clearModelsDevThinkingIndex()
+    }
+  })
+
+  it('learns a narrower stop list from an effort rejection', () => {
+    resetThinkingProbes()
+    try {
+      const learned = noteThinkingEffortError(
+        { id: 'kimi-k3', provider: 'kimi-coding' },
+        'Invalid reasoning_effort: medium. Supported values: low, high, max',
+      )
+      expect(learned).toBe(true)
+      expect(modelThinkingCapability({ id: 'kimi-k3', provider: 'kimi-coding' })).toMatchObject({
+        source: 'probe',
+        levels: ['low', 'high', 'max'],
+      })
+      expect(noteThinkingEffortError({ id: 'kimi-k3' }, 'context length exceeded')).toBe(false)
+    } finally {
+      resetThinkingProbes()
+    }
   })
 
   it('moves an out-of-range stop to the nearest legal one', () => {

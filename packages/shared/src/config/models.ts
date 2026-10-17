@@ -119,8 +119,16 @@ export interface ModelDefinition {
    * `always-on` cannot be disabled or scaled. `unsupported` has no effort control.
    */
   thinkingMode?: 'unsupported' | 'always-on' | 'levels';
+  /**
+   * `explicit` keeps a settings choice. `provider-api` keeps stops copied from
+   * a live `/models` payload. Other layers are resolved again at read time.
+   */
+  thinkingSource?: 'explicit' | 'provider-api' | 'probe' | 'models-dev' | 'sdk-map' | 'static' | 'conservative';
   /** Stops the effort control may offer. Empty when thinking cannot be scaled. */
   supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  /** Copied from a provider model list when it names effort values. */
+  supportedReasoningEfforts?: string[];
+  reasoningMandatory?: boolean;
   supportsImages?: boolean;
 }
 

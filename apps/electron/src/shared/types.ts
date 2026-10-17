@@ -480,7 +480,7 @@ export interface ElectronAPI {
   // Pi provider discovery (main process only — Pi SDK can't run in renderer)
   getPiApiKeyProviders(): Promise<Array<{ key: string; label: string; placeholder: string }>>
   getPiProviderBaseUrl(provider: string): Promise<string | undefined>
-  getPiProviderModels(provider: string): Promise<{ models: Array<{ id: string; name: string; costInput: number; costOutput: number; contextWindow: number; reasoning: boolean }>; totalCount: number }>
+  getPiProviderModels(provider: string): Promise<{ models: Array<{ id: string; name: string; costInput: number; costOutput: number; contextWindow: number; reasoning: boolean; supportedReasoningEfforts?: string[]; reasoningMandatory?: boolean }>; totalCount: number }>
   /** Fetch a custom endpoint's model catalog from the main/server process. The key is not logged. */
   fetchCustomEndpointModels(input: import('@craft-agent/shared/config').FetchCustomEndpointModelsInput): Promise<import('@craft-agent/shared/config').FetchCustomEndpointModelsResult>
 
