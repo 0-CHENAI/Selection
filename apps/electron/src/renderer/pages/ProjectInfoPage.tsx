@@ -2,8 +2,8 @@ import { confirmAction } from '@/lib/confirmation'
 /**
  * ProjectInfoPage
  *
- * One scrolling project page. Settings share a single save button; resources
- * sit after it and apply on upload or delete. Sessions are not listed here.
+ * One scrolling project page. Settings save themselves; resources sit with
+ * the other sections and apply on upload or delete. Sessions are not listed here.
  * They stay on the session list, still bound by projectId. The sidebar
  * project item opens that filtered list. The middle project column stays,
  * because compact layout hides the sidebar and that column is the index.
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel'
+import { ProjectSettingsAutosaveController, projectSettingsPatch, type ProjectSettingsSaveContext } from '@/components/projects/project-settings-autosave'
 import { mergeProjectSettingsRefresh, projectSettingsDraftDirty, projectSettingsDraftFromConfig } from '@/components/projects/project-settings-draft'
 import { SettingsCard, SettingsSection } from '@/components/settings'
 import { projectWorkingDirectorySaveIssue } from '@craft-agent/shared/projects/working-directory'
@@ -48,7 +49,6 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editDetails, setEditDetails] = useState('')
   const [editHistorySearch, setEditHistorySearch] = useState(false)
   const [editColor, setEditColor] = useState<string>('')
-  const [saving, setSaving] = useState(false)
   const [folderError, setFolderError] = useState<'cleared' | null>(null)
   const projectRef = React.useRef(project)
   const draftRef = React.useRef({
@@ -60,6 +60,39 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     color: editColor,
   })
   projectRef.current = project
+  const tRef = React.useRef(t)
+  const mountedRef = React.useRef(true)
+  tRef.current = t
+  // Updated in an effect so a slug/workspace change can flush the previous target
+  // before this ref follows the new page.
+  const saveTargetRef = React.useRef<ProjectSettingsSaveContext>({})
+  const autosaveRef = React.useRef<ProjectSettingsAutosaveController | null>(null)
+  if (!autosaveRef.current) {
+    autosaveRef.current = new ProjectSettingsAutosaveController({
+      capture: () => saveTargetRef.current,
+      persist: async (draft, context) => {
+        if (!context.workspaceId || !context.slug) return 'blocked'
+        const issue = projectWorkingDirectorySaveIssue({
+          storedWorkingDirectory: context.storedWorkingDirectory,
+          nextWorkingDirectory: draft.workingDirectory,
+        })
+        if (issue === 'cleared') {
+          if (mountedRef.current) setFolderError('cleared')
+          return 'blocked'
+        }
+        if (mountedRef.current) setFolderError(null)
+        await window.electronAPI.updateProject(context.workspaceId, context.slug, projectSettingsPatch(draft))
+        return 'saved'
+      },
+      onSuccess: () => {
+        toast.success(tRef.current('projectInfo.saved'), { id: 'project-settings-save' })
+      },
+      onError: (error) => {
+        console.error('[ProjectInfoPage] Save failed:', error)
+        toast.error(tRef.current('projectInfo.saveFailed'), { id: 'project-settings-save' })
+      },
+    })
+  }
   draftRef.current = {
     name: editName,
     description: editDescription,
@@ -93,6 +126,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       const nextDraft = preserveEdits
         ? mergeProjectSettingsRefresh(previous, stored, draftRef.current)
         : stored
+      autosaveRef.current?.syncServer(stored, nextDraft)
       setProject(loaded)
       setEditName(nextDraft.name)
       setEditDescription(nextDraft.description)
@@ -155,35 +189,57 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     confirmServerBrowser,
   } = useDirectoryPicker(handlePickWorkingDirectory)
 
-  const handleSaveSettings = useCallback(async () => {
-    if (!workspaceId || !project) return
-    const issue = projectWorkingDirectorySaveIssue({
-      storedWorkingDirectory: project.config.workingDirectory,
-      nextWorkingDirectory: editWorkingDir,
+  const handleTextFocus = useCallback(() => {
+    autosaveRef.current?.focusText()
+  }, [])
+
+  const handleTextBlur = useCallback(() => {
+    const autosave = autosaveRef.current
+    if (!autosave) return
+    if (!draftRef.current.name.trim()) setEditName(autosave.baseline.name)
+    autosave.blurText()
+  }, [])
+
+  useEffect(() => {
+    saveTargetRef.current = {
+      workspaceId,
+      slug: project?.config.slug,
+      storedWorkingDirectory: project?.config.workingDirectory,
+    }
+  }, [workspaceId, project])
+
+  useEffect(() => {
+    if (loading || !project) return
+    autosaveRef.current?.setDraft({
+      name: editName,
+      description: editDescription,
+      workingDirectory: editWorkingDir,
+      details: editDetails,
+      historySearch: editHistorySearch,
+      color: editColor,
     })
-    if (issue === 'cleared') {
-      setFolderError('cleared')
-      return
+  }, [loading, project, editName, editDescription, editWorkingDir, editDetails, editHistorySearch, editColor])
+
+  useEffect(() => {
+    return () => {
+      const autosave = autosaveRef.current
+      if (!autosave) return
+      void autosave.flush()
+      autosave.suspend()
     }
-    setFolderError(null)
-    setSaving(true)
-    try {
-      await window.electronAPI.updateProject(workspaceId, project.config.slug, {
-        name: editName.trim() || project.config.name,
-        description: editDescription.trim() || undefined,
-        workingDirectory: editWorkingDir.trim() || undefined,
-        details: editDetails.trim() || undefined,
-        historySearchEnabled: editHistorySearch,
-        color: editColor.trim() || undefined,
-      })
-      toast.success(t('projectInfo.saved'))
-    } catch (err) {
-      console.error('[ProjectInfoPage] Save failed:', err)
-      toast.error(t('projectInfo.saveFailed'))
-    } finally {
-      setSaving(false)
+  }, [workspaceId, projectSlug])
+
+  useEffect(() => {
+    mountedRef.current = true
+    const flush = () => { void autosaveRef.current?.flush() }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      mountedRef.current = false
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
     }
-  }, [workspaceId, project, editName, editDescription, editWorkingDir, editDetails, editHistorySearch, editColor, t])
+  }, [])
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -251,15 +307,15 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
             color={editColor}
             slug={project.config.slug}
             folderPath={project.folderPath}
-            saving={saving}
             folderError={folderError}
             onNameChange={setEditName}
             onDescriptionChange={setEditDescription}
             onDetailsChange={setEditDetails}
             onHistorySearchChange={setEditHistorySearch}
             onColorChange={setEditColor}
+            onTextFocus={handleTextFocus}
+            onTextBlur={handleTextBlur}
             onPickFolder={pickDirectory}
-            onSave={handleSaveSettings}
             onDelete={handleDeleteProject}
             onOpenLocation={() => onOpenFile(project.folderPath)}
             resources={(
