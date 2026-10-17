@@ -3,64 +3,60 @@ import { TodoList, type TodoItem } from '@craft-agent/ui'
 import { i18n } from '@craft-agent/shared/i18n'
 import type { ComponentEntry } from './types'
 
-const progress: TodoItem[] = [
-  { id: 'facts', content: '确认事实', status: 'completed' },
-  { id: 'sources', content: '核对出处', status: 'in_progress', activeForm: '正在核对出处' },
-  { id: 'summary', content: '撰写摘要', status: 'pending' },
-  { id: 'appendix', content: '整理附录', status: 'pending' },
-]
+const labels = ['确认事实', '核对出处', '撰写摘要', '确认范围', '整理附录', '对照文献', '标注出处'] as const
 
-const done: TodoItem[] = [
-  { id: 'facts', content: '确认事实', status: 'completed' },
-  { id: 'sources', content: '核对出处', status: 'completed' },
-  { id: 'summary', content: '撰写摘要', status: 'completed' },
-  { id: 'appendix', content: '整理附录', status: 'completed' },
-]
+function tasks(patch: Partial<Record<(typeof labels)[number], Partial<TodoItem>>> = {}): TodoItem[] {
+  return labels.map(label => ({
+    id: label,
+    content: label,
+    status: 'pending' as const,
+    ...patch[label],
+  }))
+}
 
-const interrupted: TodoItem[] = [
-  { id: 'facts', content: '确认事实', status: 'completed' },
-  { id: 'sources', content: '核对出处', status: 'interrupted' },
-  { id: 'summary', content: '撰写摘要', status: 'in_progress', activeForm: '正在撰写摘要' },
-  { id: 'appendix', content: '整理附录', status: 'pending' },
-]
+const progress = tasks({
+  确认事实: { status: 'completed' },
+  核对出处: { status: 'completed' },
+  撰写摘要: { status: 'completed' },
+  确认范围: { status: 'in_progress', activeForm: '正在确认范围' },
+})
+
+const done = tasks({
+  确认事实: { status: 'completed' },
+  核对出处: { status: 'completed' },
+  撰写摘要: { status: 'completed' },
+  确认范围: { status: 'completed' },
+  整理附录: { status: 'completed' },
+  对照文献: { status: 'completed' },
+  标注出处: { status: 'completed' },
+})
+
+const interrupted = tasks({
+  确认事实: { status: 'completed' },
+  核对出处: { status: 'completed' },
+  撰写摘要: { status: 'interrupted' },
+  确认范围: { status: 'in_progress', activeForm: '正在确认范围' },
+})
 
 const script: TodoItem[][] = [
-  [
-    { id: 'facts', content: '确认事实', status: 'pending' },
-    { id: 'sources', content: '核对出处', status: 'pending' },
-    { id: 'summary', content: '撰写摘要', status: 'pending' },
-    { id: 'appendix', content: '整理附录', status: 'pending' },
-  ],
-  [
-    { id: 'facts', content: '确认事实', status: 'in_progress', activeForm: '正在确认事实' },
-    { id: 'sources', content: '核对出处', status: 'pending' },
-    { id: 'summary', content: '撰写摘要', status: 'pending' },
-    { id: 'appendix', content: '整理附录', status: 'pending' },
-  ],
-  [
-    { id: 'facts', content: '确认事实', status: 'completed' },
-    { id: 'sources', content: '核对出处', status: 'in_progress', activeForm: '正在核对出处' },
-    { id: 'summary', content: '撰写摘要', status: 'pending' },
-    { id: 'appendix', content: '整理附录', status: 'pending' },
-  ],
-  [
-    { id: 'facts', content: '确认事实', status: 'completed' },
-    { id: 'sources', content: '核对出处', status: 'interrupted' },
-    { id: 'summary', content: '撰写摘要', status: 'pending' },
-    { id: 'appendix', content: '整理附录', status: 'pending' },
-  ],
-  [
-    { id: 'facts', content: '确认事实', status: 'completed' },
-    { id: 'sources', content: '核对出处', status: 'completed' },
-    { id: 'summary', content: '撰写摘要', status: 'in_progress', activeForm: '正在撰写摘要' },
-    { id: 'appendix', content: '整理附录', status: 'pending' },
-  ],
-  [
-    { id: 'facts', content: '确认事实', status: 'completed' },
-    { id: 'sources', content: '核对出处', status: 'completed' },
-    { id: 'summary', content: '撰写摘要', status: 'completed' },
-    { id: 'appendix', content: '整理附录', status: 'in_progress', activeForm: '正在整理附录' },
-  ],
+  tasks(),
+  tasks({ 确认事实: { status: 'in_progress', activeForm: '正在确认事实' } }),
+  tasks({
+    确认事实: { status: 'completed' },
+    核对出处: { status: 'in_progress', activeForm: '正在核对出处' },
+  }),
+  tasks({
+    确认事实: { status: 'completed' },
+    核对出处: { status: 'interrupted' },
+  }),
+  progress,
+  tasks({
+    确认事实: { status: 'completed' },
+    核对出处: { status: 'completed' },
+    撰写摘要: { status: 'completed' },
+    确认范围: { status: 'completed' },
+    整理附录: { status: 'in_progress', activeForm: '正在整理附录' },
+  }),
   done,
 ]
 

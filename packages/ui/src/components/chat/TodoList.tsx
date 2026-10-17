@@ -9,20 +9,44 @@ interface TodoListProps {
 
 const STATUSES = ['in_progress', 'pending', 'completed', 'interrupted'] as const
 
-/** Same outline rhythm as a heading TOC: siblings share a column, then the rail steps back. */
-const OUTLINE_DEPTH = [0, 1, 1, 0, 1, 2, 1] as const
+const RAIL_DEPTH_MAX = 2
+
+function railSeedHash(seed: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+/** One level toward the side the hash picks. At 0 or 2 there is only one way. */
+function nudgeDepth(depth: number, hash: number): number {
+  const outward = (hash & 4) !== 0
+  if (outward && depth < RAIL_DEPTH_MAX) return depth + 1
+  if (!outward && depth > 0) return depth - 1
+  return depth < RAIL_DEPTH_MAX ? depth + 1 : depth - 1
+}
 
 /**
- * Real depth wins when any item carries one.
- * A flat list has no parent field, so it borrows this outline. Status is not used:
- * an all-completed list would otherwise sit on one column and lose the bend.
+ * Visual depth for a flat task list. The first step stays at 0.
+ * Each later step bends with probability 1/4, from a hash of its id
+ * (or its content when it has no id). A bend moves one level, and
+ * two bends in a row are allowed. Appending a task does not move earlier nodes.
  */
-export function taskRailDepth(todos: readonly { depth?: number }[], index: number): number {
-  if (todos.some(todo => typeof todo.depth === 'number')) {
-    const depth = todos[index]?.depth
-    return typeof depth === 'number' && depth > 0 ? Math.floor(depth) : 0
+export function taskRailDepths(todos: readonly { id?: string; content: string }[]): number[] {
+  const depths: number[] = []
+  let depth = 0
+  for (let index = 0; index < todos.length; index++) {
+    if (index > 0) {
+      const todo = todos[index]
+      const seed = todo?.id?.trim() || todo?.content || String(index)
+      const hash = railSeedHash(seed)
+      if (hash % 4 === 0) depth = nudgeDepth(depth, hash)
+    }
+    depths.push(depth)
   }
-  return OUTLINE_DEPTH[index % OUTLINE_DEPTH.length] ?? 0
+  return depths
 }
 
 function summaryLabel(
@@ -39,13 +63,14 @@ function summaryLabel(
 /** Conversation task progress. Legacy todo snapshots share this renderer. */
 export function TodoList({ todos }: TodoListProps) {
   const { t } = useTranslation()
+  const depths = useMemo(() => taskRailDepths(todos), [todos])
   const items = useMemo<RailTocItem[]>(() => todos.map((todo, index) => ({
     id: todo.id || `task-${index}`,
     label: todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content,
     status: todo.status as RailTocStatus,
     statusLabel: t(`taskList.status.${todo.status}`),
-    depth: taskRailDepth(todos, index),
-  })), [t, todos])
+    depth: depths[index] ?? 0,
+  })), [depths, t, todos])
 
   if (todos.length === 0) return null
 
