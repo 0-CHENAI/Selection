@@ -43,6 +43,8 @@ export interface ProjectSettingsPanelProps {
   onSave: () => void
   onDelete: () => void
   onOpenLocation: () => void
+  /** Resources sit on the same page, after the single save action. */
+  resources?: React.ReactNode
 }
 
 export function ProjectSettingsPanel({
@@ -66,6 +68,7 @@ export function ProjectSettingsPanel({
   onSave,
   onDelete,
   onOpenLocation,
+  resources,
 }: ProjectSettingsPanelProps) {
   const { t } = useTranslation()
   const folderState = projectWorkingDirectorySaveIssue({
@@ -160,10 +163,12 @@ export function ProjectSettingsPanel({
         <SettingsCard>
           <div className="p-4">
             <Textarea
+              id="project-settings-instructions"
               value={details}
               onChange={(event) => onDetailsChange(event.target.value)}
               rows={6}
               placeholder={t('projectInfo.detailsPlaceholder')}
+              className="min-h-32 resize-none border-foreground/15 bg-transparent shadow-none field-sizing-fixed focus-visible:border-foreground/15 focus-visible:ring-foreground/30 dark:bg-transparent"
             />
           </div>
         </SettingsCard>
@@ -188,6 +193,8 @@ export function ProjectSettingsPanel({
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </div>
+
+      {resources}
 
       <SettingsSection
         variant="danger"

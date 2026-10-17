@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { ModalProvider } from '@/context/ModalContext'
 import { CreateProjectDialog } from '@/components/projects/CreateProjectDialog'
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel'
+import { Button } from '@/components/ui/button'
+import { SettingsCard, SettingsSection } from '@/components/settings'
+import { Trash2, Upload } from 'lucide-react'
 import { ProjectWorkingDirectoryMark } from '@/components/app-shell/input/ProjectWorkingDirectoryMark'
 import type { ComponentEntry } from './types'
 
@@ -50,7 +53,7 @@ function ProjectSettingsPreview() {
   useChineseCopy()
   const [name, setName] = React.useState('巡察资料')
   const [description, setDescription] = React.useState('2026 年巡察底稿')
-  const [folder, setFolder] = React.useState('')
+  const [folder, setFolder] = React.useState('/Users/chenai/local/EFSA')
   const [details, setDetails] = React.useState('引用材料时注明页码。')
   const [history, setHistory] = React.useState(true)
   const [color, setColor] = React.useState('#6366f1')
@@ -78,6 +81,32 @@ function ProjectSettingsPreview() {
         onSave={() => setSaved(folder ? '已保存' : '已保存其他字段，仍需补选工作文件夹')}
         onDelete={() => setSaved('已请求删除')}
         onOpenLocation={() => setSaved('已打开存储位置')}
+        resources={(
+          <SettingsSection
+            title="资源"
+            description="上传 PDF、图片或文本，供此项目中的会话使用。"
+            action={(
+              <Button variant="outline" size="sm" type="button">
+                <Upload />
+                上传文件
+              </Button>
+            )}
+          >
+            <SettingsCard divided={false}>
+              <ul className="divide-y divide-border/50">
+                <li className="flex items-center gap-3 px-4 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm">brief.pdf</div>
+                    <div className="text-xs text-foreground/50">128.0 KB · application/pdf</div>
+                  </div>
+                  <Button size="sm" variant="ghost" type="button" className="text-destructive hover:text-destructive" aria-label="删除资源">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </li>
+              </ul>
+            </SettingsCard>
+          </SettingsSection>
+        )}
       />
       <div className="mt-6 rounded-xl border border-border/60 bg-background px-3 py-3">
         <div className="mb-2 text-xs font-medium text-muted-foreground">项目会话</div>

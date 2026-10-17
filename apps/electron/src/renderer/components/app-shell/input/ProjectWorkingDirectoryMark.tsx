@@ -35,7 +35,7 @@ export function ProjectWorkingDirectoryMark({
           role="note"
           aria-disabled="true"
           aria-label={label}
-          title={folder || undefined}
+          title={folder ? `${t('chat.projectWorkingDirectory')}\n${folder}` : undefined}
         >
           <Icon_Folder className="h-4 w-4 shrink-0" />
           <span className="max-w-[140px] truncate">{name}</span>
