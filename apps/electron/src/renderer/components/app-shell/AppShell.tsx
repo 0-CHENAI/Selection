@@ -662,10 +662,9 @@ function AppShellContent({
     // Load workspace-scoped state on BOTH initial mount AND workspace switch
     // This fixes CMD+R losing filters - previously only ran on workspace switch
     if (previousWorkspaceId !== activeWorkspaceId) {
-      const newViewFilters = sanitizeRemovedSessionFilters(
-        storage.get<ViewFiltersMap>(storage.KEYS.viewFilters, {}, activeWorkspaceId),
-      )
-      const savedProjects = newViewFilters.allSessions?.projects
+      const newViewFilters = storage.get<ViewFiltersMap>(storage.KEYS.viewFilters, {}, activeWorkspaceId)
+      const sanitizedViewFilters = sanitizeRemovedSessionFilters(newViewFilters)
+      const savedProjects = sanitizedViewFilters.allSessions?.projects
       const savedScope = serializeProjectHistoryScope(
         Object.entries(savedProjects ?? {}).filter(([, mode]) => mode === 'include').map(([id]) => id),
       )
@@ -675,7 +674,7 @@ function AppShellContent({
         store.set(historyScopeSilentAtom, true)
         store.set(historyScopeAtom, savedScope)
       }
-      setViewFiltersMap(newViewFilters)
+      setViewFiltersMap(sanitizedViewFilters)
 
       const newExpandedFolders = storage.get<string[]>(storage.KEYS.expandedFolders, [], activeWorkspaceId)
       setExpandedFolders(new Set(newExpandedFolders))
