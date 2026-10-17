@@ -1,4 +1,4 @@
-import { modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
+import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
@@ -532,16 +532,16 @@ export function FreeFormInput({
   }, [effectiveConnectionDetails])
 
   const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
-  const availableThinkingLevels = modelThinkingLevels(typeof configuredThinkingModel === 'object' ? configuredThinkingModel : undefined)
+  const thinkingModel: ThinkingModelRef | undefined = typeof configuredThinkingModel === 'object'
+    ? configuredThinkingModel
+    : (typeof configuredThinkingModel === 'string' ? { id: configuredThinkingModel } : (currentModel ? { id: currentModel } : undefined))
+  const thinkingCapability = modelThinkingCapability(thinkingModel)
+  const availableThinkingLevels = modelThinkingLevels(thinkingModel)
 
 
-  // Disable thinking selector when the current model explicitly doesn't support it
-  const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(m =>
-      typeof m !== 'string' && isPickerModelSelected(currentModel, m.id),
-    )
-    return typeof model !== 'string' && model?.supportsThinking === false
-  }, [availableModels, currentModel])
+  // The prompt slider is replaced by an explanation when this model cannot scale effort.
+  const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
+  const thinkingDisabled = thinkingUnavailable !== undefined || availableThinkingLevels.length <= 1
   const promptMaxed = usePromptAppearance && !thinkingDisabled && availableThinkingLevels.length > 1
     && thinkingLevel === availableThinkingLevels.at(-1)?.id
 
@@ -1877,12 +1877,14 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && !thinkingDisabled && availableThinkingLevels.length > 0 ? (
+  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && (thinkingUnavailable || availableThinkingLevels.length > 0) ? (
     <PromptThinkingSettings
       value={thinkingLevel}
       levels={availableThinkingLevels}
       workMode={workMode}
-      disabled={disabled}
+      disabled={disabled || thinkingDisabled}
+      unavailable={thinkingUnavailable}
+      binary={thinkingCapability.binary}
       onChange={onThinkingLevelChange}
     />
   ) : null
@@ -2593,6 +2595,11 @@ export function FreeFormInput({
 
                 {/* Thinking level selector — only shown when thinking levels are available
                     (Claude supports extended thinking, OpenAI backends may not) */}
+                {thinkingUnavailable && (!usePromptAppearance || !onThinkingLevelChange) && (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">
+                    {t(thinkingUnavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported')}
+                  </div>
+                )}
                 {availableThinkingLevels.length > 0 && (!usePromptAppearance || !onThinkingLevelChange) && (
                   <>
                     <StyledDropdownMenuSeparator className="my-1" />
@@ -2601,7 +2608,7 @@ export function FreeFormInput({
                       <StyledDropdownMenuSubTrigger disabled={thinkingDisabled} className={cn("flex items-center justify-between px-2 py-2 rounded-lg", thinkingDisabled && "opacity-50 cursor-not-allowed")}>
                         <div className="text-left flex-1">
                           <div className="font-medium text-sm">{t(getThinkingLevelNameKey(thinkingLevel))}</div>
-                          <div className="text-xs text-muted-foreground">{thinkingDisabled ? t('thinking.notSupported') : t('thinking.extendedDesc')}</div>
+                          <div className="text-xs text-muted-foreground">{availableThinkingLevels.length === 1 ? t('thinking.alwaysOn') : t('thinking.extendedDesc')}</div>
                         </div>
                       </StyledDropdownMenuSubTrigger>
                       <StyledDropdownMenuSubContent className="min-w-[220px]">

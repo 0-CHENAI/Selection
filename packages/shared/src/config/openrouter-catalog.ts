@@ -7,6 +7,7 @@
  */
 
 import type { ModelDefinition } from './models.ts'
+import { thinkingFieldsFromUpstream } from '../agent/thinking-capabilities.ts'
 
 export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models'
 export const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -145,7 +146,7 @@ export function openRouterCatalogToModelDefinitions(
       description: 'openrouter model via Selection Backend',
       provider: 'pi',
       contextWindow: model.contextWindow,
-      supportsThinking: model.reasoning,
+      ...thinkingFieldsFromUpstream({ id: model.id, reasoning: model.reasoning }),
     }
   })
 }

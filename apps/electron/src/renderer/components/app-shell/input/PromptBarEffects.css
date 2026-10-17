@@ -74,6 +74,12 @@
   line-height: 18px;
 }
 
+.prompt-effort-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .prompt-effort-help {
   display: inline-flex;
   margin-left: auto;

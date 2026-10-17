@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { constrainThinkingLevel, modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
+import { constrainThinkingLevel, modelThinkingLevels, resolveSessionThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 
 function read(relative: string): string {
   return readFileSync(join(import.meta.dir, relative), 'utf8')
@@ -33,9 +33,10 @@ describe('draft to live session composer', () => {
     expect(chatPage).toContain('draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection')
     expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(2)
     expect(chatPage).toContain('if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))')
-    expect(chatPage).toContain('constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))')
-    expect(chatPage).toContain('draftCreateRef.current.thinkingLevel = draftThinkingLevel')
-    expect(chatPage.match(/thinkingLevel=\{isDraft \? draftThinkingLevel : sessionOpts\.thinkingLevel\}/g)).toHaveLength(2)
+    expect(chatPage).toContain('resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)')
+    expect(chatPage).toContain('draftCreateRef.current.thinkingLevel = activeThinkingLevel')
+    expect(chatPage.match(/thinkingLevel=\{activeThinkingLevel\}/g)).toHaveLength(2)
+    expect(chatPage).toContain('handleThinkingLevelChange(activeThinkingLevel)')
   })
 
   it('maps an unsupported saved default to the level shown for the selected model', () => {
@@ -43,6 +44,8 @@ describe('draft to live session composer', () => {
       .map(level => level.id)
     expect(constrainThinkingLevel('medium', supported)).toBe('low')
     expect(constrainThinkingLevel('high', supported)).toBe('high')
+    expect(resolveSessionThinkingLevel({ id: 'gpt-4o' }, 'high')).toBe('off')
+    expect(resolveSessionThinkingLevel({ id: 'claude-haiku-4-5-20251001' }, 'max')).toBe('high')
   })
 
   it('keeps ChatPage mounted so the composer is not swapped on first send', () => {

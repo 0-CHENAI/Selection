@@ -16,6 +16,7 @@
 import { getProviders, getModels } from '@earendil-works/pi-ai/compat';
 import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
+import { thinkingFieldsFromUpstream } from '../agent/thinking-capabilities.ts';
 import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
 
 // ============================================
@@ -28,6 +29,15 @@ import { fromPiProviderId, toPiProviderId } from './pi-provider-ids.ts';
 function piModelToDefinition(m: Model<Api>): ModelDefinition {
   const lastPart = m.name.split(/[\s-]/).pop() ?? m.name;
   const shortName = m.name.length > 20 ? lastPart : m.name;
+  const compat = m.compat as { supportsReasoningEffort?: boolean; thinkingFormat?: string } | undefined;
+  const thinking = thinkingFieldsFromUpstream({
+    id: m.id,
+    reasoning: m.reasoning,
+    thinkingLevelMap: m.thinkingLevelMap as Record<string, string | null> | undefined,
+    api: m.api,
+    supportsReasoningEffort: compat?.supportsReasoningEffort,
+    thinkingFormat: compat?.thinkingFormat,
+  });
 
   return {
     id: `pi/${m.id}`,
@@ -36,7 +46,7 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
     description: `${m.provider} model via Selection Backend`,
     provider: 'pi',
     contextWindow: m.contextWindow,
-    supportsThinking: m.reasoning,
+    ...thinking,
   };
 }
 

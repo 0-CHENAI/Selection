@@ -62,7 +62,7 @@ describe('spawn_session thinkingLevel forwarding', () => {
   });
 
   it('forwards each valid thinking level unchanged', async () => {
-    const levels = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
     for (const level of levels) {
       const { agent: a, captured: c } = setup();
       await a.invokeSpawn({ prompt: 'hi', thinkingLevel: level });

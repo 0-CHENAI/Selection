@@ -12,6 +12,7 @@ describe('THINKING_TO_PI', () => {
 
   it('passes lower tiers through unchanged', () => {
     expect(THINKING_TO_PI.off).toBe('off')
+    expect(THINKING_TO_PI.minimal).toBe('minimal')
     expect(THINKING_TO_PI.low).toBe('low')
     expect(THINKING_TO_PI.medium).toBe('medium')
     expect(THINKING_TO_PI.high).toBe('high')

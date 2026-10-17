@@ -1,5 +1,6 @@
 import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.ts';
 import type { ModelDefinition } from '../../../../config/models.ts';
+import { thinkingFieldsFromUpstream } from '../../../thinking-capabilities.ts';
 import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 import { toPiProviderId } from '../../../../config/pi-provider-ids.ts';
@@ -126,7 +127,11 @@ function toModelDefinitions(models: RawCopilotModel[]): ModelDefinition[] {
     description: '',
     provider: 'pi' as const,
     contextWindow: m.contextWindow || 200_000,
-    supportsThinking: !!(m.supportedReasoningEfforts && m.supportedReasoningEfforts.length > 0),
+    ...thinkingFieldsFromUpstream({
+      id: m.id,
+      supportedReasoningEfforts: m.supportedReasoningEfforts,
+      reasoning: !!(m.supportedReasoningEfforts && m.supportedReasoningEfforts.length > 0),
+    }),
   }));
 }
 

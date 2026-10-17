@@ -52,7 +52,7 @@ interface CredentialsStepProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
-    modelThinkingLevels?: Record<string, Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelContextWindows?: Record<string, number>
     modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi

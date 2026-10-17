@@ -1,4 +1,5 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
+import { modelThinkingCapability, thinkingLevelMapForLevels } from '../../shared/src/agent/thinking-capabilities.ts';
 import { inferModelSupportsImages } from '../../shared/src/config/model-image-support.ts';
 import { OPENROUTER_API_BASE_URL } from '../../shared/src/config/openrouter-catalog.ts';
 import {
@@ -62,12 +63,23 @@ export function buildOpenRouterDynamicModel(
 ): OpenRouterProviderModel {
   const supportsImages = entry.supportsImages ?? inferModelSupportsImages(entry.id)
   const contextWindow = entry.contextWindow ?? 131_072
+  const thinking = modelThinkingCapability({
+    id: entry.id,
+    supportedThinkingLevels: entry.supportedThinkingLevels,
+    thinkingMode: entry.thinkingMode,
+  })
+  const reasoning = thinking.mode === 'always-on' || (thinking.mode === 'levels' && thinking.levels.some(level => level !== 'off'))
   return {
     id: entry.id,
     name: entry.id,
     api: 'openai-completions',
     baseUrl: OPENROUTER_API_BASE_URL,
-    reasoning: false,
+    reasoning,
+    ...(reasoning ? {
+      thinkingLevelMap: thinking.mode === 'always-on'
+        ? { ...thinkingLevelMapForLevels(['low']), off: null }
+        : thinkingLevelMapForLevels(thinking.levels),
+    } : {}),
     input: supportsImages ? ['text', 'image'] : ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,

@@ -30,7 +30,7 @@ export interface BackendRuntimePayload extends Record<string, unknown> {
   /** Custom endpoint protocol config (api type for routing). */
   customEndpoint?: { api: string; supportsImages?: boolean };
   /** Models registered for a custom endpoint. Strings default to 128k/8k; objects carry catalog limits. */
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
 }
 
 export interface BackendResolutionContext {

@@ -114,8 +114,13 @@ export interface ModelDefinition {
   maxTokens?: number;
   /** Whether this model supports thinking/reasoning effort. Defaults to true when undefined. */
   supportsThinking?: boolean;
-  /** Explicit per-model image input capability hint, primarily for custom endpoints. */
-  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  /**
+   * How the effort control behaves. `levels` uses `supportedThinkingLevels`.
+   * `always-on` cannot be disabled or scaled. `unsupported` has no effort control.
+   */
+  thinkingMode?: 'unsupported' | 'always-on' | 'levels';
+  /** Stops the effort control may offer. Empty when thinking cannot be scaled. */
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   supportsImages?: boolean;
 }
 

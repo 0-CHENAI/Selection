@@ -99,8 +99,8 @@ describe('thinking effort thumb', () => {
     expect(html).toContain('class="prompt-effort-thumb"')
     expect(html).toContain('--prompt-effort-thumb:26px')
     expect(html).not.toContain('data-dragging')
-    // Medium is index 2 of 6. Stops stay inset by 11px; fill reaches the 26px thumb's right edge.
-    expect(html).toContain('--prompt-effort-fill:calc(calc(11px + (100% - 22px) * 0.4) + 13px)')
+    // Medium is index 3 of 7 (off, minimal, low, medium, …). Stops stay inset by 11px.
+    expect(html).toContain('--prompt-effort-fill:calc(calc(11px + (100% - 22px) * 0.5) + 13px)')
     expect(html).toContain('aria-disabled="false"')
 
     const maxed = renderSettings('max')

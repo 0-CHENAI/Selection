@@ -101,7 +101,7 @@ export type SubmittedConnectionModel = string | {
   id: string
   name?: string
   shortName?: string
-  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   supportsImages?: boolean
   contextWindow?: number
   maxTokens?: number
@@ -167,7 +167,8 @@ export interface ApiKeyInputProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
-    modelThinkingLevels?: Record<string, Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
+    modelThinkingModes?: Record<string, 'unsupported' | 'always-on' | 'levels'>
     modelContextWindows?: Record<string, number>
     modelMaxTokens?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
@@ -798,6 +799,7 @@ export function ApiKeyInput({
           includeDisplayNames: isOrderPreset,
           supportsImages,
           supportedThinkingLevels: modelThinkingLevels[id] ?? (initialValues ? undefined : []),
+          thinkingMode: initialValues?.modelThinkingModes?.[id],
           contextWindow,
           maxTokens,
         })
