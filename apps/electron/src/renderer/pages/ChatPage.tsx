@@ -49,7 +49,7 @@ import { immersiveLayoutActiveAtom } from '@/atoms/immersive-mode'
 import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
-import { constrainThinkingLevel, modelThinkingLevels, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import { resolveSessionThinkingLevel, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getSessionTitle } from '@/utils/session'
 import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import type { PermissionMode } from '../../shared/types'
@@ -514,14 +514,22 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     return connection?.defaultModel ?? ''
   }, [isDraft, draftModel, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
-  // Use the same model capability constraint as AI Settings for a new chat.
-  // Submit that displayed level so the persisted session matches the picker.
-  const draftConnectionDetails = llmConnections.find(c => c.slug === draftConnection)
-  const draftThinkingModel = draftConnectionDetails?.models?.find(m =>
-    connectionModelIdsMatch(typeof m === 'string' ? m : m.id, draftModel))
-  const draftThinkingLevels = modelThinkingLevels(typeof draftThinkingModel === 'object' ? draftThinkingModel : undefined)
-  const draftThinkingLevel = constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))
-  draftCreateRef.current.thinkingLevel = draftThinkingLevel
+  // Show and send the nearest stop this model actually accepts.
+  const activeConnectionSlug = isDraft ? draftConnection : session?.llmConnection
+  const activeConnectionDetails = llmConnections.find(c => c.slug === (activeConnectionSlug || workspaceDefaultLlmConnection))
+  const activeModelId = isDraft ? draftModel : effectiveModel
+  const activeThinkingEntry = activeConnectionDetails?.models?.find(m =>
+    connectionModelIdsMatch(typeof m === 'string' ? m : m.id, activeModelId))
+  const activeThinkingModel = typeof activeThinkingEntry === 'object'
+    ? activeThinkingEntry
+    : { id: typeof activeThinkingEntry === 'string' ? activeThinkingEntry : activeModelId }
+  const activeThinkingLevel = resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)
+  draftCreateRef.current.thinkingLevel = activeThinkingLevel
+
+  React.useEffect(() => {
+    if (activeThinkingLevel === sessionOpts.thinkingLevel) return
+    handleThinkingLevelChange(activeThinkingLevel)
+  }, [activeThinkingLevel, sessionOpts.thinkingLevel, handleThinkingLevelChange])
 
   // Project conversations display the project folder. Other sessions keep their own.
   const conversationIdentity = isDraft
@@ -894,7 +902,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                   pendingCredential={undefined}
                   onRespondToCredential={onRespondToCredential}
                   onRespondToClarification={onRespondToClarification}
-                  thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+                  thinkingLevel={activeThinkingLevel}
                   onThinkingLevelChange={handleThinkingLevelChange}
                   permissionMode={sessionOpts.permissionMode}
                   onPermissionModeChange={handlePermissionModeChange}
@@ -988,7 +996,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               pendingCredential={pendingCredential}
               onRespondToCredential={onRespondToCredential}
               onRespondToClarification={onRespondToClarification}
-              thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+              thinkingLevel={activeThinkingLevel}
               onThinkingLevelChange={handleThinkingLevelChange}
               permissionMode={sessionOpts.permissionMode}
               onPermissionModeChange={handlePermissionModeChange}

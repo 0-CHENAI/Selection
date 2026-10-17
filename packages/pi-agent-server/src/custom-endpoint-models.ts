@@ -1,4 +1,9 @@
 import {
+  modelThinkingCapability,
+  thinkingLevelMapForLevels,
+  type ThinkingMode,
+} from '../../shared/src/agent/thinking-capabilities.ts'
+import {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
   DEFAULT_CUSTOM_MAX_TOKENS,
   inferModelSupportsImages,
@@ -19,7 +24,8 @@ export interface CustomEndpointModelDefaults {
 export interface CustomEndpointModelOverrides {
   contextWindow?: number
   maxTokens?: number
-  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  thinkingMode?: ThinkingMode;
   supportsImages?: boolean
 }
 
@@ -31,7 +37,8 @@ export type CustomEndpointModelConfig = string | {
   id: string
   contextWindow?: number
   maxTokens?: number
-  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  thinkingMode?: ThinkingMode;
   supportsImages?: boolean
 }
 
@@ -66,11 +73,37 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
 
   return {
     id: stripPiPrefix(model.id),
+    ...(model.thinkingMode ? { thinkingMode: model.thinkingMode } : {}),
     ...(model.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: model.supportedThinkingLevels } : {}),
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
     ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
   }
+}
+
+function resolveCustomEndpointThinking(
+  id: string,
+  overrides?: CustomEndpointModelOverrides,
+): { reasoning: boolean; map?: Record<string, string | null> } {
+  if (overrides?.thinkingMode === 'always-on') {
+    return { reasoning: true, map: { ...thinkingLevelMapForLevels(['low']), off: null } }
+  }
+  if (overrides?.thinkingMode === 'unsupported') return { reasoning: false }
+  const declared = overrides?.supportedThinkingLevels
+  if (declared !== undefined) {
+    const enabled = declared.some(level => level !== 'off')
+    return enabled
+      ? { reasoning: true, map: thinkingLevelMapForLevels(declared) }
+      : { reasoning: false, map: thinkingLevelMapForLevels([]) }
+  }
+  const inferred = modelThinkingCapability({ id })
+  if (inferred.mode === 'always-on') {
+    return { reasoning: true, map: { ...thinkingLevelMapForLevels(['low']), off: null } }
+  }
+  if (inferred.mode === 'levels' && inferred.levels.some(level => level !== 'off')) {
+    return { reasoning: true, map: thinkingLevelMapForLevels(inferred.levels) }
+  }
+  return { reasoning: false }
 }
 
 /**
@@ -94,18 +127,13 @@ export function buildCustomEndpointModelDef(
     overrides?.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
     contextWindow,
   ) ?? Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
+  const thinking = resolveCustomEndpointThinking(id, overrides)
 
   return {
     id,
     name: id,
-    reasoning: overrides?.supportedThinkingLevels?.some(level => level !== 'off') ?? false,
-    ...(overrides?.supportedThinkingLevels !== undefined ? {
-      thinkingLevelMap: Object.fromEntries(
-        (['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const).map(level => [
-          level, level !== 'minimal' && overrides.supportedThinkingLevels!.includes(level) ? level : null,
-        ]),
-      ),
-    } : {}),
+    reasoning: thinking.reasoning,
+    ...(thinking.map ? { thinkingLevelMap: thinking.map } : {}),
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,

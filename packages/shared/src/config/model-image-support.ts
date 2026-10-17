@@ -86,7 +86,8 @@ export type CustomEndpointModelSource =
       name?: string
       contextWindow?: number
       maxTokens?: number
-      supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+      supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+      thinkingMode?: 'unsupported' | 'always-on' | 'levels';
   supportsImages?: boolean
     }
 
@@ -96,7 +97,8 @@ export type CustomEndpointModelPayload =
       id: string
       contextWindow?: number
       maxTokens?: number
-      supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+      supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+      thinkingMode?: 'unsupported' | 'always-on' | 'levels';
   supportsImages?: boolean
     }
 
@@ -115,9 +117,11 @@ export function toCustomEndpointModelPayload(
     ? model.supportsImages
     : undefined
   const supportedThinkingLevels = typeof model === 'string' ? undefined : model.supportedThinkingLevels
-  if (contextWindow || maxTokens || explicit !== undefined || supportedThinkingLevels !== undefined) {
+  const thinkingMode = typeof model === 'string' ? undefined : model.thinkingMode
+  if (contextWindow || maxTokens || explicit !== undefined || supportedThinkingLevels !== undefined || thinkingMode) {
     return {
       id,
+      ...(thinkingMode ? { thinkingMode } : {}),
       ...(supportedThinkingLevels !== undefined ? { supportedThinkingLevels } : {}),
       ...(contextWindow ? { contextWindow } : {}),
       ...(maxTokens ? { maxTokens } : {}),

@@ -1,4 +1,4 @@
-import { modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
+import { modelThinkingCapability, modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -237,14 +237,14 @@ export function CompactModelSelector({
   }, [availableModels, currentModel])
 
   const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
-  const availableThinkingLevels = modelThinkingLevels(typeof configuredThinkingModel === 'object' ? configuredThinkingModel : undefined)
+  const thinkingModel = typeof configuredThinkingModel === 'object'
+    ? configuredThinkingModel
+    : (typeof configuredThinkingModel === 'string' ? { id: configuredThinkingModel } : (currentModel ? { id: currentModel } : undefined))
+  const thinkingCapability = modelThinkingCapability(thinkingModel)
+  const availableThinkingLevels = modelThinkingLevels(thinkingModel)
+  const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
 
-  const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(
-      m => typeof m !== 'string' && isPickerModelSelected(currentModel, m.id),
-    )
-    return typeof model !== 'string' && model?.supportsThinking === false
-  }, [availableModels, currentModel])
+  const thinkingDisabled = thinkingUnavailable !== undefined || availableThinkingLevels.length <= 1
 
   const connectionsByProvider = React.useMemo(
     () => groupConnectionsByProvider(llmConnections),
@@ -478,6 +478,11 @@ export function CompactModelSelector({
           )}
 
           {/* === Thinking section === */}
+          {thinkingUnavailable && pickerMode !== 'unavailable' && (
+            <div className="px-3 pt-4 pb-2 text-xs text-foreground/60">
+              {t(thinkingUnavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported')}
+            </div>
+          )}
           {availableThinkingLevels.length > 0 && pickerMode !== 'unavailable' && (
             <>
               <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">

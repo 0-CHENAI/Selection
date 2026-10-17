@@ -15,18 +15,35 @@ const EFFORT_EDGE = 11
 const EFFORT_THUMB = 26
 
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange,
+  value, levels, workMode, disabled, onChange, unavailable, binary,
 }: {
   value: ThinkingLevel
   levels: readonly ThinkingLevelDefinition[]
   workMode?: WorkMode
   disabled?: boolean
   onChange: (level: ThinkingLevel) => void
+  /** Hide the slider and explain why this model has no effort scale. */
+  unavailable?: 'unsupported' | 'always-on'
+  /** Two stops that only turn thinking on or off. */
+  binary?: boolean
 }) {
   const { t } = useTranslation()
   const [dragging, setDragging] = React.useState(false)
+  if (unavailable) {
+    const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
+    return (
+      <div className="prompt-effort-settings" data-thinking-mode={unavailable} data-work-mode={workMode}>
+        <div className="prompt-effort-heading">
+          <span className="text-muted-foreground">{t('thinking.effort')}</span>
+          <span className="prompt-effort-value font-medium">{t(unavailable === 'always-on' ? 'thinking.alwaysOnShort' : 'thinking.notSupported')}</span>
+        </div>
+        <p className="prompt-effort-note text-muted-foreground">{t(note)}</p>
+      </div>
+    )
+  }
   const index = Math.max(0, levels.findIndex(level => level.id === value))
   const maxed = levels.length > 1 && value === levels.at(-1)?.id
+  const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
   const stopDragging = () => setDragging(false)
@@ -56,7 +73,7 @@ export function PromptThinkingSettings({
     <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
       <div className="prompt-effort-heading">
         <span className="text-muted-foreground">{t('thinking.effort')}</span>
-        <span className="prompt-effort-value font-medium">{t(getThinkingLevelNameKey(value))}</span>
+        <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <MenuItem asChild onSelect={event => event.preventDefault()}>
@@ -69,8 +86,8 @@ export function PromptThinkingSettings({
         </Tooltip>
       </div>
       <div className="prompt-effort-endpoints text-muted-foreground">
-        <span>{t('thinking.faster')}</span>
-        <span>{t('thinking.smarter')}</span>
+        <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
+        <span>{t(binary ? 'thinking.on' : 'thinking.smarter')}</span>
       </div>
       <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>
         <div
@@ -81,7 +98,7 @@ export function PromptThinkingSettings({
           aria-valuemin={0}
           aria-valuemax={levels.length - 1}
           aria-valuenow={index}
-          aria-valuetext={t(getThinkingLevelNameKey(value))}
+          aria-valuetext={t(valueKey)}
           aria-disabled={inactive}
           data-dragging={dragging || undefined}
           style={{

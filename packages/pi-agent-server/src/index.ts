@@ -178,8 +178,8 @@ interface InitMessage {
   swarmEnabled?: boolean;
   /** Independent budget for a spawned agent; roots omit this value. */
   swarmAgentTokenBudget?: number;
-  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
+  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
 }
 
@@ -190,8 +190,8 @@ interface RuntimeConfigUpdateMessage {
   providerType?: string;
   authType?: string;
   baseUrl?: string;
-  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
+  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -660,8 +660,9 @@ function registerCustomEndpointModels(
 ): void {
   for (const m of models) {
     customEndpointModelIds.add(m.id);
-    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined || m.supportedThinkingLevels !== undefined) {
+    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined || m.supportedThinkingLevels !== undefined || m.thinkingMode) {
       customModelOverrides.set(m.id, {
+        ...(m.thinkingMode ? { thinkingMode: m.thinkingMode } : {}),
         ...(m.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: m.supportedThinkingLevels } : {}),
         ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
         ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),

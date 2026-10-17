@@ -1,22 +1,22 @@
 /**
  * Thinking Level Configuration
  *
- * Six-tier thinking system for extended reasoning:
- * - OFF: No extended thinking (disabled)
+ * Ordered effort stops for extended reasoning:
+ * - Off: No extended thinking
+ * - Minimal: Smallest effort a model actually accepts (GPT-5, Gemini 3 Flash, …)
  * - Low: Light reasoning, faster responses
  * - Medium: Balanced speed and reasoning (default)
  * - High: Deep reasoning for complex tasks
- * - XHigh: Extra-high reasoning — Anthropic's recommended level for Opus agentic/coding work
+ * - XHigh: Extra-high reasoning for models that advertise it
  * - Max: Maximum effort reasoning
  *
- * Session-level setting with workspace defaults.
- *
- * Provider mappings:
- * - Anthropic: adaptive thinking + effort levels (current Opus models). On models that
- *   don't accept `xhigh`, the Anthropic SDK silently falls back to `high`.
- * - Pi/OpenAI: reasoning_effort via Pi SDK levels, passed through 1:1 up to `max`.
- *   Pi clamps per model internally, so models without native `max` support
- *   (everything except GPT-5.6 and adaptive Claude) degrade to their own ceiling.
+ * Which stops appear is per model. `thinking-capabilities.ts` reads upstream
+ * `thinkingLevelMap` / `supportedReasoningEfforts` first and falls back to one
+ * capability table. The selected stop is passed through to Pi, which maps it
+ * onto the provider wire format (OpenAI `reasoning_effort`, Anthropic `effort`
+ * or `budget_tokens`, Gemini `thinkingLevel` / `thinkingBudget`, DeepSeek and
+ * Kimi thinking flags). Stops the model does not accept are not offered, so
+ * the request does not rely on a silent upstream clamp.
  */
 
 /**
@@ -24,10 +24,12 @@
  * `ThinkingLevel` type, `THINKING_LEVELS` metadata, the Zod schema in
  * `validators.ts`, and runtime validation/error messages all derive from this.
  *
- * Order is significant: it determines UI ordering (low → max).
+ * Order is significant: it determines UI ordering (off → max) and distance
+ * when a saved level has to move to the nearest legal stop.
  */
 export const THINKING_LEVEL_IDS = [
   'off',
+  'minimal',
   'low',
   'medium',
   'high',
@@ -53,6 +55,7 @@ export interface ThinkingLevelDefinition {
  */
 export const THINKING_LEVELS: readonly ThinkingLevelDefinition[] = [
   { id: 'off', nameKey: 'thinking.off', descriptionKey: 'thinking.offDesc' },
+  { id: 'minimal', nameKey: 'thinking.minimal', descriptionKey: 'thinking.minimalDesc' },
   { id: 'low', nameKey: 'thinking.low', descriptionKey: 'thinking.lowDesc' },
   { id: 'medium', nameKey: 'thinking.medium', descriptionKey: 'thinking.mediumDesc' },
   { id: 'high', nameKey: 'thinking.high', descriptionKey: 'thinking.highDesc' },
@@ -68,8 +71,9 @@ export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
  * Used with adaptive thinking (thinking: { type: 'adaptive' }).
  * Returns null for 'off' (thinking should be disabled entirely).
  */
-export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null> = {
+export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null> = {
   off: null,
+  minimal: 'minimal',
   low: 'low',
   medium: 'medium',
   high: 'high',
@@ -89,6 +93,7 @@ export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'low' | 'medium' | 'high'
 const TOKEN_BUDGETS = {
   haiku: {
     off: 0,
+    minimal: 1_000,
     low: 2_000,
     medium: 4_000,
     high: 6_000,
@@ -97,6 +102,7 @@ const TOKEN_BUDGETS = {
   },
   default: {
     off: 0,
+    minimal: 2_000,
     low: 4_000,
     medium: 10_000,
     high: 20_000,
@@ -150,15 +156,14 @@ export function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefine
   return undefined;
 }
 
-/** User-declared capability list; undefined preserves the provider defaults. */
-export function modelThinkingLevels(model?: { supportedThinkingLevels?: ThinkingLevel[]; supportsThinking?: boolean }) {
-  if (model?.supportedThinkingLevels !== undefined) {
-    return THINKING_LEVELS.filter(level => model.supportedThinkingLevels!.includes(level.id));
-  }
-  return model?.supportsThinking === false ? [] : THINKING_LEVELS;
-}
-
-export function constrainThinkingLevel(requested: ThinkingLevel, supported?: ThinkingLevel[]): ThinkingLevel {
-  if (supported === undefined || supported.includes(requested)) return requested;
-  return THINKING_LEVEL_IDS.filter(level => supported.includes(level)).at(0) ?? 'off';
-}
+export {
+  constrainThinkingLevel,
+  modelThinkingCapability,
+  modelThinkingLevels,
+  resolveSessionThinkingLevel,
+  thinkingFieldsFromUpstream,
+  thinkingLevelMapForLevels,
+  type ThinkingCapability,
+  type ThinkingMode,
+  type ThinkingModelRef,
+} from './thinking-capabilities.ts';

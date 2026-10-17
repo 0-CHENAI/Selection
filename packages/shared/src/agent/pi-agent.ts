@@ -1,4 +1,4 @@
-import { constrainThinkingLevel } from './thinking-levels.ts';
+import { resolveSessionThinkingLevel } from './thinking-levels.ts';
 /**
  * Pi Backend (Subprocess RPC Client)
  *
@@ -2988,9 +2988,13 @@ export class PiAgent extends BaseAgent {
   }
 
   private resolveConfiguredThinkingLevel(level: ThinkingLevel): ThinkingLevel {
+    const modelId = this.getModel();
     const model = getBackendRuntime(this.config).customModels?.find(entry =>
-      connectionModelIdsMatch(typeof entry === 'string' ? entry : entry.id, this.getModel()));
-    return constrainThinkingLevel(level, typeof model === 'object' ? model.supportedThinkingLevels : undefined);
+      connectionModelIdsMatch(typeof entry === 'string' ? entry : entry.id, modelId));
+    const ref = typeof model === 'object'
+      ? { ...model, id: model.id || modelId }
+      : { id: typeof model === 'string' ? model : modelId };
+    return resolveSessionThinkingLevel(ref, level);
   }
 
   override setThinkingLevel(level: ThinkingLevel): void {
