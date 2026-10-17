@@ -1,7 +1,7 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
-import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react"
+import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
 import {
@@ -84,10 +84,12 @@ import { resolveEntityColor } from "@craft-agent/shared/colors"
 import * as storage from "@/lib/local-storage"
 import {
   immersiveDisplayWidths,
+  immersiveTogglePressed,
   isConversationSurface,
+  nextImmersiveToggle,
+  readImmersivePreference,
   shouldApplyImmersiveLayout,
 } from "./immersive-mode"
-import { immersiveLayoutActiveAtom, immersiveModeEnabledAtom } from "@/atoms/immersive-mode"
 import { toast } from "sonner"
 import { draftSessionNavigateOptions, navigate, routes } from "@/lib/navigate"
 import {
@@ -251,17 +253,24 @@ function AppShellContent({
     return storage.get(storage.KEYS.sessionListWidth, 300)
   })
 
-  // Hides both sidebar and navigator (CMD+. toggle)
-  // Seed from either focused window param or persisted preference, then keep it toggleable.
+  // Focused-window launch (Open in New Window) starts with the left columns hidden.
+  // It is not a second preference: the first immersive toggle clears it.
   const [isSidebarAndNavigatorHidden, setIsSidebarAndNavigatorHidden] = React.useState(() => {
-    return isFocusedMode || storage.get(storage.KEYS.focusModeEnabled, false)
+    return isFocusedMode
   })
 
-  // Immersive mode (the former sidebar button, still ⌘/Ctrl+B).
+  // Immersive mode (⌘/Ctrl+B and ⌘/Ctrl+.). Hides the left nav and list only.
   // The flag is persisted. Column widths are not rewritten, so turning it off
   // restores the sidebar and list exactly as they were.
   const [isImmersiveMode, setIsImmersiveMode] = React.useState(() => {
-    return storage.get(storage.KEYS.immersiveModeEnabled, false)
+    return readImmersivePreference({
+      immersive: storage.get(storage.KEYS.immersiveModeEnabled, false),
+      legacyFocus: storage.get(storage.KEYS.focusModeEnabled, false),
+    })
+  })
+  const immersivePressed = immersiveTogglePressed({
+    immersive: isImmersiveMode,
+    launchHidden: isSidebarAndNavigatorHidden,
   })
 
   // Auto-compact mode: shell width below mobile threshold hides sidebar/navigator
@@ -307,13 +316,6 @@ function AppShellContent({
   )
   const displayedSidebarWidth = isAutoCompact ? 0 : collapsedWidths.sidebar
   const displayedNavigatorWidth = isAutoCompact ? sessionListWidth : collapsedWidths.navigator
-  const setImmersiveModeEnabled = useSetAtom(immersiveModeEnabledAtom)
-  const setImmersiveLayoutActive = useSetAtom(immersiveLayoutActiveAtom)
-  useLayoutEffect(() => {
-    setImmersiveModeEnabled(isImmersiveMode)
-    setImmersiveLayoutActive(immersiveLayout)
-  }, [immersiveLayout, isImmersiveMode, setImmersiveLayoutActive, setImmersiveModeEnabled])
-
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
@@ -794,14 +796,18 @@ function AppShellContent({
   })
 
   const handleToggleImmersiveMode = useCallback(() => {
-    setIsImmersiveMode(value => !value)
-  }, [])
+    const next = nextImmersiveToggle({
+      immersive: isImmersiveMode,
+      launchHidden: isSidebarAndNavigatorHidden,
+    })
+    setIsSidebarAndNavigatorHidden(next.launchHidden)
+    setIsImmersiveMode(next.immersive)
+  }, [isImmersiveMode, isSidebarAndNavigatorHidden])
 
-  // Immersive mode (CMD+B). Escape stays bound to stop-processing / overlays.
+  // One switch. ⌘/Ctrl+B is the menu accelerator; ⌘/Ctrl+. is the same toggle.
+  // Escape stays bound to stop-processing / overlays.
   useAction('view.toggleSidebar', handleToggleImmersiveMode)
-
-  // Focus mode toggle (CMD+.) - hides both sidebars
-  useAction('view.toggleFocusMode', () => setIsSidebarAndNavigatorHidden(v => !v))
+  useAction('view.toggleFocusMode', handleToggleImmersiveMode)
 
   // Panel focus navigation (CMD+SHIFT+[ / ])
   const focusNextPanel = useSetAtom(focusNextPanelAtom)
@@ -1283,29 +1289,29 @@ function AppShellContent({
     storage.set(storage.KEYS.sidebarVisible, isSidebarVisible)
   }, [isSidebarVisible])
 
-  // Persist focus mode state to localStorage
-  React.useEffect(() => {
-    storage.set(storage.KEYS.focusModeEnabled, isSidebarAndNavigatorHidden)
-  }, [isSidebarAndNavigatorHidden])
-
   React.useEffect(() => {
     storage.set(storage.KEYS.immersiveModeEnabled, isImmersiveMode)
   }, [isImmersiveMode])
 
-  // Listen for focus mode toggle from menu (View → Focus Mode)
+  // ⌘+. used to persist its own flag. Keep the key, but it is no longer a second switch.
   React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleFocusMode?.(() => {
-      setIsSidebarAndNavigatorHidden(v => !v)
-    })
-    return cleanup
+    if (storage.get(storage.KEYS.focusModeEnabled, false)) {
+      storage.set(storage.KEYS.focusModeEnabled, false)
+    }
   }, [])
 
-  // Listen for immersive mode from the menu (View → Immersive Mode, still ⌘/Ctrl+B)
+  // View menu and the legacy focus-mode channel both hit the same switch.
   React.useEffect(() => {
-    const cleanup = window.electronAPI.onMenuToggleSidebar?.(() => {
+    const cleanupFocus = window.electronAPI.onMenuToggleFocusMode?.(() => {
       handleToggleImmersiveMode()
     })
-    return cleanup
+    const cleanupSidebar = window.electronAPI.onMenuToggleSidebar?.(() => {
+      handleToggleImmersiveMode()
+    })
+    return () => {
+      cleanupFocus?.()
+      cleanupSidebar?.()
+    }
   }, [handleToggleImmersiveMode])
 
   // Persist per-view filter map to localStorage (workspace-scoped)
@@ -1894,8 +1900,8 @@ function AppShellContent({
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleImmersiveMode}
-          onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          immersive={isImmersiveMode}
+          onToggleFocusMode={handleToggleImmersiveMode}
+          immersive={immersivePressed}
           afterWorkspace={isSessionsNavigation(navState) ? (
             <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}

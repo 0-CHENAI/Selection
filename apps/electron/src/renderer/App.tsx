@@ -20,7 +20,6 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import { immersiveLayoutActiveAtom } from '@/atoms/immersive-mode'
 import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
@@ -415,8 +414,6 @@ export default function App() {
   // Sources and skills for badge extraction
   const sources = useAtomValue(sourcesAtom)
   const skills = useAtomValue(skillsAtom)
-  const immersiveLayout = useAtomValue(immersiveLayoutActiveAtom)
-
   // Compute if app is fully ready (all data loaded)
   const isFullyReady = appState === 'ready' && sessionsLoaded
 
@@ -2271,11 +2268,11 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
-                  hasTrailingPanel={officePreviewPresent && !immersiveLayout}
+                  hasTrailingPanel={officePreviewPresent}
                 />
               )}
               </div>
-              <div className={immersiveLayout ? 'hidden' : 'contents'}>
+              <div className="contents">
                 {officePreviewPanel}
               </div>
               {officeFilePicker}

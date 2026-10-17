@@ -89,7 +89,7 @@ const ACTION_LABEL_KEYS: Partial<Record<ActionId, string>> = {
   'nav.goBackAlt': 'shortcuts.action.goBack',
   'nav.goForwardAlt': 'shortcuts.action.goForward',
   'view.toggleSidebar': 'shortcuts.action.immersiveMode',
-  'view.toggleFocusMode': 'shortcuts.action.toggleFocusMode',
+  'view.toggleFocusMode': 'shortcuts.action.immersiveMode',
   'navigator.selectAll': 'shortcuts.action.selectAll',
   'navigator.clearSelection': 'shortcuts.action.clearSelection',
   'panel.focusNext': 'shortcuts.action.focusNextPanel',
@@ -98,6 +98,11 @@ const ACTION_LABEL_KEYS: Partial<Record<ActionId, string>> = {
   'chat.cyclePermissionMode': 'shortcuts.action.cyclePermissionMode',
   'chat.nextSearchMatch': 'shortcuts.action.nextSearchMatch',
   'chat.prevSearchMatch': 'shortcuts.action.prevSearchMatch',
+}
+
+const ACTION_DESCRIPTION_KEYS: Partial<Record<ActionId, string>> = {
+  'view.toggleSidebar': 'shortcuts.action.immersiveMode.description',
+  'view.toggleFocusMode': 'shortcuts.action.immersiveMode.description',
 }
 
 function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
@@ -114,7 +119,10 @@ function ActionShortcutRow({ actionId }: { actionId: ActionId }) {
     : hotkey.split('+')
 
   return (
-    <SettingsRow label={ACTION_LABEL_KEYS[actionId] ? t(ACTION_LABEL_KEYS[actionId]!) : label}>
+    <SettingsRow
+      label={ACTION_LABEL_KEYS[actionId] ? t(ACTION_LABEL_KEYS[actionId]!) : label}
+      description={ACTION_DESCRIPTION_KEYS[actionId] ? t(ACTION_DESCRIPTION_KEYS[actionId]!) : undefined}
+    >
       <div className="flex items-center gap-1">
         {keys.map((key, keyIndex) => (
           <Kbd key={keyIndex}>{key}</Kbd>

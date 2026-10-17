@@ -5,7 +5,11 @@ import { actions } from '../../../actions/definitions'
 import {
   IMMERSIVE_CHAT_MAX_WIDTH,
   immersiveDisplayWidths,
+  immersivePanelMaxWidth,
+  immersiveTogglePressed,
   isConversationSurface,
+  nextImmersiveToggle,
+  readImmersivePreference,
   shouldApplyImmersiveLayout,
 } from '../immersive-mode'
 import type { NavigationState } from '../../../../shared/types'
@@ -42,23 +46,57 @@ describe('immersive mode layout', () => {
     expect(IMMERSIVE_CHAT_MAX_WIDTH).toBeLessThanOrEqual(1040)
   })
 
-  it('reuses ⌘/Ctrl+B and does not exit on Escape', () => {
+  it('keeps a reading width until a trailing panel shares the row', () => {
+    expect(immersivePanelMaxWidth(true, false)).toBe(IMMERSIVE_CHAT_MAX_WIDTH)
+    expect(immersivePanelMaxWidth(true, true)).toBeNull()
+    expect(immersivePanelMaxWidth(false, false)).toBeNull()
+    expect(immersivePanelMaxWidth(false, true)).toBeNull()
+  })
+
+  it('treats ⌘+. and ⌘/Ctrl+B as one switch and folds the old focus flag in', () => {
+    expect(readImmersivePreference({ immersive: false, legacyFocus: false })).toBe(false)
+    expect(readImmersivePreference({ immersive: true, legacyFocus: false })).toBe(true)
+    expect(readImmersivePreference({ immersive: false, legacyFocus: true })).toBe(true)
+    expect(nextImmersiveToggle({ immersive: false, launchHidden: false })).toEqual({ immersive: true, launchHidden: false })
+    expect(nextImmersiveToggle({ immersive: true, launchHidden: false })).toEqual({ immersive: false, launchHidden: false })
+    expect(nextImmersiveToggle({ immersive: false, launchHidden: true })).toEqual({ immersive: false, launchHidden: false })
+    expect(immersiveTogglePressed({ immersive: false, launchHidden: true })).toBe(true)
+    expect(immersiveTogglePressed({ immersive: true, launchHidden: false })).toBe(true)
+    expect(immersiveTogglePressed({ immersive: false, launchHidden: false })).toBe(false)
+  })
+
+  it('reuses ⌘/Ctrl+B and ⌘+. and does not exit on Escape', () => {
     expect(actions['view.toggleSidebar'].defaultHotkey).toBe('mod+b')
     expect(actions['view.toggleSidebar'].label).toBe('Immersive Mode')
+    expect(actions['view.toggleSidebar'].description).toMatch(/left navigation/i)
+    expect(actions['view.toggleSidebar'].description).not.toMatch(/only the conversation/i)
+    expect(actions['view.toggleFocusMode'].defaultHotkey).toBe('mod+.')
+    expect(actions['view.toggleFocusMode'].label).toBe('Immersive Mode')
     expect(actions['chat.stopProcessing'].defaultHotkey).toBe('escape')
 
     const appShell = read('../AppShell.tsx')
     const toggleStart = appShell.indexOf('const handleToggleImmersiveMode')
-    const toggle = appShell.slice(toggleStart, appShell.indexOf('}, [])', toggleStart))
-    expect(toggle).toContain('setIsImmersiveMode')
+    const toggle = appShell.slice(toggleStart, appShell.indexOf('}, [isImmersiveMode, isSidebarAndNavigatorHidden])', toggleStart))
+    expect(toggle).toContain('nextImmersiveToggle')
     expect(toggle).not.toMatch(/escape|Escape/)
     expect(toggle).not.toContain('setSidebarWidth')
     expect(toggle).not.toContain('setSessionListWidth')
+    expect(appShell).toContain("useAction('view.toggleSidebar', handleToggleImmersiveMode)")
+    expect(appShell).toContain("useAction('view.toggleFocusMode', handleToggleImmersiveMode)")
     expect(appShell).toContain('storage.KEYS.immersiveModeEnabled')
-    expect(appShell).toContain('immersive={isImmersiveMode}')
+    expect(appShell).toContain('immersive={immersivePressed}')
     expect(appShell).toContain('immersive={immersiveLayout}')
-    expect(read('../PanelSlot.tsx')).toContain('IMMERSIVE_CHAT_MAX_WIDTH')
-    expect(read('../../../../../../../packages/ui/src/components/chat/ResponseSourcesLayout.tsx')).toContain('suspended')
+    expect(appShell).not.toContain('setIsSidebarAndNavigatorHidden(v => !v)')
+    const panel = read('../PanelSlot.tsx')
+    expect(panel).toContain('immersivePanelMaxWidth')
+    expect(panel).toContain('data-immersive-cap')
+    expect(read('../immersive-mode.css')).toContain(":has([data-source-layout='open'])")
+    const chat = read('../../../pages/ChatPage.tsx')
+    expect(chat).not.toContain('suspended={immersiveLayout}')
+    expect(chat).not.toContain('immersiveLayoutActiveAtom')
+    const app = read('../../../App.tsx')
+    expect(app).not.toContain('immersiveLayout')
+    expect(app).toContain('hasTrailingPanel={officePreviewPresent}')
     expect(appShell).not.toContain('setIsSidebarVisible(v => !v)')
   })
 
@@ -79,9 +117,13 @@ describe('immersive mode layout', () => {
     expect(menu).not.toContain('RectangleHorizontal')
     expect(menu).toContain("shortcut: 'CmdOrCtrl+B'")
     expect(menu).not.toContain('menu.toggleSidebar')
+    expect(menu).not.toContain('menu.toggleFocusMode')
+    expect(menu).not.toContain("shortcut: 'CmdOrCtrl+.'")
 
     const shortcuts = read('../../../pages/settings/ShortcutsPage.tsx')
     expect(shortcuts).toContain("'view.toggleSidebar': 'shortcuts.action.immersiveMode'")
+    expect(shortcuts).toContain("'view.toggleFocusMode': 'shortcuts.action.immersiveMode'")
+    expect(shortcuts).toContain('shortcuts.action.immersiveMode.description')
   })
 
   it('aligns immersive locale keys and uses 沉浸模式 for the Chinese label', () => {
@@ -90,6 +132,7 @@ describe('immersive mode layout', () => {
     const keys = [
       'menu.immersiveMode',
       'shortcuts.action.immersiveMode',
+      'shortcuts.action.immersiveMode.description',
       'chatInput.placeholder.immersiveMode',
     ]
     const removed = ['menu.toggleSidebar', 'shortcuts.action.toggleSidebar', 'chatInput.placeholder.sidebar']
@@ -98,12 +141,19 @@ describe('immersive mode layout', () => {
       for (const key of keys) expect(messages[key], `${file} ${key}`).toBeTruthy()
       for (const key of removed) expect(messages[key], `${file} ${key}`).toBeUndefined()
       expect(messages['menu.immersiveMode']).toBe(messages['shortcuts.action.immersiveMode'])
+      expect(messages['menu.toggleFocusMode']).toBe(messages['menu.immersiveMode'])
+      expect(messages['shortcuts.action.toggleFocusMode']).toBe(messages['shortcuts.action.immersiveMode'])
       expect(messages['chatInput.placeholder.immersiveMode']).toContain('{{key}}')
+      expect(messages['chatInput.placeholder.focusMode']).toContain('{{key}}')
       expect(messages['menu.immersiveMode']).not.toMatch(/进入|退出|Enter|Exit/)
+      expect(messages['shortcuts.action.immersiveMode.description']).not.toMatch(/只显示对话|only the conversation|Show only/i)
+      expect(messages['chatInput.placeholder.focusMode']).not.toMatch(/专注|Focus Mode|フォーカス|Fokus|enfoque|skupienia|fókusz/i)
     }
     const zh = JSON.parse(readFileSync(join(localesDir, 'zh-Hans.json'), 'utf8')) as Record<string, string>
     expect(zh['menu.immersiveMode']).toBe('沉浸模式')
     expect(zh['shortcuts.action.immersiveMode']).toBe('沉浸模式')
     expect(zh['chatInput.placeholder.immersiveMode']).toBe('按 {{key}} + B 沉浸模式')
+    expect(zh['chatInput.placeholder.focusMode']).toBe('按 {{key}} + . 沉浸模式')
+    expect(zh['shortcuts.action.immersiveMode.description']).toContain('隐藏左侧')
   })
 })

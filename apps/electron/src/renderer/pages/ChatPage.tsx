@@ -45,7 +45,6 @@ import {
   updateSessionMetaAtom,
 } from '@/atoms/sessions'
 import { draftComposerAtomFamily, workModeViewAtom } from '@/atoms/work-mode'
-import { immersiveLayoutActiveAtom } from '@/atoms/immersive-mode'
 import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
@@ -110,7 +109,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const draftStore = useStore()
   const draftWorkMode = useAtomValue(workModeViewAtom)
-  const immersiveLayout = useAtomValue(immersiveLayoutActiveAtom)
   const optionsSessionId = sessionId ?? draftSessionOptionsId(activeWorkspaceId ?? '', orchestrationProjectId ?? undefined, draftWorkMode)
   const [draftComposer, setDraftComposer] = useAtom(draftComposerAtomFamily(optionsSessionId))
 
@@ -961,7 +959,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }
 
   return (
-    <ResponseSourcesLayout suspended={immersiveLayout} resizeHandle={SourcesResizeHandle} key={optionsSessionId} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
+    <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={optionsSessionId} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
       renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />

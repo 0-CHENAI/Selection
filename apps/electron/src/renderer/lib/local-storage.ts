@@ -23,10 +23,10 @@ export const KEYS = {
   chatGroupingMode: 'chat-grouping-mode', // How to group chats: 'date' | 'status'
   collapsedSessionGroups: 'collapsed-session-groups', // Collapsed group keys in session list
 
-  // Focus mode
+  // Retired ⌘+. flag. Read once into immersive mode, then cleared.
   focusModeEnabled: 'focus-mode-enabled',
 
-  // Immersive mode — conversation only. Column widths stay in their own keys.
+  // Immersive mode — hides the left nav and list. Column widths stay in their own keys.
   immersiveModeEnabled: 'immersive-mode-enabled',
 
   // Session files panel state

@@ -172,17 +172,6 @@ export const VIEW_MENU: MenuSection = {
     { type: 'separator' },
     {
       type: 'action',
-      id: 'toggleFocusMode',
-      actionId: 'view.toggleFocusMode',
-      labelKey: 'menu.toggleFocusMode',
-      shortcut: 'CmdOrCtrl+.',
-      shortcutDisplayMac: '⌘.',
-      shortcutDisplayOther: 'Ctrl+.',
-      ipcChannel: RPC_CHANNELS.menu.TOGGLE_FOCUS_MODE,
-      icon: 'Focus',
-    },
-    {
-      type: 'action',
       id: 'toggleSidebar',
       actionId: 'view.toggleSidebar',
       labelKey: 'menu.immersiveMode',

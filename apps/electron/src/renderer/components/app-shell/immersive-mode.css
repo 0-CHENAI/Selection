@@ -1,0 +1,18 @@
+/* Reading-width cap for immersive mode. The sources column is inside this
+   panel; drop the cap so the conversation and the sources sit side by side.
+   Office is a sibling panel and never sets data-immersive-cap. */
+[data-immersive-cap='on'] {
+  width: 100%;
+  max-width: var(--immersive-panel-max, 960px);
+  margin-inline: auto;
+  flex-grow: 0;
+  flex-shrink: 1;
+  flex-basis: auto;
+  min-width: 0;
+}
+
+[data-immersive-cap='on']:has([data-source-layout='open']) {
+  max-width: none;
+  margin-inline: 0;
+  flex-grow: 1;
+}
