@@ -6,7 +6,7 @@ import testI18n from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import en from '../../../../../shared/src/i18n/locales/en.json'
 import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
-import { TodoList } from '../TodoList'
+import { TodoList, taskRailDepths } from '../TodoList'
 import type { TodoItem } from '../TurnCard'
 import { railTocActiveIndex } from '../../ui/rail-toc'
 
@@ -120,9 +120,67 @@ describe('read-only task rail', () => {
     expect(html).toContain('text-foreground/50')
   })
 
+  test('bends about one later step in four and keeps earlier nodes still', async () => {
+    const depths = taskRailDepths(mixed)
+    expect(depths[0]).toBe(0)
+    for (let index = 1; index < depths.length; index++) {
+      expect(Math.abs((depths[index] ?? 0) - (depths[index - 1] ?? 0))).toBeLessThanOrEqual(1)
+      expect(depths[index]).toBeGreaterThanOrEqual(0)
+      expect(depths[index]).toBeLessThanOrEqual(2)
+    }
+    const finished = mixed.map(item => ({ ...item, status: 'completed' as const, activeForm: '忽略' }))
+    expect(taskRailDepths(finished)).toEqual(depths)
+    const extra: TodoItem = { id: 'extra', content: '补充说明', status: 'pending' }
+    expect(taskRailDepths([...mixed, extra]).slice(0, mixed.length)).toEqual(depths)
+    expect(taskRailDepths(mixed.map(({ id, ...item }) => item))[0]).toBe(0)
+
+    // At either edge the only feasible step is back toward the middle.
+    const edge = (ids: string[]) => taskRailDepths(ids.map(id => ({ id, content: id })))
+    expect(edge(['stay', 'bend-5'])).toEqual([0, 1])
+    expect(edge(['stay', 'bend-1', 'bend-9', 'bend-10'])).toEqual([0, 1, 2, 1])
+    expect(edge(['stay', 'bend-1', 'bend-5'])).toEqual([0, 1, 0])
+
+    const many = Array.from({ length: 96 }, (_, index) => ({
+      id: `step-${index}-${(index * 17).toString(36)}`,
+      content: `步骤 ${index}`,
+    }))
+    const manyDepths = taskRailDepths(many)
+    let bends = 0
+    let consecutive = 0
+    let previousBent = false
+    for (let index = 1; index < manyDepths.length; index++) {
+      const bent = manyDepths[index] !== manyDepths[index - 1]
+      if (bent) {
+        bends += 1
+        if (previousBent) consecutive += 1
+      }
+      previousBent = bent
+      expect(Math.abs((manyDepths[index] ?? 0) - (manyDepths[index - 1] ?? 0))).toBeLessThanOrEqual(1)
+    }
+    const rate = bends / (manyDepths.length - 1)
+    expect(rate).toBeGreaterThan(0.12)
+    expect(rate).toBeLessThan(0.4)
+    expect(consecutive).toBeGreaterThan(0)
+
+    const html = await renderList(mixed)
+    const rows = html.split('<li ').slice(1)
+    expect(rows.map(entry => entry.match(/data-task-depth="(\d+)"/)?.[1])).toEqual(depths.map(String))
+    const padding = [19, 33, 47]
+    rows.forEach((entry, index) => {
+      expect(entry).toContain(`padding-left:${padding[depths[index] ?? 0]}px`)
+    })
+  })
+
   test('keeps the native rail drawing and drops click, hover, and scroll', () => {
     const source = readFileSync(new URL('../../ui/rail-toc.tsx', import.meta.url), 'utf8')
     const list = readFileSync(new URL('../TodoList.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('from.x === to.x')
+    expect(source).toContain('(to.y - from.y) * 0.5')
+    expect(source).toContain('fill-transparent')
+    expect(source).toContain('r={3.25}')
+    expect(source).toContain('stroke-foreground/30')
+    expect(source).toContain('indent = 14')
+    expect(source).toContain('paddingLeft: RAIL_X + (item.depth ?? 0) * indent + LABEL_GAP')
     expect(source).toContain('strokeDasharray="2 5"')
     expect(source).toContain('M12 2 20.5 21 12 17.5 3.5 21z')
     expect(source).toContain('stiffness: 140, damping: 26, mass: 0.6')

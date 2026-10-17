@@ -42,18 +42,20 @@ type Geometry = { nodes: Point[]; d: string; width: number; height: number }
 function buildPath(nodes: Point[]) {
   const first = nodes[0]
   if (!first) return ""
-  const points: Point[] = [{ x: first.x, y: 0 }, first]
+  const commands = [`M${first.x} 0`, `L${first.x} ${first.y}`]
   for (let i = 1; i < nodes.length; i++) {
     const from = nodes[i - 1]
     const to = nodes[i]
     if (!from || !to) continue
-    if (from.x !== to.x) {
-      const bend = (to.y - from.y) * 0.3
-      points.push({ x: from.x, y: from.y + bend }, { x: to.x, y: to.y - bend })
+    if (from.x === to.x) {
+      commands.push(`L${to.x} ${to.y}`)
+      continue
     }
-    points.push(to)
+    // Vertical at each node, horizontal through the middle: the S in the reference.
+    const mid = from.y + (to.y - from.y) * 0.5
+    commands.push(`C${from.x} ${mid} ${to.x} ${mid} ${to.x} ${to.y}`)
   }
-  return points.map((p, i) => `${i ? "L" : "M"}${p.x} ${p.y}`).join(" ")
+  return commands.join(" ")
 }
 
 // the rail only ever runs downward, so y is monotonic along its length
@@ -344,23 +346,18 @@ const RailToc = ({
             <g mask={`url(#${maskId}-nodes)`}>
               {geometry.nodes.map((node, i) => {
                 const status = items[i]?.status
-                const filledNode = status === "completed" || status === "in_progress"
                 const stopped = status === "interrupted"
                 return (
                   <circle
                     key={items[i]?.id ?? i}
                     cx={node.x}
                     cy={node.y}
-                    r={filledNode ? 3 : 3.25}
+                    r={3.25}
                     strokeWidth="1.25"
                     data-task-node={status}
                     className={cn(
-                      "transition-[fill,stroke] duration-200 motion-reduce:transition-none",
-                      stopped
-                        ? "fill-transparent stroke-destructive"
-                        : filledNode
-                          ? "fill-[var(--rail)] stroke-[var(--rail)]"
-                          : "fill-transparent stroke-foreground/30",
+                      "fill-transparent transition-[stroke] duration-200 motion-reduce:transition-none",
+                      stopped ? "stroke-destructive" : "stroke-foreground/30",
                     )}
                   />
                 )
