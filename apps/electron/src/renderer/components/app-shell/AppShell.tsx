@@ -1,7 +1,7 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
-import { useRef, useState, useEffect, useCallback, useMemo } from "react"
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react"
 import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
 import {
@@ -67,6 +67,8 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { workModeViewAtom } from '@/atoms/work-mode'
+import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
+import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -427,6 +429,45 @@ function AppShellContent({
     return new Map<string, FilterMode>(Object.entries(entry))
   }, [viewFiltersMap, sessionFilterKey])
 
+  const setHistoryScope = useSetAtom(historyScopeAtom)
+  const historyScope = useAtomValue(historyScopeAtom)
+  const historyScopeRevision = useAtomValue(historyScopeRevisionAtom)
+  const appliedHistoryScopeRevisionRef = useRef(0)
+
+  // Keep the history key aligned with the All Sessions project filter, including
+  // filters restored from storage. This follows the stored filter, not the
+  // navigator-derived map, so opening settings does not look like clearing it.
+  // Clicks that also navigate set the atom before navigate(), so this effect
+  // does not race that history push.
+  useLayoutEffect(() => {
+    const projects = viewFiltersMap.allSessions?.projects
+    const scope = serializeProjectHistoryScope(
+      Object.entries(projects ?? {}).filter(([, mode]) => mode === 'include').map(([id]) => id),
+    )
+    setHistoryScope(scope)
+  }, [viewFiltersMap, setHistoryScope])
+
+  useEffect(() => {
+    if (historyScopeRevision === appliedHistoryScopeRevisionRef.current) return
+    appliedHistoryScopeRevisionRef.current = historyScopeRevision
+    const projects = parseProjectHistoryScope(historyScope)
+    setViewFiltersMap(prev => {
+      const current = prev.allSessions?.projects ?? {}
+      const currentIds = Object.entries(current).filter(([, mode]) => mode === 'include').map(([id]) => id).sort().join(',')
+      const nextIds = Object.keys(projects).sort().join(',')
+      if (currentIds === nextIds) return prev
+      return {
+        ...prev,
+        allSessions: {
+          statuses: prev.allSessions?.statuses ?? {},
+          labels: prev.allSessions?.labels ?? {},
+          groupingMode: prev.allSessions?.groupingMode ?? 'date',
+          projects,
+        },
+      }
+    })
+  }, [historyScope, historyScopeRevision])
+
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -434,6 +475,7 @@ function AppShellContent({
   // handleJumpToProjectSessions; used by kanban tile/subtask clicks and post-create.
   const handleJumpToTaskSessions = useCallback(
     (sessionId: string, scope: { labelId: string; projectId?: string }) => {
+      setHistoryScope(scope.projectId ? serializeProjectHistoryScope([scope.projectId]) : '')
       setViewFiltersMap(prev => {
         const existing = prev['allSessions']
         return {
@@ -448,7 +490,7 @@ function AppShellContent({
       })
       navigate(routes.view.allSessions(sessionId))
     },
-    []
+    [setHistoryScope]
   )
 
   // Search state for session list
@@ -621,7 +663,18 @@ function AppShellContent({
     // This fixes CMD+R losing filters - previously only ran on workspace switch
     if (previousWorkspaceId !== activeWorkspaceId) {
       const newViewFilters = storage.get<ViewFiltersMap>(storage.KEYS.viewFilters, {}, activeWorkspaceId)
-      setViewFiltersMap(sanitizeRemovedSessionFilters(newViewFilters))
+      const sanitizedViewFilters = sanitizeRemovedSessionFilters(newViewFilters)
+      const savedProjects = sanitizedViewFilters.allSessions?.projects
+      const savedScope = serializeProjectHistoryScope(
+        Object.entries(savedProjects ?? {}).filter(([, mode]) => mode === 'include').map(([id]) => id),
+      )
+      // Hydration is not a visit. Mark the scope write so history refreshes
+      // the current entry instead of enabling Back on startup.
+      if (store.get(historyScopeAtom) !== savedScope) {
+        store.set(historyScopeSilentAtom, true)
+        store.set(historyScopeAtom, savedScope)
+      }
+      setViewFiltersMap(sanitizedViewFilters)
 
       const newExpandedFolders = storage.get<string[]>(storage.KEYS.expandedFolders, [], activeWorkspaceId)
       setExpandedFolders(new Set(newExpandedFolders))
@@ -631,7 +684,7 @@ function AppShellContent({
     }
 
     previousWorkspaceRef.current = activeWorkspaceId
-  }, [activeWorkspaceId])
+  }, [activeWorkspaceId, store])
 
   // Load sources from backend on mount
   React.useEffect(() => {
@@ -1095,6 +1148,7 @@ function AppShellContent({
   // Select a project-bound session explicitly, or suppress auto-selection when
   // the project is empty so an unrelated global chat cannot remain on the right.
   const handleJumpToProjectSessions = useCallback((projectId: string, sessionId?: string, newPanel?: boolean) => {
+    setHistoryScope(serializeProjectHistoryScope([projectId]))
     setViewFiltersMap(prev => ({
       ...prev,
       allSessions: {
@@ -1115,7 +1169,7 @@ function AppShellContent({
       routes.view.allSessions(targetProjectSessionId ?? undefined),
       targetProjectSessionId ? (newPanel === undefined ? undefined : { newPanel }) : { skipAutoSelect: true },
     )
-  }, [activeSessionMetas])
+  }, [activeSessionMetas, setHistoryScope])
 
   const refreshWorkspaceUnreadMap = useCallback(async () => {
     try {
@@ -1335,6 +1389,7 @@ function AppShellContent({
     // secondary project filter. Explicitly selecting the parent must clear
     // that scope; otherwise both rows stay highlighted and the list remains
     // restricted to the previously selected project (#165).
+    setHistoryScope('')
     setViewFiltersMap(prev => {
       const existing = prev['allSessions']
       if (!existing || Object.keys(existing.projects ?? {}).length === 0) return prev
@@ -1344,7 +1399,7 @@ function AppShellContent({
       }
     })
     navigate(routes.view.allSessions())
-  }, [])
+  }, [setHistoryScope])
 
   // Handler for sources view (all sources)
   const handleSourcesClick = useCallback(() => {
