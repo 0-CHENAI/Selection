@@ -72,10 +72,11 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
   if (artifacts.length === 0) return null
   return (
     <TooltipProvider>
-      <section ref={sectionRef} aria-label={t('chat.artifacts')} className="@container/artifacts px-4 pb-3 pt-1">
+      <section ref={sectionRef} aria-label={t('chat.artifacts')} className="@container/artifacts px-2.5 pb-3 pt-1">
         <div className="mb-2 text-xs font-medium text-muted-foreground">{t('chat.artifacts')}</div>
-        {/* Container queries keep the row limit in sync; flex growth fills incomplete rows. */}
-        <ul id={listId} className="flex flex-wrap gap-2">
+        {/* Container queries keep the row limit in sync; flex growth fills incomplete rows.
+            Shift by the chip's own padding so the file icon lines up with message actions. */}
+        <ul id={listId} className="-ml-3 flex flex-wrap gap-2">
           {artifacts.map((artifact, index) => {
             const version = versions?.find(item => artifactPathKey(item.path) === artifactPathKey(artifact.path))
             const change = artifact.change

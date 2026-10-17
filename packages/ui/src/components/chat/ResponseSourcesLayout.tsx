@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { WebsiteIcon } from '../markdown/WebsiteIcon'
 import type { ResponseSource } from './response-sources'
 import { collectSourceMetadata, sourcePlainText, sourceUrlKey, type SourceToolMessage } from './source-metadata'
-import { isSourcesPanelShown } from './sources-panel'
+import { SOURCE_PANEL_GAP_PX, isSourcesPanelShown, sourceColumnWidth } from './sources-panel'
 
 const SourcesPanelContext = React.createContext<((sources: ResponseSource[]) => void) | null>(null)
 export const useSourcesPanel = () => React.useContext(SourcesPanelContext)
@@ -54,15 +54,17 @@ export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHea
         <div className={panelPresent && !suspended ? "min-w-[320px] flex-1 overflow-hidden rounded-[10px] bg-foreground-2 shadow-middle" : "min-w-[320px] flex-1"}>{children}</div>
         <AnimatePresence initial={false} onExitComplete={() => { if (!sources) setPanelPresent(false) }}>
         {isSourcesPanelShown(!!sources, suspended) && sources && (
-          <motion.div key="reference-sources" className="flex h-full shrink-0 overflow-hidden"
+          <motion.div key="reference-sources" className="relative flex h-full shrink-0 overflow-hidden"
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: panelWidth + 6, opacity: 1 }}
+            animate={{ width: sourceColumnWidth(panelWidth), opacity: 1 }}
             exit={{ width: 0, opacity: 0, transition: reduceMotion ? { duration: 0 } : PANEL_SPRING }}
             transition={reduceMotion || dragRef.current ? { duration: 0 } : PANEL_SPRING}
           >
+          {/* Out of flow so a standalone sash margin cannot widen the seam past SOURCE_PANEL_GAP_PX. */}
           <ResizeHandle role="separator" aria-label={t('chat.sourcesTitle')} aria-orientation="vertical"
             aria-valuemin={Math.round(minWidth)} aria-valuemax={Math.round(maxWidth)} aria-valuenow={Math.round(panelWidth)} tabIndex={0}
-            className="group relative w-1.5 shrink-0 cursor-col-resize touch-none select-none focus-visible:outline-none"
+            className="group absolute inset-y-0 z-10 cursor-col-resize touch-none select-none focus-visible:outline-none"
+            style={{ position: 'absolute', left: 0, top: 0, width: SOURCE_PANEL_GAP_PX, height: '100%', margin: 0 }}
             onDoubleClick={() => setWidthRatio(0.25)}
             onPointerDown={event => {
               if (event.button !== 0) return
@@ -84,7 +86,7 @@ export function ResponseSourcesLayout({ children, messages, onOpenUrl, renderHea
               resizeTo(event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : panelWidth + (event.key === 'ArrowLeft' ? 16 : -16))
             }}
           >{ResizeHandle === 'div' && <span className="absolute left-1/2 top-1/2 h-20 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/20 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />}</ResizeHandle>
-          <aside aria-labelledby={headingId} style={{ width: panelWidth }} className="flex h-full shrink-0 flex-col overflow-hidden rounded-[10px] bg-foreground-2 shadow-middle" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setSources(null) } }}>
+          <aside aria-labelledby={headingId} style={{ width: panelWidth, marginLeft: SOURCE_PANEL_GAP_PX }} className="flex h-full shrink-0 flex-col overflow-hidden rounded-[10px] bg-foreground-2 shadow-middle" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setSources(null) } }}>
             {renderHeader ? <div id={headingId}>{renderHeader(t('chat.sourcesTitle') + ' (' + sources.length + ')', () => setSources(null))}</div> : <div className="flex h-[42px] shrink-0 items-center justify-between px-3">
               <h2 id={headingId} className="text-sm font-semibold">{t('chat.sourcesTitle')} ({sources.length})</h2>
               <button type="button" aria-label={t('common.close')} onClick={() => setSources(null)} className="rounded p-1 text-muted-foreground hover:text-foreground"><X className="size-4" /></button>

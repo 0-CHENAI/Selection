@@ -3061,7 +3061,7 @@ export function ResponseCard({
           {showCompletedChrome && compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
-                "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
+                "pl-2.5 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
                 SIZE_CONFIG.fontSize
               )}
             >
