@@ -285,6 +285,8 @@ export interface TodoItem {
   status: TodoStatus
   /** Present continuous form shown when in_progress (e.g., "Running tests") */
   activeForm?: string
+  /** Heading depth when the list is nested. Flat conversation tasks omit this. */
+  depth?: number
 }
 
 export interface ActivityItem {

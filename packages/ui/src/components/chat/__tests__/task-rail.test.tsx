@@ -6,7 +6,7 @@ import testI18n from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import en from '../../../../../shared/src/i18n/locales/en.json'
 import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
-import { TodoList } from '../TodoList'
+import { TodoList, taskRailDepth } from '../TodoList'
 import type { TodoItem } from '../TurnCard'
 import { railTocActiveIndex } from '../../ui/rail-toc'
 
@@ -120,9 +120,37 @@ describe('read-only task rail', () => {
     expect(html).toContain('text-foreground/50')
   })
 
+  test('steps a flat list through the outline so the native rail can bend', async () => {
+    expect([0, 1, 2, 3].map(index => taskRailDepth(mixed, index))).toEqual([0, 1, 1, 0])
+    const html = await renderList(mixed)
+    expect(html).toContain('data-task-depth="0"')
+    expect(html).toContain('data-task-depth="1"')
+    expect(html).toContain('padding-left:19px')
+    expect(html).toContain('padding-left:33px')
+    const rows = html.split('<li ').slice(1)
+    expect(rows.map(entry => entry.match(/data-task-depth="(\d+)"/)?.[1])).toEqual(['0', '1', '1', '0'])
+    const done = mixed.map(item => ({ ...item, status: 'completed' as const }))
+    const finished = await renderList(done)
+    expect(finished.split('<li ').slice(1).map(entry => entry.match(/data-task-depth="(\d+)"/)?.[1])).toEqual(['0', '1', '1', '0'])
+  })
+
+  test('keeps an explicit depth instead of the outline', () => {
+    const nested = [
+      { depth: 0 },
+      { depth: 2 },
+      {},
+    ]
+    expect(taskRailDepth(nested, 0)).toBe(0)
+    expect(taskRailDepth(nested, 1)).toBe(2)
+    expect(taskRailDepth(nested, 2)).toBe(0)
+    expect(taskRailDepth([{ depth: -1 }], 0)).toBe(0)
+  })
+
   test('keeps the native rail drawing and drops click, hover, and scroll', () => {
     const source = readFileSync(new URL('../../ui/rail-toc.tsx', import.meta.url), 'utf8')
     const list = readFileSync(new URL('../TodoList.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('from.x !== to.x')
+    expect(source).toContain('(to.y - from.y) * 0.3')
     expect(source).toContain('strokeDasharray="2 5"')
     expect(source).toContain('M12 2 20.5 21 12 17.5 3.5 21z')
     expect(source).toContain('stiffness: 140, damping: 26, mass: 0.6')
