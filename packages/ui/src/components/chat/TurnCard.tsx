@@ -45,7 +45,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { TaskRail } from './TaskRail'
+import { TodoList } from './TodoList'
 import { MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
@@ -3100,19 +3100,6 @@ export function ResponseCard({
     )
   }
 
-}
-
-// ============================================================================
-// TodoList — read-only rail for conversation task progress
-// ============================================================================
-
-interface TodoListProps {
-  todos: TodoItem[]
-}
-
-/** Conversation task progress. Legacy todo snapshots share this renderer. */
-export function TodoList({ todos }: TodoListProps) {
-  return <TaskRail items={todos} />
 }
 
 // ============================================================================
