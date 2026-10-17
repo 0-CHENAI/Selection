@@ -6,6 +6,7 @@ import {
   type LlmConnection,
 } from '@config/llm-connections'
 import type { ModelDefinition } from '@config/models'
+import { thinkingFieldsFromUpstream } from '@craft-agent/shared/agent/thinking-levels'
 
 /**
  * Format token count for display (e.g., 1500 -> "1.5k", 200000 -> "200k").
@@ -81,6 +82,8 @@ export type LivePickerModel = {
   name: string
   contextWindow: number
   reasoning: boolean
+  supportedReasoningEfforts?: string[]
+  reasoningMandatory?: boolean
 }
 
 export function isOpenRouterConnection(
@@ -101,7 +104,16 @@ function livePickerModelsToDefinitions(
       description: '',
       provider: 'pi',
       contextWindow: model.contextWindow,
-      supportsThinking: model.reasoning,
+      ...thinkingFieldsFromUpstream({
+        id: model.id,
+        provider: 'openrouter',
+        reasoning: model.reasoning,
+        supportedReasoningEfforts: model.supportedReasoningEfforts,
+        reasoningMandatory: model.reasoningMandatory,
+      }),
+      ...(model.supportedReasoningEfforts?.length
+        ? { supportedReasoningEfforts: model.supportedReasoningEfforts, reasoningMandatory: model.reasoningMandatory }
+        : {}),
     }
   })
 }

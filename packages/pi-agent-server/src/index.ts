@@ -106,6 +106,9 @@ import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/s
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
+import { constrainThinkingLevel, modelThinkingCapability } from '../../shared/src/agent/thinking-capabilities.ts';
+import { parseUnsupportedThinkingEffort } from '../../shared/src/agent/thinking-effort-error.ts';
+import type { ThinkingLevel } from '../../shared/src/agent/thinking-levels.ts';
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
 import { createDocumentTools } from './tools/documents.ts';
@@ -327,6 +330,14 @@ interface OutboundRuntimeConfigUpdateResult {
 interface OutboundSessionIdUpdate { type: 'session_id_update'; sessionId: string }
 interface OutboundAnySearchApiKeyRequest { type: 'anysearch_api_key_request'; id: string }
 interface OutboundError { type: 'error'; message: string; code?: string }
+interface OutboundThinkingProbe {
+  type: 'thinking_probe';
+  modelId: string;
+  provider?: string;
+  mode: 'unsupported' | 'always-on' | 'levels';
+  levels: string[];
+  level?: string;
+}
 
 type OutboundMessage =
   | ModelRequestSlotMessage
@@ -347,6 +358,7 @@ type OutboundMessage =
   | OutboundRuntimeConfigUpdateResult
   | OutboundAnySearchApiKeyRequest
   | OutboundSessionIdUpdate
+  | OutboundThinkingProbe
   | OutboundError;
 
 // ============================================================
@@ -381,6 +393,7 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+let thinkingEffortRetried = false;
 const modelRequestSlots = createModelRequestSlots(message => send(message));
 
 function applyCompactionPolicy(model: { contextWindow?: number } | undefined, enabled: boolean): void {
@@ -1598,6 +1611,24 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     } | undefined;
     if (msg?.stopReason === 'error') {
       debugLog(`API error in message_end: ${msg.errorMessage || 'unknown'}`);
+      const parsed = msg.errorMessage ? parseUnsupportedThinkingEffort(msg.errorMessage) : undefined;
+      const model = piSession?.model as { id?: string; provider?: string } | undefined;
+      if (parsed && model?.id) {
+        const current = (initConfig?.thinkingLevel || 'medium') as ThinkingLevel;
+        const known = modelThinkingCapability({ id: model.id, provider: model.provider, reasoning: true });
+        const allowed = parsed.allowed?.length
+          ? parsed.allowed
+          : (parsed.rejected && known.mode === 'levels' ? known.levels.filter(level => level !== parsed.rejected) : []);
+        if (allowed.length > 0) {
+          const next = constrainThinkingLevel(current, allowed);
+          const piLevel = THINKING_TO_PI[next];
+          if (piLevel) {
+            try { piSession?.setThinkingLevel(piLevel); } catch { /* next turn still uses the cached probe */ }
+            if (initConfig) initConfig.thinkingLevel = next;
+            publishThinkingProbe(model.id, model.provider, allowed, next);
+          }
+        }
+      }
     }
 
     if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
@@ -1825,7 +1856,55 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
 
 const pendingOperationControllers = new Set<AbortController>();
 
+function publishThinkingProbe(modelId: string, provider: string | undefined, levels: ThinkingLevel[], level: ThinkingLevel): void {
+  send({
+    type: 'thinking_probe',
+    modelId,
+    provider,
+    mode: 'levels',
+    levels,
+    level,
+  });
+}
+
+/**
+ * One retry when the provider names the efforts it accepts. The corrected
+ * stop is cached by the parent process and the slider drops the rejected one.
+ */
+async function retryPromptForUnsupportedEffort(
+  session: AgentSession,
+  errorMsg: string,
+  message: string,
+  images: Array<{ type: 'image'; data: string; mimeType: string }> | undefined,
+): Promise<boolean> {
+  if (thinkingEffortRetried) return false;
+  const parsed = parseUnsupportedThinkingEffort(errorMsg);
+  if (!parsed) return false;
+  const model = session.model as { id?: string; provider?: string } | undefined;
+  const modelId = model?.id || initConfig?.model;
+  if (!modelId) return false;
+  const provider = model?.provider;
+  const current = (initConfig?.thinkingLevel || 'medium') as ThinkingLevel;
+  const known = modelThinkingCapability({ id: modelId, provider, reasoning: true });
+  const allowed = parsed.allowed?.length
+    ? parsed.allowed
+    : (parsed.rejected && known.mode === 'levels'
+      ? known.levels.filter(level => level !== parsed.rejected)
+      : []);
+  if (allowed.length === 0) return false;
+  const next = constrainThinkingLevel(current, allowed);
+  const piLevel = THINKING_TO_PI[next];
+  if (!piLevel) return false;
+  thinkingEffortRetried = true;
+  session.setThinkingLevel(piLevel);
+  if (initConfig) initConfig.thinkingLevel = next;
+  publishThinkingProbe(modelId, provider, allowed, next);
+  await session.prompt(message, { images, streamingBehavior: 'followUp' });
+  return true;
+}
+
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
+  thinkingEffortRetried = false;
   const promptController = new AbortController();
   pendingOperationControllers.add(promptController);
   currentUserMessage = msg.message;
@@ -1836,6 +1915,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   answerSubmissionSdkMessageId = undefined;
   answerBatchSize = 0;
   answerBatchGate.reset();
+  const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined;
 
   try {
     // If proxy tools changed since last session creation, dispose and recreate.
@@ -1880,7 +1960,6 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // session object. Restore the trigger before the SDK's pre-prompt check.
     applyCompactionPolicy(session.model, session.autoCompactionEnabled);
 
-    const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined
     if (promptImages) {
       debugLog(`image-input ${JSON.stringify({
         requestId: msg.id,
@@ -1902,7 +1981,17 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
       streamingBehavior: 'followUp',
     }));
   } catch (error) {
+    let reported = error;
     const errorMsg = error instanceof Error ? error.message : String(error);
+    if (piSession && !thinkingEffortRetried) {
+      try {
+        const retried = await retryPromptForUnsupportedEffort(piSession, errorMsg, msg.message, promptImages);
+        if (retried) return;
+      } catch (retryError) {
+        reported = retryError;
+      }
+    }
+    const reportedMsg = reported instanceof Error ? reported.message : String(reported);
 
     // No wrapper-side overflow recovery here. The Pi SDK's _checkCompaction
     // already runs `_runAutoCompaction("overflow", true)` on overflow and
@@ -1913,8 +2002,8 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // queue open across the SDK's recovery flow so the recovered turn
     // reaches the UI.
 
-    debugLog(`Prompt failed: ${errorMsg}`);
-    send({ type: 'error', message: errorMsg, code: 'prompt_error' });
+    debugLog(`Prompt failed: ${reportedMsg}`);
+    send({ type: 'error', message: reportedMsg, code: 'prompt_error' });
     // Send synthetic agent_end so the main process event queue unblocks.
     // willRetry: false — this is the terminal error path, no retry follows.
     send({ type: 'event', event: { type: 'agent_end', messages: [], willRetry: false } });

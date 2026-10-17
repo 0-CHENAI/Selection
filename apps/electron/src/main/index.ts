@@ -239,6 +239,17 @@ registerPiModelResolver((piAuthProvider) =>
   piAuthProvider ? getPiModelsForAuthProvider(piAuthProvider) : getAllPiModels()
 )
 
+void import('@craft-agent/shared/config/models-dev-thinking-cache')
+  .then(({ loadModelsDevThinkingCache }) => loadModelsDevThinkingCache())
+  .catch((error: unknown) => {
+    console.warn('[thinking] models.dev catalog unavailable', error)
+  })
+void import('@craft-agent/shared/config/thinking-probe-store')
+  .then(({ loadThinkingProbeStore }) => loadThinkingProbeStore())
+  .catch((error: unknown) => {
+    console.warn('[thinking] probe cache unavailable', error)
+  })
+
 // Custom URL scheme for deeplinks (e.g., craftagents://auth-complete)
 // Supports multi-instance dev: CRAFT_DEEPLINK_SCHEME env var (craftagents1, craftagents2, etc.)
 const DEEPLINK_SCHEME = process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'

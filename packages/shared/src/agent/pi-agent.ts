@@ -1,4 +1,4 @@
-import { resolveSessionThinkingLevel } from './thinking-levels.ts';
+import { applyThinkingProbe, noteThinkingEffortError, resolveSessionThinkingLevel } from './thinking-levels.ts';
 /**
  * Pi Backend (Subprocess RPC Client)
  *
@@ -1332,6 +1332,26 @@ export class PiAgent extends BaseAgent {
         this.handleRuntimeConfigUpdateResult(msg);
         break;
 
+      case 'thinking_probe': {
+        const modelId = typeof msg.modelId === 'string' ? msg.modelId : ''
+        const provider = typeof msg.provider === 'string' ? msg.provider : getBackendRuntime(this.config).piAuthProvider
+        const mode = msg.mode === 'always-on' || msg.mode === 'unsupported' || msg.mode === 'levels' ? msg.mode : 'levels'
+        const levels = Array.isArray(msg.levels) ? msg.levels.filter((level): level is string => typeof level === 'string') : []
+        if (modelId) {
+          applyThinkingProbe({ id: modelId, provider }, { mode, levels })
+          const level = typeof msg.level === 'string' ? msg.level : undefined
+          this.config.onThinkingProbe?.({
+            modelId,
+            provider,
+            mode,
+            levels: levels.filter((level): level is 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' =>
+              level === 'off' || level === 'minimal' || level === 'low' || level === 'medium' || level === 'high' || level === 'xhigh' || level === 'max'),
+            ...(level ? { level } : {}),
+          })
+        }
+        break
+      }
+
       case 'session_id_update':
         // Pi session ID changed
         if (msg.sessionId) {
@@ -1417,6 +1437,11 @@ export class PiAgent extends BaseAgent {
           this.lastSubprocessError = rawMessage;
           this.subprocessErrorRepeatCount = 1;
         }
+
+        noteThinkingEffortError({
+          id: this.getModel(),
+          provider: getBackendRuntime(this.config).piAuthProvider,
+        }, rawMessage)
 
         const parsed = parseError(new Error(rawMessage));
         if (parsed.code !== 'unknown_error') {
@@ -2991,9 +3016,10 @@ export class PiAgent extends BaseAgent {
     const modelId = this.getModel();
     const model = getBackendRuntime(this.config).customModels?.find(entry =>
       connectionModelIdsMatch(typeof entry === 'string' ? entry : entry.id, modelId));
+    const provider = getBackendRuntime(this.config).piAuthProvider
     const ref = typeof model === 'object'
-      ? { ...model, id: model.id || modelId }
-      : { id: typeof model === 'string' ? model : modelId };
+      ? { ...model, id: model.id || modelId, provider }
+      : { id: typeof model === 'string' ? model : modelId, provider };
     return resolveSessionThinkingLevel(ref, level);
   }
 

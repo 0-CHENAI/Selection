@@ -10,9 +10,9 @@
  * - XHigh: Extra-high reasoning for models that advertise it
  * - Max: Maximum effort reasoning
  *
- * Which stops appear is per model. `thinking-capabilities.ts` reads upstream
- * `thinkingLevelMap` / `supportedReasoningEfforts` first and falls back to one
- * capability table. The selected stop is passed through to Pi, which maps it
+ * Which stops appear is per model. `thinking-capabilities.ts` resolves a
+ * provider `/models` payload, then models.dev, then a runtime probe, and
+ * only then the static table. The selected stop is passed through to Pi, which maps it
  * onto the provider wire format (OpenAI `reasoning_effort`, Anthropic `effort`
  * or `budget_tokens`, Gemini `thinkingLevel` / `thinkingBudget`, DeepSeek and
  * Kimi thinking flags). Stops the model does not accept are not offered, so
@@ -157,13 +157,18 @@ export function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefine
 }
 
 export {
+  applyThinkingProbe,
   constrainThinkingLevel,
+  getThinkingCatalogVersion,
   modelThinkingCapability,
   modelThinkingLevels,
+  noteThinkingEffortError,
   resolveSessionThinkingLevel,
+  subscribeThinkingCatalog,
   thinkingFieldsFromUpstream,
   thinkingLevelMapForLevels,
   type ThinkingCapability,
+  type ThinkingCapabilitySource,
   type ThinkingMode,
   type ThinkingModelRef,
 } from './thinking-capabilities.ts';

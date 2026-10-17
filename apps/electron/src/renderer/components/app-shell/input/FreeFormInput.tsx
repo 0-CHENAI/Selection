@@ -1,4 +1,5 @@
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
+import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
@@ -214,7 +215,8 @@ function SwitcherConnectionModels({
             return (
               <StyledDropdownMenuItem
                 key={modelId}
-                onSelect={() => {
+                onSelect={(event) => {
+                  event.preventDefault()
                   const next = chosenPickerModelId(
                     modelId,
                     isCurrentConnection ? currentModel : '',
@@ -531,10 +533,14 @@ export function FreeFormInput({
     return connectionPinnedModelIds(effectiveConnectionDetails)
   }, [effectiveConnectionDetails])
 
-  const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  useThinkingCatalog()
+  const configuredThinkingModel = pickerCatalog.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+    ?? effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
   const thinkingModel: ThinkingModelRef | undefined = typeof configuredThinkingModel === 'object'
-    ? configuredThinkingModel
-    : (typeof configuredThinkingModel === 'string' ? { id: configuredThinkingModel } : (currentModel ? { id: currentModel } : undefined))
+    ? { ...configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+    : (typeof configuredThinkingModel === 'string'
+      ? { id: configuredThinkingModel, provider: effectiveConnectionDetails?.piAuthProvider }
+      : (currentModel ? { id: currentModel, provider: effectiveConnectionDetails?.piAuthProvider } : undefined))
   const thinkingCapability = modelThinkingCapability(thinkingModel)
   const availableThinkingLevels = modelThinkingLevels(thinkingModel)
 
@@ -1877,7 +1883,7 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && (thinkingUnavailable || availableThinkingLevels.length > 0) ? (
+  const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && thinkingUnavailable !== 'unsupported' && (thinkingUnavailable === 'always-on' || availableThinkingLevels.length > 0) ? (
     <PromptThinkingSettings
       value={thinkingLevel}
       levels={availableThinkingLevels}
@@ -2553,7 +2559,8 @@ export function FreeFormInput({
                       return (
                         <StyledDropdownMenuItem
                           key={modelId}
-                          onSelect={() => {
+                          onSelect={(event) => {
+                            event.preventDefault()
                             const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
                             if (next === undefined) return
                             onModelChange(next, effectiveConnection)
@@ -2595,9 +2602,9 @@ export function FreeFormInput({
 
                 {/* Thinking level selector — only shown when thinking levels are available
                     (Claude supports extended thinking, OpenAI backends may not) */}
-                {thinkingUnavailable && (!usePromptAppearance || !onThinkingLevelChange) && (
+                {thinkingUnavailable === 'always-on' && (!usePromptAppearance || !onThinkingLevelChange) && (
                   <div className="px-2 py-2 text-xs text-muted-foreground">
-                    {t(thinkingUnavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported')}
+                    {t('thinking.alwaysOn')}
                   </div>
                 )}
                 {availableThinkingLevels.length > 0 && (!usePromptAppearance || !onThinkingLevelChange) && (
@@ -2617,7 +2624,10 @@ export function FreeFormInput({
                           return (
                             <StyledDropdownMenuItem
                               key={id}
-                              onSelect={() => onThinkingLevelChange?.(id)}
+                              onSelect={(event) => {
+                                event.preventDefault()
+                                onThinkingLevelChange?.(id)
+                              }}
                               className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                             >
                               <div className="text-left">

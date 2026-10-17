@@ -23,6 +23,7 @@ export function buildCustomEndpointModelSubmission(
     ...(input.includeDisplayNames
       ? { name: displayName, shortName: displayName }
       : {}),
+    ...(input.thinkingMode || input.supportedThinkingLevels !== undefined ? { thinkingSource: 'explicit' as const } : {}),
     ...(input.thinkingMode ? { thinkingMode: input.thinkingMode } : {}),
     ...(input.supportedThinkingLevels !== undefined ? {
       supportedThinkingLevels: input.supportedThinkingLevels,

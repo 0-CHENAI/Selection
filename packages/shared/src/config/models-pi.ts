@@ -32,6 +32,7 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
   const compat = m.compat as { supportsReasoningEffort?: boolean; thinkingFormat?: string } | undefined;
   const thinking = thinkingFieldsFromUpstream({
     id: m.id,
+    provider: m.provider,
     reasoning: m.reasoning,
     thinkingLevelMap: m.thinkingLevelMap as Record<string, string | null> | undefined,
     api: m.api,

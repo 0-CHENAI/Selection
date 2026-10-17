@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ComponentEntry } from './types'
 import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
 import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
@@ -542,7 +543,7 @@ const inputModelMenuConnections: LlmConnectionWithStatus[] = [
     slug: 'eming', name: 'Eming', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
     createdAt: 0, isAuthenticated: true, isDefault: true, defaultModel: 'gpt-6-luna',
     models: [
-      { id: 'gpt-6-luna', name: 'gpt-6-luna', shortName: 'gpt-6-luna', description: 'UI fixture', provider: 'pi', contextWindow: 258_000, maxTokens: 128_000, supportedThinkingLevels: THINKING_LEVELS.map(level => level.id) },
+      { id: 'gpt-6-luna', name: 'gpt-6-luna', shortName: 'gpt-6-luna', description: 'UI fixture', provider: 'pi', contextWindow: 258_000, maxTokens: 128_000, thinkingSource: 'explicit', supportedThinkingLevels: THINKING_LEVELS.map(level => level.id) },
       { id: 'gpt-6.1-sol', name: 'gpt-6.1-sol', shortName: 'gpt-6.1-sol', description: 'UI fixture', provider: 'pi', contextWindow: 272_000, maxTokens: 128_000, supportedThinkingLevels: ['low', 'high', 'max'] },
     ],
   },
@@ -550,6 +551,16 @@ const inputModelMenuConnections: LlmConnectionWithStatus[] = [
     slug: 'direct-fixture', name: 'Direct-only (fixture)', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
     createdAt: 0, isAuthenticated: true, defaultModel: 'direct-fixture',
     models: [{ id: 'direct-fixture', name: 'No reasoning (fixture)', shortName: 'Direct', description: 'UI fixture', provider: 'pi', contextWindow: 128_000, supportsThinking: false }],
+  },
+  {
+    slug: 'kimi-code', name: 'Kimi Code', providerType: 'pi', piAuthProvider: 'kimi-coding', authType: 'oauth',
+    createdAt: 0, isAuthenticated: true, defaultModel: 'k3-256k',
+    models: [
+      { id: 'k3', name: 'Kimi K3', shortName: 'Kimi K3', description: 'UI fixture', provider: 'pi', contextWindow: 1_000_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'k3-256k', name: 'Kimi K3-256K', shortName: 'Kimi K3-256K', description: 'UI fixture', provider: 'pi', contextWindow: 256_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'kimi-for-coding', name: 'kimi-for-coding', shortName: 'kimi-for-coding', description: 'UI fixture', provider: 'pi', contextWindow: 1_000_000, supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'max'] },
+      { id: 'kimi-for-coding-highspeed', name: 'Kimi For Coding HighSpeed', shortName: 'HighSpeed', description: 'UI fixture', provider: 'pi', contextWindow: 256_000, supportedThinkingLevels: ['off', 'low', 'medium', 'high'] },
+    ],
   },
 ]
 
@@ -566,6 +577,7 @@ interface InputContainerPlaygroundProps {
   workingDirectory?: string
   inputMode?: InputContainerMode
   compactMode?: boolean
+  enableCompactModelPicker?: boolean
   showOptionBadges?: boolean
   showTasks?: boolean
   showLabels?: boolean
@@ -595,6 +607,7 @@ function InputContainerPlayground({
   workingDirectory = '/Users/demo/projects/craft-agent',
   inputMode = 'freeform',
   compactMode = false,
+  enableCompactModelPicker = false,
   showOptionBadges = true,
   showTasks = true,
   showLabels = true,
@@ -610,6 +623,7 @@ function InputContainerPlayground({
   showFollowUps = false,
   followUpCount = 2,
 }: InputContainerPlaygroundProps) {
+  const { i18n } = useTranslation()
   const playgroundSessionId = 'playground-session'
   const [model, setModel] = React.useState(currentModel)
   const [connection, setConnection] = React.useState('eming')
@@ -623,6 +637,11 @@ function InputContainerPlayground({
   React.useEffect(() => {
     ensureMockElectronAPI()
   }, [])
+
+  React.useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('lng')
+    if (requested && requested !== i18n.language) void i18n.changeLanguage(requested)
+  }, [i18n])
 
   React.useEffect(() => {
     if (!seedRecentDirs) return
@@ -807,6 +826,7 @@ function InputContainerPlayground({
               console.log('[Playground] Structured response:', response)
             },
             currentModel: model,
+            enableCompactModelPicker: compactMode && enableCompactModelPicker,
             currentConnection: modelPickerHierarchy ? connection : undefined,
             onConnectionChange: modelPickerHierarchy ? setConnection : undefined,
             sources: showSources ? sources : [],
@@ -1539,6 +1559,11 @@ export const chatComponents: ComponentEntry[] = [
         name: '模型菜单内调节强度',
         description: '同一浮窗先选供应商、再选模型并调节强度；模型能力仅作界面验收样例',
         props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '紧凑模型菜单内调节强度',
+        description: '紧凑抽屉选中模型后保持打开，并在列表下方显示该模型的思考强度',
+        props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', compactMode: true, enableCompactModelPicker: true, showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
       },
       {
         name: '原输入框对比',

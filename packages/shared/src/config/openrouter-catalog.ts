@@ -8,6 +8,7 @@
 
 import type { ModelDefinition } from './models.ts'
 import { thinkingFieldsFromUpstream } from '../agent/thinking-capabilities.ts'
+import { rememberOpenRouterEfforts } from './openrouter-effort-cache.ts'
 
 export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models'
 export const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -23,6 +24,9 @@ export interface OpenRouterCatalogModel {
   costOutput: number
   contextWindow: number
   reasoning: boolean
+  /** Present only when OpenRouter's `reasoning.supported_efforts` lists them. */
+  supportedReasoningEfforts?: string[]
+  reasoningMandatory?: boolean
 }
 
 export interface PiProviderPickerModel {
@@ -32,6 +36,8 @@ export interface PiProviderPickerModel {
   costOutput: number
   contextWindow: number
   reasoning: boolean
+  supportedReasoningEfforts?: string[]
+  reasoningMandatory?: boolean
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -75,7 +81,22 @@ function isExpiredCatalogModel(rec: Record<string, unknown>): boolean {
   return Number.isFinite(expiresAt) && expiresAt < Date.now()
 }
 
+function reasoningPayload(rec: Record<string, unknown>): { efforts?: string[]; mandatory?: boolean } {
+  const reasoning = asRecord(rec.reasoning)
+  if (!reasoning) return {}
+  const raw = reasoning.supported_efforts ?? reasoning.supportedEfforts
+  const efforts = Array.isArray(raw)
+    ? raw.map(entry => String(entry).trim()).filter(Boolean)
+    : undefined
+  const mandatory = reasoning.mandatory === true
+  return {
+    ...(efforts && efforts.length > 0 ? { efforts } : {}),
+    ...(mandatory ? { mandatory: true } : {}),
+  }
+}
+
 function hasReasoning(rec: Record<string, unknown>): boolean {
+  if (reasoningPayload(rec).efforts?.length) return true
   const params = rec.supported_parameters ?? rec.supportedParameters
   if (!Array.isArray(params)) return false
   return params.some((entry) => {
@@ -104,6 +125,7 @@ export function parseOpenRouterModelsPayload(json: unknown): OpenRouterCatalogMo
     const contextWindow = parseContextWindow(
       rec.context_length ?? rec.context_window ?? rec.contextWindow ?? topProvider?.context_length,
     ) ?? DEFAULT_CONTEXT_WINDOW
+    const reasoning = reasoningPayload(rec)
 
     models.push({
       id,
@@ -112,6 +134,8 @@ export function parseOpenRouterModelsPayload(json: unknown): OpenRouterCatalogMo
       costOutput: perMillionTokens(pricing?.completion),
       contextWindow,
       reasoning: hasReasoning(rec),
+      ...(reasoning.efforts ? { supportedReasoningEfforts: reasoning.efforts } : {}),
+      ...(reasoning.mandatory ? { reasoningMandatory: true } : {}),
     })
   }
   return models
@@ -129,6 +153,10 @@ export function formatPiProviderPickerModels(
       costOutput: model.costOutput,
       contextWindow: model.contextWindow,
       reasoning: model.reasoning,
+      ...('supportedReasoningEfforts' in model && model.supportedReasoningEfforts?.length
+        ? { supportedReasoningEfforts: model.supportedReasoningEfforts }
+        : {}),
+      ...('reasoningMandatory' in model && model.reasoningMandatory ? { reasoningMandatory: true } : {}),
     })),
     totalCount: models.length,
   }
@@ -146,7 +174,13 @@ export function openRouterCatalogToModelDefinitions(
       description: 'openrouter model via Selection Backend',
       provider: 'pi',
       contextWindow: model.contextWindow,
-      ...thinkingFieldsFromUpstream({ id: model.id, reasoning: model.reasoning }),
+      ...thinkingFieldsFromUpstream({
+        id: model.id,
+        provider: 'openrouter',
+        reasoning: model.reasoning,
+        supportedReasoningEfforts: model.supportedReasoningEfforts,
+        reasoningMandatory: model.reasoningMandatory,
+      }),
     }
   })
 }
@@ -178,7 +212,9 @@ export async function fetchOpenRouterCatalog(options: {
     if (!response.ok) {
       throw new Error(`openrouter_models_http_${response.status}`)
     }
-    return parseOpenRouterModelsPayload(await response.json())
+    const models = parseOpenRouterModelsPayload(await response.json())
+    rememberOpenRouterEfforts(models)
+    return models
   } finally {
     clearTimeout(timer)
   }
