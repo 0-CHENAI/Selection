@@ -186,7 +186,7 @@ describe('read-only task rail', () => {
     expect(source).toContain('stiffness: 140, damping: 26, mass: 0.6')
     expect(source).toContain('stiffness: 260, damping: 30')
     expect(source).toContain('data-slot="rail-toc-plane"')
-    expect(source).not.toContain('pathLength')
+    expect(source).toContain('pathLength: filled')
     expect(source).toContain('useReducedMotion')
     expect(source).toContain('reduceMotion ? target : travel')
     expect(source).toContain('reduceMotion ? heading : turn')

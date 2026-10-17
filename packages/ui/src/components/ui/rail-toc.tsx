@@ -120,6 +120,7 @@ const RailToc = ({
   const y = useMotionValue(0)
   const heading = useMotionValue(180)
   const turn = useSpring(heading, TURN_SPRING)
+  const filled = useMotionValue(0)
 
   const activeIndex = railTocActiveIndex(items)
 
@@ -144,8 +145,9 @@ const RailToc = ({
       // unwrapped against the current heading so the turn spring takes the short way round
       const prev = heading.get()
       heading.set(angle + 360 * Math.round((prev - angle) / 360))
+      filled.set(l / length)
     },
-    [x, y, heading],
+    [x, y, heading, filled],
   )
 
   useMotionValueEvent(distance, "change", pose)
@@ -331,6 +333,14 @@ const RailToc = ({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="stroke-foreground/25"
+              />
+              <motion.path
+                d={geometry.d}
+                fill="none"
+                strokeWidth="1.25"
+                stroke="var(--rail)"
+                strokeLinejoin="round"
+                style={{ pathLength: filled }}
               />
             </g>
             <g mask={`url(#${maskId}-nodes)`}>
