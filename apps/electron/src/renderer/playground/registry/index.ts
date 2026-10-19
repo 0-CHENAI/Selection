@@ -3,6 +3,7 @@ import { onboardingComponents } from './onboarding'
 import { chatComponents } from './chat'
 import { turnCardComponents, fullscreenOverlayComponents } from './turn-card'
 import { taskRailComponents } from './task-rail'
+import { taskCardComponents } from './task-card'
 import { turnCardModesComponents } from './turn-card-modes'
 import { messagesComponents } from './messages'
 import { inputComponents } from './input'
@@ -42,6 +43,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...chatComponents,
   ...turnCardComponents,
   ...taskRailComponents,
+  ...taskCardComponents,
   ...turnCardModesComponents,
   ...fullscreenOverlayComponents,
   ...messagesComponents,

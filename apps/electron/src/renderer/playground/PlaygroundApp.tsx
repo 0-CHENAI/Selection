@@ -72,8 +72,19 @@ export function PlaygroundApp() {
     }
     return null
   })
-  const [props, setProps] = React.useState<Record<string, unknown>>({})
-  const [selectedVariant, setSelectedVariant] = React.useState<string | null>(null)
+  const [props, setProps] = React.useState<Record<string, unknown>>(() => {
+    const params = new URLSearchParams(window.location.search)
+    const component = getComponentById(params.get('component') ?? '')
+    if (!component) return {}
+    const defaults: Record<string, unknown> = {}
+    for (const prop of component.props) defaults[prop.name] = prop.defaultValue
+    const variant = component.variants?.find(entry => entry.name === params.get('variant'))
+    return { ...defaults, ...variant?.props }
+  })
+  const [selectedVariant, setSelectedVariant] = React.useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('variant')
+  })
   const [variantsSidebarOpen, setVariantsSidebarOpen] = React.useState(() => {
     try {
       const stored = localStorage.getItem(VARIANTS_SIDEBAR_KEY)
@@ -155,6 +166,10 @@ export function PlaygroundApp() {
   }, [variantsSidebarOpen])
 
   const selectedComponent = selectedId ? (getComponentById(selectedId) ?? null) : null
+  const frameStage = React.useMemo(
+    () => new URLSearchParams(window.location.search).get('frame') === 'stage',
+    [],
+  )
 
   // Reset props when component changes
   React.useEffect(() => {
@@ -205,6 +220,15 @@ export function PlaygroundApp() {
     }
 
     setColorTheme(nextTheme)
+  }
+
+  if (frameStage && selectedComponent) {
+    const Stage = selectedComponent.component
+    return (
+      <div className="h-dvh bg-background text-foreground">
+        <Stage {...props} />
+      </div>
+    )
   }
 
   return (

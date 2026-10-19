@@ -46,6 +46,8 @@ import {
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
+import { TaskTurnSummary } from './TaskProgressCard'
+import type { TodoRailMode } from './task-progress'
 import { MemoizedMarkdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
@@ -424,6 +426,11 @@ export interface TurnCardProps {
   hasEditOrWriteActivities?: boolean
   /** TodoWrite tool state - shown at bottom of turn */
   todos?: TodoItem[]
+  /**
+   * `full` keeps the inline rail. `summary` is a one-line review for older
+   * turns. `hidden` drops the rail when the latest list is docked above the input.
+   */
+  todoRail?: TodoRailMode
   /** Optional render prop for actions menu (Electron provides dropdown) */
   renderActionsMenu?: () => React.ReactNode
   /** Callback when user accepts the plan (plan responses only) */
@@ -3141,6 +3148,7 @@ export const TurnCard = React.memo(function TurnCard({
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
+  todoRail = 'full',
   renderActionsMenu,
   onAcceptPlan,
   onAcceptPlanWithCompact,
@@ -3643,7 +3651,11 @@ export const TurnCard = React.memo(function TurnCard({
       )}
       </AnimatePresence>
 
-      {todos && todos.length > 0 && <TodoList todos={todos} />}
+      {todos && todos.length > 0 && todoRail !== 'hidden' && (
+        todoRail === 'summary'
+          ? <TaskTurnSummary todos={todos} />
+          : <TodoList todos={todos} />
+      )}
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (

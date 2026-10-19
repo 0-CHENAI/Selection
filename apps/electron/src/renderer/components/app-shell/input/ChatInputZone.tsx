@@ -34,6 +34,8 @@ interface ChatInputZoneProps {
   swarmRunning?: boolean
   className?: string
   queuedMessages?: Message[]
+  /** Sits in the composer column, directly above the input card. */
+  beforeInput?: React.ReactNode
   inputProps: React.ComponentProps<typeof InputContainer>
 }
 
@@ -60,6 +62,7 @@ export function ChatInputZone({
   swarmRunning = false,
   className,
   queuedMessages = [],
+  beforeInput,
   inputProps,
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
@@ -126,6 +129,8 @@ export function ChatInputZone({
           compactMode={compactMode}
         />
       )}
+
+      {beforeInput}
 
       <InputErrorBoundary
         sessionId={sessionId}
