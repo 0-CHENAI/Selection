@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "Zwiń zadania",
   "taskCard.completed": "{{current}}/{{total}} ukończone",
   "taskCard.expand": "Rozwiń zadania",
+  "taskCard.heading": "Zadania {{current}}/{{total}}",
   "taskCard.interrupted": "Przerwano · {{current}}/{{total}}",
   "taskCard.label": "Postęp zadań",
   "taskCard.progress": "{{current}}/{{total}}",

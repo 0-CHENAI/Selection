@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "Aufgaben einklappen",
   "taskCard.completed": "{{current}}/{{total}} erledigt",
   "taskCard.expand": "Aufgaben ausklappen",
+  "taskCard.heading": "Aufgaben {{current}}/{{total}}",
   "taskCard.interrupted": "Unterbrochen · {{current}}/{{total}}",
   "taskCard.label": "Aufgabenfortschritt",
   "taskCard.progress": "{{current}}/{{total}}",

@@ -2240,8 +2240,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         todoRail={todoRailForTurn({
                           enabled: taskCardEnabled,
                           isLatest: latestTodo?.key === assistantUiKey,
-                          docked: taskCard.visible,
+                          docked: taskCard.visible || taskCardPresent,
                           hasTodos: !!turn.todos?.length,
+                          superseded: userTurnAfterList,
                         })}
                         onOpenFile={onOpenFile}
                         onOpenArtifact={onOpenArtifact}
@@ -2500,7 +2501,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 phase={taskCard.phase}
                 expanded={taskCard.expanded}
                 onExpandedChange={taskCard.setExpanded}
-                onHoverChange={taskCard.setHovering}
                 visible={taskCard.visible}
                 onPresenceChange={setTaskCardPresent}
                 showScrollToBottom={showScrollToBottom}

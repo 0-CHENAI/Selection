@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "Feladatok összecsukása",
   "taskCard.completed": "{{current}}/{{total}} kész",
   "taskCard.expand": "Feladatok kibontása",
+  "taskCard.heading": "Feladatok {{current}}/{{total}}",
   "taskCard.interrupted": "Megszakítva · {{current}}/{{total}}",
   "taskCard.label": "Feladatállapot",
   "taskCard.progress": "{{current}}/{{total}}",

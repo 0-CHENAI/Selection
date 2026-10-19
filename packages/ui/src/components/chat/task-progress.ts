@@ -32,7 +32,6 @@ export type TaskCardEvent =
   | { type: 'toggle' }
   | { type: 'expand'; expanded: boolean }
   | { type: 'collapse' }
-  | { type: 'fade'; force?: boolean }
 
 export const EMPTY_TASK_CARD_MEMORY: TaskCardMemory = {
   expanded: false,
@@ -40,13 +39,7 @@ export const EMPTY_TASK_CARD_MEMORY: TaskCardMemory = {
   listKey: null,
 }
 
-/** Completed or interrupted capsule stays this long, then fades. */
-export const TASK_CARD_HOLD_MS = 2500
-
-/** Hover or an open panel can postpone the fade only until this deadline. */
-export const TASK_CARD_HOLD_MAX_MS = 6000
-
-/** Exit motion toward the inline summary of the turn. */
+/** Opacity fade when a finished capsule leaves for the next round. */
 export const TASK_CARD_EXIT_MS = 200
 
 /** Room the transcript keeps so the last line sits above the capsule. */
@@ -140,15 +133,23 @@ export function latestTodoList<T extends { type: string; todos?: TodoItem[] }>(
   return null
 }
 
-/** Latest floating list is omitted from the turn. Older lists keep a one-line summary. */
+/**
+ * The capsule owns the latest list, including after it completes or stops.
+ * That turn stays out of the transcript until a later user message closes the
+ * round, or a newer list replaces it. Only then does the older turn keep the
+ * one-line summary, so the same round is never in both places at once.
+ */
 export function todoRailForTurn(input: {
   enabled: boolean
   isLatest: boolean
+  /** The capsule is still on screen, including while it fades out. */
   docked: boolean
   hasTodos: boolean
+  /** A later user message closed this round. */
+  superseded?: boolean
 }): TodoRailMode {
   if (!input.enabled || !input.hasTodos) return 'full'
-  if (input.isLatest && input.docked) return 'hidden'
+  if (input.isLatest && (input.docked || !input.superseded)) return 'hidden'
   return 'summary'
 }
 
@@ -156,7 +157,7 @@ function hidden(snapshot: TaskListSnapshot): TaskCardMemory {
   return { expanded: false, phase: 'hidden', listKey: snapshot.key }
 }
 
-/** Only a running session with open work shows a capsule. Finished sessions stay inline. */
+/** A finished session does not bring the capsule back. Only live, open work does. */
 function restoreSnapshot(snapshot: TaskListSnapshot, userTurnAfterList: boolean): TaskCardMemory {
   if (!snapshot.key || !snapshot.hasIncomplete || userTurnAfterList || snapshot.generationEnded) {
     return hidden(snapshot)
@@ -209,11 +210,6 @@ export function reduceTaskCardMemory(state: TaskCardMemory, event: TaskCardEvent
     case 'collapse':
       if (!state.expanded) return state
       return { ...state, expanded: false }
-    case 'fade': {
-      if (state.phase !== 'complete' && state.phase !== 'interrupted') return state
-      if (state.expanded && !event.force) return state
-      return { ...state, phase: 'hidden', expanded: false }
-    }
     default:
       return state
   }
@@ -228,20 +224,3 @@ export function isTaskCardDocked(state: TaskCardMemory, _listKey?: string | null
   return isTaskCardVisible(state)
 }
 
-/**
- * Terminal capsules fade after the hold. An open panel or hover waits,
- * but never past the hard deadline, which also collapses the panel.
- */
-export function shouldFadeTaskCard(
-  state: TaskCardMemory,
-  hovering: boolean,
-  elapsedMs = TASK_CARD_HOLD_MS,
-): { fade: boolean; force: boolean } {
-  const terminal = state.phase === 'complete' || state.phase === 'interrupted'
-  if (!terminal) return { fade: false, force: false }
-  if (elapsedMs >= TASK_CARD_HOLD_MAX_MS) return { fade: true, force: true }
-  if (elapsedMs >= TASK_CARD_HOLD_MS && !state.expanded && !hovering) {
-    return { fade: true, force: false }
-  }
-  return { fade: false, force: false }
-}

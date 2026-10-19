@@ -26,11 +26,8 @@ export {
   reduceTaskCardMemory,
   isTaskCardVisible,
   isTaskCardDocked,
-  shouldFadeTaskCard,
   taskTurnInterrupted,
   EMPTY_TASK_CARD_MEMORY,
-  TASK_CARD_HOLD_MS,
-  TASK_CARD_HOLD_MAX_MS,
   TASK_CARD_EXIT_MS,
   TASK_CARD_CAPSULE_CLEARANCE,
 } from './task-progress'

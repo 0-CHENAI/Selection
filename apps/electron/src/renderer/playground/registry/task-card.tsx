@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { TaskProgressCard, TaskTurnSummary, type TodoItem } from '@craft-agent/ui'
-import { TASK_CARD_HOLD_MS } from '@craft-agent/ui/chat'
 import { i18n } from '@craft-agent/shared/i18n'
 import type { ComponentEntry } from './types'
 
@@ -29,20 +28,21 @@ const interrupted = stoppedAt(2)
 
 type Mode = 'collapsed' | 'expanded' | 'done' | 'scroll' | 'interrupted' | 'summary' | 'play'
 type Phase = 'active' | 'complete' | 'interrupted'
+type Story = 'idle' | 'playing' | 'holding' | 'sent' | 'summary'
 
 const script: Array<{ at: number; todos: TodoItem[]; phase: Phase }> = [
-  { at: 400, todos: tasks(0, 0), phase: 'active' },
-  { at: 1100, todos: tasks(1, 1), phase: 'active' },
+  { at: 0, todos: tasks(0, 0), phase: 'active' },
+  { at: 900, todos: tasks(1, 1), phase: 'active' },
   { at: 1800, todos: tasks(2, 2), phase: 'active' },
-  { at: 2500, todos: tasks(3, 3), phase: 'active' },
-  { at: 3200, todos: tasks(4, 4), phase: 'active' },
-  { at: 3900, todos: done, phase: 'complete' },
+  { at: 2700, todos: tasks(3, 3), phase: 'active' },
+  { at: 3600, todos: tasks(4, 4), phase: 'active' },
+  { at: 4500, todos: done, phase: 'complete' },
 ]
 
 function staticView(mode: Mode): { todos: TodoItem[]; phase: Phase; expanded: boolean; scroll: boolean } {
-  if (mode === 'expanded') return { todos: tasks(0, 0), phase: 'active', expanded: true, scroll: false }
+  if (mode === 'expanded') return { todos: tasks(3, 3), phase: 'active', expanded: true, scroll: false }
   if (mode === 'done') return { todos: done, phase: 'complete', expanded: false, scroll: false }
-  if (mode === 'scroll') return { todos: tasks(1, 1), phase: 'active', expanded: false, scroll: true }
+  if (mode === 'scroll') return { todos: tasks(3, 3), phase: 'active', expanded: false, scroll: true }
   if (mode === 'interrupted') return { todos: interrupted, phase: 'interrupted', expanded: false, scroll: false }
   return { todos: tasks(0, 0), phase: 'active', expanded: false, scroll: false }
 }
@@ -53,9 +53,9 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
   const [visible, setVisible] = useState(mode !== 'play' && mode !== 'summary')
   const [todos, setTodos] = useState<TodoItem[]>(view.todos)
   const [phase, setPhase] = useState<Phase>(view.phase)
-  const [rounds, setRounds] = useState<TodoItem[][]>([])
   const [secondAsk, setSecondAsk] = useState(false)
-  const [story, setStory] = useState<'idle' | 'playing' | 'done'>(mode === 'play' ? 'playing' : 'idle')
+  const [showSummary, setShowSummary] = useState(mode === 'summary')
+  const [story, setStory] = useState<Story>(mode === 'play' ? 'playing' : 'idle')
 
   useEffect(() => {
     const previous = i18n.language
@@ -69,40 +69,35 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
     setTodos(next.todos)
     setPhase(next.phase)
     setVisible(mode !== 'play' && mode !== 'summary')
-    setRounds(mode === 'summary' ? [done] : [])
     setSecondAsk(false)
+    setShowSummary(mode === 'summary')
     setStory(mode === 'play' ? 'playing' : 'idle')
   }, [mode])
 
   useEffect(() => {
     if (mode !== 'play') return
-    const hold = TASK_CARD_HOLD_MS
-    const show = (next: TodoItem[], nextPhase: Phase) => {
-      setTodos(next)
-      setPhase(nextPhase)
+    const doneAt = script[script.length - 1]!.at
+    const timers = script.map(step => window.setTimeout(() => {
+      setTodos(step.todos)
+      setPhase(step.phase)
       setVisible(true)
-    }
-    const settle = (next: TodoItem[]) => {
-      setRounds(current => [...current, next])
+      setExpanded(false)
+      setStory(step.phase === 'complete' ? 'holding' : 'playing')
+    }, step.at))
+    timers.push(window.setTimeout(() => {
+      setSecondAsk(true)
       setVisible(false)
-    }
-    const second = script[script.length - 1]!.at + hold
-    const stopStart = second + 1200
-    const stopMark = stopStart + 2100
-    const timers = script.map(step => window.setTimeout(() => show(step.todos, step.phase), step.at))
-    timers.push(window.setTimeout(() => settle(done), second))
-    timers.push(window.setTimeout(() => setSecondAsk(true), second + 700))
-    timers.push(window.setTimeout(() => show(tasks(0, 0), 'active'), stopStart))
-    timers.push(window.setTimeout(() => show(tasks(1, 1), 'active'), stopStart + 700))
-    timers.push(window.setTimeout(() => show(tasks(2, 2), 'active'), stopStart + 1400))
-    timers.push(window.setTimeout(() => show(interrupted, 'interrupted'), stopMark))
-    timers.push(window.setTimeout(() => settle(interrupted), stopMark + hold))
-    timers.push(window.setTimeout(() => setStory('done'), stopMark + hold + 1600))
+      setStory('sent')
+    }, doneAt + 4000))
+    timers.push(window.setTimeout(() => {
+      setShowSummary(true)
+      setStory('summary')
+    }, doneAt + 4600))
     return () => { timers.forEach(timer => window.clearTimeout(timer)) }
   }, [mode])
 
-  const showCard = mode !== 'summary' && (mode !== 'play' || story !== 'idle')
-  const cardVisible = mode === 'play' ? visible : mode !== 'summary'
+  const cardVisible = mode === 'play' ? visible : true
+  const completionLine = mode === 'done' || mode === 'summary' || (mode === 'play' && story !== 'playing' && story !== 'idle')
 
   return (
     <div
@@ -116,30 +111,22 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
             帮我看一下这台电脑，写一首秋天的小诗，再用一句话总结。
           </div>
           <div className="text-sm leading-6 text-foreground/80">
-            {mode !== 'play' && (
-              <>
-                <p>上一回合的任务收在一行里，点开可以回看完整轨道。</p>
-                <TaskTurnSummary
-                  todos={[
-                    { id: 'old-1', content: '确认这次要改的范围', status: 'completed' },
-                    { id: 'old-2', content: '记下当前内嵌轨道的位置', status: 'completed' },
-                  ]}
-                  settled
-                />
-              </>
-            )}
-            <p className={mode === 'play' ? '' : 'mt-3'}>这台 macOS 27.0.1 的工作目录有 6 个文件，磁盘还剩 699 GB。</p>
-            {rounds.map((round, index) => (
-              <TaskTurnSummary key={`${round[0]?.id ?? 'round'}-${index}`} todos={round} settled />
-            ))}
+            <p>这台 macOS 27.0.1 的工作目录有 6 个文件，磁盘还剩 699 GB。</p>
+            {completionLine && <p className="mt-3">六项任务全部完成。</p>}
+            {showSummary && <TaskTurnSummary todos={done} settled />}
           </div>
           {secondAsk && (
             <div className="mt-4 max-w-[75%] self-end rounded-[12px] bg-foreground/[0.05] px-4 py-2.5 text-sm">
-              先停在检查磁盘这里。
+              再帮我看一下磁盘剩余空间。
+            </div>
+          )}
+          {mode === 'summary' && (
+            <div className="mt-4 max-w-[75%] self-end rounded-[12px] bg-foreground/[0.05] px-4 py-2.5 text-sm">
+              再帮我看一下磁盘剩余空间。
             </div>
           )}
         </div>
-        {showCard && (
+        {mode !== 'summary' && (
           <TaskProgressCard
             todos={todos}
             phase={phase}
@@ -165,14 +152,14 @@ export const taskCardComponents: ComponentEntry[] = [
     id: 'task-card',
     name: 'Task Card',
     category: 'Turn Cards',
-    description: 'Centered floating task capsule that folds itself back into the turn',
+    description: 'Centered floating task capsule that stays until the next round',
     component: TaskCardStage,
     layout: 'full',
     previewOverflow: 'hidden',
     props: [
       {
         name: 'mode',
-        description: 'Collapsed capsule, expanded panel, completed, interrupted, inline summary, with the back-to-bottom button, or the auto-dismiss story',
+        description: 'Collapsed capsule, expanded panel with the progress heading, completed or interrupted capsule, history summary after the next message, scroll button, or the hold-then-dismiss story',
         control: {
           type: 'select',
           options: [
@@ -180,7 +167,7 @@ export const taskCardComponents: ComponentEntry[] = [
             { label: 'Expanded', value: 'expanded' },
             { label: 'Completed', value: 'done' },
             { label: 'Interrupted', value: 'interrupted' },
-            { label: 'Inline summary', value: 'summary' },
+            { label: 'After next message', value: 'summary' },
             { label: 'With scroll button', value: 'scroll' },
             { label: 'Step through', value: 'play' },
           ],
@@ -193,7 +180,7 @@ export const taskCardComponents: ComponentEntry[] = [
       { name: 'Expanded', props: { mode: 'expanded' } },
       { name: 'Completed', props: { mode: 'done' } },
       { name: 'Interrupted', props: { mode: 'interrupted' } },
-      { name: 'Inline summary', props: { mode: 'summary' } },
+      { name: 'After next message', props: { mode: 'summary' } },
       { name: 'With scroll button', props: { mode: 'scroll' } },
       { name: 'Step through', props: { mode: 'play' } },
     ],
