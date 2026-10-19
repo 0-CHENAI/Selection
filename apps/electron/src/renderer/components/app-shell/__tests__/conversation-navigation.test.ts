@@ -7,8 +7,9 @@ import {
 } from '../conversation-navigation'
 
 describe('shouldShowConversationNavigation (#394)', () => {
-  it('shows the rail only when enabled and there are records', () => {
+  it('shows the rail only when enabled and there are at least two records', () => {
     expect(shouldShowConversationNavigation(true, 2)).toBe(true)
+    expect(shouldShowConversationNavigation(true, 1)).toBe(false)
     expect(shouldShowConversationNavigation(true, 0)).toBe(false)
     expect(shouldShowConversationNavigation(false, 4)).toBe(false)
   })
@@ -24,7 +25,7 @@ describe('shouldReserveConversationNavigationColumn', () => {
 describe('ChatDisplay record navigation (#394)', () => {
   const source = readFileSync(join(import.meta.dir, '../ChatDisplay.tsx'), 'utf8')
 
-  it('reserves the 2rem column with the feature flag, and only paints ticks when records exist', () => {
+  it('reserves the 2rem column with the feature flag, and only paints ticks once a second record exists', () => {
     expect(source).toContain('showRecordNavigation = true')
     expect(source).toContain('if (!showRecordNavigation) return []')
     expect(source).toContain('shouldShowConversationNavigation(showRecordNavigation, navigationItems.length)')

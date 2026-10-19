@@ -870,12 +870,18 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!found) return null
     const turn = allTurns[found.index]
     if (!turn || turn.type !== 'assistant') return null
-    return { key: getAssistantTurnUiKey(turn, found.index), todos: found.todos }
+    return { key: getAssistantTurnUiKey(turn, found.index), todos: found.todos, index: found.index, streaming: !!turn.isStreaming }
   }, [allTurns])
-  const latestTodoComplete = !!latestTodo?.todos.every(item => item.status === 'completed')
-  const taskCard = useSessionTaskCard(activeSessionId, latestTodo?.key ?? null, latestTodoComplete)
+  const userTurnAfterList = !!latestTodo && allTurns.slice(latestTodo.index + 1).some(turn => turn.type === 'user')
+  const taskCard = useSessionTaskCard(activeSessionId, {
+    listKey: latestTodo?.key ?? null,
+    todos: latestTodo?.todos ?? [],
+    generationEnded: !!latestTodo && !latestTodo.streaming && !sessionBusy,
+    userTurnAfterList,
+  })
   const taskCardEnabled = !hideComposer && !taskPreview
-  const showTaskCard = taskCardEnabled && !!latestTodo && taskCard.docked
+  const showTaskCard = taskCardEnabled && !!latestTodo && taskCard.visible
+  const [taskCardPresent, setTaskCardPresent] = React.useState(false)
   const { start: startIndex, end: endIndex } = historyBounds.sessionId === activeSessionId
     ? historyBounds : { start: 0, end: 0 }
   const turns = allTurns.slice(startIndex, endIndex)
@@ -1407,7 +1413,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   React.useLayoutEffect(() => {
     if (!isStickToBottomRef.current) return
     stickyFollowRef.current?.resize()
-  }, [showTaskCard, taskCard.collapsed, latestTodo?.key])
+  }, [showTaskCard, latestTodo?.key])
 
   const liveTail = session?.messages.reduce((sum, message) => (
     message.isStreaming || message.isPending ? sum + message.content.length : sum
@@ -2234,7 +2240,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         todoRail={todoRailForTurn({
                           enabled: taskCardEnabled,
                           isLatest: latestTodo?.key === assistantUiKey,
-                          docked: taskCard.docked,
+                          docked: taskCard.visible,
                           hasTodos: !!turn.todos?.length,
                         })}
                         onOpenFile={onOpenFile}
@@ -2477,14 +2483,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 )}
                 {processingTurnIndex === -1 && !clarificationLayout && processingIndicator}
                 {/* Scroll Anchor: For auto-scroll to bottom.
-                    The docked card shortens this viewport; a few extra pixels
-                    keep the last line out of the bottom fade. */}
-                <div ref={messagesEndRef} style={{ height: showTaskCard ? 16 : 0 }} />
+                    The floating capsule overlays this viewport, so the transcript
+                    keeps one capsule of space and the last line stays visible. */}
+                <div ref={messagesEndRef} data-task-card-clearance="" style={{ height: showTaskCard ? 48 : 0 }} />
               </div>
               </ScrollArea>
             </div>
+            {taskCardEnabled && latestTodo && (
+              <TaskProgressCard
+                todos={latestTodo.todos}
+                phase={taskCard.phase}
+                expanded={taskCard.expanded}
+                onExpandedChange={taskCard.setExpanded}
+                onDismiss={taskCard.dismiss}
+                onHoverChange={taskCard.setHovering}
+                visible={taskCard.visible}
+                onPresenceChange={setTaskCardPresent}
+                showScrollToBottom={showScrollToBottom && (taskCard.visible || taskCardPresent)}
+                onScrollToBottom={() => scrollToLatest('smooth')}
+              />
+            )}
             <AnimatePresence>
-              {showScrollToBottom && !showTaskCard && (
+              {showScrollToBottom && !showTaskCard && !taskCardPresent && (
                 <motion.button
                   key="scroll-to-bottom"
                   type="button"
@@ -2533,23 +2553,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
-            // The card shares this composer column (max-w 840px, centered),
-            // directly above the input. The transcript is the flex sibling
-            // above the column, so a taller card shortens that viewport
-            // instead of covering the last message.
-            beforeInput={taskCardEnabled && latestTodo ? (
-              <TaskProgressCard
-                key={latestTodo.key}
-                todos={latestTodo.todos}
-                expanded={!taskCard.collapsed}
-                onExpandedChange={() => taskCard.toggle()}
-                onDismiss={taskCard.dismiss}
-                docked={taskCard.docked}
-                showScrollToBottom={showScrollToBottom && taskCard.docked}
-                onScrollToBottom={() => scrollToLatest('smooth')}
-                compact={compactMode}
-              />
-            ) : null}
             inputProps={{
               workMode: session.workMode,
               placeholder,
