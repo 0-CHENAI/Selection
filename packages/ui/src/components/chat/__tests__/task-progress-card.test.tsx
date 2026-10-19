@@ -385,6 +385,44 @@ describe('task card markup', () => {
     expect(finished).toContain('6/6 已完成')
   })
 
+  test('toolbar capsule matches the composer row and can shrink to the ring and fraction', async () => {
+    await testI18n.changeLanguage('zh-Hans')
+    const html = renderCard(
+      <TaskProgressCard
+        todos={mixed}
+        phase="active"
+        expanded={false}
+        onExpandedChange={() => {}}
+        placement="toolbar"
+        shellMaxWidth={180}
+        showScrollToBottom
+        onScrollToBottom={() => {}}
+      />,
+    )
+    expect(html).toContain('data-task-card-placement="toolbar"')
+    expect(html).toContain('data-task-card-cluster="natural"')
+    expect(html).toContain('data-task-card-cluster="min"')
+    expect(html).toContain('h-7')
+    expect(html).toContain('text-xs')
+    expect(html).toContain('rounded-[8px]')
+    expect(html).toContain('border-radius:8px')
+    expect(html).toContain('data-task-card-progress')
+    expect(html).toContain('3/6')
+    expect(html).toContain('size-[30px]')
+    expect(html).not.toContain('bottom-3')
+    const minAt = html.indexOf('data-task-card-cluster="min"')
+    const minEnd = html.indexOf('data-task-card-cluster="natural"')
+    const minHtml = minAt >= 0 && minEnd > minAt ? html.slice(minAt, minEnd) : html.slice(minAt)
+    expect(minHtml.includes('正在撰写摘要')).toBe(false)
+    expect(minHtml).toContain('3/6')
+
+    const open = renderCard(
+      <TaskProgressCard todos={mixed} phase="active" expanded placement="toolbar" shellMaxWidth={320} onExpandedChange={() => {}} />,
+    )
+    expect(open).toContain('border-radius:16px')
+    expect(open).toContain('data-task-card-heading')
+  })
+
   test('does not replace the rail drawing', () => {
     const rail = readFileSync(new URL('../../ui/rail-toc.tsx', import.meta.url), 'utf8')
     const card = readFileSync(new URL('../TaskProgressCard.tsx', import.meta.url), 'utf8')
@@ -407,7 +445,9 @@ describe('task card markup', () => {
     expect(card).toContain('taskCardContentMotion')
     expect(card.includes('mode="wait"')).toBe(false)
     expect(card).toContain('items-end')
-    expect(card).toContain('borderRadius: FIXED_RADIUS')
+    expect(card).toContain('FIXED_RADIUS')
+    expect(card).toContain('TOOLBAR_CAPSULE_RADIUS')
+    expect(card).toContain('borderRadius:')
     expect(card).toContain("overflow: 'hidden'")
     expect(card.includes('layout=')).toBe(false)
     expect(card.includes('popLayout')).toBe(false)

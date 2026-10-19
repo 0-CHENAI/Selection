@@ -42,7 +42,7 @@ export const EMPTY_TASK_CARD_MEMORY: TaskCardMemory = {
 /** Opacity fade when a finished capsule leaves for the next round. */
 export const TASK_CARD_EXIT_MS = 200
 
-/** Room the transcript keeps so the last line sits above the capsule. */
+/** Former transcript gap. The capsule now sits in the composer toolbar, so the list does not reserve this. */
 export const TASK_CARD_CAPSULE_CLEARANCE = 48
 
 export function taskStepProgress(todos: readonly TodoItem[]): {

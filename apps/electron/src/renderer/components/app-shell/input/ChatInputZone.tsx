@@ -36,6 +36,8 @@ interface ChatInputZoneProps {
   queuedMessages?: Message[]
   /** Sits in the composer column, directly above the input card. */
   beforeInput?: React.ReactNode
+  /** Task capsule centered in the permission / session-files row. */
+  toolbarCenter?: (slot: { shellMaxWidth: number }) => React.ReactNode
   inputProps: React.ComponentProps<typeof InputContainer>
 }
 
@@ -63,6 +65,7 @@ export function ChatInputZone({
   className,
   queuedMessages = [],
   beforeInput,
+  toolbarCenter,
   inputProps,
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
@@ -119,6 +122,7 @@ export function ChatInputZone({
           onSwarmEnabledChange={onSwarmEnabledChange}
           swarmToggleDisabled={swarmToggleDisabled}
           swarmRunning={swarmRunning}
+          center={toolbarCenter}
         />
       )}
 

@@ -31,6 +31,17 @@ export {
   TASK_CARD_EXIT_MS,
   TASK_CARD_CAPSULE_CLEARANCE,
 } from './task-progress'
+export {
+  centeredShellBudget,
+  toolbarCapsuleFit,
+  TOOLBAR_BUTTON_GAP,
+  TOOLBAR_CAPSULE_RADIUS,
+  TOOLBAR_CLUSTER_GAP,
+  TOOLBAR_CONTROL_HEIGHT,
+  TOOLBAR_SCROLL_SIZE,
+  TOOLBAR_SHELL_MAX,
+} from './toolbar-capsule-fit'
+export type { ToolbarCapsuleFit, ToolbarCapsuleFitInput } from './toolbar-capsule-fit'
 export type { TodoRailMode, TaskCardMemory, TaskCardEvent, TaskCardPhase, TaskListSnapshot } from './task-progress'
 export { InlineExecution, mapToolEventToActivity, type InlineExecutionProps, type InlineExecutionStatus, type InlineActivityItem } from './InlineExecution'
 export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardActionsMenu'

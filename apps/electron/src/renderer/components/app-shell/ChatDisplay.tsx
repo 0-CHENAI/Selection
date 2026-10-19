@@ -58,7 +58,7 @@ import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequ
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import { TASK_CARD_CAPSULE_CLEARANCE, type ResponseSource } from '@craft-agent/ui/chat'
+import { type ResponseSource } from '@craft-agent/ui/chat'
 import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
@@ -904,8 +904,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     userTurnAfterList,
   })
   const taskCardEnabled = !hideComposer && !taskPreview
-  const showTaskCard = taskCardEnabled && !!latestTodo && taskCard.visible
   const [taskCardPresent, setTaskCardPresent] = React.useState(false)
+  const taskScrollFused = taskCardEnabled && !!latestTodo && (compactMode || taskCard.visible || taskCardPresent)
   const { start: startIndex, end: endIndex } = historyBounds.sessionId === activeSessionId
     ? historyBounds : { start: 0, end: 0 }
   const turns = allTurns.slice(startIndex, endIndex)
@@ -1432,12 +1432,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (stickyFollowRef.current === follow) stickyFollowRef.current = null
     }
   }, [session?.id, applyStickState])
-
-  // Card height changes the transcript viewport. Keep a stuck reader on the last line.
-  React.useLayoutEffect(() => {
-    if (!isStickToBottomRef.current) return
-    stickyFollowRef.current?.resize()
-  }, [showTaskCard, taskCardPresent, latestTodo?.key])
 
   const liveTail = session?.messages.reduce((sum, message) => (
     message.isStreaming || message.isPending ? sum + message.content.length : sum
@@ -2528,20 +2522,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   </div>
                 )}
                 {processingTurnIndex === -1 && !clarificationLayout && processingIndicator}
-                {/* Scroll Anchor: For auto-scroll to bottom.
-                    The floating capsule overlays this viewport, so the transcript
-                    keeps one capsule of space and the last line stays visible. */}
-                <div
-                  ref={messagesEndRef}
-                  data-task-card-clearance=""
-                  className="transition-[height] duration-200 ease-out motion-reduce:transition-none"
-                  style={{ height: showTaskCard || taskCardPresent ? TASK_CARD_CAPSULE_CLEARANCE : 0 }}
-                />
+                {/* Scroll anchor. The capsule lives in the composer toolbar, so the transcript does not reserve a gap for it. */}
+                <div ref={messagesEndRef} />
               </div>
               </ScrollArea>
             </div>
-            {taskCardEnabled && latestTodo && (
+            {compactMode && taskCardEnabled && latestTodo && (
               <TaskProgressCard
+                placement="overlay"
                 todos={latestTodo.todos}
                 listSeed={latestTodo.listSeed}
                 phase={taskCard.phase}
@@ -2554,7 +2542,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               />
             )}
             <AnimatePresence>
-              {showScrollToBottom && !(taskCardEnabled && latestTodo) && (
+              {showScrollToBottom && !taskScrollFused && (
                 <motion.button
                   key="scroll-to-bottom"
                   type="button"
@@ -2584,6 +2572,21 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
           <ChatInputZone
+            toolbarCenter={!compactMode && taskCardEnabled && latestTodo ? (slot) => (
+              <TaskProgressCard
+                placement="toolbar"
+                shellMaxWidth={slot.shellMaxWidth}
+                todos={latestTodo.todos}
+                listSeed={latestTodo.listSeed}
+                phase={taskCard.phase}
+                expanded={taskCard.expanded}
+                onExpandedChange={taskCard.setExpanded}
+                visible={taskCard.visible}
+                onPresenceChange={setTaskCardPresent}
+                showScrollToBottom={showScrollToBottom && (taskCard.visible || taskCardPresent)}
+                onScrollToBottom={() => scrollToLatest('smooth')}
+              />
+            ) : undefined}
             className={compactMode ? "px-3" : "px-5 @xs/panel:px-5"}
             compactMode={compactMode}
             permissionMode={permissionMode}

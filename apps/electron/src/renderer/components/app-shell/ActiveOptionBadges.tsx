@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
+import { TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@craft-agent/ui/chat'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Check, ChevronDown, FolderOpen } from 'lucide-react'
@@ -86,6 +87,134 @@ export interface ActiveOptionBadgesProps {
   swarmRunning?: boolean
   /** Additional CSS classes */
   className?: string
+  /** Centered task capsule. Receives the width that stays clear of the side buttons. */
+  center?: (slot: { shellMaxWidth: number }) => React.ReactNode
+}
+
+function widthOf(element: HTMLElement | null): number {
+  return element ? element.getBoundingClientRect().width : 0
+}
+
+function elementChildren(element: HTMLElement): HTMLElement[] {
+  return Array.from(element.children).filter((child): child is HTMLElement =>
+    child instanceof HTMLElement
+    && !child.hasAttribute('data-toolbar-measure')
+    && child.getAttribute('data-task-card-cluster') == null)
+}
+
+/** Visual width of a cluster, ignoring flex-grow empty space and clipped stacks. */
+function occupiedWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element)
+  const grows = Number.parseFloat(style.flexGrow || '0') > 0
+  const clips = style.overflowX === 'hidden' || style.overflowX === 'clip'
+  const kids = elementChildren(element)
+  if (!grows && !clips) return element.getBoundingClientRect().width
+  if (kids.length === 0) return grows ? 0 : element.getBoundingClientRect().width
+  const base = element.getBoundingClientRect().left
+  let right = base
+  for (const kid of kids) {
+    right = Math.max(right, kid.getBoundingClientRect().left + occupiedWidth(kid))
+  }
+  return Math.max(0, right - base)
+}
+
+function toolbarControlLayout(iconsOnly: boolean, side: 'permission' | 'files') {
+  return cn(
+    'flex h-[30px] shrink-0 items-center rounded-[8px] text-xs font-medium',
+    iconsOnly
+      ? 'w-[30px] justify-center px-0'
+      : side === 'permission'
+        ? 'gap-1.5 pl-2.5 pr-2'
+        : 'gap-1.5 pl-[12px] pr-[14px]',
+  )
+}
+
+function useToolbarCapsuleFit(enabled: boolean) {
+  const rowRef = React.useRef<HTMLDivElement>(null)
+  const leftRef = React.useRef<HTMLDivElement>(null)
+  const rightRef = React.useRef<HTMLDivElement>(null)
+  const iconsOnlyRef = React.useRef(false)
+  const shellRef = React.useRef(TOOLBAR_SHELL_MAX)
+  const [iconsOnly, setIconsOnly] = React.useState(false)
+  const [shellMaxWidth, setShellMaxWidth] = React.useState(TOOLBAR_SHELL_MAX)
+
+  React.useLayoutEffect(() => {
+    const row = rowRef.current
+    if (!row || !enabled) return
+
+    const measure = () => {
+      const left = leftRef.current
+      const right = rightRef.current
+      if (!left || !right) return
+      const natural = row.querySelector<HTMLElement>('[data-task-card-cluster="natural"]')
+      const minimum = row.querySelector<HTMLElement>('[data-task-card-cluster="min"]')
+      if (!natural || !minimum) {
+        if (iconsOnlyRef.current) {
+          iconsOnlyRef.current = false
+          setIconsOnly(false)
+        }
+        if (shellRef.current !== TOOLBAR_SHELL_MAX) {
+          shellRef.current = TOOLBAR_SHELL_MAX
+          setShellMaxWidth(TOOLBAR_SHELL_MAX)
+        }
+        return
+      }
+      const anchor = row.querySelector<HTMLElement>('[data-task-card-anchor]')
+      const endReserve = Number(anchor?.getAttribute('data-task-card-end-reserve') ?? '0') || 0
+      const permDelta = left.querySelector('[data-tutorial="permission-mode-dropdown"]')
+        ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="perm-icon"]')))
+        : 0
+      const filesDelta = right.querySelector('[data-toolbar-files]')
+        ? Math.max(0, widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-text"]')) - widthOf(row.querySelector<HTMLElement>('[data-toolbar-measure="files-icon"]')))
+        : 0
+      const leftNow = occupiedWidth(left)
+      const rightNow = occupiedWidth(right)
+      const currentIcons = iconsOnlyRef.current
+      const fit = toolbarCapsuleFit({
+        rowWidth: row.clientWidth,
+        leftTextWidth: currentIcons ? leftNow + permDelta : leftNow,
+        rightTextWidth: currentIcons ? rightNow + filesDelta : rightNow,
+        leftIconWidth: currentIcons ? leftNow : Math.max(0, leftNow - permDelta),
+        rightIconWidth: currentIcons ? rightNow : Math.max(0, rightNow - filesDelta),
+        shellNaturalWidth: natural.offsetWidth,
+        shellMinWidth: minimum.offsetWidth,
+        endReserve,
+        iconOnly: currentIcons,
+      })
+      if (fit.iconOnly !== iconsOnlyRef.current) {
+        iconsOnlyRef.current = fit.iconOnly
+        setIconsOnly(fit.iconOnly)
+      }
+      if (fit.shellMaxWidth !== shellRef.current) {
+        shellRef.current = fit.shellMaxWidth
+        setShellMaxWidth(fit.shellMaxWidth)
+      }
+    }
+
+    const observer = new ResizeObserver(measure)
+    const watch = () => {
+      observer.disconnect()
+      observer.observe(row)
+      if (leftRef.current) observer.observe(leftRef.current)
+      if (rightRef.current) observer.observe(rightRef.current)
+      row.querySelectorAll('[data-task-card-cluster], [data-toolbar-measure]').forEach(node => {
+        if (node instanceof Element) observer.observe(node)
+      })
+    }
+    watch()
+    measure()
+    const mutations = new MutationObserver(() => {
+      watch()
+      measure()
+    })
+    mutations.observe(row, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-task-card-end-reserve'] })
+    return () => {
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [enabled])
+
+  return { rowRef, leftRef, rightRef, iconsOnly, shellMaxWidth }
 }
 
 /** Resolved label entry: config + parsed value + original index in sessionLabels */
@@ -116,8 +245,10 @@ export function ActiveOptionBadges({
   swarmToggleDisabled = false,
   swarmRunning = false,
   className,
+  center,
 }: ActiveOptionBadgesProps) {
   const { t } = useTranslation()
+  const { rowRef, leftRef, rightRef, iconsOnly, shellMaxWidth } = useToolbarCapsuleFit(!!center)
 
   // Resolve session label entries to their config objects + parsed values.
   // Entries may be bare IDs ("bug") or valued ("priority::3").
@@ -147,7 +278,7 @@ export function ActiveOptionBadges({
   const stackRef = useDynamicStack({ gap: 8, minVisible: 20, reservedStart: 0 })
 
   // Only render if badges or tasks are active
-  if (!permissionMode && tasks.length === 0 && !onSwarmEnabledChange && !hasStackContent) {
+  if (!center && !permissionMode && tasks.length === 0 && !onSwarmEnabledChange && !hasStackContent) {
     return null
   }
 
@@ -169,9 +300,15 @@ export function ActiveOptionBadges({
         </div>
       )}
 
-    <div className={cn("flex flex-wrap items-start gap-2 mb-2 px-px pt-px pb-0.5", className)}>
+    <div className="mb-2">
+    <div
+      ref={rowRef}
+      data-toolbar-row=""
+      data-toolbar-icons={iconsOnly ? 'true' : 'false'}
+      className={cn("relative flex min-h-[30px] min-w-0 flex-nowrap items-center gap-2 px-px", className)}
+    >
       {/* Left side: permission → Swarm → labels stack */}
-      <div className="flex items-start gap-2 min-w-0 flex-1 basis-auto">
+      <div ref={leftRef} className="flex min-w-0 flex-1 items-center gap-2 basis-auto">
         {/* Permission Mode Badge */}
         {permissionMode && (
           <div className="shrink-0">
@@ -179,6 +316,7 @@ export function ActiveOptionBadges({
               permissionMode={permissionMode}
               onPermissionModeChange={onPermissionModeChange}
               sessionId={sessionId}
+              iconsOnly={iconsOnly}
             />
           </div>
         )}
@@ -244,10 +382,17 @@ export function ActiveOptionBadges({
       </div>
 
       {/* Right side: document collaboration and session files. */}
-      <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+      <div ref={rightRef} className="ml-auto flex max-w-full shrink-0 flex-nowrap items-center justify-end gap-2">
         <OfficeCollaborationButton sessionId={sessionId} />
-        <FilesPopoverButton sessionId={sessionId} sessionFolderPath={sessionFolderPath} />
+        <FilesPopoverButton sessionId={sessionId} sessionFolderPath={sessionFolderPath} iconsOnly={iconsOnly} />
       </div>
+      <ToolbarWidthProbes permissionMode={permissionMode} />
+      {center && (
+        <div className="pointer-events-none absolute inset-0 z-20">
+          {center({ shellMaxWidth })}
+        </div>
+      )}
+    </div>
     </div>
     </>
   )
@@ -327,24 +472,37 @@ function LabelBadge({
   )
 }
 
-function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: string; sessionFolderPath?: string }) {
+function FilesPopoverButton({
+  sessionId,
+  sessionFolderPath,
+  iconsOnly = false,
+}: {
+  sessionId?: string
+  sessionFolderPath?: string
+  iconsOnly?: boolean
+}) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
+  const label = t("chat.sessionInfo")
+  const className = cn(
+    toolbarControlLayout(iconsOnly, 'files'),
+    "outline-none select-none shadow-minimal",
+    "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
+    "text-foreground/80",
+    sessionId && "transition-colors hover:bg-foreground/5 data-[state=open]:bg-foreground/5",
+    !sessionId && "disabled:cursor-default disabled:opacity-100",
+  )
+  const content = (
+    <>
+      <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+      <span data-toolbar-label="" className={cn("whitespace-nowrap", iconsOnly && "hidden")}>{label}</span>
+    </>
+  )
 
   if (!sessionId) {
     return (
-      <button
-        type="button"
-        disabled
-        className={cn(
-          "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
-          "outline-none select-none shadow-minimal",
-          "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
-          "text-foreground/80 disabled:cursor-default disabled:opacity-100",
-        )}
-      >
-        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-        <span className="whitespace-nowrap">{t("chat.sessionInfo")}</span>
+      <button type="button" disabled data-toolbar-files="" aria-label={label} className={className}>
+        {content}
       </button>
     )
   }
@@ -354,21 +512,36 @@ function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: stri
       sessionId={sessionId}
       sessionFolderPath={sessionFolderPath}
       trigger={(
-        <button
-          type="button"
-          className={cn(
-            "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
-            "outline-none select-none transition-colors shadow-minimal",
-            "hover:bg-foreground/5 data-[state=open]:bg-foreground/5",
-            "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
-            "text-foreground/80",
-          )}
-        >
-          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-          <span className="whitespace-nowrap">{t("chat.sessionInfo")}</span>
+        <button type="button" data-toolbar-files="" aria-label={label} className={className}>
+          {content}
         </button>
       )}
     />
+  )
+}
+
+function ToolbarWidthProbes({ permissionMode }: { permissionMode?: PermissionMode }) {
+  const { t } = useTranslation()
+  const modeLabel = permissionMode ? t(`mode.${permissionMode}`) : ''
+  const filesLabel = t('chat.sessionInfo')
+  return (
+    <div data-toolbar-measure="" className="pointer-events-none absolute left-0 top-0 -z-10 flex w-max flex-col items-start opacity-0" aria-hidden>
+      <span data-toolbar-measure="perm-text" className={toolbarControlLayout(false, 'permission')}>
+        {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
+        <span className="whitespace-nowrap">{modeLabel}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </span>
+      <span data-toolbar-measure="perm-icon" className={toolbarControlLayout(true, 'permission')}>
+        {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
+      </span>
+      <span data-toolbar-measure="files-text" className={toolbarControlLayout(false, 'files')}>
+        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">{filesLabel}</span>
+      </span>
+      <span data-toolbar-measure="files-icon" className={toolbarControlLayout(true, 'files')}>
+        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+      </span>
+    </div>
   )
 }
 
@@ -376,6 +549,7 @@ interface PermissionModeDropdownProps {
   permissionMode: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   sessionId?: string
+  iconsOnly?: boolean
 }
 
 const MODE_DESC_KEYS: Record<PermissionMode, string> = {
@@ -384,7 +558,7 @@ const MODE_DESC_KEYS: Record<PermissionMode, string> = {
   'allow-all': 'mode.executeFullDesc',
 }
 
-function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessionId }: PermissionModeDropdownProps) {
+function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessionId, iconsOnly = false }: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   // Optimistic local state - updates immediately, syncs with prop
@@ -427,15 +601,19 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
         <button
           type="button"
           data-tutorial="permission-mode-dropdown"
+          aria-label={t(`mode.${optimisticMode}`)}
           className={cn(
-            "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 shadow-tinted outline-none select-none",
+            toolbarControlLayout(iconsOnly, 'permission'),
+            "shadow-tinted outline-none select-none",
             currentStyle.className
           )}
           style={{ '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
         >
-          <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5" />
-          <span>{t(`mode.${optimisticMode}`)}</span>
-          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+          <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5 shrink-0" />
+          <span data-toolbar-label="" className={cn("flex items-center gap-1.5", iconsOnly && "hidden")}>
+            <span className="whitespace-nowrap">{t(`mode.${optimisticMode}`)}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          </span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
