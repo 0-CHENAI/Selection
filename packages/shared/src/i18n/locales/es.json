@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "Contraer tareas",
   "taskCard.completed": "{{current}}/{{total}} completadas",
   "taskCard.expand": "Expandir tareas",
+  "taskCard.heading": "Tareas {{current}}/{{total}}",
   "taskCard.interrupted": "Interrumpido · {{current}}/{{total}}",
   "taskCard.label": "Progreso de tareas",
   "taskCard.progress": "{{current}}/{{total}}",

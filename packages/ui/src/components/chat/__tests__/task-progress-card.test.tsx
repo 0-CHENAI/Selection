@@ -11,12 +11,9 @@ import type { TodoItem } from '../TurnCard'
 import {
   EMPTY_TASK_CARD_MEMORY,
   TASK_CARD_EXIT_MS,
-  TASK_CARD_HOLD_MAX_MS,
-  TASK_CARD_HOLD_MS,
   isTaskCardVisible,
   latestTodoList,
   reduceTaskCardMemory,
-  shouldFadeTaskCard,
   snapshotFromTodos,
   taskStepProgress,
   taskTurnInterrupted,
@@ -109,7 +106,7 @@ describe('task step progress', () => {
 })
 
 describe('which turn keeps the rail', () => {
-  test('docks only the latest list and leaves older turns as a summary', () => {
+  test('hides the current turn and summarizes only a round that was replaced', () => {
     const turns = [
       { type: 'user' },
       { type: 'assistant', todos: mixed.slice(0, 2) },
@@ -118,8 +115,23 @@ describe('which turn keeps the rail', () => {
     ]
     expect(latestTodoList(turns)).toEqual({ index: 3, todos: mixed })
     expect(todoRailForTurn({ enabled: true, isLatest: true, docked: true, hasTodos: true })).toBe('hidden')
+    expect(todoRailForTurn({ enabled: true, isLatest: true, docked: false, hasTodos: true })).toBe('hidden')
     expect(todoRailForTurn({ enabled: true, isLatest: false, docked: true, hasTodos: true })).toBe('summary')
-    expect(todoRailForTurn({ enabled: true, isLatest: true, docked: false, hasTodos: true })).toBe('summary')
+    expect(todoRailForTurn({ enabled: true, isLatest: false, docked: false, hasTodos: true })).toBe('summary')
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: false,
+      hasTodos: true,
+      superseded: true,
+    })).toBe('summary')
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: true,
+      hasTodos: true,
+      superseded: true,
+    })).toBe('hidden')
     expect(todoRailForTurn({ enabled: false, isLatest: true, docked: true, hasTodos: true })).toBe('full')
     expect(latestTodoList([{ type: 'assistant' }])).toBeNull()
   })
@@ -146,7 +158,6 @@ describe('floating card lifecycle', () => {
     let memory = appear(active)
     expect(memory).toMatchObject({ phase: 'active', expanded: false, listKey: 'turn-1' })
     expect(isTaskCardVisible(memory)).toBe(true)
-    expect(shouldFadeTaskCard(memory, false, TASK_CARD_HOLD_MAX_MS).fade).toBe(false)
 
     const advanced = mixed.map((item, index) => index < 3
       ? { ...item, status: 'completed' as const, activeForm: undefined }
@@ -178,56 +189,58 @@ describe('floating card lifecycle', () => {
     expect(list(EMPTY_TASK_CARD_MEMORY, done).phase).toBe('hidden')
   })
 
-  test('fades the completed capsule on its own after the hold', () => {
-    expect(TASK_CARD_HOLD_MS).toBe(2500)
+  test('keeps the completed capsule until the next message, without an inline summary', () => {
     expect(TASK_CARD_EXIT_MS).toBe(200)
     let memory = list(appear(active), done)
-    expect(memory.phase).toBe('complete')
+    expect(memory).toMatchObject({ phase: 'complete', expanded: false, listKey: 'turn-1' })
     expect(isTaskCardVisible(memory)).toBe(true)
-    expect(shouldFadeTaskCard(memory, false, TASK_CARD_HOLD_MS - 1)).toEqual({ fade: false, force: false })
-    expect(shouldFadeTaskCard(memory, false, TASK_CARD_HOLD_MS)).toEqual({ fade: true, force: false })
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: true,
+      hasTodos: true,
+    })).toBe('hidden')
 
-    memory = reduceTaskCardMemory(memory, { type: 'fade' })
-    expect(memory).toMatchObject({ phase: 'hidden', expanded: false })
-    expect(isTaskCardVisible(memory)).toBe(false)
+    memory = reduceTaskCardMemory(memory, { type: 'expand', expanded: true })
+    expect(memory).toMatchObject({ phase: 'complete', expanded: true })
+    expect(isTaskCardVisible(memory)).toBe(true)
 
-    const followedUp = reduceTaskCardMemory(list(appear(active), done), {
-      type: 'user-message',
-      snapshot: done,
-    })
-    expect(followedUp.phase).toBe('hidden')
+    const followedUp = reduceTaskCardMemory(memory, { type: 'user-message', snapshot: done })
+    expect(followedUp).toMatchObject({ phase: 'hidden', expanded: false })
+    expect(isTaskCardVisible(followedUp)).toBe(false)
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: false,
+      hasTodos: true,
+      superseded: true,
+    })).toBe('summary')
   })
 
-  test('an open panel or hover postpones the fade, and 6 seconds forces it closed', () => {
-    expect(TASK_CARD_HOLD_MAX_MS).toBe(6000)
-    let memory = reduceTaskCardMemory(list(appear(active), done), { type: 'expand', expanded: true })
-    expect(shouldFadeTaskCard(memory, false, TASK_CARD_HOLD_MS)).toEqual({ fade: false, force: false })
-    expect(shouldFadeTaskCard(memory, true, TASK_CARD_HOLD_MAX_MS - 1)).toEqual({ fade: false, force: false })
-    expect(reduceTaskCardMemory(memory, { type: 'fade' }).phase).toBe('complete')
-
-    const forced = shouldFadeTaskCard(memory, true, TASK_CARD_HOLD_MAX_MS)
-    expect(forced).toEqual({ fade: true, force: true })
-    memory = reduceTaskCardMemory(memory, { type: 'fade', force: true })
-    expect(memory).toMatchObject({ phase: 'hidden', expanded: false })
-
-    const hovering = list(appear(active), done)
-    expect(shouldFadeTaskCard(hovering, true, TASK_CARD_HOLD_MS)).toEqual({ fade: false, force: false })
-    expect(shouldFadeTaskCard(hovering, true, TASK_CARD_HOLD_MAX_MS).force).toBe(true)
-    expect(shouldFadeTaskCard(reduceTaskCardMemory(hovering, { type: 'collapse' }), false, TASK_CARD_HOLD_MS).fade).toBe(true)
-  })
-
-  test('fades an interrupted capsule on its own after the run ends', () => {
+  test('keeps an interrupted capsule until the next message', () => {
     let memory = list(appear(active), halted)
     expect(memory.phase).toBe('interrupted')
     expect(isTaskCardVisible(memory)).toBe(true)
-    expect(shouldFadeTaskCard(memory, false, 0).fade).toBe(false)
-    expect(shouldFadeTaskCard(memory, false, TASK_CARD_HOLD_MS)).toEqual({ fade: true, force: false })
-    memory = reduceTaskCardMemory(memory, { type: 'fade' })
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: true,
+      hasTodos: true,
+    })).toBe('hidden')
+    memory = reduceTaskCardMemory(memory, { type: 'user-message', snapshot: halted })
     expect(memory.phase).toBe('hidden')
     expect(list(appear(halted), halted).phase).toBe('hidden')
   })
 
-  test('a new message dismisses a capsule that is still counting down', () => {
+  test('a newer list replaces the capsule and the old turn shows the summary', () => {
+    const replaced = list(list(appear(active), done), snap('turn-2', mixed))
+    expect(replaced).toMatchObject({ phase: 'active', expanded: false, listKey: 'turn-2' })
+    expect(isTaskCardVisible(replaced)).toBe(true)
+    expect(todoRailForTurn({ enabled: true, isLatest: false, docked: true, hasTodos: true })).toBe('summary')
+    expect(todoRailForTurn({ enabled: true, isLatest: true, docked: true, hasTodos: true })).toBe('hidden')
+  })
+
+  test('a new message dismisses a capsule that is still open', () => {
     const pending = list(appear(active), done)
     expect(pending.phase).toBe('complete')
     expect(reduceTaskCardMemory(pending, { type: 'user-message', snapshot: done }).phase).toBe('hidden')
@@ -265,6 +278,12 @@ describe('floating card lifecycle', () => {
     })
     expect(returned.phase).toBe('hidden')
     expect(isTaskCardVisible(returned)).toBe(false)
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: false,
+      hasTodos: true,
+    })).toBe('hidden')
   })
 })
 
@@ -281,7 +300,7 @@ describe('task card markup', () => {
     expect(html).toContain('data-task-card-state="active"')
     expect(html).toContain('aria-expanded="false"')
     expect(html).toContain('absolute')
-    expect(html).toContain('rounded-full')
+    expect(html).toContain('border-radius:999px')
     expect(html).toContain('max-w-[min(420px,calc(100%-2.75rem))]')
     expect(html).toContain('backdrop-blur-md')
     expect(html).toContain('shadow-minimal')
@@ -306,11 +325,14 @@ describe('task card markup', () => {
       />,
     )
     expect(html).toContain('data-task-card-expanded="true"')
-    expect(html).toContain('rounded-2xl')
+    expect(html).toContain('border-radius:16px')
+    expect(html).toContain('data-task-card-heading')
+    expect(html).toContain('任务 3/6')
     expect(html).toContain('max-h-[40vh]')
     expect(html).toContain('data-slot="rail-toc"')
     expect(html.includes('data-slot="rail-toc-title"')).toBe(false)
     expect(html.match(/正在撰写摘要/g)).toHaveLength(1)
+    expect(html.match(/任务 3\/6/g)).toHaveLength(1)
     expect(html).toContain('data-testid="chat-scroll-to-bottom"')
     expect(html).toContain(zh['chat.scrollToBottom'])
     expect(html.includes('关闭任务进度')).toBe(false)
@@ -324,6 +346,14 @@ describe('task card markup', () => {
     expect(complete).toContain('6/6 已完成')
     expect(complete).toContain('data-task-card-state="complete"')
     expect(complete.includes('data-slot="rail-toc"')).toBe(false)
+    expect(complete.includes('data-task-card-heading')).toBe(false)
+
+    const donePanel = renderCard(
+      <TaskProgressCard todos={doneItems} phase="complete" expanded onExpandedChange={() => {}} />,
+    )
+    expect(donePanel).toContain('任务 6/6')
+    expect(donePanel.includes('6/6 已完成')).toBe(false)
+    expect(donePanel.includes('data-slot="rail-toc-title"')).toBe(false)
 
     const interrupted = renderCard(
       <TaskProgressCard todos={stopped} phase="interrupted" expanded={false} onExpandedChange={() => {}} />,
@@ -367,10 +397,19 @@ describe('task card markup', () => {
     expect(card).toContain('max-h-[40vh]')
     expect(card).toContain('useReducedMotion')
     expect(card).toContain('TASK_CARD_EXIT_MS')
+    expect(card).toContain('MotionConfig')
+    expect(card).toContain('reducedMotion="user"')
+    expect(card).toContain('layout="position"')
+    expect(card).toContain('borderRadius')
+    expect(card).toContain('mode="popLayout"')
+    expect(card.includes('scale: 0.9')).toBe(false)
+    expect(card.includes('scale: 0.96')).toBe(false)
     expect(card.includes('taskCard.dismiss')).toBe(false)
     expect(card.includes('<X')).toBe(false)
-    expect(machine).toContain('TASK_CARD_HOLD_MS')
-    expect(machine).toContain('TASK_CARD_HOLD_MAX_MS')
+    expect(machine.includes('TASK_CARD_HOLD_MS')).toBe(false)
+    expect(machine.includes('TASK_CARD_HOLD_MAX_MS')).toBe(false)
+    expect(machine.includes('shouldFadeTaskCard')).toBe(false)
+    expect(machine.includes("type: 'fade'")).toBe(false)
     expect(machine.includes('dismissedKey')).toBe(false)
   })
 })

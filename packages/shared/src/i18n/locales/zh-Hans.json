@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "折叠任务",
   "taskCard.completed": "{{current}}/{{total}} 已完成",
   "taskCard.expand": "展开任务",
+  "taskCard.heading": "任务 {{current}}/{{total}}",
   "taskCard.interrupted": "已中断 · {{current}}/{{total}}",
   "taskCard.label": "任务进度",
   "taskCard.progress": "{{current}}/{{total}}",

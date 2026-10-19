@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "タスクを折りたたむ",
   "taskCard.completed": "{{current}}/{{total}} 完了",
   "taskCard.expand": "タスクを展開",
+  "taskCard.heading": "タスク {{current}}/{{total}}",
   "taskCard.interrupted": "中断 · {{current}}/{{total}}",
   "taskCard.label": "タスクの進捗",
   "taskCard.progress": "{{current}}/{{total}}",

@@ -1959,6 +1959,7 @@
   "taskCard.collapse": "Collapse tasks",
   "taskCard.completed": "{{current}}/{{total}} completed",
   "taskCard.expand": "Expand tasks",
+  "taskCard.heading": "Tasks {{current}}/{{total}}",
   "taskCard.interrupted": "Interrupted · {{current}}/{{total}}",
   "taskCard.label": "Task progress",
   "taskCard.progress": "{{current}}/{{total}}",

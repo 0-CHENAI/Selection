@@ -7,7 +7,7 @@ import type { TodoItem } from './TurnCard'
 interface TodoListProps {
   todos: TodoItem[]
   className?: string
-  /** The floating panel already names the current step, so it drops this heading. */
+  /** The floating panel has its own progress heading, so it drops this one. */
   showTitle?: boolean
 }
 
