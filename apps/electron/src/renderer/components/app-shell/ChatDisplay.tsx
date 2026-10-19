@@ -57,7 +57,7 @@ import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequ
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import type { TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
-import type { ResponseSource } from '@craft-agent/ui/chat'
+import { TASK_CARD_CAPSULE_CLEARANCE, type ResponseSource } from '@craft-agent/ui/chat'
 import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
@@ -1413,7 +1413,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   React.useLayoutEffect(() => {
     if (!isStickToBottomRef.current) return
     stickyFollowRef.current?.resize()
-  }, [showTaskCard, latestTodo?.key])
+  }, [showTaskCard, taskCardPresent, latestTodo?.key])
 
   const liveTail = session?.messages.reduce((sum, message) => (
     message.isStreaming || message.isPending ? sum + message.content.length : sum
@@ -2485,7 +2485,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 {/* Scroll Anchor: For auto-scroll to bottom.
                     The floating capsule overlays this viewport, so the transcript
                     keeps one capsule of space and the last line stays visible. */}
-                <div ref={messagesEndRef} data-task-card-clearance="" style={{ height: showTaskCard ? 48 : 0 }} />
+                <div
+                  ref={messagesEndRef}
+                  data-task-card-clearance=""
+                  className="transition-[height] duration-200 ease-out motion-reduce:transition-none"
+                  style={{ height: showTaskCard || taskCardPresent ? TASK_CARD_CAPSULE_CLEARANCE : 0 }}
+                />
               </div>
               </ScrollArea>
             </div>
@@ -2495,16 +2500,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 phase={taskCard.phase}
                 expanded={taskCard.expanded}
                 onExpandedChange={taskCard.setExpanded}
-                onDismiss={taskCard.dismiss}
                 onHoverChange={taskCard.setHovering}
                 visible={taskCard.visible}
                 onPresenceChange={setTaskCardPresent}
-                showScrollToBottom={showScrollToBottom && (taskCard.visible || taskCardPresent)}
+                showScrollToBottom={showScrollToBottom}
                 onScrollToBottom={() => scrollToLatest('smooth')}
               />
             )}
             <AnimatePresence>
-              {showScrollToBottom && !showTaskCard && !taskCardPresent && (
+              {showScrollToBottom && !(taskCardEnabled && latestTodo) && (
                 <motion.button
                   key="scroll-to-bottom"
                   type="button"

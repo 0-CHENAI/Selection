@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "No headings",
   "taskCard.collapse": "Collapse tasks",
   "taskCard.completed": "{{current}}/{{total}} completed",
-  "taskCard.dismiss": "Hide task progress",
   "taskCard.expand": "Expand tasks",
   "taskCard.interrupted": "Interrupted · {{current}}/{{total}}",
   "taskCard.label": "Task progress",

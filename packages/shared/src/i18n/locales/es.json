@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "Sin encabezados",
   "taskCard.collapse": "Contraer tareas",
   "taskCard.completed": "{{current}}/{{total}} completadas",
-  "taskCard.dismiss": "Ocultar el progreso",
   "taskCard.expand": "Expandir tareas",
   "taskCard.interrupted": "Interrumpido · {{current}}/{{total}}",
   "taskCard.label": "Progreso de tareas",

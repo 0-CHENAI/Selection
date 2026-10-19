@@ -1,28 +1,30 @@
 import * as React from 'react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, ChevronDown, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import type { TodoItem } from './TurnCard'
 import {
   EMPTY_TASK_CARD_MEMORY,
-  TASK_CARD_FADE_MS,
+  TASK_CARD_EXIT_MS,
+  TASK_CARD_HOLD_MAX_MS,
+  TASK_CARD_HOLD_MS,
   isTaskCardVisible,
-  readTaskCardMemory,
   reduceTaskCardMemory,
   shouldFadeTaskCard,
   snapshotFromTodos,
   taskListSignature,
   taskStepProgress,
-  writeTaskCardMemory,
+  taskTurnInterrupted,
   type TaskCardEvent,
   type TaskCardMemory,
   type TaskCardPhase,
 } from './task-progress'
 
-const PRESENCE = { duration: 0.18, ease: [0.23, 1, 0.32, 1] as const }
+const EASE = [0.23, 1, 0.32, 1] as const
+const ENTER = { duration: 0.18, ease: EASE }
 
 function TaskMark({ className }: { className?: string }) {
   return (
@@ -68,6 +70,7 @@ export function TaskProgressSummary({
   trailing,
   className,
   controls,
+  settled = false,
 }: {
   todos: TodoItem[]
   expanded: boolean
@@ -75,12 +78,17 @@ export function TaskProgressSummary({
   trailing?: React.ReactNode
   className?: string
   controls?: string
+  /** The turn has finished, so leftover work reads as interrupted. */
+  settled?: boolean
 }) {
   const { t } = useTranslation()
   const progress = taskStepProgress(todos)
+  const interrupted = taskTurnInterrupted(todos, settled)
   const label = progress.allCompleted
     ? t('taskCard.completed', { current: progress.current, total: progress.total })
-    : progress.title
+    : interrupted
+      ? t('taskCard.interrupted', { current: progress.current, total: progress.total })
+      : progress.title
   return (
     <div className={cn('flex items-center gap-1.5 px-3 py-2', className)} data-task-card-summary="">
       <button
@@ -99,7 +107,7 @@ export function TaskProgressSummary({
         <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
           {label}
         </span>
-        {!progress.allCompleted && (
+        {!progress.allCompleted && !interrupted && (
           <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
             {t('taskCard.progress', { current: progress.current, total: progress.total })}
           </span>
@@ -120,9 +128,12 @@ export function TaskProgressSummary({
 export function TaskTurnSummary({
   todos,
   defaultExpanded = false,
+  settled = false,
 }: {
   todos: TodoItem[]
   defaultExpanded?: boolean
+  /** The turn has finished, so leftover work reads as interrupted. */
+  settled?: boolean
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -130,7 +141,13 @@ export function TaskTurnSummary({
   if (todos.length === 0) return null
   return (
     <div className="mt-3" role="group" aria-label={t('taskCard.review')} data-task-turn-summary="">
-      <TaskProgressSummary todos={todos} expanded={expanded} onToggle={() => setExpanded(open => !open)} className="px-0 py-0.5" />
+      <TaskProgressSummary
+        todos={todos}
+        expanded={expanded}
+        settled={settled}
+        onToggle={() => setExpanded(open => !open)}
+        className="px-0 py-0.5"
+      />
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -138,7 +155,7 @@ export function TaskTurnSummary({
             initial={reduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: reduceMotion ? 0 : PRESENCE.duration, ease: PRESENCE.ease }}
+            transition={{ duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }}
             className="overflow-hidden"
           >
             <TodoList todos={todos} className="mt-2" />
@@ -163,7 +180,6 @@ export function TaskProgressCard({
   phase,
   expanded,
   onExpandedChange,
-  onDismiss,
   onHoverChange,
   showScrollToBottom = false,
   onScrollToBottom,
@@ -174,11 +190,10 @@ export function TaskProgressCard({
   phase: Exclude<TaskCardPhase, 'hidden'>
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
-  onDismiss?: () => void
   onHoverChange?: (hovering: boolean) => void
   showScrollToBottom?: boolean
   onScrollToBottom?: () => void
-  /** False plays the fade, then the overlay unmounts. */
+  /** False plays the fade, then the capsule unmounts. The scroll button can stay. */
   visible?: boolean
   onPresenceChange?: (present: boolean) => void
 }) {
@@ -186,33 +201,33 @@ export function TaskProgressCard({
   const reduceMotion = !!useReducedMotion()
   const panelId = useId()
   const rootRef = useRef<HTMLDivElement>(null)
+  const alive = useRef(true)
+  const cardShown = visible && todos.length > 0
+  const shownRef = useRef(cardShown)
+  shownRef.current = cardShown
+  const [present, setPresent] = useState(cardShown)
+  if (cardShown && !present) setPresent(true)
   const progress = taskStepProgress(todos)
-  const [mounted, setMounted] = useState(visible)
   const shapeRef = useRef(expanded)
-  if (visible) shapeRef.current = expanded
-  const shapeExpanded = visible ? expanded : shapeRef.current
-  const shown = visible && mounted
-  const present = mounted && todos.length > 0
-  const reported = useRef<boolean | null>(null)
+  if (cardShown) shapeRef.current = expanded
+  const shapeExpanded = cardShown ? expanded : shapeRef.current
+  const onScreen = cardShown || present
 
   useEffect(() => {
-    if (visible) setMounted(true)
-    else if (reduceMotion) setMounted(false)
-  }, [reduceMotion, visible])
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
 
   useEffect(() => {
-    if (reported.current === present) return
-    reported.current = present
-    onPresenceChange?.(present)
-  }, [onPresenceChange, present])
+    onPresenceChange?.(onScreen)
+  }, [onPresenceChange, onScreen])
 
   useEffect(() => () => {
-    reported.current = null
     onPresenceChange?.(false)
   }, [onPresenceChange])
 
   useEffect(() => {
-    if (!shapeExpanded || !shown) return
+    if (!shapeExpanded || !cardShown) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       const target = event.target
@@ -231,9 +246,9 @@ export function TaskProgressCard({
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('pointerdown', onPointer)
     }
-  }, [onExpandedChange, shapeExpanded, shown])
+  }, [cardShown, onExpandedChange, shapeExpanded])
 
-  if (todos.length === 0 || !mounted) return null
+  if (!onScreen && !showScrollToBottom) return null
 
   const fraction = t('taskCard.progress', { current: progress.current, total: progress.total })
   const label = phase === 'complete'
@@ -243,6 +258,7 @@ export function TaskProgressCard({
       : progress.title || fraction
   const scrollLabel = t('chat.scrollToBottom')
   const glass = 'border border-foreground/10 bg-background/80 shadow-minimal backdrop-blur-md'
+  const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const hover = (hovering: boolean) => onHoverChange?.(hovering)
   const inside = (event: React.MouseEvent) => {
     const next = event.relatedTarget
@@ -255,116 +271,110 @@ export function TaskProgressCard({
       className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex items-end justify-center gap-1.5 px-4"
       data-task-card-anchor=""
     >
-      <motion.section
-        data-task-card=""
-        data-task-card-state={phase}
-        data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
-        aria-label={t('taskCard.label')}
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
-        animate={{ opacity: shown ? 1 : 0, scale: shown && !reduceMotion ? 1 : reduceMotion ? 1 : 0.96 }}
-        transition={{ duration: reduceMotion ? 0 : PRESENCE.duration, ease: PRESENCE.ease }}
-        onAnimationComplete={() => { if (!visible) setMounted(false) }}
-        style={{ transformOrigin: 'bottom center' }}
-        onMouseEnter={() => hover(true)}
-        onMouseLeave={(event) => { if (!inside(event)) hover(false) }}
-        className={cn(
-          'pointer-events-auto min-w-0',
-          glass,
-          shapeExpanded
-            ? 'w-[min(420px,calc(100%-2.75rem))] rounded-2xl'
-            : 'w-max max-w-[min(420px,calc(100%-2.75rem))] rounded-full',
-        )}
+      <AnimatePresence
+        mode="popLayout"
+        initial={false}
+        onExitComplete={() => {
+          if (!alive.current || shownRef.current) return
+          setPresent(false)
+        }}
       >
-        <AnimatePresence initial={false} mode="wait">
-          {shapeExpanded ? (
-            <motion.div
-              key="panel"
-              id={panelId}
-              initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
-              transition={{ duration: reduceMotion ? 0 : PRESENCE.duration, ease: PRESENCE.ease }}
-            >
-              <div className="flex items-center justify-end gap-0.5 px-2 pt-1.5">
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  aria-expanded
-                  aria-controls={panelId}
-                  title={t('taskCard.collapse')}
-                  onClick={() => onExpandedChange(false)}
+        {cardShown && (
+          <motion.section
+            key="task-card"
+            data-task-card=""
+            data-task-card-state={phase}
+            data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
+            aria-label={t('taskCard.label')}
+            initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reduceMotion
+              ? { opacity: 0, transition: { duration: 0 } }
+              : { opacity: 0, y: 18, scale: 0.9, transition: { duration: exitSeconds, ease: EASE } }}
+            transition={{ duration: reduceMotion ? 0 : ENTER.duration, ease: EASE }}
+            style={{ transformOrigin: 'bottom center' }}
+            onMouseEnter={() => hover(true)}
+            onMouseLeave={(event) => { if (!inside(event)) hover(false) }}
+            className={cn(
+              'pointer-events-auto min-w-0',
+              glass,
+              shapeExpanded
+                ? 'w-[min(420px,calc(100%-2.75rem))] rounded-2xl'
+                : 'w-max max-w-[min(420px,calc(100%-2.75rem))] rounded-full',
+            )}
+          >
+            <AnimatePresence initial={false} mode="wait">
+              {shapeExpanded ? (
+                <motion.div
+                  key="panel"
+                  id={panelId}
+                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                  transition={{ duration: reduceMotion ? 0 : ENTER.duration, ease: EASE }}
                 >
-                  <ChevronDown className="size-3.5" aria-hidden />
-                </button>
-                {onDismiss && (
+                  <div className="flex items-center justify-end gap-0.5 px-2 pt-1.5">
+                    <button
+                      type="button"
+                      className={iconButtonClass()}
+                      aria-expanded
+                      aria-controls={panelId}
+                      title={t('taskCard.collapse')}
+                      onClick={() => onExpandedChange(false)}
+                    >
+                      <ChevronDown className="size-3.5" aria-hidden />
+                    </button>
+                  </div>
+                  <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
+                    <TodoList todos={todos} showTitle={false} className="mt-0" />
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="capsule"
+                  initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                  transition={{ duration: reduceMotion ? 0 : ENTER.duration, ease: EASE }}
+                  className="flex min-w-0 items-center"
+                  data-task-card-summary=""
+                >
                   <button
                     type="button"
-                    className={iconButtonClass()}
-                    aria-label={t('taskCard.dismiss')}
-                    title={t('taskCard.dismiss')}
-                    onClick={onDismiss}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-3 pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    aria-expanded={false}
+                    aria-controls={panelId}
+                    title={t('taskCard.expand')}
+                    onClick={() => onExpandedChange(true)}
                   >
-                    <X className="size-3.5" aria-hidden />
+                    {phase === 'complete' ? (
+                      <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
+                    ) : phase === 'interrupted' ? (
+                      <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden />
+                    ) : (
+                      <ProgressRing current={progress.current} total={progress.total} />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
+                      {label}
+                    </span>
+                    {phase === 'active' && (
+                      <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
+                        {fraction}
+                      </span>
+                    )}
+                    <ChevronDown className="size-3.5 shrink-0 rotate-180 text-foreground/50" aria-hidden />
                   </button>
-                )}
-              </div>
-              <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
-                <TodoList todos={todos} showTitle={false} className="mt-0" />
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="capsule"
-              initial={reduceMotion ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
-              transition={{ duration: reduceMotion ? 0 : PRESENCE.duration, ease: PRESENCE.ease }}
-              className="flex min-w-0 items-center"
-              data-task-card-summary=""
-            >
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-3 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                aria-expanded={false}
-                aria-controls={panelId}
-                title={t('taskCard.expand')}
-                onClick={() => onExpandedChange(true)}
-              >
-                {phase === 'complete' ? (
-                  <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
-                ) : phase === 'interrupted' ? (
-                  <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden />
-                ) : (
-                  <ProgressRing current={progress.current} total={progress.total} />
-                )}
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
-                  {label}
-                </span>
-                {phase === 'active' && (
-                  <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
-                    {fraction}
-                  </span>
-                )}
-                <ChevronDown className="size-3.5 shrink-0 rotate-180 text-foreground/50" aria-hidden />
-              </button>
-              {onDismiss && (
-                <button
-                  type="button"
-                  className={iconButtonClass('mr-1')}
-                  aria-label={t('taskCard.dismiss')}
-                  title={t('taskCard.dismiss')}
-                  onClick={onDismiss}
-                >
-                  <X className="size-3.5" aria-hidden />
-                </button>
+                </motion.div>
               )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.section>
+            </AnimatePresence>
+          </motion.section>
+        )}
+      </AnimatePresence>
       {showScrollToBottom && onScrollToBottom && (
-        <button
+        <motion.button
           type="button"
+          layout={reduceMotion ? false : 'position'}
+          transition={{ duration: exitSeconds, ease: EASE }}
           data-testid="chat-scroll-to-bottom"
           onMouseEnter={() => hover(true)}
           onMouseLeave={(event) => { if (!inside(event)) hover(false) }}
@@ -379,7 +389,7 @@ export function TaskProgressCard({
           )}
         >
           <ChevronDown className="size-4" />
-        </button>
+        </motion.button>
       )}
     </div>
   )
@@ -393,7 +403,6 @@ export function useSessionTaskCard(
     generationEnded: boolean
     userTurnAfterList: boolean
   },
-  storage: Pick<Storage, 'getItem' | 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage,
 ) {
   const snapshot = snapshotFromTodos(input.listKey, input.todos, input.generationEnded)
   const signature = taskListSignature(snapshot)
@@ -401,21 +410,20 @@ export function useSessionTaskCard(
   const [hovering, setHovering] = useState(false)
   const [memory, setMemory] = useState<TaskCardMemory>(() => reduceTaskCardMemory(EMPTY_TASK_CARD_MEMORY, {
     type: 'hydrate',
-    memory: readTaskCardMemory(sessionId, storage),
     snapshot,
     userTurnAfterList,
   }))
   const previous = useRef({ sessionId, signature, userTurnAfterList, ready: false })
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
+  const memoryRef = useRef(memory)
+  memoryRef.current = memory
+  const holdStartedRef = useRef<number | null>(null)
+  const holdKeyRef = useRef<string | null>(null)
 
   const commit = React.useCallback((event: TaskCardEvent) => {
-    setMemory(current => {
-      const next = reduceTaskCardMemory(current, event)
-      writeTaskCardMemory(sessionId, next, storage)
-      return next
-    })
-  }, [sessionId, storage])
+    setMemory(current => reduceTaskCardMemory(current, event))
+  }, [])
 
   useEffect(() => {
     const prior = previous.current
@@ -424,9 +432,10 @@ export function useSessionTaskCard(
     const currentSnapshot = snapshotRef.current
     if (prior.sessionId !== sessionId) {
       setHovering(false)
+      holdStartedRef.current = null
+      holdKeyRef.current = null
       setMemory(reduceTaskCardMemory(EMPTY_TASK_CARD_MEMORY, {
         type: 'session',
-        memory: readTaskCardMemory(sessionId, storage),
         snapshot: currentSnapshot,
         userTurnAfterList,
       }))
@@ -438,13 +447,35 @@ export function useSessionTaskCard(
     if (!prior.userTurnAfterList && userTurnAfterList) {
       commit({ type: 'user-message', snapshot: currentSnapshot })
     }
-  }, [commit, sessionId, signature, storage, userTurnAfterList])
+  }, [commit, sessionId, signature, userTurnAfterList])
 
   useEffect(() => {
-    if (!shouldFadeTaskCard(memory, hovering)) return
-    const timer = window.setTimeout(() => commit({ type: 'fade' }), TASK_CARD_FADE_MS)
+    const phase = memory.phase
+    if (phase !== 'complete' && phase !== 'interrupted') {
+      holdStartedRef.current = null
+      holdKeyRef.current = null
+      return
+    }
+    if (holdKeyRef.current !== memory.listKey || holdStartedRef.current == null) {
+      holdKeyRef.current = memory.listKey
+      holdStartedRef.current = performance.now()
+    }
+    const startedAt = holdStartedRef.current
+    let timer = 0
+    const arm = () => {
+      const current = memoryRef.current
+      const elapsed = performance.now() - startedAt
+      const decision = shouldFadeTaskCard(current, hovering, elapsed)
+      if (decision.fade) {
+        commit({ type: 'fade', force: decision.force })
+        return
+      }
+      const deadline = current.expanded || hovering ? TASK_CARD_HOLD_MAX_MS : TASK_CARD_HOLD_MS
+      timer = window.setTimeout(arm, Math.max(0, deadline - elapsed))
+    }
+    arm()
     return () => window.clearTimeout(timer)
-  }, [commit, hovering, memory])
+  }, [commit, hovering, memory.expanded, memory.listKey, memory.phase])
 
   const phaseRef = useRef<Exclude<TaskCardPhase, 'hidden'>>('active')
   if (memory.phase !== 'hidden') phaseRef.current = memory.phase
@@ -457,7 +488,6 @@ export function useSessionTaskCard(
     toggle: () => commit({ type: 'toggle' }),
     setExpanded: (expanded: boolean) => commit({ type: 'expand', expanded }),
     collapse: () => commit({ type: 'collapse' }),
-    dismiss: () => commit({ type: 'dismiss', snapshot }),
     setHovering,
   }
 }

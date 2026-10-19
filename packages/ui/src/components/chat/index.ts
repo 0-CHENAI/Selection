@@ -27,11 +27,12 @@ export {
   isTaskCardVisible,
   isTaskCardDocked,
   shouldFadeTaskCard,
-  readTaskCardMemory,
-  writeTaskCardMemory,
-  taskCardStorageKey,
+  taskTurnInterrupted,
   EMPTY_TASK_CARD_MEMORY,
-  TASK_CARD_FADE_MS,
+  TASK_CARD_HOLD_MS,
+  TASK_CARD_HOLD_MAX_MS,
+  TASK_CARD_EXIT_MS,
+  TASK_CARD_CAPSULE_CLEARANCE,
 } from './task-progress'
 export type { TodoRailMode, TaskCardMemory, TaskCardEvent, TaskCardPhase, TaskListSnapshot } from './task-progress'
 export { InlineExecution, mapToolEventToActivity, type InlineExecutionProps, type InlineExecutionStatus, type InlineActivityItem } from './InlineExecution'
