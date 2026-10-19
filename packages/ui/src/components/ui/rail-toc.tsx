@@ -226,6 +226,9 @@ const RailToc = ({
 
   if (items.length === 0) return null
 
+  // Green is all-or-nothing: the whole dashed track and the arrow, only when every step is done.
+  const allComplete = items.every((item) => item.status === "completed")
+
   const railColor =
     "[--rail:color-mix(in_oklab,var(--foreground)_45%,var(--background))]"
 
@@ -234,6 +237,7 @@ const RailToc = ({
       data-slot="rail-toc"
       aria-labelledby={showTitle ? titleId : undefined}
       aria-label={showTitle ? undefined : title}
+      data-rail-complete={allComplete ? "true" : "false"}
       className={cn("w-max text-sm", railColor, className)}
       {...props}
     >
@@ -334,20 +338,32 @@ const RailToc = ({
                 ref={pathRef}
                 d={geometry.d}
                 fill="none"
+                data-rail-track=""
                 strokeWidth="1.25"
                 strokeDasharray="2 5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="stroke-foreground/25"
+                className={cn(
+                  "transition-[stroke] duration-[250ms] ease-out motion-reduce:transition-none",
+                  allComplete ? "stroke-success" : "stroke-foreground/25",
+                )}
               />
-              <motion.path
-                d={geometry.d}
-                fill="none"
-                strokeWidth="1.25"
-                stroke="var(--rail)"
-                strokeLinejoin="round"
-                style={{ pathLength: filled }}
-              />
+              <g
+                data-rail-progress=""
+                className={cn(
+                  "transition-opacity duration-[250ms] ease-out motion-reduce:transition-none",
+                  allComplete ? "opacity-0" : "opacity-100",
+                )}
+              >
+                <motion.path
+                  d={geometry.d}
+                  fill="none"
+                  strokeWidth="1.25"
+                  stroke="var(--rail)"
+                  strokeLinejoin="round"
+                  style={{ pathLength: filled }}
+                />
+              </g>
             </g>
             <g mask={`url(#${maskId}-nodes)`}>
               {geometry.nodes.map((node, i) => {
@@ -375,7 +391,10 @@ const RailToc = ({
         {geometry && (
           <motion.div
             data-slot="rail-toc-plane"
-            className="pointer-events-none absolute left-0 top-0 -ml-2 -mt-2 h-4 w-4 text-foreground [filter:drop-shadow(0_0_2px_rgb(0_0_0/0.35))]"
+            className={cn(
+              "pointer-events-none absolute left-0 top-0 -ml-2 -mt-2 h-4 w-4 transition-colors duration-[250ms] ease-out motion-reduce:transition-none [filter:drop-shadow(0_0_2px_rgb(0_0_0/0.35))]",
+              allComplete ? "text-success" : "text-foreground",
+            )}
             style={{ x, y, rotate: reduceMotion ? heading : turn }}
             aria-hidden
           >

@@ -34,6 +34,7 @@ export {
 export {
   centeredShellBudget,
   toolbarCapsuleFit,
+  toolbarScrollX,
   TOOLBAR_BUTTON_GAP,
   TOOLBAR_CAPSULE_RADIUS,
   TOOLBAR_CLUSTER_GAP,
