@@ -743,6 +743,37 @@ export function extractTodosFromActivities(activities: ActivityItem[]): TodoItem
   return undefined
 }
 
+function isTaskListActivity(toolName: string | undefined): boolean {
+  const name = normalizeCraftSessionToolName(toolName ?? '')
+  return name === 'update_task_list' || name === 'TodoWrite'
+}
+
+/**
+ * Stable identity for one task list's rail shape.
+ *
+ * Later `update_task_list` calls replace statuses and may append items, but
+ * they must not move nodes that are already on screen. The seed is therefore
+ * the first call that created the list, not the latest snapshot. A turn id,
+ * then the session id, cover lists whose tool call id was not persisted.
+ */
+export function taskListSeed(input: {
+  activities?: readonly Pick<ActivityItem, 'toolName' | 'toolUseId' | 'timestamp'>[]
+  turnId?: string | null
+  sessionId?: string | null
+}): string {
+  const origin = [...(input.activities ?? [])]
+    .filter(activity => isTaskListActivity(activity.toolName))
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+    .find(activity => activity.toolUseId?.trim())
+  const toolUseId = origin?.toolUseId?.trim()
+  if (toolUseId) return toolUseId
+  const turnId = input.turnId?.trim()
+  if (turnId) return turnId
+  const sessionId = input.sessionId?.trim()
+  if (sessionId) return sessionId
+  return 'task-list'
+}
+
 // ============================================================================
 // Main Grouping Function
 // ============================================================================

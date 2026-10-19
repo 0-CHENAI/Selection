@@ -4,6 +4,7 @@ import { i18n } from '@craft-agent/shared/i18n'
 import type { ComponentEntry } from './types'
 
 const labels = ['查看 macOS 版本', '统计工作目录文件', '查看磁盘剩余空间', '写一首秋天的小诗', '计算 1 到 100 的质数和', '用一句话总结以上结果'] as const
+const LIST_SEED = 'playground-task-card'
 
 function tasks(active: number, doneThrough = active): TodoItem[] {
   return labels.map((label, index) => ({
@@ -113,7 +114,7 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
           <div className="text-sm leading-6 text-foreground/80">
             <p>这台 macOS 27.0.1 的工作目录有 6 个文件，磁盘还剩 699 GB。</p>
             {completionLine && <p className="mt-3">六项任务全部完成。</p>}
-            {showSummary && <TaskTurnSummary todos={done} settled />}
+            {showSummary && <TaskTurnSummary todos={done} listSeed={LIST_SEED} settled />}
           </div>
           {secondAsk && (
             <div className="mt-4 max-w-[75%] self-end rounded-[12px] bg-foreground/[0.05] px-4 py-2.5 text-sm">
@@ -129,6 +130,7 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
         {mode !== 'summary' && (
           <TaskProgressCard
             todos={todos}
+            listSeed={LIST_SEED}
             phase={phase}
             expanded={expanded}
             visible={cardVisible}

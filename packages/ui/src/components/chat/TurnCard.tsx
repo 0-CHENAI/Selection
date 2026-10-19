@@ -72,6 +72,7 @@ import {
   formatOrchestrationToolSummary,
   formatTokens,
   normalizeCraftSessionToolName,
+  taskListSeed,
   deriveTurnPhase,
   getActiveTurnPreview,
   countWorkRecords,
@@ -426,6 +427,11 @@ export interface TurnCardProps {
   hasEditOrWriteActivities?: boolean
   /** TodoWrite tool state - shown at bottom of turn */
   todos?: TodoItem[]
+  /**
+   * Stable rail seed shared with the floating card. Omitted callers derive it
+   * from the turn's first task-list tool call, then the turn id, then the session.
+   */
+  listSeed?: string
   /**
    * `full` keeps the inline rail. `summary` is a one-line review for older
    * turns. `hidden` drops the rail when the latest list is docked above the input.
@@ -3148,6 +3154,7 @@ export const TurnCard = React.memo(function TurnCard({
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
+  listSeed,
   todoRail = 'full',
   renderActionsMenu,
   onAcceptPlan,
@@ -3172,6 +3179,7 @@ export const TurnCard = React.memo(function TurnCard({
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
+  const railSeed = listSeed ?? taskListSeed({ activities, turnId, sessionId })
   const hasRunningTools = activities.some(activity => activity.type === 'tool' && activity.status === 'running')
   const showCommentary = isVisibleCommentaryCard(
     response,
@@ -3653,8 +3661,8 @@ export const TurnCard = React.memo(function TurnCard({
 
       {todos && todos.length > 0 && todoRail !== 'hidden' && (
         todoRail === 'summary'
-          ? <TaskTurnSummary todos={todos} settled={isComplete} />
-          : <TodoList todos={todos} />
+          ? <TaskTurnSummary todos={todos} listSeed={railSeed} settled={isComplete} />
+          : <TodoList todos={todos} listSeed={railSeed} />
       )}
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}

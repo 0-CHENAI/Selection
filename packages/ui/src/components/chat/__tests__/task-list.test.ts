@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { extractTodosFromActivities, groupMessagesByTurn } from '../turn-utils';
+import { extractTodosFromActivities, groupMessagesByTurn, taskListSeed } from '../turn-utils';
 import type { ActivityItem, TodoItem } from '../TurnCard';
 import type { Message } from '@craft-agent/core';
 const items = [{ id: 'a', content: '确认事实', status: 'in_progress' as const }, { id: 'b', content: '验收', status: 'pending' as const }];
@@ -20,4 +20,21 @@ test('historical turns retain snapshots and a stopped turn interrupts only the a
   const turns = groupMessagesByTurn(messages, { isSessionProcessing: false }).filter(turn => turn.type === 'assistant');
   expect(turns[0]!.todos?.map(item => item.status)).toEqual(['interrupted', 'pending']);
   expect(turns[1]!.todos?.map(item => item.status)).toEqual(['completed', 'completed']);
+});
+test('rail seed stays on the call that created the list', () => {
+  expect(taskListSeed({
+    activities: [
+      { toolName: 'update_task_list', toolUseId: 'origin', timestamp: 2 },
+      { toolName: 'mcp__session__update_task_list', toolUseId: 'later', timestamp: 5 },
+    ],
+    turnId: 'turn',
+    sessionId: 'session',
+  })).toBe('origin');
+  expect(taskListSeed({
+    activities: [{ toolName: 'TodoWrite', toolUseId: 'legacy', timestamp: 4 }],
+    turnId: 'turn',
+  })).toBe('legacy');
+  expect(taskListSeed({ activities: [], turnId: 'turn', sessionId: 'session' })).toBe('turn');
+  expect(taskListSeed({ sessionId: ' session ' })).toBe('session');
+  expect(taskListSeed({})).toBe('task-list');
 });

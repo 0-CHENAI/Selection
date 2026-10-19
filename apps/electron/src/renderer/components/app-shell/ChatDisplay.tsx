@@ -73,6 +73,7 @@ import {
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
   getAssistantTurnUiKey,
+  taskListSeed,
   pendingClarificationLayout,
   settledClarificationGroups,
   settledClarificationMessages,
@@ -870,8 +871,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!found) return null
     const turn = allTurns[found.index]
     if (!turn || turn.type !== 'assistant') return null
-    return { key: getAssistantTurnUiKey(turn, found.index), todos: found.todos, index: found.index, streaming: !!turn.isStreaming }
-  }, [allTurns])
+    const turnKey = getAssistantTurnUiKey(turn, found.index)
+    return {
+      key: turnKey,
+      todos: found.todos,
+      index: found.index,
+      streaming: !!turn.isStreaming,
+      listSeed: taskListSeed({
+        activities: turn.activities,
+        turnId: turnKey,
+        sessionId: activeSessionId,
+      }),
+    }
+  }, [activeSessionId, allTurns])
   const userTurnAfterList = !!latestTodo && allTurns.slice(latestTodo.index + 1).some(turn => turn.type === 'user')
   const taskCard = useSessionTaskCard(activeSessionId, {
     listKey: latestTodo?.key ?? null,
@@ -2237,6 +2249,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         expandedActivityGroups={expandedActivityGroups}
                         onExpandedActivityGroupsChange={setExpandedActivityGroups}
                         todos={turn.todos}
+                        listSeed={taskListSeed({
+                          activities: turn.activities,
+                          turnId: assistantUiKey,
+                          sessionId: session.id,
+                        })}
                         todoRail={todoRailForTurn({
                           enabled: taskCardEnabled,
                           isLatest: latestTodo?.key === assistantUiKey,
@@ -2498,6 +2515,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             {taskCardEnabled && latestTodo && (
               <TaskProgressCard
                 todos={latestTodo.todos}
+                listSeed={latestTodo.listSeed}
                 phase={taskCard.phase}
                 expanded={taskCard.expanded}
                 onExpandedChange={taskCard.setExpanded}
