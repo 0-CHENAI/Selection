@@ -27,6 +27,14 @@ export function coerceInputText(value: unknown): string {
  * user message put back on Stop). Appends with a blank line so a half-typed
  * draft isn't clobbered; returns the non-empty side when the other is empty.
  */
+/**
+ * Explicit Stop leaves the composer alone. An empty draft stays empty, and a
+ * draft the user is already typing is not combined with the cancelled prompt.
+ */
+export function resolveComposerAfterExplicitStop(draft: unknown): string {
+  return coerceInputText(draft)
+}
+
 export function appendRestoredInput(existing: string | undefined, restored: string | undefined): string {
   const existingText = coerceInputText(existing)
   const restoredText = coerceInputText(restored)

@@ -596,6 +596,7 @@
   "chat.title": "Tytuł",
   "chat.titlePlaceholder": "Bez tytułu",
   "chat.tokensUsed": "Użyto {{displayCount}} tokenów",
+  "chat.turnCancelled": "Anulowane",
   "chat.usage.cacheRead": "Odczyt z pamięci podręcznej",
   "chat.usage.cost": "Koszt",
   "chat.usage.currentTurn": "Bieżące zadanie użytkownika",

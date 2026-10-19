@@ -596,6 +596,7 @@
   "chat.title": "标题",
   "chat.titlePlaceholder": "无标题",
   "chat.tokensUsed": "{{displayCount}} 个令牌已使用",
+  "chat.turnCancelled": "已取消",
   "chat.usage.cacheRead": "缓存读取",
   "chat.usage.cost": "费用",
   "chat.usage.currentTurn": "当前用户任务",

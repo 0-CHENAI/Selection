@@ -1,4 +1,5 @@
 import type { Turn } from '@craft-agent/ui'
+import { isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
 
 export interface WorkTiming {
   startTime: number
@@ -49,8 +50,7 @@ export function getWorkTimings(
       endTime = Math.max(endTime, turn.timestamp, turn.response?.timestamp ?? 0,
         turn.response?.completedRevealStartTime ?? 0)
       for (const activity of turn.activities) endTime = Math.max(endTime, activity.timestamp)
-    } else if (turn.type === 'system' && (turn.message.role === 'error'
-      || (turn.message.role === 'info' && turn.message.content === 'Response interrupted'))) {
+    } else if (turn.type === 'system' && (turn.message.role === 'error' || isCancelledTurnMarker(turn.message))) {
       interrupted = true
       endTime = Math.max(endTime, turn.timestamp)
       // A stop before the first token still retains its elapsed work status.
@@ -59,4 +59,13 @@ export function getWorkTimings(
   })
   save()
   return timings
+}
+
+/** The status row belongs to the user message that opened its request. */
+export function workStatusOwnsUser(turns: readonly Turn[], statusIndex: number, userId: string): boolean {
+  for (let index = statusIndex; index >= 0; index--) {
+    const turn = turns[index]
+    if (turn?.type === 'user') return turn.message.id === userId
+  }
+  return false
 }

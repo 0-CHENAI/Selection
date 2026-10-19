@@ -1676,8 +1676,9 @@ export function FreeFormInput({
       }
     }
 
-    // Plain Arrow Up with no draft content cancels the running turn and recalls
-    // its prompt through ChatDisplay.handleStop. The pure guard deliberately
+    // Plain Arrow Up with no draft content cancels the running turn. The prompt
+    // stays in the transcript; ChatDisplay.handleStop does not copy it back.
+    // The pure guard deliberately
     // treats whitespace, attachments, loading files, and follow-up chips as draft
     // content so normal editing is never hijacked.
     if (shouldRecallPromptOnArrowUp({

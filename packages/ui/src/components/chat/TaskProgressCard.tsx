@@ -2,7 +2,8 @@ import * as React from 'react'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, ChevronDown } from 'lucide-react'
-import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, MotionConfig, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
+import { taskCardContentMotion, type TaskCardBox, type TaskCardMotionDirection } from './task-card-motion'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import type { TodoItem } from './TurnCard'
@@ -28,8 +29,6 @@ const SHELL_SPRING = { type: 'spring' as const, bounce: 0, duration: 0.32 }
 const FIXED_RADIUS = 16
 const CONTENT_BLUR = 'blur(4px)'
 const BUTTON_GAP = 6
-
-type ShellSize = { width: number; height: number }
 
 const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -184,6 +183,105 @@ export function TaskTurnSummary({
   )
 }
 
+function PanelFrame({
+  panelId,
+  panelWidth,
+  heading,
+  todos,
+  listSeed,
+  onCollapse,
+  collapseLabel,
+}: {
+  panelId: string
+  panelWidth: number
+  heading: string
+  todos: TodoItem[]
+  listSeed?: string
+  onCollapse: () => void
+  collapseLabel: string
+}) {
+  return (
+    <div data-task-card-frame="panel" style={{ width: panelWidth }}>
+      <div className="flex items-center gap-1 pl-3 pr-1.5 pt-1.5">
+        <p
+          className="min-w-0 flex-1 truncate py-1 text-[13px] font-medium text-foreground"
+          data-task-card-heading=""
+        >
+          {heading}
+        </p>
+        <button
+          type="button"
+          className={iconButtonClass()}
+          aria-expanded
+          aria-controls={panelId}
+          title={collapseLabel}
+          onClick={onCollapse}
+        >
+          <ChevronDown className="size-3.5" aria-hidden />
+        </button>
+      </div>
+      <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
+        <TodoList todos={todos} listSeed={listSeed} showTitle={false} className="mt-0" />
+      </div>
+    </div>
+  )
+}
+
+function CapsuleFrame({
+  panelId,
+  panelWidth,
+  phase,
+  progress,
+  label,
+  fraction,
+  expandLabel,
+  onExpand,
+}: {
+  panelId: string
+  panelWidth: number
+  phase: Exclude<TaskCardPhase, 'hidden'>
+  progress: ReturnType<typeof taskStepProgress>
+  label: string
+  fraction: string
+  expandLabel: string
+  onExpand: () => void
+}) {
+  return (
+    <div
+      data-task-card-frame="capsule"
+      data-task-card-summary=""
+      style={{ maxWidth: panelWidth }}
+      className="flex w-max min-w-0 max-w-[min(420px,calc(100%-2.75rem))] items-center"
+    >
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-3 pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        aria-expanded={false}
+        aria-controls={panelId}
+        title={expandLabel}
+        onClick={onExpand}
+      >
+        {phase === 'complete' ? (
+          <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
+        ) : phase === 'interrupted' ? (
+          <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden />
+        ) : (
+          <ProgressRing current={progress.current} total={progress.total} />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
+          {label}
+        </span>
+        {phase === 'active' && (
+          <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
+            {fraction}
+          </span>
+        )}
+        <ChevronDown className="size-3.5 shrink-0 rotate-180 text-foreground/50" aria-hidden />
+      </button>
+    </div>
+  )
+}
+
 function iconButtonClass(extra?: string) {
   return cn(
     'inline-flex size-6 shrink-0 items-center justify-center rounded-full text-foreground/50',
@@ -203,6 +301,7 @@ export function TaskProgressCard({
   visible = true,
   onPresenceChange,
   listSeed,
+  motionSample,
 }: {
   todos: TodoItem[]
   phase: Exclude<TaskCardPhase, 'hidden'>
@@ -215,6 +314,8 @@ export function TaskProgressCard({
   onPresenceChange?: (present: boolean) => void
   /** Same seed the history summary uses, so the rail shape matches. */
   listSeed?: string
+  /** Pin the shape crossfade at 0 (capsule) to 1 (panel). Used to inspect frames. */
+  motionSample?: number
 }) {
   const { t } = useTranslation()
   const reduceMotion = !!useReducedMotion()
@@ -232,44 +333,121 @@ export function TaskProgressCard({
   const shapeExpanded = cardShown ? expanded : shapeRef.current
   const onScreen = cardShown || present
   const shellRef = useRef<HTMLElement>(null)
-  const sizerRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLDivElement>(null)
   const snapRef = useRef(true)
   const [panelWidth, setPanelWidth] = useState(420)
-  const [shellSize, setShellSize] = useState<ShellSize | null>(null)
+  const [shapes, setShapes] = useState<{ panel: TaskCardBox; capsule: TaskCardBox } | null>(null)
+  const shapesRef = useRef(shapes)
+  shapesRef.current = shapes
+  const directionRef = useRef<TaskCardMotionDirection>(shapeExpanded ? 'expand' : 'collapse')
+  const shapeProgress = useMotionValue(shapeExpanded ? 1 : 0)
+  const shellWidth = useMotionValue<number | undefined>(undefined)
+  const shellHeight = useMotionValue<number | undefined>(undefined)
+  const panelOpacity = useMotionValue(shapeExpanded ? 1 : 0)
+  const capsuleOpacity = useMotionValue(shapeExpanded ? 0 : 1)
+  const panelY = useMotionValue(0)
+  const capsuleY = useMotionValue(0)
+  const panelFilter = useMotionValue('blur(0px)')
+  const capsuleFilter = useMotionValue('blur(0px)')
+  const panelPointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'auto' : 'none')
+  const capsulePointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'none' : 'auto')
+  const [crossfade, setCrossfade] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  const publishShape = React.useCallback((value: number) => {
+    const current = shapesRef.current
+    if (!current) return
+    const frame = taskCardContentMotion({
+      progress: value,
+      panel: current.panel,
+      capsule: current.capsule,
+      direction: directionRef.current,
+      reduceMotion,
+    })
+    shellWidth.set(frame.width)
+    shellHeight.set(frame.height)
+    panelOpacity.set(frame.panelOpacity)
+    capsuleOpacity.set(frame.capsuleOpacity)
+    panelY.set(frame.panelY)
+    capsuleY.set(frame.capsuleY)
+    panelFilter.set(frame.panelBlur >= 4 ? CONTENT_BLUR : frame.panelBlur > 0 ? `blur(${frame.panelBlur}px)` : 'blur(0px)')
+    capsuleFilter.set(frame.capsuleBlur >= 4 ? CONTENT_BLUR : frame.capsuleBlur > 0 ? `blur(${frame.capsuleBlur}px)` : 'blur(0px)')
+    panelPointer.set(frame.panelOpacity > 0.05 ? 'auto' : 'none')
+    capsulePointer.set(frame.capsuleOpacity > 0.05 ? 'auto' : 'none')
+  }, [capsuleFilter, capsuleOpacity, capsulePointer, capsuleY, panelFilter, panelOpacity, panelPointer, panelY, reduceMotion, shellHeight, shellWidth])
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useIsoLayoutEffect(() => {
     const anchor = rootRef.current
     const shell = shellRef.current
-    const sizer = sizerRef.current
-    if (!anchor || !shell || !sizer) return
+    const measure = measureRef.current
+    if (!anchor || !shell || !measure) return
+    measure.setAttribute('inert', '')
 
-    const measure = () => {
+    const read = () => {
       if (!shownRef.current) return
       const nextPanel = readPanelWidth(anchor)
-      const frame = sizer.querySelector<HTMLElement>('[data-task-card-frame]')
-      if (frame?.dataset.taskCardFrame === 'panel') frame.style.width = `${nextPanel}px`
-      if (frame?.dataset.taskCardFrame === 'capsule') frame.style.maxWidth = `${nextPanel}px`
+      const panelFrame = measure.querySelector<HTMLElement>('[data-task-card-frame="panel"]')
+      const capsuleFrame = measure.querySelector<HTMLElement>('[data-task-card-frame="capsule"]')
+      if (panelFrame) panelFrame.style.width = `${nextPanel}px`
+      if (capsuleFrame) capsuleFrame.style.maxWidth = `${nextPanel}px`
       setPanelWidth(prev => prev === nextPanel ? prev : nextPanel)
+      if (!panelFrame || !capsuleFrame) return
       const shellStyle = getComputedStyle(shell)
       const borderX = (parseFloat(shellStyle.borderLeftWidth) || 0) + (parseFloat(shellStyle.borderRightWidth) || 0)
       const borderY = (parseFloat(shellStyle.borderTopWidth) || 0) + (parseFloat(shellStyle.borderBottomWidth) || 0)
-      const width = Math.ceil(sizer.offsetWidth + borderX)
-      const height = Math.ceil(sizer.offsetHeight + borderY)
-      if (width <= 0 || height <= 0) return
-      setShellSize(prev => prev && prev.width === width && prev.height === height ? prev : { width, height })
+      const panelBox = {
+        width: Math.ceil(panelFrame.offsetWidth + borderX),
+        height: Math.ceil(panelFrame.offsetHeight + borderY),
+      }
+      const capsuleBox = {
+        width: Math.ceil(capsuleFrame.offsetWidth + borderX),
+        height: Math.ceil(capsuleFrame.offsetHeight + borderY),
+      }
+      if (panelBox.width <= 0 || panelBox.height <= 0 || capsuleBox.width <= 0 || capsuleBox.height <= 0) return
+      setShapes(prev => prev
+        && prev.panel.width === panelBox.width && prev.panel.height === panelBox.height
+        && prev.capsule.width === capsuleBox.width && prev.capsule.height === capsuleBox.height
+        ? prev
+        : { panel: panelBox, capsule: capsuleBox })
     }
 
-    measure()
+    read()
     if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(read)
     observer.observe(anchor)
-    observer.observe(sizer)
+    observer.observe(measure)
     return () => observer.disconnect()
-  }, [present, shapeExpanded, showScrollToBottom])
+  }, [mounted, present, shapeExpanded, showScrollToBottom])
 
-  useIsoLayoutEffect(() => {
-    if (shellSize) snapRef.current = false
-  }, [shellSize])
+  useEffect(() => {
+    if (!shapes) return
+    setCrossfade(true)
+    if (motionSample != null) {
+      shapeProgress.set(motionSample)
+      publishShape(motionSample)
+      return
+    }
+    publishShape(shapeProgress.get())
+  }, [motionSample, publishShape, shapeProgress, shapes])
+
+  const shapesReady = shapes != null
+  useEffect(() => {
+    if (!shapesRef.current || motionSample != null) return
+    directionRef.current = shapeExpanded ? 'expand' : 'collapse'
+    const target = shapeExpanded ? 1 : 0
+    if (reduceMotion || snapRef.current) {
+      shapeProgress.set(target)
+      publishShape(target)
+      snapRef.current = false
+      return
+    }
+    const controls = animate(shapeProgress, target, { ...SHELL_SPRING, onUpdate: publishShape })
+    return () => controls.stop()
+  }, [motionSample, publishShape, reduceMotion, shapeExpanded, shapeProgress, shapesReady])
 
   useEffect(() => {
     alive.current = true
@@ -320,18 +498,21 @@ export function TaskProgressCard({
   const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const fade = { duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }
   const buttonGap = showScrollToBottom && onScrollToBottom ? BUTTON_GAP : 0
-  const snap = snapRef.current || reduceMotion
-  const shellTransition = {
-    width: snap ? { duration: 0 } : SHELL_SPRING,
-    height: snap ? { duration: 0 } : SHELL_SPRING,
-    marginRight: snap ? { duration: 0 } : SHELL_SPRING,
-    opacity: fade,
+  const frameProps = {
+    panelId,
+    panelWidth,
+    heading,
+    todos,
+    listSeed,
+    phase,
+    progress,
+    label,
+    fraction,
+    collapseLabel: t('taskCard.collapse'),
+    expandLabel: t('taskCard.expand'),
+    onCollapse: () => onExpandedChange(false),
+    onExpand: () => onExpandedChange(true),
   }
-  const contentInitial = reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: CONTENT_BLUR }
-  const contentAnimate = { opacity: 1, y: 0, filter: 'blur(0px)' }
-  const contentExit = reduceMotion
-    ? { opacity: 0, transition: { duration: 0 } }
-    : { opacity: 0, y: -4, filter: CONTENT_BLUR, transition: { duration: 0.14, ease: EASE } }
 
   return (
     <MotionConfig reducedMotion="user">
@@ -356,109 +537,64 @@ export function TaskProgressCard({
               data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
               aria-label={t('taskCard.label')}
               initial={reduceMotion ? false : { opacity: 0 }}
-              animate={shellSize
-                ? { opacity: 1, width: shellSize.width, height: shellSize.height, marginRight: buttonGap }
-                : { opacity: 1, marginRight: buttonGap }}
+              animate={{ opacity: 1, marginRight: buttonGap }}
               exit={{
                 opacity: 0,
-                width: 0,
-                height: 0,
                 marginRight: 0,
                 transition: reduceMotion
                   ? { duration: 0 }
-                  : {
-                      width: SHELL_SPRING,
-                      height: SHELL_SPRING,
-                      marginRight: SHELL_SPRING,
-                      opacity: { duration: exitSeconds, ease: EASE },
-                    },
+                  : { marginRight: SHELL_SPRING, opacity: { duration: exitSeconds, ease: EASE } },
               }}
-              transition={shellTransition}
-              style={{ borderRadius: FIXED_RADIUS, overflow: 'hidden' }}
+              transition={{ marginRight: reduceMotion ? { duration: 0 } : SHELL_SPRING, opacity: fade }}
+              style={{
+                borderRadius: FIXED_RADIUS,
+                overflow: 'hidden',
+                width: crossfade ? shellWidth : undefined,
+                height: crossfade ? shellHeight : undefined,
+              }}
               className={cn(
                 'pointer-events-auto relative min-w-0 shrink-0',
                 glass,
-                !shellSize && (shapeExpanded
+                !crossfade && (shapeExpanded
                   ? 'w-[min(420px,calc(100%-2.75rem))]'
                   : 'w-max max-w-[min(420px,calc(100%-2.75rem))]'),
               )}
             >
-              <div ref={sizerRef} className="w-max">
-                <AnimatePresence mode="wait" initial={false}>
-                  {shapeExpanded ? (
-                    <motion.div
-                      key="panel"
-                      id={panelId}
-                      data-task-card-frame="panel"
-                      style={{ width: panelWidth }}
-                      initial={contentInitial}
-                      animate={contentAnimate}
-                      exit={contentExit}
-                      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: EASE }}
-                    >
-                      <div className="flex items-center gap-1 pl-3 pr-1.5 pt-1.5">
-                        <p
-                          className="min-w-0 flex-1 truncate py-1 text-[13px] font-medium text-foreground"
-                          data-task-card-heading=""
-                        >
-                          {heading}
-                        </p>
-                        <button
-                          type="button"
-                          className={iconButtonClass()}
-                          aria-expanded
-                          aria-controls={panelId}
-                          title={t('taskCard.collapse')}
-                          onClick={() => onExpandedChange(false)}
-                        >
-                          <ChevronDown className="size-3.5" aria-hidden />
-                        </button>
-                      </div>
-                      <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
-                        <TodoList todos={todos} listSeed={listSeed} showTitle={false} className="mt-0" />
-                      </div>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="capsule"
-                      data-task-card-frame="capsule"
-                      data-task-card-summary=""
-                      style={{ maxWidth: panelWidth }}
-                      initial={contentInitial}
-                      animate={contentAnimate}
-                      exit={contentExit}
-                      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: EASE }}
-                      className="flex w-max min-w-0 max-w-[min(420px,calc(100%-2.75rem))] items-center"
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-3 pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                        aria-expanded={false}
-                        aria-controls={panelId}
-                        title={t('taskCard.expand')}
-                        onClick={() => onExpandedChange(true)}
-                      >
-                        {phase === 'complete' ? (
-                          <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
-                        ) : phase === 'interrupted' ? (
-                          <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden />
-                        ) : (
-                          <ProgressRing current={progress.current} total={progress.total} />
-                        )}
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
-                          {label}
-                        </span>
-                        {phase === 'active' && (
-                          <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
-                            {fraction}
-                          </span>
-                        )}
-                        <ChevronDown className="size-3.5 shrink-0 rotate-180 text-foreground/50" aria-hidden />
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {mounted && (
+                <div
+                  ref={measureRef}
+                  className="pointer-events-none invisible absolute left-0 top-0 -z-10"
+                  aria-hidden
+                >
+                  <PanelFrame {...frameProps} />
+                  <CapsuleFrame {...frameProps} />
+                </div>
+              )}
+              {crossfade ? (
+                <div className="relative h-full w-full">
+                  <motion.div
+                    id={panelId}
+                    data-task-card-layer="panel"
+                    className="absolute bottom-0 left-0"
+                    style={{ opacity: panelOpacity, y: panelY, filter: panelFilter, pointerEvents: panelPointer }}
+                  >
+                    <PanelFrame {...frameProps} />
+                  </motion.div>
+                  <motion.div
+                    data-task-card-layer="capsule"
+                    className="absolute bottom-0 left-0"
+                    style={{ opacity: capsuleOpacity, y: capsuleY, filter: capsuleFilter, pointerEvents: capsulePointer }}
+                  >
+                    <CapsuleFrame {...frameProps} />
+                  </motion.div>
+                </div>
+              ) : shapeExpanded ? (
+                <div id={panelId}>
+                  <PanelFrame {...frameProps} />
+                </div>
+              ) : (
+                <CapsuleFrame {...frameProps} />
+              )}
             </motion.section>
           )}
         </AnimatePresence>

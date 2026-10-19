@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import { ArrowRight, Check, Clock, Copy } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
@@ -334,6 +335,8 @@ export interface UserMessageBubbleProps {
   compactMode?: boolean
   /** Message send time, shown under the bubble as HH:mm */
   timestamp?: number
+  /** First paint of a message the user just sent. History stays still. */
+  enterFromComposer?: boolean
 }
 
 export function formatUserMessageTime(timestamp: number, locale?: string): string {
@@ -360,8 +363,10 @@ export function UserMessageBubble({
   isQueued,
   compactMode,
   timestamp,
+  enterFromComposer = false,
 }: UserMessageBubbleProps) {
   const { t, i18n } = useTranslation()
+  const reduceMotion = !!useReducedMotion()
   const followUpsLabel = t('chat.followUps')
   const { onCopyToClipboard } = usePlatform()
   const hasAttachments = attachments && attachments.length > 0
@@ -469,7 +474,7 @@ export function UserMessageBubble({
   // even if a legacy path stored them in message.content.
   displayContent = sanitizeUserMessageForDisplay(displayContent)
 
-  return (
+  const bubble = (
     <div className={cn("group flex flex-col items-end gap-3 w-full", className)}>
       {/* Attachment preview row - stored attachments with thumbnails */}
       {hasAttachments && (
@@ -635,5 +640,15 @@ export function UserMessageBubble({
       )}
       </div>
     </div>
+  )
+  if (!enterFromComposer) return bubble
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduceMotion ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.25 }}
+    >
+      {bubble}
+    </motion.div>
   )
 }

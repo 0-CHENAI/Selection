@@ -141,6 +141,7 @@ export interface ISessionManager {
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
   regenerateLastResponse(sessionId: string): Promise<{ success: true }>
+  retryCancelledTurn(sessionId: string): Promise<{ success: true }>
   updateQueuedMessage(sessionId: string, messageId: string, content: string): Promise<void>
   deleteQueuedMessage(sessionId: string, messageId: string): Promise<void>
   reorderQueuedMessages(sessionId: string, messageIds: string[]): Promise<void>

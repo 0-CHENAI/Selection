@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt, sessionHasLiveGeneration } from '../input-text'
+import { readFileSync } from 'node:fs'
+import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt, resolveComposerAfterExplicitStop, sessionHasLiveGeneration } from '../input-text'
 
 describe('coerceInputText', () => {
   it('preserves plain strings', () => {
@@ -23,6 +24,21 @@ describe('coerceInputText', () => {
   it('stringifies primitive scalar values', () => {
     expect(coerceInputText(42)).toBe('42')
     expect(coerceInputText(false)).toBe('false')
+  })
+})
+
+describe('resolveComposerAfterExplicitStop', () => {
+  it('keeps an empty draft empty and does not append the cancelled prompt', () => {
+    expect(resolveComposerAfterExplicitStop('')).toBe('')
+    expect(resolveComposerAfterExplicitStop(undefined)).toBe('')
+    expect(resolveComposerAfterExplicitStop('still typing')).toBe('still typing')
+    expect(resolveComposerAfterExplicitStop('still typing')).not.toBe(appendRestoredInput('still typing', 'original question'))
+  })
+
+  it('does not put the stopped prompt back into the composer', () => {
+    const source = readFileSync(new URL('../../components/app-shell/ChatDisplay.tsx', import.meta.url), 'utf8')
+    expect(source.includes('getRestorableStoppedPrompt')).toBe(false)
+    expect(source.includes('appendRestoredInput')).toBe(false)
   })
 })
 

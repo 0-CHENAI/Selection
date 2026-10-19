@@ -60,9 +60,13 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
       }
     },
   })
-  // Reconcile the tail as estimated heights become measured on first mount.
-  // This also resets a reused scroll viewport when switching conversations.
+  // Reconcile the tail once, on mount. The list is keyed by session, so a
+  // conversation switch remounts. Repeating this whenever the virtualizer
+  // identity changes snaps the viewport on send.
+  const didMountScrollRef = React.useRef(false)
   React.useLayoutEffect(() => {
+    if (didMountScrollRef.current) return
+    didMountScrollRef.current = true
     virtualizer.scrollToEnd({ behavior: 'auto' })
   }, [virtualizer])
 

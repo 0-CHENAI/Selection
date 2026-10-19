@@ -406,6 +406,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.sendQueuedMessageNow(sessionId, command.messageId)
       case 'regenerate':
         return sessionManager.regenerateLastResponse(sessionId)
+      case 'retryCancelled':
+        return sessionManager.retryCancelledTurn(sessionId)
       default: {
         const _exhaustive: never = command
         throw new Error(`Unknown session command: ${JSON.stringify(command)}`)

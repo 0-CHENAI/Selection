@@ -41,6 +41,7 @@
     "./prompts": "./src/prompts/index.ts",
     "./sessions": "./src/sessions/index.ts",
     "./sessions/work-mode": "./src/sessions/work-mode.ts",
+    "./sessions/cancelled-turn": "./src/sessions/cancelled-turn.ts",
     "./projects": "./src/projects/index.ts",
     "./projects/types": "./src/projects/types.ts",
     "./projects/working-directory": "./src/projects/working-directory.ts",
