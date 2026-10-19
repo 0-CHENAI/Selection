@@ -83,6 +83,8 @@ export type RailTocProps = Omit<React.ComponentProps<"section">, "title"> & {
   items: RailTocItem[]
   indent?: number
   title?: string
+  /** Floating task card hides the heading so the current step is not repeated. */
+  showTitle?: boolean
   liveSummary?: string
 }
 
@@ -91,6 +93,7 @@ const RailToc = ({
   items,
   indent = 14,
   title = "On this page",
+  showTitle = true,
   liveSummary,
   ...props
 }: RailTocProps) => {
@@ -229,31 +232,34 @@ const RailToc = ({
   return (
     <section
       data-slot="rail-toc"
-      aria-labelledby={titleId}
+      aria-labelledby={showTitle ? titleId : undefined}
+      aria-label={showTitle ? undefined : title}
       className={cn("w-max text-sm", railColor, className)}
       {...props}
     >
       {liveSummary ? (
         <p className="sr-only" aria-live="polite">{liveSummary}</p>
       ) : null}
-      <p
-        id={titleId}
-        data-slot="rail-toc-title"
-        className="mb-3 flex items-center gap-2 font-medium text-foreground/70"
-      >
-        <svg
-          viewBox="0 0 16 16"
-          className="-ml-0.5 h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          aria-hidden
+      {showTitle ? (
+        <p
+          id={titleId}
+          data-slot="rail-toc-title"
+          className="mb-3 flex items-center gap-2 font-medium text-foreground/70"
         >
-          <path d="M2 4h12M2 8h8M2 12h10" />
-        </svg>
-        {title}
-      </p>
+          <svg
+            viewBox="0 0 16 16"
+            className="-ml-0.5 h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <path d="M2 4h12M2 8h8M2 12h10" />
+          </svg>
+          {title}
+        </p>
+      ) : null}
 
       <ul ref={listRef} data-slot="rail-toc-list" className="relative">
         {geometry && (

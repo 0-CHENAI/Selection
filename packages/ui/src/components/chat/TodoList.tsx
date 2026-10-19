@@ -7,6 +7,8 @@ import type { TodoItem } from './TurnCard'
 interface TodoListProps {
   todos: TodoItem[]
   className?: string
+  /** The floating panel already names the current step, so it drops this heading. */
+  showTitle?: boolean
 }
 
 const STATUSES = ['in_progress', 'pending', 'completed', 'interrupted'] as const
@@ -63,7 +65,7 @@ function summaryLabel(
 }
 
 /** Conversation task progress. Legacy todo snapshots share this renderer. */
-export function TodoList({ todos, className }: TodoListProps) {
+export function TodoList({ todos, className, showTitle = true }: TodoListProps) {
   const { t } = useTranslation()
   const depths = useMemo(() => taskRailDepths(todos), [todos])
   const items = useMemo<RailTocItem[]>(() => todos.map((todo, index) => ({
@@ -80,6 +82,7 @@ export function TodoList({ todos, className }: TodoListProps) {
     <RailToc
       items={items}
       title={t('taskList.title')}
+      showTitle={showTitle}
       liveSummary={summaryLabel(todos, t)}
       className={cn('mt-3 w-full max-w-full select-text', className)}
       data-task-rail=""

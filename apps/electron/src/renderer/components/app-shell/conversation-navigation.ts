@@ -1,9 +1,13 @@
-/** Config popovers hide the rail so it cannot leave a 2rem click/placeholder column. */
+/**
+ * Config popovers hide the rail so it cannot leave a 2rem click/placeholder column.
+ * A single record is one short tick at the chat's left edge, which reads as a
+ * stray dash. Ticks start at the second record.
+ */
 export function shouldShowConversationNavigation(
   enabled: boolean,
   itemCount: number,
 ): boolean {
-  return enabled && itemCount > 0
+  return enabled && itemCount >= 2
 }
 
 /**

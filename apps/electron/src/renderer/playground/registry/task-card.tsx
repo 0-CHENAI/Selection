@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
 import { TaskProgressCard, TaskTurnSummary, type TodoItem } from '@craft-agent/ui'
+import {
+  EMPTY_TASK_CARD_MEMORY,
+  TASK_CARD_FADE_MS,
+  reduceTaskCardMemory,
+  shouldFadeTaskCard,
+  snapshotFromTodos,
+  type TaskCardMemory,
+} from '@craft-agent/ui/chat'
 import { i18n } from '@craft-agent/shared/i18n'
 import type { ComponentEntry } from './types'
 
@@ -14,13 +22,15 @@ function tasks(active: number, doneThrough = active): TodoItem[] {
   }))
 }
 
-const catalogs = {
-  expanded: tasks(2),
-  collapsed: tasks(2),
-  done: labels.map(label => ({ id: label, content: label, status: 'completed' as const })),
-  scroll: tasks(3),
-  play: tasks(0, 0),
-}
+const done = labels.map(label => ({ id: label, content: label, status: 'completed' as const }))
+
+const interrupted: TodoItem[] = labels.map((label, index) => ({
+  id: label,
+  content: label,
+  status: index < 2 ? 'completed' : index === 2 ? 'interrupted' : 'pending',
+}))
+
+type Mode = 'collapsed' | 'expanded' | 'done' | 'scroll' | 'interrupted' | 'play'
 
 const script: TodoItem[][] = [
   tasks(0, 0),
@@ -28,7 +38,7 @@ const script: TodoItem[][] = [
   tasks(2, 2),
   tasks(3, 3),
   tasks(4, 4),
-  catalogs.done,
+  done,
 ]
 
 const older: TodoItem[] = [
@@ -36,10 +46,20 @@ const older: TodoItem[] = [
   { id: 'old-2', content: '记下当前内嵌轨道的位置', status: 'completed' },
 ]
 
-function TaskCardStage({ mode = 'expanded' }: { mode?: 'expanded' | 'collapsed' | 'done' | 'scroll' | 'play' }) {
+function staticView(mode: Mode): { todos: TodoItem[]; phase: 'active' | 'complete' | 'interrupted'; expanded: boolean; scroll: boolean } {
+  if (mode === 'expanded') return { todos: tasks(0, 0), phase: 'active', expanded: true, scroll: false }
+  if (mode === 'done') return { todos: done, phase: 'complete', expanded: false, scroll: false }
+  if (mode === 'scroll') return { todos: tasks(1, 1), phase: 'active', expanded: false, scroll: true }
+  if (mode === 'interrupted') return { todos: interrupted, phase: 'interrupted', expanded: false, scroll: false }
+  return { todos: tasks(0, 0), phase: 'active', expanded: false, scroll: false }
+}
+
+function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
+  const view = staticView(mode)
   const [step, setStep] = useState(0)
-  const [expanded, setExpanded] = useState(mode === 'expanded' || mode === 'scroll' || mode === 'play')
-  const [hidden, setHidden] = useState(false)
+  const [visible, setVisible] = useState(mode !== 'play')
+  const [hovering, setHovering] = useState(false)
+  const [memory, setMemory] = useState<TaskCardMemory>(EMPTY_TASK_CARD_MEMORY)
 
   useEffect(() => {
     const previous = i18n.language
@@ -48,26 +68,58 @@ function TaskCardStage({ mode = 'expanded' }: { mode?: 'expanded' | 'collapsed' 
   }, [])
 
   useEffect(() => {
-    setExpanded(mode === 'expanded' || mode === 'scroll' || mode === 'play')
-    setHidden(false)
     setStep(0)
+    setHovering(false)
+    setVisible(mode !== 'play')
+    setMemory(EMPTY_TASK_CARD_MEMORY)
   }, [mode])
 
   useEffect(() => {
     if (mode !== 'play') return
-    const timer = window.setInterval(() => {
-      setStep(current => (current + 1) % script.length)
-    }, 900)
-    return () => window.clearInterval(timer)
+    const timers = [
+      window.setTimeout(() => {
+        const snapshot = snapshotFromTodos('play', script[0]!, false)
+        setMemory(reduceTaskCardMemory(EMPTY_TASK_CARD_MEMORY, {
+          type: 'list',
+          snapshot,
+          userTurnAfterList: false,
+        }))
+        setVisible(true)
+      }, 400),
+    ]
+    for (let index = 1; index < script.length; index++) {
+      timers.push(window.setTimeout(() => {
+        setStep(index)
+        setMemory(current => reduceTaskCardMemory(current, {
+          type: 'list',
+          snapshot: snapshotFromTodos('play', script[index]!, false),
+          userTurnAfterList: false,
+        }))
+      }, 400 + index * 900))
+    }
+    return () => { timers.forEach(timer => window.clearTimeout(timer)) }
   }, [mode])
 
-  const todos = mode === 'play' ? script[step]! : catalogs[mode]
-  const showScroll = mode === 'scroll' || mode === 'play'
+  useEffect(() => {
+    if (mode !== 'play' || !shouldFadeTaskCard(memory, hovering)) return
+    const timer = window.setTimeout(() => {
+      setMemory(current => reduceTaskCardMemory(current, { type: 'fade' }))
+      setVisible(false)
+    }, TASK_CARD_FADE_MS)
+    return () => window.clearTimeout(timer)
+  }, [hovering, memory, mode])
+
+  const playing = mode === 'play'
+  const todos = playing ? script[step]! : view.todos
+  const phase = playing ? (memory.phase === 'hidden' ? 'complete' : memory.phase) : view.phase
+  const expanded = playing ? memory.expanded : view.expanded
+  const cardVisible = playing ? memory.phase !== 'hidden' : visible
+  const showCard = playing ? memory.listKey !== null : true
 
   return (
-    <div data-task-card-stage={mode} data-task-card-step={mode === 'play' ? step : mode} className="flex h-full min-h-[560px] w-full flex-col bg-background text-foreground">
+    <div data-task-card-stage={mode} data-task-card-step={playing ? step : mode} className="flex h-full min-h-[560px] w-full flex-col bg-background text-foreground">
       <div className="relative min-h-0 flex-1">
-        <div className="mx-auto flex h-full w-full max-w-[840px] flex-col justify-end px-5 pb-4">
+        <div className="mx-auto flex h-full w-full max-w-[840px] flex-col justify-end px-5 pb-16">
           <div className="mb-4 max-w-[75%] self-end rounded-[12px] bg-foreground/[0.05] px-4 py-2.5 text-sm">
             帮我看一下这台电脑，写一首秋天的小诗，再用一句话总结。
           </div>
@@ -77,18 +129,33 @@ function TaskCardStage({ mode = 'expanded' }: { mode?: 'expanded' | 'collapsed' 
             <p className="mt-3">这台 macOS 27.0.1 的工作目录有 6 个文件，磁盘还剩 699 GB。</p>
           </div>
         </div>
-      </div>
-      <div className="mx-auto w-full max-w-[840px] px-5 pb-4">
-        {!hidden && (
+        {showCard && (
           <TaskProgressCard
             todos={todos}
+            phase={phase}
             expanded={expanded}
-            onExpandedChange={setExpanded}
-            onDismiss={() => setHidden(true)}
-            showScrollToBottom={showScroll}
+            visible={cardVisible}
+            onExpandedChange={(next) => {
+              if (!playing) return
+              setMemory(current => reduceTaskCardMemory(current, { type: 'expand', expanded: next }))
+            }}
+            onDismiss={() => {
+              if (playing) {
+                setMemory(current => reduceTaskCardMemory(current, {
+                  type: 'dismiss',
+                  snapshot: snapshotFromTodos('play', todos, false),
+                }))
+                return
+              }
+              setVisible(false)
+            }}
+            onHoverChange={setHovering}
+            showScrollToBottom={!playing && view.scroll}
             onScrollToBottom={() => {}}
           />
         )}
+      </div>
+      <div className="mx-auto w-full max-w-[840px] px-5 pb-4">
         <div className="rounded-[16px] bg-background px-4 py-3 text-sm text-foreground/45 shadow-minimal">
           按 ⌘ + . 沉浸模式
         </div>
@@ -102,31 +169,33 @@ export const taskCardComponents: ComponentEntry[] = [
     id: 'task-card',
     name: 'Task Card',
     category: 'Turn Cards',
-    description: 'Collapsible task progress pinned above the composer',
+    description: 'Centered floating task capsule above the composer',
     component: TaskCardStage,
     layout: 'full',
     previewOverflow: 'hidden',
     props: [
       {
         name: 'mode',
-        description: 'Expanded, collapsed, completed, with the back-to-bottom button, or a stepping script',
+        description: 'Collapsed capsule, expanded panel, completed, interrupted, with the back-to-bottom button, or the appear-to-fade script',
         control: {
           type: 'select',
           options: [
-            { label: 'Expanded', value: 'expanded' },
             { label: 'Collapsed', value: 'collapsed' },
+            { label: 'Expanded', value: 'expanded' },
             { label: 'Completed', value: 'done' },
+            { label: 'Interrupted', value: 'interrupted' },
             { label: 'With scroll button', value: 'scroll' },
             { label: 'Step through', value: 'play' },
           ],
         },
-        defaultValue: 'expanded',
+        defaultValue: 'collapsed',
       },
     ],
     variants: [
-      { name: 'Expanded', props: { mode: 'expanded' } },
       { name: 'Collapsed', props: { mode: 'collapsed' } },
+      { name: 'Expanded', props: { mode: 'expanded' } },
       { name: 'Completed', props: { mode: 'done' } },
+      { name: 'Interrupted', props: { mode: 'interrupted' } },
       { name: 'With scroll button', props: { mode: 'scroll' } },
       { name: 'Step through', props: { mode: 'play' } },
     ],

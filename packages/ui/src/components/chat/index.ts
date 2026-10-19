@@ -19,16 +19,21 @@ export { TodoList } from './TodoList'
 export { TaskProgressCard, TaskTurnSummary, TaskProgressSummary, useSessionTaskCard } from './TaskProgressCard'
 export {
   taskStepProgress,
+  snapshotFromTodos,
+  taskListSignature,
   latestTodoList,
   todoRailForTurn,
   reduceTaskCardMemory,
+  isTaskCardVisible,
   isTaskCardDocked,
+  shouldFadeTaskCard,
   readTaskCardMemory,
   writeTaskCardMemory,
   taskCardStorageKey,
   EMPTY_TASK_CARD_MEMORY,
+  TASK_CARD_FADE_MS,
 } from './task-progress'
-export type { TodoRailMode, TaskCardMemory, TaskCardEvent } from './task-progress'
+export type { TodoRailMode, TaskCardMemory, TaskCardEvent, TaskCardPhase, TaskListSnapshot } from './task-progress'
 export { InlineExecution, mapToolEventToActivity, type InlineExecutionProps, type InlineExecutionStatus, type InlineActivityItem } from './InlineExecution'
 export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardActionsMenu'
 export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from './SessionViewer'
