@@ -6,7 +6,7 @@ function read(path: string): string {
 }
 
 describe('task card dock', () => {
-  test('docks the capsule in the composer toolbar and keeps a lone scroll button where it was', () => {
+  test('docks the capsule and the scroll button in the composer toolbar row', () => {
     const chat = read('../ChatDisplay.tsx')
     const zone = read('../input/ChatInputZone.tsx')
     const badges = read('../ActiveOptionBadges.tsx')
@@ -15,9 +15,10 @@ describe('task card dock', () => {
     expect(chat).toContain('placement="overlay"')
     expect(chat).toContain('shellMaxWidth={slot.shellMaxWidth}')
     expect(chat).toContain('toolbarCenter=')
+    expect(chat).toContain('scrollInToolbar')
     expect(chat).toContain('taskScrollFused')
     expect(chat).toContain('showScrollToBottom={showScrollToBottom}')
-    expect(chat).toContain('showScrollToBottom && (taskCard.visible || taskCardPresent)')
+    expect(chat).not.toContain('showScrollToBottom && (taskCard.visible || taskCardPresent)')
     expect(chat).toContain('showScrollToBottom && !taskScrollFused')
     expect(chat).toContain('absolute bottom-3 left-1/2')
     expect(chat).toContain('data-testid="chat-scroll-to-bottom"')

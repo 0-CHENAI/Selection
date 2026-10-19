@@ -905,7 +905,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   })
   const taskCardEnabled = !hideComposer && !taskPreview
   const [taskCardPresent, setTaskCardPresent] = React.useState(false)
-  const taskScrollFused = taskCardEnabled && !!latestTodo && (compactMode || taskCard.visible || taskCardPresent)
+  const scrollInToolbar = !compactMode && taskCardEnabled
+  const taskScrollFused = scrollInToolbar || (compactMode && taskCardEnabled && !!latestTodo)
   const { start: startIndex, end: endIndex } = historyBounds.sessionId === activeSessionId
     ? historyBounds : { start: 0, end: 0 }
   const turns = allTurns.slice(startIndex, endIndex)
@@ -2522,7 +2523,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   </div>
                 )}
                 {processingTurnIndex === -1 && !clarificationLayout && processingIndicator}
-                {/* Scroll anchor. The capsule lives in the composer toolbar, so the transcript does not reserve a gap for it. */}
+                {/* Scroll anchor. The capsule and back-to-bottom control live in the composer toolbar, so the transcript does not reserve a gap for either. */}
                 <div ref={messagesEndRef} />
               </div>
               </ScrollArea>
@@ -2572,18 +2573,18 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
           <ChatInputZone
-            toolbarCenter={!compactMode && taskCardEnabled && latestTodo ? (slot) => (
+            toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
                 placement="toolbar"
                 shellMaxWidth={slot.shellMaxWidth}
-                todos={latestTodo.todos}
-                listSeed={latestTodo.listSeed}
+                todos={latestTodo?.todos ?? []}
+                listSeed={latestTodo?.listSeed}
                 phase={taskCard.phase}
-                expanded={taskCard.expanded}
+                expanded={!!latestTodo && taskCard.expanded}
                 onExpandedChange={taskCard.setExpanded}
-                visible={taskCard.visible}
+                visible={!!latestTodo && taskCard.visible}
                 onPresenceChange={setTaskCardPresent}
-                showScrollToBottom={showScrollToBottom && (taskCard.visible || taskCardPresent)}
+                showScrollToBottom={showScrollToBottom}
                 onScrollToBottom={() => scrollToLatest('smooth')}
               />
             ) : undefined}

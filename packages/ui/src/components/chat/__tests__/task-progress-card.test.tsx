@@ -409,7 +409,25 @@ describe('task card markup', () => {
     expect(html).toContain('data-task-card-progress')
     expect(html).toContain('3/6')
     expect(html).toContain('size-[30px]')
+    expect(html).toContain('data-toolbar-scroll="docked"')
     expect(html).not.toContain('bottom-3')
+    expect(html).not.toContain('bg-success')
+
+    const centered = renderCard(
+      <TaskProgressCard
+        todos={[]}
+        phase="active"
+        expanded={false}
+        onExpandedChange={() => {}}
+        placement="toolbar"
+        visible={false}
+        showScrollToBottom
+        onScrollToBottom={() => {}}
+      />,
+    )
+    expect(centered).toContain('data-toolbar-scroll="center"')
+    expect(centered).toContain('data-testid="chat-scroll-to-bottom"')
+    expect(centered).not.toContain('data-task-card=""')
     const minAt = html.indexOf('data-task-card-cluster="min"')
     const minEnd = html.indexOf('data-task-card-cluster="natural"')
     const minHtml = minAt >= 0 && minEnd > minAt ? html.slice(minAt, minEnd) : html.slice(minAt)
@@ -429,6 +447,12 @@ describe('task card markup', () => {
     const machine = readFileSync(new URL('../task-progress.ts', import.meta.url), 'utf8')
     expect(rail).toContain('useReducedMotion')
     expect(rail).toContain('strokeDasharray="2 5"')
+    expect(rail).toContain('strokeWidth="1.25"')
+    expect(rail).toContain('allComplete ? "stroke-success" : "stroke-foreground/25"')
+    expect(rail).not.toContain('fill-success')
+    expect(card).toContain('text-success')
+    expect(card).not.toContain('bg-success')
+    expect(card).not.toContain('border-success')
     expect(rail).toContain('M2 4h12M2 8h8M2 12h10')
     expect(rail).toContain('showTitle')
     expect(card).toContain('M2 4h12M2 8h8M2 12h10')

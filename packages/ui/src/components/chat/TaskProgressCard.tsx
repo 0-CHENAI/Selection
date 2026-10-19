@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, ChevronDown } from 'lucide-react'
-import { AnimatePresence, MotionConfig, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
+import { AnimatePresence, MotionConfig, animate, motion, useMotionValue, useMotionValueEvent, useReducedMotion } from 'motion/react'
 import { taskCardContentMotion, type TaskCardBox, type TaskCardMotionDirection } from './task-card-motion'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
@@ -26,6 +26,7 @@ import {
   TOOLBAR_CONTROL_HEIGHT,
   TOOLBAR_SCROLL_SIZE,
   TOOLBAR_SHELL_MAX,
+  toolbarScrollX,
 } from './toolbar-capsule-fit'
 
 const EASE = [0.23, 1, 0.32, 1] as const
@@ -534,6 +535,107 @@ export function TaskProgressCard({
     }
   }, [cardShown, onExpandedChange, shapeExpanded])
 
+  const scrollShownLive = !!(showScrollToBottom && onScrollToBottom)
+  const scrollX = useMotionValue(-TOOLBAR_SCROLL_SIZE / 2)
+  const [scrollReady, setScrollReady] = useState(false)
+  const scrollReadyRef = useRef(false)
+  const scrollSeen = useRef(false)
+  const scrollGlued = useRef(false)
+  const scrollFlight = useRef<{ stop: () => void, to: number } | null>(null)
+  const scrollGen = useRef(0)
+  const onScreenRef = useRef(onScreen)
+  const scrollShownRef = useRef(scrollShownLive)
+  const reduceMotionRef = useRef(reduceMotion)
+  const shapeExpandedRef = useRef(shapeExpanded)
+  scrollReadyRef.current = scrollReady
+  onScreenRef.current = onScreen
+  scrollShownRef.current = scrollShownLive
+  reduceMotionRef.current = reduceMotion
+  shapeExpandedRef.current = shapeExpanded
+
+  const readShellWidth = React.useCallback(() => {
+    const live = shellWidth.get()
+    if (typeof live === 'number' && live > 0) return live
+    const box = shapesRef.current
+    if (!box) return 0
+    return (shapeExpandedRef.current ? box.panel.width : box.capsule.width) || 0
+  }, [shellWidth])
+
+  const stopScrollFlight = React.useCallback(() => {
+    scrollGen.current += 1
+    scrollFlight.current?.stop()
+    scrollFlight.current = null
+  }, [])
+
+  // The button stays mounted on the row center. `x` springs between center and the
+  // shell's right edge, so a capsule mount does not remount it or flash the old slot.
+  const flyScroll = React.useCallback((docked: boolean) => {
+    if (!toolbar || !scrollShownRef.current) return
+    const width = docked ? readShellWidth() : 0
+    if (docked && width <= 0) return
+    const next = toolbarScrollX({ docked, shellWidth: width })
+    if (scrollFlight.current && Math.abs(scrollFlight.current.to - next) < 0.5) return
+    if (scrollGlued.current && docked && Math.abs(scrollX.get() - next) < 0.5) return
+    const slide = scrollSeen.current && !reduceMotionRef.current && Math.abs(scrollX.get() - next) >= 0.5
+    if (!slide) {
+      stopScrollFlight()
+      scrollX.set(next)
+      scrollGlued.current = docked
+      return
+    }
+    stopScrollFlight()
+    const token = scrollGen.current
+    scrollGlued.current = false
+    const controls = animate(scrollX, next, {
+      ...SHELL_SPRING,
+      onComplete: () => {
+        if (scrollGen.current !== token) return
+        scrollFlight.current = null
+        const stillDocked = onScreenRef.current && scrollShownRef.current
+        if (stillDocked) {
+          const latest = readShellWidth()
+          if (latest > 0) scrollX.set(toolbarScrollX({ docked: true, shellWidth: latest }))
+        }
+        scrollGlued.current = stillDocked
+      },
+    })
+    scrollFlight.current = { to: next, stop: () => controls.stop() }
+  }, [readShellWidth, scrollX, stopScrollFlight, toolbar])
+
+  useIsoLayoutEffect(() => {
+    if (!toolbar || !scrollShownLive) {
+      stopScrollFlight()
+      scrollGlued.current = false
+      scrollSeen.current = false
+      return
+    }
+    flyScroll(onScreen)
+  }, [flyScroll, onScreen, scrollShownLive, stopScrollFlight, toolbar])
+
+  useMotionValueEvent(shellWidth, 'change', (width) => {
+    if (!toolbar || !scrollShownRef.current || !onScreenRef.current) return
+    if (typeof width !== 'number' || width <= 0) return
+    if (scrollGlued.current) {
+      scrollX.set(toolbarScrollX({ docked: true, shellWidth: width }))
+      return
+    }
+    if (scrollFlight.current) return
+    flyScroll(true)
+  })
+
+  useEffect(() => {
+    if (!toolbar || !scrollShownLive || scrollReady) return
+    if (!onScreen || readShellWidth() > 0) setScrollReady(true)
+  }, [onScreen, readShellWidth, scrollReady, scrollShownLive, shapes, toolbar])
+
+  useEffect(() => {
+    if (!scrollShownLive || !scrollReady) return
+    const frame = requestAnimationFrame(() => { scrollSeen.current = true })
+    return () => cancelAnimationFrame(frame)
+  }, [scrollReady, scrollShownLive])
+
+  useEffect(() => () => { scrollFlight.current?.stop() }, [])
+
   if (!onScreen && !showScrollToBottom) return null
 
   const fraction = t('taskCard.progress', { current: progress.current, total: progress.total })
@@ -547,9 +649,9 @@ export function TaskProgressCard({
   const glass = 'border border-foreground/10 bg-background/80 shadow-minimal backdrop-blur-md'
   const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const fade = { duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }
-  const scrollShown = !!(showScrollToBottom && onScrollToBottom)
-  const buttonGap = scrollShown ? BUTTON_GAP : 0
-  const toolbarEndReserve = toolbar && scrollShown ? TOOLBAR_SCROLL_SIZE + BUTTON_GAP : 0
+  const scrollShown = scrollShownLive
+  const buttonGap = !toolbar && scrollShown ? BUTTON_GAP : 0
+  const toolbarEndReserve = toolbar && scrollShown && onScreen ? TOOLBAR_SCROLL_SIZE + BUTTON_GAP : 0
   const restingCapsulePx = shapes?.capsule.height ?? TOOLBAR_CONTROL_HEIGHT
   const frameWidth = toolbarShellMax ?? panelWidth
   const frameProps = {
@@ -578,15 +680,11 @@ export function TaskProgressCard({
         data-task-card-placement={placement}
         data-task-card-end-reserve={toolbar ? toolbarEndReserve : undefined}
         className={cn(
-          'pointer-events-none z-20 flex items-end',
+          'pointer-events-none z-20',
           toolbar
-            ? 'absolute left-1/2'
-            : 'absolute inset-x-0 bottom-3 justify-center px-4',
+            ? 'absolute left-1/2 top-0 h-full w-0'
+            : 'absolute inset-x-0 bottom-3 flex items-end justify-center px-4',
         )}
-        style={toolbar ? {
-          bottom: `calc(50% - ${restingCapsulePx}px / 2)`,
-          transform: `translateX(calc(-50% + ${toolbarEndReserve / 2}px))`,
-        } : undefined}
       >
         {toolbar && onScreen && (
           <>
@@ -606,6 +704,13 @@ export function TaskProgressCard({
             </div>
           </>
         )}
+        <div
+          className={cn('flex items-end', toolbar && 'absolute left-0')}
+          style={toolbar ? {
+            bottom: `calc(50% - ${restingCapsulePx}px / 2)`,
+            transform: 'translateX(-50%)',
+          } : undefined}
+        >
         <AnimatePresence
           initial={false}
           onExitComplete={() => {
@@ -685,7 +790,7 @@ export function TaskProgressCard({
             </motion.section>
           )}
         </AnimatePresence>
-        {showScrollToBottom && onScrollToBottom && (
+        {!toolbar && scrollShown && (
           <button
             type="button"
             data-testid="chat-scroll-to-bottom"
@@ -693,8 +798,7 @@ export function TaskProgressCard({
             aria-label={scrollLabel}
             title={scrollLabel}
             className={cn(
-              'pointer-events-auto inline-flex shrink-0 items-center justify-center rounded-full',
-              toolbar ? 'size-[30px]' : 'size-8',
+              'pointer-events-auto inline-flex size-8 shrink-0 items-center justify-center rounded-full',
               'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
               'transition-colors hover:bg-background hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
@@ -702,6 +806,38 @@ export function TaskProgressCard({
           >
             <ChevronDown className="size-4" />
           </button>
+        )}
+        </div>
+        {toolbar && (
+          <AnimatePresence initial={false}>
+            {scrollShown && (
+              <motion.button
+                type="button"
+                data-testid="chat-scroll-to-bottom"
+                data-toolbar-scroll={onScreen ? 'docked' : 'center'}
+                onClick={onScrollToBottom}
+                aria-label={scrollLabel}
+                title={scrollLabel}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: scrollReady ? 1 : 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
+                style={{
+                  x: scrollX,
+                  left: 0,
+                  bottom: `calc(50% - ${TOOLBAR_SCROLL_SIZE}px / 2)`,
+                }}
+                className={cn(
+                  'pointer-events-auto absolute z-10 inline-flex size-[30px] items-center justify-center rounded-full',
+                  'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
+                  'transition-colors hover:bg-background hover:text-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                )}
+              >
+                <ChevronDown className="size-4" />
+              </motion.button>
+            )}
+          </AnimatePresence>
         )}
       </div>
     </MotionConfig>

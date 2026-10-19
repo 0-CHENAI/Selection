@@ -3,6 +3,7 @@ import {
   TOOLBAR_SHELL_MAX,
   centeredShellBudget,
   toolbarCapsuleFit,
+  toolbarScrollX,
 } from '../toolbar-capsule-fit'
 
 describe('toolbar capsule fit', () => {
@@ -76,6 +77,12 @@ describe('toolbar capsule fit', () => {
     const restored = toolbarCapsuleFit({ ...base, rightTextWidth: 286, iconOnly: true })
     expect(centeredShellBudget(800, 200, 286, 36, 8)).toBe(140)
     expect(restored.iconOnly).toBe(false)
+  })
+
+  test('centers the scroll button, and docks its left edge on the shell\'s right', () => {
+    expect(toolbarScrollX({ docked: false, shellWidth: 180 })).toBe(-15)
+    expect(toolbarScrollX({ docked: true, shellWidth: 0 })).toBe(-15)
+    expect(toolbarScrollX({ docked: true, shellWidth: 180 })).toBe(96)
   })
 
   test('the scroll button only spends width on the capsule\'s right', () => {

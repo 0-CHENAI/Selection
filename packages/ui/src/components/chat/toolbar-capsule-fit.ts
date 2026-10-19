@@ -12,6 +12,22 @@ export const TOOLBAR_SCROLL_SIZE = 30
 
 export const TOOLBAR_BUTTON_GAP = 6
 
+/**
+ * `x` of the toolbar back-to-bottom button when its left edge sits on the row center.
+ * Undocked, shift by half its width so the button itself is centered.
+ * Docked, its left edge is the shell's right edge plus the gap (the shell stays centered).
+ */
+export function toolbarScrollX(input: {
+  docked: boolean
+  shellWidth: number
+  button?: number
+  gap?: number
+}): number {
+  const button = input.button ?? TOOLBAR_SCROLL_SIZE
+  if (!input.docked || !(input.shellWidth > 0)) return -button / 2
+  return input.shellWidth / 2 + (input.gap ?? TOOLBAR_BUTTON_GAP)
+}
+
 /** Same cap the floating panel has always used. */
 export const TOOLBAR_SHELL_MAX = 420
 
