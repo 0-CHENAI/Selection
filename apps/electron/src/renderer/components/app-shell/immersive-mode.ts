@@ -1,10 +1,9 @@
 import type { NavigationState } from '../../../shared/types'
 
 /**
- * Conversation column while immersive layout is applied and nothing shares the row.
- * Wide enough for the 840px message column plus the record rail and page padding.
+ * The conversation card fills the row. Message text and the composer keep the
+ * reading width from CHAT_LAYOUT and stay centered inside the card.
  */
-export const IMMERSIVE_CHAT_MAX_WIDTH = 960
 
 export interface ImmersiveLayoutInput {
   enabled: boolean
@@ -61,15 +60,4 @@ export function immersiveTogglePressed(input: { immersive: boolean; launchHidden
 /** Old ⌘+. stored its own flag. Fold it into the immersive preference once. */
 export function readImmersivePreference(stored: { immersive: boolean; legacyFocus: boolean }): boolean {
   return stored.immersive || stored.legacyFocus
-}
-
-/**
- * Outer width of the conversation panel.
- * Null when Office (or another trailing panel) is open, so the conversation
- * fills the space beside it. The sources column lives inside this panel and
- * clears the cap while `[data-source-layout=open]` is present.
- */
-export function immersivePanelMaxWidth(apply: boolean, trailingPanelOpen: boolean): number | null {
-  if (!apply || trailingPanelOpen) return null
-  return IMMERSIVE_CHAT_MAX_WIDTH
 }

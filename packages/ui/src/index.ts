@@ -320,4 +320,4 @@ export {
 export { renderContentWithBadges } from './components/chat/UserMessageBubble'
 export { markdownToPlainText } from './components/chat/markdown-to-plain-text'
 
-export { PANEL_SPRING } from './lib/panel-motion'
+export { PANEL_SPRING, panelPushTransition } from './lib/panel-motion'
