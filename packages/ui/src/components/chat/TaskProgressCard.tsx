@@ -1,8 +1,8 @@
 import * as React from 'react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, ChevronDown } from 'lucide-react'
-import { AnimatePresence, LayoutGroup, MotionConfig, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import type { TodoItem } from './TurnCard'
@@ -22,9 +22,24 @@ import {
 
 const EASE = [0.23, 1, 0.32, 1] as const
 const ENTER = { duration: 0.18, ease: EASE }
-const LAYOUT_SPRING = { type: 'spring' as const, bounce: 0, duration: 0.25 }
-const CAPSULE_RADIUS = 999
-const PANEL_RADIUS = 16
+// Real width/height, not a scale transform. Bounce 0 keeps the border circular.
+const SHELL_SPRING = { type: 'spring' as const, bounce: 0, duration: 0.32 }
+// Fixed radius. A ~32px capsule clamps into a pill; the panel keeps 16px corners.
+const FIXED_RADIUS = 16
+const CONTENT_BLUR = 'blur(4px)'
+const BUTTON_GAP = 6
+
+type ShellSize = { width: number; height: number }
+
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+function readPanelWidth(anchor: HTMLElement): number {
+  const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const style = getComputedStyle(anchor)
+  const pad = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
+  const available = anchor.clientWidth - pad - 2.75 * rootFont
+  return Math.max(0, Math.min(420, Math.floor(available)))
+}
 
 function TaskMark({ className }: { className?: string }) {
   return (
@@ -129,11 +144,14 @@ export function TaskTurnSummary({
   todos,
   defaultExpanded = false,
   settled = false,
+  listSeed,
 }: {
   todos: TodoItem[]
   defaultExpanded?: boolean
   /** The turn has finished, so leftover work reads as interrupted. */
   settled?: boolean
+  /** Same seed the floating card used, so the rail shape matches. */
+  listSeed?: string
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -158,7 +176,7 @@ export function TaskTurnSummary({
             transition={{ duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }}
             className="overflow-hidden"
           >
-            <TodoList todos={todos} className="mt-2" />
+            <TodoList todos={todos} listSeed={listSeed} className="mt-2" />
           </motion.div>
         )}
       </AnimatePresence>
@@ -184,6 +202,7 @@ export function TaskProgressCard({
   onScrollToBottom,
   visible = true,
   onPresenceChange,
+  listSeed,
 }: {
   todos: TodoItem[]
   phase: Exclude<TaskCardPhase, 'hidden'>
@@ -194,6 +213,8 @@ export function TaskProgressCard({
   /** False plays the fade, then the capsule unmounts. The scroll button can stay. */
   visible?: boolean
   onPresenceChange?: (present: boolean) => void
+  /** Same seed the history summary uses, so the rail shape matches. */
+  listSeed?: string
 }) {
   const { t } = useTranslation()
   const reduceMotion = !!useReducedMotion()
@@ -210,7 +231,45 @@ export function TaskProgressCard({
   if (cardShown) shapeRef.current = expanded
   const shapeExpanded = cardShown ? expanded : shapeRef.current
   const onScreen = cardShown || present
-  const radius = shapeExpanded ? PANEL_RADIUS : CAPSULE_RADIUS
+  const shellRef = useRef<HTMLElement>(null)
+  const sizerRef = useRef<HTMLDivElement>(null)
+  const snapRef = useRef(true)
+  const [panelWidth, setPanelWidth] = useState(420)
+  const [shellSize, setShellSize] = useState<ShellSize | null>(null)
+
+  useIsoLayoutEffect(() => {
+    const anchor = rootRef.current
+    const shell = shellRef.current
+    const sizer = sizerRef.current
+    if (!anchor || !shell || !sizer) return
+
+    const measure = () => {
+      if (!shownRef.current) return
+      const nextPanel = readPanelWidth(anchor)
+      const frame = sizer.querySelector<HTMLElement>('[data-task-card-frame]')
+      if (frame?.dataset.taskCardFrame === 'panel') frame.style.width = `${nextPanel}px`
+      if (frame?.dataset.taskCardFrame === 'capsule') frame.style.maxWidth = `${nextPanel}px`
+      setPanelWidth(prev => prev === nextPanel ? prev : nextPanel)
+      const shellStyle = getComputedStyle(shell)
+      const borderX = (parseFloat(shellStyle.borderLeftWidth) || 0) + (parseFloat(shellStyle.borderRightWidth) || 0)
+      const borderY = (parseFloat(shellStyle.borderTopWidth) || 0) + (parseFloat(shellStyle.borderBottomWidth) || 0)
+      const width = Math.ceil(sizer.offsetWidth + borderX)
+      const height = Math.ceil(sizer.offsetHeight + borderY)
+      if (width <= 0 || height <= 0) return
+      setShellSize(prev => prev && prev.width === width && prev.height === height ? prev : { width, height })
+    }
+
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(anchor)
+    observer.observe(sizer)
+    return () => observer.disconnect()
+  }, [present, shapeExpanded, showScrollToBottom])
+
+  useIsoLayoutEffect(() => {
+    if (shellSize) snapRef.current = false
+  }, [shellSize])
 
   useEffect(() => {
     alive.current = true
@@ -260,58 +319,82 @@ export function TaskProgressCard({
   const glass = 'border border-foreground/10 bg-background/80 shadow-minimal backdrop-blur-md'
   const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const fade = { duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }
+  const buttonGap = showScrollToBottom && onScrollToBottom ? BUTTON_GAP : 0
+  const snap = snapRef.current || reduceMotion
+  const shellTransition = {
+    width: snap ? { duration: 0 } : SHELL_SPRING,
+    height: snap ? { duration: 0 } : SHELL_SPRING,
+    marginRight: snap ? { duration: 0 } : SHELL_SPRING,
+    opacity: fade,
+  }
+  const contentInitial = reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: CONTENT_BLUR }
+  const contentAnimate = { opacity: 1, y: 0, filter: 'blur(0px)' }
+  const contentExit = reduceMotion
+    ? { opacity: 0, transition: { duration: 0 } }
+    : { opacity: 0, y: -4, filter: CONTENT_BLUR, transition: { duration: 0.14, ease: EASE } }
 
   return (
     <MotionConfig reducedMotion="user">
       <div
         ref={rootRef}
-        className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex items-end justify-center gap-1.5 px-4"
+        className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex items-end justify-center px-4"
         data-task-card-anchor=""
       >
-        <LayoutGroup>
-          <AnimatePresence
-            mode="popLayout"
-            initial={false}
-            onExitComplete={() => {
-              if (!alive.current || shownRef.current) return
-              setPresent(false)
-            }}
-          >
-            {cardShown && (
-              <motion.section
-                key="task-card"
-                layout
-                data-task-card=""
-                data-task-card-state={phase}
-                data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
-                aria-label={t('taskCard.label')}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1, borderRadius: radius }}
-                exit={{ opacity: 0, transition: { duration: exitSeconds, ease: EASE } }}
-                transition={{
-                  layout: LAYOUT_SPRING,
-                  borderRadius: LAYOUT_SPRING,
-                  opacity: fade,
-                }}
-                style={{ borderRadius: radius, overflow: 'hidden' }}
-                className={cn(
-                  'pointer-events-auto relative min-w-0',
-                  glass,
-                  shapeExpanded
-                    ? 'w-[min(420px,calc(100%-2.75rem))]'
-                    : 'w-max max-w-[min(420px,calc(100%-2.75rem))]',
-                )}
-              >
-                <AnimatePresence mode="popLayout" initial={false}>
+        <AnimatePresence
+          initial={false}
+          onExitComplete={() => {
+            if (!alive.current || shownRef.current) return
+            setPresent(false)
+          }}
+        >
+          {cardShown && (
+            <motion.section
+              key="task-card"
+              ref={shellRef}
+              data-task-card=""
+              data-task-card-state={phase}
+              data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
+              aria-label={t('taskCard.label')}
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={shellSize
+                ? { opacity: 1, width: shellSize.width, height: shellSize.height, marginRight: buttonGap }
+                : { opacity: 1, marginRight: buttonGap }}
+              exit={{
+                opacity: 0,
+                width: 0,
+                height: 0,
+                marginRight: 0,
+                transition: reduceMotion
+                  ? { duration: 0 }
+                  : {
+                      width: SHELL_SPRING,
+                      height: SHELL_SPRING,
+                      marginRight: SHELL_SPRING,
+                      opacity: { duration: exitSeconds, ease: EASE },
+                    },
+              }}
+              transition={shellTransition}
+              style={{ borderRadius: FIXED_RADIUS, overflow: 'hidden' }}
+              className={cn(
+                'pointer-events-auto relative min-w-0 shrink-0',
+                glass,
+                !shellSize && (shapeExpanded
+                  ? 'w-[min(420px,calc(100%-2.75rem))]'
+                  : 'w-max max-w-[min(420px,calc(100%-2.75rem))]'),
+              )}
+            >
+              <div ref={sizerRef} className="w-max">
+                <AnimatePresence mode="wait" initial={false}>
                   {shapeExpanded ? (
                     <motion.div
                       key="panel"
                       id={panelId}
-                      layout="position"
-                      initial={reduceMotion ? false : { opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0, transition: fade }}
-                      transition={fade}
+                      data-task-card-frame="panel"
+                      style={{ width: panelWidth }}
+                      initial={contentInitial}
+                      animate={contentAnimate}
+                      exit={contentExit}
+                      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: EASE }}
                     >
                       <div className="flex items-center gap-1 pl-3 pr-1.5 pt-1.5">
                         <p
@@ -332,19 +415,20 @@ export function TaskProgressCard({
                         </button>
                       </div>
                       <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
-                        <TodoList todos={todos} showTitle={false} className="mt-0" />
+                        <TodoList todos={todos} listSeed={listSeed} showTitle={false} className="mt-0" />
                       </div>
                     </motion.div>
                   ) : (
                     <motion.div
                       key="capsule"
-                      layout="position"
-                      initial={reduceMotion ? false : { opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0, transition: fade }}
-                      transition={fade}
-                      className="flex min-w-0 items-center"
+                      data-task-card-frame="capsule"
                       data-task-card-summary=""
+                      style={{ maxWidth: panelWidth }}
+                      initial={contentInitial}
+                      animate={contentAnimate}
+                      exit={contentExit}
+                      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: EASE }}
+                      className="flex w-max min-w-0 max-w-[min(420px,calc(100%-2.75rem))] items-center"
                     >
                       <button
                         type="button"
@@ -374,29 +458,27 @@ export function TaskProgressCard({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </motion.section>
-            )}
-          </AnimatePresence>
-          {showScrollToBottom && onScrollToBottom && (
-            <motion.button
-              type="button"
-              layout="position"
-              transition={{ layout: LAYOUT_SPRING }}
-              data-testid="chat-scroll-to-bottom"
-              onClick={onScrollToBottom}
-              aria-label={scrollLabel}
-              title={scrollLabel}
-              className={cn(
-                'pointer-events-auto inline-flex size-8 shrink-0 items-center justify-center rounded-full',
-                'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
-                'transition-colors hover:bg-background hover:text-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-              )}
-            >
-              <ChevronDown className="size-4" />
-            </motion.button>
+              </div>
+            </motion.section>
           )}
-        </LayoutGroup>
+        </AnimatePresence>
+        {showScrollToBottom && onScrollToBottom && (
+          <button
+            type="button"
+            data-testid="chat-scroll-to-bottom"
+            onClick={onScrollToBottom}
+            aria-label={scrollLabel}
+            title={scrollLabel}
+            className={cn(
+              'pointer-events-auto inline-flex size-8 shrink-0 items-center justify-center rounded-full',
+              'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
+              'transition-colors hover:bg-background hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+            )}
+          >
+            <ChevronDown className="size-4" />
+          </button>
+        )}
       </div>
     </MotionConfig>
   )

@@ -135,10 +135,31 @@ describe('read-only task rail', () => {
     expect(taskRailDepths(mixed.map(({ id, ...item }) => item))[0]).toBe(0)
 
     // At either edge the only feasible step is back toward the middle.
-    const edge = (ids: string[]) => taskRailDepths(ids.map(id => ({ id, content: id })))
-    expect(edge(['stay', 'bend-5'])).toEqual([0, 1])
-    expect(edge(['stay', 'bend-1', 'bend-9', 'bend-10'])).toEqual([0, 1, 2, 1])
-    expect(edge(['stay', 'bend-1', 'bend-5'])).toEqual([0, 1, 0])
+    let climbed = false
+    let returnedFromTop = false
+    let returnedToZero = false
+    let sawConsecutive = false
+    for (let n = 0; n < 400; n++) {
+      const probed = taskRailDepths(
+        ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id, content: id })),
+        `edge-${n}`,
+      )
+      for (let index = 1; index < probed.length; index++) {
+        const previous = probed[index - 1] ?? 0
+        const current = probed[index] ?? 0
+        expect(current).toBeGreaterThanOrEqual(0)
+        expect(current).toBeLessThanOrEqual(2)
+        expect(Math.abs(current - previous)).toBeLessThanOrEqual(1)
+        if (previous === 0 && current === 1) climbed = true
+        if (previous === 2 && current === 1) returnedFromTop = true
+        if (previous === 1 && current === 0) returnedToZero = true
+        if (index > 1 && current !== previous && previous !== (probed[index - 2] ?? 0)) sawConsecutive = true
+      }
+    }
+    expect(climbed).toBe(true)
+    expect(returnedFromTop).toBe(true)
+    expect(returnedToZero).toBe(true)
+    expect(sawConsecutive).toBe(true)
 
     const many = Array.from({ length: 96 }, (_, index) => ({
       id: `step-${index}-${(index * 17).toString(36)}`,
@@ -161,6 +182,32 @@ describe('read-only task rail', () => {
     expect(rate).toBeGreaterThan(0.12)
     expect(rate).toBeLessThan(0.4)
     expect(consecutive).toBeGreaterThan(0)
+
+    const numbered = Array.from({ length: 6 }, (_, index) => ({
+      id: String(index + 1),
+      content: `任务 ${index + 1}`,
+    }))
+    const shapes = new Set<string>()
+    let straight = 0
+    for (let n = 0; n < 100; n++) {
+      const seed = `list-${n}`
+      const depthsForSeed = taskRailDepths(numbered, seed)
+      expect(taskRailDepths(numbered, seed)).toEqual(depthsForSeed)
+      expect(taskRailDepths(numbered.map(item => ({ ...item, content: `${item.content} 改` })), seed)).toEqual(depthsForSeed)
+      expect(taskRailDepths(numbered.slice(0, 4), seed)).toEqual(depthsForSeed.slice(0, 4))
+      expect(taskRailDepths([...numbered, { id: '7', content: '补充' }], seed).slice(0, 6)).toEqual(depthsForSeed)
+      shapes.add(depthsForSeed.join(','))
+      if (depthsForSeed.every(depth => depth === 0)) straight += 1
+      expect(depthsForSeed[0]).toBe(0)
+      for (let index = 1; index < depthsForSeed.length; index++) {
+        expect(Math.abs((depthsForSeed[index] ?? 0) - (depthsForSeed[index - 1] ?? 0))).toBeLessThanOrEqual(1)
+        expect(depthsForSeed[index]).toBeGreaterThanOrEqual(0)
+        expect(depthsForSeed[index]).toBeLessThanOrEqual(2)
+      }
+    }
+    expect(shapes.size).toBeGreaterThanOrEqual(15)
+    expect(straight).toBe(0)
+    expect(taskRailDepths(numbered, 'alpha')).not.toEqual(taskRailDepths(numbered, 'beta'))
 
     const html = await renderList(mixed)
     const rows = html.split('<li ').slice(1)
