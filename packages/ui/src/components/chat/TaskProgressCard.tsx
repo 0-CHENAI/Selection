@@ -20,6 +20,13 @@ import {
   type TaskCardMemory,
   type TaskCardPhase,
 } from './task-progress'
+import {
+  TOOLBAR_BUTTON_GAP,
+  TOOLBAR_CAPSULE_RADIUS,
+  TOOLBAR_CONTROL_HEIGHT,
+  TOOLBAR_SCROLL_SIZE,
+  TOOLBAR_SHELL_MAX,
+} from './toolbar-capsule-fit'
 
 const EASE = [0.23, 1, 0.32, 1] as const
 const ENTER = { duration: 0.18, ease: EASE }
@@ -28,7 +35,7 @@ const SHELL_SPRING = { type: 'spring' as const, bounce: 0, duration: 0.32 }
 // Fixed radius. A ~32px capsule clamps into a pill; the panel keeps 16px corners.
 const FIXED_RADIUS = 16
 const CONTENT_BLUR = 'blur(4px)'
-const BUTTON_GAP = 6
+const BUTTON_GAP = TOOLBAR_BUTTON_GAP
 
 const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -199,6 +206,7 @@ function PanelFrame({
   listSeed?: string
   onCollapse: () => void
   collapseLabel: string
+  toolbar?: boolean
 }) {
   return (
     <div data-task-card-frame="panel" style={{ width: panelWidth }}>
@@ -236,6 +244,10 @@ function CapsuleFrame({
   fraction,
   expandLabel,
   onExpand,
+  toolbar = false,
+  showTitle = true,
+  probe = false,
+  unbounded = false,
 }: {
   panelId: string
   panelWidth: number
@@ -245,21 +257,37 @@ function CapsuleFrame({
   fraction: string
   expandLabel: string
   onExpand: () => void
+  /** Sit in the composer toolbar: 30px shell, 12px type, 8px corners. */
+  toolbar?: boolean
+  /** False drops the current-item title. Active capsules still keep the ring and X/X. */
+  showTitle?: boolean
+  probe?: boolean
+  unbounded?: boolean
 }) {
   return (
     <div
-      data-task-card-frame="capsule"
-      data-task-card-summary=""
-      style={{ maxWidth: panelWidth }}
-      className="flex w-max min-w-0 max-w-[min(420px,calc(100%-2.75rem))] items-center"
+      data-task-card-frame={probe ? undefined : 'capsule'}
+      data-task-card-summary={probe ? undefined : ''}
+      style={unbounded ? undefined : { maxWidth: panelWidth }}
+      className={cn(
+        'flex w-max min-w-0 items-center',
+        !toolbar && 'max-w-[min(420px,calc(100%-2.75rem))]',
+        toolbar && 'overflow-hidden',
+      )}
     >
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-3 pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        tabIndex={probe ? -1 : undefined}
+        className={cn(
+          'flex min-w-0 max-w-full flex-1 items-center text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          toolbar
+            ? 'h-7 gap-1.5 rounded-[8px] pl-2.5 pr-2 text-xs font-medium'
+            : 'gap-2 rounded-full py-1.5 pl-3 pr-3',
+        )}
         aria-expanded={false}
-        aria-controls={panelId}
+        aria-controls={probe ? undefined : panelId}
         title={expandLabel}
-        onClick={onExpand}
+        onClick={probe ? undefined : onExpand}
       >
         {phase === 'complete' ? (
           <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
@@ -268,9 +296,17 @@ function CapsuleFrame({
         ) : (
           <ProgressRing current={progress.current} total={progress.total} />
         )}
-        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={label}>
-          {label}
-        </span>
+        {showTitle && (
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate text-foreground',
+              toolbar ? 'text-xs font-medium' : 'text-[13px]',
+            )}
+            title={label}
+          >
+            {label}
+          </span>
+        )}
         {phase === 'active' && (
           <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
             {fraction}
@@ -302,6 +338,8 @@ export function TaskProgressCard({
   onPresenceChange,
   listSeed,
   motionSample,
+  placement = 'overlay',
+  shellMaxWidth,
 }: {
   todos: TodoItem[]
   phase: Exclude<TaskCardPhase, 'hidden'>
@@ -316,6 +354,10 @@ export function TaskProgressCard({
   listSeed?: string
   /** Pin the shape crossfade at 0 (capsule) to 1 (panel). Used to inspect frames. */
   motionSample?: number
+  /** Overlay floats over the transcript. Toolbar docks the capsule in the composer row. */
+  placement?: 'overlay' | 'toolbar'
+  /** Measured width the centered toolbar shell may use before it meets the side buttons. */
+  shellMaxWidth?: number
 }) {
   const { t } = useTranslation()
   const reduceMotion = !!useReducedMotion()
@@ -351,8 +393,13 @@ export function TaskProgressCard({
   const capsuleFilter = useMotionValue('blur(0px)')
   const panelPointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'auto' : 'none')
   const capsulePointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'none' : 'auto')
+  const toolbar = placement === 'toolbar'
+  const shellRadius = useMotionValue(toolbar && !shapeExpanded ? TOOLBAR_CAPSULE_RADIUS : FIXED_RADIUS)
   const [crossfade, setCrossfade] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const toolbarShellMax = toolbar
+    ? Math.max(0, Math.min(TOOLBAR_SHELL_MAX, Math.floor(shellMaxWidth ?? TOOLBAR_SHELL_MAX)))
+    : null
 
   const publishShape = React.useCallback((value: number) => {
     const current = shapesRef.current
@@ -374,7 +421,10 @@ export function TaskProgressCard({
     capsuleFilter.set(frame.capsuleBlur >= 4 ? CONTENT_BLUR : frame.capsuleBlur > 0 ? `blur(${frame.capsuleBlur}px)` : 'blur(0px)')
     panelPointer.set(frame.panelOpacity > 0.05 ? 'auto' : 'none')
     capsulePointer.set(frame.capsuleOpacity > 0.05 ? 'auto' : 'none')
-  }, [capsuleFilter, capsuleOpacity, capsulePointer, capsuleY, panelFilter, panelOpacity, panelPointer, panelY, reduceMotion, shellHeight, shellWidth])
+    shellRadius.set(toolbar
+      ? TOOLBAR_CAPSULE_RADIUS + value * (FIXED_RADIUS - TOOLBAR_CAPSULE_RADIUS)
+      : FIXED_RADIUS)
+  }, [capsuleFilter, capsuleOpacity, capsulePointer, capsuleY, panelFilter, panelOpacity, panelPointer, panelY, reduceMotion, shellHeight, shellRadius, shellWidth, toolbar])
 
   useEffect(() => {
     setMounted(true)
@@ -389,7 +439,7 @@ export function TaskProgressCard({
 
     const read = () => {
       if (!shownRef.current) return
-      const nextPanel = readPanelWidth(anchor)
+      const nextPanel = toolbarShellMax ?? readPanelWidth(anchor)
       const panelFrame = measure.querySelector<HTMLElement>('[data-task-card-frame="panel"]')
       const capsuleFrame = measure.querySelector<HTMLElement>('[data-task-card-frame="capsule"]')
       if (panelFrame) panelFrame.style.width = `${nextPanel}px`
@@ -421,7 +471,7 @@ export function TaskProgressCard({
     observer.observe(anchor)
     observer.observe(measure)
     return () => observer.disconnect()
-  }, [mounted, present, shapeExpanded, showScrollToBottom])
+  }, [mounted, present, shapeExpanded, shellMaxWidth, showScrollToBottom, toolbar, toolbarShellMax])
 
   useEffect(() => {
     if (!shapes) return
@@ -497,10 +547,14 @@ export function TaskProgressCard({
   const glass = 'border border-foreground/10 bg-background/80 shadow-minimal backdrop-blur-md'
   const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const fade = { duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }
-  const buttonGap = showScrollToBottom && onScrollToBottom ? BUTTON_GAP : 0
+  const scrollShown = !!(showScrollToBottom && onScrollToBottom)
+  const buttonGap = scrollShown ? BUTTON_GAP : 0
+  const toolbarEndReserve = toolbar && scrollShown ? TOOLBAR_SCROLL_SIZE + BUTTON_GAP : 0
+  const restingCapsulePx = shapes?.capsule.height ?? TOOLBAR_CONTROL_HEIGHT
+  const frameWidth = toolbarShellMax ?? panelWidth
   const frameProps = {
     panelId,
-    panelWidth,
+    panelWidth: frameWidth,
     heading,
     todos,
     listSeed,
@@ -508,19 +562,50 @@ export function TaskProgressCard({
     progress,
     label,
     fraction,
+    toolbar,
     collapseLabel: t('taskCard.collapse'),
     expandLabel: t('taskCard.expand'),
     onCollapse: () => onExpandedChange(false),
     onExpand: () => onExpandedChange(true),
   }
+  const restingRadius = toolbar && !shapeExpanded ? TOOLBAR_CAPSULE_RADIUS : FIXED_RADIUS
 
   return (
     <MotionConfig reducedMotion="user">
       <div
         ref={rootRef}
-        className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex items-end justify-center px-4"
         data-task-card-anchor=""
+        data-task-card-placement={placement}
+        data-task-card-end-reserve={toolbar ? toolbarEndReserve : undefined}
+        className={cn(
+          'pointer-events-none z-20 flex items-end',
+          toolbar
+            ? 'absolute left-1/2'
+            : 'absolute inset-x-0 bottom-3 justify-center px-4',
+        )}
+        style={toolbar ? {
+          bottom: `calc(50% - ${restingCapsulePx}px / 2)`,
+          transform: `translateX(calc(-50% + ${toolbarEndReserve / 2}px))`,
+        } : undefined}
       >
+        {toolbar && onScreen && (
+          <>
+            <div
+              data-task-card-cluster="min"
+              className="pointer-events-none invisible absolute left-0 top-0 flex w-max border border-transparent"
+              aria-hidden
+            >
+              <CapsuleFrame {...frameProps} toolbar showTitle={false} unbounded probe />
+            </div>
+            <div
+              data-task-card-cluster="natural"
+              className="pointer-events-none invisible absolute left-0 top-0 flex w-max border border-transparent"
+              aria-hidden
+            >
+              <CapsuleFrame {...frameProps} toolbar unbounded probe />
+            </div>
+          </>
+        )}
         <AnimatePresence
           initial={false}
           onExitComplete={() => {
@@ -547,7 +632,7 @@ export function TaskProgressCard({
               }}
               transition={{ marginRight: reduceMotion ? { duration: 0 } : SHELL_SPRING, opacity: fade }}
               style={{
-                borderRadius: FIXED_RADIUS,
+                borderRadius: toolbar && crossfade ? shellRadius : restingRadius,
                 overflow: 'hidden',
                 width: crossfade ? shellWidth : undefined,
                 height: crossfade ? shellHeight : undefined,
@@ -555,9 +640,11 @@ export function TaskProgressCard({
               className={cn(
                 'pointer-events-auto relative min-w-0 shrink-0',
                 glass,
-                !crossfade && (shapeExpanded
-                  ? 'w-[min(420px,calc(100%-2.75rem))]'
-                  : 'w-max max-w-[min(420px,calc(100%-2.75rem))]'),
+                !crossfade && (toolbar
+                  ? (shapeExpanded ? undefined : 'w-max')
+                  : (shapeExpanded
+                    ? 'w-[min(420px,calc(100%-2.75rem))]'
+                    : 'w-max max-w-[min(420px,calc(100%-2.75rem))]')),
               )}
             >
               {mounted && (
@@ -606,7 +693,8 @@ export function TaskProgressCard({
             aria-label={scrollLabel}
             title={scrollLabel}
             className={cn(
-              'pointer-events-auto inline-flex size-8 shrink-0 items-center justify-center rounded-full',
+              'pointer-events-auto inline-flex shrink-0 items-center justify-center rounded-full',
+              toolbar ? 'size-[30px]' : 'size-8',
               'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
               'transition-colors hover:bg-background hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
