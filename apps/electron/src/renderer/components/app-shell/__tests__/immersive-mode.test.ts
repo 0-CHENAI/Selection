@@ -3,9 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { actions } from '../../../actions/definitions'
 import {
-  IMMERSIVE_CHAT_MAX_WIDTH,
   immersiveDisplayWidths,
-  immersivePanelMaxWidth,
   immersiveTogglePressed,
   isConversationSurface,
   nextImmersiveToggle,
@@ -42,15 +40,50 @@ describe('immersive mode layout', () => {
     expect(immersiveDisplayWidths(stored, true)).toEqual({ sidebar: 0, navigator: 0 })
     expect(stored).toEqual({ sidebar: 220, navigator: 300 })
     expect(immersiveDisplayWidths(stored, false)).toBe(stored)
-    expect(IMMERSIVE_CHAT_MAX_WIDTH).toBeGreaterThanOrEqual(840)
-    expect(IMMERSIVE_CHAT_MAX_WIDTH).toBeLessThanOrEqual(1040)
   })
 
-  it('keeps a reading width until a trailing panel shares the row', () => {
-    expect(immersivePanelMaxWidth(true, false)).toBe(IMMERSIVE_CHAT_MAX_WIDTH)
-    expect(immersivePanelMaxWidth(true, true)).toBeNull()
-    expect(immersivePanelMaxWidth(false, false)).toBeNull()
-    expect(immersivePanelMaxWidth(false, true)).toBeNull()
+  it('fills the window with the conversation card and keeps the reading column inside it', () => {
+    const panel = read('../PanelSlot.tsx')
+    const stack = read('../PanelStackContainer.tsx')
+    const chat = read('../ChatDisplay.tsx')
+    const input = read('../input/ChatInputZone.tsx')
+    const layout = read('../../../../../../../packages/ui/src/lib/layout.ts')
+    const mode = read('../immersive-mode.ts')
+    expect(mode).not.toContain('960')
+    expect(panel).not.toContain('data-immersive-cap')
+    expect(panel).not.toContain('max-w-[960px]')
+    expect(panel).toContain('flexGrow: 1')
+    expect(panel).toContain('minWidth: 0')
+    expect(stack).toContain('className="flex h-full w-full"')
+    expect(stack).not.toContain('w-full justify-center')
+    expect(layout).toContain("maxWidth: 'max-w-[840px]'")
+    expect(layout).toContain('composerColumn:')
+    expect(chat).toContain('CHAT_LAYOUT.maxWidth')
+    expect(chat).toContain('mx-auto min-w-0')
+    expect(input).toContain('CHAT_CLASSES.composerColumn')
+  })
+
+  it('pushes side and trailing panels with one spring, and skips it while dragging or reducing motion', () => {
+    const stack = read('../PanelStackContainer.tsx')
+    const office = read('../OfficePreviewPanel.tsx')
+    const sources = read('../../../../../../../packages/ui/src/components/chat/ResponseSourcesLayout.tsx')
+    const motion = read('../../../../../../../packages/ui/src/lib/panel-motion.ts')
+    expect(motion).toContain('export function panelPushTransition')
+    expect(stack).toContain('useReducedMotion')
+    expect(stack).toContain('panelPushTransition(reduceMotion)')
+    expect(stack).toContain('isResizing || isCompact')
+    expect(stack).toContain('duration: 0')
+    expect(office).toContain('panelPushTransition(reduceMotion)')
+    expect(office).toContain('var(--office-panel-open, 0)')
+    expect(office).toContain('marginLeft: PANEL_GAP')
+    expect(office).toContain('right-0')
+    expect(office).not.toContain("'--office-panel-open': open ? 1 : 0, opacity")
+    expect(sources).toContain('animate(openFraction')
+    expect(sources).toContain('pixelWidth.set(sourceColumnWidth(panelWidth))')
+    expect(sources).toContain('marginLeft: SOURCE_PANEL_GAP_PX')
+    expect(sources).toContain('right-0')
+    expect(sources).toContain('useReducedMotion')
+    expect(sources).not.toContain('animate={{ width:')
   })
 
   it('treats ⌘+. and ⌘/Ctrl+B as one switch and folds the old focus flag in', () => {
@@ -88,9 +121,9 @@ describe('immersive mode layout', () => {
     expect(appShell).toContain('immersive={immersiveLayout}')
     expect(appShell).not.toContain('setIsSidebarAndNavigatorHidden(v => !v)')
     const panel = read('../PanelSlot.tsx')
-    expect(panel).toContain('immersivePanelMaxWidth')
-    expect(panel).toContain('data-immersive-cap')
-    expect(read('../immersive-mode.css')).toContain(":has([data-source-layout='open'])")
+    expect(panel).toContain('data-immersive-layout')
+    expect(panel).not.toContain('data-immersive-cap')
+    expect(panel).not.toContain('immersivePanelMaxWidth')
     const chat = read('../../../pages/ChatPage.tsx')
     expect(chat).not.toContain('suspended={immersiveLayout}')
     expect(chat).not.toContain('immersiveLayoutActiveAtom')

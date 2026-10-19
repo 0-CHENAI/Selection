@@ -24,7 +24,7 @@
 
 import { useRef, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { motion } from 'motion/react'
+import { motion, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import { panelStackAtom, focusedPanelIdAtom, focusedPanelRouteAtom } from '@/atoms/panel-stack'
 import { parseRouteToNavigationState } from '../../../shared/route-parser'
@@ -40,8 +40,8 @@ import {
   RADIUS_INNER,
 } from './panel-constants'
 
-/** Spring transition matching AppShell's sidebar/navigator animation */
-import { PANEL_SPRING } from '@craft-agent/ui'
+/** Same spring as Office and reference sources. Dragging and reduced motion snap. */
+import { panelPushTransition } from '@craft-agent/ui'
 
 /** Visual breathing room between the fixed compact TopBar and the first panel. */
 const COMPACT_PANEL_TOP_GAP = 8
@@ -56,7 +56,7 @@ interface PanelStackContainerProps {
   /** Compact mode: single-panel, list/content toggle (mobile or narrow window) */
   isCompact?: boolean
   isResizing?: boolean
-  /** Center the conversation after the side columns are collapsed. */
+  /** Left columns are collapsed. The conversation card fills the space they leave. */
   immersive?: boolean
 }
 
@@ -113,7 +113,9 @@ export function PanelStackContainer({
     prevCountRef.current = contentPanels.length
   }, [contentPanels.length, isCompact])
 
-  const transition = (isResizing || isCompact) ? { duration: 0 } : PANEL_SPRING
+  const reduceMotion = useReducedMotion()
+  // Width changes reflow the conversation card, so dragging must not spring.
+  const transition = (isResizing || isCompact) ? { duration: 0 } : panelPushTransition(reduceMotion)
 
   // === COMPACT BRANCH ===
   // Single-panel layout with iOS-style slide between navigator and detail.
@@ -198,7 +200,7 @@ export function PanelStackContainer({
       }}
     >
       <motion.div
-        className={cn('flex h-full', immersive && 'w-full justify-center')}
+        className="flex h-full w-full"
         initial={false}
         animate={{ paddingLeft: !hasSidebar ? PANEL_EDGE_INSET : 0 }}
         transition={transition}

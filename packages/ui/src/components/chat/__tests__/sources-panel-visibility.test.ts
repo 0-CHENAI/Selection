@@ -21,6 +21,8 @@ describe('sources panel visibility helper', () => {
     expect(layout).toContain('marginLeft: SOURCE_PANEL_GAP_PX')
     expect(layout).toContain("position: 'absolute'")
     expect(layout).toContain('margin: 0')
+    expect(layout).toContain('pixelWidth.set(sourceColumnWidth(panelWidth))')
+    expect(layout).toContain('right-0')
     expect(layout).not.toContain('w-1.5')
     expect(layout).not.toContain('panelWidth + 6')
   })

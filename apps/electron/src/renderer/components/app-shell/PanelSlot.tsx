@@ -24,8 +24,6 @@ import { useAppShellContext, AppShellProvider } from '@/context/AppShellContext'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { MainContentPanel } from './MainContentPanel'
 import { PANEL_MIN_WIDTH, RADIUS_EDGE, RADIUS_INNER } from './panel-constants'
-import { immersivePanelMaxWidth } from './immersive-mode'
-import './immersive-mode.css'
 
 interface PanelSlotProps {
   entry: PanelStackEntry
@@ -43,7 +41,7 @@ interface PanelSlotProps {
   sash?: React.ReactNode
   /** Compact (mobile) mode — shows back button in panel header */
   isCompact?: boolean
-  /** Center this conversation at a reading width. Only the single content panel uses it. */
+  /** Left columns are collapsed. The card still fills the row; reading width stays inside. */
   immersive?: boolean
 }
 
@@ -109,10 +107,6 @@ export function PanelSlot({
     }
   }, [isFocusedPanel, setFocusedPanel, entry.id])
 
-  // Cap only the lone conversation. A trailing Office panel, or an open sources
-  // column (see immersive-mode.css), shares the row instead.
-  const immersiveCap = immersivePanelMaxWidth(immersive && isOnly, !isAtRightEdge)
-
   return (
     <>
       {sash}
@@ -121,7 +115,6 @@ export function PanelSlot({
         data-panel-role="content"
         data-compact={isCompact || undefined}
         data-immersive-layout={immersive && isOnly ? 'on' : undefined}
-        data-immersive-cap={immersiveCap != null ? 'on' : undefined}
         className={cn(
           'h-full overflow-hidden relative @container/panel',
           !isOnly && isFocusedPanel ? 'shadow-panel-focused z-[1]' : 'shadow-middle z-0',
@@ -144,12 +137,8 @@ export function PanelSlot({
           borderBottomLeftRadius: isCompact && isAtRightEdge ? 0 : (isAtLeftEdge ? RADIUS_EDGE : RADIUS_INNER),
           borderTopRightRadius: RADIUS_INNER,
           borderBottomRightRadius: isCompact && isAtRightEdge ? 0 : (isAtRightEdge ? RADIUS_EDGE : RADIUS_INNER),
-          ...(immersiveCap != null
-            ? { '--immersive-panel-max': `${immersiveCap}px` } as React.CSSProperties
-            : immersive && isOnly
-            ? { flexGrow: 1, minWidth: 0 }
-            : isOnly
-            ? { flexGrow: 1, minWidth: 0 }
+          ...(isOnly
+            ? { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 }
             : { flexGrow: proportion, flexShrink: 1, flexBasis: 0, minWidth: PANEL_MIN_WIDTH }
           ),
         }}
