@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "Keine Überschriften",
   "taskCard.collapse": "Aufgaben einklappen",
   "taskCard.completed": "{{current}}/{{total}} erledigt",
-  "taskCard.dismiss": "Aufgabenfortschritt ausblenden",
   "taskCard.expand": "Aufgaben ausklappen",
   "taskCard.interrupted": "Unterbrochen · {{current}}/{{total}}",
   "taskCard.label": "Aufgabenfortschritt",

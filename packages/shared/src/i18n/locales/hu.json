@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "Nincsenek címsorok",
   "taskCard.collapse": "Feladatok összecsukása",
   "taskCard.completed": "{{current}}/{{total}} kész",
-  "taskCard.dismiss": "Feladatállapot elrejtése",
   "taskCard.expand": "Feladatok kibontása",
   "taskCard.interrupted": "Megszakítva · {{current}}/{{total}}",
   "taskCard.label": "Feladatállapot",

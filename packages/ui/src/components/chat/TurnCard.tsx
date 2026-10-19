@@ -3653,7 +3653,7 @@ export const TurnCard = React.memo(function TurnCard({
 
       {todos && todos.length > 0 && todoRail !== 'hidden' && (
         todoRail === 'summary'
-          ? <TaskTurnSummary todos={todos} />
+          ? <TaskTurnSummary todos={todos} settled={isComplete} />
           : <TodoList todos={todos} />
       )}
 

@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "見出しなし",
   "taskCard.collapse": "タスクを折りたたむ",
   "taskCard.completed": "{{current}}/{{total}} 完了",
-  "taskCard.dismiss": "タスクの進捗を閉じる",
   "taskCard.expand": "タスクを展開",
   "taskCard.interrupted": "中断 · {{current}}/{{total}}",
   "taskCard.label": "タスクの進捗",

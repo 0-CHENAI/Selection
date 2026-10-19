@@ -1958,7 +1958,6 @@
   "tableOfContents.noHeadings": "Brak nagłówków",
   "taskCard.collapse": "Zwiń zadania",
   "taskCard.completed": "{{current}}/{{total}} ukończone",
-  "taskCard.dismiss": "Ukryj postęp zadań",
   "taskCard.expand": "Rozwiń zadania",
   "taskCard.interrupted": "Przerwano · {{current}}/{{total}}",
   "taskCard.label": "Postęp zadań",
