@@ -177,7 +177,8 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
-import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { findRetryableCancelledUser } from '@craft-agent/shared/sessions/cancelled-turn'
 import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -332,6 +333,19 @@ export async function loadPiTurnAnchors(sessionPath: string): Promise<PiTurnAnch
       version: PI_TURN_ANCHORS_VERSION,
       anchors: {},
     }
+  }
+}
+
+function snapshotTurnContext(managed: ManagedSession, options?: SendMessageOptions): NonNullable<Message['turnContext']> {
+  return {
+    model: managed.model ?? null,
+    llmConnection: managed.llmConnection ?? null,
+    thinkingLevel: managed.thinkingLevel,
+    permissionMode: managed.permissionMode,
+    workMode: managed.workMode,
+    projectId: managed.projectId ?? null,
+    sourceSlugs: [...(managed.enabledSourceSlugs ?? [])],
+    skillSlugs: options?.skillSlugs ? [...options.skillSlugs] : undefined,
   }
 }
 
@@ -7204,7 +7218,10 @@ export class SessionManager implements ISessionManager {
       && message === pendingAutoRetry.content
       && Date.now() < pendingAutoRetry.deadlineMs)
     const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry || _isProgressContinuation
-    if (!isUserTaskContinuation && !options?.hidden && !existingMessageId) managed.progressDisabled = false
+    // Regenerating an existing user message must be allowed to call update_task_list again.
+    if (!isUserTaskContinuation && !options?.hidden && (!existingMessageId || managed.regenerateTransaction)) {
+      managed.progressDisabled = false
+    }
     if (!_isSourceContinuationReplay && claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
@@ -7402,6 +7419,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        turnContext: snapshotTurnContext(managed, options),
         officeDocumentPath,
         officeContextPath: options?.officeContext?.path,
         ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
@@ -7458,6 +7476,7 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
         badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+        turnContext: snapshotTurnContext(managed, options),
         officeDocumentPath,
         officeContextPath: options?.officeContext?.path,
         ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
@@ -9939,6 +9958,73 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
   }
 
+  /**
+   * Run the latest explicitly cancelled user message again.
+   * The same user row stays in the transcript; its partial reply is replaced.
+   */
+  async retryCancelledTurn(sessionId: string): Promise<{ success: true }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (managed.isProcessing) throw new Error('Cannot retry while a response is still generating')
+    await this.ensureMessagesLoaded(managed)
+    const userMessage = findRetryableCancelledUser(managed.messages)
+    if (!userMessage) throw new Error('No cancelled turn to retry')
+
+    const context = userMessage.turnContext
+    if (context) {
+      const nextModel = context.model ?? null
+      const modelDiffers = (managed.model ?? null) !== nextModel
+      const connectionDiffers = !!context.llmConnection && context.llmConnection !== managed.llmConnection
+      if (modelDiffers || connectionDiffers) {
+        await this.updateSessionModel(
+          sessionId,
+          managed.workspace.id,
+          nextModel,
+          context.llmConnection ?? undefined,
+        )
+      }
+      const thinking = normalizeThinkingLevel(context.thinkingLevel)
+      if (thinking && thinking !== managed.thinkingLevel) this.setSessionThinkingLevel(sessionId, thinking)
+      const permission = context.permissionMode ? parsePermissionMode(context.permissionMode) : null
+      if (permission && permission !== managed.permissionMode) this.setSessionPermissionMode(sessionId, permission)
+      if ((context.workMode === 'NORM' || context.workMode === 'PRO') && context.workMode !== managed.workMode) {
+        managed.workMode = context.workMode
+        managed.swarmEnabled = context.workMode === 'PRO' && isTasksOrchestrateEnabled()
+        this.sendEvent({
+          type: 'session_metadata_changed',
+          sessionId,
+          changes: { workMode: context.workMode, swarmEnabled: managed.swarmEnabled },
+        }, managed.workspace.id)
+      }
+      if (context.projectId !== undefined && (context.projectId ?? undefined) !== managed.projectId) {
+        managed.projectId = context.projectId ?? undefined
+        this.sendEvent({
+          type: 'session_metadata_changed',
+          sessionId,
+          changes: { projectId: managed.projectId },
+        }, managed.workspace.id)
+      }
+      if (context.sourceSlugs) {
+        managed.enabledSourceSlugs = [...context.sourceSlugs]
+        this.sendEvent({
+          type: 'sources_changed',
+          sessionId,
+          enabledSourceSlugs: managed.enabledSourceSlugs,
+        }, managed.workspace.id)
+      }
+      if (context.skillSlugs) {
+        managed.lastSentOptions = { ...managed.lastSentOptions, skillSlugs: [...context.skillSlugs] }
+      }
+    }
+
+    managed.progressDisabled = false
+    const storedAttachments = userMessage.attachments
+    managed.lastSentMessage = typeof userMessage.content === 'string' ? userMessage.content : ''
+    managed.lastSentStoredAttachments = storedAttachments
+    managed.lastSentAttachments = fileAttachmentsFromStored(storedAttachments)
+    return this.regenerateLastResponse(sessionId)
+  }
+
   private getVisibleQueuedMessages(managed: ManagedSession): Message[] {
     return managed.messageQueue.flatMap((entry) => {
       if (!entry.messageId) return []
@@ -10201,10 +10287,17 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     // Only show "Response interrupted" message when user explicitly clicked Stop
     // Silent mode is used when redirecting (sending new message while processing)
     if (!silent) {
+      const cancelledUser = [...managed.messages].reverse().find(message =>
+        message.role === 'user' && !message.hidden && !message.isQueued,
+      )
+      if (cancelledUser && !cancelledUser.turnContext) {
+        cancelledUser.turnContext = snapshotTurnContext(managed)
+      }
       const interruptedMessage: Message = {
         id: generateMessageId(),
         role: 'info',
         content: 'Response interrupted',
+        statusType: 'turn_cancelled',
         timestamp: this.monotonic(),
       }
       managed.messages.push(interruptedMessage)

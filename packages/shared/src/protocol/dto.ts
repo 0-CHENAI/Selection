@@ -799,6 +799,7 @@ export type SessionCommand =
   | { type: 'reorderQueuedMessages'; messageIds: string[] }
   | { type: 'sendQueuedMessageNow'; messageId: string }
   | { type: 'regenerate' }
+  | { type: 'retryCancelled' }
 
 export interface NewChatActionParams {
   input?: string

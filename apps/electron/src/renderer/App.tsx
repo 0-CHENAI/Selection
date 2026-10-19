@@ -41,6 +41,7 @@ import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
+import { mergeCreatedSessionMessages } from './lib/session-created-merge'
 import { isDraftSessionOptionsId } from './lib/draft-session'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
@@ -1009,10 +1010,14 @@ export default function App() {
           .then((createdSession: Session | null) => {
             if (createdSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
+              const existing = store.get(sessionAtomFamily(sessionId))
+              const merged = existing
+                ? { ...createdSession, messages: mergeCreatedSessionMessages(existing.messages, createdSession.messages) }
+                : createdSession
               if (existingMeta) {
-                replaceLoadedSession(createdSession)
+                replaceLoadedSession(merged)
               } else {
-                addSession(createdSession)
+                addSession(merged)
               }
               syncSessionOptionsFromSession(createdSession)
               return

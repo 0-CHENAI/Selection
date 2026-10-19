@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate, useIsPresent } from 'motion/react'
+import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate, useIsPresent, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
 import { FreeFormInput, type FreeFormInputProps } from './FreeFormInput'
 import { StructuredInput } from './StructuredInput'
@@ -80,6 +80,7 @@ export function InputContainer({
   onAnimatedHeightChange,
   ...freeFormProps
 }: InputContainerProps) {
+  const reduceMotion = !!useReducedMotion()
   const appShellContext = useOptionalAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
   const mode: InputMode = structuredInput ? 'structured' : 'freeform'
@@ -99,28 +100,6 @@ export function InputContainer({
   // Create a stable key for the current content
   const contentKey = mode === 'freeform' ? 'freeform' : `structured-${structuredInput?.type}`
 
-  // Track mode transitions - animate height for a short period after mode change
-  const [isAnimating, setIsAnimating] = React.useState(false)
-  const prevContentKeyRef = React.useRef(contentKey)
-
-  // Detect transition synchronously during render
-  const isTransitioning = prevContentKeyRef.current !== contentKey
-
-  // Should animate if we're in a transition OR still in the animation window
-  const shouldAnimateHeight = isTransitioning || isAnimating
-
-  React.useEffect(() => {
-    if (isTransitioning) {
-      prevContentKeyRef.current = contentKey
-      setIsAnimating(true)
-      // Keep animating for the transition duration + a bit extra for measurement settle
-      const timer = setTimeout(() => {
-        setIsAnimating(false)
-      }, TRANSITION_DURATION * 1000 + 100)
-      return () => clearTimeout(timer)
-    }
-  }, [contentKey, isTransitioning])
-
   // Compact-mode collapse-during-thinking is escapable: the user can hover or
   // click the collapsed bar to bring the input back without waiting for the
   // agent to finish. State resets the moment processing ends so the next
@@ -138,24 +117,6 @@ export function InputContainer({
   }, [])
 
   const isCollapsedInCompact = compactMode && isProcessing && !expandedDuringProcessing
-
-  // Animate height when either isProcessing flips OR the user manually expands
-  // / re-collapses the input during a thinking cycle.
-  const prevIsProcessingRef = React.useRef(isProcessing)
-  const prevExpandedRef = React.useRef(expandedDuringProcessing)
-  React.useEffect(() => {
-    if (!compactMode) return
-    const isProcessingChanged = prevIsProcessingRef.current !== isProcessing
-    const expandedChanged = prevExpandedRef.current !== expandedDuringProcessing
-    prevIsProcessingRef.current = isProcessing
-    prevExpandedRef.current = expandedDuringProcessing
-    if (!isProcessingChanged && !expandedChanged) return
-    setIsAnimating(true)
-    const timer = setTimeout(() => {
-      setIsAnimating(false)
-    }, TRANSITION_DURATION * 1000 + 100)
-    return () => clearTimeout(timer)
-  }, [compactMode, isProcessing, expandedDuringProcessing])
 
   // Handle height changes from FreeFormInput (synchronous, no measuring div needed)
   const handleFreeformHeightChange = React.useCallback((height: number) => {
@@ -219,6 +180,7 @@ export function InputContainer({
   // Motion value for frame-synchronized height animation
   const heightMotionValue = useMotionValue(targetHeight)
   const prevAnimatedHeightRef = React.useRef(targetHeight)
+  const heightSettledRef = React.useRef(false)
 
   // Emit delta on every animation frame for scroll sync
   useMotionValueEvent(heightMotionValue, "change", (latest) => {
@@ -229,19 +191,22 @@ export function InputContainer({
     }
   })
 
-  // Animate height changes using motion value
+  // The first measurement lands immediately. Later changes, including the
+  // composer shrinking after send, spring so the transcript does not jump.
   React.useEffect(() => {
-    if (shouldAnimateHeight) {
-      animate(heightMotionValue, targetHeight, {
-        duration: TRANSITION_DURATION,
-        ease: TRANSITION_EASE
-      })
-    } else {
-      // Instant update - no animation
+    if (!heightSettledRef.current || reduceMotion) {
       heightMotionValue.set(targetHeight)
       prevAnimatedHeightRef.current = targetHeight
+      heightSettledRef.current = true
+      return
     }
-  }, [targetHeight, shouldAnimateHeight, heightMotionValue])
+    const controls = animate(heightMotionValue, targetHeight, {
+      type: 'spring',
+      bounce: 0,
+      duration: 0.25,
+    })
+    return () => controls.stop()
+  }, [targetHeight, heightMotionValue, reduceMotion])
 
   const handleStructuredResponse = (response: StructuredResponse) => {
     onStructuredResponse?.(response)

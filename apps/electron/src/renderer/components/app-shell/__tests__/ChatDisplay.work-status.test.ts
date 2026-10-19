@@ -71,4 +71,11 @@ describe('work status for each user request', () => {
     info.message.content = 'Compaction complete'
     expect(getWorkTimings([user(1000), assistant, info]).get(1)?.interrupted).toBe(false)
   })
+  it('treats a localized cancel marker as an interruption', () => {
+    const marker = stop(4000)
+    if (marker.type !== 'system') throw new Error('Expected system fixture')
+    marker.message.content = '已取消'
+    marker.message.statusType = 'turn_cancelled'
+    expect(getWorkTimings([user(1000), marker]).get(1)?.interrupted).toBe(true)
+  })
 })

@@ -56,6 +56,18 @@ export interface QueuedMessageContext {
   permissionMode: string;
 }
 
+/** Options captured with a user message so a cancelled turn can be retried as it was sent. */
+export interface TurnContext {
+  model?: string | null;
+  llmConnection?: string | null;
+  thinkingLevel?: string;
+  permissionMode?: string;
+  workMode?: 'NORM' | 'PRO';
+  projectId?: string | null;
+  sourceSlugs?: string[];
+  skillSlugs?: string[];
+}
+
 /**
  * Tool display metadata - embedded at storage time for viewer compatibility
  * Icons are base64-encoded to work in both Electron and web viewer
@@ -399,6 +411,8 @@ export interface Message {
   queuedSkillSlugs?: string[];
   /** Session options captured when this message entered the queue. */
   queuedContext?: QueuedMessageContext;
+  /** Model, mode, and project captured when this user message was sent. */
+  turnContext?: TurnContext;
   // Intermediate text (commentary between tool calls, not final response)
   isIntermediate?: boolean;
   /** Explicit answer identity; absent on legacy turns. */
@@ -431,7 +445,7 @@ export interface Message {
   // Turn ID: Correlation ID from the API's message.id, groups all messages in an assistant turn
   turnId?: string;
   // Status type for special status messages (e.g., compacting)
-  statusType?: 'compacting' | 'compaction_complete';
+  statusType?: 'compacting' | 'compaction_complete' | 'turn_cancelled';
   // Info level for info messages (determines icon/color)
   infoLevel?: 'info' | 'warning' | 'error' | 'success';
   // Error-specific fields (for typed errors with diagnostics)
@@ -539,7 +553,7 @@ export interface StoredMessage {
 
   turnId?: string;
   // Status type for compaction messages (persisted for reload)
-  statusType?: 'compacting' | 'compaction_complete';
+  statusType?: 'compacting' | 'compaction_complete' | 'turn_cancelled';
   // Info level for info messages (persisted for reload)
   infoLevel?: 'info' | 'warning' | 'error' | 'success';
   // Error display fields
@@ -586,6 +600,8 @@ export interface StoredMessage {
   queuedSkillSlugs?: string[];
   /** Session options captured when this message entered the queue. */
   queuedContext?: QueuedMessageContext;
+  /** Model, mode, and project captured when this user message was sent. */
+  turnContext?: TurnContext;
 }
 
 /**

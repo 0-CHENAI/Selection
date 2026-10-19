@@ -24,11 +24,12 @@ import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
 import { ChatVirtualHistory, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
-import { getWorkTimings } from './ChatDisplay.work-status'
+import { getWorkTimings, workStatusOwnsUser } from './ChatDisplay.work-status'
+import { findRetryableCancelledUser, isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
+import { useComposerEnter } from '@/lib/composer-enter'
 import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
 import { Markdown, CollapsibleMarkdownProvider, type RenderMode } from "@/components/markdown"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import {
@@ -421,13 +422,14 @@ interface ProcessingIndicatorProps {
   interrupted?: boolean
   /** Exact start time supplied by the completed backend execution. */
   completedStartTime?: number
+  trailing?: React.ReactNode
 }
 
 /**
  * ProcessingIndicator - Shows cycling status messages with elapsed time
  * Matches TurnCard header layout for visual continuity
  */
-function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, endTime, interrupted = false, completedStartTime }: ProcessingIndicatorProps) {
+function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, endTime, interrupted = false, completedStartTime, trailing }: ProcessingIndicatorProps) {
   const { t } = useTranslation()
   const clock = React.useRef({
     start: startTime ?? Date.now(),
@@ -484,7 +486,9 @@ function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, en
   // Use status message if provided, otherwise cycle through default messages
   const displayMessage = isProcessing
     ? statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
-    : t('chat.processing.worked')
+    : interrupted
+      ? t('chat.turnCancelled')
+      : t('chat.processing.worked')
 
   return (
     // No -mb-1: a margin outside the presence tween pops 4px on unmount.
@@ -512,6 +516,7 @@ function ProcessingIndicator({ startTime, statusMessage, isProcessing = true, en
           </span>
         )}
       </span>
+      {trailing}
     </div>
   )
 }
@@ -627,6 +632,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
   const updateSession = useSetAtom(updateSessionAtom)
+  const enteringUserIds = useComposerEnter({
+    sessionId: session?.id ?? null,
+    messagesLoading,
+    userIds: session?.messages
+      .filter(message => message.role === 'user' && !message.hidden && !message.isQueued)
+      .map(message => message.id) ?? [],
+  })
 
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
@@ -1466,10 +1478,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!messageActuallyChanged || !countIncreased) return
     if (lastMessageRole !== 'user') return
 
-    // Instant pin — a smooth scrollIntoView here fights the same-frame
-    // resize snap while the first assistant tokens arrive.
     requestAnimationFrame(() => {
-      scrollToLatest('instant')
+      scrollToLatest('smooth')
     })
   }, [session?.id, messageCount, lastMessageId, lastMessageRole, scrollToLatest])
 
@@ -1496,7 +1506,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     })))
 
     requestAnimationFrame(() => {
-      scrollToLatest('instant')
+      scrollToLatest('smooth')
     })
   }
 
@@ -1533,15 +1543,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (!silent && onBeforeExplicitStop && !(await onBeforeExplicitStop())) return
 
       if (session.isProcessing) {
-        // Explicit Stop (not a redirect/new-message send): put the in-flight
-        // prompt back in the input so the user can tweak and resend.
-        if (!silent) {
-          const restoredText = getRestorableStoppedPrompt(session.messages)
-          if (restoredText) {
-            onInputChange?.(appendRestoredInput(inputValue, restoredText))
-          }
-        }
-
         try {
           await window.electronAPI.cancelProcessing(session.id, silent)
           if (!silent) onExplicitStop?.()
@@ -1847,11 +1848,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
   // Keep the live status above the current reply as its body grows. Before
   // the first assistant turn exists, it follows the latest user message.
+  const retryUserId = !sessionBusy && !disableSend
+    ? findRetryableCancelledUser(session?.messages ?? [])?.id ?? null
+    : null
+  const handleRetryCancelled = () => {
+    if (!session || !retryUserId) return
+    updateSession(session.id, (current) => current
+      ? { ...current, isProcessing: true, processingStartedAt: Date.now() }
+      : current)
+    void window.electronAPI.sessionCommand(session.id, { type: 'retryCancelled' }).catch(error => {
+      updateSession(session.id, (current) => current
+        ? { ...current, isProcessing: false, processingStartedAt: undefined }
+        : current)
+      const detail = error instanceof Error ? error.message : String(error)
+      toast.error(t('chat.regenerateFailed'), { description: detail || undefined })
+    })
+  }
   const renderWorkStatus = (index: number) => {
     if (clarificationLayout && (index === clarificationLayout.statusTurnIndex || clarificationLayout.hiddenTurnIndexes.has(index))) return null
     const timing = displayWorkTimings.get(index)
     if (!timing) return null
     const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)
+    const showRetry = !!retryUserId && !isProcessing && timing.interrupted && workStatusOwnsUser(allTurns, index, retryUserId)
     return (
       <HeightPresence key="work-status" animateIn={isProcessing} reduceMotion={reduceMotion}>
         <ProcessingIndicator
@@ -1863,6 +1881,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           completedStartTime={timing.recorded ? timing.startTime : undefined}
           interrupted={timing.interrupted}
           statusMessage={isProcessing ? session?.currentStatus?.message : undefined}
+          trailing={showRetry ? (
+            <button
+              type="button"
+              className="turn-action-btn ml-auto flex items-center gap-1.5 text-muted-foreground transition-colors select-none hover:text-foreground focus:outline-none focus-visible:underline"
+              onClick={handleRetryCancelled}
+            >
+              {t('common.retry')}
+            </button>
+          ) : undefined}
         />
       </HeightPresence>
     )
@@ -2033,6 +2060,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
                             compactMode={compactMode}
+                            enterFromComposer={enteringUserIds.has(turn.message.id)}
                           />
                           {session && window.electronAPI.isChannelAvailable('artifacts:bodyFeedback') && turn.message.annotationFollowUps?.map(reference => (
                             <div key={`${reference.messageId}:${reference.annotationId}`} className="mt-1 flex justify-end">
@@ -2794,6 +2822,8 @@ interface MessageBubbleProps {
   onPopOut?: (message: Message) => void
   /** Compact mode - reduces padding for popover embedding */
   compactMode?: boolean
+  /** First paint of a user message that was just sent. */
+  enterFromComposer?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
   contextRecovery?: ContextLimitRecoveryOptions
@@ -2897,6 +2927,7 @@ function MessageBubble({
   onRetry,
   contextRecovery,
   executionRecovery,
+  enterFromComposer,
 }: MessageBubbleProps) {
   const { t, i18n } = useTranslation()
 
@@ -2913,6 +2944,7 @@ function MessageBubble({
         onUrlClick={onOpenUrl}
         onFileClick={onOpenFile}
         compactMode={compactMode}
+        enterFromComposer={enterFromComposer}
       />
     )
   }
@@ -2962,6 +2994,7 @@ function MessageBubble({
 
   // === INFO MESSAGE: Icon and color based on level ===
   if (message.role === 'info') {
+    if (isCancelledTurnMarker(message)) return null
     // Compaction complete message - render as horizontal rule with centered label
     // This persists after reload to show where context was compacted
     if (message.statusType === 'compaction_complete') {
@@ -3029,6 +3062,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.contextRecovery === next.contextRecovery &&
     prev.executionRecovery === next.executionRecovery &&
     prev.sessionId === next.sessionId &&
-    prev.compactMode === next.compactMode
+    prev.compactMode === next.compactMode &&
+    prev.enterFromComposer === next.enterFromComposer
   )
 })
