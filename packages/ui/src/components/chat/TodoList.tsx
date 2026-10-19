@@ -1,10 +1,12 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { cn } from '../../lib/utils'
 import { RailToc, type RailTocItem, type RailTocStatus } from '../ui/rail-toc'
 import type { TodoItem } from './TurnCard'
 
 interface TodoListProps {
   todos: TodoItem[]
+  className?: string
 }
 
 const STATUSES = ['in_progress', 'pending', 'completed', 'interrupted'] as const
@@ -61,7 +63,7 @@ function summaryLabel(
 }
 
 /** Conversation task progress. Legacy todo snapshots share this renderer. */
-export function TodoList({ todos }: TodoListProps) {
+export function TodoList({ todos, className }: TodoListProps) {
   const { t } = useTranslation()
   const depths = useMemo(() => taskRailDepths(todos), [todos])
   const items = useMemo<RailTocItem[]>(() => todos.map((todo, index) => ({
@@ -79,7 +81,7 @@ export function TodoList({ todos }: TodoListProps) {
       items={items}
       title={t('taskList.title')}
       liveSummary={summaryLabel(todos, t)}
-      className="mt-3 w-full max-w-full select-text"
+      className={cn('mt-3 w-full max-w-full select-text', className)}
       data-task-rail=""
       data-readonly="true"
     />

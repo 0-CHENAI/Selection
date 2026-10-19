@@ -61,6 +61,10 @@ import type { ResponseSource } from '@craft-agent/ui/chat'
 import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
+  TaskProgressCard,
+  latestTodoList,
+  todoRailForTurn,
+  useSessionTaskCard,
   formatUserMessageTime,
   HeightPresence,
   UserMessageBubble,
@@ -861,6 +865,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
     return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
   }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
+  const latestTodo = React.useMemo(() => {
+    const found = latestTodoList(allTurns)
+    if (!found) return null
+    const turn = allTurns[found.index]
+    if (!turn || turn.type !== 'assistant') return null
+    return { key: getAssistantTurnUiKey(turn, found.index), todos: found.todos }
+  }, [allTurns])
+  const latestTodoComplete = !!latestTodo?.todos.every(item => item.status === 'completed')
+  const taskCard = useSessionTaskCard(activeSessionId, latestTodo?.key ?? null, latestTodoComplete)
+  const taskCardEnabled = !hideComposer && !taskPreview
+  const showTaskCard = taskCardEnabled && !!latestTodo && taskCard.docked
   const { start: startIndex, end: endIndex } = historyBounds.sessionId === activeSessionId
     ? historyBounds : { start: 0, end: 0 }
   const turns = allTurns.slice(startIndex, endIndex)
@@ -1387,6 +1402,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (stickyFollowRef.current === follow) stickyFollowRef.current = null
     }
   }, [session?.id, applyStickState])
+
+  // Card height changes the transcript viewport. Keep a stuck reader on the last line.
+  React.useLayoutEffect(() => {
+    if (!isStickToBottomRef.current) return
+    stickyFollowRef.current?.resize()
+  }, [showTaskCard, taskCard.collapsed, latestTodo?.key])
 
   const liveTail = session?.messages.reduce((sum, message) => (
     message.isStreaming || message.isPending ? sum + message.content.length : sum
@@ -2210,6 +2231,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         expandedActivityGroups={expandedActivityGroups}
                         onExpandedActivityGroupsChange={setExpandedActivityGroups}
                         todos={turn.todos}
+                        todoRail={todoRailForTurn({
+                          enabled: taskCardEnabled,
+                          isLatest: latestTodo?.key === assistantUiKey,
+                          docked: taskCard.docked,
+                          hasTodos: !!turn.todos?.length,
+                        })}
                         onOpenFile={onOpenFile}
                         onOpenArtifact={onOpenArtifact}
                         onOpenUrl={onOpenUrl}
@@ -2449,13 +2476,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   </div>
                 )}
                 {processingTurnIndex === -1 && !clarificationLayout && processingIndicator}
-                {/* Scroll Anchor: For auto-scroll to bottom */}
-                <div ref={messagesEndRef} />
+                {/* Scroll Anchor: For auto-scroll to bottom.
+                    The docked card shortens this viewport; a few extra pixels
+                    keep the last line out of the bottom fade. */}
+                <div ref={messagesEndRef} style={{ height: showTaskCard ? 16 : 0 }} />
               </div>
               </ScrollArea>
             </div>
             <AnimatePresence>
-              {showScrollToBottom && (
+              {showScrollToBottom && !showTaskCard && (
                 <motion.button
                   key="scroll-to-bottom"
                   type="button"
@@ -2504,6 +2533,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
+            // The card shares this composer column (max-w 840px, centered),
+            // directly above the input. The transcript is the flex sibling
+            // above the column, so a taller card shortens that viewport
+            // instead of covering the last message.
+            beforeInput={taskCardEnabled && latestTodo ? (
+              <TaskProgressCard
+                key={latestTodo.key}
+                todos={latestTodo.todos}
+                expanded={!taskCard.collapsed}
+                onExpandedChange={() => taskCard.toggle()}
+                onDismiss={taskCard.dismiss}
+                docked={taskCard.docked}
+                showScrollToBottom={showScrollToBottom && taskCard.docked}
+                onScrollToBottom={() => scrollToLatest('smooth')}
+                compact={compactMode}
+              />
+            ) : null}
             inputProps={{
               workMode: session.workMode,
               placeholder,
