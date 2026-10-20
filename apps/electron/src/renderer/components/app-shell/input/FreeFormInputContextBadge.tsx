@@ -13,6 +13,11 @@ export interface FreeFormInputContextBadgeProps {
   isExpanded?: boolean
   /** Whether there's an active selection (affects collapsed state styling and shows label) */
   hasSelection?: boolean
+  /**
+   * Collapsed selection draws a filled chip (`bg-background` + hairline).
+   * Working-directory marks pass false so the folder name stays borderless.
+   */
+  selectionChrome?: boolean
   /** Show chevron indicator (for dropdowns) - only visible in expanded state */
   showChevron?: boolean
   /** Click handler */
@@ -37,7 +42,7 @@ export interface FreeFormInputContextBadgeProps {
  * Visual States:
  * - Expanded: Icon + Label + Chevron, no background, hover shows background
  * - Collapsed (no selection): Icon only, no background, hover shows background
- * - Collapsed (has selection): Icon + Label (fading), bg-background + shadow-minimal
+ * - Collapsed (has selection): Icon + Label (fading), bg-background + hairline unless selectionChrome is false
  * - Open: bg-foreground/5 (like hover)
  */
 export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, FreeFormInputContextBadgeProps>(
@@ -47,6 +52,7 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
       label,
       isExpanded = false,
       hasSelection = false,
+      selectionChrome = true,
       showChevron = false,
       onClick,
       tooltip,
@@ -63,6 +69,7 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
 
     // Show label in expanded state OR in collapsed state with selection
     const showLabel = isExpanded || hasSelection
+    const filledSelection = !isExpanded && hasSelection && selectionChrome
 
     const button = (
       <button
@@ -79,9 +86,9 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
           // Padding: more padding when showing label
           showLabel ? "px-2" : "px-1.5",
           // Collapsed with selection: visible background + thin 1px border + margin
-          !isExpanded && hasSelection && "bg-background border border-foreground/5 mx-0.5",
-          // Hover state (when not already showing background from selection)
-          !(!isExpanded && hasSelection) && "hover:bg-foreground/5",
+          filledSelection && "bg-background border border-foreground/5 mx-0.5",
+          // Hover state (when not already showing a filled selection chip)
+          !filledSelection && "hover:bg-foreground/5",
           // Open state (dropdown shown)
           isOpen && "bg-foreground/5",
           className

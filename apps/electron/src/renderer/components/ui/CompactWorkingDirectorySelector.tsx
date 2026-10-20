@@ -95,6 +95,7 @@ export function CompactWorkingDirectorySelector({
         label={displayFolderName}
         isExpanded={isEmptySession}
         hasSelection={hasFolder}
+        selectionChrome={false}
         showChevron={true}
         isOpen={open}
         onClick={() => setOpen((prev) => !prev)}
