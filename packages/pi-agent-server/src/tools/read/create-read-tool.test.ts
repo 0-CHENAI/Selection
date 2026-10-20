@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ImageOptimizationResult } from './image-resize-types.ts'
+import { IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import type { ImageOptimizationResult, ImageResizeLimits } from './image-resize-types.ts'
+import { DEFAULT_JPEG_QUALITY, DEFAULT_MAX_ENCODED_BYTES, DEFAULT_MAX_HEIGHT, DEFAULT_MAX_WIDTH } from './image-resize-types.ts'
 import { createSelectionReadToolDefinition } from './create-read-tool.ts'
 
 const tempDirs: string[] = []
@@ -33,6 +35,19 @@ function onePixelBmp(): Buffer {
   bmp.writeUInt16LE(1, 26)
   bmp.writeUInt16LE(24, 28)
   return bmp
+}
+
+function widePng(width: number, height: number): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const length = Buffer.alloc(4)
+  length.writeUInt32BE(13, 0)
+  const type = Buffer.from('IHDR')
+  const data = Buffer.alloc(13)
+  data.writeUInt32BE(width, 0)
+  data.writeUInt32BE(height, 4)
+  data[8] = 8
+  data[9] = 2
+  return Buffer.concat([signature, length, type, data, Buffer.alloc(4)])
 }
 
 describe('Selection Pi read tool', () => {
@@ -124,6 +139,57 @@ describe('Selection Pi read tool', () => {
 
     expect(result.content.some(content => content.type === 'image')).toBe(false)
     expect(text?.type === 'text' ? text.text : '').toContain('image_capability_mismatch')
+  })
+
+  it('downscales a full original attachment to the prompt limit and leaves crops alone', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'selection-read-tool-'))
+    tempDirs.push(cwd)
+    const id = '11111111-1111-4111-8111-111111111111'
+    const attachments = join(cwd, 'attachments')
+    mkdirSync(attachments)
+    const original = join('attachments', `${id}_pasted-image-1.original.png`)
+    const crop = join('attachments', 'crop.png')
+    const wide = widePng(3200, 1800)
+    writeFileSync(join(cwd, original), wide)
+    writeFileSync(join(cwd, crop), wide)
+    const seen: ImageResizeLimits[] = []
+    const tool = createSelectionReadToolDefinition(cwd, undefined, {
+      optimize: async (_bytes, _mimeType, limits) => {
+        seen.push(limits)
+        return {
+          ok: true,
+          bytes: png,
+          mimeType: 'image/png',
+          originalWidth: 3200,
+          originalHeight: 1800,
+          width: limits.maxWidth,
+          height: 1,
+          wasResized: true,
+          encodingAttempts: 1,
+          resizePasses: 1,
+        }
+      },
+    })
+
+    await tool.execute('read-original', { path: original }, undefined, undefined, imageContext())
+    await tool.execute('read-crop', { path: crop }, undefined, undefined, imageContext())
+
+    expect(seen).toEqual([
+      {
+        maxWidth: IMAGE_LIMITS.OPTIMAL_EDGE,
+        maxHeight: IMAGE_LIMITS.OPTIMAL_EDGE,
+        maxEncodedBytes: DEFAULT_MAX_ENCODED_BYTES,
+        jpegQuality: DEFAULT_JPEG_QUALITY,
+      },
+      {
+        maxWidth: DEFAULT_MAX_WIDTH,
+        maxHeight: DEFAULT_MAX_HEIGHT,
+        maxEncodedBytes: DEFAULT_MAX_ENCODED_BYTES,
+        jpegQuality: DEFAULT_JPEG_QUALITY,
+      },
+    ])
+    expect(IMAGE_LIMITS.OPTIMAL_EDGE).toBe(1568)
+    expect(DEFAULT_MAX_WIDTH).toBeGreaterThan(IMAGE_LIMITS.OPTIMAL_EDGE)
   })
 
   it('continues to delegate text files to the upstream read implementation', async () => {

@@ -3,6 +3,8 @@ import { access, readFile, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createReadToolDefinition, truncateHead } from '@earendil-works/pi-coding-agent'
 import type { ReadOperations, ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import { isOriginalFullResolutionAttachment } from '@craft-agent/shared/utils/image-attachment'
 import { detectReadImageMimeType } from './image-mime.ts'
 import {
   processReadImage,
@@ -14,8 +16,26 @@ class SelectionImagePayload extends Error {
   constructor(
     readonly bytes: Buffer,
     readonly mimeType: string,
+    readonly path?: string,
   ) {
     super(`Selection image payload: ${mimeType}`)
+  }
+}
+
+/**
+ * A whole-file read of the saved original attachment uses the same long-edge
+ * cap as the prompt copy. Crops and other images keep the read-tool defaults.
+ */
+export function readImageOptionsForPath(
+  filePath: string | undefined,
+  options?: ReadImageProcessingOptions,
+): ReadImageProcessingOptions | undefined {
+  if (!filePath || !isOriginalFullResolutionAttachment(filePath)) return options
+  const edge = IMAGE_LIMITS.OPTIMAL_EDGE
+  return {
+    ...options,
+    maxWidth: Math.min(options?.maxWidth ?? edge, edge),
+    maxHeight: Math.min(options?.maxHeight ?? edge, edge),
   }
 }
 
@@ -51,9 +71,16 @@ export function createSelectionReadToolDefinition(
             ...operations,
             async readFile(path) {
               const canonical = await realpath(path)
-              const bytes = await operations.readFile(path)
-              captured = { path: canonical, bytes }
-              return bytes
+              try {
+                const bytes = await operations.readFile(path)
+                captured = { path: canonical, bytes }
+                return bytes
+              } catch (error) {
+                if (error instanceof SelectionImagePayload) {
+                  throw new SelectionImagePayload(error.bytes, error.mimeType, canonical)
+                }
+                throw error
+              }
             },
           },
         })
@@ -95,10 +122,13 @@ export function createSelectionReadToolDefinition(
         throw error
       }
 
+      const requested = args[1] as { path?: unknown } | undefined
+      const requestedPath = typeof requested?.path === 'string' ? requested.path : undefined
+      const limitPath = [image.path, requestedPath].find(path => !!path && isOriginalFullResolutionAttachment(path))
       const processed = await processReadImage(
         image.bytes,
         image.mimeType,
-        imageProcessingOptions,
+        readImageOptionsForPath(limitPath, imageProcessingOptions),
         imageProcessingDependencies,
         args[2],
       )

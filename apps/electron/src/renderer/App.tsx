@@ -1456,6 +1456,11 @@ export default function App() {
             storedPath: stored.storedPath,
             markdownPath: stored.type === 'office' ? undefined : stored.markdownPath,
             base64: stored.resizedBase64 ?? att.base64,
+            ...(stored.originalPath ? {
+              originalPath: stored.originalPath,
+              originalWidth: stored.originalWidth,
+              originalHeight: stored.originalHeight,
+            } : {}),
           }
         })
       }

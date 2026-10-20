@@ -10,10 +10,10 @@ import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
 import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
-import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import { readFileAttachment } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { resizeImageForAPI, inspectImageBuffer } from '@craft-agent/server-core/services'
+import { storeAttachmentImage } from './attachment-image'
 import { sanitizeFilename, resolveWorkspaceIdForFileAccess, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -436,6 +436,9 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       let wasResized = false
       let finalSize = attachment.size
       let resizedBase64: string | undefined
+      let originalPath: string | undefined
+      let originalWidth: number | undefined
+      let originalHeight: number | undefined
 
       // 1. Save the file (with image validation and resizing)
       if (attachment.base64) {
@@ -446,100 +449,29 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           throw new Error(`Attachment corrupted: size mismatch (expected ${attachment.size}, got ${decoded.length})`)
         }
 
-        // For images: validate and resize if needed for Claude API compatibility
+        // Images are validated and maybe downscaled. The model payload stays the
+        // downscaled file; the original sibling is written only when that happens.
         if (attachment.type === 'image') {
-          const imageInspection = await inspectImageBuffer(decoded, deps.platform.imageProcessor)
-          const imageSize = imageInspection.status === 'ok'
-            ? { width: imageInspection.width, height: imageInspection.height }
-            : null
-
-          // Determine if we should resize
-          let shouldResize = false
-          let targetSize: { width: number; height: number } | undefined
-
-          if (imageInspection.status === 'processor_unavailable') {
-            deps.platform.logger.warn('Image processing unavailable while validating attachment:', imageInspection.error?.message ?? 'unknown error')
-            if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-              throw new Error('Image processing is unavailable, so oversized images cannot be validated or resized automatically. Please attach a smaller image.')
-            }
-          } else if (imageInspection.status === 'invalid_image') {
-            throw new Error(imageInspection.error?.message || 'Invalid or unsupported image file')
-          } else {
-            // Validate image for Claude API
-            const validation = validateImageForClaudeAPI(decoded.length, imageSize!.width, imageSize!.height)
-
-            shouldResize = validation.needsResize ?? false
-            targetSize = validation.suggestedSize
-
-            if (!validation.valid && validation.errorCode === 'dimension_exceeded') {
-              // Image exceeds 8000px limit - calculate resize to fit within limits
-              const maxDim = IMAGE_LIMITS.MAX_DIMENSION
-              const scale = Math.min(maxDim / imageSize!.width, maxDim / imageSize!.height)
-              targetSize = {
-                width: Math.floor(imageSize!.width * scale),
-                height: Math.floor(imageSize!.height * scale),
-              }
-              shouldResize = true
-              deps.platform.logger.info(`Image exceeds ${maxDim}px limit (${imageSize!.width}x${imageSize!.height}), will resize to ${targetSize.width}x${targetSize.height}`)
-            } else if (!validation.valid && validation.errorCode === 'size_exceeded') {
-              // File >5MB — try resize+compress instead of rejecting
-              shouldResize = true
-              deps.platform.logger.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
-            } else if (!validation.valid) {
-              throw new Error(validation.error)
-            }
-          }
-
-          // If resize is needed (either recommended or required), do it now
-          if (shouldResize) {
-            const isPhoto = attachment.mimeType === 'image/jpeg'
-
-            if (targetSize) {
-              // Dimension-exceeded: resize to specific target dimensions
-              deps.platform.logger.info(`Resizing image from ${imageSize!.width}x${imageSize!.height} to ${targetSize.width}x${targetSize.height}`)
-              try {
-                decoded = await deps.platform.imageProcessor.process(decoded, {
-                  resize: { width: targetSize.width, height: targetSize.height },
-                  format: isPhoto ? 'jpeg' : 'png',
-                  quality: isPhoto ? IMAGE_LIMITS.JPEG_QUALITY_HIGH : undefined,
-                })
-                wasResized = true
-                finalSize = decoded.length
-
-                // Re-validate final size after resize
-                if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-                  decoded = await deps.platform.imageProcessor.process(decoded, { format: 'jpeg', quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK })
-                  finalSize = decoded.length
-                  if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-                    throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
-                  }
-                }
-              } catch (resizeError) {
-                deps.platform.logger.error('Image resize failed:', resizeError)
-                const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
-                throw new Error(`Image too large (${imageSize!.width}x${imageSize!.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
-              }
-            } else {
-              // Size-exceeded or optimal resize — use shared utility for full pipeline
-              const result = await resizeImageForAPI(decoded, { isPhoto })
-              if (!result) {
-                throw new Error(`Image too large (${(decoded.length / 1024 / 1024).toFixed(1)}MB) and could not be compressed enough. Please use a smaller image.`)
-              }
-              decoded = result.buffer
-              wasResized = true
-              finalSize = decoded.length
-            }
-
-            deps.platform.logger.info(`Image resized: ${attachment.size} -> ${finalSize} bytes (${Math.round((1 - finalSize / attachment.size) * 100)}% reduction)`)
-
-            // Store resized base64 to return to renderer
-            // This is used when sending to Claude API instead of original large base64
-            resizedBase64 = decoded.toString('base64')
-          }
+          const saved = await storeAttachmentImage({
+            bytes: decoded,
+            mimeType: attachment.mimeType,
+            declaredSize: attachment.size,
+            attachmentsDir,
+            storedFileName,
+            processor: deps.platform.imageProcessor,
+            logger: deps.platform.logger,
+          })
+          wasResized = saved.wasResized
+          finalSize = saved.finalSize
+          resizedBase64 = saved.resizedBase64
+          originalPath = saved.originalPath
+          originalWidth = saved.originalWidth
+          originalHeight = saved.originalHeight
+          filesToCleanup.push(...saved.writtenPaths)
+        } else {
+          await writeFile(storedPath, decoded)
+          filesToCleanup.push(storedPath)
         }
-
-        await writeFile(storedPath, decoded)
-        filesToCleanup.push(storedPath)
       } else if (attachment.text) {
         // Text files - save as UTF-8
         await writeFile(storedPath, attachment.text, 'utf-8')
@@ -590,6 +522,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         thumbnailBase64,
         wasResized,
         resizedBase64, // Only set when wasResized=true, used for Claude API
+        ...(originalPath ? { originalPath, originalWidth, originalHeight } : {}),
       }
     } catch (error) {
       // Clean up any files we've written before the error

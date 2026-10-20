@@ -122,6 +122,25 @@ describe('fileAttachmentsFromStored', () => {
     }])
   })
 
+  test('keeps the original sibling on rebuilt image attachments', () => {
+    const rebuilt = fileAttachmentsFromStored([{
+      type: 'image',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 12,
+      storedPath: '/tmp/session/attachments/shot.png',
+      originalPath: '/tmp/session/attachments/shot.original.png',
+      originalWidth: 5120,
+      originalHeight: 2880,
+    }])
+    expect(rebuilt?.[0]).toMatchObject({
+      storedPath: '/tmp/session/attachments/shot.png',
+      originalPath: '/tmp/session/attachments/shot.original.png',
+      originalWidth: 5120,
+      originalHeight: 2880,
+    })
+  })
+
   test('returns undefined when nothing was persisted', () => {
     expect(fileAttachmentsFromStored(undefined)).toBeUndefined()
     expect(fileAttachmentsFromStored([])).toBeUndefined()
@@ -148,6 +167,34 @@ describe('withStoredImagePaths', () => {
     )
 
     expect(merged?.[0]?.storedPath).toBe('/tmp/session/shot.png')
+  })
+
+  test('copies the original sibling onto live image bytes', () => {
+    const merged = withStoredImagePaths(
+      [{
+        type: 'image',
+        path: '/tmp/original.png',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: 12,
+        base64: 'resized',
+        storedPath: '/tmp/session/attachments/shot.png',
+      }],
+      [{
+        type: 'image',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: 12,
+        storedPath: '/tmp/session/attachments/shot.png',
+        originalPath: '/tmp/session/attachments/shot.original.png',
+        originalWidth: 5120,
+        originalHeight: 2880,
+      }],
+    )
+    expect(merged?.[0]?.base64).toBe('resized')
+    expect(merged?.[0]?.originalPath).toBe('/tmp/session/attachments/shot.original.png')
+    expect(merged?.[0]?.originalWidth).toBe(5120)
+    expect(merged?.[0]?.originalHeight).toBe(2880)
   })
 
   test('leaves attachments that already have bytes unchanged', () => {

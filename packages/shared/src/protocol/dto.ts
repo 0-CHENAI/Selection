@@ -872,6 +872,10 @@ export interface FileAttachment {
   text?: string
   size: number
   thumbnailBase64?: string
+  /** Full-resolution sibling of a downscaled image. Not a separate attachment. */
+  originalPath?: string
+  originalWidth?: number
+  originalHeight?: number
 }
 
 export interface SessionFile {
