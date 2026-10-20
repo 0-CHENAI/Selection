@@ -51,6 +51,48 @@ export function taskCardShellSize(progress: number, panel: TaskCardBox, capsule:
   }
 }
 
+/**
+ * Resting shell when the step count changes width.
+ * Linear in the measured box. Clamped so a spring sample cannot overshoot into a scaled pill.
+ */
+export function taskCardRestingBox(from: TaskCardBox, to: TaskCardBox, t: number): TaskCardBox {
+  const value = clamp01(t)
+  return {
+    width: from.width + (to.width - from.width) * value,
+    height: from.height + (to.height - from.height) * value,
+  }
+}
+
+/**
+ * Scroll button growing out from behind a pill that is already on screen.
+ * t = 0 is a zero-width clip on the pill's right edge, fully transparent.
+ * That pose matches "no button": nothing sticks out, and the group center
+ * does not move. t = 1 is the full control plus the gap.
+ * `span` is the clip width (control + gap). A circle pinned to the clip's
+ * right edge therefore starts tucked behind the pill and slides out.
+ * `pillShift` is how far translateX(-50%) on that live span moves the pill
+ * left — half the added width — so the group stays centered on the same spring.
+ */
+export function taskCardScrollDockFrame(t: number, button: number, gap: number): {
+  width: number
+  opacity: number
+  margin: number
+  span: number
+  pillShift: number
+} {
+  const value = clamp01(t)
+  const width = button * value
+  const margin = gap * value
+  const span = width + margin
+  return {
+    width,
+    opacity: value,
+    margin,
+    span,
+    pillShift: span === 0 ? 0 : -span / 2,
+  }
+}
+
 export function taskCardContentMotion(input: {
   progress: number
   panel: TaskCardBox

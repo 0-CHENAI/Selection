@@ -3,6 +3,8 @@ import {
   capsuleContentOpacity,
   panelContentOpacity,
   taskCardContentMotion,
+  taskCardRestingBox,
+  taskCardScrollDockFrame,
   taskCardShellSize,
 } from '../task-card-motion'
 
@@ -73,6 +75,41 @@ describe('task card shape crossfade', () => {
     const open = taskCardContentMotion({ progress: 1, panel, capsule, direction: 'expand' })
     expect(open.panelOpacity).toBe(1)
     expect(open.capsuleOpacity).toBe(0)
+  })
+
+  test('a resting count change moves the measured box and does not scale it', () => {
+    const from = { width: 84, height: 30 }
+    const to = { width: 96, height: 30 }
+    expect(taskCardRestingBox(from, to, 0)).toEqual(from)
+    expect(taskCardRestingBox(from, to, 1)).toEqual(to)
+    expect(taskCardRestingBox(from, to, 0.5)).toEqual({ width: 90, height: 30 })
+    expect(taskCardRestingBox(from, to, -0.4)).toEqual(from)
+    expect(taskCardRestingBox(from, to, 1.4)).toEqual(to)
+    const grown = taskCardRestingBox({ width: 120, height: 36 }, { width: 120, height: 180 }, 0.25)
+    expect(grown).toEqual({ width: 120, height: 72 })
+  })
+
+  test('scroll dock frame starts on the pill edge and keeps the group centered', () => {
+    const button = 30
+    const gap = 6
+    const hidden = taskCardScrollDockFrame(0, button, gap)
+    expect(hidden).toEqual({ width: 0, opacity: 0, margin: 0, span: 0, pillShift: 0 })
+    const shown = taskCardScrollDockFrame(1, button, gap)
+    expect(shown).toEqual({ width: 30, opacity: 1, margin: 6, span: 36, pillShift: -18 })
+    const mid = taskCardScrollDockFrame(0.5, button, gap)
+    expect(mid).toEqual({ width: 15, opacity: 0.5, margin: 3, span: 18, pillShift: -9 })
+    expect(taskCardScrollDockFrame(-0.2, button, gap)).toEqual(hidden)
+    expect(taskCardScrollDockFrame(1.4, button, gap)).toEqual(shown)
+    let previous = hidden.span
+    for (let step = 0; step <= 20; step++) {
+      const frame = taskCardScrollDockFrame(step / 20, button, gap)
+      expect(frame.opacity).toBeCloseTo(step / 20, 5)
+      expect(frame.span).toBeCloseTo(frame.width + frame.margin, 5)
+      expect(frame.pillShift + frame.span / 2).toBeCloseTo(0, 5)
+      expect(frame.span).toBeGreaterThanOrEqual(previous)
+      expect(frame.width).toBeLessThanOrEqual(button)
+      previous = frame.span
+    }
   })
 
   test('reduced motion snaps without blur or shift', () => {

@@ -288,13 +288,14 @@ describe('floating card lifecycle', () => {
 })
 
 describe('task card markup', () => {
-  test('collapsed capsule shows the active title once, with 3/6, and no rail', async () => {
+  test('collapsed capsule shows only the step count, with no rail', async () => {
     await testI18n.changeLanguage('zh-Hans')
     const html = renderCard(
       <TaskProgressCard todos={mixed} phase="active" expanded={false} onExpandedChange={() => {}} />,
     )
-    expect(html).toContain('正在撰写摘要')
-    expect(html.match(/正在撰写摘要/g)).toHaveLength(2)
+    expect(html.includes('正在撰写摘要')).toBe(false)
+    expect(html.includes('已完成')).toBe(false)
+    expect(html).toContain('data-task-card-progress')
     expect(html).toContain('3/6')
     expect(html).toContain('data-task-card-expanded="false"')
     expect(html).toContain('data-task-card-state="active"')
@@ -338,12 +339,15 @@ describe('task card markup', () => {
     expect(html.includes('关闭任务进度')).toBe(false)
   })
 
-  test('completed and interrupted capsules use their own one-line labels', async () => {
+  test('completed and interrupted capsules show only the step count', async () => {
     await testI18n.changeLanguage('zh-Hans')
     const complete = renderCard(
       <TaskProgressCard todos={doneItems} phase="complete" expanded={false} onExpandedChange={() => {}} />,
     )
-    expect(complete).toContain('6/6 已完成')
+    expect(complete).toContain('data-task-card-progress')
+    expect(complete).toContain('6/6')
+    expect(complete.includes('已完成')).toBe(false)
+    expect(complete).toContain('text-success')
     expect(complete).toContain('data-task-card-state="complete"')
     expect(complete.includes('data-slot="rail-toc"')).toBe(false)
     expect(complete.includes('data-task-card-heading')).toBe(false)
@@ -358,7 +362,10 @@ describe('task card markup', () => {
     const interrupted = renderCard(
       <TaskProgressCard todos={stopped} phase="interrupted" expanded={false} onExpandedChange={() => {}} />,
     )
-    expect(interrupted).toContain('已中断 · 3/6')
+    expect(interrupted).toContain('data-task-card-progress')
+    expect(interrupted).toContain('3/6')
+    expect(interrupted.includes('已中断')).toBe(false)
+    expect(interrupted).toContain('bg-destructive')
     expect(interrupted).toContain('data-task-card-state="interrupted"')
     expect(interrupted.includes('正在撰写摘要')).toBe(false)
   })
@@ -409,8 +416,17 @@ describe('task card markup', () => {
     expect(html).not.toContain('rounded-[8px]')
     expect(html).toContain('data-task-card-progress')
     expect(html).toContain('3/6')
+    expect(html.includes('正在撰写摘要')).toBe(false)
+    expect(html.includes('已完成')).toBe(false)
     expect(html).toContain('size-[30px]')
     expect(html).toContain('data-toolbar-scroll="docked"')
+    expect(html).toContain('data-scroll-dock-width="0"')
+    expect(html).toContain('data-scroll-dock-opacity="0"')
+    expect(html).toContain('translateX(-50%)')
+    expect(html).toContain('style="width:0;opacity:0"')
+    expect(html).toContain('absolute right-0')
+    expect(html).toContain('overflow-hidden')
+    expect(html).not.toContain('translateX(calc(-50% +')
     expect(html).not.toContain('bottom-3')
     expect(html).not.toContain('bg-success')
 
@@ -428,6 +444,9 @@ describe('task card markup', () => {
     )
     expect(centered).toContain('data-toolbar-scroll="center"')
     expect(centered).toContain('data-testid="chat-scroll-to-bottom"')
+    expect(centered).toContain('data-scroll-dock-width="30"')
+    expect(centered).toContain('data-scroll-dock-opacity="0"')
+    expect(centered).toContain('translateX(-50%)')
     expect(centered).not.toContain('data-task-card=""')
     const minAt = html.indexOf('data-task-card-cluster="min"')
     const minEnd = html.indexOf('data-task-card-cluster="natural"')
@@ -472,13 +491,17 @@ describe('task card markup', () => {
     expect(card).toContain('blur(4px)')
     expect(card).toContain('absolute bottom-0 left-0')
     expect(card).toContain('taskCardContentMotion')
+    expect(card).toContain('taskCardRestingBox')
+    expect(card).toContain('taskCardScrollDockFrame')
+    expect(card).toContain('taskCardShellSize')
     expect(card.includes('mode="wait"')).toBe(false)
     expect(card).toContain('items-end')
     expect(card).toContain('FIXED_RADIUS')
     expect(card).toContain('TOOLBAR_CAPSULE_RADIUS')
     expect(card).toContain('TOOLBAR_CAPSULE_RADIUS + value * (FIXED_RADIUS - TOOLBAR_CAPSULE_RADIUS)')
     expect(card).toContain('marginRight: buttonGap')
-    expect(card).toContain('translateX(calc(-50% + ${toolbarEndReserve / 2}px))')
+    expect(card).toContain("transform: 'translateX(-50%)'")
+    expect(card).not.toContain('toolbarEndReserve / 2')
     expect(card).not.toContain('toolbarScrollX')
     expect(card).not.toContain('flyScroll')
     expect(card).toContain('borderRadius:')
