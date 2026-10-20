@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  TOOLBAR_CAPSULE_RADIUS,
+  TOOLBAR_CONTROL_HEIGHT,
   TOOLBAR_SHELL_MAX,
   centeredShellBudget,
   toolbarCapsuleFit,
-  toolbarScrollX,
 } from '../toolbar-capsule-fit'
 
 describe('toolbar capsule fit', () => {
@@ -79,10 +80,9 @@ describe('toolbar capsule fit', () => {
     expect(restored.iconOnly).toBe(false)
   })
 
-  test('centers the scroll button, and docks its left edge on the shell\'s right', () => {
-    expect(toolbarScrollX({ docked: false, shellWidth: 180 })).toBe(-15)
-    expect(toolbarScrollX({ docked: true, shellWidth: 0 })).toBe(-15)
-    expect(toolbarScrollX({ docked: true, shellWidth: 180 })).toBe(96)
+  test('collapsed toolbar radius is a pill on the 30px control', () => {
+    expect(TOOLBAR_CAPSULE_RADIUS).toBe(TOOLBAR_CONTROL_HEIGHT / 2)
+    expect(TOOLBAR_CAPSULE_RADIUS).toBeGreaterThanOrEqual(TOOLBAR_CONTROL_HEIGHT / 2)
   })
 
   test('the scroll button only spends width on the capsule\'s right', () => {
