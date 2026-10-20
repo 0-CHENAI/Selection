@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  TOOLBAR_CAPSULE_CONTENT_HEIGHT,
   TOOLBAR_CAPSULE_RADIUS,
   TOOLBAR_CONTROL_HEIGHT,
+  TOOLBAR_SCROLL_SIZE,
+  TOOLBAR_SHELL_BORDER,
   TOOLBAR_SHELL_MAX,
   centeredShellBudget,
   toolbarCapsuleFit,
@@ -83,6 +86,8 @@ describe('toolbar capsule fit', () => {
   test('collapsed toolbar radius is a pill on the 30px control', () => {
     expect(TOOLBAR_CAPSULE_RADIUS).toBe(TOOLBAR_CONTROL_HEIGHT / 2)
     expect(TOOLBAR_CAPSULE_RADIUS).toBeGreaterThanOrEqual(TOOLBAR_CONTROL_HEIGHT / 2)
+    expect(TOOLBAR_SCROLL_SIZE).toBe(TOOLBAR_CONTROL_HEIGHT)
+    expect(TOOLBAR_CAPSULE_CONTENT_HEIGHT + TOOLBAR_SHELL_BORDER * 2).toBe(TOOLBAR_CONTROL_HEIGHT)
   })
 
   test('the scroll button only spends width on the capsule\'s right', () => {

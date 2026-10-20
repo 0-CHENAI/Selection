@@ -22,6 +22,7 @@ import {
 } from './task-progress'
 import {
   TOOLBAR_BUTTON_GAP,
+  TOOLBAR_CAPSULE_CONTENT_HEIGHT,
   TOOLBAR_CAPSULE_RADIUS,
   TOOLBAR_CONTROL_HEIGHT,
   TOOLBAR_SCROLL_SIZE,
@@ -254,7 +255,7 @@ function CapsuleFrame({
   fraction: string
   expandLabel: string
   onExpand: () => void
-  /** Sit in the composer toolbar: 30px shell, 12px type, pill ends. */
+  /** Sit in the composer toolbar: control-height shell, pill ends. */
   toolbar?: boolean
   probe?: boolean
   unbounded?: boolean
@@ -273,10 +274,11 @@ function CapsuleFrame({
       <button
         type="button"
         tabIndex={probe ? -1 : undefined}
+        style={toolbar ? { height: TOOLBAR_CAPSULE_CONTENT_HEIGHT } : undefined}
         className={cn(
           'flex min-w-0 max-w-full flex-1 items-center text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
           toolbar
-            ? 'h-7 gap-1.5 rounded-full pl-2.5 pr-2 text-xs font-medium'
+            ? 'gap-1.5 rounded-full pl-2.5 pr-2 text-xs font-medium'
             : 'gap-2 rounded-full py-1.5 pl-3 pr-3',
         )}
         aria-expanded={false}
@@ -464,7 +466,12 @@ export function TaskProgressCard({
       }
       const capsuleBox = {
         width: Math.ceil(capsuleFrame.offsetWidth + borderX),
-        height: Math.ceil(capsuleFrame.offsetHeight + borderY),
+        // Toolbar pill is the shared control height, not the rem-sized content box.
+        // offsetHeight rounds, and h-7 at a 15px root is 26.25px, which locked the
+        // shell at 28px beside the 30px circle.
+        height: toolbar
+          ? TOOLBAR_CONTROL_HEIGHT
+          : Math.ceil(capsuleFrame.offsetHeight + borderY),
       }
       if (panelBox.width <= 0 || panelBox.height <= 0 || capsuleBox.width <= 0 || capsuleBox.height <= 0) return
       setShapes(prev => prev
@@ -721,7 +728,9 @@ export function TaskProgressCard({
                 borderRadius: toolbar && crossfade ? shellRadius : restingRadius,
                 overflow: 'hidden',
                 width: crossfade ? shellWidth : undefined,
-                height: crossfade ? shellHeight : undefined,
+                height: crossfade
+                  ? shellHeight
+                  : (toolbar && !shapeExpanded ? TOOLBAR_CONTROL_HEIGHT : undefined),
               }}
               className={cn(
                 'pointer-events-auto relative z-[1] min-w-0 shrink-0',
@@ -782,9 +791,9 @@ export function TaskProgressCard({
               onClick={onScrollToBottom}
               aria-label={scrollLabel}
               title={scrollLabel}
-              style={{ width: scrollVisual.width, opacity: scrollVisual.opacity }}
+              style={{ width: scrollVisual.width, height: TOOLBAR_CONTROL_HEIGHT, opacity: scrollVisual.opacity }}
               className={cn(
-                'relative z-0 inline-flex h-[30px] min-w-0 shrink-0 p-0',
+                'relative z-0 inline-flex min-w-0 shrink-0 p-0',
                 scrollInteractive ? 'pointer-events-auto' : 'pointer-events-none',
                 // Clip while growing so the circle stays behind the pill's right edge.
                 // At rest, overflow stays visible so the shadow is not cut off.
@@ -793,8 +802,9 @@ export function TaskProgressCard({
               )}
             >
               <span
+                style={{ width: TOOLBAR_CONTROL_HEIGHT, height: TOOLBAR_CONTROL_HEIGHT }}
                 className={cn(
-                  'absolute right-0 top-0 inline-flex size-[30px] items-center justify-center rounded-full',
+                  'absolute right-0 top-0 inline-flex items-center justify-center rounded-full',
                   'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
                   'transition-colors hover:bg-background hover:text-foreground',
                 )}

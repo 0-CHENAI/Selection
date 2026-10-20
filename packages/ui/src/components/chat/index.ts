@@ -35,10 +35,12 @@ export {
   centeredShellBudget,
   toolbarCapsuleFit,
   TOOLBAR_BUTTON_GAP,
+  TOOLBAR_CAPSULE_CONTENT_HEIGHT,
   TOOLBAR_CAPSULE_RADIUS,
   TOOLBAR_CLUSTER_GAP,
   TOOLBAR_CONTROL_HEIGHT,
   TOOLBAR_SCROLL_SIZE,
+  TOOLBAR_SHELL_BORDER,
   TOOLBAR_SHELL_MAX,
 } from './toolbar-capsule-fit'
 export type { ToolbarCapsuleFit, ToolbarCapsuleFitInput } from './toolbar-capsule-fit'
