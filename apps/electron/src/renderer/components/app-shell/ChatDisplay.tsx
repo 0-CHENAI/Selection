@@ -71,6 +71,7 @@ import {
   UserMessageBubble,
   withTaskMessagePresentation,
   groupMessagesByTurn,
+  stabilizeTurns,
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
   getAssistantTurnUiKey,
@@ -871,13 +872,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
   })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
   const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
+  const stableTurnsRef = React.useRef<{ sessionId: string | null; turns: Turn[] }>({ sessionId: null, turns: [] })
   // Group once for rendering, search and the outline; only visible turns mount cards.
   const allTurns = React.useMemo(() => {
-    if (!sessionMessages) return []
+    if (!sessionMessages) {
+      stableTurnsRef.current = { sessionId: activeSessionId, turns: [] }
+      return []
+    }
     const grouped = groupMessagesByTurn(sessionDisplayMessages, taskGroupingOptions)
-    if (!taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length) return grouped
-    return orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
-  }, [sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
+    const next = !taskGroupingOptions.isTaskOrchestrationRoot || !orchestrationRuns?.length
+      ? grouped
+      : orchestrationRuns.reduce((turns, run) => withOrchestrationProgress(turns, run, t), grouped)
+    const previous = stableTurnsRef.current.sessionId === activeSessionId ? stableTurnsRef.current.turns : []
+    const stable = stabilizeTurns(previous, next)
+    stableTurnsRef.current = { sessionId: activeSessionId, turns: stable }
+    return stable
+  }, [activeSessionId, sessionMessages, sessionDisplayMessages, taskGroupingOptions, orchestrationRuns, t])
   const latestTodo = React.useMemo(() => {
     const found = latestTodoList(allTurns)
     if (!found) return null

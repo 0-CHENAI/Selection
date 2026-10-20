@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { unified } from 'unified'
 import type { Root, RootContent, Element } from 'hast'
-import { createStreamArrivalChunks, rehypeStreamChunks, splitRevealText } from '../rehype-stream-chunks'
+import { STREAM_ARRIVAL_LIMIT, createStreamArrivalChunks, rehypeStreamChunks, splitRevealText } from '../rehype-stream-chunks'
 import remarkParse from 'remark-parse'
 import remarkRehype from 'remark-rehype'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +15,19 @@ test('each short arrival gets a new run without changing already received runs',
   expect(split('你好世界', '/p')).toEqual(['你', '好', '世界'])
   expect(split('修正', '/p')).toEqual(['修正'])
   expect(split('另一段', '/other')).toEqual(['另一段'])
+})
+
+test('a long stream folds settled arrivals instead of keeping one span per token', () => {
+  const split = createStreamArrivalChunks()
+  let text = ''
+  for (let i = 0; i < 80; i++) {
+    text += '字'
+    const chunks = split(text, '/p')
+    expect(chunks.join('')).toBe(text)
+    expect(chunks.length).toBeLessThanOrEqual(STREAM_ARRIVAL_LIMIT)
+  }
+  // The paragraph stopped growing. The next pass must not keep a span per token.
+  expect(split(text, '/p')).toEqual([text])
 })
 
 test('arrival boundaries do not break combining characters or emoji', () => {

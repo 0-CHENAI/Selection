@@ -4,23 +4,52 @@ import type { Plugin } from 'unified'
 const skip = new Set(['pre', 'code', 'svg', 'math', 'script', 'style', 'textarea'])
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
+/** Recent arrivals stay separate so each fade has its own node. */
+export const STREAM_ARRIVAL_TAIL = 8
+/** Hard cap per text node while it is still growing. */
+export const STREAM_ARRIVAL_LIMIT = 24
+
+function alignArrivalBoundary(chunks: string[]): string[] {
+  if (chunks.length < 2) return chunks
+  const tail = chunks.at(-2)! + chunks.at(-1)!
+  const boundary = chunks.at(-2)!.length
+  if (segmenter.segment(tail).containing(boundary)?.index === boundary) return chunks
+  // A combining mark/ZWJ may finish the previous grapheme in a later delta.
+  return [...chunks.slice(0, -2), tail]
+}
+
+/** Fold text the reader has already had time to see. The live tail stays split. */
+export function foldStreamArrivalChunks(chunks: string[]): string[] {
+  if (chunks.length <= STREAM_ARRIVAL_LIMIT) return chunks
+  const tail = chunks.slice(-STREAM_ARRIVAL_TAIL)
+  const head = chunks.slice(0, -STREAM_ARRIVAL_TAIL).join('')
+  if (!head) return tail
+  const aligned = alignArrivalBoundary([head, ...tail])
+  return aligned
+}
+
+/**
+ * A text node that stopped growing does not need one span per token.
+ * Short runs stay split so a just-finished word can still fade.
+ */
+export function collapseSettledArrivalChunks(chunks: string[]): string[] {
+  if (chunks.length <= STREAM_ARRIVAL_TAIL) return chunks
+  return [chunks.join('')]
+}
+
 /** Per-message arrival boundaries: never append new text into an old fade. */
 export function createStreamArrivalChunks() {
   const nodes = new Map<string, { text: string; chunks: string[] }>()
   return (text: string, path: string): string[] => {
     const previous = nodes.get(path)
-    if (previous?.text === text) return previous.chunks
-    const chunks = previous && text.startsWith(previous.text)
-      ? [...previous.chunks, text.slice(previous.text.length)]
-      : [text]
-    if (chunks.length > 1) {
-      const tail = chunks.at(-2)! + chunks.at(-1)!
-      const boundary = chunks.at(-2)!.length
-      if (segmenter.segment(tail).containing(boundary)?.index !== boundary) {
-        // A combining mark/ZWJ may finish the previous grapheme in a later delta.
-        chunks.splice(-2, 2, tail)
-      }
+    if (previous?.text === text) {
+      const settled = collapseSettledArrivalChunks(previous.chunks)
+      if (settled !== previous.chunks) nodes.set(path, { text, chunks: settled })
+      return settled
     }
+    const chunks = foldStreamArrivalChunks(alignArrivalBoundary(previous && text.startsWith(previous.text)
+      ? [...previous.chunks, text.slice(previous.text.length)]
+      : [text]))
     nodes.set(path, { text, chunks })
     return chunks
   }

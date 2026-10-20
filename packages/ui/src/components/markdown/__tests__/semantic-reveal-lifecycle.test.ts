@@ -121,6 +121,15 @@ edited.dispose();
 assert.equal(appendedRevealInset(60,80),25);
 assert.equal(appendedRevealInset(80,80),0);
 assert.equal(appendedRevealInset(80,40),0);
+let farScans=0;
+const farQuery=root.querySelectorAll;
+root.querySelectorAll=()=>{farScans++;return []};
+root.getBoundingClientRect=()=>({top:4000,bottom:5200,height:1200,width:600,left:0,right:600});
+const far=createSemanticReveal(root,true);
+far.update(true,true,'a live reply the reader has scrolled away from');
+assert.equal(farScans,0,'a live reply far from the viewport is not scanned');
+far.dispose();
+root.querySelectorAll=farQuery;
 console.log('lifecycle assertions passed');
 `
 

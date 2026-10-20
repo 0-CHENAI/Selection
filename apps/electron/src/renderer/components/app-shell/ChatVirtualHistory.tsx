@@ -16,6 +16,17 @@ interface Props {
   children: (turn: Turn, index: number) => React.ReactNode
 }
 
+/**
+ * Streaming growth resizes the virtual list every token. That does not move
+ * the list inside the scrollport, and measuring it forces layout of the live row.
+ */
+export function shouldMeasureVirtualScrollMargin(
+  entries: ReadonlyArray<{ target: unknown }>,
+  list: unknown,
+): boolean {
+  return entries.some(entry => entry.target !== list)
+}
+
 /** Estimates only seed the scrollbar; ResizeObserver caches actual row heights. */
 export function estimateChatTurnHeight(turn: Turn, width: number): number {
   const text = turn.type === 'assistant' ? turn.response?.text ?? '' : turn.message.content
@@ -31,9 +42,16 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
 }, ref) {
   const listRef = React.useRef<HTMLDivElement>(null)
   const retainedKeys = React.useRef(new Set<string>())
+  const estimateCache = React.useRef(new WeakMap<Turn, number>())
   const [initialWidth] = React.useState(() => viewportRef.current?.clientWidth || 680)
   const [scrollMargin, setScrollMargin] = React.useState(0)
-  const estimates = React.useMemo(() => turns.map(turn => estimateChatTurnHeight(turn, initialWidth)), [turns, initialWidth])
+  const estimates = React.useMemo(() => turns.map(turn => {
+    const cached = estimateCache.current.get(turn)
+    if (cached != null) return cached
+    const height = estimateChatTurnHeight(turn, initialWidth)
+    estimateCache.current.set(turn, height)
+    return height
+  }), [turns, initialWidth])
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: turns.length,
     getScrollElement: () => viewportRef.current,
@@ -78,10 +96,28 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
       setScrollMargin(previous => Math.abs(previous - margin) < 1 ? previous : margin)
     }
     measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(list)
+    const observer = new ResizeObserver(entries => {
+      if (!shouldMeasureVirtualScrollMargin(entries, list)) return
+      measure()
+    })
+    const watchAbove = () => {
+      const above = list.previousElementSibling
+      if (above) observer.observe(above)
+    }
+    watchAbove()
     observer.observe(viewport)
-    return () => observer.disconnect()
+    // A sibling can appear after mount (handover). Child-list changes are not
+    // the streaming row growing inside the list.
+    const parent = list.parentElement
+    const mutations = parent ? new MutationObserver(() => {
+      watchAbove()
+      measure()
+    }) : undefined
+    mutations?.observe(parent!, { childList: true })
+    return () => {
+      observer.disconnect()
+      mutations?.disconnect()
+    }
   }, [viewportRef])
 
   // Each mounted row already reports wrapping changes through measureElement's
@@ -110,12 +146,16 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
           // estimated box, so growth paints past the viewport and the stick
           // follow never sees a taller transcript until the stream ends.
           const streaming = turn.type === 'assistant' && turn.isStreaming
+          const visible = row.index >= start && row.index < end
+          // Offscreen live rows must not lay out every token. Only the on-screen
+          // streaming row reports its real height so stick-to-bottom can follow.
+          const layOutStreamingRow = streaming && visible
           return (
           <div key={row.key} data-index={row.index} ref={virtualizer.measureElement}
-            data-chat-virtual-visible={row.index >= start && row.index < end}
+            data-chat-virtual-visible={visible}
             data-chat-virtual-streaming={streaming ? '' : undefined}
             className="absolute left-0 top-0 w-full min-w-0"
-            style={streaming ? undefined : { contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }}>
+            style={layOutStreamingRow ? undefined : { contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }}>
             {children(turn, row.index)}
           </div>
           )

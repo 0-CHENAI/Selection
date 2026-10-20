@@ -121,6 +121,12 @@ export function createStickyScrollFollow(
     lastTime = time
     // A middle-row regenerate grows the transcript without another resize event.
     target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    if (!manualSmooth && Math.abs(target - viewport.scrollTop) > viewport.clientHeight) {
+      viewport.scrollTop = target
+      lastTime = undefined
+      manualSmooth = false
+      return
+    }
     const more = followStickyViewportToBottom(viewport, {
       focused: true, sticky: true, reduceMotion: options.reduceMotion(), elapsedMs, target,
     })
@@ -131,6 +137,10 @@ export function createStickyScrollFollow(
     resize(behavior?: ScrollBehavior) {
       if (disposed || !options.sticky()) { stop(); return }
       if (behavior === 'smooth') manualSmooth = true
+      // Streaming growth often notifies twice before the frame runs (commit +
+      // ResizeObserver). The queued frame already reads scrollHeight; reading
+      // it here forces a layout of the live row on every token.
+      if (frame != null && behavior !== 'instant' && behavior !== 'auto' && !options.reduceMotion() && !manualSmooth) return
       // Geometry is read once per resize, not on every animation frame.
       target = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
       if (options.reduceMotion() || behavior === 'instant' || behavior === 'auto' || (
