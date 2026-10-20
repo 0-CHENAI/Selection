@@ -77,6 +77,8 @@ interface OnboardingWizardProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, 'auto' | 'on' | 'off'>
+    modelImageLearned?: Record<string, boolean>
     modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelContextWindows?: Record<string, number>
     modelMaxTokens?: Record<string, number>

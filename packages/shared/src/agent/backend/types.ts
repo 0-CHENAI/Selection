@@ -42,7 +42,7 @@ export interface BackendRuntimeUpdate {
     baseUrl?: string;
     piAuthProvider?: string;
     customEndpoint?: { api: string; supportsImages?: boolean };
-    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
+    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
     [key: string]: unknown;
   };
 }
@@ -254,6 +254,12 @@ export interface CoreBackendConfig {
    * A provider rejected a thinking effort. `levels` is the set to keep offering.
    * The main process caches it and the renderer hides the rejected stop.
    */
+  /**
+   * Auto mode learned that this model rejected image input.
+   * The host persists `learnedSupportsImages: false` for the connection.
+   */
+  onImageSupportLearned?: (modelId: string) => void;
+
   onThinkingProbe?: (probe: {
     modelId: string
     provider?: string

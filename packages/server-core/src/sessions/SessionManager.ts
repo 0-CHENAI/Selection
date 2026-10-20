@@ -168,7 +168,7 @@ import {
 } from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
-import { resolveAuthEnvVars, toCustomEndpointModelPayload } from '@craft-agent/shared/config'
+import { buildSkippedImagesNote, learnModelRejectsImages, resolveAuthEnvVars, toCustomEndpointModelPayload, updateLlmConnection } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
@@ -4170,6 +4170,19 @@ export class SessionManager implements ISessionManager {
    * so capability changes reach live Pi subprocesses immediately instead of
    * waiting for the next send to lazily notice the signature drift.
    */
+  /**
+   * Persist an auto-mode image rejection without interrupting the current turn.
+   * The next send reads the connection again and skips images.
+   */
+  private rememberModelRejectsImages(connectionSlug: string | undefined, modelId: string): void {
+    if (!connectionSlug || !modelId) return
+    const connection = getLlmConnection(connectionSlug)
+    if (!connection) return
+    const next = learnModelRejectsImages(connection, modelId)
+    if (next === connection) return
+    updateLlmConnection(connectionSlug, { models: next.models })
+  }
+
   async refreshConnectionRuntime(connectionSlug: string): Promise<void> {
     for (const managed of this.sessions.values()) {
       if (managed.llmConnection !== connectionSlug) continue
@@ -4479,6 +4492,9 @@ export class SessionManager implements ISessionManager {
             levels: probe.levels,
             level: probe.level,
           }, managed.workspace.id)
+        },
+        onImageSupportLearned: (modelId) => {
+          this.rememberModelRejectsImages(managed.llmConnection, modelId)
         },
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
@@ -7972,9 +7988,23 @@ export class SessionManager implements ISessionManager {
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
       const currentInput = handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage
+      const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
+      if (preparedImages.ok && skippedImageCount > 0) {
+        const modelName = messageBackendContext.resolvedModel || 'model'
+        this.sendEvent({
+          type: 'info',
+          sessionId,
+          message: i18n.isInitialized
+            ? String(i18n.t('chat.imageSkipped.notice', { count: skippedImageCount, modelName }))
+            : `Skipped ${skippedImageCount} images for ${modelName}. Change this in model settings.`,
+          level: 'warning',
+          timestamp: this.monotonic(),
+        }, managed.workspace.id)
+      }
+      const imageSkipNote = skippedImageCount > 0 ? `\n\n${buildSkippedImagesNote(skippedImageCount)}` : ''
       const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
-        ? `${currentInput}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
-        : currentInput
+        ? `${currentInput}${imageSkipNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : `${currentInput}${imageSkipNote}`
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -14364,7 +14394,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         break
 
       case 'info': {
-        const isCompactionComplete = event.message.startsWith('Compacted')
+        const skippedImages = event.code === 'image_input_skipped'
+        const infoMessage = skippedImages
+          ? (i18n.isInitialized
+            ? String(i18n.t('chat.imageSkipped.notice', {
+              count: event.imageCount ?? 0,
+              modelName: event.modelName || event.message || 'model',
+            }))
+            : `Skipped ${event.imageCount ?? 0} images for ${event.modelName || 'this model'}. Change this in model settings.`)
+          : event.message
+        const isCompactionComplete = infoMessage.startsWith('Compacted')
         const infoTimestamp = this.monotonic()
 
         // Persist compaction messages so they survive reload
@@ -14400,7 +14439,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         this.sendEvent({
           type: 'info',
           sessionId,
-          message: event.message,
+          message: infoMessage,
+          level: skippedImages ? 'warning' : undefined,
           statusType: isCompactionComplete ? 'compaction_complete' : undefined,
           timestamp: infoTimestamp,
         }, workspaceId)

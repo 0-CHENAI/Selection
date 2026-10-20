@@ -51,9 +51,9 @@ describe('normalizeCustomEndpointModelEntry', () => {
 })
 
 describe('buildCustomEndpointModelDef', () => {
-  it('defaults custom endpoint models to text-only input and 128k/8k limits', () => {
+  it('defaults unknown custom endpoint models to image input and 128k/8k limits', () => {
     const model = buildCustomEndpointModelDef('my-model')
-    expect(model.input).toEqual(['text'])
+    expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(131_072)
     expect(model.maxTokens).toBe(8_192)
   })

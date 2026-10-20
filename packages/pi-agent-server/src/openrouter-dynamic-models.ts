@@ -1,6 +1,6 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { modelThinkingCapability, thinkingLevelMapForLevels } from '../../shared/src/agent/thinking-capabilities.ts';
-import { inferModelSupportsImages } from '../../shared/src/config/model-image-support.ts';
+import { resolveModelImageSupportFromCatalog } from '../../shared/src/config/model-image-support.ts';
 import { OPENROUTER_API_BASE_URL } from '../../shared/src/config/openrouter-catalog.ts';
 import {
   stripPiPrefix,
@@ -61,7 +61,10 @@ function toProviderModel(model: OpenRouterRegistryModel): OpenRouterProviderMode
 export function buildOpenRouterDynamicModel(
   entry: CustomEndpointModelEntry,
 ): OpenRouterProviderModel {
-  const supportsImages = entry.supportsImages ?? inferModelSupportsImages(entry.id)
+  const supportsImages = resolveModelImageSupportFromCatalog({
+    modelId: entry.id,
+    models: [entry],
+  }).supportsImages
   const contextWindow = entry.contextWindow ?? 131_072
   const thinking = modelThinkingCapability({
     id: entry.id,

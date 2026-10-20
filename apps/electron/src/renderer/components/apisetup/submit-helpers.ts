@@ -8,7 +8,9 @@ export interface CustomEndpointModelSubmissionInput {
   includeDisplayNames?: boolean
   supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>
   thinkingMode?: 'unsupported' | 'always-on' | 'levels'
-  supportsImages: boolean
+  supportsImages?: boolean
+  imageSupport?: 'auto' | 'on' | 'off'
+  learnedSupportsImages?: boolean
   contextWindow: number
   maxTokens: number
 }
@@ -29,7 +31,16 @@ export function buildCustomEndpointModelSubmission(
       supportedThinkingLevels: input.supportedThinkingLevels,
       supportsThinking: input.thinkingMode === 'always-on' || input.supportedThinkingLevels.some(level => level !== 'off'),
     } : {}),
-    supportsImages: input.supportsImages,
+    ...(input.imageSupport === 'on' || input.imageSupport === 'off'
+      ? { imageSupport: input.imageSupport, supportsImages: input.imageSupport === 'on' }
+      : input.imageSupport === 'auto'
+        ? {
+          imageSupport: 'auto' as const,
+          ...(input.learnedSupportsImages === false ? { learnedSupportsImages: false as const } : {}),
+        }
+        : typeof input.supportsImages === 'boolean'
+          ? { supportsImages: input.supportsImages }
+          : {}),
     contextWindow: input.contextWindow,
     maxTokens: input.maxTokens,
   }

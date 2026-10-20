@@ -18,14 +18,17 @@ import {
 } from './models';
 import {
   connectionModelIdsMatch,
-  inferModelSupportsImages,
   resolveCustomModelContextWindow,
   resolveCustomModelMaxTokens,
+  resolveModelImageSupportFromCatalog,
+  setModelImageSupport,
 } from './model-image-support';
 import {
   lookupKnownModelContextWindow,
   resolveApiKeyModelContextWindow,
 } from './model-context-window.ts';
+import type { CredentialManager } from '../credentials/manager.ts';
+import { isOrderGatewayUrl } from './order-gateway.ts';
 export {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
   DEFAULT_CUSTOM_MAX_TOKENS,
@@ -33,17 +36,30 @@ export {
   MAX_CUSTOM_MAX_TOKENS,
   MIN_CUSTOM_CONTEXT_WINDOW,
   MIN_CUSTOM_MAX_TOKENS,
+  alignModelImageInput,
+  buildSkippedImagesNote,
   connectionModelIdsMatch,
   inferModelSupportsImages,
+  isUnsupportedImageInputError,
+  learnModelRejectsImages,
+  lookupKnownModelImageSupport,
   normalizeConnectionModelId,
+  planUnsupportedImageRetry,
+  readStoredImageSupport,
+  resolveModelImageSupportFromCatalog,
+  setModelImageSupport,
   resolveCustomModelContextWindow,
   resolveCustomModelMaxTokens,
   sanitizeCustomContextWindow,
   sanitizeCustomMaxTokens,
   toCustomEndpointModelPayload,
 } from './model-image-support';
-import type { CredentialManager } from '../credentials/manager.ts';
-import { isOrderGatewayUrl } from './order-gateway.ts';
+export type {
+  ImageSupportMode,
+  ImageSupportResolution,
+  ImageSupportSource,
+  ModelImageRecord,
+} from './model-image-support';
 
 // ============================================================
 // Pi Model Resolver (dependency injection to avoid Pi SDK in renderer)
@@ -599,57 +615,26 @@ export function setModelSupportsImages(
   modelId: string,
   enabled: boolean,
 ): LlmConnection {
-  if (!connection.models) return connection;
-  const idOf = (m: ModelDefinition | string) => (typeof m === 'string' ? m : m.id);
-  const idx = connection.models.findIndex(m => connectionModelIdsMatch(idOf(m), modelId));
-  if (idx === -1) return connection;
-
-  const entry = connection.models[idx]!;
-  const nextEntry =
-    typeof entry === 'string'
-      ? { id: entry, name: entry, shortName: entry, supportsImages: enabled }
-      : { ...entry, supportsImages: enabled };
-
-  const nextModels = connection.models.slice();
-  nextModels[idx] = nextEntry as ModelDefinition;
-  return { ...connection, models: nextModels };
+  return setModelImageSupport(connection, modelId, enabled ? 'on' : 'off') as LlmConnection;
 }
 
 /**
- * Resolve whether a given model on a connection accepts image input.
+ * Whether a model on a connection should receive images.
  *
- * For `pi_compat` (custom-endpoint) connections this mirrors the precedence used
- * by Pi's `buildCustomEndpointModelDef`:
- *   per-model `supportsImages` override
- *   ?? connection-level `customEndpoint.supportsImages` default
- *   ?? conservative name heuristic (`inferModelSupportsImages`)
- *
- * Stored IDs (`Opus`) and runtime IDs (`pi/Opus`, `custom-endpoint/Opus`) compare
- * as the same model so the flag still applies at send time.
- *
- * For non-`pi_compat` connections the renderer doesn't own the catalog — Pi SDK's
- * bundled provider definitions and Anthropic's API do. This helper conservatively
- * returns `true` there (we don't know better; the upstream decides). The
- * pre-flight banner gates on `pi_compat` separately, so this just reports what
- * the renderer can know with confidence.
+ * Renderer banners and runtime send paths both call this. Precedence lives in
+ * `resolveModelImageSupportFromCatalog`: explicit on/off, then a learned
+ * rejection, then a connection endpoint default, then the known table, then
+ * an optimistic attempt.
  */
 export function modelSupportsImages(
-  connection: Pick<LlmConnection, 'providerType' | 'models' | 'customEndpoint'>,
+  connection: Pick<LlmConnection, 'models' | 'customEndpoint'>,
   modelId: string,
 ): boolean {
-  if (!isCompatProvider(connection.providerType)) return true;
-
-  const entry = connection.models?.find(m =>
-    connectionModelIdsMatch(typeof m === 'string' ? m : m.id, modelId),
-  );
-  if (entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean') {
-    return entry.supportsImages;
-  }
-  if (typeof connection.customEndpoint?.supportsImages === 'boolean') {
-    return connection.customEndpoint.supportsImages;
-  }
-  const entryName = entry && typeof entry !== 'string' ? entry.name : undefined
-  return inferModelSupportsImages(modelId, entryName);
+  return resolveModelImageSupportFromCatalog({
+    modelId,
+    models: connection.models,
+    endpointSupportsImages: connection.customEndpoint?.supportsImages,
+  }).supportsImages
 }
 
 /**

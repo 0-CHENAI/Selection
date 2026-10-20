@@ -42,8 +42,8 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 import { getModelById } from '../config/models.ts';
 import {
   connectionModelIdsMatch,
-  inferModelSupportsImages,
   resolveCustomModelContextWindow,
+  resolveModelImageSupportFromCatalog,
 } from '../config/model-image-support.ts';
 import {
   lookupKnownModelContextWindow,
@@ -1188,6 +1188,22 @@ export class PiAgent extends BaseAgent {
         this.subprocessReadyResolve?.();
         break;
 
+      case 'image_input_skipped': {
+        const modelId = typeof msg.modelId === 'string' ? msg.modelId : this.getModel();
+        const imageCount = typeof msg.imageCount === 'number' ? msg.imageCount : 0;
+        this.noteLearnedImageSupport(modelId);
+        this.config.onImageSupportLearned?.(modelId);
+        this.eventQueue.enqueue({
+          type: 'info',
+          message: '',
+          level: 'warning',
+          code: 'image_input_skipped',
+          imageCount,
+          modelName: modelId,
+        });
+        break;
+      }
+
       case 'event':
         // Pi SDK event -- forward through PiEventAdapter
         this.handleSubprocessEvent(msg.event as Record<string, unknown>);
@@ -2089,20 +2105,39 @@ export class PiAgent extends BaseAgent {
    * Get or create a SessionToolContext for executing session-scoped tools.
    * Cached per agent instance since the workspace/session don't change.
    */
+  private noteLearnedImageSupport(modelId: string): void {
+    const runtime = getBackendRuntime(this.config);
+    const models = [...(runtime.customModels ?? [])];
+    const index = models.findIndex(model =>
+      connectionModelIdsMatch(typeof model === 'string' ? model : model.id, modelId),
+    );
+    const learned = { id: modelId, imageSupport: 'auto' as const, learnedSupportsImages: false as const };
+    if (index === -1) models.push(learned);
+    else {
+      const current = models[index]!;
+      models[index] = typeof current === 'string'
+        ? { id: current, imageSupport: 'auto', learnedSupportsImages: false }
+        : { ...current, imageSupport: 'auto', learnedSupportsImages: false };
+    }
+    this.config = {
+      ...this.config,
+      runtime: { ...runtime, customModels: models },
+    };
+    if (this._sessionToolContext) {
+      this._sessionToolContext.supportsImages = false;
+    }
+  }
+
   private resolveCurrentModelSupportsImages(): boolean {
     const modelId = this.config.model || '';
     const runtime = getBackendRuntime(this.config);
-    const customModel = runtime.customModels?.find((model) =>
-      connectionModelIdsMatch(typeof model === 'string' ? model : model.id, modelId),
-    );
-    const customModelSupportsImages = customModel && typeof customModel !== 'string'
-      ? customModel.supportsImages
-      : undefined;
     const registeredModel = getModelById(modelId);
-    return customModelSupportsImages
-      ?? runtime.customEndpoint?.supportsImages
-      ?? registeredModel?.supportsImages
-      ?? inferModelSupportsImages(modelId, registeredModel?.name);
+    return resolveModelImageSupportFromCatalog({
+      modelId,
+      modelName: registeredModel?.name,
+      models: runtime.customModels,
+      endpointSupportsImages: runtime.customEndpoint?.supportsImages,
+    }).supportsImages;
   }
 
   private getSessionToolContext(): SessionToolContext {

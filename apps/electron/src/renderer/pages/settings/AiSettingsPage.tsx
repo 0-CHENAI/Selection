@@ -718,6 +718,8 @@ export default function AiSettingsPage() {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, 'auto' | 'on' | 'off'>
+    modelImageLearned?: Record<string, boolean>
     modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelThinkingModes?: Record<string, 'unsupported' | 'always-on' | 'levels'>
     modelContextWindows?: Record<string, number>
@@ -922,12 +924,18 @@ export default function AiSettingsPage() {
       ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .filter(Boolean)
 
-    const modelImageCaps = Object.fromEntries(
-      (connection.models ?? []).flatMap((entry) => {
-        if (typeof entry === 'string' || typeof entry.supportsImages !== 'boolean') return []
-        return [[entry.id, entry.supportsImages]] as Array<[string, boolean]>
-      }),
-    )
+    const modelImageModes: Record<string, 'auto' | 'on' | 'off'> = {}
+    const modelImageLearned: Record<string, boolean> = {}
+    const modelImageCaps: Record<string, boolean> = {}
+    for (const entry of connection.models ?? []) {
+      if (typeof entry === 'string') continue
+      if (entry.imageSupport === 'auto' || entry.imageSupport === 'on' || entry.imageSupport === 'off') {
+        modelImageModes[entry.id] = entry.imageSupport
+      } else if (typeof entry.supportsImages === 'boolean') {
+        modelImageCaps[entry.id] = entry.supportsImages
+      }
+      if (entry.learnedSupportsImages === false) modelImageLearned[entry.id] = false
+    }
 
     const modelContextWindows = Object.fromEntries(
       (connection.models ?? []).flatMap((entry) => {
@@ -959,6 +967,8 @@ export default function AiSettingsPage() {
       activePreset,
       models: modelIds,
       modelImageCaps,
+      modelImageModes,
+      modelImageLearned,
       modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => {
         if (typeof m === 'string' || m.thinkingMode === 'always-on') return []
         if (m.supportedThinkingLevels === undefined && m.supportsThinking === undefined && !m.thinkingMode) return []

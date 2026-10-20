@@ -6,10 +6,11 @@ import {
 import {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
   DEFAULT_CUSTOM_MAX_TOKENS,
-  inferModelSupportsImages,
   normalizeConnectionModelId,
+  resolveModelImageSupportFromCatalog,
   sanitizeCustomContextWindow,
   sanitizeCustomMaxTokens,
+  type ImageSupportMode,
 } from '../../shared/src/config/model-image-support.ts'
 
 export type CustomEndpointInput = 'text' | 'image'
@@ -27,6 +28,8 @@ export interface CustomEndpointModelOverrides {
   supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   thinkingMode?: ThinkingMode;
   supportsImages?: boolean
+  imageSupport?: ImageSupportMode
+  learnedSupportsImages?: boolean
 }
 
 export interface CustomEndpointModelEntry extends CustomEndpointModelOverrides {
@@ -40,6 +43,8 @@ export type CustomEndpointModelConfig = string | {
   supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   thinkingMode?: ThinkingMode;
   supportsImages?: boolean
+  imageSupport?: ImageSupportMode
+  learnedSupportsImages?: boolean
 }
 
 /** Strip runtime provider prefixes so stored and live IDs compare as the same model. */
@@ -78,6 +83,8 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
     ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
+    ...(model.imageSupport ? { imageSupport: model.imageSupport } : {}),
+    ...(model.learnedSupportsImages !== undefined ? { learnedSupportsImages: model.learnedSupportsImages } : {}),
   }
 }
 
@@ -109,8 +116,8 @@ function resolveCustomEndpointThinking(
 /**
  * Build a synthetic model definition for a custom endpoint.
  * Context window comes from the stored catalog when present, otherwise 128k.
- * Image support:
- *   per-model override ?? connection default ?? conservative name heuristic.
+ * Image support uses the shared auto resolver: explicit on/off, learned
+ * rejection, endpoint default, known table, then an optimistic attempt.
  */
 export function buildCustomEndpointModelDef(
   id: string,
@@ -118,9 +125,16 @@ export function buildCustomEndpointModelDef(
   overrides?: CustomEndpointModelOverrides,
   api?: CustomEndpointApi,
 ) {
-  const supportsImages = overrides?.supportsImages
-    ?? defaults?.supportsImages
-    ?? inferModelSupportsImages(id)
+  const supportsImages = resolveModelImageSupportFromCatalog({
+    modelId: id,
+    models: [{
+      id,
+      ...(overrides?.supportsImages !== undefined ? { supportsImages: overrides.supportsImages } : {}),
+      ...(overrides?.imageSupport ? { imageSupport: overrides.imageSupport } : {}),
+      ...(overrides?.learnedSupportsImages !== undefined ? { learnedSupportsImages: overrides.learnedSupportsImages } : {}),
+    }],
+    endpointSupportsImages: defaults?.supportsImages,
+  }).supportsImages
   const input: CustomEndpointInput[] = supportsImages ? ['text', 'image'] : ['text']
   const contextWindow = sanitizeCustomContextWindow(overrides?.contextWindow) ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
   const maxTokens = sanitizeCustomMaxTokens(

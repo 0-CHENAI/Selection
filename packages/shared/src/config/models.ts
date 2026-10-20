@@ -130,6 +130,10 @@ export interface ModelDefinition {
   supportedReasoningEfforts?: string[];
   reasoningMandatory?: boolean;
   supportsImages?: boolean;
+  /** Per-model image input choice. Absent legacy booleans still mean on/off. */
+  imageSupport?: 'auto' | 'on' | 'off';
+  /** Learned while the choice is auto. Explicit on/off ignores this. */
+  learnedSupportsImages?: boolean;
 }
 
 // ============================================

@@ -63,8 +63,7 @@ import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
 import { getModelShortName, getModelDisplayName } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
-  isCompatProvider,
-  modelSupportsImages,
+  resolveModelImageSupportFromCatalog,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
@@ -626,8 +625,11 @@ export function FreeFormInput({
   const [attachments, setAttachments] = React.useState<FileAttachment[]>(attachmentsValue ?? [])
   const showVisionWarning = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
     && !!effectiveConnectionDetails
-    && isCompatProvider(effectiveConnectionDetails.providerType)
-    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
+    && !resolveModelImageSupportFromCatalog({
+      modelId: currentModel,
+      models: effectiveConnectionDetails.models,
+      endpointSupportsImages: effectiveConnectionDetails.customEndpoint?.supportsImages,
+    }).supportsImages
 
   // Ref to track current attachments for use in event handlers (avoids stale closure issues)
   const attachmentsRef = React.useRef<FileAttachment[]>([])
