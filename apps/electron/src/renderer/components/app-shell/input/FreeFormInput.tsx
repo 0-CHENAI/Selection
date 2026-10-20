@@ -2726,6 +2726,7 @@ function WorkingDirectoryBadge({
             label={folderName ?? t('chat.workInFolder')}
             isExpanded={isEmptySession}
             hasSelection={hasFolder}
+            selectionChrome={false}
             showChevron={true}
             isOpen={open}
             tooltip={

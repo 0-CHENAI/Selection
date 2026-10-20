@@ -11,9 +11,9 @@ import { cn } from '@/lib/utils'
 
 export function ProjectWorkingDirectoryMark({
   workingDirectory,
-  isEmptySession = false,
 }: {
   workingDirectory?: string
+  /** Accepted for call-site compatibility. Empty and ongoing sessions share the same borderless mark. */
   isEmptySession?: boolean
 }) {
   const { t } = useTranslation()
@@ -28,8 +28,7 @@ export function ProjectWorkingDirectoryMark({
         <span
           tabIndex={0}
           className={cn(
-            'inline-flex h-7 min-w-0 shrink cursor-default items-center gap-1.5 rounded-[6px] px-2 text-[13px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring',
-            !isEmptySession && folder && 'mx-0.5 border border-foreground/5 bg-background',
+            'inline-flex h-7 min-w-0 shrink cursor-default items-center gap-1.5 rounded-[6px] px-2 text-[13px] text-foreground outline-none transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-ring',
             !folder && 'text-amber-800 dark:text-amber-200',
           )}
           role="note"
