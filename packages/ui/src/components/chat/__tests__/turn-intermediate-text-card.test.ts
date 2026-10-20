@@ -103,6 +103,29 @@ describe('thinking and commentary stay in the work chain across tool rounds', ()
     expect(turn.response?.text).not.toContain('Zen 1.23.2b')
     expect(turn.response?.text).not.toContain('Crash reason')
   })
+
+  it('peels a bare </think> out of the final body and into the chain', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('看项目'),
+      {
+        id: 'final',
+        role: 'assistant',
+        content: '先摸清目录。\n</think>\n\n## 结论\n\n入口在 src。',
+        timestamp: 2,
+        isIntermediate: false,
+        phase: 'final',
+        answerProtocol: 'explicit-v1',
+        answerRunId: 'run',
+        answerCommitted: true,
+      },
+    ], { isSessionProcessing: false }))
+    expect(turn.response?.text).toBe('## 结论\n\n入口在 src。')
+    expect(turn.response?.text).not.toContain('</think>')
+    expect(turn.response?.text).not.toContain('先摸清目录')
+    const thinking = turn.activities.find(activity => activity.type === 'thinking')
+    expect(thinking?.content).toBe('先摸清目录。')
+    expect(thinking?.status).toBe('completed')
+  })
 })
 
 describe('issue #58 — text then tools keeps the body readable', () => {

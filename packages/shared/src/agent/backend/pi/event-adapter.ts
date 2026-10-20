@@ -11,6 +11,7 @@ import { AnswerBoundary } from './answer-boundary.ts';
  */
 
 import type { AgentEvent as CraftAgentEvent, AgentEventUsage } from '@craft-agent/core/types';
+import { ThinkLeakBuffer, visibleTextAfterThinkLeak } from '@craft-agent/core/utils';
 import type {
   AgentEvent as PiAgentEvent,
 } from '@earendil-works/pi-agent-core';
@@ -156,6 +157,9 @@ export class PiEventAdapter extends BaseEventAdapter {
     // Native commentary/final_answer signatures remain authoritative even if
     // a forwarded event omits api/provider fields. Optional legacy markers
     // must not concatenate process text into the host-committed final answer.
+    // marker-v1 (`<<<FINAL_ANSWER>>>`) still exists on some connections. Do not
+    // parse it here — a second pass over the model output is forbidden. Leaked
+    // `<think>` / bare `</think>` in that text is peeled at presentation time.
     if (this.hostAnswerBoundary && (isCodexResponsesMessage(message) || (
       Array.isArray(message?.content) && message.content.some(part =>
         part.type === 'text' && getTextPhase((part as { textSignature?: unknown }).textSignature) !== undefined)
@@ -190,6 +194,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   /** Live reasoning is its own intermediate turn so it never joins the answer. */
   private thinkingTurnId: string | null = null;
   private thinkingText = '';
+  /** `<think>` that arrived inside a text part because reasoning was disabled. */
+  private thinkLeak = new ThinkLeakBuffer();
+  private leakedThinkEmitted = false;
   // message_end precedes the SDK's retry decision. Keep transient failures out
   // of the durable transcript until agent_end confirms they are terminal.
   private pendingRetryError: CraftAgentEvent | null = null;
@@ -343,6 +350,39 @@ export class PiEventAdapter extends BaseEventAdapter {
     };
   }
 
+  /** Route a leaked `<think>` block onto the thinking turn; other text stays visible. */
+  private *emitTextPieces(
+    pieces: ReturnType<ThinkLeakBuffer['push']>,
+    textPhase: TextPhase | undefined,
+  ): Generator<CraftAgentEvent> {
+    for (const piece of pieces) {
+      if (piece.kind === 'thinking') {
+        if (piece.text) {
+          this.leakedThinkEmitted = true;
+          yield* this.pushThinking(piece.text);
+        }
+        if (piece.done) yield* this.finishThinking();
+        continue;
+      }
+      if (!piece.text) continue;
+      this.hasStreamedDeltas = true;
+      if (!this.messageSubTurnId) this.messageSubTurnId = this.nextSubTurnId('m');
+      this.streamingTextPhase = textPhase ?? 'unclassified';
+      streamTrace('adapter-delta', { event: 'text_delta', chars: piece.text.length });
+      yield {
+        type: 'text_delta',
+        presentationProtocol: this.presentationProtocol,
+        text: piece.text,
+        phase: textPhase === 'commentary'
+          ? 'intermediate'
+          : textPhase === 'final_answer'
+            ? 'final'
+            : 'unclassified',
+        turnId: this.messageSubTurnId,
+      };
+    }
+  }
+
   private *finishThinking(): Generator<CraftAgentEvent> {
     if (!this.thinkingTurnId || !this.thinkingText) {
       this.thinkingTurnId = null;
@@ -378,6 +418,8 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.streamingTextPhase = undefined;
     this.thinkingTurnId = null;
     this.thinkingText = '';
+    this.thinkLeak.reset();
+    this.leakedThinkEmitted = false;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -534,23 +576,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           const textPhase = getStreamingTextPhase(amEvent.partial);
           if (isCodexResponsesMessage(amEvent.partial) && !textPhase) break;
 
-          this.hasStreamedDeltas = true;
-          if (!this.messageSubTurnId) {
-            this.messageSubTurnId = this.nextSubTurnId('m');
-          }
-          this.streamingTextPhase = textPhase ?? 'unclassified';
-          streamTrace('adapter-delta', { event: 'text_delta', chars: amEvent.delta.length });
-          yield {
-            type: 'text_delta',
-            presentationProtocol: this.presentationProtocol,
-            text: amEvent.delta,
-            phase: textPhase === 'commentary'
-              ? 'intermediate'
-              : textPhase === 'final_answer'
-                ? 'final'
-                : 'unclassified',
-            turnId: this.messageSubTurnId,
-          };
+          yield* this.emitTextPieces(this.thinkLeak.push(amEvent.delta), textPhase);
         }
         break;
       }
@@ -637,13 +663,6 @@ export class PiEventAdapter extends BaseEventAdapter {
           return type === 'toolCall' || type === 'tool_use';
         });
         const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall || userStopped;
-        const streamedSegmentIndex = this.messageSubTurnId
-          ? textSegments.findIndex((segment) => (
-              this.streamingTextPhase === 'unclassified'
-                ? segment.phase === undefined
-                : segment.phase === this.streamingTextPhase
-            ))
-          : -1;
         if (this.usesAnswerBoundary(event.message as AssistantMessage)) {
           if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
           yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId, userStopped);
@@ -651,8 +670,32 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.boundary = undefined;
           this.boundaryStreamed = false;
         } else {
+        yield* this.emitTextPieces(this.thinkLeak.finish(), this.streamingTextPhase === 'commentary' || this.streamingTextPhase === 'final_answer'
+          ? this.streamingTextPhase
+          : undefined);
+        const streamedSegmentIndex = this.messageSubTurnId
+          ? textSegments.findIndex((segment) => (
+              this.streamingTextPhase === 'unclassified'
+                ? segment.phase === undefined
+                : segment.phase === this.streamingTextPhase
+            ))
+          : -1;
         for (const [index, segment] of textSegments.entries()) {
+          const peeled = visibleTextAfterThinkLeak(segment.text, this.leakedThinkEmitted);
+          if (peeled.thinking.trim()) {
+            yield {
+              type: 'text_complete',
+              presentationProtocol: this.presentationProtocol,
+              text: peeled.thinking,
+              isIntermediate: true,
+              phase: 'intermediate',
+              turnId: this.nextSubTurnId('think'),
+              sdkMessageId,
+            };
+            this.leakedThinkEmitted = true;
+          }
           const isIntermediate = messageIsIntermediate || segment.phase === 'commentary';
+          if (!peeled.answer.trim()) continue;
           if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
@@ -667,13 +710,15 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield {
             type: 'text_complete',
             presentationProtocol: this.presentationProtocol,
-            text: segment.text,
+            text: peeled.answer,
             isIntermediate,
             phase: isIntermediate ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };
         }
+        this.thinkLeak.reset();
+        this.leakedThinkEmitted = false;
         }
         this.hasStreamedDeltas = false;
         this.messageSubTurnId = null;

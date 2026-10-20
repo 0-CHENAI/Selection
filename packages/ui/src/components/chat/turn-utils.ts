@@ -6,7 +6,7 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
-import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt, splitThinkDelimiter } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
 import { parseTaskListResult } from '@craft-agent/shared/utils/task-list'
@@ -945,7 +945,45 @@ function consolidateOrchestrationTurns(turns: Turn[], running: boolean): Turn[] 
  * as the signal: isIntermediate=true means more work coming, isIntermediate=false
  * means final response.
  */
+/**
+ * A visible body that still contains `<think>…</think>` or a bare `</think>`
+ * is process text plus an answer. Peel it before turn grouping so the
+ * chain-of-thought stays an intermediate step. This is presentation only —
+ * it does not parse marker-v1.
+ */
+export function expandLeakedThinking(message: Message): Message[] {
+  if (message.role !== 'assistant' || !message.content) return [message]
+  const split = splitThinkDelimiter(message.content)
+  if (!split) return [message]
+  const parts: Message[] = []
+  if (hasRenderableAssistantText(split.thinking)) {
+    const turnId = message.turnId?.includes('__think')
+      ? message.turnId
+      : `${message.turnId ?? message.id}__think`
+    parts.push({
+      ...message,
+      id: `${message.id}:think`,
+      content: split.thinking,
+      isIntermediate: true,
+      phase: 'intermediate',
+      isStreaming: false,
+      isPending: false,
+      answerCommitted: undefined,
+      answerPreview: undefined,
+      answerSalvaged: undefined,
+      turnId,
+    })
+  }
+  if (hasRenderableAssistantText(split.answer)) {
+    parts.push({ ...message, content: split.answer })
+  }
+  return parts.length > 0 ? parts : [message]
+}
+
 export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOptions = {}): Turn[] {
+  // Peel leaked `<think>` / bare `</think>` before commit matching, so the
+  // chain-of-thought is not discarded as a prefix of the raw final body.
+  messages = messages.flatMap(expandLeakedThinking)
   // Drop hidden and queued messages before grouping. Queued user content belongs
   // to the composer queue until replay starts; it is not yet a transcript turn.
   const deliveredRuns = new Set<string>()
@@ -1716,7 +1754,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
     lines.push('')
 
     for (const activity of turn.activities) {
-      if (activity.type === 'intermediate') {
+      if (activity.type === 'intermediate' || activity.type === 'thinking') {
         // Intermediate text (thinking/commentary)
         lines.push(`### 💭 Commentary`)
         lines.push('')
@@ -1803,7 +1841,7 @@ export function formatTurnAsMarkdown(turn: AssistantTurn): string {
 export function formatActivityAsMarkdown(activity: ActivityItem): string {
   const lines: string[] = []
 
-  if (activity.type === 'intermediate') {
+  if (activity.type === 'intermediate' || activity.type === 'thinking') {
     // Commentary/thinking
     lines.push('# Commentary')
     lines.push('')
