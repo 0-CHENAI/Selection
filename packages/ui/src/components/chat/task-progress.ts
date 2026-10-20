@@ -4,11 +4,16 @@ export type TodoRailMode = 'full' | 'summary' | 'hidden'
 
 export type TaskCardPhase = 'hidden' | 'active' | 'complete' | 'interrupted'
 
-/** Expanded is in-memory only. Closing the capsule is not a user action. */
+/**
+ * One session's capsule for this process. Expanded is remembered per session.
+ * `dismissed` means a later user message closed this list — not a manual close,
+ * and not a session switch.
+ */
 export interface TaskCardMemory {
   expanded: boolean
   phase: TaskCardPhase
   listKey: string | null
+  dismissed: boolean
 }
 
 export interface TaskListSnapshot {
@@ -37,7 +42,22 @@ export const EMPTY_TASK_CARD_MEMORY: TaskCardMemory = {
   expanded: false,
   phase: 'hidden',
   listKey: null,
+  dismissed: false,
 }
+
+/** Capsules for every session touched in this process. Not written to disk. */
+export interface SessionTaskCards {
+  bySession: Readonly<Record<string, TaskCardMemory>>
+}
+
+export const EMPTY_SESSION_TASK_CARDS: SessionTaskCards = { bySession: {} }
+
+export type SessionTaskCardEvent =
+  | { type: 'show'; sessionId: string; snapshot: TaskListSnapshot; userTurnAfterList: boolean }
+  | { type: 'user-message'; sessionId: string; snapshot: TaskListSnapshot }
+  | { type: 'toggle'; sessionId: string }
+  | { type: 'expand'; sessionId: string; expanded: boolean }
+  | { type: 'collapse'; sessionId: string }
 
 /** Opacity fade when a finished capsule leaves for the next round. */
 export const TASK_CARD_EXIT_MS = 200
@@ -136,8 +156,9 @@ export function latestTodoList<T extends { type: string; todos?: TodoItem[] }>(
 /**
  * The capsule owns the latest list, including after it completes or stops.
  * That turn stays out of the transcript until a later user message closes the
- * round, or a newer list replaces it. Only then does the older turn keep the
- * one-line summary, so the same round is never in both places at once.
+ * round, or a newer list replaces it. Switching sessions does not close it.
+ * Only then does the older turn keep the one-line summary, so the same round
+ * is never in both places at once.
  */
 export function todoRailForTurn(input: {
   enabled: boolean
@@ -153,16 +174,26 @@ export function todoRailForTurn(input: {
   return 'summary'
 }
 
-function hidden(snapshot: TaskListSnapshot): TaskCardMemory {
-  return { expanded: false, phase: 'hidden', listKey: snapshot.key }
+function conceal(snapshot: TaskListSnapshot, dismissed = false): TaskCardMemory {
+  return { expanded: false, phase: 'hidden', listKey: snapshot.key, dismissed }
 }
 
-/** A finished session does not bring the capsule back. Only live, open work does. */
+/**
+ * Cold open: the latest list is still this session's checklist until a later
+ * user message. A finished or stopped round comes back collapsed. A following
+ * user message means that round was already dismissed.
+ */
 function restoreSnapshot(snapshot: TaskListSnapshot, userTurnAfterList: boolean): TaskCardMemory {
-  if (!snapshot.key || !snapshot.hasIncomplete || userTurnAfterList || snapshot.generationEnded) {
-    return hidden(snapshot)
+  if (!snapshot.key || snapshot.total === 0 || userTurnAfterList) {
+    return conceal(snapshot, userTurnAfterList && !!snapshot.key)
   }
-  return { expanded: false, phase: 'active', listKey: snapshot.key }
+  if (snapshot.allCompleted) {
+    return { expanded: false, phase: 'complete', listKey: snapshot.key, dismissed: false }
+  }
+  if (snapshot.generationEnded && snapshot.hasIncomplete) {
+    return { expanded: false, phase: 'interrupted', listKey: snapshot.key, dismissed: false }
+  }
+  return { expanded: false, phase: 'active', listKey: snapshot.key, dismissed: false }
 }
 
 function applyLive(
@@ -170,17 +201,29 @@ function applyLive(
   snapshot: TaskListSnapshot,
   userTurnAfterList: boolean,
 ): TaskCardMemory {
-  if (!snapshot.key || snapshot.total === 0 || userTurnAfterList) return hidden(snapshot)
+  // No list in view yet (session still loading). Don't treat that as a clear.
+  if (!snapshot.key) {
+    if (state.phase === 'hidden' && state.listKey === null) return state
+    if (state.phase !== 'hidden') return state
+    return conceal(snapshot, false)
+  }
+  if (snapshot.total === 0 || userTurnAfterList) {
+    const dismissed = userTurnAfterList
+      ? !!snapshot.key
+      : state.dismissed && state.listKey === snapshot.key
+    return conceal(snapshot, dismissed)
+  }
+  if (state.dismissed && state.listKey === snapshot.key) return conceal(snapshot, true)
 
   const showingThisList = state.phase !== 'hidden' && state.listKey === snapshot.key
   if (snapshot.allCompleted) {
-    if (showingThisList) return { ...state, phase: 'complete', listKey: snapshot.key }
-    return hidden(snapshot)
+    if (showingThisList) return { ...state, phase: 'complete', listKey: snapshot.key, dismissed: false }
+    return conceal(snapshot)
   }
 
   if (snapshot.generationEnded && snapshot.hasIncomplete) {
-    if (showingThisList) return { ...state, phase: 'interrupted', listKey: snapshot.key }
-    return hidden(snapshot)
+    if (showingThisList) return { ...state, phase: 'interrupted', listKey: snapshot.key, dismissed: false }
+    return conceal(snapshot)
   }
 
   const fresh = state.listKey !== snapshot.key || state.phase === 'hidden'
@@ -188,6 +231,7 @@ function applyLive(
     expanded: fresh ? false : state.expanded,
     phase: 'active',
     listKey: snapshot.key,
+    dismissed: false,
   }
 }
 
@@ -199,8 +243,8 @@ export function reduceTaskCardMemory(state: TaskCardMemory, event: TaskCardEvent
     case 'list':
       return applyLive(state, event.snapshot, event.userTurnAfterList)
     case 'user-message':
-      if (state.phase === 'hidden') return state
-      return hidden(event.snapshot)
+      if (state.phase === 'hidden' && (state.dismissed || !event.snapshot.key)) return state
+      return conceal(event.snapshot, true)
     case 'toggle':
       if (state.phase === 'hidden') return state
       return { ...state, expanded: !state.expanded }
@@ -210,6 +254,51 @@ export function reduceTaskCardMemory(state: TaskCardMemory, event: TaskCardEvent
     case 'collapse':
       if (!state.expanded) return state
       return { ...state, expanded: false }
+    default:
+      return state
+  }
+}
+
+function writeSession(state: SessionTaskCards, sessionId: string, memory: TaskCardMemory): SessionTaskCards {
+  if (state.bySession[sessionId] === memory) return state
+  return { bySession: { ...state.bySession, [sessionId]: memory } }
+}
+
+export function sessionTaskCardMemory(state: SessionTaskCards, sessionId: string | null): TaskCardMemory {
+  if (!sessionId) return EMPTY_TASK_CARD_MEMORY
+  return state.bySession[sessionId] ?? EMPTY_TASK_CARD_MEMORY
+}
+
+/**
+ * Remember each session's capsule. The first time a session is seen — including
+ * after a restart, when nothing is stored yet — the phase comes from its latest
+ * list. Later updates keep that memory, so a switch away and back is not a dismiss.
+ */
+export function reduceSessionTaskCards(state: SessionTaskCards, event: SessionTaskCardEvent): SessionTaskCards {
+  const stored = state.bySession[event.sessionId]
+  const current = stored ?? EMPTY_TASK_CARD_MEMORY
+  switch (event.type) {
+    case 'show': {
+      const cold = !stored || (stored.phase === 'hidden' && !stored.dismissed)
+      const next = cold
+        ? restoreSnapshot(event.snapshot, event.userTurnAfterList)
+        : applyLive(current, event.snapshot, event.userTurnAfterList)
+      return writeSession(state, event.sessionId, next)
+    }
+    case 'user-message':
+      return writeSession(state, event.sessionId, reduceTaskCardMemory(current, {
+        type: 'user-message',
+        snapshot: event.snapshot,
+      }))
+    case 'toggle':
+      return writeSession(state, event.sessionId, reduceTaskCardMemory(current, { type: 'toggle' }))
+    case 'expand':
+      return writeSession(state, event.sessionId, reduceTaskCardMemory(current, {
+        type: 'expand',
+        expanded: event.expanded,
+      }))
+    case 'collapse':
+      return writeSession(state, event.sessionId, reduceTaskCardMemory(current, { type: 'collapse' }))
     default:
       return state
   }

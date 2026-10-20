@@ -2531,6 +2531,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             {compactMode && taskCardEnabled && latestTodo && (
               <TaskProgressCard
                 placement="overlay"
+                sessionKey={activeSessionId}
                 todos={latestTodo.todos}
                 listSeed={latestTodo.listSeed}
                 phase={taskCard.phase}
@@ -2576,6 +2577,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
                 placement="toolbar"
+                sessionKey={activeSessionId}
                 shellMaxWidth={slot.shellMaxWidth}
                 todos={latestTodo?.todos ?? []}
                 listSeed={latestTodo?.listSeed}
