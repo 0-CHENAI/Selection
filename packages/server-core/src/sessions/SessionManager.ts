@@ -11688,7 +11688,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const canResolveRead = typeof inputPath === 'string' && (originalInput !== undefined || isAbsolute(inputPath))
         if (isRead && typeof inputPath === 'string' && !canResolveRead) snapshot.warnings.push(`Input snapshot unavailable: ${inputPath} (original tool arguments unavailable; display-relative paths cannot identify file bytes)`)
         return [
-          ...(message.attachments ?? []).map(attachment => ({ path: attachment.storedPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined })),
+          ...(message.attachments ?? []).flatMap(attachment => [
+            { path: attachment.storedPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined },
+            ...(attachment.originalPath && attachment.originalPath !== attachment.storedPath
+              ? [{ path: attachment.originalPath, versionId: undefined as string | undefined, artifactId: undefined as string | undefined }]
+              : []),
+          ]),
           ...(message.artifactVersions ?? []).map(ref => ({ path: ref.path, versionId: ref.versionId, artifactId: ref.artifactId })),
           ...(isRead && canResolveRead && typeof inputPath === 'string'
             ? [{ path: expandPath(inputPath, expandPath(member.sdkCwd ?? member.workingDirectory ?? member.workspace.rootPath)), versionId: undefined, artifactId: undefined }] : []),

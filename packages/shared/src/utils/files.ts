@@ -76,6 +76,10 @@ export interface FileAttachment {
   size: number;
   /** Path where file is stored in session attachments folder (set by Electron app) */
   storedPath?: string;
+  /** Full-resolution sibling, set only when storedPath was downscaled for the model. */
+  originalPath?: string;
+  originalWidth?: number;
+  originalHeight?: number;
   /** Legacy converted Markdown path. Modern Office files no longer generate or expose this sidecar. */
   markdownPath?: string;
 }
@@ -377,6 +381,9 @@ export interface StoredAttachmentSource {
   storedPath: string
   markdownPath?: string
   resizedBase64?: string
+  originalPath?: string
+  originalWidth?: number
+  originalHeight?: number
 }
 
 /**
@@ -396,6 +403,11 @@ export function fileAttachmentsFromStored(
     base64: attachment.resizedBase64,
     storedPath: attachment.storedPath,
     markdownPath: attachment.markdownPath,
+    ...(attachment.originalPath ? {
+      originalPath: attachment.originalPath,
+      originalWidth: attachment.originalWidth,
+      originalHeight: attachment.originalHeight,
+    } : {}),
   }))
 }
 
@@ -427,17 +439,26 @@ export function withStoredImagePaths(
   if (!stored?.length) return attachments
   return attachments.map((attachment, index) => {
     const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true
-    if (!isImage || attachment.base64 || attachment.storedPath) return attachment
     const byIndex = stored[index]
-    const match = byIndex?.type === 'image' && byIndex.storedPath
+    const match = byIndex?.type === 'image' && (byIndex.storedPath || byIndex.originalPath)
       ? byIndex
-      : stored.find(item => item.type === 'image' && item.name === attachment.name && !!item.storedPath)
+      : stored.find(item => item.type === 'image' && item.name === attachment.name && !!(item.storedPath || item.originalPath))
+    const withOriginal = (base: FileAttachment): FileAttachment => {
+      if (!isImage || base.originalPath || !match?.originalPath) return base
+      return {
+        ...base,
+        originalPath: match.originalPath,
+        originalWidth: match.originalWidth,
+        originalHeight: match.originalHeight,
+      }
+    }
+    if (!isImage || attachment.base64 || attachment.storedPath) return withOriginal(attachment)
     if (!match?.storedPath) return attachment
-    return {
+    return withOriginal({
       ...attachment,
       storedPath: match.storedPath,
       path: attachment.path || match.storedPath,
-    }
+    })
   })
 }
 

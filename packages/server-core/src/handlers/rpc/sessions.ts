@@ -1,6 +1,7 @@
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
 import { RPC_CHANNELS, type FileAttachment, type SendMessageOptions, type SessionEvent } from '@craft-agent/shared/protocol'
+import { isOriginalFullResolutionAttachment } from '@craft-agent/shared/utils/image-attachment'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
@@ -70,6 +71,8 @@ async function scanSessionDirectory(dirPath: string): Promise<import('@craft-age
     if (entry.name === 'session.jsonl' || entry.name.startsWith('.')) continue
 
     const fullPath = join(dirPath, entry.name)
+    // The full-resolution sibling is for cropping, not a second user attachment.
+    if (!entry.isDirectory() && isOriginalFullResolutionAttachment(fullPath)) continue
 
     if (entry.isDirectory()) {
       // Recursively scan subdirectory

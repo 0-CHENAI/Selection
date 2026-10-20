@@ -22,6 +22,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
 import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
+import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 import { streamTrace } from '../stream-trace.ts';
 
@@ -2842,10 +2843,8 @@ export class PiAgent extends BaseAgent {
             data: att.base64,
             mimeType: att.mimeType || 'image/png',
           });
-          const stored = att.storedPath || att.path
-          if (stored) {
-            attachmentParts.push(`[Attached image: ${att.name}]\nThe image is included as visual input — look at it. Path: ${stored}`);
-          }
+          const prompt = buildAttachedImagePrompt(att)
+          if (prompt) attachmentParts.push(prompt);
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
         } else if (att.type === 'office' && att.storedPath) {

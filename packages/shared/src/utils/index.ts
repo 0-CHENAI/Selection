@@ -1,6 +1,7 @@
 export * from './debug.ts';
 export * from './artifact-links.ts';
 export * from './files.ts';
+export * from './image-attachment.ts';
 export * from './image-input.ts';
 export * from './officecli.ts';
 export * from './open-url.ts';

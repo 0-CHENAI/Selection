@@ -265,6 +265,10 @@ export interface StoredAttachment {
   markdownPath?: string;         // For Office files: converted markdown for Claude
   wasResized?: boolean;          // True if image was auto-resized for Claude API limits
   resizedBase64?: string;        // Base64 of resized image (only when wasResized=true, for Claude API)
+  /** Untouched bytes, present only when storedPath is the downscaled copy. */
+  originalPath?: string;
+  originalWidth?: number;
+  originalHeight?: number;
 }
 
 /** Immutable feedback references accepted with a user message. */
