@@ -8,16 +8,16 @@ import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import type { TodoItem } from './TurnCard'
 import {
-  EMPTY_TASK_CARD_MEMORY,
+  EMPTY_SESSION_TASK_CARDS,
   TASK_CARD_EXIT_MS,
   isTaskCardVisible,
-  reduceTaskCardMemory,
+  reduceSessionTaskCards,
+  sessionTaskCardMemory,
   snapshotFromTodos,
   taskListSignature,
   taskStepProgress,
   taskTurnInterrupted,
-  type TaskCardEvent,
-  type TaskCardMemory,
+  type SessionTaskCardEvent,
   type TaskCardPhase,
 } from './task-progress'
 import {
@@ -197,6 +197,7 @@ function PanelFrame({
   heading,
   todos,
   listSeed,
+  railKey,
   onCollapse,
   collapseLabel,
 }: {
@@ -205,6 +206,8 @@ function PanelFrame({
   heading: string
   todos: TodoItem[]
   listSeed?: string
+  /** Remounts the rail when the session changes, so a finished line does not replay. */
+  railKey?: string
   onCollapse: () => void
   collapseLabel: string
   toolbar?: boolean
@@ -230,7 +233,7 @@ function PanelFrame({
         </button>
       </div>
       <div className="max-h-[40vh] overflow-y-auto overscroll-contain px-3 pb-3">
-        <TodoList todos={todos} listSeed={listSeed} showTitle={false} className="mt-0" />
+        <TodoList key={railKey} todos={todos} listSeed={listSeed} showTitle={false} className="mt-0" />
       </div>
     </div>
   )
@@ -255,6 +258,7 @@ function CapsuleFrame({
   fraction: string
   expandLabel: string
   onExpand: () => void
+  railKey?: string
   /** Sit in the composer toolbar: control-height shell, pill ends. */
   toolbar?: boolean
   probe?: boolean
@@ -324,6 +328,7 @@ export function TaskProgressCard({
   motionSample,
   placement = 'overlay',
   shellMaxWidth,
+  sessionKey,
 }: {
   todos: TodoItem[]
   phase: Exclude<TaskCardPhase, 'hidden'>
@@ -342,6 +347,8 @@ export function TaskProgressCard({
   placement?: 'overlay' | 'toolbar'
   /** Measured width the centered toolbar shell may use before it meets the side buttons. */
   shellMaxWidth?: number
+  /** Switches the capsule to this session's resting frame without an enter/exit pop. */
+  sessionKey?: string | null
 }) {
   const { t } = useTranslation()
   const reduceMotion = !!useReducedMotion()
@@ -388,6 +395,15 @@ export function TaskProgressCard({
   const shellRef = useRef<HTMLElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   const snapRef = useRef(true)
+  const sessionKeyValue = sessionKey ?? ''
+  const sessionKeyRef = useRef(sessionKeyValue)
+  const sessionSnapRef = useRef(false)
+  if (sessionKeyRef.current !== sessionKeyValue) {
+    sessionKeyRef.current = sessionKeyValue
+    sessionSnapRef.current = true
+    snapRef.current = true
+  }
+  if (sessionSnapRef.current && present !== cardShown) setPresent(cardShown)
   const boxSpring = useRef<{ stop: () => void } | null>(null)
   const [panelWidth, setPanelWidth] = useState(420)
   const [shapes, setShapes] = useState<{ panel: TaskCardBox; capsule: TaskCardBox } | null>(null)
@@ -407,6 +423,7 @@ export function TaskProgressCard({
   const capsulePointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'none' : 'auto')
   const shellRadius = useMotionValue(toolbar && !shapeExpanded ? TOOLBAR_CAPSULE_RADIUS : FIXED_RADIUS)
   const [crossfade, setCrossfade] = useState(false)
+  const [shellEpoch, setShellEpoch] = useState(0)
   const [mounted, setMounted] = useState(false)
   const toolbarShellMax = toolbar
     ? Math.max(0, Math.min(TOOLBAR_SHELL_MAX, Math.floor(shellMaxWidth ?? TOOLBAR_SHELL_MAX)))
@@ -474,11 +491,26 @@ export function TaskProgressCard({
           : Math.ceil(capsuleFrame.offsetHeight + borderY),
       }
       if (panelBox.width <= 0 || panelBox.height <= 0 || capsuleBox.width <= 0 || capsuleBox.height <= 0) return
+      const nextShapes = { panel: panelBox, capsule: capsuleBox }
+      shapesRef.current = nextShapes
+      if (sessionSnapRef.current || snapRef.current) {
+        boxSpring.current?.stop()
+        boxSpring.current = null
+        const switching = sessionSnapRef.current
+        const target = shapeExpanded ? 1 : 0
+        directionRef.current = shapeExpanded ? 'expand' : 'collapse'
+        shapeProgress.set(target)
+        publishShape(target)
+        sessionSnapRef.current = false
+        snapRef.current = false
+        setCrossfade(true)
+        if (switching) setShellEpoch(epoch => epoch + 1)
+      }
       setShapes(prev => prev
         && prev.panel.width === panelBox.width && prev.panel.height === panelBox.height
         && prev.capsule.width === capsuleBox.width && prev.capsule.height === capsuleBox.height
         ? prev
-        : { panel: panelBox, capsule: capsuleBox })
+        : nextShapes)
     }
 
     read()
@@ -487,7 +519,7 @@ export function TaskProgressCard({
     observer.observe(anchor)
     observer.observe(measure)
     return () => observer.disconnect()
-  }, [mounted, present, shapeExpanded, shellMaxWidth, showScrollToBottom, toolbar, toolbarShellMax])
+  }, [mounted, present, publishShape, sessionKeyValue, shapeExpanded, shapeProgress, shellMaxWidth, showScrollToBottom, toolbar, toolbarShellMax])
 
   useEffect(() => {
     if (!shapes) return
@@ -502,11 +534,11 @@ export function TaskProgressCard({
     const progress = shapeProgress.get()
     const resting = progress <= 0.001 || progress >= 0.999
     // Expand and collapse already spring the shell. A resting count change must not snap.
-    if (!resting && !snapRef.current) return
+    if (!resting && !snapRef.current && !sessionSnapRef.current) return
     const next = taskCardShellSize(progress, shapes.panel, shapes.capsule)
     const widthNow = shellWidth.get()
     const heightNow = shellHeight.get()
-    if (reduceMotion || snapRef.current || widthNow == null || heightNow == null) {
+    if (reduceMotion || snapRef.current || sessionSnapRef.current || widthNow == null || heightNow == null) {
       boxSpring.current?.stop()
       boxSpring.current = null
       publishShape(progress)
@@ -533,7 +565,7 @@ export function TaskProgressCard({
       controls.stop()
       if (boxSpring.current === controls) boxSpring.current = null
     }
-  }, [motionSample, publishShape, reduceMotion, shapeProgress, shapes, shellHeight, shellWidth])
+  }, [motionSample, publishShape, reduceMotion, sessionKeyValue, shapeProgress, shapes, shellHeight, shellWidth])
 
   const shapesReady = shapes != null
   useEffect(() => {
@@ -542,15 +574,16 @@ export function TaskProgressCard({
     boxSpring.current = null
     directionRef.current = shapeExpanded ? 'expand' : 'collapse'
     const target = shapeExpanded ? 1 : 0
-    if (reduceMotion || snapRef.current) {
+    if (reduceMotion || snapRef.current || sessionSnapRef.current) {
       shapeProgress.set(target)
       publishShape(target)
       snapRef.current = false
+      sessionSnapRef.current = false
       return
     }
     const controls = animate(shapeProgress, target, { ...SHELL_SPRING, onUpdate: publishShape })
     return () => controls.stop()
-  }, [motionSample, publishShape, reduceMotion, shapeExpanded, shapeProgress, shapesReady])
+  }, [motionSample, publishShape, reduceMotion, sessionKeyValue, shapeExpanded, shapeProgress, shapesReady])
 
   useEffect(() => {
     alive.current = true
@@ -651,10 +684,13 @@ export function TaskProgressCard({
     toolbar,
     collapseLabel: t('taskCard.collapse'),
     expandLabel: t('taskCard.expand'),
+    railKey: sessionKeyValue || undefined,
     onCollapse: () => onExpandedChange(false),
     onExpand: () => onExpandedChange(true),
   }
   const restingRadius = toolbar && !shapeExpanded ? TOOLBAR_CAPSULE_RADIUS : FIXED_RADIUS
+  // A session switch paints the resting capsule. The previous shell width must not spring, and must not start at 0.
+  const holdRestingShell = sessionSnapRef.current
 
   return (
     <MotionConfig reducedMotion="user">
@@ -695,6 +731,7 @@ export function TaskProgressCard({
           </>
         )}
         <AnimatePresence
+          key={sessionKeyValue}
           initial={false}
           onExitComplete={() => {
             if (!alive.current || shownRef.current) return
@@ -708,6 +745,7 @@ export function TaskProgressCard({
               data-task-card=""
               data-task-card-state={phase}
               data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
+              data-task-card-epoch={shellEpoch}
               aria-label={t('taskCard.label')}
               initial={reduceMotion ? false : { opacity: 0 }}
               animate={toolbar ? { opacity: 1 } : { opacity: 1, marginRight: buttonGap }}
@@ -725,17 +763,17 @@ export function TaskProgressCard({
                 ? { opacity: fade }
                 : { marginRight: reduceMotion ? { duration: 0 } : SHELL_SPRING, opacity: fade }}
               style={{
-                borderRadius: toolbar && crossfade ? shellRadius : restingRadius,
+                borderRadius: toolbar && crossfade && !holdRestingShell ? shellRadius : restingRadius,
                 overflow: 'hidden',
-                width: crossfade ? shellWidth : undefined,
-                height: crossfade
+                width: crossfade && !holdRestingShell ? shellWidth : undefined,
+                height: crossfade && !holdRestingShell
                   ? shellHeight
                   : (toolbar && !shapeExpanded ? TOOLBAR_CONTROL_HEIGHT : undefined),
               }}
               className={cn(
                 'pointer-events-auto relative z-[1] min-w-0 shrink-0',
                 glass,
-                !crossfade && (toolbar
+                (!crossfade || holdRestingShell) && (toolbar
                   ? (shapeExpanded ? undefined : 'w-max')
                   : (shapeExpanded
                     ? 'w-[min(420px,calc(100%-2.75rem))]'
@@ -752,7 +790,7 @@ export function TaskProgressCard({
                   <CapsuleFrame {...frameProps} />
                 </div>
               )}
-              {crossfade ? (
+              {crossfade && !holdRestingShell ? (
                 <div className="relative h-full w-full">
                   <motion.div
                     id={panelId}
@@ -847,40 +885,40 @@ export function useSessionTaskCard(
   const snapshot = snapshotFromTodos(input.listKey, input.todos, input.generationEnded)
   const signature = taskListSignature(snapshot)
   const userTurnAfterList = input.userTurnAfterList
-  const [memory, setMemory] = useState<TaskCardMemory>(() => reduceTaskCardMemory(EMPTY_TASK_CARD_MEMORY, {
-    type: 'hydrate',
-    snapshot,
-    userTurnAfterList,
-  }))
+  const [cards, setCards] = useState(() => (
+    sessionId
+      ? reduceSessionTaskCards(EMPTY_SESSION_TASK_CARDS, {
+        type: 'show',
+        sessionId,
+        snapshot,
+        userTurnAfterList,
+      })
+      : EMPTY_SESSION_TASK_CARDS
+  ))
   const previous = useRef({ sessionId, signature, userTurnAfterList, ready: false })
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
 
-  const commit = React.useCallback((event: TaskCardEvent) => {
-    setMemory(current => reduceTaskCardMemory(current, event))
+  const commit = React.useCallback((event: SessionTaskCardEvent) => {
+    setCards(current => reduceSessionTaskCards(current, event))
   }, [])
 
   useEffect(() => {
     const prior = previous.current
     previous.current = { sessionId, signature, userTurnAfterList, ready: true }
-    if (!prior.ready) return
+    if (!prior.ready || !sessionId) return
     const currentSnapshot = snapshotRef.current
-    if (prior.sessionId !== sessionId) {
-      setMemory(reduceTaskCardMemory(EMPTY_TASK_CARD_MEMORY, {
-        type: 'session',
-        snapshot: currentSnapshot,
-        userTurnAfterList,
-      }))
-      return
+    const switched = prior.sessionId !== sessionId
+    if (switched || prior.signature !== signature) {
+      commit({ type: 'show', sessionId, snapshot: currentSnapshot, userTurnAfterList })
     }
-    if (prior.signature !== signature) {
-      commit({ type: 'list', snapshot: currentSnapshot, userTurnAfterList })
-    }
-    if (!prior.userTurnAfterList && userTurnAfterList) {
-      commit({ type: 'user-message', snapshot: currentSnapshot })
+    // A switch only selects the destination. It must not dismiss that session.
+    if (!switched && !prior.userTurnAfterList && userTurnAfterList) {
+      commit({ type: 'user-message', sessionId, snapshot: currentSnapshot })
     }
   }, [commit, sessionId, signature, userTurnAfterList])
 
+  const memory = sessionTaskCardMemory(cards, sessionId)
   const phaseRef = useRef<Exclude<TaskCardPhase, 'hidden'>>('active')
   if (memory.phase !== 'hidden') phaseRef.current = memory.phase
 
@@ -889,8 +927,8 @@ export function useSessionTaskCard(
     expanded: memory.expanded && memory.phase !== 'hidden',
     phase: memory.phase === 'hidden' ? phaseRef.current : memory.phase,
     docked: isTaskCardVisible(memory),
-    toggle: () => commit({ type: 'toggle' }),
-    setExpanded: (expanded: boolean) => commit({ type: 'expand', expanded }),
-    collapse: () => commit({ type: 'collapse' }),
+    toggle: () => { if (sessionId) commit({ type: 'toggle', sessionId }) },
+    setExpanded: (expanded: boolean) => { if (sessionId) commit({ type: 'expand', sessionId, expanded }) },
+    collapse: () => { if (sessionId) commit({ type: 'collapse', sessionId }) },
   }
 }

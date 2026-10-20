@@ -9,15 +9,19 @@ import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
 import { TaskProgressCard, TaskTurnSummary } from '../TaskProgressCard'
 import type { TodoItem } from '../TurnCard'
 import {
+  EMPTY_SESSION_TASK_CARDS,
   EMPTY_TASK_CARD_MEMORY,
   TASK_CARD_EXIT_MS,
   isTaskCardVisible,
   latestTodoList,
+  reduceSessionTaskCards,
   reduceTaskCardMemory,
+  sessionTaskCardMemory,
   snapshotFromTodos,
   taskStepProgress,
   taskTurnInterrupted,
   todoRailForTurn,
+  type SessionTaskCards,
   type TaskCardMemory,
   type TaskListSnapshot,
 } from '../task-progress'
@@ -185,7 +189,7 @@ describe('floating card lifecycle', () => {
 
     const fresh = list(memory, snap('turn-2', mixed))
     expect(fresh).toMatchObject({ phase: 'active', expanded: false, listKey: 'turn-2' })
-    expect(appear(done).phase).toBe('hidden')
+    expect(appear(done)).toMatchObject({ phase: 'complete', expanded: false, dismissed: false })
     expect(list(EMPTY_TASK_CARD_MEMORY, done).phase).toBe('hidden')
   })
 
@@ -228,8 +232,9 @@ describe('floating card lifecycle', () => {
       hasTodos: true,
     })).toBe('hidden')
     memory = reduceTaskCardMemory(memory, { type: 'user-message', snapshot: halted })
-    expect(memory.phase).toBe('hidden')
-    expect(list(appear(halted), halted).phase).toBe('hidden')
+    expect(memory).toMatchObject({ phase: 'hidden', dismissed: true })
+    expect(list(memory, halted).phase).toBe('hidden')
+    expect(appear(halted)).toMatchObject({ phase: 'interrupted', expanded: false, dismissed: false })
   })
 
   test('a newer list replaces the capsule and the old turn shows the summary', () => {
@@ -257,33 +262,121 @@ describe('floating card lifecycle', () => {
     expect(reduceTaskCardMemory({ ...running, phase: 'hidden' }, { type: 'toggle' }).phase).toBe('hidden')
   })
 
-  test('switching to a finished session does not show the capsule', () => {
-    expect(session(done).phase).toBe('hidden')
-    expect(session(halted).phase).toBe('hidden')
-    expect(session(snap('turn-1', mixed, true)).phase).toBe('hidden')
-    expect(session(active, true).phase).toBe('hidden')
+  test('a cold open restores the latest list unless a later message dismissed it', () => {
+    expect(session(done)).toMatchObject({ phase: 'complete', expanded: false, dismissed: false })
+    expect(session(halted)).toMatchObject({ phase: 'interrupted', expanded: false })
+    expect(session(snap('turn-1', mixed, true))).toMatchObject({ phase: 'interrupted', expanded: false })
+    expect(session(active)).toMatchObject({ phase: 'active', expanded: false, dismissed: false })
+    expect(session(active, true)).toMatchObject({ phase: 'hidden', dismissed: true })
+    expect(session(done, true).phase).toBe('hidden')
 
     const expanded = reduceTaskCardMemory(appear(active), { type: 'expand', expanded: true })
-    const running = reduceTaskCardMemory(expanded, {
+    const cold = reduceTaskCardMemory(expanded, {
       type: 'session',
       snapshot: active,
       userTurnAfterList: false,
     })
-    expect(running).toMatchObject({ phase: 'active', expanded: false, listKey: 'turn-1' })
-
-    const returned = reduceTaskCardMemory(list(appear(active), done), {
-      type: 'session',
-      snapshot: done,
-      userTurnAfterList: false,
-    })
-    expect(returned.phase).toBe('hidden')
-    expect(isTaskCardVisible(returned)).toBe(false)
+    expect(cold).toMatchObject({ phase: 'active', expanded: false, listKey: 'turn-1' })
+    expect(todoRailForTurn({
+      enabled: true,
+      isLatest: true,
+      docked: true,
+      hasTodos: true,
+    })).toBe('hidden')
     expect(todoRailForTurn({
       enabled: true,
       isLatest: true,
       docked: false,
       hasTodos: true,
+      superseded: true,
+    })).toBe('summary')
+  })
+})
+
+function show(cards: SessionTaskCards, sessionId: string, snapshot: TaskListSnapshot, userTurnAfterList = false) {
+  return reduceSessionTaskCards(cards, { type: 'show', sessionId, snapshot, userTurnAfterList })
+}
+
+describe('task pill is kept per session', () => {
+  const active = snap('turn-1', mixed)
+  const done = snap('turn-1', doneItems)
+  const halted = snap('turn-1', stopped, true)
+  const advanced = snap('turn-1', mixed.map((item, index) => index < 3
+    ? { ...item, status: 'completed' as const, activeForm: undefined }
+    : index === 3
+      ? { ...item, status: 'in_progress' as const, activeForm: '正在整理附录' }
+      : item))
+  const nextRound = snap('turn-2', [
+    { id: 'next', content: '改成另一组任务', status: 'in_progress', activeForm: '正在改任务' },
+    { id: 'after', content: '收尾', status: 'pending' },
+  ])
+
+  test('A → B → A restores A and does not copy B', () => {
+    let cards = show(EMPTY_SESSION_TASK_CARDS, 'A', active)
+    cards = reduceSessionTaskCards(cards, { type: 'expand', sessionId: 'A', expanded: true })
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({
+      phase: 'active', expanded: true, listKey: 'turn-1', dismissed: false,
+    })
+
+    cards = show(cards, 'B', done)
+    expect(sessionTaskCardMemory(cards, 'B')).toMatchObject({
+      phase: 'complete', expanded: false, listKey: 'turn-1', dismissed: false,
+    })
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({ phase: 'active', expanded: true })
+    expect(todoRailForTurn({
+      enabled: true, isLatest: true, docked: true, hasTodos: true,
     })).toBe('hidden')
+
+    cards = reduceSessionTaskCards(cards, { type: 'expand', sessionId: 'B', expanded: true })
+    cards = show(cards, 'A', advanced)
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({
+      phase: 'active', expanded: true, listKey: 'turn-1',
+    })
+    expect(sessionTaskCardMemory(cards, 'B')).toMatchObject({
+      phase: 'complete', expanded: true, listKey: 'turn-1',
+    })
+
+    cards = show(cards, 'A', done)
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({ phase: 'complete', expanded: true })
+    expect(sessionTaskCardMemory(cards, 'B').phase).toBe('complete')
+    expect(sessionTaskCardMemory(cards, 'B').expanded).toBe(true)
+
+    const kept = show(cards, 'A', snapshotFromTodos(null, [], false))
+    expect(sessionTaskCardMemory(kept, 'A')).toMatchObject({ phase: 'complete', expanded: true, listKey: 'turn-1' })
+    expect(sessionTaskCardMemory(kept, 'B').expanded).toBe(true)
+  })
+
+  test('a message in A dismisses only A', () => {
+    let cards = show(show(EMPTY_SESSION_TASK_CARDS, 'A', done), 'B', active)
+    cards = reduceSessionTaskCards(cards, { type: 'expand', sessionId: 'B', expanded: true })
+    cards = reduceSessionTaskCards(cards, { type: 'user-message', sessionId: 'A', snapshot: done })
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({ phase: 'hidden', dismissed: true })
+    expect(isTaskCardVisible(sessionTaskCardMemory(cards, 'A'))).toBe(false)
+    expect(sessionTaskCardMemory(cards, 'B')).toMatchObject({ phase: 'active', expanded: true })
+    expect(todoRailForTurn({
+      enabled: true, isLatest: true, docked: false, hasTodos: true, superseded: true,
+    })).toBe('summary')
+
+    cards = show(cards, 'A', done)
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({ phase: 'hidden', dismissed: true })
+    cards = show(cards, 'A', done, true)
+    expect(sessionTaskCardMemory(cards, 'A').phase).toBe('hidden')
+    expect(sessionTaskCardMemory(cards, 'B')).toMatchObject({ phase: 'active', expanded: true, listKey: 'turn-1' })
+  })
+
+  test('a new round dismisses only that session, and a cold open keeps an undismissed list', () => {
+    let cards = show(show(EMPTY_SESSION_TASK_CARDS, 'A', done), 'B', halted)
+    cards = show(cards, 'A', nextRound)
+    expect(sessionTaskCardMemory(cards, 'A')).toMatchObject({
+      phase: 'active', expanded: false, listKey: 'turn-2', dismissed: false,
+    })
+    expect(sessionTaskCardMemory(cards, 'B')).toMatchObject({ phase: 'interrupted', listKey: 'turn-1' })
+
+    const reopened = show(EMPTY_SESSION_TASK_CARDS, 'A', done)
+    expect(sessionTaskCardMemory(reopened, 'A')).toMatchObject({ phase: 'complete', dismissed: false, expanded: false })
+    expect(sessionTaskCardMemory(reopened, 'B').phase).toBe('hidden')
+    const dismissed = show(EMPTY_SESSION_TASK_CARDS, 'A', halted, true)
+    expect(sessionTaskCardMemory(dismissed, 'A')).toMatchObject({ phase: 'hidden', dismissed: true })
   })
 })
 
@@ -519,5 +612,8 @@ describe('task card markup', () => {
     expect(machine.includes('shouldFadeTaskCard')).toBe(false)
     expect(machine.includes("type: 'fade'")).toBe(false)
     expect(machine.includes('dismissedKey')).toBe(false)
+    expect(card).toContain('key={sessionKeyValue}')
+    expect(card).toContain('sessionSnapRef')
+    expect(card).toContain('holdRestingShell')
   })
 })

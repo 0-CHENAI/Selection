@@ -26,6 +26,7 @@ describe('task card dock', () => {
     expect(chat).toContain('docked: taskCard.visible || taskCardPresent')
     expect(chat).toContain('superseded: userTurnAfterList')
     expect(chat).toContain('useSessionTaskCard')
+    expect(chat).toContain('sessionKey={activeSessionId}')
     expect(chat).toContain('listSeed={latestTodo.listSeed}')
     expect(chat).toContain('taskListSeed({')
     expect(chat).not.toContain('data-task-card-clearance')

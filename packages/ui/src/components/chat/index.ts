@@ -24,10 +24,13 @@ export {
   latestTodoList,
   todoRailForTurn,
   reduceTaskCardMemory,
+  reduceSessionTaskCards,
+  sessionTaskCardMemory,
   isTaskCardVisible,
   isTaskCardDocked,
   taskTurnInterrupted,
   EMPTY_TASK_CARD_MEMORY,
+  EMPTY_SESSION_TASK_CARDS,
   TASK_CARD_EXIT_MS,
   TASK_CARD_CAPSULE_CLEARANCE,
 } from './task-progress'
@@ -44,7 +47,7 @@ export {
   TOOLBAR_SHELL_MAX,
 } from './toolbar-capsule-fit'
 export type { ToolbarCapsuleFit, ToolbarCapsuleFitInput } from './toolbar-capsule-fit'
-export type { TodoRailMode, TaskCardMemory, TaskCardEvent, TaskCardPhase, TaskListSnapshot } from './task-progress'
+export type { TodoRailMode, TaskCardMemory, TaskCardEvent, TaskCardPhase, TaskListSnapshot, SessionTaskCards, SessionTaskCardEvent } from './task-progress'
 export { InlineExecution, mapToolEventToActivity, type InlineExecutionProps, type InlineExecutionStatus, type InlineActivityItem } from './InlineExecution'
 export { TurnCardActionsMenu, type TurnCardActionsMenuProps } from './TurnCardActionsMenu'
 export { SessionViewer, type SessionViewerProps, type SessionViewerMode } from './SessionViewer'
