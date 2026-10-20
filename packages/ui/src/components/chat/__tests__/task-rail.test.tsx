@@ -8,7 +8,7 @@ import en from '../../../../../shared/src/i18n/locales/en.json'
 import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
 import { TodoList, taskRailDepths } from '../TodoList'
 import type { TodoItem } from '../TurnCard'
-import { railTocActiveIndex } from '../../ui/rail-toc'
+import { railSolidTween, railTocActiveIndex } from '../../ui/rail-toc'
 
 await testI18n.use(initReactI18next).init({
   lng: 'zh-Hans',
@@ -54,6 +54,22 @@ describe('task step from status', () => {
     expect(railTocActiveIndex([{ status: 'pending' }, { status: 'pending' }])).toBe(-1)
     expect(railTocActiveIndex([])).toBe(-1)
   })
+
+  test('crossfades the rail only when a mounted list becomes complete', () => {
+    const edge = { mounted: true, previousComplete: false, allComplete: true, reduceMotion: false as boolean | null }
+    expect(railSolidTween(edge)).toBe(true)
+    expect(railSolidTween({ ...edge, reduceMotion: null })).toBe(true)
+    expect(railSolidTween({ ...edge, reduceMotion: true })).toBe(false)
+    expect(railSolidTween({ ...edge, mounted: false })).toBe(false)
+    expect(railSolidTween({ ...edge, previousComplete: true })).toBe(false)
+    expect(railSolidTween({ ...edge, allComplete: false })).toBe(false)
+    expect(railSolidTween({
+      mounted: true,
+      previousComplete: true,
+      allComplete: false,
+      reduceMotion: false,
+    })).toBe(false)
+  })
 })
 
 describe('read-only task rail', () => {
@@ -97,6 +113,7 @@ describe('read-only task rail', () => {
     const done: TodoItem[] = mixed.map(item => ({ ...item, status: 'completed' as const, activeForm: undefined }))
     const html = await renderList(done)
     expect(html).toContain('data-rail-complete="true"')
+    expect(html).toContain('data-rail-solid-motion="instant"')
     expect(html).toContain(zh['taskList.allCompleted'])
     expect(html).toContain('撰写摘要')
     expect(html).toContain('整理附录')
@@ -234,10 +251,18 @@ describe('read-only task rail', () => {
     expect(source).toContain('strokeWidth="1.25"')
     expect(source).toContain('strokeDasharray="2 5"')
     expect(source).toContain('items.every((item) => item.status === "completed")')
-    expect(source).toContain('allComplete ? "stroke-success" : "stroke-foreground/25"')
+    expect(source).toContain('data-rail-solid=""')
+    expect(source).toContain('className="stroke-foreground/25"')
+    expect(source).toContain('className="stroke-success"')
+    expect(source).toContain('opacity={dashOpacity.get()}')
+    expect(source).toContain('opacity={solidOpacity.get()}')
+    expect(source).toContain('const RAIL_FADE_S = 0.25')
+    expect(source).toContain('duration: RAIL_FADE_S')
     expect(source).toContain('allComplete ? "text-success" : "text-foreground"')
     expect(source).toContain('duration-[250ms]')
     expect(source).toContain('transition-[stroke]')
+    expect(source).not.toContain('allComplete ? "stroke-success"')
+    expect(source).not.toMatch(/strokeDasharray=\{/)
     expect(source).not.toContain('fill-success')
     expect(source).not.toContain('stroke-[5px]')
     expect(source).toContain('M12 2 20.5 21 12 17.5 3.5 21z')

@@ -3,6 +3,7 @@
 
 import * as React from "react"
 import {
+  animate,
   motion,
   useMotionValue,
   useMotionValueEvent,
@@ -79,6 +80,32 @@ export function railTocActiveIndex(items: readonly { status?: RailTocStatus }[])
   return -1
 }
 
+/** Same curve as Tailwind ease-out, so the line and the arrow stay in step. */
+const RAIL_FADE_S = 0.25
+const RAIL_FADE_EASE = [0, 0, 0.2, 1] as const
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
+/**
+ * Crossfade only after this rail has painted, and only on incomplete → all-complete.
+ * Mounting already complete (`mounted` false, or previous already true) shows the
+ * solid line immediately. Leaving the complete state snaps back. Reduced motion
+ * is always instant.
+ */
+export function railSolidTween(input: {
+  mounted: boolean
+  previousComplete: boolean
+  allComplete: boolean
+  reduceMotion: boolean | null
+}): boolean {
+  if (!input.mounted || input.reduceMotion) return false
+  return !input.previousComplete && input.allComplete
+}
+
 export type RailTocProps = Omit<React.ComponentProps<"section">, "title"> & {
   items: RailTocItem[]
   indent?: number
@@ -104,6 +131,8 @@ const RailToc = ({
   const listRef = React.useRef<HTMLUListElement>(null)
   const rowRefs = React.useRef<(HTMLLIElement | null)[]>([])
   const pathRef = React.useRef<SVGPathElement>(null)
+  const solidRef = React.useRef<SVGPathElement>(null)
+  const progressRef = React.useRef<SVGGElement>(null)
   const holeRefs = React.useRef<(SVGCircleElement | null)[]>([])
   const signatureRef = React.useRef("")
 
@@ -126,6 +155,54 @@ const RailToc = ({
   const filled = useMotionValue(0)
 
   const activeIndex = railTocActiveIndex(items)
+  const allComplete = items.length > 0 && items.every((item) => item.status === "completed")
+  const mountedRef = React.useRef(false)
+  const previousComplete = React.useRef(allComplete)
+  const dashOpacity = useMotionValue(allComplete ? 0 : 1)
+  const solidOpacity = useMotionValue(allComplete ? 1 : 0)
+  const motionOff = Boolean(reduceMotion) || prefersReducedMotion()
+  const solidTween = railSolidTween({
+    mounted: mountedRef.current,
+    previousComplete: previousComplete.current,
+    allComplete,
+    reduceMotion: motionOff,
+  })
+
+  useIsoLayoutEffect(() => {
+    const tween = railSolidTween({
+      mounted: mountedRef.current,
+      previousComplete: previousComplete.current,
+      allComplete,
+      reduceMotion: motionOff,
+    })
+    mountedRef.current = true
+    previousComplete.current = allComplete
+    const dash = allComplete ? 0 : 1
+    const solid = allComplete ? 1 : 0
+    if (!tween) {
+      dashOpacity.set(dash)
+      solidOpacity.set(solid)
+      return
+    }
+    const fade = { duration: RAIL_FADE_S, ease: RAIL_FADE_EASE }
+    const dashAnim = animate(dashOpacity, dash, fade)
+    const solidAnim = animate(solidOpacity, solid, fade)
+    return () => {
+      dashAnim.stop()
+      solidAnim.stop()
+    }
+  }, [allComplete, dashOpacity, motionOff, solidOpacity])
+
+  const paintDash = React.useCallback((opacity: number) => {
+    const value = String(opacity)
+    pathRef.current?.setAttribute("opacity", value)
+    progressRef.current?.setAttribute("opacity", value)
+  }, [])
+  const paintSolid = React.useCallback((opacity: number) => {
+    solidRef.current?.setAttribute("opacity", String(opacity))
+  }, [])
+  useMotionValueEvent(dashOpacity, "change", paintDash)
+  useMotionValueEvent(solidOpacity, "change", paintSolid)
 
   const pose = React.useCallback(
     (l: number) => {
@@ -226,8 +303,9 @@ const RailToc = ({
 
   if (items.length === 0) return null
 
-  // Green is all-or-nothing: the whole dashed track and the arrow, only when every step is done.
-  const allComplete = items.every((item) => item.status === "completed")
+  // Green is all-or-nothing: the whole track and the arrow, only when every step is done.
+  // A same-width solid line sits on the dashed one and they crossfade. strokeDasharray
+  // stays "2 5" on the dashed layer so the pattern never swaps in place.
 
   const railColor =
     "[--rail:color-mix(in_oklab,var(--foreground)_45%,var(--background))]"
@@ -238,6 +316,7 @@ const RailToc = ({
       aria-labelledby={showTitle ? titleId : undefined}
       aria-label={showTitle ? undefined : title}
       data-rail-complete={allComplete ? "true" : "false"}
+      data-rail-solid-motion={solidTween ? "tween" : "instant"}
       className={cn("w-max text-sm", railColor, className)}
       {...props}
     >
@@ -343,18 +422,10 @@ const RailToc = ({
                 strokeDasharray="2 5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className={cn(
-                  "transition-[stroke] duration-[250ms] ease-out motion-reduce:transition-none",
-                  allComplete ? "stroke-success" : "stroke-foreground/25",
-                )}
+                className="stroke-foreground/25"
+                opacity={dashOpacity.get()}
               />
-              <g
-                data-rail-progress=""
-                className={cn(
-                  "transition-opacity duration-[250ms] ease-out motion-reduce:transition-none",
-                  allComplete ? "opacity-0" : "opacity-100",
-                )}
-              >
+              <g ref={progressRef} data-rail-progress="" opacity={dashOpacity.get()}>
                 <motion.path
                   d={geometry.d}
                   fill="none"
@@ -364,6 +435,17 @@ const RailToc = ({
                   style={{ pathLength: filled }}
                 />
               </g>
+              <path
+                ref={solidRef}
+                d={geometry.d}
+                fill="none"
+                data-rail-solid=""
+                strokeWidth="1.25"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="stroke-success"
+                opacity={solidOpacity.get()}
+              />
             </g>
             <g mask={`url(#${maskId}-nodes)`}>
               {geometry.nodes.map((node, i) => {
@@ -395,7 +477,14 @@ const RailToc = ({
               "pointer-events-none absolute left-0 top-0 -ml-2 -mt-2 h-4 w-4 transition-colors duration-[250ms] ease-out motion-reduce:transition-none [filter:drop-shadow(0_0_2px_rgb(0_0_0/0.35))]",
               allComplete ? "text-success" : "text-foreground",
             )}
-            style={{ x, y, rotate: reduceMotion ? heading : turn }}
+            style={{
+              x,
+              y,
+              rotate: reduceMotion ? heading : turn,
+              // The color transition is always armed so incomplete → complete eases.
+              // Leaving complete snaps with the line instead of playing that fade backwards.
+              transitionDuration: mountedRef.current && previousComplete.current && !allComplete ? "0s" : undefined,
+            }}
             aria-hidden
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4 overflow-visible">
