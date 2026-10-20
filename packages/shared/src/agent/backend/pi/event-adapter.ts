@@ -345,6 +345,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       type: 'text_delta',
       text: delta,
       phase: 'intermediate',
+      streamKind: 'thinking',
       presentationProtocol: this.presentationProtocol,
       turnId: this.thinkingTurnId,
     };
@@ -397,6 +398,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       type: 'text_complete',
       text,
       phase: 'intermediate',
+      streamKind: 'thinking',
       isIntermediate: true,
       presentationProtocol: this.presentationProtocol,
       turnId,
@@ -689,6 +691,7 @@ export class PiEventAdapter extends BaseEventAdapter {
               text: peeled.thinking,
               isIntermediate: true,
               phase: 'intermediate',
+              streamKind: 'thinking',
               turnId: this.nextSubTurnId('think'),
               sdkMessageId,
             };

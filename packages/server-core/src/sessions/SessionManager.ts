@@ -176,7 +176,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
-import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { findRetryableCancelledUser } from '@craft-agent/shared/sessions/cancelled-turn'
 import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
@@ -1509,6 +1509,7 @@ interface PendingDelta {
   delta: string
   phase: TextStreamPhase
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
+  streamKind?: 'thinking'
   turnId?: string
 }
 
@@ -9668,6 +9669,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const run = managed.messages.slice(userIndex + 1)
     const isDraft = (m: Message) => m.role === 'assistant' && !!m.isIntermediate && !m.answerCommitted
       && m.answerRunId === state.runId && hasRenderableAssistantText(m.content) && !isAnswerDeliveryReceipt(m.content)
+      && !isThinkingText(m)
     let draft: Message | undefined
     if (mode === 'natural') {
       const last = [...run].reverse().find(m => m.role === 'tool' || (m.role === 'assistant' && hasRenderableAssistantText(m.content)))
@@ -13862,6 +13864,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const hideDraft = this.coordinatorProseHidden(managed, managed.streamingPhase, presentationProtocol)
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
+    const streamKind = isThinkingText({ turnId, streamKind: this.pendingDeltas.get(managed.id)?.streamKind })
+      ? 'thinking' as const
+      : undefined
     this.flushDelta(managed.id, managed.workspace.id)
 
     let messageId: string | undefined
@@ -13876,6 +13881,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         isIntermediate: true,
         ...(hideDraft ? { hidden: true } : {}),
         phase: 'intermediate',
+        streamKind,
         presentationProtocol,
         turnId,
       }
@@ -13894,6 +13900,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       sessionId: managed.id,
       text: content,
       phase: 'intermediate',
+      streamKind,
       presentationProtocol,
       isIntermediate: true,
       turnId,
@@ -13969,6 +13976,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           event.phase ?? 'unclassified',
           event.turnId,
           event.presentationProtocol,
+          isThinkingText(event) ? 'thinking' : undefined,
         )
         break
 
@@ -13982,12 +13990,14 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           && aggregation !== undefined
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
-        const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
+        const thinking = isThinkingText(event)
+        const isIntermediate = thinking || !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
         // natural-v1: text from a message that called tools is a progress note
         // and is shown. The final tool-free message is the answer candidate; it
         // stays a private draft (the renderer keeps its live stream) until the
         // run ends and the host commits it in place.
-        const answerCandidate = !!managed.answerDelivery && !event.isIntermediate && event.phase !== 'intermediate' && !this.isCoordinatorAnswerTurn(managed)
+        // Reasoning is never that candidate, even when the phase was dropped.
+        const answerCandidate = !thinking && !!managed.answerDelivery && !event.isIntermediate && event.phase !== 'intermediate' && !this.isCoordinatorAnswerTurn(managed)
         const hideDraft = answerCandidate || this.coordinatorProseHidden(managed, event.phase, event.presentationProtocol)
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
@@ -14012,7 +14022,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           timestamp: this.monotonic(),
           isIntermediate,
           ...(hideDraft ? { hidden: true } : {}),
-          phase: answerCandidate ? 'final' : event.phase,
+          phase: thinking ? 'intermediate' : (answerCandidate ? 'final' : event.phase),
+          streamKind: thinking ? 'thinking' : undefined,
           presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
           turnId: event.turnId,
@@ -14074,7 +14085,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         }
 
-        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, artifactVersions: assistantMessage.artifactVersions, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: thinking ? 'intermediate' : event.phase, streamKind: thinking ? 'thinking' : undefined, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, artifactVersions: assistantMessage.artifactVersions, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -15057,10 +15068,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     phase: TextStreamPhase,
     turnId?: string,
     presentationProtocol?: 'native' | 'marker-v1' | 'legacy',
+    streamKind?: 'thinking',
   ): void {
     const existing = this.pendingDeltas.get(sessionId)
     const changesStream = !!existing && (
       existing.phase !== phase || existing.presentationProtocol !== presentationProtocol
+      || existing.streamKind !== streamKind
       || (!!existing.turnId && !!turnId && existing.turnId !== turnId)
     )
     if (changesStream) {
@@ -15078,7 +15091,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       if (turnId) active.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, phase, turnId, presentationProtocol })
+      this.pendingDeltas.set(sessionId, { delta, phase, turnId, presentationProtocol, streamKind })
     }
 
     // Schedule flush if not already scheduled
@@ -15117,6 +15130,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         delta: pending.delta,
         phase: pending.phase,
         presentationProtocol: pending.presentationProtocol,
+        streamKind: pending.streamKind,
         turnId: pending.turnId
       }, workspaceId)
     }

@@ -42,6 +42,8 @@ export interface TextDeltaEvent {
   /** Missing only for legacy senders; current backends classify every delta. */
   phase?: TextStreamPhase
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
+  /** Provider reasoning. Never a reply, even when the phase is missing. */
+  streamKind?: 'thinking'
   turnId?: string
 }
 
@@ -59,6 +61,7 @@ export interface TextCompleteEvent {
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  streamKind?: 'thinking';
 
   sessionId: string
   text: string

@@ -433,6 +433,11 @@ export interface Message {
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /**
+   * Provider reasoning. Distinct from unclassified or legacy body text, so a
+   * live explicit-v1 draft cannot mount it as the reply.
+   */
+  streamKind?: 'thinking';
   /** Original provider message shared by presentation fragments. */
   sourceSdkMessageId?: string;
 
@@ -548,6 +553,8 @@ export interface StoredMessage {
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Provider reasoning. Never the reply, including after reload. */
+  streamKind?: 'thinking';
   /** Original provider message shared by presentation fragments. */
   sourceSdkMessageId?: string;
 
@@ -784,8 +791,8 @@ export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string; level?: 'info' | 'warning' | 'error' | 'success'; code?: 'image_input_skipped'; imageCount?: number; modelName?: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }
-  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
+  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; turnId?: string; parentToolUseId?: string }
+  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; sourceRead?: SourceReadProof; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }

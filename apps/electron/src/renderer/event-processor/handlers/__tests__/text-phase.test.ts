@@ -317,6 +317,73 @@ it('closes whitespace commentary before final streaming and leaves no stale thin
 })
 
 
+it('folds a deepseek thinking plus toolCall stream while it is live and after it completes', () => {
+  const protocol = { answerProtocol: 'explicit-v1' as const, answerRunId: 'run-deepseek', answerRoutingVersion: 1 as const }
+  let current = state()
+  current.session.messages[0] = { ...current.session.messages[0], ...protocol }
+  const rounds = [
+    { text: 'Now I can read the template.', turnId: 'pi-turn-0__think0', tool: 'call-1' },
+    { text: 'The numbers do not add up.', turnId: 'pi-turn-0__think2', tool: 'call-2' },
+  ]
+  for (const round of rounds) {
+    for (const piece of [round.text.slice(0, 8), round.text.slice(8)]) {
+      current = handleTextDelta(current, {
+        type: 'text_delta', sessionId: 'session-1', delta: piece, turnId: round.turnId,
+        phase: 'intermediate', presentationProtocol: 'legacy', streamKind: 'thinking',
+      })
+    }
+    const live = assistantTurn(current)
+    expect(live.response).toBeUndefined()
+    expect(live.activities.filter(activity => activity.type === 'thinking').at(-1)).toMatchObject({
+      content: round.text,
+      status: 'running',
+    })
+    current = handleTextComplete(current, {
+      type: 'text_complete', sessionId: 'session-1', text: round.text, turnId: round.turnId,
+      phase: 'intermediate', presentationProtocol: 'legacy', streamKind: 'thinking',
+      isIntermediate: true, messageId: round.turnId, ...protocol,
+    })
+    current = handleToolStart(current, {
+      type: 'tool_start', sessionId: 'session-1', toolUseId: round.tool, toolName: 'Read',
+      toolInput: { path: 'template.html' }, toolPurpose: 'work', turnId: round.tool, ...protocol,
+    })
+  }
+  const beforeAnswer = assistantTurn(current)
+  expect(beforeAnswer.response).toBeUndefined()
+  expect(beforeAnswer.activities.map(activity => activity.type)).toEqual(['thinking', 'tool', 'thinking', 'tool'])
+
+  current = handleTextDelta(current, {
+    type: 'text_delta', sessionId: 'session-1', delta: '结论在这里。', turnId: 'pi-turn-0__m4',
+    phase: 'final', presentationProtocol: 'legacy',
+  })
+  expect(assistantTurn(current).response).toMatchObject({ text: '结论在这里。', isStreaming: true })
+  expect(assistantTurn(current).activities.filter(activity => activity.type === 'thinking')).toHaveLength(2)
+
+  current = handleTextComplete(current, {
+    type: 'text_complete', sessionId: 'session-1', text: '结论在这里。', turnId: 'pi-turn-0__m4',
+    phase: 'final', presentationProtocol: 'legacy', isIntermediate: false, answerCommitted: true,
+    messageId: 'answer', ...protocol,
+  })
+  const done = assistantTurn(current, false)
+  expect(done.response).toMatchObject({ text: '结论在这里。', isStreaming: false, messageId: 'answer' })
+  expect(done.response?.text).not.toContain('Now I can read')
+  expect(done.activities.filter(activity => activity.type === 'thinking').map(activity => activity.status)).toEqual(['completed', 'completed'])
+})
+
+it('does not promote a legacy thinking delta with no phase into the reply', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta', sessionId: 'session-1', delta: 'Now I can read',
+    presentationProtocol: 'legacy', turnId: 'pi-turn-0__think0',
+  })
+  expect(pending.session.messages.at(-1)).toMatchObject({
+    isIntermediate: true,
+    phase: 'intermediate',
+    streamKind: 'thinking',
+  })
+  expect(assistantTurn(pending).response).toBeUndefined()
+  expect(assistantTurn(pending).activities[0]).toMatchObject({ type: 'thinking', content: 'Now I can read' })
+})
+
 it('message completion does not complete the work header while the agent is processing', () => {
   const current = handleTextComplete(state(), {
     type: 'text_complete', sessionId: 'session-1', text: '已有内容',
