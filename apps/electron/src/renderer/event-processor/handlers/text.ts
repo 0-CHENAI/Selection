@@ -8,7 +8,7 @@
 import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } from '../types'
 import type { Message } from '../../../shared/types'
 import type { TextStreamPhase } from '@craft-agent/core/types'
-import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
 import { streamTrace } from '@craft-agent/shared/stream-trace'
 import {
   findStreamingMessage,
@@ -39,6 +39,9 @@ function mergeTextStreamPhase(
 }
 
 function incomingTextPhase(event: TextDeltaEvent): TextStreamPhase {
+  // Legacy senders map anything that is not already intermediate onto the
+  // reply. Reasoning must not take that path when its phase is missing.
+  if (isThinkingText(event)) return 'intermediate'
   if (event.answerProtocol === 'explicit-v1') return event.phase ?? 'unclassified'
   if (event.presentationProtocol && event.presentationProtocol !== 'legacy') {
     return event.phase ?? 'unclassified'
@@ -47,9 +50,10 @@ function incomingTextPhase(event: TextDeltaEvent): TextStreamPhase {
 }
 
 function isLiveDeltaIntermediate(
-  event: Pick<TextDeltaEvent, 'answerProtocol' | 'presentationProtocol'>,
+  event: Pick<TextDeltaEvent, 'answerProtocol' | 'presentationProtocol' | 'streamKind' | 'turnId'>,
   phase: TextStreamPhase,
 ): boolean {
+  if (isThinkingText(event)) return true
   if (event.answerProtocol === 'explicit-v1') return phase === 'intermediate'
   if (event.presentationProtocol === 'marker-v1') return phase !== 'final'
   return phase === 'intermediate'
@@ -79,13 +83,20 @@ export function handleTextDelta(
 
   // Live tokens stay on the card unless this stream is already commentary
   // (or marker-v1 unclassified). text_complete reclassifies the finished body.
+  // Reasoning is its own sub-turn and is never merged into a reply stream.
+  const thinking = isThinkingText(event)
   const incomingPhase = incomingTextPhase(event)
   const continuesExistingStream = !!streaming
-    && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
-  const phase = mergeTextStreamPhase(
-    continuesExistingStream ? streaming.phase : undefined,
-    incomingPhase,
-  )
+    && (thinking
+      ? !!event.turnId && streaming.turnId === event.turnId
+      : (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId))
+  const phase = thinking
+    ? 'intermediate'
+    : mergeTextStreamPhase(
+      continuesExistingStream ? streaming.phase : undefined,
+      incomingPhase,
+    )
+  const streamKind = thinking ? 'thinking' as const : undefined
 
   // Accumulate only within the same classified sub-turn.
   const newStreaming: StreamingState = continuesExistingStream
@@ -112,8 +123,11 @@ export function handleTextDelta(
       isIntermediate: isLiveDeltaIntermediate({
         answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
         presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
+        streamKind: streamKind ?? currentMsg.streamKind,
+        turnId: event.turnId ?? currentMsg.turnId,
       }, phase),
       phase,
+      streamKind: streamKind ?? currentMsg.streamKind,
       presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
       answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
       answerRunId: event.answerRunId ?? currentMsg.answerRunId,
@@ -136,6 +150,7 @@ export function handleTextDelta(
     isPending: true,
     isIntermediate: isLiveDeltaIntermediate(event, phase),
     phase,
+    streamKind,
     presentationProtocol: event.presentationProtocol,
     turnId: event.turnId,
   }
@@ -200,7 +215,7 @@ export function handleTextComplete(
 
     // Don't overwrite a completed intermediate message with another intermediate —
     // each thinking block (e.g. Codex reasoning between tool calls) should be distinct
-    if (!existingMsg.isStreaming && existingMsg.isIntermediate && event.isIntermediate) {
+    if (!existingMsg.isStreaming && existingMsg.isIntermediate && (event.isIntermediate || isThinkingText(event))) {
       msgIndex = -1
     }
   }
@@ -208,8 +223,13 @@ export function handleTextComplete(
   if (msgIndex !== -1) {
     // Update existing message with final content
     // Only update lastMessageAt for final (non-intermediate) messages
-    const shouldUpdateTimestamp = !event.isIntermediate
     const existingMsg = session.messages[msgIndex]
+    const thinking = isThinkingText({
+      streamKind: event.streamKind ?? existingMsg.streamKind,
+      turnId: event.turnId ?? existingMsg.turnId,
+    })
+    const isIntermediate = thinking || !!event.isIntermediate
+    const shouldUpdateTimestamp = !isIntermediate
     // Prefer a renderable complete payload; recover truncation from the stream (#81).
     // A committed answer is authoritative: it is exactly what was persisted.
     const resolvedContent = committedInPlace ? event.text : preferRicherAssistantText(
@@ -223,7 +243,7 @@ export function handleTextComplete(
       ? timestampAfterVisibleUser(session.messages.filter((_, index) => index !== msgIndex), event.timestamp ?? Date.now())
       : timestampAfterVisibleUser(
         session.messages,
-        event.timestamp ?? (event.isIntermediate ? existingMsg.timestamp : Date.now()),
+        event.timestamp ?? (isIntermediate ? existingMsg.timestamp : Date.now()),
       )
     const updatedSession = updateMessageAt(session, msgIndex, {
       // Replace temporary renderer-generated ID with authoritative main-process ID
@@ -232,8 +252,9 @@ export function handleTextComplete(
       content: resolvedContent,
       isStreaming: false,
       isPending: false,
-      isIntermediate: event.isIntermediate,
-      phase: event.phase,
+      isIntermediate,
+      phase: thinking ? 'intermediate' : event.phase,
+      streamKind: thinking ? 'thinking' : event.streamKind,
       presentationProtocol: event.presentationProtocol ?? (committedInPlace ? existingMsg.presentationProtocol : undefined),
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
@@ -241,7 +262,7 @@ export function handleTextComplete(
       answerCommitted: event.answerCommitted,
       answerSalvaged: event.answerSalvaged,
       artifactVersions: event.artifactVersions,
-      completedRevealStartTime: session.isProcessing && !event.isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
+      completedRevealStartTime: session.isProcessing && !isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
       turnId: event.turnId ?? existingMsg.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
@@ -252,6 +273,8 @@ export function handleTextComplete(
   // Message not found - CREATE IT
   // This handles the race condition where text_complete arrives
   // before text_delta's setSessions has been processed
+  const thinking = isThinkingText(event)
+  const isIntermediate = thinking || !!event.isIntermediate
   const newMessage: Message = {
     id: event.messageId ?? generateMessageId(),
     role: 'assistant',
@@ -259,8 +282,9 @@ export function handleTextComplete(
     timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     isStreaming: false,
     isPending: false,
-    isIntermediate: event.isIntermediate,
-    phase: event.phase,
+    isIntermediate,
+    phase: thinking ? 'intermediate' : event.phase,
+    streamKind: thinking ? 'thinking' : event.streamKind,
     presentationProtocol: event.presentationProtocol,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
@@ -268,13 +292,13 @@ export function handleTextComplete(
     answerCommitted: event.answerCommitted,
     answerSalvaged: event.answerSalvaged,
     artifactVersions: event.artifactVersions,
-    completedRevealStartTime: session.isProcessing && !event.isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
+    completedRevealStartTime: session.isProcessing && !isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }
 
   // Only update lastMessageAt for final (non-intermediate) messages
-  const shouldUpdateTimestamp = !event.isIntermediate
+  const shouldUpdateTimestamp = !isIntermediate
 
   return {
     session: appendMessage(session, newMessage, shouldUpdateTimestamp),

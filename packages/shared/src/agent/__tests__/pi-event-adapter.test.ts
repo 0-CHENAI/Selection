@@ -392,6 +392,76 @@ describe('PiEventAdapter', () => {
       expect(reply.text).not.toContain('Crash reason');
     });
 
+    it('streams deepseek reasoning_content plus tool calls as thinking, not body text', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      adapter.setPresentationProtocol('legacy');
+      const rounds = [
+        { think: ['Now I can read', ' the template.'], tool: 'call_1', name: 'read' },
+        { think: ['The numbers do not add up', ' so I will check the source.'], tool: 'call_2', name: 'bash' },
+      ];
+      const thinkingIds: string[] = [];
+      for (const round of rounds) {
+        const deltas = round.think.flatMap(piece => collect(adapter.adaptEvent({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'thinking_delta', delta: piece },
+        } as any)).filter(event => event.type === 'text_delta'));
+        expect(deltas.map(event => event.text).join('')).toBe(round.think.join(''));
+        expect(deltas.every(event => event.streamKind === 'thinking' && event.phase === 'intermediate' && event.presentationProtocol === 'legacy')).toBe(true);
+        expect(new Set(deltas.map(event => event.turnId)).size).toBe(1);
+        expect(String(deltas[0].turnId)).toContain('__think');
+        thinkingIds.push(String(deltas[0].turnId));
+        const done = collect(adapter.adaptEvent({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            stopReason: 'toolUse',
+            content: [
+              { type: 'thinking', thinking: round.think.join(''), thinkingSignature: 'reasoning_content' },
+              { type: 'toolCall', id: round.tool, name: round.name },
+            ],
+          },
+        } as any));
+        const completes = done.filter(event => event.type === 'text_complete');
+        expect(completes).toEqual([expect.objectContaining({
+          text: round.think.join(''),
+          isIntermediate: true,
+          phase: 'intermediate',
+          streamKind: 'thinking',
+          turnId: deltas[0].turnId,
+        })]);
+        expect(done.some(event => event.type === 'text_delta')).toBe(false);
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_start',
+          toolCallId: round.tool,
+          toolName: round.name,
+          args: {},
+        } as any));
+        collect(adapter.adaptEvent({
+          type: 'tool_execution_end',
+          toolCallId: round.tool,
+          toolName: round.name,
+          isError: false,
+          result: { content: [{ type: 'text', text: 'ok' }] },
+        } as any));
+      }
+      expect(new Set(thinkingIds).size).toBe(2);
+      const answerDelta = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '结论在这里。' },
+      } as any)).find(event => event.type === 'text_delta');
+      expect(answerDelta).toMatchObject({ text: '结论在这里。', phase: 'unclassified' });
+      expect(answerDelta.streamKind).toBeUndefined();
+      expect(String(answerDelta.turnId)).not.toContain('__think');
+      const answer = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '结论在这里。' }] },
+      } as any)).find(event => event.type === 'text_complete' && event.streamKind !== 'thinking');
+      expect(answer).toMatchObject({ text: '结论在这里。', isIntermediate: false });
+      expect(String(answer.turnId)).not.toContain('__think');
+      expect(answer.text).not.toContain('Now I can read');
+      expect(answer.text).not.toContain('numbers do not add up');
+    });
+
     it('should skip message_update without text_delta type', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({

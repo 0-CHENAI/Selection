@@ -6,7 +6,7 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
-import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt, splitThinkDelimiter } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, splitThinkDelimiter } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
 import { parseTaskListResult } from '@craft-agent/shared/utils/task-list'
@@ -439,6 +439,8 @@ function replaceLiveDraft(turn: AssistantTurn, nextText: string): void {
 }
 
 function isLiveAnswerDraft(message: Message): boolean {
+  // An explicit-v1 run stamps its id onto later rows. Reasoning is not that draft.
+  if (isThinkingText(message)) return false
   return message.role === 'assistant'
     && message.answerProtocol === 'explicit-v1'
     && !message.answerCommitted
@@ -460,11 +462,12 @@ function isAuthoritativeCommit(message: Message): message is Message & { answerR
  */
 /** Provider reasoning uses its own sub-turn so it never becomes the reply. */
 export function isModelThinkingTurn(turnId?: string): boolean {
-  return !!turnId && turnId.includes('__think')
+  return isThinkingText({ turnId })
 }
 
 function isLiveCardStream(message: Message): boolean {
   if (message.role !== 'assistant') return false
+  if (isThinkingText(message)) return false
   if (!(message.isStreaming || message.isPending)) return false
   if (!hasRenderableAssistantText(message.content)) return false
   if (message.presentationProtocol === 'marker-v1') return false
@@ -478,6 +481,11 @@ function isLiveCardStream(message: Message): boolean {
 
 /** Host-committed answers: live tokens are the reply; a finished uncommitted draft is process text. */
 function classifyForTurnGrouping(message: Message): Message {
+  if (isThinkingText(message)) {
+    return message.isIntermediate && message.phase === 'intermediate'
+      ? message
+      : { ...message, isIntermediate: true, phase: 'intermediate' }
+  }
   if (message.answerCommitted || message.answerPreview) return message
   if (!isLiveAnswerDraft(message)) return message
   const live = !!(message.isStreaming || message.isPending)
@@ -968,6 +976,7 @@ export function expandLeakedThinking(message: Message): Message[] {
       phase: 'intermediate',
       isStreaming: false,
       isPending: false,
+      streamKind: 'thinking',
       answerCommitted: undefined,
       answerPreview: undefined,
       answerSalvaged: undefined,
@@ -1060,6 +1069,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       && !message.answerPreview
       && !message.answerProtocol
       && message.presentationProtocol !== 'marker-v1'
+      && !isThinkingText(message)
     ) {
       normalized = { ...message, answerProtocol: 'explicit-v1', answerRunId: runId }
     }
@@ -1424,7 +1434,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Include parentId for intermediate messages to support nesting within subagents
         const intermediateActivity: ActivityItem = {
           id: message.id,
-          type: isModelThinkingTurn(message.turnId) ? 'thinking' : 'intermediate',
+          type: isThinkingText(message) ? 'thinking' : 'intermediate',
           status: message.isPending ? 'running' : 'completed',
           content: message.content,
           timestamp: message.timestamp,
