@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  navigationMutationNeedsMeasure,
   shouldReserveConversationNavigationColumn,
   shouldShowConversationNavigation,
 } from '../conversation-navigation'
@@ -12,6 +13,17 @@ describe('shouldShowConversationNavigation (#394)', () => {
     expect(shouldShowConversationNavigation(true, 1)).toBe(false)
     expect(shouldShowConversationNavigation(true, 0)).toBe(false)
     expect(shouldShowConversationNavigation(false, 4)).toBe(false)
+  })
+})
+
+describe('navigation mutations during streaming', () => {
+  function target(insideTurn: boolean) {
+    return { closest: (selector: string) => selector === '[data-chat-turn-key]' && insideTurn ? {} : null }
+  }
+  it('ignores text inserted inside a turn and still measures a new record', () => {
+    expect(navigationMutationNeedsMeasure([{ target: target(true) }])).toBe(false)
+    expect(navigationMutationNeedsMeasure([{ target: target(false) }])).toBe(true)
+    expect(navigationMutationNeedsMeasure([{ target: target(true) }, { target: target(false) }])).toBe(true)
   })
 })
 

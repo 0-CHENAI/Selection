@@ -48,6 +48,12 @@ describe('virtual history preserves reader intent and streaming', () => {
   })
 })
 
+/**
+ * Frame rate is not asserted in CI. Hand test: open a session of about 100 long
+ * replies, start a long answer, and scroll in the Performance panel. A single
+ * reply should not keep one span[data-stream-chunk] per token, and scrolling
+ * should not show a forced layout on every token.
+ */
 describe('streaming resize follows frames and reader intent (#328)', () => {
   const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
 
@@ -107,7 +113,31 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
   test('a streaming row reports its real height instead of an estimated box', () => {
     const history = readFileSync(new URL('../ChatVirtualHistory.tsx', import.meta.url), 'utf8')
     expect(history).toContain('data-chat-virtual-streaming')
-    expect(history).toContain('streaming ? undefined : { contentVisibility:')
+    expect(history).toContain('layOutStreamingRow ? undefined : { contentVisibility:')
+    expect(history).toContain('shouldMeasureVirtualScrollMargin')
+  })
+
+  test('a queued follow does not read layout for another streaming resize', () => {
+    let reads = 0
+    const viewport = {
+      scrollTop: 560,
+      get scrollHeight() { reads += 1; return 1000 },
+      clientHeight: 400,
+    }
+    let next: FrameRequestCallback | undefined
+    const follow = createStickyScrollFollow(viewport, {
+      sticky: () => true,
+      reduceMotion: () => false,
+      requestFrame: callback => { next = callback; return 1 },
+      cancelFrame: () => { next = undefined },
+    })
+    follow.resize()
+    const afterSchedule = reads
+    expect(afterSchedule).toBeGreaterThan(0)
+    expect(next).toBeTypeOf('function')
+    follow.resize()
+    expect(reads).toBe(afterSchedule)
+    follow.dispose()
   })
 
   test('uses one follow controller without translating the transcript', () => {

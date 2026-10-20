@@ -18,3 +18,19 @@ export function shouldShowConversationNavigation(
 export function shouldReserveConversationNavigationColumn(enabled: boolean): boolean {
   return enabled
 }
+
+/**
+ * Streaming writes text inside an existing turn. Those mutations must not
+ * schedule a geometry pass over the record rail; mounting or removing a turn does.
+ */
+export function navigationMutationNeedsMeasure(
+  records: ReadonlyArray<{ target: unknown }>,
+): boolean {
+  return records.some(record => !isTurnContentMutationTarget(record.target))
+}
+
+export function isTurnContentMutationTarget(target: unknown): boolean {
+  if (!target || typeof target !== 'object' || !('closest' in target)) return false
+  const closest = (target as { closest?: unknown }).closest
+  return typeof closest === 'function' && !!closest.call(target, '[data-chat-turn-key]')
+}

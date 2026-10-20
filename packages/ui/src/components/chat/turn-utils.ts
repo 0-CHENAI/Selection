@@ -2264,3 +2264,5 @@ export function countTotalActivities(items: (ActivityItem | ActivityGroup)[]): n
   }
   return count
 }
+
+export { stabilizeTurns, turnsShareRenderIdentity } from './turn-stability'

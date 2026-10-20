@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { renderContentWithBadges, markdownToPlainText } from '@craft-agent/ui'
 import type { ContentBadge } from '@craft-agent/core'
 import { cn } from '@/lib/utils'
+import { navigationMutationNeedsMeasure } from './conversation-navigation'
 import { getConversationNavigationTitlePreview } from './conversation-navigation-preview'
 
 export interface ConversationNavigationItem {
@@ -61,7 +62,9 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
     resize.observe(viewport)
     if (viewport.firstElementChild) resize.observe(viewport.firstElementChild)
     // History can mount after the session exit animation has finished.
-    const mutation = new MutationObserver(schedule)
+    const mutation = new MutationObserver(records => {
+      if (navigationMutationNeedsMeasure(records)) schedule()
+    })
     mutation.observe(viewport, { childList: true, subtree: true })
     viewport.addEventListener('scroll', schedule, { passive: true })
     schedule()

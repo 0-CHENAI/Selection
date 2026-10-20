@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Virtualizer } from '@tanstack/react-virtual'
+import { shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
 
 function history() {
   const corrections: number[] = []
@@ -11,6 +12,18 @@ function history() {
   })
   return { list, corrections }
 }
+
+describe('virtual scroll margin', () => {
+  const list = {}
+  const viewport = {}
+  test('ignores the list growing under a live stream', () => {
+    expect(shouldMeasureVirtualScrollMargin([{ target: list }], list)).toBe(false)
+  })
+  test('still measures when the viewport or the content above the list changes', () => {
+    expect(shouldMeasureVirtualScrollMargin([{ target: viewport }], list)).toBe(true)
+    expect(shouldMeasureVirtualScrollMargin([{ target: list }, { target: viewport }], list)).toBe(true)
+  })
+})
 
 describe('variable-height chat history', () => {
   test('keeps the full history extent with only viewport neighbours mounted', () => {

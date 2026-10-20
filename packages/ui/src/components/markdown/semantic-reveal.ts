@@ -33,6 +33,14 @@ export function appendedRevealInset(previousHeight: number, height: number): num
   return height > previousHeight + 1 ? Math.max(0, 100 * (height - previousHeight) / height) : 0
 }
 
+/** A live card far below or above the reader must not be measured on every token. */
+export function revealRootOffscreen(root: HTMLElement, top: number, bottom: number): boolean {
+  if (typeof root.getBoundingClientRect !== 'function') return false
+  const rect = root.getBoundingClientRect()
+  const slack = 600
+  return rect.bottom < top - slack || rect.top > bottom + slack
+}
+
 function scrollViewport(element: HTMLElement): HTMLElement | null {
   for (let parent = element.parentElement; parent; parent = parent.parentElement) {
     if (/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) return parent
@@ -139,69 +147,75 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     const bounds = viewport?.getBoundingClientRect()
     const top = Math.max(0, bounds?.top ?? 0)
     const bottom = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight)
-    const measurements: Array<{ unit: HTMLElement; state: UnitState; height: number; width: number; inset: number; below: boolean; animate: boolean }> = []
-    // Only changed text needs geometry; completed paragraphs never remeasure on
-    // ordinary deltas. A burst beyond the budget is shown immediately.
-    const changed = getRevealUnits(root).map(unit => ({ unit, text: unit.textContent ?? '', previous: states.get(unit) }))
-      .filter(({ text, previous }) => previous?.text !== text || previous.pending)
-    // Retain a budget at both ends of a fast burst: autoscroll commonly lands
-    // on the tail, which must not lose every animation to offscreen early units.
-    const budget = new Set(changed.length <= MAX_UNITS_PER_FRAME ? changed : [
-      ...changed.slice(0, MAX_UNITS_PER_FRAME / 2), ...changed.slice(-MAX_UNITS_PER_FRAME / 2),
-    ])
-    for (const candidate of changed) {
-      const { unit, text, previous } = candidate
-      const start = unit.getAttribute?.('data-stream-start')
-      const end = unit.getAttribute?.('data-stream-end')
-      // AST restructuring replaces DOM nodes (e.g. closing ** / a link or a
-      // table delimiter). Source ranges, not DOM identity, decide what is new.
-      // Unmapped/generated nodes are conservative after the initial commit.
-      const newSource = content == null || (append && (frontier === 0 || (
-        start != null && end != null && Number(start) >= frontier && Number(end) > frontier
-      )))
-      if (immediate || !append || (!previous && !newSource) || !budget.has(candidate) || typeof unit.animate !== 'function') {
-        expose(unit)
-        states.set(unit, { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath })
-        continue
+    // getBoundingClientRect/textContent on descendants forces layout and defeats
+    // content-visibility on a streaming row the reader has scrolled away from.
+    const offscreen = revealRootOffscreen(root, top, bottom)
+    if (offscreen) initial = false
+    if (!offscreen) {
+      const measurements: Array<{ unit: HTMLElement; state: UnitState; height: number; width: number; inset: number; below: boolean; animate: boolean }> = []
+      // Only changed text needs geometry; completed paragraphs never remeasure on
+      // ordinary deltas. A burst beyond the budget is shown immediately.
+      const changed = getRevealUnits(root).map(unit => ({ unit, text: unit.textContent ?? '', previous: states.get(unit) }))
+        .filter(({ text, previous }) => previous?.text !== text || previous.pending)
+      // Retain a budget at both ends of a fast burst: autoscroll commonly lands
+      // on the tail, which must not lose every animation to offscreen early units.
+      const budget = new Set(changed.length <= MAX_UNITS_PER_FRAME ? changed : [
+        ...changed.slice(0, MAX_UNITS_PER_FRAME / 2), ...changed.slice(-MAX_UNITS_PER_FRAME / 2),
+      ])
+      for (const candidate of changed) {
+        const { unit, text, previous } = candidate
+        const start = unit.getAttribute?.('data-stream-start')
+        const end = unit.getAttribute?.('data-stream-end')
+        // AST restructuring replaces DOM nodes (e.g. closing ** / a link or a
+        // table delimiter). Source ranges, not DOM identity, decide what is new.
+        // Unmapped/generated nodes are conservative after the initial commit.
+        const newSource = content == null || (append && (frontier === 0 || (
+          start != null && end != null && Number(start) >= frontier && Number(end) > frontier
+        )))
+        if (immediate || !append || (!previous && !newSource) || !budget.has(candidate) || typeof unit.animate !== 'function') {
+          expose(unit)
+          states.set(unit, { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath })
+          continue
+        }
+        const rect = unit.getBoundingClientRect()
+        // A paragraph fades only on admission. Appending tokens or wrapping
+        // onto another line must not replay an effect over text being read.
+        const inset = previous && !previous.pending ? 0 : 100
+        const state = previous ?? { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath }
+        state.text = text
+        states.set(unit, state)
+        measurements.push({ unit, state, height: rect.height, width: rect.width, inset, below: rect.top >= bottom, animate: rect.bottom > top && rect.height > 0 })
       }
-      const rect = unit.getBoundingClientRect()
-      // A paragraph fades only on admission. Appending tokens or wrapping
-      // onto another line must not replay an effect over text being read.
-      const inset = previous && !previous.pending ? 0 : 100
-      const state = previous ?? { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath }
-      state.text = text
-      states.set(unit, state)
-      measurements.push({ unit, state, height: rect.height, width: rect.width, inset, below: rect.top >= bottom, animate: rect.bottom > top && rect.height > 0 })
+      measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
+        state.height = height
+        state.width = width
+        if (below && inset === 100) {
+          // A live tail is often below the viewport. Clipping it fully hid the
+          // rest of the reply for the whole stream: the completion deadline does
+          // not start while streaming, and a fully clipped box may never
+          // intersect. Keep the text readable and skip the offscreen fade.
+          expose(unit)
+          state.pending = false
+          state.clip = ''
+          unit.style.clipPath = ''
+          return
+        }
+        if (inset <= 0) return
+        expose(unit)
+        if (!animate) return
+        // Fade new arrivals without wiping/reflowing previously shown text.
+        // Blur is opt-in; the default creates no filter animation layers.
+        unit.classList.add('t-stream-w', 'is-in')
+        const animation = unit.animate(semanticRevealFrames(blur), semanticRevealTiming(duration, easing))
+        active.set(unit, animation)
+        animation.onfinish = () => {
+          if (active.get(unit) !== animation) return
+          active.delete(unit)
+          // Do not leave filter layers attached to completed/history text.
+          unit.classList.remove('t-stream-w', 'is-in')
+        }
+      })
     }
-    measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
-      state.height = height
-      state.width = width
-      if (below && inset === 100) {
-        // A live tail is often below the viewport. Clipping it fully hid the
-        // rest of the reply for the whole stream: the completion deadline does
-        // not start while streaming, and a fully clipped box may never
-        // intersect. Keep the text readable and skip the offscreen fade.
-        expose(unit)
-        state.pending = false
-        state.clip = ''
-        unit.style.clipPath = ''
-        return
-      }
-      if (inset <= 0) return
-      expose(unit)
-      if (!animate) return
-      // Fade new arrivals without wiping/reflowing previously shown text.
-      // Blur is opt-in; the default creates no filter animation layers.
-      unit.classList.add('t-stream-w', 'is-in')
-      const animation = unit.animate(semanticRevealFrames(blur), semanticRevealTiming(duration, easing))
-      active.set(unit, animation)
-      animation.onfinish = () => {
-        if (active.get(unit) !== animation) return
-        active.delete(unit)
-        // Do not leave filter layers attached to completed/history text.
-        unit.classList.remove('t-stream-w', 'is-in')
-      }
-    })
     initial = false
     // The deadline starts once, not again for each delta/IntersectionObserver.
     if (enabled && !streaming && deadline == null) {
