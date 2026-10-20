@@ -127,7 +127,24 @@ function TaskCardStage({ mode = 'collapsed' }: { mode?: Mode }) {
             </div>
           )}
         </div>
-        {mode !== 'summary' && (
+        {mode === 'scroll' && (
+          <div className="absolute inset-x-0 bottom-16 h-[30px]">
+            <div className="relative mx-auto h-full max-w-[840px]">
+              <TaskProgressCard
+                todos={todos}
+                listSeed={LIST_SEED}
+                phase={phase}
+                expanded={expanded}
+                visible={cardVisible}
+                placement="toolbar"
+                onExpandedChange={setExpanded}
+                showScrollToBottom
+                onScrollToBottom={() => {}}
+              />
+            </div>
+          </div>
+        )}
+        {mode !== 'summary' && mode !== 'scroll' && (
           <TaskProgressCard
             todos={todos}
             listSeed={LIST_SEED}
@@ -154,14 +171,14 @@ export const taskCardComponents: ComponentEntry[] = [
     id: 'task-card',
     name: 'Task Card',
     category: 'Turn Cards',
-    description: 'Centered floating task capsule that stays until the next round',
+    description: 'Collapsed capsule shows only the step count; open it for the task list',
     component: TaskCardStage,
     layout: 'full',
     previewOverflow: 'hidden',
     props: [
       {
         name: 'mode',
-        description: 'Collapsed capsule, expanded panel with the progress heading, completed or interrupted capsule, history summary after the next message, scroll button, or the hold-then-dismiss story',
+        description: 'Collapsed capsule shows only X/X. Expanded panel keeps the progress heading and rail. With scroll button, the control grows out of the pill on the toolbar row. Also completed, interrupted, history summary, or the hold-then-dismiss story',
         control: {
           type: 'select',
           options: [

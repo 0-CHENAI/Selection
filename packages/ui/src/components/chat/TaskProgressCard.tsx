@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, ChevronDown } from 'lucide-react'
 import { AnimatePresence, MotionConfig, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
-import { taskCardContentMotion, type TaskCardBox, type TaskCardMotionDirection } from './task-card-motion'
+import { taskCardContentMotion, taskCardRestingBox, taskCardScrollDockFrame, taskCardShellSize, type TaskCardBox, type TaskCardMotionDirection } from './task-card-motion'
 import { cn } from '../../lib/utils'
 import { TodoList } from './TodoList'
 import type { TodoItem } from './TurnCard'
@@ -240,12 +240,10 @@ function CapsuleFrame({
   panelWidth,
   phase,
   progress,
-  label,
   fraction,
   expandLabel,
   onExpand,
   toolbar = false,
-  showTitle = true,
   probe = false,
   unbounded = false,
 }: {
@@ -253,14 +251,11 @@ function CapsuleFrame({
   panelWidth: number
   phase: Exclude<TaskCardPhase, 'hidden'>
   progress: ReturnType<typeof taskStepProgress>
-  label: string
   fraction: string
   expandLabel: string
   onExpand: () => void
   /** Sit in the composer toolbar: 30px shell, 12px type, pill ends. */
   toolbar?: boolean
-  /** False drops the current-item title. Active capsules still keep the ring and X/X. */
-  showTitle?: boolean
   probe?: boolean
   unbounded?: boolean
 }) {
@@ -296,22 +291,9 @@ function CapsuleFrame({
         ) : (
           <ProgressRing current={progress.current} total={progress.total} />
         )}
-        {showTitle && (
-          <span
-            className={cn(
-              'min-w-0 flex-1 truncate text-foreground',
-              toolbar ? 'text-xs font-medium' : 'text-[13px]',
-            )}
-            title={label}
-          >
-            {label}
-          </span>
-        )}
-        {phase === 'active' && (
-          <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
-            {fraction}
-          </span>
-        )}
+        <span className="shrink-0 text-xs tabular-nums text-foreground/50" data-task-card-progress="">
+          {fraction}
+        </span>
         <ChevronDown className="size-3.5 shrink-0 rotate-180 text-foreground/50" aria-hidden />
       </button>
     </div>
@@ -374,9 +356,37 @@ export function TaskProgressCard({
   if (cardShown) shapeRef.current = expanded
   const shapeExpanded = cardShown ? expanded : shapeRef.current
   const onScreen = cardShown || present
+  const toolbar = placement === 'toolbar'
+  const scrollShown = !!(showScrollToBottom && onScrollToBottom)
+  const dockedScroll = toolbar && onScreen
+  // 0 = tucked into the pill's right edge. 1 = full control.
+  // Plain numbers, not motion styles: the first commit must already be the
+  // tucked pose. A motion value applied after mount paints the resting size first.
+  const dockTRef = useRef(0)
+  const centerTRef = useRef(0)
+  const [dockT, setDockT] = useState(0)
+  const [centerT, setCenterT] = useState(0)
+  const scrollShownRef = useRef(scrollShown)
+  scrollShownRef.current = scrollShown
+  const [scrollHold, setScrollHold] = useState(false)
+  const prevDockedScroll = useRef<boolean | null>(null)
+  if (prevDockedScroll.current !== null && prevDockedScroll.current !== dockedScroll && scrollShown) {
+    // The pill mounted or left while the button was already up. Don't replay the grow.
+    if (dockedScroll && dockTRef.current !== 1) {
+      dockTRef.current = 1
+      setDockT(1)
+    }
+    if (!dockedScroll && centerTRef.current !== 1) {
+      centerTRef.current = 1
+      setCenterT(1)
+    }
+  }
+  prevDockedScroll.current = dockedScroll
+  if (scrollShown && !scrollHold) setScrollHold(true)
   const shellRef = useRef<HTMLElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   const snapRef = useRef(true)
+  const boxSpring = useRef<{ stop: () => void } | null>(null)
   const [panelWidth, setPanelWidth] = useState(420)
   const [shapes, setShapes] = useState<{ panel: TaskCardBox; capsule: TaskCardBox } | null>(null)
   const shapesRef = useRef(shapes)
@@ -393,7 +403,6 @@ export function TaskProgressCard({
   const capsuleFilter = useMotionValue('blur(0px)')
   const panelPointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'auto' : 'none')
   const capsulePointer = useMotionValue<'auto' | 'none'>(shapeExpanded ? 'none' : 'auto')
-  const toolbar = placement === 'toolbar'
   const shellRadius = useMotionValue(toolbar && !shapeExpanded ? TOOLBAR_CAPSULE_RADIUS : FIXED_RADIUS)
   const [crossfade, setCrossfade] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -477,16 +486,53 @@ export function TaskProgressCard({
     if (!shapes) return
     setCrossfade(true)
     if (motionSample != null) {
+      boxSpring.current?.stop()
+      boxSpring.current = null
       shapeProgress.set(motionSample)
       publishShape(motionSample)
       return
     }
-    publishShape(shapeProgress.get())
-  }, [motionSample, publishShape, shapeProgress, shapes])
+    const progress = shapeProgress.get()
+    const resting = progress <= 0.001 || progress >= 0.999
+    // Expand and collapse already spring the shell. A resting count change must not snap.
+    if (!resting && !snapRef.current) return
+    const next = taskCardShellSize(progress, shapes.panel, shapes.capsule)
+    const widthNow = shellWidth.get()
+    const heightNow = shellHeight.get()
+    if (reduceMotion || snapRef.current || widthNow == null || heightNow == null) {
+      boxSpring.current?.stop()
+      boxSpring.current = null
+      publishShape(progress)
+      return
+    }
+    if (Math.abs(widthNow - next.width) < 0.5 && Math.abs(heightNow - next.height) < 0.5) {
+      boxSpring.current?.stop()
+      boxSpring.current = null
+      publishShape(progress)
+      return
+    }
+    boxSpring.current?.stop()
+    const from = { width: widthNow, height: heightNow }
+    const controls = animate(0, 1, {
+      ...SHELL_SPRING,
+      onUpdate: (t) => {
+        const box = taskCardRestingBox(from, next, t)
+        shellWidth.set(box.width)
+        shellHeight.set(box.height)
+      },
+    })
+    boxSpring.current = controls
+    return () => {
+      controls.stop()
+      if (boxSpring.current === controls) boxSpring.current = null
+    }
+  }, [motionSample, publishShape, reduceMotion, shapeProgress, shapes, shellHeight, shellWidth])
 
   const shapesReady = shapes != null
   useEffect(() => {
     if (!shapesRef.current || motionSample != null) return
+    boxSpring.current?.stop()
+    boxSpring.current = null
     directionRef.current = shapeExpanded ? 'expand' : 'collapse'
     const target = shapeExpanded ? 1 : 0
     if (reduceMotion || snapRef.current) {
@@ -534,24 +580,56 @@ export function TaskProgressCard({
     }
   }, [cardShown, onExpandedChange, shapeExpanded])
 
-  if (!onScreen && !showScrollToBottom) return null
+  useIsoLayoutEffect(() => {
+    if (!toolbar) return
+    const target = scrollShown ? 1 : 0
+    const leadRef = dockedScroll ? dockTRef : centerTRef
+    const setLead = dockedScroll ? setDockT : setCenterT
+    if (reduceMotion) {
+      leadRef.current = target
+      setLead(target)
+      if (!scrollShown) setScrollHold(false)
+      return
+    }
+    if (leadRef.current === target) {
+      if (!scrollShown) setScrollHold(false)
+      return
+    }
+    let stopped = false
+    const controls = animate(leadRef.current, target, {
+      ...(dockedScroll ? SHELL_SPRING : { duration: ENTER.duration, ease: ENTER.ease }),
+      onUpdate: (value) => {
+        if (stopped) return
+        leadRef.current = value
+        setLead(value)
+      },
+      onComplete: () => {
+        if (!scrollShownRef.current) setScrollHold(false)
+      },
+    })
+    return () => {
+      stopped = true
+      controls.stop()
+    }
+  }, [dockedScroll, reduceMotion, scrollShown, toolbar])
+
+  if (!onScreen && !scrollShown && !scrollHold) return null
 
   const fraction = t('taskCard.progress', { current: progress.current, total: progress.total })
   const heading = t('taskCard.heading', { current: progress.current, total: progress.total })
-  const label = phase === 'complete'
-    ? t('taskCard.completed', { current: progress.current, total: progress.total })
-    : phase === 'interrupted'
-      ? t('taskCard.interrupted', { current: progress.current, total: progress.total })
-      : progress.title || fraction
   const scrollLabel = t('chat.scrollToBottom')
   const glass = 'border border-foreground/10 bg-background/80 shadow-minimal backdrop-blur-md'
   const exitSeconds = reduceMotion ? 0 : TASK_CARD_EXIT_MS / 1000
   const fade = { duration: reduceMotion ? 0 : ENTER.duration, ease: ENTER.ease }
-  const scrollShown = !!(showScrollToBottom && onScrollToBottom)
   const buttonGap = scrollShown ? BUTTON_GAP : 0
-  // Lone button stays centered on the row. With a capsule, reserve the button on the right
-  // so the same translate keeps the capsule centered (beta44 cluster).
-  const toolbarEndReserve = toolbar && scrollShown && onScreen ? TOOLBAR_SCROLL_SIZE + BUTTON_GAP : 0
+  // Layout budget for the side buttons. The visual group is centered on its live
+  // width, so this reserve is not copied into the translate (that offset jumps).
+  const toolbarEndReserve = dockedScroll && (scrollShown || scrollHold) ? TOOLBAR_SCROLL_SIZE + BUTTON_GAP : 0
+  const dockFrame = taskCardScrollDockFrame(dockT, TOOLBAR_SCROLL_SIZE, BUTTON_GAP)
+  const scrollVisual = dockedScroll
+    ? { width: dockFrame.span, opacity: dockFrame.opacity }
+    : { width: TOOLBAR_SCROLL_SIZE, opacity: centerT }
+  const scrollInteractive = dockedScroll ? dockT >= 0.999 : centerT >= 0.999
   const restingCapsulePx = shapes?.capsule.height ?? TOOLBAR_CONTROL_HEIGHT
   const frameWidth = toolbarShellMax ?? panelWidth
   const frameProps = {
@@ -562,7 +640,6 @@ export function TaskProgressCard({
     listSeed,
     phase,
     progress,
-    label,
     fraction,
     toolbar,
     collapseLabel: t('taskCard.collapse'),
@@ -587,7 +664,9 @@ export function TaskProgressCard({
         )}
         style={toolbar ? {
           bottom: `calc(50% - ${restingCapsulePx}px / 2)`,
-          transform: `translateX(calc(-50% + ${toolbarEndReserve / 2}px))`,
+          // Live width includes the growing button, so -50% shifts the pill left
+          // on the same frame the button grows. A fixed endReserve offset jumps.
+          transform: 'translateX(-50%)',
         } : undefined}
       >
         {toolbar && onScreen && (
@@ -597,7 +676,7 @@ export function TaskProgressCard({
               className="pointer-events-none invisible absolute left-0 top-0 flex w-max border border-transparent"
               aria-hidden
             >
-              <CapsuleFrame {...frameProps} toolbar showTitle={false} unbounded probe />
+              <CapsuleFrame {...frameProps} toolbar unbounded probe />
             </div>
             <div
               data-task-card-cluster="natural"
@@ -624,15 +703,20 @@ export function TaskProgressCard({
               data-task-card-expanded={shapeExpanded ? 'true' : 'false'}
               aria-label={t('taskCard.label')}
               initial={reduceMotion ? false : { opacity: 0 }}
-              animate={{ opacity: 1, marginRight: buttonGap }}
-              exit={{
+              animate={toolbar ? { opacity: 1 } : { opacity: 1, marginRight: buttonGap }}
+              exit={toolbar ? {
+                opacity: 0,
+                transition: reduceMotion ? { duration: 0 } : { opacity: { duration: exitSeconds, ease: EASE } },
+              } : {
                 opacity: 0,
                 marginRight: 0,
                 transition: reduceMotion
                   ? { duration: 0 }
                   : { marginRight: SHELL_SPRING, opacity: { duration: exitSeconds, ease: EASE } },
               }}
-              transition={{ marginRight: reduceMotion ? { duration: 0 } : SHELL_SPRING, opacity: fade }}
+              transition={toolbar
+                ? { opacity: fade }
+                : { marginRight: reduceMotion ? { duration: 0 } : SHELL_SPRING, opacity: fade }}
               style={{
                 borderRadius: toolbar && crossfade ? shellRadius : restingRadius,
                 overflow: 'hidden',
@@ -640,7 +724,7 @@ export function TaskProgressCard({
                 height: crossfade ? shellHeight : undefined,
               }}
               className={cn(
-                'pointer-events-auto relative min-w-0 shrink-0',
+                'pointer-events-auto relative z-[1] min-w-0 shrink-0',
                 glass,
                 !crossfade && (toolbar
                   ? (shapeExpanded ? undefined : 'w-max')
@@ -687,24 +771,54 @@ export function TaskProgressCard({
             </motion.section>
           )}
         </AnimatePresence>
-        {scrollShown && (
-          <button
-            type="button"
-            data-testid="chat-scroll-to-bottom"
-            data-toolbar-scroll={toolbar ? (onScreen ? 'docked' : 'center') : undefined}
-            onClick={onScrollToBottom}
-            aria-label={scrollLabel}
-            title={scrollLabel}
-            className={cn(
-              'pointer-events-auto inline-flex shrink-0 items-center justify-center rounded-full',
-              toolbar ? 'size-[30px]' : 'size-8',
-              'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
-              'transition-colors hover:bg-background hover:text-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-            )}
-          >
-            <ChevronDown className="size-4" />
-          </button>
+        {(toolbar ? scrollShown || scrollHold : scrollShown) && (
+          toolbar ? (
+            <button
+              type="button"
+              data-testid="chat-scroll-to-bottom"
+              data-toolbar-scroll={onScreen ? 'docked' : 'center'}
+              data-scroll-dock-width={scrollVisual.width}
+              data-scroll-dock-opacity={scrollVisual.opacity}
+              onClick={onScrollToBottom}
+              aria-label={scrollLabel}
+              title={scrollLabel}
+              style={{ width: scrollVisual.width, opacity: scrollVisual.opacity }}
+              className={cn(
+                'relative z-0 inline-flex h-[30px] min-w-0 shrink-0 p-0',
+                scrollInteractive ? 'pointer-events-auto' : 'pointer-events-none',
+                // Clip while growing so the circle stays behind the pill's right edge.
+                // At rest, overflow stays visible so the shadow is not cut off.
+                dockedScroll && !scrollInteractive ? 'overflow-hidden' : 'overflow-visible',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute right-0 top-0 inline-flex size-[30px] items-center justify-center rounded-full',
+                  'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
+                  'transition-colors hover:bg-background hover:text-foreground',
+                )}
+              >
+                <ChevronDown className="size-4" />
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="chat-scroll-to-bottom"
+              onClick={onScrollToBottom}
+              aria-label={scrollLabel}
+              title={scrollLabel}
+              className={cn(
+                'pointer-events-auto inline-flex size-8 shrink-0 items-center justify-center rounded-full',
+                'border border-foreground/10 bg-background/90 text-foreground/70 shadow-minimal backdrop-blur-sm',
+                'transition-colors hover:bg-background hover:text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              )}
+            >
+              <ChevronDown className="size-4" />
+            </button>
+          )
         )}
       </div>
     </MotionConfig>
