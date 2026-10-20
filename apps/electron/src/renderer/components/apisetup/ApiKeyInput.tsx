@@ -1,5 +1,5 @@
 import { parseTokenCount, formatTokenInput } from './token-count-input'
-import { MIN_CUSTOM_CONTEXT_WINDOW, MAX_CUSTOM_CONTEXT_WINDOW, MIN_CUSTOM_MAX_TOKENS, MAX_CUSTOM_MAX_TOKENS } from '@config/model-image-support'
+import { MIN_CUSTOM_CONTEXT_WINDOW, MAX_CUSTOM_CONTEXT_WINDOW, MIN_CUSTOM_MAX_TOKENS, MAX_CUSTOM_MAX_TOKENS, connectionModelIdsMatch, type ImageSupportMode } from '@config/model-image-support'
 import {
   CUSTOM_MODEL_FETCH_DEBOUNCE_MS,
   customEndpointModelsBlockSave,
@@ -30,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -42,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
 import type { PiModelInfo } from "./tier-models"
 import { PresetBrandMark } from "./PresetBrandMark"
+import { ImageSupportModeControl } from "./ImageSupportModeControl"
 import { buildPiApiKeyModels, piCatalogToRemoteModels } from "./pi-model-submission"
 import {
   ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS,
@@ -79,7 +79,6 @@ import {
   resolveCatalogOrOverrideLimit,
   resolveModelLimitSource,
   resolveModelLimitsStatus,
-  resolveRemoteModelSupportsImages,
   setHasModelId,
   toggleSelectedModel,
   type ModelLimitSource,
@@ -103,6 +102,8 @@ export type SubmittedConnectionModel = string | {
   shortName?: string
   supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   supportsImages?: boolean
+  imageSupport?: 'auto' | 'on' | 'off'
+  learnedSupportsImages?: boolean
   contextWindow?: number
   maxTokens?: number
 }
@@ -167,6 +168,9 @@ export interface ApiKeyInputProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelImageModes?: Record<string, ImageSupportMode>
+    /** Learned "this model rejected images" flags. Only meaningful while the mode is auto. */
+    modelImageLearned?: Record<string, boolean>
     modelThinkingLevels?: Record<string, Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelThinkingModes?: Record<string, 'unsupported' | 'always-on' | 'levels'>
     modelContextWindows?: Record<string, number>
@@ -312,8 +316,15 @@ export function ApiKeyInput({
   const [fetchModelsPhase, setFetchModelsPhase] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle')
   const [modelFetchNonce, setModelFetchNonce] = useState(0)
   modelsEditedRef.current = modelsEdited
-  const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
-    () => ({ ...initialValues?.modelImageCaps }),
+  const [modelImageModes, setModelImageModes] = useState<Record<string, ImageSupportMode>>(() => {
+    const modes: Record<string, ImageSupportMode> = { ...initialValues?.modelImageModes }
+    for (const [id, value] of Object.entries(initialValues?.modelImageCaps ?? {})) {
+      if (modes[id] === undefined && typeof value === 'boolean') modes[id] = value ? 'on' : 'off'
+    }
+    return modes
+  })
+  const [modelImageLearned, setModelImageLearned] = useState<Record<string, boolean>>(
+    () => ({ ...initialValues?.modelImageLearned }),
   )
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, ThinkingLevel[]>>(() => ({ ...initialValues?.modelThinkingLevels }))
   const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(
@@ -327,6 +338,55 @@ export function ApiKeyInput({
   const [limitError, setLimitError] = useState<string | null>(null)
 
   const isDisabled = disabled || status === 'validating'
+
+  function clearLearnedImageSupport(id: string) {
+    setModelImageLearned((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const key of Object.keys(next)) {
+        if (connectionModelIdsMatch(key, id)) {
+          delete next[key]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }
+
+  function imagePayload(id: string): {
+    imageSupport?: ImageSupportMode
+    supportsImages?: boolean
+    learnedSupportsImages?: false
+  } {
+    const mode = lookupRecordByModelId(modelImageModes, id) ?? 'auto'
+    if (mode === 'on' || mode === 'off') {
+      return { imageSupport: mode, supportsImages: mode === 'on' }
+    }
+    if (lookupRecordByModelId(modelImageLearned, id) === false) {
+      return { imageSupport: 'auto', learnedSupportsImages: false }
+    }
+    return {}
+  }
+
+  function renderImageSupport(id: string, modelName: string) {
+    const mode = lookupRecordByModelId(modelImageModes, id) ?? 'auto'
+    return (
+      <ImageSupportModeControl
+        modelName={modelName}
+        value={mode}
+        learnedOff={mode === 'auto' && lookupRecordByModelId(modelImageLearned, id) === false}
+        disabled={isDisabled}
+        onChange={(next) => {
+          setModelImageModes((prev) => ({ ...prev, [id]: next }))
+          if (next !== 'auto') clearLearnedImageSupport(id)
+        }}
+        onResetLearned={() => {
+          setModelImageModes((prev) => ({ ...prev, [id]: 'auto' }))
+          clearLearnedImageSupport(id)
+        }}
+      />
+    )
+  }
 
   const isPiApiKeyFlow = providerType === 'pi_api_key'
   const isOrderPreset = activePreset === 'order-openai'
@@ -438,15 +498,6 @@ export function ApiKeyInput({
           setRemoteModels(piCatalogToRemoteModels(models))
           setRemoteModelsFailed(false)
           setRemoteModelsError(isOrderPreset && models.length === 0 ? t('apiSetup.noModels') : null)
-          setModelImageCaps((prev) => {
-            const next = { ...prev }
-            for (const model of models) {
-              if (next[model.id] === undefined && typeof model.supportsImages === 'boolean') {
-                next[model.id] = model.supportsImages
-              }
-            }
-            return next
-          })
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return
@@ -606,15 +657,6 @@ export function ApiKeyInput({
         fetchedIds: models.map((model) => model.id),
         preserveExisting: modelsEditedRef.current,
       }))
-      setModelImageCaps((prev) => {
-        const next = { ...prev }
-        for (const model of models) {
-          if (next[model.id] === undefined && typeof model.supportsImages === 'boolean') {
-            next[model.id] = model.supportsImages
-          }
-        }
-        return next
-      })
       setModelError(null)
       setFetchModelsPhase('ready')
     } catch {
@@ -727,7 +769,7 @@ export function ApiKeyInput({
         models: buildPiApiKeyModels(selected, piModels, {
           contextWindows: modelContextWindows,
           maxTokens: modelMaxTokens,
-        }),
+        }).map((model) => ({ ...model, ...imagePayload(model.id) })),
         piAuthProvider: effectivePiAuthProvider,
         modelSelectionMode: 'userDefined3Tier',
       })
@@ -754,7 +796,7 @@ export function ApiKeyInput({
         ? buildPiApiKeyModels(parsedModels, piModels, {
           contextWindows: modelContextWindows,
           maxTokens: modelMaxTokens,
-        })
+        }).map((model) => ({ ...model, ...imagePayload(model.id) }))
         : undefined
       onSubmit({
         apiKey: '',
@@ -769,7 +811,12 @@ export function ApiKeyInput({
           },
         } : {}),
         connectionDefaultModel: parsedModels[0],
-        models: catalogModels ?? (parsedModels.length > 0 ? parsedModels : undefined),
+        models: catalogModels ?? (parsedModels.length > 0
+          ? parsedModels.map((id) => {
+            const image = imagePayload(id)
+            return Object.keys(image).length > 0 ? { id, ...image } : id
+          })
+          : undefined),
         ...(catalogModels ? { modelSelectionMode: 'userDefined3Tier' as const } : {}),
       })
       return
@@ -789,15 +836,14 @@ export function ApiKeyInput({
         const { remote, contextWindow: rawContextWindow, maxTokens: rawMaxTokens } = resolveEditableLimits(id)
         const contextWindow = persistCustomContextWindow(rawContextWindow)
         const maxTokens = persistCustomMaxTokens(rawMaxTokens, contextWindow)
-        const supportsImages = resolveRemoteModelSupportsImages(
-          remote ?? { id, name: id },
-          lookupRecordByModelId(modelImageCaps, id),
-        )
+        const image = imagePayload(id)
         return buildCustomEndpointModelSubmission({
           id,
           name: remote?.name,
           includeDisplayNames: isOrderPreset,
-          supportsImages,
+          imageSupport: image.imageSupport,
+          supportsImages: image.supportsImages,
+          learnedSupportsImages: image.learnedSupportsImages,
           supportedThinkingLevels: modelThinkingLevels[id] ?? (initialValues ? undefined : []),
           thinkingMode: initialValues?.modelThinkingModes?.[id],
           contextWindow,
@@ -1306,6 +1352,22 @@ export function ApiKeyInput({
         </div>
       )}
 
+      {!showCustomModelLimits && selectedCustomModelIds.length > 0 && (
+        <div className="space-y-3">
+          {selectedCustomModelIds.map((id) => {
+            const listed = piModels.find((model) => connectionModelIdsMatch(model.id, id))
+              ?? remoteModels.find((model) => connectionModelIdsMatch(model.id, id))
+            const modelName = listed?.name ?? id
+            return (
+              <div key={id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <span className="min-w-0 truncate text-sm font-medium" title={modelName}>{modelName}</span>
+                {renderImageSupport(id, modelName)}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {showCustomModelLimits && (
         <div className="space-y-5">
           <div className="space-y-1">
@@ -1320,21 +1382,12 @@ export function ApiKeyInput({
             </p>
           </div>
           {selectedLimitRows.map(({ id, remote, contextWindow, maxTokens, contextSource, maxSource }) => {
-            const supportsImages = resolveRemoteModelSupportsImages(
-              remote ?? { id, name: id },
-              lookupRecordByModelId(modelImageCaps, id),
-            )
             const limitsInvalid = !isValidModelLimitCombination(maxTokens, contextWindow)
             return (
               <section key={id} className="rounded-xl border border-border bg-background p-4">
                 <header className="mb-4 flex items-center justify-between gap-3">
                   <h3 className="min-w-0 truncate text-sm font-semibold" title={remote?.name ?? id}>{remote?.name ?? id}</h3>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Label htmlFor={`multimodal-${id}`} className="text-xs font-normal text-muted-foreground">{t('apiSetup.multimodal')}</Label>
-                    <Switch id={`multimodal-${id}`} checked={supportsImages} disabled={isDisabled}
-                      onCheckedChange={checked => setModelImageCaps(prev => ({ ...prev, [id]: checked }))}
-                      aria-label={`${remote?.name ?? id}: ${t('apiSetup.multimodal')}`} />
-                  </div>
+                  {renderImageSupport(id, remote?.name ?? id)}
                 </header>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <ModelLimitInput

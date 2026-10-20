@@ -47,14 +47,14 @@ describe('modelSupportsImages — pi_compat precedence', () => {
     expect(modelSupportsImages(conn, 'plain')).toBe(true)
   })
 
-  it('returns false when neither per-model override nor connection default is set', () => {
+  it('tries images when neither per-model override nor connection default is set', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['plain'] }
-    expect(modelSupportsImages(conn, 'plain')).toBe(false)
+    expect(modelSupportsImages(conn, 'plain')).toBe(true)
   })
 
-  it('returns false when the model is not in models[] (matches Pi default)', () => {
+  it('tries images when the model is not in models[]', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['plain'] }
-    expect(modelSupportsImages(conn, 'unknown')).toBe(false)
+    expect(modelSupportsImages(conn, 'unknown')).toBe(true)
   })
 
   it('returns connection default when the model is missing but connection default is true', () => {
@@ -95,16 +95,12 @@ describe('modelSupportsImages — pi_compat precedence', () => {
     expect(modelSupportsImages(conn, 'pi/Laufry')).toBe(true)
   })
 
-  it('does not infer vision for unknown ORDER names', () => {
-    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Maylo'] }
-    expect(modelSupportsImages(conn, 'Maylo')).toBe(false)
-  })
-
-  it('does not treat octopus, omnibox, or vllm names as vision', () => {
-    const conn: LlmConnection = { ...BASE_COMPAT, models: ['octopus', 'omnibox', 'foo-vllm'] }
-    expect(modelSupportsImages(conn, 'octopus')).toBe(false)
-    expect(modelSupportsImages(conn, 'omnibox')).toBe(false)
-    expect(modelSupportsImages(conn, 'foo-vllm')).toBe(false)
+  it('tries images for unknown names that are not in the known table', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Maylo', 'octopus', 'omnibox', 'foo-vllm'] }
+    expect(modelSupportsImages(conn, 'Maylo')).toBe(true)
+    expect(modelSupportsImages(conn, 'octopus')).toBe(true)
+    expect(modelSupportsImages(conn, 'omnibox')).toBe(true)
+    expect(modelSupportsImages(conn, 'foo-vllm')).toBe(true)
   })
 })
 
@@ -196,22 +192,32 @@ describe('resolveConnectionModelMaxTokens', () => {
   })
 })
 
-describe('modelSupportsImages — non-pi_compat fallthrough', () => {
-  it('returns true for anthropic regardless of override (renderer does not gate built-in catalogs)', () => {
+describe('modelSupportsImages — every API-key provider', () => {
+  it('honors an explicit off for a built-in provider', () => {
     const conn: LlmConnection = {
       slug: 'a', name: 'a', providerType: 'anthropic', authType: 'api_key',
       models: [{ id: 'claude-haiku', supportsImages: false } as never],
       createdAt: 1,
     }
-    expect(modelSupportsImages(conn, 'claude-haiku')).toBe(true)
+    expect(modelSupportsImages(conn, 'claude-haiku')).toBe(false)
   })
 
-  it('returns true for pi regardless of override', () => {
+  it('honors an explicit off for a Pi API-key connection', () => {
     const conn: LlmConnection = {
       slug: 'p', name: 'p', providerType: 'pi', authType: 'api_key',
       models: [{ id: 'gpt-x', supportsImages: false } as never],
       createdAt: 1,
     }
-    expect(modelSupportsImages(conn, 'gpt-x')).toBe(true)
+    expect(modelSupportsImages(conn, 'gpt-x')).toBe(false)
+  })
+
+  it('tries images for an undeclared Pi API-key model', () => {
+    const conn: LlmConnection = {
+      slug: 'p', name: 'p', providerType: 'pi', authType: 'api_key',
+      models: [{ id: 'pi/deepseek-flash' } as never],
+      createdAt: 1,
+    }
+    expect(modelSupportsImages(conn, 'pi/deepseek-flash')).toBe(true)
+    expect(modelSupportsImages(conn, 'pi/some-new-model')).toBe(true)
   })
 })

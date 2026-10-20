@@ -23,6 +23,11 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
  */
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
+import {
+  alignModelImageInput,
+  planUnsupportedImageRetry,
+  resolveModelImageSupportFromCatalog,
+} from '../../shared/src/config/model-image-support.ts';
 import { streamTrace } from '../../shared/src/stream-trace.ts';
 import { createSessionHistoryTool } from './context-retention.ts';
 import { setModelRequestGate } from '../../shared/src/model-request-gate';
@@ -182,7 +187,7 @@ interface InitMessage {
   /** Independent budget for a spawned agent; roots omit this value. */
   swarmAgentTokenBudget?: number;
   customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
 }
 
@@ -194,7 +199,7 @@ interface RuntimeConfigUpdateMessage {
   authType?: string;
   baseUrl?: string;
   customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean }>;
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -330,6 +335,11 @@ interface OutboundRuntimeConfigUpdateResult {
 interface OutboundSessionIdUpdate { type: 'session_id_update'; sessionId: string }
 interface OutboundAnySearchApiKeyRequest { type: 'anysearch_api_key_request'; id: string }
 interface OutboundError { type: 'error'; message: string; code?: string }
+interface OutboundImageInputSkipped {
+  type: 'image_input_skipped';
+  modelId: string;
+  imageCount: number;
+}
 interface OutboundThinkingProbe {
   type: 'thinking_probe';
   modelId: string;
@@ -359,6 +369,7 @@ type OutboundMessage =
   | OutboundAnySearchApiKeyRequest
   | OutboundSessionIdUpdate
   | OutboundThinkingProbe
+  | OutboundImageInputSkipped
   | OutboundError;
 
 // ============================================================
@@ -394,6 +405,7 @@ let unsubscribeEvents: (() => void) | null = null;
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
 let thinkingEffortRetried = false;
+let promptToolsStarted = false;
 const modelRequestSlots = createModelRequestSlots(message => send(message));
 
 function applyCompactionPolicy(model: { contextWindow?: number } | undefined, enabled: boolean): void {
@@ -673,13 +685,15 @@ function registerCustomEndpointModels(
 ): void {
   for (const m of models) {
     customEndpointModelIds.add(m.id);
-    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined || m.supportedThinkingLevels !== undefined || m.thinkingMode) {
+    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined || m.imageSupport || m.learnedSupportsImages !== undefined || m.supportedThinkingLevels !== undefined || m.thinkingMode) {
       customModelOverrides.set(m.id, {
         ...(m.thinkingMode ? { thinkingMode: m.thinkingMode } : {}),
         ...(m.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: m.supportedThinkingLevels } : {}),
         ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
         ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
         ...(m.supportsImages !== undefined ? { supportsImages: m.supportsImages } : {}),
+        ...(m.imageSupport ? { imageSupport: m.imageSupport } : {}),
+        ...(m.learnedSupportsImages !== undefined ? { learnedSupportsImages: m.learnedSupportsImages } : {}),
       });
     }
   }
@@ -1707,6 +1721,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
   // Detect session MCP tool completions + enrich tool starts with canonical metadata
   if (event.type === 'tool_execution_start') {
+    promptToolsStarted = true;
     const toolName = event.toolName;
     if (toolName.startsWith('session__') || toolName.startsWith('mcp__session__')) {
       const mcpToolName = toolName.replace(/^(mcp__session__|session__)/, '');
@@ -1903,8 +1918,45 @@ async function retryPromptForUnsupportedEffort(
   return true;
 }
 
+function activeModelImageResolution(model: { id?: string; name?: string } | undefined) {
+  const modelId = model?.id || initConfig?.model || '';
+  return resolveModelImageSupportFromCatalog({
+    modelId,
+    modelName: model?.name,
+    models: initConfig?.customModels,
+    endpointSupportsImages: initConfig?.customEndpoint?.supportsImages,
+  });
+}
+
+function alignActiveModelImageInput(session: AgentSession): ReturnType<typeof activeModelImageResolution> {
+  const model = session.model as { id?: string; name?: string; input?: string[] };
+  const resolution = activeModelImageResolution(model);
+  const aligned = alignModelImageInput(model, resolution.supportsImages);
+  if (aligned.input && aligned.input !== model.input) model.input = [...aligned.input];
+  return resolution;
+}
+
+function rememberRejectedImageInput(modelId: string): void {
+  if (!initConfig || !modelId) return;
+  const models = [...(initConfig.customModels ?? [])];
+  const index = models.findIndex(model => {
+    const id = typeof model === 'string' ? model : model.id;
+    return id === modelId || id.endsWith(`/${modelId}`) || modelId.endsWith(`/${id}`);
+  });
+  const learned = { id: modelId, imageSupport: 'auto' as const, learnedSupportsImages: false as const };
+  if (index === -1) models.push(learned);
+  else {
+    const current = models[index]!;
+    models[index] = typeof current === 'string'
+      ? { id: current, imageSupport: 'auto', learnedSupportsImages: false }
+      : { ...current, imageSupport: 'auto', learnedSupportsImages: false, supportsImages: undefined };
+  }
+  initConfig = { ...initConfig, customModels: models };
+}
+
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   thinkingEffortRetried = false;
+  promptToolsStarted = false;
   const promptController = new AbortController();
   pendingOperationControllers.add(promptController);
   currentUserMessage = msg.message;
@@ -1916,6 +1968,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   answerBatchSize = 0;
   answerBatchGate.reset();
   const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined;
+  let imageResolution = activeModelImageResolution(undefined);
 
   try {
     // If proxy tools changed since last session creation, dispose and recreate.
@@ -1960,10 +2013,13 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // session object. Restore the trigger before the SDK's pre-prompt check.
     applyCompactionPolicy(session.model, session.autoCompactionEnabled);
 
+    imageResolution = alignActiveModelImageInput(session);
     if (promptImages) {
       debugLog(`image-input ${JSON.stringify({
         requestId: msg.id,
         payloadImageCount: promptImages.length,
+        learnable: imageResolution.learnable,
+        source: imageResolution.source,
         images: describePromptImages(promptImages),
       })}`);
     }
@@ -1987,6 +2043,33 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
       try {
         const retried = await retryPromptForUnsupportedEffort(piSession, errorMsg, msg.message, promptImages);
         if (retried) return;
+      } catch (retryError) {
+        reported = retryError;
+      }
+    }
+    const reportedBeforeImageRetry = reported instanceof Error ? reported.message : String(reported);
+    const imageRetry = piSession
+      ? planUnsupportedImageRetry({
+        error: reportedBeforeImageRetry,
+        message: msg.message,
+        imageCount: promptImages?.length ?? 0,
+        toolsStarted: promptToolsStarted,
+        alreadyRetried: false,
+        learnable: imageResolution.learnable,
+      })
+      : null;
+    if (piSession && imageRetry) {
+      try {
+        const model = piSession.model as { id?: string; input?: string[] };
+        const modelId = model.id || initConfig?.model || '';
+        if (model.input) {
+          const textOnly = alignModelImageInput(model, false);
+          model.input = [...(textOnly.input ?? ['text'])];
+        }
+        rememberRejectedImageInput(modelId);
+        send({ type: 'image_input_skipped', modelId, imageCount: promptImages?.length ?? 0 });
+        await piSession.prompt(imageRetry.message, { streamingBehavior: 'followUp' });
+        return;
       } catch (retryError) {
         reported = retryError;
       }

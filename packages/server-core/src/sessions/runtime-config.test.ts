@@ -158,6 +158,25 @@ describe('filterAttachmentsForModelInput', () => {
     expect(result.omittedImages).toEqual([pathOnlyImage])
     expect(result.attachments).toBeUndefined()
   })
+
+  it('soft-skips a known text-only model and still returns the other attachments', () => {
+    const connection: LlmConnection = {
+      slug: 'deepseek',
+      name: 'DeepSeek',
+      providerType: 'pi',
+      authType: 'api_key',
+      createdAt: 1,
+      models: [{ id: 'deepseek-v4-pro' } as never],
+    }
+    const result = filterAttachmentsForModelInput(
+      [imageAttachment, textAttachment],
+      connection,
+      'pi/deepseek-v4-pro',
+    )
+    expect(result.resolution?.source).toBe('known')
+    expect(result.omittedImages).toEqual([imageAttachment])
+    expect(result.attachments).toEqual([textAttachment])
+  })
 })
 
 describe('prepareModelImageAttachments', () => {
@@ -227,6 +246,27 @@ describe('prepareModelImageAttachments', () => {
       code: 'image_capability_mismatch',
       payloadImageCount: 0,
     })
+  })
+
+  it('skips known text-only images without failing the turn', () => {
+    const result = prepareModelImageAttachments({
+      attachments: [imageAttachment, textAttachment],
+      connection: {
+        slug: 'deepseek',
+        name: 'DeepSeek',
+        providerType: 'pi',
+        authType: 'api_key',
+        createdAt: 1,
+        models: [{ id: 'pi/deepseek-chat' } as never],
+      },
+      modelId: 'deepseek-chat',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.payloadImageCount).toBe(0)
+    expect(result.skippedImages).toEqual([imageAttachment])
+    expect(result.attachments).toEqual([textAttachment])
   })
 
   it('hydrates live path-only attachments from storedPath metadata', () => {

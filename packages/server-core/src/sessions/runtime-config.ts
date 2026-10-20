@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs'
 import type { AgentProvider, LlmAuthType } from '@craft-agent/shared/agent/backend'
-import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@craft-agent/shared/config'
+import { isCompatProvider, resolveModelImageSupportFromCatalog, type ImageSupportResolution, type LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
 import {
   describeImageAttachment,
@@ -25,6 +25,8 @@ export interface ModelAttachmentFilterResult {
   attachments?: FileAttachment[]
   /** Image attachments intentionally omitted from the model payload. */
   omittedImages: FileAttachment[]
+  /** Present when a connection was available to classify image input. */
+  resolution?: ImageSupportResolution
 }
 
 /** Text sentinels are model output, so they cannot reliably delimit an answer. */
@@ -47,6 +49,10 @@ function normalizeCustomModels(connection: LlmConnection): Array<Record<string, 
         contextWindow: model.contextWindow,
         maxTokens: model.maxTokens,
         supportsImages: typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined,
+        imageSupport: model.imageSupport === 'auto' || model.imageSupport === 'on' || model.imageSupport === 'off'
+          ? model.imageSupport
+          : undefined,
+        learnedSupportsImages: typeof model.learnedSupportsImages === 'boolean' ? model.learnedSupportsImages : undefined,
       })
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)))
@@ -122,9 +128,10 @@ export function isImageAttachment(attachment: Pick<FileAttachment, 'type' | 'mim
 }
 
 /**
- * Classify attachments that a text-only custom endpoint must not receive.
- * Callers must treat `omittedImages` as a hard send failure (#61), not a
- * silent text-only fallback.
+ * Classify attachments a model must not receive.
+ * An explicit user "off" is a hard send failure (#61). Known, learned, and
+ * endpoint text-only results are a soft skip: the caller drops the images,
+ * tells the user, and still sends the turn.
  */
 export function filterAttachmentsForModelInput(
   attachments: FileAttachment[] | undefined,
@@ -132,8 +139,13 @@ export function filterAttachmentsForModelInput(
   modelId: string,
 ): ModelAttachmentFilterResult {
   if (!attachments?.length) return { attachments, omittedImages: [] }
-  if (!connection || !isCompatProvider(connection.providerType)) return { attachments, omittedImages: [] }
-  if (modelSupportsImages(connection, modelId)) return { attachments, omittedImages: [] }
+  if (!connection) return { attachments, omittedImages: [] }
+  const resolution = resolveModelImageSupportFromCatalog({
+    modelId,
+    models: connection.models,
+    endpointSupportsImages: connection.customEndpoint?.supportsImages,
+  })
+  if (resolution.supportsImages) return { attachments, omittedImages: [], resolution }
 
   const modelAttachments: FileAttachment[] = []
   const omittedImages: FileAttachment[] = []
@@ -149,6 +161,7 @@ export function filterAttachmentsForModelInput(
   return {
     attachments: modelAttachments.length > 0 ? modelAttachments : undefined,
     omittedImages,
+    resolution,
   }
 }
 
@@ -165,6 +178,8 @@ export type PrepareModelImageAttachmentsResult =
       attachments?: HydratableAttachment[]
       diagnostics: ImageBlockDiagnostic[]
       payloadImageCount: number
+      /** Images removed because auto mode already knows this model cannot view them. */
+      skippedImages?: FileAttachment[]
     }
   | {
       ok: false
@@ -198,7 +213,7 @@ export function prepareModelImageAttachments(
     input.connection,
     input.modelId,
   )
-  if (capability.omittedImages.length > 0) {
+  if (capability.omittedImages.length > 0 && capability.resolution?.source === 'explicit') {
     const names = capability.omittedImages.map(attachment => attachment.name).join(', ')
     return {
       ok: false,
@@ -206,6 +221,17 @@ export function prepareModelImageAttachments(
       message: `Image input is disabled for ${input.modelId}. ${names} ${capability.omittedImages.length === 1 ? 'was' : 'were'} not sent.`,
       diagnostics: capability.omittedImages.map(attachment => describeImageAttachment(attachment)),
       payloadImageCount: 0,
+    }
+  }
+
+  if (capability.omittedImages.length > 0) {
+    const hydrated = hydrateAttachmentBytes(capability.attachments as HydratableAttachment[] | undefined)
+    return {
+      ok: true,
+      attachments: hydrated,
+      diagnostics: [],
+      payloadImageCount: 0,
+      skippedImages: capability.omittedImages,
     }
   }
 
