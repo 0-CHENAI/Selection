@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'bun:test'
+import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { FreeFormInputContextBadge } from '../FreeFormInputContextBadge'
+
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
+mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }))
+
+let FreeFormInputContextBadge: typeof import('../FreeFormInputContextBadge').FreeFormInputContextBadge
+
+beforeAll(async () => {
+  ;({ FreeFormInputContextBadge } = await import('../FreeFormInputContextBadge'))
+})
 
 function badge(selectionChrome?: boolean) {
   return renderToStaticMarkup(
