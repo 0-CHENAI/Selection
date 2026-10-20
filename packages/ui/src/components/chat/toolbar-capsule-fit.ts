@@ -1,17 +1,31 @@
 /** Gap between the centered capsule and the toolbar buttons on either side. */
 export const TOOLBAR_CLUSTER_GAP = 8
 
-/** Composer toolbar controls (permission, files, docked capsule) share this height. */
+/**
+ * Border box shared by the composer toolbar controls.
+ * Permission, session files, the collapsed task pill, and the back-to-bottom
+ * circle all use this. The document font size is 15px, so a rem height such as
+ * `h-7` (1.75rem = 26.25px) is not this box.
+ */
 export const TOOLBAR_CONTROL_HEIGHT = 30
 
+/** Glass shell border on each edge (`border` = 1px). Included in the control's border box. */
+export const TOOLBAR_SHELL_BORDER = 1
+
 /**
- * Collapsed toolbar capsule corners. Half the 30px control, so a resting capsule is a pill.
+ * Collapsed pill content box. The shell adds one border on the top and bottom,
+ * so this plus both borders is `TOOLBAR_CONTROL_HEIGHT`.
+ */
+export const TOOLBAR_CAPSULE_CONTENT_HEIGHT = TOOLBAR_CONTROL_HEIGHT - TOOLBAR_SHELL_BORDER * 2
+
+/**
+ * Collapsed toolbar capsule corners. Half the control, so a resting capsule is a pill.
  * The shell spring moves this to the panel's 16px radius; it is not a separate scale.
  */
 export const TOOLBAR_CAPSULE_RADIUS = TOOLBAR_CONTROL_HEIGHT / 2
 
-/** Fused back-to-bottom control while it sits in the toolbar row. */
-export const TOOLBAR_SCROLL_SIZE = 30
+/** Fused back-to-bottom control. Same border box as the toolbar buttons, so it stays a circle. */
+export const TOOLBAR_SCROLL_SIZE = TOOLBAR_CONTROL_HEIGHT
 
 export const TOOLBAR_BUTTON_GAP = 6
 

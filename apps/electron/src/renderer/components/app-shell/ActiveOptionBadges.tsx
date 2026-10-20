@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@craft-agent/ui/chat'
+import { TOOLBAR_CONTROL_HEIGHT, TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@craft-agent/ui/chat'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Check, ChevronDown, FolderOpen } from 'lucide-react'
@@ -120,13 +120,19 @@ function occupiedWidth(element: HTMLElement): number {
 
 function toolbarControlLayout(iconsOnly: boolean, side: 'permission' | 'files') {
   return cn(
-    'flex h-[30px] shrink-0 items-center rounded-[8px] text-xs font-medium',
+    'flex shrink-0 items-center rounded-[8px] text-xs font-medium',
     iconsOnly
-      ? 'w-[30px] justify-center px-0'
+      ? 'justify-center px-0'
       : side === 'permission'
         ? 'gap-1.5 pl-2.5 pr-2'
         : 'gap-1.5 pl-[12px] pr-[14px]',
   )
+}
+
+function toolbarControlStyle(iconsOnly: boolean): React.CSSProperties {
+  return iconsOnly
+    ? { height: TOOLBAR_CONTROL_HEIGHT, width: TOOLBAR_CONTROL_HEIGHT }
+    : { height: TOOLBAR_CONTROL_HEIGHT }
 }
 
 function useToolbarCapsuleFit(enabled: boolean) {
@@ -305,7 +311,8 @@ export function ActiveOptionBadges({
       ref={rowRef}
       data-toolbar-row=""
       data-toolbar-icons={iconsOnly ? 'true' : 'false'}
-      className={cn("relative flex min-h-[30px] min-w-0 flex-nowrap items-center gap-2 px-px", className)}
+      style={{ minHeight: TOOLBAR_CONTROL_HEIGHT }}
+      className={cn("relative flex min-w-0 flex-nowrap items-center gap-2 px-px", className)}
     >
       {/* Left side: permission → Swarm → labels stack */}
       <div ref={leftRef} className="flex min-w-0 flex-1 items-center gap-2 basis-auto">
@@ -501,7 +508,7 @@ function FilesPopoverButton({
 
   if (!sessionId) {
     return (
-      <button type="button" disabled data-toolbar-files="" aria-label={label} className={className}>
+      <button type="button" disabled data-toolbar-files="" aria-label={label} className={className} style={toolbarControlStyle(iconsOnly)}>
         {content}
       </button>
     )
@@ -512,7 +519,7 @@ function FilesPopoverButton({
       sessionId={sessionId}
       sessionFolderPath={sessionFolderPath}
       trigger={(
-        <button type="button" data-toolbar-files="" aria-label={label} className={className}>
+        <button type="button" data-toolbar-files="" aria-label={label} className={className} style={toolbarControlStyle(iconsOnly)}>
           {content}
         </button>
       )}
@@ -526,19 +533,19 @@ function ToolbarWidthProbes({ permissionMode }: { permissionMode?: PermissionMod
   const filesLabel = t('chat.sessionInfo')
   return (
     <div data-toolbar-measure="" className="pointer-events-none absolute left-0 top-0 -z-10 flex w-max flex-col items-start opacity-0" aria-hidden>
-      <span data-toolbar-measure="perm-text" className={toolbarControlLayout(false, 'permission')}>
+      <span data-toolbar-measure="perm-text" className={toolbarControlLayout(false, 'permission')} style={toolbarControlStyle(false)}>
         {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
         <span className="whitespace-nowrap">{modeLabel}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </span>
-      <span data-toolbar-measure="perm-icon" className={toolbarControlLayout(true, 'permission')}>
+      <span data-toolbar-measure="perm-icon" className={toolbarControlLayout(true, 'permission')} style={toolbarControlStyle(true)}>
         {permissionMode && <PermissionModeIcon mode={permissionMode} className="h-3.5 w-3.5 shrink-0" />}
       </span>
-      <span data-toolbar-measure="files-text" className={toolbarControlLayout(false, 'files')}>
+      <span data-toolbar-measure="files-text" className={toolbarControlLayout(false, 'files')} style={toolbarControlStyle(false)}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0" />
         <span className="whitespace-nowrap">{filesLabel}</span>
       </span>
-      <span data-toolbar-measure="files-icon" className={toolbarControlLayout(true, 'files')}>
+      <span data-toolbar-measure="files-icon" className={toolbarControlLayout(true, 'files')} style={toolbarControlStyle(true)}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0" />
       </span>
     </div>
@@ -607,7 +614,7 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
             "shadow-tinted outline-none select-none",
             currentStyle.className
           )}
-          style={{ '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
+          style={{ ...toolbarControlStyle(iconsOnly), '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
         >
           <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5 shrink-0" />
           <span data-toolbar-label="" className={cn("flex items-center gap-1.5", iconsOnly && "hidden")}>
