@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { ThinkLeakBuffer, splitThinkDelimiter } from './think-delimiter.ts'
+import { ThinkLeakBuffer, splitThinkDelimiter } from '../think-delimiter.ts'
 
 describe('splitThinkDelimiter', () => {
   it('splits a bare close delimiter and keeps the answer', () => {
