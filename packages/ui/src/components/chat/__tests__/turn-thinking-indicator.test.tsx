@@ -485,13 +485,35 @@ it('keeps thinking and intermediate rounds inside the chain and the final reply 
   expect(chainStart).toBeGreaterThan(-1)
   expect(replyStart).toBeGreaterThan(chainStart)
   const chain = html.slice(chainStart, replyStart)
-  expect(chain).toContain('先看安装情况')
+  expect(chain).toContain('已深度思考')
+  expect(chain).not.toContain('先看安装情况')
+  expect(chain).not.toContain('签名已经失效')
   expect(chain).toContain('Zen 1.23.2b installed, and there are two fresh crash reports.')
   expect(chain).toContain('Crash reason: Code Signature Invalid')
   expect(countOccurrences(chain, 'data-thinking-step=""')).toBe(2)
+  expect(countOccurrences(chain, 'data-process-step=""')).toBe(4)
   expect(html.slice(replyStart)).not.toContain('data-thinking-step')
   expect(html).not.toContain('data-thinking-done')
   expect(html).not.toContain('<details')
-  expect(html).not.toContain('已深度思考')
   expect(countOccurrences(chain, 'role="button"')).toBeGreaterThanOrEqual(2)
+})
+
+it('collapses a long intermediate narrative to one process step instead of the prose', async () => {
+  const prose = '让我先探索项目结构。\n\n' + '继续读配置与入口。'.repeat(20)
+  const html = await renderTurn('zh-Hans', [
+    { id: 'note', type: 'intermediate', status: 'completed', content: prose, timestamp: 1 },
+    { id: 'tool', type: 'tool', status: 'completed', toolName: 'Read', intent: '读入口', timestamp: 2 },
+  ], {
+    isComplete: true,
+    isStreaming: false,
+    expanded: true,
+    onOpenActivityDetails: () => {},
+    response: { text: '结论写在这里。', isStreaming: false, messageId: 'final' },
+  })
+  const chain = html.slice(html.indexOf('data-process-chain'), html.indexOf('结论写在这里。'))
+  expect(chain).toContain('已深度思考')
+  expect(chain).not.toContain('继续读配置与入口。继续读配置与入口。')
+  expect(chain).toContain('data-process-step')
+  expect(html).not.toContain('<details')
+  expect(html.slice(html.indexOf('结论写在这里。'))).toContain('结论写在这里。')
 })

@@ -249,6 +249,52 @@ describe('PiEventAdapter', () => {
       expect(completed[1].turnId).toBe(streamed[0].turnId);
     });
 
+    it('routes a leaked think block out of the visible text stream', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const opened = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '<think>先整理' },
+      } as any));
+      const closed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '结构</think>结论在这里。' },
+      } as any));
+      const done = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: '<think>先整理结构</think>结论在这里。' }],
+        },
+      } as any));
+      const visible = [...opened, ...closed].filter(event => event.type === 'text_delta' && !String(event.turnId).includes('__think'));
+      expect(visible.map(event => event.text).join('')).toBe('结论在这里。');
+      expect([...opened, ...closed].some(event => event.type === 'text_delta' && String(event.turnId).includes('__think'))).toBe(true);
+      const answer = done.find(event => event.type === 'text_complete' && event.isIntermediate !== true);
+      expect(answer).toMatchObject({ text: '结论在这里。', isIntermediate: false });
+      expect(done.filter(event => event.type === 'text_complete' && event.isIntermediate).map(event => event.text)).not.toContain('先整理结构');
+    });
+
+    it('splits a bare </think> that arrives only on message_end', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const done = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: '推理过程</think>\n\n最终答案' }],
+        },
+      } as any));
+      expect(done.find(event => event.type === 'text_complete' && event.isIntermediate)).toMatchObject({
+        text: '推理过程',
+        phase: 'intermediate',
+      });
+      expect(String(done.find(event => event.type === 'text_complete' && event.isIntermediate).turnId)).toContain('__think');
+      expect(done.find(event => event.type === 'text_complete' && !event.isIntermediate)).toMatchObject({
+        text: '最终答案',
+      });
+    });
+
     it('streams thinking as it arrives and closes it before the reply', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const first = collect(adapter.adaptEvent({

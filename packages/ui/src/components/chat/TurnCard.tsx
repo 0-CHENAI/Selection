@@ -265,6 +265,23 @@ export const SIZE_CONFIG = {
 
 /** Product-standard label paired with the 3x3 grid activity indicator. */
 const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
+/** Completed deep-thinking row. Short process notes keep their own summary. */
+const thoughtDeeplyLabel = () => i18n.t('turnCard.thoughtDeeply')
+const PROCESS_SUMMARY_LIMIT = 72
+
+/**
+ * Completed thinking is implicit. A short one-line process note stays as the
+ * step summary; a paragraph is the same collapsed label, opened from the popup.
+ */
+function collapsedProcessLabel(activity: { type: string; content?: string }): string {
+  const thought = thoughtDeeplyLabel()
+  if (activity.type === 'thinking') return thought
+  const raw = activity.content ?? ''
+  const plain = stripMarkdown(raw)
+  if (!plain) return thought
+  if (/[\r\n]/.test(raw.trim()) || plain.length > PROCESS_SUMMARY_LIMIT) return thought
+  return plain
+}
 
 // ============================================================================
 // Types
@@ -1215,21 +1232,25 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   }
 
   // Commentary and model reasoning stay in the chain as steps.
-  // A running reasoning row keeps the live text; a finished row is one line
-  // that opens the same details popup as any other step.
+  // While tokens are arriving, show a short live preview. Once the step
+  // finishes, the row is a compact label; the same details popup as any
+  // other step holds the full text. No separate thinking panel.
   if (activity.type === 'intermediate' || activity.type === 'thinking') {
     const isRunning = activity.status === 'running'
-    const liveThinking = activity.type === 'thinking' && isRunning && hasRenderableAssistantText(activity.content)
-    const displayContent = stripMarkdown(activity.content || '') || (isRunning ? thinkingStatusLabel() : '')
+    const liveThinking = isRunning && hasRenderableAssistantText(activity.content)
+    const displayContent = liveThinking
+      ? ''
+      : (isRunning ? thinkingStatusLabel() : collapsedProcessLabel(activity))
     const isComplete = activity.status === 'completed'
     return (
       <div
         className="flex items-stretch"
+        data-process-step=""
         data-thinking-step={activity.type === 'thinking' ? '' : undefined}
       >
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
-          data-thinking-live={liveThinking ? '' : undefined}
+          data-thinking-live={liveThinking && activity.type === 'thinking' ? '' : undefined}
           className={cn(
             "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
             liveThinking ? "items-start" : "items-center",
@@ -1245,8 +1266,8 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
             <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
           )}
           <span className={cn(
-            "flex-1",
-            liveThinking ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "truncate",
+            "min-w-0 flex-1",
+            liveThinking ? "line-clamp-2 break-words [overflow-wrap:anywhere]" : "truncate",
             onOpenDetails && isComplete && "group-hover/row:underline",
           )}>{liveThinking ? activity.content : displayContent}</span>
           {/* Open details button */}
@@ -3236,7 +3257,8 @@ export const TurnCard = React.memo(function TurnCard({
   const revealedThinking = useRef(false)
   useEffect(() => {
     if (revealedThinking.current || hasUserToggled.current || isExpanded) return
-    const live = activities.some(activity => activity.type === 'thinking'
+    const live = activities.some(activity =>
+      (activity.type === 'thinking' || activity.type === 'intermediate')
       && activity.status === 'running'
       && hasRenderableAssistantText(activity.content))
     if (!live) return
