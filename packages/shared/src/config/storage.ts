@@ -2870,6 +2870,9 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     imagePixelBudget: updates.imagePixelBudget !== undefined ? updates.imagePixelBudget : existing.imagePixelBudget,
     imageMaxBytes: updates.imageMaxBytes !== undefined ? updates.imageMaxBytes : existing.imageMaxBytes,
     imageMaxDimension: updates.imageMaxDimension !== undefined ? updates.imageMaxDimension : existing.imageMaxDimension,
+    imageTokenFamily: updates.imageTokenFamily !== undefined ? updates.imageTokenFamily : existing.imageTokenFamily,
+    vlHighResolutionImages: updates.vlHighResolutionImages !== undefined ? updates.vlHighResolutionImages : existing.vlHighResolutionImages,
+    imageMaxPixels: updates.imageMaxPixels !== undefined ? updates.imageMaxPixels : existing.imageMaxPixels,
     // Timestamps
     lastUsedAt: updates.lastUsedAt !== undefined ? updates.lastUsedAt : existing.lastUsedAt,
   };

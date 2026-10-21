@@ -302,6 +302,9 @@ export const piDriver: ProviderDriver = {
     imagePixelBudget: context.connection?.imagePixelBudget,
     imageMaxBytes: context.connection?.imageMaxBytes,
     imageMaxDimension: context.connection?.imageMaxDimension,
+    imageTokenFamily: context.connection?.imageTokenFamily,
+    vlHighResolutionImages: context.connection?.vlHighResolutionImages,
+    imageMaxPixels: context.connection?.imageMaxPixels,
     customEndpoint: context.connection?.customEndpoint,
     customModels: context.connection?.models?.map((model) => (
       toCustomEndpointModelPayload(withResolvedContextWindow(model))

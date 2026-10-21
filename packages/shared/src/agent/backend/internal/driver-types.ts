@@ -31,6 +31,10 @@ export interface BackendRuntimePayload extends Record<string, unknown> {
   imagePixelBudget?: number;
   imageMaxBytes?: number;
   imageMaxDimension?: number;
+  /** Explicit image-token family for the compaction precheck. */
+  imageTokenFamily?: string;
+  vlHighResolutionImages?: boolean;
+  imageMaxPixels?: number;
   /** Custom endpoint protocol config (api type for routing). */
   customEndpoint?: { api: string; supportsImages?: boolean };
   /** Models registered for a custom endpoint. Strings default to 128k/8k; objects carry catalog limits. */

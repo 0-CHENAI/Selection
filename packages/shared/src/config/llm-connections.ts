@@ -266,6 +266,15 @@ export interface LlmConnection {
   imageMaxBytes?: number;
   /** Long-edge cap, in pixels, for images sent on this connection. */
   imageMaxDimension?: number;
+  /**
+   * Image-token family for the compaction precheck.
+   * Wins over the auth provider and API host. Never inferred from a model id.
+   */
+  imageTokenFamily?: string;
+  /** DashScope VL high-resolution mode. Raises the pixel budget and caps image tokens at 16384. */
+  vlHighResolutionImages?: boolean;
+  /** Explicit DashScope max_pixels. Also applies the 16384 image-token cap. */
+  imageMaxPixels?: number;
 }
 
 /**

@@ -2,7 +2,7 @@
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
-import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
+import { applyCompactionSettings, installCompactionPolicy, setContextCompactionConnection } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
 import { runManualCompaction } from './manual-compaction.ts';
 import { waitForCompaction } from './wait-for-compaction.ts';
@@ -194,6 +194,10 @@ interface InitMessage {
   imagePixelBudget?: number;
   imageMaxBytes?: number;
   imageMaxDimension?: number;
+  imageTokenFamily?: string;
+  vlHighResolutionImages?: boolean;
+  imageMaxPixels?: number;
+  connectionSlug?: string;
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -208,6 +212,9 @@ interface RuntimeConfigUpdateMessage {
   imagePixelBudget?: number;
   imageMaxBytes?: number;
   imageMaxDimension?: number;
+  imageTokenFamily?: string;
+  vlHighResolutionImages?: boolean;
+  imageMaxPixels?: number;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -412,6 +419,16 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+
+function applyContextMeterConnection(): void {
+  setContextCompactionConnection(initConfig?.connectionSlug ?? '', {
+    piAuthProvider: initConfig?.piAuth?.provider,
+    baseUrl: initConfig?.baseUrl,
+    imageTokenFamily: initConfig?.imageTokenFamily,
+    vlHighResolutionImages: initConfig?.vlHighResolutionImages,
+    imageMaxPixels: initConfig?.imageMaxPixels,
+  });
+}
 
 function currentImageSendPolicy(): ImageSendPolicy {
   return resolveImageSendPolicy({
@@ -950,6 +967,7 @@ async function ensureSession(): Promise<AgentSession> {
   const { session } = await createAgentSession(sessionOptions);
   installToolExecutionOutcomeTracking(session.agent);
   installUnknownToolGuard(session);
+  applyContextMeterConnection();
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
   applyCompactionPolicy(session.model, true);
   piSession = session;
@@ -1871,6 +1889,7 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   // so credentials, model lookup, and the endpoint env all see the same id.
   // The connection record itself is not rewritten.
   initConfig = msg.piAuth ? { ...msg, piAuth: toPiAuth(msg.piAuth, msg.customEndpoint?.api) } : msg;
+  applyContextMeterConnection();
   syncProviderEndpointEnv(initConfig);
 
   // Start callback server for call_llm (idempotent — skips if already running)
@@ -2314,7 +2333,11 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       imagePixelBudget: msg.imagePixelBudget,
       imageMaxBytes: msg.imageMaxBytes,
       imageMaxDimension: msg.imageMaxDimension,
+      imageTokenFamily: msg.imageTokenFamily,
+      vlHighResolutionImages: msg.vlHighResolutionImages,
+      imageMaxPixels: msg.imageMaxPixels,
     };
+    applyContextMeterConnection();
     syncProviderEndpointEnv(initConfig);
 
     if (piModelRegistry) {

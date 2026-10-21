@@ -1,16 +1,31 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { compact, SettingsManager, shouldCompact, type AgentSession, type SessionEntry } from '@earendil-works/pi-coding-agent';
 import { isContextOverflow } from '@earendil-works/pi-ai/compat';
-import { createAssistantMessageEventStream, getCurrentSystemPrompt, normalizeContext, type Model, type AssistantMessage, type Context, type SimpleStreamOptions } from '@earendil-works/pi-ai';
-import { applyCompactionSettings, compactionSettings, installCompactionPolicy, shouldCompactBeforeRequest, COMPACTION_SUMMARY_MAX_TOKENS } from './compaction-policy';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, type Model, type AssistantMessage, type Context, type SimpleStreamOptions } from '@earendil-works/pi-ai';
+import { setContextMeterDirectory } from '../../shared/src/agent/backend/pi/context-meter.ts';
+import { applyCompactionSettings, compactionSettings, installCompactionPolicy, setContextCompactionConnection, shouldCompactBeforeRequest, COMPACTION_SUMMARY_MAX_TOKENS } from './compaction-policy';
+
+setContextMeterDirectory(mkdtempSync(join(tmpdir(), 'context-meter-')));
 
 const model: Model<'openai-responses'> = { id: 'test-model', name: 'Test', api: 'openai-responses', provider: 'openai', baseUrl: 'https://example.test', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1_000_000, maxTokens: 32768 };
 const usage = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 function harness(text = '## Goal\nContinue the requested task.', stopReason: AssistantMessage['stopReason'] = 'stop') {
   const calls: { context: Context; options: SimpleStreamOptions | undefined }[] = [];
+  const compactions: Array<{ kind: 'public' } | { kind: 'auto'; reason: string; willRetry: boolean }> = [];
   let listener: Parameters<AgentSession['subscribe']>[0] | undefined;
-  const state: { compacting: boolean; enabled: boolean; keepRecentTokens: number; reserveTokens: number; branch?: SessionEntry[] } = {
-    compacting: true, enabled: true, keepRecentTokens: 20_000, reserveTokens: 200_001,
+  const state: {
+    compacting: boolean;
+    enabled: boolean;
+    keepRecentTokens: number;
+    reserveTokens: number;
+    agentRunActive: boolean;
+    branch?: SessionEntry[];
+    responseUsage?: AssistantMessage['usage'];
+  } = {
+    compacting: true, enabled: true, keepRecentTokens: 20_000, reserveTokens: 200_001, agentRunActive: false,
   };
   const session = {
     get isCompacting() { return state.compacting; },
@@ -26,6 +41,12 @@ function harness(text = '## Goal\nContinue the requested task.', stopReason: Ass
       },
     },
     sessionManager: { getBranch: () => state.branch ?? [{ type: 'compaction', summary: 'User requires Chinese; pending verification of /src/task.ts.' }] },
+    get _isAgentRunActive() { return state.agentRunActive; },
+    compact: async () => { compactions.push({ kind: 'public' }); },
+    _runAutoCompaction: async (reason: 'threshold' | 'overflow', willRetry: boolean) => {
+      compactions.push({ kind: 'auto', reason, willRetry });
+    },
+    prompt: async () => undefined,
     subscribe: (callback: Parameters<AgentSession['subscribe']>[0]) => {
       listener = callback;
       return () => { listener = undefined; };
@@ -33,14 +54,18 @@ function harness(text = '## Goal\nContinue the requested task.', stopReason: Ass
     agent: { streamFunction: (_model: unknown, context: Context, options: SimpleStreamOptions | undefined) => {
       calls.push({ context, options });
       const stream = createAssistantMessageEventStream();
-      const message: AssistantMessage = { role: 'assistant', content: [{ type: 'text', text }], api: model.api, provider: model.provider, model: model.id, usage, stopReason, timestamp: 1 };
+      const message: AssistantMessage = {
+        role: 'assistant', content: [{ type: 'text', text }], api: model.api, provider: model.provider, model: model.id,
+        usage: state.responseUsage ?? usage, stopReason, timestamp: 1,
+        ...(stopReason === 'error' || stopReason === 'aborted' ? { errorMessage: text } : {}),
+      };
       if (stopReason === 'aborted' || stopReason === 'error') stream.push({ type: 'error', reason: stopReason, error: message });
       else stream.push({ type: 'done', reason: stopReason, message });
       return stream;
     } },
   } as unknown as AgentSession;
   installCompactionPolicy(session);
-  return { session, calls, state,
+  return { session, calls, state, compactions,
     emitNewUser: () => listener?.({ type: 'message_start',
       message: { role: 'user', content: 'Another request', timestamp: Date.now() } }),
     emitAgentEnd: () => listener?.({ type: 'agent_end', messages: [], willRetry: false }),
@@ -61,8 +86,9 @@ function branchMessages(messages: Context['messages']): SessionEntry[] {
 
 describe('80% compaction policy', () => {
   it('checks the current user prompt before its first provider request', async () => {
-    const { session, state, calls } = harness();
+    const { session, state, calls, compactions } = harness();
     state.compacting = false;
+    state.agentRunActive = true;
     const context: Context = { messages: [
       { role: 'user', content: 'Earlier discussion: '.repeat(3000), timestamp: 1 },
       { role: 'assistant', content: [{ type: 'text', text: 'Earlier answer: '.repeat(3000) }],
@@ -71,9 +97,16 @@ describe('80% compaction policy', () => {
     ] };
     state.branch = branchMessages(context.messages);
     expect(shouldCompactBeforeRequest(context, model.contextWindow, state.reserveTokens)).toBe(true);
-    const result = await (await session.agent.streamFunction(model, context)).result();
-    expect(result.stopReason).toBe('error');
+    await session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    expect(compactions).toEqual([{ kind: 'auto', reason: 'threshold', willRetry: false }]);
     expect(calls).toHaveLength(0);
+    await session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    expect(compactions).toHaveLength(1);
+    const streamed = await (await session.agent.streamFunction(model, context)).result();
+    expect(isContextOverflow(streamed, model.contextWindow)).toBe(false);
+    expect(streamed.errorMessage ?? '').not.toContain('context_length_exceeded');
+    expect(streamed.stopReason).toBe('stop');
+    expect(calls).toHaveLength(1);
   });
 
   it('blocks a physically full request even when automatic compaction is disabled', async () => {
@@ -103,9 +136,11 @@ describe('80% compaction policy', () => {
       8192, 1639)).toBe(false);
   });
 
-  it('routes an over-threshold tool continuation through bounded SDK recovery before another provider call', async () => {
-    const { session, state, calls, emitNewUser } = harness();
+  it('compacts an over-threshold tool continuation without faking a provider overflow', async () => {
+    const { session, state, calls, compactions, emitNewUser } = harness();
     state.compacting = false;
+    state.agentRunActive = true;
+    const heavy = { ...usage, input: 800_000, totalTokens: 800_120 };
     const midTurn: Context = { messages: [
       { role: 'user', content: 'Earlier work: '.repeat(3000), timestamp: 0 },
       { role: 'assistant', content: [{ type: 'text', text: 'Earlier result: '.repeat(1500) }],
@@ -117,50 +152,44 @@ describe('80% compaction policy', () => {
         stopReason: 'stop', timestamp: 0 },
       { role: 'user', content: 'Do the task', timestamp: 1 },
       { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'read', arguments: {} }],
-        api: model.api, provider: model.provider, model: model.id, usage: { ...usage, totalTokens: 800_000 },
+        api: model.api, provider: model.provider, model: model.id, usage: heavy,
         stopReason: 'toolUse', timestamp: 2 },
       { role: 'toolResult', toolCallId: 'call-1', toolName: 'read', content: [{ type: 'text', text: 'r'.repeat(40_000) }], isError: false, timestamp: 3 },
     ] };
     state.branch = branchMessages(midTurn.messages);
     expect(shouldCompactBeforeRequest(midTurn, model.contextWindow, state.reserveTokens)).toBe(true);
-    const preflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(preflight.stopReason).toBe('error');
-    expect(isContextOverflow(preflight, model.contextWindow)).toBe(true);
+    const turn = { message: midTurn.messages.at(-2) as AssistantMessage, toolResults: [], context: midTurn, newMessages: [] };
+    await session.agent.prepareNextTurnWithContext?.(turn);
+    expect(compactions).toEqual([{ kind: 'auto', reason: 'threshold', willRetry: false }]);
     expect(calls).toHaveLength(0);
 
-    // The 80% threshold is soft after one compaction attempt for this context.
-    const afterAttempt = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(afterAttempt.stopReason).toBe('stop');
-    expect(calls).toHaveLength(1);
+    await session.agent.prepareNextTurnWithContext?.(turn);
+    expect(compactions).toHaveLength(1);
     emitNewUser();
-    const newTurnPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(newTurnPreflight.stopReason).toBe('stop');
-    expect(calls).toHaveLength(2);
-    const changedInput: Context = { ...midTurn, systemPrompt: 'New user constraint' };
-    const changedPreflight = await (await session.agent.streamFunction(model, normalizeContext(changedInput))).result();
-    expect(isContextOverflow(changedPreflight, model.contextWindow)).toBe(true);
-    expect(calls).toHaveLength(2);
-    const freshTurn: Context = { messages: [{ role: 'user', content: 'Do the task', timestamp: 4 }] };
-    await (await session.agent.streamFunction(model, freshTurn)).result();
-    expect(shouldCompactBeforeRequest(freshTurn, model.contextWindow, state.reserveTokens)).toBe(false);
-    expect(calls).toHaveLength(3);
-    const nextPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(nextPreflight.stopReason).toBe('error');
-    expect(calls).toHaveLength(3);
+    await session.agent.prepareNextTurnWithContext?.(turn);
+    expect(compactions).toHaveLength(1);
 
-    await (await session.agent.streamFunction(model, freshTurn)).result();
+    const streamed = await (await session.agent.streamFunction(model, midTurn)).result();
+    expect(isContextOverflow(streamed, model.contextWindow)).toBe(false);
+    expect(streamed.errorMessage ?? '').not.toContain('context_length_exceeded');
+    expect(streamed.stopReason).toBe('stop');
+    expect(calls).toHaveLength(1);
+
+    const freshTurn: Context = { messages: [{ role: 'user', content: 'Do the task', timestamp: 4 }] };
+    await session.agent.prepareRequest?.({ context: freshTurn, model, thinkingLevel: 'off' });
+    expect(shouldCompactBeforeRequest(freshTurn, model.contextWindow, state.reserveTokens)).toBe(false);
+    expect(compactions).toHaveLength(1);
     state.enabled = false;
-    await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(calls).toHaveLength(5);
-    state.enabled = true;
-    const reenabledPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(isContextOverflow(reenabledPreflight, model.contextWindow)).toBe(true);
-    expect(calls).toHaveLength(5);
+    await session.agent.prepareNextTurnWithContext?.(turn);
+    expect(compactions).toHaveLength(1);
 
     const fixedPromptDominates: Context = {
       systemPrompt: 's'.repeat(360_000),
-      messages: midTurn.messages.slice(0, 2).concat({ role: 'toolResult', toolCallId: 'call-1', toolName: 'read',
-        content: [{ type: 'text', text: 'short' }], isError: false, timestamp: 3 }),
+      messages: [
+        { role: 'user', content: 'Do the task', timestamp: 1 },
+        { role: 'toolResult', toolCallId: 'call-1', toolName: 'read',
+          content: [{ type: 'text', text: 'short' }], isError: false, timestamp: 3 },
+      ],
     };
     expect(shouldCompactBeforeRequest(fixedPromptDominates, 100_000, 20_001)).toBe(true);
   });
@@ -170,7 +199,7 @@ describe('80% compaction policy', () => {
     const context: Context = { messages: [
       { role: 'user', content: 'Read this', timestamp: 1 },
       { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'read', arguments: {} }],
-        api: model.api, provider: model.provider, model: model.id, usage: { ...usage, totalTokens: 800_000 },
+        api: model.api, provider: model.provider, model: model.id, usage: { ...usage, input: 800_000, totalTokens: 800_000 },
         stopReason: 'toolUse', timestamp: 2 },
       { role: 'toolResult', toolCallId: 'call-1', toolName: 'read',
         content: [{ type: 'text', text: 'r'.repeat(100_000) }], isError: false, timestamp: 3 },
@@ -204,24 +233,29 @@ describe('80% compaction policy', () => {
     expect(calls).toHaveLength(0);
   });
   it('uses the SDK cut point before an oversized tool pair while preserving the pair', async () => {
-    const { session, state, calls } = harness();
+    const { session, state, calls, compactions } = harness();
     state.compacting = false;
+    state.agentRunActive = true;
     const context: Context = { messages: [
       { role: 'user', content: 'Old task: '.repeat(4000), timestamp: 1 },
       { role: 'assistant', content: [{ type: 'text', text: 'Old result' }], api: model.api,
         provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: 2 },
       { role: 'user', content: 'Read this', timestamp: 3 },
       { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'read', arguments: {} }],
-        api: model.api, provider: model.provider, model: model.id, usage: { ...usage, totalTokens: 800_000 },
+        api: model.api, provider: model.provider, model: model.id, usage: { ...usage, input: 800_000, totalTokens: 800_000 },
         stopReason: 'toolUse', timestamp: 4 },
       { role: 'toolResult', toolCallId: 'call-1', toolName: 'read',
         content: [{ type: 'text', text: 'r'.repeat(100_000) }], isError: false, timestamp: 5 },
     ] };
     state.branch = branchMessages(context.messages);
     expect(shouldCompactBeforeRequest(context, model.contextWindow, state.reserveTokens)).toBe(true);
+    const turn = { message: context.messages.at(-2) as AssistantMessage, toolResults: [], context, newMessages: [] };
+    await session.agent.prepareNextTurnWithContext?.(turn);
+    expect(compactions).toEqual([{ kind: 'auto', reason: 'threshold', willRetry: false }]);
     const response = await (await session.agent.streamFunction(model, context)).result();
-    expect(isContextOverflow(response, model.contextWindow)).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(isContextOverflow(response, model.contextWindow)).toBe(false);
+    expect(response.errorMessage ?? '').not.toContain('context_length_exceeded');
+    expect(calls).toHaveLength(1);
   });
   it('restores the trigger after SDK settings saves and reloads while preserving the enabled state', async () => {
     const manager = SettingsManager.inMemory();
@@ -314,6 +348,83 @@ describe('80% compaction policy', () => {
     expect(summaryPrompt).not.toContain('pending verification of /src/task.ts');
     expect(JSON.stringify(calls[0]!.context.messages)).toContain('pending verification of /src/task.ts');
   });
+  it('uses public compact while idle and leaves a real provider overflow untouched', async () => {
+    const idle = harness();
+    idle.state.compacting = false;
+    idle.state.branch = branchMessages([
+      { role: 'user', content: 'Earlier discussion: '.repeat(3000), timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: 'Earlier answer: '.repeat(3000) }],
+        api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: 2 },
+      { role: 'user', content: 'New prompt: '.repeat(300_000), timestamp: 3 },
+    ]);
+    await idle.session.prompt('New prompt: '.repeat(300_000));
+    expect(idle.compactions).toEqual([{ kind: 'public' }]);
+
+    const provider = harness('context_length_exceeded: provider rejected the prompt', 'error');
+    provider.state.compacting = false;
+    const result = await (await provider.session.agent.streamFunction(model, {
+      messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
+    })).result();
+    expect(isContextOverflow(result, model.contextWindow)).toBe(true);
+    expect(result.errorMessage).toContain('context_length_exceeded');
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.compactions).toEqual([]);
+  });
+
+  it('drops a stored usage anchor when the branch, model, or connection changes', async () => {
+    const heavy = { ...usage, input: 800_000, output: 20, cacheRead: 10, cacheWrite: 5, totalTokens: 800_035 };
+    const context: Context = { messages: [
+      { role: 'user', content: 'hello', timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }], api: model.api, provider: model.provider,
+        model: model.id, usage, stopReason: 'stop', timestamp: 1 },
+    ] };
+    const usefulBranch = branchMessages([
+      { role: 'user', content: 'old '.repeat(2_000), timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: 'kept' }], api: model.api, provider: model.provider,
+        model: model.id, usage, stopReason: 'stop', timestamp: 2 },
+      { role: 'user', content: 'x'.repeat(200_000), timestamp: 3 },
+    ]);
+    const observed = harness();
+    observed.state.compacting = false;
+    observed.state.agentRunActive = true;
+    observed.state.responseUsage = heavy;
+    observed.state.branch = usefulBranch;
+    await (await observed.session.agent.streamFunction(model, context)).result();
+    await observed.session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    expect(observed.compactions).toEqual([{ kind: 'auto', reason: 'threshold', willRetry: false }]);
+
+    const edited = harness();
+    edited.state.compacting = false;
+    edited.state.agentRunActive = true;
+    edited.state.responseUsage = heavy;
+    edited.state.branch = usefulBranch;
+    await (await edited.session.agent.streamFunction(model, context)).result();
+    edited.state.branch = [...usefulBranch, { type: 'context_edit', id: 'edit-1', parentId: 'entry-2', timestamp: new Date().toISOString(), targetId: 'entry-1', replacement: null } as SessionEntry];
+    await edited.session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    expect(edited.compactions).toEqual([]);
+
+    const switched = harness();
+    switched.state.compacting = false;
+    switched.state.agentRunActive = true;
+    switched.state.responseUsage = heavy;
+    switched.state.branch = usefulBranch;
+    await (await switched.session.agent.streamFunction(model, context)).result();
+    const other = { ...model, id: 'other-model' };
+    await switched.session.agent.prepareRequest?.({ context, model: other, thinkingLevel: 'off' });
+    expect(switched.compactions).toEqual([]);
+
+    const moved = harness();
+    moved.state.compacting = false;
+    moved.state.agentRunActive = true;
+    moved.state.responseUsage = heavy;
+    moved.state.branch = usefulBranch;
+    await (await moved.session.agent.streamFunction(model, context)).result();
+    setContextCompactionConnection('other-connection', { piAuthProvider: 'anthropic' });
+    await moved.session.agent.prepareRequest?.({ context, model, thinkingLevel: 'off' });
+    expect(moved.compactions).toEqual([]);
+    setContextCompactionConnection('', {});
+  });
+
   it('does not alter ordinary model calls, even if a user discusses summarization', async () => {
     const { session, state, calls } = harness();
     state.compacting = false;

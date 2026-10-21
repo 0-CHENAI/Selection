@@ -5,10 +5,14 @@ import {
   buildContextBudget,
   calculateContextBudget,
   calculateOverflowRetryMaxTokens,
+  contextSystemFingerprint,
+  contextToolsFingerprint,
   estimateContextInputBreakdown,
   estimateContextInputTokens,
+  estimateLocalContextTokens,
   estimateTextTokensConservatively,
   parseContextOverflow,
+  type ContextUsageAnchor,
 } from './context-budget.ts';
 
 describe('context output budget', () => {
@@ -227,4 +231,87 @@ it('leaves fenced preferences examples in the system bucket', () => {
   const result = estimateContextInputBreakdown({ systemPrompt, messages: [] });
   expect(result.rules).toBeUndefined();
   expect(result.systemPrompt).toBe(estimateTextTokensConservatively(systemPrompt));
+});
+
+function anchoredAssistant(timestamp: number, input: number, output = 20, cacheRead = 0, cacheWrite = 0) {
+  return {
+    role: 'assistant' as const,
+    content: [{ type: 'text' as const, text: 'abcd' }],
+    api: 'openai-responses' as const,
+    provider: 'openai',
+    model: 'test',
+    usage: {
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      totalTokens: 9_000_000,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: 'stop' as const,
+    timestamp,
+  };
+}
+
+describe('anchored context estimate', () => {
+  const context = {
+    systemPrompt: 'abcdefgh',
+    tools: [],
+    messages: [
+      { role: 'user' as const, content: 'abcd', timestamp: 1 },
+      anchoredAssistant(2, 100, 20, 5, 3),
+      { role: 'user' as const, content: 'abcdefgh', timestamp: 3 },
+    ],
+  } as Context;
+
+  const anchor: ContextUsageAnchor = {
+    promptTokens: 108,
+    outputTokens: 20,
+    messageTimestamp: 2,
+    systemFingerprint: contextSystemFingerprint(context),
+    toolsFingerprint: contextToolsFingerprint(context),
+    modelKey: 'openai/m',
+    connectionKey: 'conn',
+    branchRevision: 'compaction:1',
+  };
+  const options = {
+    anchor,
+    modelKey: 'openai/m',
+    connectionKey: 'conn',
+    branchRevision: 'compaction:1',
+    emaRatio: 1,
+  };
+
+  it('adds replayed output and the calibrated tail, ignoring totalTokens', () => {
+    const delta = estimateLocalContextTokens({ messages: [context.messages[2]!] });
+    expect(estimateContextInputTokens(context, options)).toBe(108 + 20 + delta);
+    expect(estimateContextInputTokens(context, { ...options, emaRatio: 2 })).toBe(108 + 20 + Math.ceil(delta * 2));
+    expect(estimateContextInputTokens(context)).toBe(108 + 20 + delta);
+  });
+
+  it('falls back to the full calibrated estimate when the anchor is invalidated', () => {
+    const full = (value: Context, ema = 1) => Math.ceil(estimateLocalContextTokens(value) * ema);
+    expect(estimateContextInputTokens(context, { ...options, anchor: null, emaRatio: 2 })).toBe(full(context, 2));
+    const changedSystem = { ...context, systemPrompt: 'changed system' } as Context;
+    expect(estimateContextInputTokens(changedSystem, options)).toBe(full(changedSystem));
+    const changedTools = { ...context, tools: [{ name: 'read', description: 'Read', parameters: { type: 'object' } }] } as Context;
+    expect(estimateContextInputTokens(changedTools, options)).toBe(full(changedTools));
+    expect(estimateContextInputTokens(context, { ...options, modelKey: 'openai/other' })).toBe(full(context));
+    expect(estimateContextInputTokens(context, { ...options, connectionKey: 'other' })).toBe(full(context));
+    expect(estimateContextInputTokens(context, { ...options, branchRevision: 'context_edit:9' })).toBe(full(context));
+    const removed = { ...context, messages: [context.messages[0]!, context.messages[2]!] } as Context;
+    expect(estimateContextInputTokens(removed, options)).toBe(full(removed));
+  });
+
+  it('does not reuse assistant usage that is older than a later message', () => {
+    const stale = {
+      messages: [
+        { role: 'user' as const, content: 'Compacted summary', timestamp: 100 },
+        anchoredAssistant(2, 900_000),
+        { role: 'user' as const, content: 'Continue', timestamp: 101 },
+      ],
+    } as Context;
+    expect(estimateContextInputTokens(stale)).toBe(estimateLocalContextTokens(stale));
+    expect(estimateContextInputTokens(stale)).toBeLessThan(1_000);
+  });
 });

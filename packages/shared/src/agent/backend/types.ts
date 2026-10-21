@@ -43,6 +43,12 @@ export interface BackendRuntimeUpdate {
     piAuthProvider?: string;
     customEndpoint?: { api: string; supportsImages?: boolean };
     customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
+    imagePixelBudget?: number;
+    imageMaxBytes?: number;
+    imageMaxDimension?: number;
+    imageTokenFamily?: string;
+    vlHighResolutionImages?: boolean;
+    imageMaxPixels?: number;
     [key: string]: unknown;
   };
 }

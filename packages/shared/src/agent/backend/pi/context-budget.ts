@@ -5,11 +5,14 @@ import type {
   Tool,
 } from '@earendil-works/pi-ai';
 import { estimateTokensDensityAware } from '../../../utils/token-estimate.ts';
+import {
+  estimateImageContentTokens,
+  type ImageTokenConnection,
+} from './image-token-estimate.ts';
 
 /** Keep enough headroom for provider-side tokenization and request framing. */
 export const MIN_CONTEXT_RESERVE_TOKENS = 8_192;
 const CONTEXT_RESERVE_RATIO = 0.02;
-const IMAGE_RESERVE_TOKENS = 2_048;
 const MESSAGE_OVERHEAD_TOKENS = 8;
 const MIN_RETRY_OUTPUT_TOKENS = 256;
 
@@ -21,6 +24,36 @@ export interface ContextBudget {
   reserveTokens: number;
   maxOutputTokens: number;
   wasReduced: boolean;
+}
+
+/**
+ * Usage anchor for the next request.
+ * `promptTokens` is input + cacheRead + cacheWrite of the anchored turn.
+ * `outputTokens` is that assistant message's replayed output.
+ */
+export interface ContextUsageAnchor {
+  promptTokens: number;
+  outputTokens: number;
+  messageTimestamp: number;
+  systemFingerprint: string;
+  toolsFingerprint: string;
+  modelKey: string;
+  connectionKey: string;
+  branchRevision: string;
+}
+
+export interface ContextEstimateOptions {
+  /** Provider/local EMA. 1 until the first sample for this model. */
+  emaRatio?: number;
+  image?: ImageTokenConnection | null;
+  /**
+   * undefined derives an anchor from the latest valid assistant usage.
+   * null forces the full calibrated local estimate.
+   */
+  anchor?: ContextUsageAnchor | null;
+  modelKey?: string;
+  connectionKey?: string;
+  branchRevision?: string;
 }
 
 export interface ParsedContextOverflow {
@@ -74,12 +107,12 @@ export function estimateTextTokensConservatively(text: string): number {
   return estimateTokensDensityAware(text);
 }
 
-function estimateContent(content: Message['content']): number {
+function estimateContent(content: Message['content'], image?: ImageTokenConnection | null): number {
   if (typeof content === 'string') return estimateTextTokensConservatively(content);
 
   let tokens = 0;
   for (const block of content) {
-    if (block.type === 'image') tokens += IMAGE_RESERVE_TOKENS;
+    if (block.type === 'image') tokens += estimateImageContentTokens(block.data, image);
     else if (block.type === 'text') tokens += estimateTextTokensConservatively(block.text);
     else if (block.type === 'thinking') tokens += estimateTextTokensConservatively(block.thinking);
     else {
@@ -90,18 +123,34 @@ function estimateContent(content: Message['content']): number {
   return tokens;
 }
 
-function estimateMessage(message: Message): number {
+function estimateMessage(message: Message, image?: ImageTokenConnection | null): number {
   if (message.role === 'system') {
-    return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content)
+    return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content, image)
       + estimateTextTokensConservatively(safeJson(message.sections ?? {}))
       + estimateTools(message.toolsAdded);
   }
-  return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content);
+  return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content, image);
 }
 
-function usageTokens(message: AssistantMessage): number {
-  const usage = message.usage;
-  return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+export function contextSystemFingerprint(context: { systemPrompt?: string }): string {
+  return context.systemPrompt ?? '';
+}
+
+export function contextToolsFingerprint(context: { tools?: unknown }): string {
+  return safeJson(context.tools ?? []);
+}
+
+export function providerPromptTokens(usage: { input?: number; cacheRead?: number; cacheWrite?: number } | undefined): number {
+  return Math.max(0, usage?.input ?? 0) + Math.max(0, usage?.cacheRead ?? 0) + Math.max(0, usage?.cacheWrite ?? 0);
+}
+
+function emaMultiplier(options?: ContextEstimateOptions): number {
+  const ratio = options?.emaRatio;
+  return typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+function calibrate(tokens: number, ema: number): number {
+  return Math.ceil(Math.max(0, tokens) * ema);
 }
 
 function estimateTools(tools: Tool[] | undefined): number {
@@ -200,9 +249,13 @@ function estimatePromptCategories(text: string, breakdown: ContextInputBreakdown
   else breakdown.messages += rest;
 }
 
-function estimateStructuredContent(content: Exclude<Message['content'], string>, breakdown: ContextInputBreakdown): void {
+function estimateStructuredContent(
+  content: Exclude<Message['content'], string>,
+  breakdown: ContextInputBreakdown,
+  image?: ImageTokenConnection | null,
+): void {
   for (const block of content) {
-    if (block.type === 'image') breakdown.messages += IMAGE_RESERVE_TOKENS;
+    if (block.type === 'image') breakdown.messages += estimateImageContentTokens(block.data, image);
     else if (block.type === 'text') estimatePromptCategories(block.text, breakdown, 'message');
     else if (block.type === 'thinking') {
       breakdown.messages += estimateTextTokensConservatively(block.thinking);
@@ -250,39 +303,90 @@ export function readContextBreakdownFields(raw: unknown): ContextInputBreakdown 
   return breakdown;
 }
 
-function estimateFromLatestUsage(context: Context): number {
-  let lastUsageIndex = -1;
-  let latestUsage = 0;
+interface DerivedUsageAnchor {
+  index: number;
+  promptTokens: number;
+  outputTokens: number;
+  messageTimestamp: number;
+}
+
+/** Latest assistant usage that is not older than a message placed before it. */
+export function deriveContextUsageAnchor(context: Context): DerivedUsageAnchor | undefined {
+  let index = -1;
+  let promptTokens = 0;
+  let outputTokens = 0;
+  let messageTimestamp = 0;
   let latestPrefixTimestamp = Number.NEGATIVE_INFINITY;
 
-  for (let index = 0; index < context.messages.length; index += 1) {
-    const message = context.messages[index];
+  for (let cursor = 0; cursor < context.messages.length; cursor += 1) {
+    const message = context.messages[cursor];
     if (!message) continue;
     if (message.role === 'assistant') {
-      const tokens = usageTokens(message);
+      const prompt = providerPromptTokens(message.usage);
+      const output = Math.max(0, message.usage?.output ?? 0);
       if (
         message.timestamp >= latestPrefixTimestamp &&
         message.stopReason !== 'aborted' &&
         message.stopReason !== 'error' &&
-        tokens > 0
+        prompt + output > 0
       ) {
-        lastUsageIndex = index;
-        latestUsage = tokens;
+        index = cursor;
+        promptTokens = prompt;
+        outputTokens = output;
+        messageTimestamp = message.timestamp;
       }
     }
     latestPrefixTimestamp = Math.max(latestPrefixTimestamp, message.timestamp);
   }
 
-  if (lastUsageIndex < 0) return 0;
-
-  let trailing = 0;
-  for (const message of context.messages.slice(lastUsageIndex + 1)) {
-    trailing += estimateMessage(message);
-  }
-  return latestUsage + trailing;
+  return index < 0 ? undefined : { index, promptTokens, outputTokens, messageTimestamp };
 }
 
-export function estimateContextInputBreakdown(context: Context): ContextInputBreakdown {
+function anchoredDelta(
+  context: Context,
+  index: number,
+  promptTokens: number,
+  outputTokens: number,
+  ema: number,
+  image?: ImageTokenConnection | null,
+): number {
+  let delta = 0;
+  for (const message of context.messages.slice(index + 1)) delta += estimateMessage(message, image);
+  return promptTokens + outputTokens + calibrate(delta, ema);
+}
+
+function explicitAnchorIndex(context: Context, anchor: ContextUsageAnchor): number {
+  let found = -1;
+  let latestPrefixTimestamp = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < context.messages.length; index += 1) {
+    const message = context.messages[index];
+    if (!message) continue;
+    if (
+      message.role === 'assistant' &&
+      message.timestamp === anchor.messageTimestamp &&
+      message.timestamp >= latestPrefixTimestamp &&
+      message.stopReason !== 'aborted' &&
+      message.stopReason !== 'error'
+    ) {
+      found = index;
+    }
+    latestPrefixTimestamp = Math.max(latestPrefixTimestamp, message.timestamp);
+  }
+  return found;
+}
+
+function anchorStillValid(anchor: ContextUsageAnchor, context: Context, options: ContextEstimateOptions): boolean {
+  return contextSystemFingerprint(context) === anchor.systemFingerprint
+    && contextToolsFingerprint(context) === anchor.toolsFingerprint
+    && (options.modelKey ?? '') === anchor.modelKey
+    && (options.connectionKey ?? '') === anchor.connectionKey
+    && (options.branchRevision ?? '') === anchor.branchRevision;
+}
+
+export function estimateContextInputBreakdown(
+  context: Context,
+  image?: ImageTokenConnection | null,
+): ContextInputBreakdown {
   const breakdown: ContextInputBreakdown = {
     systemPrompt: 0,
     tools: 0,
@@ -317,28 +421,48 @@ export function estimateContextInputBreakdown(context: Context): ContextInputBre
     // Tool output is data, not a trusted context envelope. Skill bodies read
     // through tools remain here; the skills bucket measures the catalog only.
     if (message.role === 'toolResult' || message.role === 'assistant') {
-      breakdown.messages += estimateMessage(message);
+      breakdown.messages += estimateMessage(message, image);
       continue;
     }
     breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
     if (typeof message.content === 'string') {
       estimatePromptCategories(message.content, breakdown, 'message');
     } else {
-      estimateStructuredContent(message.content, breakdown);
+      estimateStructuredContent(message.content, breakdown, image);
     }
   }
 
   return breakdown;
 }
 
-/** Estimate the complete request, including system prompt, tool schemas and images. */
-export function estimateContextInputTokens(context: Context): number {
-  const fullEstimate = contextBreakdownTotal(estimateContextInputBreakdown(context));
+/** Local estimate of the whole request, before the per-model ratio is applied. */
+export function estimateLocalContextTokens(context: Context, image?: ImageTokenConnection | null): number {
+  return contextBreakdownTotal(estimateContextInputBreakdown(context, image));
+}
 
-  // Provider usage is the best signal for an already-sent prefix. The full
-  // estimate protects new sessions and changed system/tool payloads. Taking
-  // the maximum avoids double-counting either representation.
-  return Math.max(fullEstimate, estimateFromLatestUsage(context));
+/**
+ * Next-request input tokens.
+ *
+ * A live anchor is
+ * `(input + cacheRead + cacheWrite) + replayed output + ema × local(delta)`.
+ * System prompt, tools, model, connection, context_edit, and compaction
+ * changes drop the anchor. The fallback is `ema × local(full)`, not the
+ * old max(full, usage) ceiling.
+ */
+export function estimateContextInputTokens(context: Context, options?: ContextEstimateOptions): number {
+  const ema = emaMultiplier(options);
+  const image = options?.image;
+  const full = () => calibrate(estimateLocalContextTokens(context, image), ema);
+  if (options?.anchor === null) return full();
+  if (options?.anchor) {
+    if (!anchorStillValid(options.anchor, context, options)) return full();
+    const index = explicitAnchorIndex(context, options.anchor);
+    if (index < 0) return full();
+    return anchoredDelta(context, index, options.anchor.promptTokens, options.anchor.outputTokens, ema, image);
+  }
+  const derived = deriveContextUsageAnchor(context);
+  if (!derived) return full();
+  return anchoredDelta(context, derived.index, derived.promptTokens, derived.outputTokens, ema, image);
 }
 
 export function calculateContextReserve(estimatedInputTokens: number, contextWindow?: number): number {
