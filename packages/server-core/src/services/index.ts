@@ -1,5 +1,6 @@
 export * from './search'
 export * from './image-utils'
+export * from './sharp-image'
 export * from './privileged-execution-broker'
 export * from './git-bash'
 export * from './vcredist'

@@ -27,6 +27,10 @@ export interface BackendRuntimePayload extends Record<string, unknown> {
   piAuthProvider?: string;
   /** Custom base URL from the LLM connection (e.g. Azure OpenAI endpoint). */
   baseUrl?: string;
+  /** Connection-level image send overrides. Absent values use the shared defaults. */
+  imagePixelBudget?: number;
+  imageMaxBytes?: number;
+  imageMaxDimension?: number;
   /** Custom endpoint protocol config (api type for routing). */
   customEndpoint?: { api: string; supportsImages?: boolean };
   /** Models registered for a custom endpoint. Strings default to 128k/8k; objects carry catalog limits. */

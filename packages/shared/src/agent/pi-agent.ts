@@ -736,6 +736,9 @@ export class PiAgent extends BaseAgent {
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
+      imagePixelBudget: runtime.imagePixelBudget,
+      imageMaxBytes: runtime.imageMaxBytes,
+      imageMaxDimension: runtime.imageMaxDimension,
       ...buildPiSwarmInitConfig(this.config.session),
       // Branch params for Pi SDK session fork
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
@@ -2662,6 +2665,9 @@ export class PiAgent extends BaseAgent {
         baseUrl: runtime.baseUrl,
         customEndpoint: runtime.customEndpoint,
         customModels: runtime.customModels,
+        imagePixelBudget: runtime.imagePixelBudget,
+        imageMaxBytes: runtime.imageMaxBytes,
+        imageMaxDimension: runtime.imageMaxDimension,
       });
     });
   }

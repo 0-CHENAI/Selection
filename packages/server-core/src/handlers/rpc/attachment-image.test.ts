@@ -13,12 +13,17 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function processor(size: { width: number; height: number }, resized = Buffer.from('resized')): ImageProcessor & { calls: number } {
+function processor(size: { width: number; height: number }, resized = Buffer.from('resized')): ImageProcessor & {
+  calls: number
+  lastOptions?: Parameters<ImageProcessor['process']>[1]
+} {
   const impl = {
     calls: 0,
+    lastOptions: undefined as Parameters<ImageProcessor['process']>[1],
     getMetadata: async () => size,
-    process: async () => {
+    process: async (_input: Buffer | string, options?: Parameters<ImageProcessor['process']>[1]) => {
       impl.calls += 1
+      impl.lastOptions = options
       return resized
     },
   }
@@ -70,6 +75,16 @@ describe('storeAttachmentImage', () => {
     expect(resized.originalPath).toBe(join(resizedDir, originalName))
     expect(resized.resizedBase64).toBe(resizedBytes.toString('base64'))
     expect(large.calls).toBe(1)
+    expect(large.lastOptions).toMatchObject({
+      resize: { width: 2730, height: 1536 },
+      format: 'webp',
+      quality: 85,
+      effort: 0,
+      normalize: true,
+    })
+    expect(resized.sentWidth).toBe(2730)
+    expect(resized.sentHeight).toBe(1536)
+    expect(resized.outputMimeType).toBe('image/webp')
     expect(readdirSync(resizedDir).sort()).toEqual([originalName, storedFileName].sort())
     expect(readFileSync(join(resizedDir, originalName))).toEqual(originalBytes)
     expect(readFileSync(join(resizedDir, storedFileName))).toEqual(resizedBytes)

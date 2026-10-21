@@ -1,9 +1,9 @@
 import { unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { IMAGE_LIMITS, validateImageForClaudeAPI } from '@craft-agent/shared/utils'
+import { IMAGE_LIMITS, resolveImageSendPolicy, type ImageSendPolicy } from '@craft-agent/shared/utils'
 import { originalAttachmentFileName } from '@craft-agent/shared/utils/image-attachment'
 import type { ImageProcessor, Logger } from '../../runtime/platform'
-import { inspectImageBuffer, resizeImageForAPI } from '../../services/image-utils'
+import { encodeImageForModel, imageHasAlphaChannel, inspectImageBuffer } from '../../services/image-utils'
 
 export interface StoredAttachmentImage {
   wasResized: boolean
@@ -13,6 +13,10 @@ export interface StoredAttachmentImage {
   originalPath?: string
   originalWidth?: number
   originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
+  /** Mime type of the bytes written to storedPath. */
+  outputMimeType?: string
   writtenPaths: string[]
 }
 
@@ -29,6 +33,7 @@ export async function storeAttachmentImage(input: {
   storedFileName: string
   processor: ImageProcessor
   logger: Logger
+  policy?: ImageSendPolicy
 }): Promise<StoredAttachmentImage> {
   let decoded = input.bytes
   let wasResized = false
@@ -43,8 +48,9 @@ export async function storeAttachmentImage(input: {
     ? { width: imageInspection.width, height: imageInspection.height }
     : null
 
-  let shouldResize = false
-  let targetSize: { width: number; height: number } | undefined
+  let sentWidth: number | undefined
+  let sentHeight: number | undefined
+  let outputMimeType: string | undefined
 
   if (imageInspection.status === 'processor_unavailable') {
     input.logger.warn('Image processing unavailable while validating attachment:', imageInspection.error?.message ?? 'unknown error')
@@ -54,69 +60,43 @@ export async function storeAttachmentImage(input: {
   } else if (imageInspection.status === 'invalid_image') {
     throw new Error(imageInspection.error?.message || 'Invalid or unsupported image file')
   } else {
-    const validation = validateImageForClaudeAPI(decoded.length, imageSize!.width, imageSize!.height)
-    shouldResize = validation.needsResize ?? false
-    targetSize = validation.suggestedSize
-
-    if (!validation.valid && validation.errorCode === 'dimension_exceeded') {
-      const maxDim = IMAGE_LIMITS.MAX_DIMENSION
-      const scale = Math.min(maxDim / imageSize!.width, maxDim / imageSize!.height)
-      targetSize = {
-        width: Math.floor(imageSize!.width * scale),
-        height: Math.floor(imageSize!.height * scale),
-      }
-      shouldResize = true
-      input.logger.info(`Image exceeds ${maxDim}px limit (${imageSize!.width}x${imageSize!.height}), will resize to ${targetSize.width}x${targetSize.height}`)
-    } else if (!validation.valid && validation.errorCode === 'size_exceeded') {
-      shouldResize = true
-      input.logger.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
-    } else if (!validation.valid) {
-      throw new Error(validation.error)
-    }
-  }
-
-  if (shouldResize) {
-    // Snapshot before process() replaces the buffer. This is the only copy of the original.
+    const policy = input.policy ?? resolveImageSendPolicy()
     originalBytes = Buffer.from(decoded)
     originalWidth = imageSize!.width
     originalHeight = imageSize!.height
-    const isPhoto = input.mimeType === 'image/jpeg'
-
-    if (targetSize) {
-      input.logger.info(`Resizing image from ${imageSize!.width}x${imageSize!.height} to ${targetSize.width}x${targetSize.height}`)
-      try {
-        decoded = await input.processor.process(decoded, {
-          resize: { width: targetSize.width, height: targetSize.height },
-          format: isPhoto ? 'jpeg' : 'png',
-          quality: isPhoto ? IMAGE_LIMITS.JPEG_QUALITY_HIGH : undefined,
-        })
+    try {
+      const encoded = await encodeImageForModel(decoded, {
+        sourceWidth: originalWidth,
+        sourceHeight: originalHeight,
+        hasAlpha: imageHasAlphaChannel(input.mimeType, imageInspection.hasAlpha),
+        policy,
+        processor: input.processor,
+      })
+      if (!encoded) {
+        throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
+      }
+      const changed = encoded.buffer !== decoded || encoded.width !== originalWidth || encoded.height !== originalHeight
+      if (changed) {
+        input.logger.info(`Resizing image from ${originalWidth}x${originalHeight} to ${encoded.width}x${encoded.height}`)
+        decoded = encoded.buffer
         wasResized = true
         finalSize = decoded.length
-
-        if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-          decoded = await input.processor.process(decoded, { format: 'jpeg', quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK })
-          finalSize = decoded.length
-          if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-            throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
-          }
-        }
-      } catch (resizeError) {
-        input.logger.error('Image resize failed:', resizeError)
-        const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
-        throw new Error(`Image too large (${imageSize!.width}x${imageSize!.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
+        sentWidth = encoded.width
+        sentHeight = encoded.height
+        outputMimeType = encoded.mimeType
+        resizedBase64 = decoded.toString('base64')
+        input.logger.info(`Image resized: ${input.declaredSize} -> ${finalSize} bytes (${Math.round((1 - finalSize / input.declaredSize) * 100)}% reduction)`)
+      } else {
+        originalBytes = undefined
+        originalWidth = undefined
+        originalHeight = undefined
       }
-    } else {
-      const result = await resizeImageForAPI(decoded, { isPhoto })
-      if (!result) {
-        throw new Error(`Image too large (${(decoded.length / 1024 / 1024).toFixed(1)}MB) and could not be compressed enough. Please use a smaller image.`)
-      }
-      decoded = result.buffer
-      wasResized = true
-      finalSize = decoded.length
+    } catch (resizeError) {
+      input.logger.error('Image resize failed:', resizeError)
+      const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
+      if (reason.includes('still too large') || reason.includes('Please use a smaller image')) throw resizeError
+      throw new Error(`Image too large (${imageSize!.width}x${imageSize!.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
     }
-
-    input.logger.info(`Image resized: ${input.declaredSize} -> ${finalSize} bytes (${Math.round((1 - finalSize / input.declaredSize) * 100)}% reduction)`)
-    resizedBase64 = decoded.toString('base64')
   }
 
   const writtenPaths: string[] = []
@@ -142,6 +122,9 @@ export async function storeAttachmentImage(input: {
     originalPath: wasResized ? originalPath : undefined,
     originalWidth: wasResized ? originalWidth : undefined,
     originalHeight: wasResized ? originalHeight : undefined,
+    sentWidth: wasResized ? sentWidth : undefined,
+    sentHeight: wasResized ? sentHeight : undefined,
+    outputMimeType: wasResized ? outputMimeType : undefined,
     writtenPaths,
   }
 }

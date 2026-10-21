@@ -256,6 +256,16 @@ export interface LlmConnection {
 
   /** Timestamp when connection was last used */
   lastUsedAt?: number;
+
+  /**
+   * Total-pixel budget for images sent on this connection.
+   * When set on a DeepSeek connection, it replaces the 1024-token grid.
+   */
+  imagePixelBudget?: number;
+  /** Encoded-byte target for one image sent on this connection. */
+  imageMaxBytes?: number;
+  /** Long-edge cap, in pixels, for images sent on this connection. */
+  imageMaxDimension?: number;
 }
 
 /**

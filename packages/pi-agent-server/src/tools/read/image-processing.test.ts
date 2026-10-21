@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'bun:test'
 import { encodedSize } from './image-resize-core.ts'
 import type { ImageOptimizationResult, ImageResizeLimits } from './image-resize-types.ts'
+import { resolveImageSendPolicy } from '@craft-agent/shared/utils'
 import { processReadImage } from './image-processing.ts'
 
 let png: Uint8Array
@@ -20,9 +21,9 @@ beforeAll(async () => {
     image.free()
   }
 
-  const widePixels = new Uint8Array(2700 * 4)
+  const widePixels = new Uint8Array(8193 * 4)
   widePixels.fill(255)
-  const wideImage = new photon.PhotonImage(widePixels, 2700, 1)
+  const wideImage = new photon.PhotonImage(widePixels, 8193, 1)
   try {
     largePng = wideImage.get_bytes()
   } finally {
@@ -37,9 +38,9 @@ function optimizedImage(overrides: Partial<Extract<ImageOptimizationResult, { ok
     ok: true,
     bytes: png,
     mimeType: 'image/png',
-    originalWidth: 2700,
+    originalWidth: 8193,
     originalHeight: 1,
-    width: 2560,
+    width: 8192,
     height: 1,
     wasResized: true,
     encodingAttempts: 1,
@@ -125,7 +126,7 @@ describe('Pi read image processing', () => {
     })
   })
 
-  it('passes the higher-resolution defaults and encoded-size guard to the optimizer', async () => {
+  it('passes the shared pixel budget to the optimizer for an over-long image', async () => {
     let receivedLimits: ImageResizeLimits | undefined
     const result = await processReadImage(largePng, 'image/png', {}, {
       optimize: async (_bytes, _mimeType, limits) => {
@@ -140,6 +141,9 @@ describe('Pi read image processing', () => {
       maxHeight: 2560,
       maxEncodedBytes: 4.5 * 1024 * 1024,
       jpegQuality: 85,
+      policy: resolveImageSendPolicy(),
+      applyDimensionBox: false,
+      rejectOverEncodedLimit: false,
     })
   })
 
@@ -152,19 +156,19 @@ describe('Pi read image processing', () => {
     if (result.ok) {
       expect(result.hints.join('\n')).toContain('converted from image/gif to image/jpeg')
       expect(result.hints.join('\n')).toContain('first decoded frame')
-      expect(result.hints.join('\n')).toContain('original 2700x1')
-      expect(result.hints.join('\n')).toContain('displayed at 2560x1')
+      expect(result.hints.join('\n')).toContain('original 8193x1')
+      expect(result.hints.join('\n')).toContain('displayed at 8192x1')
     }
   })
 
-  it('resizes a real oversized image through the source Worker path', async () => {
+  it('resizes a real over-long image through the source Worker path', async () => {
     const result = await processReadImage(largePng, 'image/png')
 
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.mimeType).toBe('image/png')
-      expect(result.hints.join('\n')).toContain('original 2700x1')
-      expect(result.hints.join('\n')).toContain('displayed at 2560x1')
+      expect(result.mimeType).toBe('image/jpeg')
+      expect(result.hints.join('\n')).toContain('original 8193x1')
+      expect(result.hints.join('\n')).toContain('displayed at 8192x1')
     }
   })
 })

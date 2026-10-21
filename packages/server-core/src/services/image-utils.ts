@@ -1,5 +1,12 @@
 import type { ImageProcessor } from '../runtime/platform'
-import { IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import {
+  IMAGE_ENCODING_QUALITIES,
+  IMAGE_LIMITS,
+  encodingMediaType,
+  resolveImageSendPolicy,
+  resolveImageSendSize,
+  type ImageSendPolicy,
+} from '@craft-agent/shared/utils'
 
 export interface ImageResizeResult {
   /** Resized image buffer */
@@ -8,7 +15,8 @@ export interface ImageResizeResult {
   width: number
   height: number
   /** Output format */
-  format: 'png' | 'jpeg'
+  format: 'png' | 'jpeg' | 'webp'
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
 }
 
 let imageProcessor: ImageProcessor
@@ -26,7 +34,7 @@ function isImageProcessorUnavailableError(error: unknown): boolean {
 }
 
 export type ImageBufferInspection =
-  | { status: 'ok'; width: number; height: number }
+  | { status: 'ok'; width: number; height: number; hasAlpha?: boolean }
   | { status: 'invalid_image'; error?: Error }
   | { status: 'processor_unavailable'; error?: Error }
 
@@ -41,7 +49,7 @@ export async function inspectImageBuffer(
   try {
     const metadata = await processor.getMetadata(buffer)
     if (metadata?.width && metadata?.height) {
-      return { status: 'ok', width: metadata.width, height: metadata.height }
+      return { status: 'ok', width: metadata.width, height: metadata.height, hasAlpha: metadata.hasAlpha }
     }
   } catch (error) {
     if (isImageProcessorUnavailableError(error)) {
@@ -53,7 +61,7 @@ export async function inspectImageBuffer(
     const normalized = await processor.process(buffer, { format: 'png' })
     const metadata = await processor.getMetadata(normalized)
     if (metadata?.width && metadata?.height) {
-      return { status: 'ok', width: metadata.width, height: metadata.height }
+      return { status: 'ok', width: metadata.width, height: metadata.height, hasAlpha: metadata.hasAlpha }
     }
     return { status: 'invalid_image' }
   } catch (error) {
@@ -96,85 +104,115 @@ export async function resizeIconBuffer(buffer: Buffer, targetSize: number): Prom
   }
 }
 
+function sniffImageFormat(buffer: Buffer): ImageResizeResult['format'] {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8) return 'jpeg'
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) return 'webp'
+  return 'png'
+}
+
+function mimeForFormat(format: ImageResizeResult['format']): ImageResizeResult['mimeType'] {
+  if (format === 'jpeg') return 'image/jpeg'
+  if (format === 'webp') return 'image/webp'
+  return 'image/png'
+}
+
+export function imageHasAlphaChannel(mimeType: string | undefined, hasAlpha?: boolean): boolean {
+  if (typeof hasAlpha === 'boolean') return hasAlpha
+  const mime = mimeType?.split(';')[0]?.trim().toLowerCase()
+  return mime !== 'image/jpeg' && mime !== 'image/jpg'
+}
+
 /**
- * Resize and/or compress an image buffer to fit within Claude API limits.
- *
- * Strategy:
- * 1. If dimensions exceed OPTIMAL_EDGE (1568px), resize down
- * 2. Output as PNG (or JPEG if isPhoto)
- * 3. If still over maxSizeBytes, try JPEG at 90 quality
- * 4. If still over, try JPEG at 75 quality
- * 5. If still over, return null (can't fix)
- *
- * @returns Resized image data, or null if image can't be made small enough
+ * Encode one image onto the shared send-size target.
+ * Qualities 85/75/60 are tried in order. The first output within `maxBytes`
+ * wins; otherwise the smallest is kept. Returns null only when that smallest
+ * output still exceeds the 5MB hard limit.
+ */
+export async function encodeImageForModel(
+  source: Buffer,
+  input: {
+    sourceWidth: number
+    sourceHeight: number
+    hasAlpha: boolean
+    policy?: ImageSendPolicy
+    processor: ImageProcessor
+    maxBytes?: number
+  },
+): Promise<ImageResizeResult | null> {
+  const policy = input.policy ?? resolveImageSendPolicy()
+  const byteTarget = input.maxBytes ?? policy.maxBytes
+  const target = resolveImageSendSize(input.sourceWidth, input.sourceHeight, policy)
+  const geometryFits = target.width === input.sourceWidth && target.height === input.sourceHeight
+  if (geometryFits && source.length <= byteTarget && source.length <= IMAGE_LIMITS.MAX_SIZE) {
+    const format = sniffImageFormat(source)
+    return {
+      buffer: source,
+      width: target.width,
+      height: target.height,
+      format,
+      mimeType: mimeForFormat(format),
+    }
+  }
+
+  const format = encodingMediaType(input.hasAlpha) === 'image/webp' ? 'webp' : 'jpeg'
+  let smallest: Buffer | null = null
+  for (const quality of IMAGE_ENCODING_QUALITIES) {
+    const output = await input.processor.process(source, {
+      ...(geometryFits ? {} : {
+        resize: { width: target.width, height: target.height },
+        fit: 'inside',
+        withoutEnlargement: true,
+      }),
+      format,
+      quality,
+      ...(format === 'webp' ? { effort: 0 } : {}),
+      normalize: true,
+    })
+    if (!smallest || output.length < smallest.length) smallest = output
+    if (output.length <= byteTarget) {
+      smallest = output
+      break
+    }
+  }
+  if (!smallest || smallest.length > IMAGE_LIMITS.MAX_SIZE) return null
+  return {
+    buffer: smallest,
+    width: target.width,
+    height: target.height,
+    format,
+    mimeType: mimeForFormat(format),
+  }
+}
+
+/**
+ * Resize and/or compress an image buffer for a model request.
+ * Uses the shared pixel budget (or the DeepSeek token grid when `policy` says so).
+ * Returns null when the smallest ladder output still exceeds the hard size limit.
  */
 export async function resizeImageForAPI(
   buffer: Buffer,
   options?: {
-    /** Max output size in bytes. Default: IMAGE_LIMITS.MAX_SIZE (5MB) */
+    /** Override the policy byte target. The 5MB hard limit still applies. */
     maxSizeBytes?: number
-    /** Prefer JPEG output (for photos). Default: false */
+    /** Force JPEG output. */
     isPhoto?: boolean
+    policy?: ImageSendPolicy
+    processor?: ImageProcessor
   },
 ): Promise<ImageResizeResult | null> {
-  const maxSize = options?.maxSizeBytes ?? IMAGE_LIMITS.MAX_SIZE
-  const isPhoto = options?.isPhoto ?? false
-
-  const metadata = await imageProcessor.getMetadata(buffer).catch(() => null)
+  const processor = options?.processor ?? imageProcessor
+  const metadata = await processor.getMetadata(buffer).catch(() => null)
   if (!metadata) return null
-
-  const maxEdge = Math.max(metadata.width, metadata.height)
-
-  // Step 1: Compute target dimensions if resize needed
-  let outWidth = metadata.width
-  let outHeight = metadata.height
-
-  if (maxEdge > IMAGE_LIMITS.OPTIMAL_EDGE) {
-    const scale = IMAGE_LIMITS.OPTIMAL_EDGE / maxEdge
-    outWidth = Math.round(metadata.width * scale)
-    outHeight = Math.round(metadata.height * scale)
-  }
-
-  const needsResize = outWidth !== metadata.width || outHeight !== metadata.height
-
-  // Step 2: Encode — try preferred format first
-  let output: Buffer
-  let format: 'png' | 'jpeg'
-
-  if (isPhoto) {
-    output = await imageProcessor.process(buffer, {
-      ...(needsResize && { resize: { width: outWidth, height: outHeight } }),
-      format: 'jpeg',
-      quality: IMAGE_LIMITS.JPEG_QUALITY_HIGH,
-    })
-    format = 'jpeg'
-  } else {
-    output = await imageProcessor.process(buffer, {
-      ...(needsResize && { resize: { width: outWidth, height: outHeight } }),
-      format: 'png',
-    })
-    format = 'png'
-  }
-
-  // Step 3-4: Fallback to JPEG compression if still too large
-  if (output.length > maxSize) {
-    output = await imageProcessor.process(buffer, {
-      resize: { width: outWidth, height: outHeight },
-      format: 'jpeg',
-      quality: IMAGE_LIMITS.JPEG_QUALITY_HIGH,
-    })
-    format = 'jpeg'
-  }
-  if (output.length > maxSize) {
-    output = await imageProcessor.process(buffer, {
-      resize: { width: outWidth, height: outHeight },
-      format: 'jpeg',
-      quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK,
-    })
-  }
-
-  // Step 5: Give up
-  if (output.length > maxSize) return null
-
-  return { buffer: output, width: outWidth, height: outHeight, format }
+  return encodeImageForModel(buffer, {
+    sourceWidth: metadata.width,
+    sourceHeight: metadata.height,
+    hasAlpha: options?.isPhoto ? false : imageHasAlphaChannel(undefined, metadata.hasAlpha),
+    policy: options?.policy,
+    processor,
+    maxBytes: options?.maxSizeBytes,
+  })
 }

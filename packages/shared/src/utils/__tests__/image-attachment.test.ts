@@ -31,12 +31,15 @@ describe('attached image prompt', () => {
       originalPath: original,
       originalWidth: 5120,
       originalHeight: 2880,
+      sentWidth: 2730,
+      sentHeight: 1536,
     })
 
     expect(prompt).toBe(
       [
         '[Attached image: pasted-image-1.png]',
         `The image is included as visual input — look at it. Path: ${stored}`,
+        'Sent to the model at 2730x1536.',
         `Original full-resolution file for cropping/zooming: ${original} (5120x2880)`,
       ].join('\n'),
     )

@@ -22,6 +22,7 @@ import {
   type BrowserInstanceInfo,
 } from '../shared/types'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@craft-agent/shared/config'
+import { IMAGE_ENCODING_QUALITIES, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
 import { CodedError } from '@craft-agent/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import type {
@@ -199,6 +200,7 @@ export interface BrowserScreenshotOptions {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserConsoleEntry {
@@ -222,6 +224,7 @@ export interface BrowserScreenshotRegionTarget {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserNetworkEntry {
@@ -281,6 +284,10 @@ export interface BrowserDownloadOptions {
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: {
     mode: 'raw' | 'agent'
     viewport?: {
@@ -1135,11 +1142,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           dpr: viewport.dpr,
           format: options?.format,
           jpegQuality: options?.jpegQuality,
+          imagePolicy: options?.imagePolicy,
         })
 
         return {
           imageBuffer: captured.imageBuffer,
           imageFormat: captured.imageFormat,
+          sourceWidth: captured.sourceWidth,
+          sourceHeight: captured.sourceHeight,
+          width: captured.width,
+          height: captured.height,
           metadata: options?.includeMetadata
             ? {
               mode: 'raw',
@@ -1214,6 +1226,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           dpr: viewport.dpr,
           format: options?.format,
           jpegQuality: options?.jpegQuality,
+          imagePolicy: options?.imagePolicy,
         })
 
         if (captured.warnings.length > 0) {
@@ -1223,6 +1236,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         return {
           imageBuffer: captured.imageBuffer,
           imageFormat: captured.imageFormat,
+          sourceWidth: captured.sourceWidth,
+          sourceHeight: captured.sourceHeight,
+          width: captured.width,
+          height: captured.height,
           metadata: {
             mode: 'agent',
             viewport,
@@ -1326,11 +1343,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         dpr: viewport.dpr,
         format: target.format,
         jpegQuality: target.jpegQuality,
+        imagePolicy: target.imagePolicy,
       })
 
       return {
         imageBuffer: captured.imageBuffer,
         imageFormat: captured.imageFormat,
+        sourceWidth: captured.sourceWidth,
+        sourceHeight: captured.sourceHeight,
+        width: captured.width,
+        height: captured.height,
         metadata: {
           mode: 'raw',
           viewport,
@@ -1358,15 +1380,36 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       dpr?: number
       format?: 'png' | 'jpeg'
       jpegQuality?: number
+      imagePolicy?: ImageSendPolicy
     },
-  ): Promise<{ imageBuffer: Buffer; imageFormat: 'png' | 'jpeg'; warnings: string[] }> {
+  ): Promise<{
+    imageBuffer: Buffer
+    imageFormat: 'png' | 'jpeg'
+    warnings: string[]
+    sourceWidth?: number
+    sourceHeight?: number
+    width?: number
+    height?: number
+  }> {
     let rescueUsed = false
     let sawDisplaySurfaceUnavailable = false
     const warnings: string[] = []
-    const imageOpts = { dpr: options.dpr, format: options.format, jpegQuality: options.jpegQuality }
+    const imageOpts = {
+      dpr: options.dpr,
+      format: options.format,
+      jpegQuality: options.jpegQuality,
+      imagePolicy: options.imagePolicy,
+    }
 
     for (let attempt = 1; attempt <= SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS; attempt += 1) {
-      let result: { buffer: Buffer; format: 'png' | 'jpeg' } | null = null
+      let result: {
+        buffer: Buffer
+        format: 'png' | 'jpeg'
+        sourceWidth?: number
+        sourceHeight?: number
+        width?: number
+        height?: number
+      } | null = null
       try {
         result = await this.capturePageImage(instance, {
           rect: options.rect,
@@ -1388,7 +1431,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         if (attempt > 1) {
           warnings.push(`Capture recovered after ${attempt} hidden attempt${attempt === 1 ? '' : 's'}.`)
         }
-        return { imageBuffer: result.buffer, imageFormat: result.format, warnings }
+        return {
+          imageBuffer: result.buffer,
+          imageFormat: result.format,
+          warnings,
+          sourceWidth: result.sourceWidth,
+          sourceHeight: result.sourceHeight,
+          width: result.width,
+          height: result.height,
+        }
       }
 
       mainLog.warn(
@@ -1417,7 +1468,14 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           await this.waitForScreenshotReadiness(instance.id)
         }
 
-        let rescueResult: { buffer: Buffer; format: 'png' | 'jpeg' } | null = null
+        let rescueResult: {
+          buffer: Buffer
+          format: 'png' | 'jpeg'
+          sourceWidth?: number
+          sourceHeight?: number
+          width?: number
+          height?: number
+        } | null = null
         try {
           rescueResult = await this.capturePageImage(instance, {
             rect: options.rect,
@@ -1439,7 +1497,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           if (rescueUsed) {
             warnings.push('Capture required temporary inactive reveal for rendering; browser visibility was restored immediately.')
           }
-          return { imageBuffer: rescueResult.buffer, imageFormat: rescueResult.format, warnings }
+          return {
+            imageBuffer: rescueResult.buffer,
+            imageFormat: rescueResult.format,
+            warnings,
+            sourceWidth: rescueResult.sourceWidth,
+            sourceHeight: rescueResult.sourceHeight,
+            width: rescueResult.width,
+            height: rescueResult.height,
+          }
         }
       } finally {
         if (!wasVisible && !window.isDestroyed()) {
@@ -1477,8 +1543,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       dpr?: number
       format?: 'png' | 'jpeg'
       jpegQuality?: number
+      imagePolicy?: ImageSendPolicy
     },
-  ): Promise<{ buffer: Buffer; format: 'png' | 'jpeg' } | null> {
+  ): Promise<{
+    buffer: Buffer
+    format: 'png' | 'jpeg'
+    sourceWidth?: number
+    sourceHeight?: number
+    width?: number
+    height?: number
+  } | null> {
     const captureOpts = options.useHiddenCaptureOptions
       ? { stayHidden: true, stayAwake: true }
       : undefined
@@ -1503,16 +1577,57 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       })
     }
 
-    const fmt = options.format ?? 'png'
-    const encoded = fmt === 'jpeg'
-      ? image.toJPEG(options.jpegQuality ?? 80)
-      : image.toPNG()
-
-    if (!encoded || encoded.length === 0) {
-      return null
+    const policy = options.imagePolicy ?? resolveImageSendPolicy()
+    let sourceWidth: number | undefined
+    let sourceHeight: number | undefined
+    let sentWidth: number | undefined
+    let sentHeight: number | undefined
+    const size = typeof image.getSize === 'function' ? image.getSize() : undefined
+    if (size && size.width > 0 && size.height > 0) {
+      sourceWidth = size.width
+      sourceHeight = size.height
+      const target = resolveImageSendSize(size.width, size.height, policy)
+      sentWidth = target.width
+      sentHeight = target.height
+      if (
+        (target.width !== size.width || target.height !== size.height)
+        && typeof image.resize === 'function'
+      ) {
+        image = image.resize({
+          width: target.width,
+          height: target.height,
+          quality: 'best',
+        })
+      }
     }
 
-    return { buffer: encoded, format: fmt }
+    const dimensions = {
+      sourceWidth,
+      sourceHeight,
+      width: sentWidth,
+      height: sentHeight,
+    }
+    const fmt = options.format ?? 'png'
+    if (fmt !== 'jpeg') {
+      const png = image.toPNG()
+      if (!png || png.length === 0) return null
+      if (png.length <= policy.maxBytes) {
+        return { buffer: png, format: 'png', ...dimensions }
+      }
+    }
+
+    let smallest: Buffer | null = null
+    for (const quality of IMAGE_ENCODING_QUALITIES) {
+      const jpeg = image.toJPEG(quality)
+      if (!jpeg || jpeg.length === 0) continue
+      if (!smallest || jpeg.length < smallest.length) smallest = jpeg
+      if (jpeg.length <= policy.maxBytes) {
+        smallest = jpeg
+        break
+      }
+    }
+    if (!smallest || smallest.length === 0) return null
+    return { buffer: smallest, format: 'jpeg', ...dimensions }
   }
 
   private async waitForScreenshotReadiness(instanceId: string): Promise<void> {
@@ -2491,6 +2606,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       imageFormat: result.imageFormat,
       imageBytes: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
       metadata: result.metadata,
+      sourceWidth: result.sourceWidth,
+      sourceHeight: result.sourceHeight,
+      width: result.width,
+      height: result.height,
     }
   }
 

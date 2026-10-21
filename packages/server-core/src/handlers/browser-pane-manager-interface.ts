@@ -9,6 +9,7 @@
  */
 
 import type { BrowserInstanceInfo } from '@craft-agent/shared/protocol'
+import type { ImageSendPolicy } from '@craft-agent/shared/utils'
 
 // ---------------------------------------------------------------------------
 // Supporting types — minimal subsets of BPM's internal types
@@ -31,11 +32,16 @@ export interface BrowserScreenshotOptions {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: Record<string, unknown>
 }
 
@@ -49,6 +55,7 @@ export interface BrowserScreenshotRegionTarget {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserConsoleOptions {

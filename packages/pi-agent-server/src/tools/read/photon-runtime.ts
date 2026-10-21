@@ -16,6 +16,7 @@ export interface PhotonImageLike {
   get_raw_pixels(): Uint8Array
   get_bytes(): Uint8Array
   get_bytes_jpeg(quality: number): Uint8Array
+  get_bytes_webp?(): Uint8Array
 }
 
 export interface PhotonModuleLike {

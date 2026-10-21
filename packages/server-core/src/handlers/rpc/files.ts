@@ -10,9 +10,9 @@ import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
 import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
-import { readFileAttachment } from '@craft-agent/shared/utils'
+import { readFileAttachment, resolveImageSendPolicy } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { getLlmConnection, getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { storeAttachmentImage } from './attachment-image'
 import { sanitizeFilename, resolveWorkspaceIdForFileAccess, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
@@ -439,6 +439,9 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       let originalPath: string | undefined
       let originalWidth: number | undefined
       let originalHeight: number | undefined
+      let sentWidth: number | undefined
+      let sentHeight: number | undefined
+      let outputMimeType: string | undefined
 
       // 1. Save the file (with image validation and resizing)
       if (attachment.base64) {
@@ -452,6 +455,10 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         // Images are validated and maybe downscaled. The model payload stays the
         // downscaled file; the original sibling is written only when that happens.
         if (attachment.type === 'image') {
+          const storedSession = loadStoredSession(workspaceRootPath, sessionId)
+          const connection = storedSession?.llmConnection
+            ? getLlmConnection(storedSession.llmConnection)
+            : null
           const saved = await storeAttachmentImage({
             bytes: decoded,
             mimeType: attachment.mimeType,
@@ -460,6 +467,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
             storedFileName,
             processor: deps.platform.imageProcessor,
             logger: deps.platform.logger,
+            policy: resolveImageSendPolicy(connection),
           })
           wasResized = saved.wasResized
           finalSize = saved.finalSize
@@ -467,6 +475,9 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           originalPath = saved.originalPath
           originalWidth = saved.originalWidth
           originalHeight = saved.originalHeight
+          sentWidth = saved.sentWidth
+          sentHeight = saved.sentHeight
+          outputMimeType = saved.outputMimeType
           filesToCleanup.push(...saved.writtenPaths)
         } else {
           await writeFile(storedPath, decoded)
@@ -514,7 +525,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         id,
         type: attachment.type,
         name: attachment.name,
-        mimeType: attachment.mimeType,
+        mimeType: outputMimeType ?? attachment.mimeType,
         size: finalSize, // Use final size (may differ if resized)
         originalSize: wasResized ? attachment.size : undefined, // Track original if resized
         storedPath,
@@ -522,7 +533,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         thumbnailBase64,
         wasResized,
         resizedBase64, // Only set when wasResized=true, used for Claude API
-        ...(originalPath ? { originalPath, originalWidth, originalHeight } : {}),
+        ...(originalPath ? { originalPath, originalWidth, originalHeight, sentWidth, sentHeight } : {}),
       }
     } catch (error) {
       // Clean up any files we've written before the error

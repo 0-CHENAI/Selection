@@ -132,6 +132,8 @@ import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
+import { resolveImageSendPolicy, type ImageSendPolicy } from '../../shared/src/utils/image-send-size.ts';
+import { fitToolResultImages } from './tool-result-images.ts';
 import { mergeSummarizedToolResult } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 import { isBundledOfficecliLoadSkillCommand } from '../../shared/src/utils/officecli.ts';
@@ -189,6 +191,9 @@ interface InitMessage {
   customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
+  imagePixelBudget?: number;
+  imageMaxBytes?: number;
+  imageMaxDimension?: number;
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -200,6 +205,9 @@ interface RuntimeConfigUpdateMessage {
   baseUrl?: string;
   customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; thinkingMode?: 'unsupported' | 'always-on' | 'levels'; supportsImages?: boolean; imageSupport?: 'auto' | 'on' | 'off'; learnedSupportsImages?: boolean }>;
+  imagePixelBudget?: number;
+  imageMaxBytes?: number;
+  imageMaxDimension?: number;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -404,6 +412,16 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+
+function currentImageSendPolicy(): ImageSendPolicy {
+  return resolveImageSendPolicy({
+    baseUrl: initConfig?.baseUrl,
+    piAuthProvider: initConfig?.piAuth?.provider,
+    imagePixelBudget: initConfig?.imagePixelBudget,
+    imageMaxBytes: initConfig?.imageMaxBytes,
+    imageMaxDimension: initConfig?.imageMaxDimension,
+  });
+}
 let thinkingEffortRetried = false;
 let promptToolsStarted = false;
 const modelRequestSlots = createModelRequestSlots(message => send(message));
@@ -829,7 +847,9 @@ async function ensureSession(): Promise<AgentSession> {
   }) : undefined;
   confinedShellCleanup = isolatedShell?.dispose;
   const builtinDefs = [
-    registerRecoveryClass(createSelectionReadToolDefinition(cwd), 'read-only'),
+    registerRecoveryClass(createSelectionReadToolDefinition(cwd, undefined, {
+      getPolicy: () => currentImageSendPolicy(),
+    }), 'read-only'),
     registerRecoveryClass(createBashToolDefinition(cwd, isolatedShell ? { operations: isolatedShell.operations } : undefined), 'unknown'),
     registerRecoveryClass(createEditToolDefinition(cwd, { operations: nativeEditOperations }), 'file-verifiable'),
     registerRecoveryClass(createWriteToolDefinition(cwd, { operations: nativeWriteOperations }), 'file-verifiable'),
@@ -1257,7 +1277,10 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
 
         if (acceptsTurnCompletion(executionName, result)) answerAccepted = true;
         return {
-          content: normalizeProxyToolContent(result.content),
+          content: await fitToolResultImages(
+            normalizeProxyToolContent(result.content),
+            currentImageSendPolicy(),
+          ),
           details: proxyToolDetails(result),
         };
       },
@@ -2288,6 +2311,9 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       baseUrl: msg.baseUrl,
       customEndpoint: msg.customEndpoint,
       customModels: msg.customModels,
+      imagePixelBudget: msg.imagePixelBudget,
+      imageMaxBytes: msg.imageMaxBytes,
+      imageMaxDimension: msg.imageMaxDimension,
     };
     syncProviderEndpointEnv(initConfig);
 

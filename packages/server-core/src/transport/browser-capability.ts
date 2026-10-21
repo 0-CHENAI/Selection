@@ -83,4 +83,8 @@ export interface ScreenshotResultWire {
   imageFormat: 'png' | 'jpeg'
   imageBytes: Uint8Array
   metadata?: Record<string, unknown>
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
 }
