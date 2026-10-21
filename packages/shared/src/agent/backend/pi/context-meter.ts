@@ -15,6 +15,13 @@ import { debug } from '../../../utils/debug.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../../../utils/files.ts';
 
 export const CONTEXT_METER_EMA_ALPHA = 0.2;
+/**
+ * A provider/local ratio outside this band did not measure the same prompt
+ * (placeholder usage, or a context the provider never billed). Training on it
+ * would shrink later estimates and skip compaction. Real tokenizer bias,
+ * including image-formula error within 4×, still moves the average.
+ */
+export const CONTEXT_METER_MAX_RATIO = 4;
 const METER_FILE = 'context-token-meters.json';
 
 export interface ContextMeterSample {
@@ -124,6 +131,14 @@ export function observeContextMeter(
   if (!Number.isFinite(localTokens) || localTokens <= 0) return undefined;
   const ratio = providerTokens / localTokens;
   if (!Number.isFinite(ratio) || ratio <= 0) return undefined;
+  if (ratio < 1 / CONTEXT_METER_MAX_RATIO || ratio > CONTEXT_METER_MAX_RATIO) {
+    debug(
+      `[context-meter] skip ${connectionKey || '(no-connection)'}/${modelKey} `
+      + `provider=${Math.round(providerTokens)} local=${Math.round(localTokens)} `
+      + `ratio=${ratio.toFixed(3)} outside 1/${CONTEXT_METER_MAX_RATIO}..${CONTEXT_METER_MAX_RATIO}`,
+    );
+    return undefined;
+  }
   const next = nextContextMeter(loadContextMeter(connectionKey, modelKey), ratio, now);
   const key = contextMeterKey(connectionKey, modelKey);
   memory.set(key, next);

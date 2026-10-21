@@ -5,6 +5,7 @@ import type {
   Tool,
 } from '@earendil-works/pi-ai';
 import { estimateTokensDensityAware } from '../../../utils/token-estimate.ts';
+import { CONTEXT_METER_MAX_RATIO } from './context-meter.ts';
 import {
   estimateImageContentTokens,
   type ImageTokenConnection,
@@ -107,8 +108,9 @@ export function estimateTextTokensConservatively(text: string): number {
   return estimateTokensDensityAware(text);
 }
 
-function estimateContent(content: Message['content'], image?: ImageTokenConnection | null): number {
+function estimateContent(content: Message['content'] | undefined, image?: ImageTokenConnection | null): number {
   if (typeof content === 'string') return estimateTextTokensConservatively(content);
+  if (!Array.isArray(content)) return 0;
 
   let tokens = 0;
   for (const block of content) {
@@ -250,10 +252,11 @@ function estimatePromptCategories(text: string, breakdown: ContextInputBreakdown
 }
 
 function estimateStructuredContent(
-  content: Exclude<Message['content'], string>,
+  content: Exclude<Message['content'], string> | undefined,
   breakdown: ContextInputBreakdown,
   image?: ImageTokenConnection | null,
 ): void {
+  if (!Array.isArray(content)) return;
   for (const block of content) {
     if (block.type === 'image') breakdown.messages += estimateImageContentTokens(block.data, image);
     else if (block.type === 'text') estimatePromptCategories(block.text, breakdown, 'message');
@@ -342,6 +345,24 @@ export function deriveContextUsageAnchor(context: Context): DerivedUsageAnchor |
   return index < 0 ? undefined : { index, promptTokens, outputTokens, messageTimestamp };
 }
 
+/**
+ * Provider usage bills the prefix before this assistant message.
+ * A count several times below that prefix did not see this text, so the
+ * anchor would hide it and the next request could overflow.
+ */
+function anchorExplainsPrefix(
+  context: Context,
+  index: number,
+  promptTokens: number,
+  image?: ImageTokenConnection | null,
+): boolean {
+  const prefix = estimateLocalContextTokens({
+    ...context,
+    messages: context.messages.slice(0, index),
+  }, image);
+  return promptTokens * CONTEXT_METER_MAX_RATIO >= prefix;
+}
+
 function anchoredDelta(
   context: Context,
   index: number,
@@ -406,7 +427,13 @@ export function estimateContextInputBreakdown(
     if (message.role === 'system') {
       breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
       if (typeof message.content === 'string') estimatePromptCategories(message.content, breakdown, 'system');
-      else for (const part of message.content) estimatePromptCategories(part.text, breakdown, 'system');
+      else if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+            estimatePromptCategories(part.text, breakdown, 'system');
+          }
+        }
+      }
       for (const section of Object.values(message.sections ?? {})) {
         if (section) estimatePromptCategories(section, breakdown, 'system');
       }
@@ -427,7 +454,7 @@ export function estimateContextInputBreakdown(
     breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
     if (typeof message.content === 'string') {
       estimatePromptCategories(message.content, breakdown, 'message');
-    } else {
+    } else if (Array.isArray(message.content)) {
       estimateStructuredContent(message.content, breakdown, image);
     }
   }
@@ -446,8 +473,8 @@ export function estimateLocalContextTokens(context: Context, image?: ImageTokenC
  * A live anchor is
  * `(input + cacheRead + cacheWrite) + replayed output + ema × local(delta)`.
  * System prompt, tools, model, connection, context_edit, and compaction
- * changes drop the anchor. The fallback is `ema × local(full)`, not the
- * old max(full, usage) ceiling.
+ * changes drop the anchor. Usage that cannot describe the visible prefix
+ * does too. The fallback is `ema × local(full)`, not the old max(full, usage).
  */
 export function estimateContextInputTokens(context: Context, options?: ContextEstimateOptions): number {
   const ema = emaMultiplier(options);
@@ -457,11 +484,11 @@ export function estimateContextInputTokens(context: Context, options?: ContextEs
   if (options?.anchor) {
     if (!anchorStillValid(options.anchor, context, options)) return full();
     const index = explicitAnchorIndex(context, options.anchor);
-    if (index < 0) return full();
+    if (index < 0 || !anchorExplainsPrefix(context, index, options.anchor.promptTokens, image)) return full();
     return anchoredDelta(context, index, options.anchor.promptTokens, options.anchor.outputTokens, ema, image);
   }
   const derived = deriveContextUsageAnchor(context);
-  if (!derived) return full();
+  if (!derived || !anchorExplainsPrefix(context, derived.index, derived.promptTokens, image)) return full();
   return anchoredDelta(context, derived.index, derived.promptTokens, derived.outputTokens, ema, image);
 }
 

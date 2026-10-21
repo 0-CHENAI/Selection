@@ -303,6 +303,29 @@ describe('anchored context estimate', () => {
     expect(estimateContextInputTokens(removed, options)).toBe(full(removed));
   });
 
+  it('drops an anchor whose usage cannot describe the visible prefix', () => {
+    const huge = {
+      systemPrompt: 's',
+      messages: [
+        { role: 'user' as const, content: '文'.repeat(8_000), timestamp: 1 },
+        anchoredAssistant(2, 100),
+        { role: 'user' as const, content: 'next', timestamp: 3 },
+      ],
+    } as Context;
+    expect(estimateContextInputTokens(huge)).toBe(estimateLocalContextTokens(huge));
+    const plausible = {
+      ...huge,
+      messages: [
+        huge.messages[0],
+        anchoredAssistant(2, 4_000),
+        huge.messages[2],
+      ],
+    } as Context;
+    const trusted = estimateContextInputTokens(plausible);
+    expect(trusted).toBeGreaterThan(4_000);
+    expect(trusted).toBeLessThan(8_000);
+  });
+
   it('does not reuse assistant usage that is older than a later message', () => {
     const stale = {
       messages: [

@@ -250,12 +250,17 @@ function rememberUsageAnchor(
   const localTokens = estimateLocalContextTokens(context, meterConnection.image);
   observeContextMeter(meterConnection.key, meterModelKey(model), promptTokens, localTokens);
   if (promptTokens + outputTokens <= 0) return;
+  // The provider stream sees a normalized transcript: system prompt and tools
+  // live on the leading system message, so context.tools is empty. The next
+  // precheck still carries the session tool list. Fingerprint that list, or
+  // every anchor dies on the turn boundary.
+  const sessionTools = session.agent.state?.tools;
   anchorState(session).anchor = {
     promptTokens,
     outputTokens,
     messageTimestamp: message.timestamp,
     systemFingerprint: contextSystemFingerprint(context),
-    toolsFingerprint: contextToolsFingerprint(context),
+    toolsFingerprint: contextToolsFingerprint({ tools: sessionTools ?? context.tools }),
     modelKey: meterModelKey(model),
     connectionKey: meterConnection.fingerprint,
     branchRevision: branchRevision(session),

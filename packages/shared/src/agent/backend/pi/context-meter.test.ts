@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CONTEXT_METER_EMA_ALPHA,
+  CONTEXT_METER_MAX_RATIO,
   contextBranchRevision,
   contextMeterRatio,
   loadContextMeter,
@@ -44,6 +45,15 @@ describe('context token meter', () => {
     observeContextMeter('other', 'anthropic/m', 50, 25, 7_000);
     expect(loadContextMeter('conn', 'openai/m')?.samples).toBe(2);
     expect(loadContextMeter('other', 'anthropic/m')?.ema).toBe(2);
+  });
+
+  it('does not train on a ratio that cannot describe the same prompt', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'context-meter-band-'));
+    setContextMeterDirectory(directory);
+    expect(observeContextMeter('conn', 'openai/m', 100, 100 * CONTEXT_METER_MAX_RATIO, 1_000)?.ratio).toBeCloseTo(1 / CONTEXT_METER_MAX_RATIO);
+    expect(observeContextMeter('conn', 'openai/m', 10, 10_000)).toBeUndefined();
+    expect(observeContextMeter('conn', 'openai/m', 10_000, 10)).toBeUndefined();
+    expect(loadContextMeter('conn', 'openai/m')?.samples).toBe(1);
   });
 
   it('tracks the latest context edit or compaction', () => {
