@@ -1,11 +1,14 @@
 import { STAGED_TASK_CONTEXT_TYPE, taskContextReference } from './history-records.ts';
-import { createAssistantMessageEventStream, normalizeContext, type AssistantMessage } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, normalizeContext, type AssistantMessage, type Context } from '@earendil-works/pi-ai';
 import { createHash } from 'node:crypto';
 import { projectRetainedContext } from './context-retention.ts';
 import { TASK_CONTEXT_TYPE, TASK_RECONCILIATION_INSTRUCTIONS, reconcileSummary, taskReconciliationContext, taskRecoveryContext, type TaskContextItem } from './task-context.ts';
 import { createSyntheticSourceInfo, estimateTokens, findCutPoint, sessionEntryToContextMessages, type AgentSession, type Extension, type SessionBeforeCompactEvent, type SettingsManager } from '@earendil-works/pi-coding-agent';
 import { swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, estimateContextInputTokens, estimateTextTokensConservatively, estimateContextInputBreakdown } from '../../shared/src/agent/backend/pi/context-budget.ts';
+import { debug } from '../../shared/src/utils/debug.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, contextSystemFingerprint, contextToolsFingerprint, estimateContextInputTokens, estimateLocalContextTokens, estimateTextTokensConservatively, estimateContextInputBreakdown, providerPromptTokens, type ContextEstimateOptions, type ContextUsageAnchor } from '../../shared/src/agent/backend/pi/context-budget.ts';
+import { contextBranchRevision, contextMeterRatio, observeContextMeter } from '../../shared/src/agent/backend/pi/context-meter.ts';
+import type { ImageTokenConnection } from '../../shared/src/agent/backend/pi/image-token-estimate.ts';
 
 /** Trigger budget and summary output budget serve different purposes. */
 export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
@@ -17,6 +20,252 @@ export const PROTECTED_TOOL_CHAIN_STEPS = 3;
 const CHAIN_EXTENSION_PATH = '<selection:compaction-policy>';
 const installedSessions = new WeakSet<AgentSession>();
 const pendingChainOmissions = new WeakMap<AgentSession, string[]>();
+const anchorStates = new WeakMap<AgentSession, {
+  anchor?: ContextUsageAnchor | null;
+  attemptedContext?: string;
+  preflightModelKey: string;
+}>();
+
+let meterConnection: { key: string; fingerprint: string; image: ImageTokenConnection } = {
+  key: '',
+  fingerprint: '',
+  image: {},
+};
+
+/**
+ * Connection identity and image-token family for the precheck.
+ * The slug keys the EMA file. The fingerprint also covers provider, host,
+ * and the image-token override, so changing any of those drops the anchor.
+ */
+export function setContextCompactionConnection(connectionKey: string, image: ImageTokenConnection = {}): void {
+  meterConnection = {
+    key: connectionKey,
+    fingerprint: [
+      connectionKey,
+      image.piAuthProvider ?? '',
+      image.baseUrl ?? '',
+      image.imageTokenFamily ?? '',
+      image.vlHighResolutionImages ? '1' : '0',
+      image.imageMaxPixels ?? '',
+    ].join('\0'),
+    image,
+  };
+}
+
+function meterModelKey(model: { provider?: string; id?: string }): string {
+  return `${model.provider ?? ''}/${model.id ?? ''}`;
+}
+
+function anchorState(session: AgentSession) {
+  let state = anchorStates.get(session);
+  if (!state) {
+    state = { preflightModelKey: '' };
+    anchorStates.set(session, state);
+  }
+  return state;
+}
+
+function branchRevision(session: AgentSession): string {
+  const branch = session.sessionManager.getBranch?.() ?? [];
+  return contextBranchRevision(branch as Array<{ type?: string; id?: string }>);
+}
+
+function estimateOptions(session: AgentSession, model: { provider?: string; id?: string }): ContextEstimateOptions {
+  const state = anchorState(session);
+  const modelKey = meterModelKey(model);
+  return {
+    emaRatio: contextMeterRatio(meterConnection.key, modelKey),
+    image: meterConnection.image,
+    anchor: state.anchor,
+    modelKey,
+    connectionKey: meterConnection.fingerprint,
+    branchRevision: branchRevision(session),
+  };
+}
+
+type LiveSession = {
+  _isAgentRunActive?: boolean;
+  _runAutoCompaction?: (reason: 'threshold' | 'overflow', willRetry: boolean) => Promise<unknown>;
+  prompt?: AgentSession['prompt'];
+  systemPrompt?: string;
+};
+
+function liveSession(session: AgentSession): LiveSession {
+  return session as unknown as LiveSession;
+}
+
+/**
+ * Compact before the provider sees the request.
+ * Idle pre-run uses public `session.compact()` (it aborts, which is a no-op
+ * while idle, and still runs session_before_compact). An active run cannot
+ * call that: compact() waits for the run to go idle, and the run is waiting
+ * on this precheck. `_runAutoCompaction('threshold', false)` is the SDK's
+ * in-run entry. willRetry stays false, so the overflow retry is untouched.
+ */
+async function compactForPrecheck(session: AgentSession): Promise<void> {
+  const live = liveSession(session);
+  if (live._isAgentRunActive && typeof live._runAutoCompaction === 'function') {
+    await live._runAutoCompaction('threshold', false);
+    return;
+  }
+  await session.compact();
+}
+
+function projectedMessages(session: AgentSession): ContextMessage[] | undefined {
+  const manager = session.sessionManager as { buildSessionContext?: () => { messages?: ContextMessage[] } };
+  try {
+    return manager.buildSessionContext?.().messages;
+  } catch {
+    return undefined;
+  }
+}
+
+type PrecheckModel = { provider: string; id: string; contextWindow: number; maxTokens?: number };
+
+function asPrecheckModel(model: { provider?: string; id?: string; contextWindow?: number; maxTokens?: number } | null | undefined): PrecheckModel | undefined {
+  if (!model?.provider || !model.id || typeof model.contextWindow !== 'number') return undefined;
+  return { provider: model.provider, id: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens };
+}
+
+/** Run the soft gate and, when compaction rewrote the branch, return the projected context. */
+async function precheckedContext(
+  session: AgentSession,
+  model: PrecheckModel | undefined,
+  context: Context,
+  signal?: AbortSignal,
+  maxTokens?: number,
+): Promise<Context> {
+  if (!model || session.isCompacting) return context;
+  const result = await runContextPrecheck(session, model, context, { signal, maxTokens });
+  if (!result.compacted) return context;
+  const messages = projectedMessages(session);
+  if (!messages) return context;
+  return { ...context, messages: messages as Context['messages'] };
+}
+
+/**
+ * Soft gate for the two SDK request edges.
+ * `prepareNextTurnWithContext` sees a tool continuation. `prepareRequest`
+ * sees the assembled context of every request, including the first.
+ * `session.prompt` covers the idle pre-run, and only while no run is active:
+ * public `compact()` aborts, which must not interrupt a live turn.
+ */
+function installPrecheckHooks(session: AgentSession): void {
+  const agent = session.agent;
+  const previousNext = agent.prepareNextTurnWithContext;
+  agent.prepareNextTurnWithContext = async (turn, signal) => {
+    const context = await precheckedContext(session, asPrecheckModel(session.model), turn.context as Context, signal);
+    const nextTurn = context === turn.context ? turn : { ...turn, context: context as typeof turn.context };
+    return previousNext?.(nextTurn, signal);
+  };
+  const previousRequest = agent.prepareRequest;
+  agent.prepareRequest = async (request, signal) => {
+    const context = await precheckedContext(
+      session,
+      asPrecheckModel(request.model ?? session.model),
+      request.context as Context,
+      signal,
+    );
+    const nextRequest = context === request.context ? request : { ...request, context: context as typeof request.context };
+    const previous = await previousRequest?.(nextRequest, signal);
+    return previous && typeof previous === 'object' ? previous : undefined;
+  };
+  const live = liveSession(session);
+  if (typeof live.prompt === 'function') {
+    const previousPrompt = live.prompt.bind(session);
+    live.prompt = async (text, options) => {
+      const model = asPrecheckModel(session.model);
+      if (model && !session.isCompacting && !live._isAgentRunActive) {
+        const existing = projectedMessages(session) ?? [];
+        const images = options?.images ?? [];
+        const content = images.length > 0
+          ? [{ type: 'text' as const, text }, ...images]
+          : text;
+        await runContextPrecheck(session, model, {
+          systemPrompt: live.systemPrompt,
+          messages: [
+            ...existing as Context['messages'],
+            { role: 'user', content, timestamp: Date.now() },
+          ],
+        });
+      }
+      return previousPrompt(text, options);
+    };
+  }
+}
+
+/** Soft precheck. Over threshold with foldable history calls compaction instead of a fake overflow. */
+export async function runContextPrecheck(
+  session: AgentSession,
+  model: { provider: string; id: string; contextWindow: number; maxTokens?: number },
+  context: Context,
+  options?: { signal?: AbortSignal; maxTokens?: number },
+): Promise<{ compacted: boolean; estimatedInput: number }> {
+  const state = anchorState(session);
+  const settings = session.settingsManager.getCompactionSettings();
+  const preflightKey = `${model.provider}/${model.id}/${model.contextWindow}/${settings.reserveTokens}/${settings.enabled}`;
+  if (preflightKey !== state.preflightModelKey) {
+    state.preflightModelKey = preflightKey;
+    state.attemptedContext = undefined;
+    if (state.anchor && state.anchor.modelKey !== meterModelKey(model)) state.anchor = null;
+  }
+  const revision = branchRevision(session);
+  if (state.anchor && state.anchor.branchRevision !== revision) state.anchor = null;
+  if (state.anchor && state.anchor.connectionKey !== meterConnection.fingerprint) state.anchor = null;
+  const estimatedInput = estimateContextInputTokens(context, estimateOptions(session, model));
+  const boundary = adaptiveCompactionBoundary(context, model.contextWindow, settings.reserveTokens,
+    options?.maxTokens ?? model.maxTokens ?? 0);
+  const overThreshold = settings.enabled && estimatedInput >= boundary;
+  const contextKey = overThreshold ? createHash('sha256').update(JSON.stringify({
+    system: context.systemPrompt ?? '',
+    tools: (context.tools ?? []).map(tool => tool.name),
+    messages: context.messages.filter(message => message.role !== 'assistant' || message.stopReason !== 'error'),
+    checkpoints: session.sessionManager.getBranch().filter(entry => entry.type === 'compaction'),
+  })).digest('hex') : undefined;
+  if (!overThreshold) state.attemptedContext = undefined;
+  let compacted = false;
+  if (overThreshold && state.attemptedContext !== contextKey && !options?.signal?.aborted
+    && hasUsefulCompactionHistory(session, settings.keepRecentTokens, model.contextWindow)) {
+    state.attemptedContext = contextKey;
+    state.anchor = null;
+    try {
+      await compactForPrecheck(session);
+      compacted = true;
+    } catch (error) {
+      debug('[context-meter] precheck compaction failed', error instanceof Error ? error.message : error);
+    }
+  }
+  return { compacted, estimatedInput };
+}
+
+function rememberUsageAnchor(
+  session: AgentSession,
+  model: { provider: string; id: string },
+  context: Context,
+  message: AssistantMessage,
+): void {
+  if (message.stopReason === 'error' || message.stopReason === 'aborted') return;
+  const promptTokens = providerPromptTokens(message.usage);
+  const outputTokens = Math.max(0, message.usage?.output ?? 0);
+  const localTokens = estimateLocalContextTokens(context, meterConnection.image);
+  observeContextMeter(meterConnection.key, meterModelKey(model), promptTokens, localTokens);
+  if (promptTokens + outputTokens <= 0) return;
+  // The provider stream sees a normalized transcript: system prompt and tools
+  // live on the leading system message, so context.tools is empty. The next
+  // precheck still carries the session tool list. Fingerprint that list, or
+  // every anchor dies on the turn boundary.
+  const sessionTools = session.agent.state?.tools;
+  anchorState(session).anchor = {
+    promptTokens,
+    outputTokens,
+    messageTimestamp: message.timestamp,
+    systemFingerprint: contextSystemFingerprint(context),
+    toolsFingerprint: contextToolsFingerprint({ tools: sessionTools ?? context.tools }),
+    modelKey: meterModelKey(model),
+    connectionKey: meterConnection.fingerprint,
+    branchRevision: branchRevision(session),
+  };
+}
 type ContextMessage = ReturnType<typeof sessionEntryToContextMessages>[number];
 
 export const COMPACTION_FOCUS = 'Preserve the active user request, constraints and permissions, decisions, unresolved errors, exact paths, completed changes and next steps. Distinguish verified results from assumptions. Remove duplicate logs, obsolete plans and earlier source-recovery blocks (the harness restores current source state); do not continue the task.';
@@ -53,7 +302,7 @@ export function applyCompactionSettings(
 
 /** The SDK checks before a new prompt, but does not account for that prompt or mid-turn tool results. */
 export function shouldCompactBeforeRequest(
-  context: Parameters<AgentSession['agent']['streamFunction']>[1],
+  context: Context,
   contextWindow: number,
   reserveTokens: number,
   estimatedInputTokens = estimateContextInputTokens(context),
@@ -64,7 +313,7 @@ export function shouldCompactBeforeRequest(
 
 /** Anticipate the next tool batch instead of waiting for it to overflow the 80% gate. */
 export function adaptiveCompactionBoundary(
-  context: Parameters<AgentSession['agent']['streamFunction']>[1], contextWindow: number,
+  context: Context, contextWindow: number,
   reserveTokens: number, maxOutputTokens: number,
 ): number {
   const baseline = contextWindow - reserveTokens + 1;
@@ -201,7 +450,7 @@ function planInProgressToolChain(session: AgentSession, contextWindow: number): 
   const protectedMessages = [user.message, ...protectedSteps.flatMap(step => step.messages)];
   const protectedTokens = estimateContextInputTokens({
     messages: protectedMessages as Parameters<typeof estimateContextInputTokens>[0]['messages'],
-  });
+  }, { anchor: null, image: meterConnection.image });
   // Same physical ceiling as the precheck. A tail that cannot be sent is left to the
   // existing cut, which ends in the actionable context-limit error instead of another pass.
   const reserve = calculateContextReserve(protectedTokens, contextWindow);
@@ -316,14 +565,17 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
   if (installedSessions.has(session)) return;
   installedSessions.add(session);
   installInProgressChainHook(session);
+  installPrecheckHooks(session);
   const stream = session.agent.streamFunction;
-  let attemptedContext: string | undefined;
-  let preflightModelKey = '';
   let pendingNotes: TaskContextItem[] | undefined;
   session.subscribe(event => {
-    if (event.type === 'compaction_start') pendingNotes = undefined;
+    if (event.type === 'compaction_start') {
+      pendingNotes = undefined;
+      anchorState(session).anchor = null;
+    }
     if (event.type === 'compaction_end') {
       pendingNotes = undefined;
+      anchorState(session).anchor = null;
     }
     // Extensions can save settings after the last provider request. Restore
     // the override before Pi checks the threshold after agent_end.
@@ -335,7 +587,6 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
   session.agent.streamFunction = async (model, context, options) => {
     if (!session.isCompacting) {
       // Apply before budget checks so retained source excerpts are accounted for.
-      // Keep provider usage as a conservative ceiling even when old results shrink.
       let runtimeContext: string | undefined;
       try { runtimeContext = !options?.signal?.aborted ? await readRuntimeContext?.(options?.signal) : undefined; }
       catch { runtimeContext = '{"unavailable":true}'; }
@@ -345,45 +596,13 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
       // Tool continuations may follow such a save without a new prompt.
       applyCompactionSettings(session.settingsManager, model.contextWindow,
         session.autoCompactionEnabled, agentTokenBudget);
-      const settings = session.settingsManager.getCompactionSettings();
-      const modelKey = `${model.provider}/${model.id}/${model.contextWindow}/${settings.reserveTokens}/${settings.enabled}`;
-      if (modelKey !== preflightModelKey) {
-        preflightModelKey = modelKey;
-        attemptedContext = undefined;
-      }
-      const estimatedInput = estimateContextInputTokens(context);
-      const boundary = adaptiveCompactionBoundary(context, model.contextWindow, settings.reserveTokens,
-        options?.maxTokens ?? model.maxTokens);
-      const overThreshold = settings.enabled && estimatedInput >= boundary;
+      const estimatedInput = estimateContextInputTokens(context, estimateOptions(session, model));
       const reserve = calculateContextReserve(estimatedInput, model.contextWindow);
       const physicallyFull = Number.isFinite(model.contextWindow) && model.contextWindow > 0
         && estimatedInput + reserve + 1 >= model.contextWindow;
-      // Only actual request/history changes permit another automatic attempt.
-      // A repeated user lifecycle event or our synthetic error is not new input.
-      const contextKey = overThreshold ? createHash('sha256').update(JSON.stringify({
-        messages: context.messages.filter(message => message.role !== 'assistant' || message.stopReason !== 'error'),
-        checkpoints: session.sessionManager.getBranch().filter(entry => entry.type === 'compaction'),
-      })).digest('hex') : undefined;
-      if (!overThreshold) attemptedContext = undefined;
-      if (overThreshold && attemptedContext !== contextKey && !options?.signal?.aborted
-        && hasUsefulCompactionHistory(session, settings.keepRecentTokens, model.contextWindow)) {
-        attemptedContext = contextKey;
-        // Return a recognized overflow error before sending another provider
-        // request. The SDK will finish this agent run, compact the saved turn,
-        // and continue it through its bounded overflow recovery path.
-        const error: AssistantMessage = {
-          role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-          stopReason: 'error', errorMessage: 'context_length_exceeded: mid-turn compaction threshold reached',
-          timestamp: Date.now(),
-        };
-        const response = createAssistantMessageEventStream();
-        response.push({ type: 'error', reason: 'error', error });
-        return response;
-      }
-      // The compaction threshold is soft. If this context was already tried or
-      // there is no useful history to fold, let a physically safe request run.
+      // The soft threshold compacts from prepareNextTurnWithContext and the
+      // pre-run path. This request path only blocks a context that cannot fit
+      // even after that, and it does not impersonate a provider overflow.
       if (physicallyFull && !options?.signal?.aborted) {
         const error: AssistantMessage & { craftContextLimit: true } = {
           role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
@@ -398,7 +617,11 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         response.push({ type: 'error', reason: 'error', error });
         return response;
       }
-      return stream(model, context, options);
+      const response = await Promise.resolve(stream(model, context, options));
+      void response.result?.().then(message => {
+        rememberUsageAnchor(session, model, context, message);
+      }).catch(() => undefined);
+      return response;
     }
     const output = createAssistantMessageEventStream();
     const validLimit = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 1

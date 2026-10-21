@@ -159,3 +159,26 @@ describe('updateLlmConnection – Anthropic OAuth identity (issue #838)', () => 
     expect(conn.oauthProfileVerifiedAt).toBe(identity.oauthProfileVerifiedAt)
   })
 })
+
+describe('updateLlmConnection – image token family', () => {
+  it('keeps the image-token override across an unrelated save', () => {
+    const { runUpdate, readConnection } = setup([
+      makeConnection({
+        imageTokenFamily: 'kimi',
+        vlHighResolutionImages: true,
+        imageMaxPixels: 2_621_440,
+        imagePixelBudget: 640_000,
+      }),
+    ])
+
+    const ok = runUpdate('custom-compat', { name: 'Renamed' })
+    expect(ok).toBe(true)
+
+    const conn = readConnection('custom-compat')
+    expect(conn.name).toBe('Renamed')
+    expect(conn.imageTokenFamily).toBe('kimi')
+    expect(conn.vlHighResolutionImages).toBe(true)
+    expect(conn.imageMaxPixels).toBe(2_621_440)
+    expect(conn.imagePixelBudget).toBe(640_000)
+  })
+})

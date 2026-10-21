@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'bun:test';
+import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { applyCompactionSettings, COMPACTION_FOCUS, installCompactionPolicy, PROTECTED_TOOL_CHAIN_STEPS } from './compaction-policy.ts';
 import { snapshotContextBreakdown } from './context-breakdown.ts';
 import { PiEventAdapter } from '../../shared/src/agent/backend/pi/event-adapter.ts';
+import { setContextMeterDirectory } from '../../shared/src/agent/backend/pi/context-meter.ts';
 
 const model: Model<'openai-responses'> = {
   id: 'offline-compaction-test', name: 'Offline compaction test', api: 'openai-responses',
@@ -18,7 +19,13 @@ const model: Model<'openai-responses'> = {
 const usage = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const tempDirs: string[] = [];
+beforeEach(() => {
+  const meterDir = mkdtempSync(join(tmpdir(), 'selection-meter-'));
+  tempDirs.push(meterDir);
+  setContextMeterDirectory(meterDir);
+});
 afterEach(() => {
+  setContextMeterDirectory(undefined);
   for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
@@ -121,8 +128,8 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
 
   await session.prompt('Continue the same request');
 
-  expect(events).toContain('start:overflow');
-  expect(events).toContain('end:overflow:true');
+  expect(events).toContain('start:manual');
+  expect(events).toContain('end:manual:true');
   expect(postCompactionMessages).toBeGreaterThan(0);
   expect(providerCalls.map(call => call.summary)).toEqual([true, false]);
   expect(providerCalls[1]!.context.messages.some(message => message.role === 'user'

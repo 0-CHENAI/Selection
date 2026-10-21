@@ -1570,6 +1570,9 @@ export function buildAgentRuntimeConfigUpdate(
       imagePixelBudget: connection.imagePixelBudget,
       imageMaxBytes: connection.imageMaxBytes,
       imageMaxDimension: connection.imageMaxDimension,
+      imageTokenFamily: connection.imageTokenFamily,
+      vlHighResolutionImages: connection.vlHighResolutionImages,
+      imageMaxPixels: connection.imageMaxPixels,
     } : undefined,
   }
 }
