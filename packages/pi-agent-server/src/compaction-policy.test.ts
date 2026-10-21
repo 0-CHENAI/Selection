@@ -185,6 +185,24 @@ describe('80% compaction policy', () => {
     await (await session.agent.streamFunction(model, context)).result();
     expect(calls).toHaveLength(2);
   });
+  it('reports the context limit once when the protected tool chain cannot fit', async () => {
+    const { session, state, calls } = harness();
+    state.compacting = false;
+    const small = { ...model, contextWindow: 16_384 };
+    const context: Context = { messages: [
+      { role: 'user', content: 'Read this', timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'call-1', name: 'read', arguments: {} }],
+        api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'toolUse', timestamp: 2 },
+      { role: 'toolResult', toolCallId: 'call-1', toolName: 'read',
+        content: [{ type: 'text', text: 'r'.repeat(80_000) }], isError: false, timestamp: 3 },
+    ] };
+    state.branch = branchMessages(context.messages);
+    const first = await (await session.agent.streamFunction(small, context)).result();
+    const second = await (await session.agent.streamFunction(small, context)).result();
+    expect(first.errorMessage).toContain('上下文安全上限');
+    expect(second.errorMessage).toContain('上下文安全上限');
+    expect(calls).toHaveLength(0);
+  });
   it('uses the SDK cut point before an oversized tool pair while preserving the pair', async () => {
     const { session, state, calls } = harness();
     state.compacting = false;

@@ -3,13 +3,21 @@ import { createAssistantMessageEventStream, normalizeContext, type AssistantMess
 import { createHash } from 'node:crypto';
 import { projectRetainedContext } from './context-retention.ts';
 import { TASK_CONTEXT_TYPE, TASK_RECONCILIATION_INSTRUCTIONS, reconcileSummary, taskReconciliationContext, taskRecoveryContext, type TaskContextItem } from './task-context.ts';
-import { estimateTokens, findCutPoint, sessionEntryToContextMessages, type AgentSession, type SettingsManager } from '@earendil-works/pi-coding-agent';
+import { createSyntheticSourceInfo, estimateTokens, findCutPoint, sessionEntryToContextMessages, type AgentSession, type Extension, type SessionBeforeCompactEvent, type SettingsManager } from '@earendil-works/pi-coding-agent';
 import { swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
 import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, estimateContextInputTokens, estimateTextTokensConservatively, estimateContextInputBreakdown } from '../../shared/src/agent/backend/pi/context-budget.ts';
 
 /** Trigger budget and summary output budget serve different purposes. */
 export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
+/**
+ * Closed tool steps of the current turn kept verbatim when compaction runs
+ * before the final answer. Older closed steps may be summarized.
+ */
+export const PROTECTED_TOOL_CHAIN_STEPS = 3;
+const CHAIN_EXTENSION_PATH = '<selection:compaction-policy>';
 const installedSessions = new WeakSet<AgentSession>();
+const pendingChainOmissions = new WeakMap<AgentSession, string[]>();
+type ContextMessage = ReturnType<typeof sessionEntryToContextMessages>[number];
 
 export const COMPACTION_FOCUS = 'Preserve the active user request, constraints and permissions, decisions, unresolved errors, exact paths, completed changes and next steps. Distinguish verified results from assumptions. Remove duplicate logs, obsolete plans and earlier source-recovery blocks (the harness restores current source state); do not continue the task.';
 
@@ -73,10 +81,211 @@ export function adaptiveCompactionBoundary(
   return Math.floor(Math.max(effectiveWindow * 0.5, Math.min(baseline, effectiveWindow - reserve)));
 }
 
+function minimumCompactionSavings(keepRecentTokens: number): number {
+  return Math.min(1024, Math.max(256, Math.floor(keepRecentTokens / 4)));
+}
+
+interface ChainRef {
+  id: string;
+  message: ContextMessage;
+}
+
+interface ToolStep {
+  entryIds: string[];
+  messages: ContextMessage[];
+  closed: boolean;
+}
+
+interface InProgressChainPlan {
+  userEntryId: string;
+  fits: boolean;
+  summarizableMessages: ContextMessage[];
+  summarizableTokens: number;
+  omitEntryIds: string[];
+}
+
+/** Context-visible messages. Projected entries honor context edits; raw entries cover test doubles. */
+function contextRefs(session: AgentSession): ChainRef[] {
+  const manager = session.sessionManager;
+  if (typeof manager.buildSessionProjection === 'function') {
+    return manager.buildSessionProjection().entries.flatMap(entry => {
+      if (entry.sourceEntry.type === 'compaction') return [];
+      return entry.messages
+        .filter(message => message.role !== 'system')
+        .map(message => ({ id: entry.sourceEntry.id, message }));
+    });
+  }
+  return manager.getBranch().flatMap(entry => {
+    if (entry.type === 'compaction') return [];
+    return sessionEntryToContextMessages(entry)
+      .filter(message => message.role !== 'system')
+      .map(message => ({ id: entry.id, message }));
+  });
+}
+
+function toolCallIds(message: ContextMessage): string[] {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return [];
+  return message.content.flatMap(block => block.type === 'toolCall' && block.id ? [block.id] : []);
+}
+
+/** A final answer ends the turn. Errors and aborts are not answers, so the tool chain is still in progress. */
+function closesTurn(message: ContextMessage): boolean {
+  if (message.role !== 'assistant' || toolCallIds(message).length > 0) return false;
+  return message.stopReason !== 'error' && message.stopReason !== 'aborted';
+}
+
+function toolStepsAfter(refs: ChainRef[], userIndex: number): ToolStep[] | undefined {
+  const steps: ToolStep[] = [];
+  let current: { entryIds: string[]; messages: ContextMessage[]; callIds: Set<string>; matched: Set<string> } | undefined;
+  const flush = () => {
+    if (!current) return;
+    const step = current;
+    steps.push({
+      entryIds: step.entryIds,
+      messages: step.messages,
+      closed: step.callIds.size > 0 && [...step.callIds].every(id => step.matched.has(id)),
+    });
+    current = undefined;
+  };
+  for (const ref of refs.slice(userIndex + 1)) {
+    const calls = toolCallIds(ref.message);
+    if (closesTurn(ref.message)) return undefined;
+    if (ref.message.role === 'assistant' && calls.length > 0) {
+      flush();
+      current = { entryIds: [ref.id], messages: [ref.message], callIds: new Set(calls), matched: new Set() };
+      continue;
+    }
+    if (!current) continue;
+    // Keep every record that follows the call with that call, matched or not.
+    current.entryIds.push(ref.id);
+    current.messages.push(ref.message);
+    if (ref.message.role === 'toolResult' && current.callIds.has(ref.message.toolCallId)) {
+      current.matched.add(ref.message.toolCallId);
+    }
+  }
+  flush();
+  return steps.length > 0 ? steps : undefined;
+}
+
+/**
+ * Mid-turn plan: keep the current user message and the newest tool steps verbatim.
+ * Older closed steps are summarizable. Undefined when the turn already has a final answer.
+ */
+function planInProgressToolChain(session: AgentSession, contextWindow: number): InProgressChainPlan | undefined {
+  const refs = contextRefs(session);
+  let userIndex = -1;
+  for (let index = refs.length - 1; index >= 0; index--) {
+    if (refs[index]?.message.role === 'user') { userIndex = index; break; }
+  }
+  if (userIndex < 0) return undefined;
+  const user = refs[userIndex];
+  if (!user) return undefined;
+  const steps = toolStepsAfter(refs, userIndex);
+  if (!steps) return undefined;
+  const tail = new Set(steps.slice(-PROTECTED_TOOL_CHAIN_STEPS));
+  const protectedSteps = steps.filter(step => !step.closed || tail.has(step));
+  const protectedIds = new Set<string>([user.id, ...protectedSteps.flatMap(step => step.entryIds)]);
+  const summarizableMessages: ContextMessage[] = [];
+  const omitEntryIds: string[] = [];
+  const omitted = new Set<string>();
+  let passedUser = false;
+  for (const ref of refs) {
+    if (ref.id === user.id) { passedUser = true; continue; }
+    if (protectedIds.has(ref.id)) continue;
+    summarizableMessages.push(ref.message);
+    if (passedUser && !omitted.has(ref.id)) {
+      omitted.add(ref.id);
+      omitEntryIds.push(ref.id);
+    }
+  }
+  const protectedMessages = [user.message, ...protectedSteps.flatMap(step => step.messages)];
+  const protectedTokens = estimateContextInputTokens({
+    messages: protectedMessages as Parameters<typeof estimateContextInputTokens>[0]['messages'],
+  });
+  // Same physical ceiling as the precheck. A tail that cannot be sent is left to the
+  // existing cut, which ends in the actionable context-limit error instead of another pass.
+  const reserve = calculateContextReserve(protectedTokens, contextWindow);
+  const fits = Number.isFinite(contextWindow) && contextWindow > 0
+    && protectedTokens + reserve + 1 < contextWindow;
+  const summarizableTokens = summarizableMessages.reduce((total, message) => total + estimateTokens(message), 0);
+  return { userEntryId: user.id, fits, summarizableMessages, summarizableTokens, omitEntryIds };
+}
+
+function collectFileOps(message: ContextMessage, fileOps: { read: Set<string>; written: Set<string>; edited: Set<string> }): void {
+  const calls: Array<{ name: string; arguments?: { path?: unknown } }> = [];
+  if (message.role === 'assistant' && Array.isArray(message.content)) {
+    for (const block of message.content) {
+      if (block.type === 'toolCall') calls.push({ name: block.name, arguments: block.arguments as { path?: unknown } });
+    }
+  } else if (message.role === 'toolResult') {
+    const nested = (message as { nestedCalls?: { calls?: Array<{ name: string; arguments?: { path?: unknown } }> } }).nestedCalls?.calls ?? [];
+    calls.push(...nested);
+  }
+  for (const call of calls) {
+    const path = call.arguments?.path;
+    if (typeof path !== 'string' || !path) continue;
+    if (call.name === 'read') fileOps.read.add(path);
+    else if (call.name === 'write') fileOps.written.add(path);
+    else if (call.name === 'edit') fileOps.edited.add(path);
+  }
+}
+
+/** Move the SDK cut so the summary excludes the protected tail. Omissions land only after the checkpoint is saved. */
+function protectInProgressChain(session: AgentSession, event: SessionBeforeCompactEvent): void {
+  const plan = planInProgressToolChain(session, session.model?.contextWindow ?? 0);
+  const savings = minimumCompactionSavings(event.preparation.settings.keepRecentTokens);
+  if (!plan?.fits || plan.summarizableMessages.length === 0 || plan.summarizableTokens < savings) {
+    pendingChainOmissions.delete(session);
+    return;
+  }
+  event.preparation.firstKeptEntryId = plan.userEntryId;
+  event.preparation.isSplitTurn = false;
+  event.preparation.turnPrefixMessages = [];
+  event.preparation.messagesToSummarize = plan.summarizableMessages;
+  for (const message of plan.summarizableMessages) collectFileOps(message, event.preparation.fileOps);
+  pendingChainOmissions.set(session, plan.omitEntryIds);
+}
+
+function applyPendingChainOmissions(session: AgentSession): void {
+  const entryIds = pendingChainOmissions.get(session);
+  pendingChainOmissions.delete(session);
+  if (!entryIds?.length) return;
+  for (const entryId of entryIds) session.sessionManager.appendContextEdit(entryId, null);
+  session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
+}
+
+function installInProgressChainHook(session: AgentSession): void {
+  if (!('extensionRunner' in session) || !session.extensionRunner) return;
+  const runner = session.extensionRunner as unknown as { extensions: Extension[] };
+  if (runner.extensions.some(extension => extension.path === CHAIN_EXTENSION_PATH)) return;
+  const handlers: Extension['handlers'] = new Map();
+  handlers.set('session_before_compact', [async (event: unknown) => {
+    protectInProgressChain(session, event as SessionBeforeCompactEvent);
+  }]);
+  handlers.set('session_compact', [async () => { applyPendingChainOmissions(session); }]);
+  handlers.set('session_compact_failed', [async () => { pendingChainOmissions.delete(session); }]);
+  runner.extensions.push({
+    path: CHAIN_EXTENSION_PATH,
+    resolvedPath: CHAIN_EXTENSION_PATH,
+    hidden: true,
+    sourceInfo: createSyntheticSourceInfo(CHAIN_EXTENSION_PATH, { source: 'selection' }),
+    handlers,
+    tools: new Map(),
+    messageRenderers: new Map(),
+    commands: new Map(),
+    flags: new Map(),
+    shortcuts: new Map(),
+  });
+}
+
 /** Avoid a synthetic overflow when the SDK has little useful history to discard. */
-function hasUsefulCompactionHistory(session: AgentSession, keepRecentTokens: number): boolean {
+function hasUsefulCompactionHistory(session: AgentSession, keepRecentTokens: number, contextWindow: number): boolean {
   const entries = session.sessionManager.getBranch();
   if (entries.at(-1)?.type === 'compaction') return false;
+  // A protected in-progress chain is not discardable. Compact only when something
+  // outside that tail is worth summarizing; otherwise leave the existing error path.
+  const plan = planInProgressToolChain(session, contextWindow);
+  if (plan?.fits) return plan.summarizableTokens >= minimumCompactionSavings(keepRecentTokens);
   let boundaryStart = 0;
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index];
@@ -98,8 +307,7 @@ function hasUsefulCompactionHistory(session: AgentSession, keepRecentTokens: num
     discarded += sessionEntryToContextMessages(entry).reduce((total, message) => total + estimateTokens(message), 0);
   }
   // Tiny prefixes can cost more to summarize than they remove.
-  const minimumSavings = Math.min(1024, Math.max(256, Math.floor(keepRecentTokens / 4)));
-  return discarded >= minimumSavings;
+  return discarded >= minimumCompactionSavings(keepRecentTokens);
 }
 
 /** Keep the SDK checkpoint/retention algorithm; reject invalid summaries before persistence. */
@@ -107,6 +315,7 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
   readRuntimeContext?: (signal?: AbortSignal) => Promise<string | undefined>): void {
   if (installedSessions.has(session)) return;
   installedSessions.add(session);
+  installInProgressChainHook(session);
   const stream = session.agent.streamFunction;
   let attemptedContext: string | undefined;
   let preflightModelKey = '';
@@ -157,7 +366,7 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
       })).digest('hex') : undefined;
       if (!overThreshold) attemptedContext = undefined;
       if (overThreshold && attemptedContext !== contextKey && !options?.signal?.aborted
-        && hasUsefulCompactionHistory(session, settings.keepRecentTokens)) {
+        && hasUsefulCompactionHistory(session, settings.keepRecentTokens, model.contextWindow)) {
         attemptedContext = contextKey;
         // Return a recognized overflow error before sending another provider
         // request. The SDK will finish this agent run, compact the saved turn,
