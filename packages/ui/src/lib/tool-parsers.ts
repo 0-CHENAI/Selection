@@ -5,6 +5,7 @@
  * Used by both Electron and viewer apps for consistent overlay display.
  */
 
+import i18n from 'i18next'
 import type { ActivityItem } from '../components/chat/TurnCard'
 import type { ToolType } from '../components/terminal/TerminalOutput'
 
@@ -249,6 +250,18 @@ export function extractOverlayData(activity: ActivityItem): OverlayData | null {
   const input = activity.toolInput as Record<string, unknown> | undefined
   const rawContent = activity.content || ''
   const toolName = activity.toolName?.toLowerCase() || ''
+
+  // Reasoning is prose, even when a note happens to look like JSON.
+  // The details overlay renders this as markdown inside its scroll view.
+  if (activity.type === 'thinking') {
+    return {
+      type: 'document',
+      content: rawContent,
+      filePath: '',
+      toolName: i18n.t('turnCard.thoughtDeeply'),
+      error: activity.error,
+    }
+  }
 
   // Get file path from various input formats
   const filePath = (input?.file_path as string) || (input?.path as string) || 'file'

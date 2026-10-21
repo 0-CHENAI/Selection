@@ -458,8 +458,13 @@ it('shows model reasoning inside the process chain while it is still running', a
   }], { expanded: true })
   const chain = live.slice(live.indexOf('data-process-chain'))
   expect(chain).toContain('data-thinking-live')
+  expect(chain).toContain('data-thinking-preview="live"')
   expect(chain).toContain('data-thinking-step')
+  expect(chain).toContain('已深度思考')
   expect(chain).toContain('先整理结构')
+  expect(chain).toContain('truncate')
+  expect(chain).not.toContain('line-clamp-2')
+  expect(chain).not.toContain('lucide-message-circle-dashed')
   expect(live).not.toContain('data-thinking-done')
   expect(live).not.toContain('<details')
 })
@@ -486,8 +491,13 @@ it('keeps thinking and intermediate rounds inside the chain and the final reply 
   expect(replyStart).toBeGreaterThan(chainStart)
   const chain = html.slice(chainStart, replyStart)
   expect(chain).toContain('已深度思考')
-  expect(chain).not.toContain('先看安装情况')
-  expect(chain).not.toContain('签名已经失效')
+  expect(chain).toContain('data-thinking-preview="done"')
+  expect(chain).toContain('先看安装情况')
+  expect(chain).toContain('签名已经失效')
+  expect(chain).toContain('opacity-60')
+  expect(chain).toContain('truncate')
+  expect(chain).toContain('lucide-message-circle-dashed')
+  expect(chain).not.toContain('lucide lucide-circle ')
   expect(chain).toContain('Zen 1.23.2b installed, and there are two fresh crash reports.')
   expect(chain).toContain('Crash reason: Code Signature Invalid')
   expect(countOccurrences(chain, 'data-thinking-step=""')).toBe(2)
@@ -516,4 +526,43 @@ it('collapses a long intermediate narrative to one process step instead of the p
   expect(chain).toContain('data-process-step')
   expect(html).not.toContain('<details')
   expect(html.slice(html.indexOf('结论写在这里。'))).toContain('结论写在这里。')
+})
+
+it('shows a one-line thinking preview and opens details only when the block has text', async () => {
+  const opening = '甲'.repeat(80)
+  const latest = '最新判断'
+  const live = await renderTurn('zh-Hans', [{
+    id: 'think-live', type: 'thinking', status: 'running', timestamp: 1,
+    content: `先看安装情况。\n${opening}${latest}`,
+  }], { expanded: true })
+  const liveStep = live.slice(live.indexOf('data-thinking-step'))
+  expect(liveStep).toContain('data-thinking-preview="live"')
+  expect(liveStep).toContain('已深度思考')
+  expect(liveStep).toContain(`…${(`${opening}${latest}`).slice(-(48 - 1))}`)
+  expect(liveStep).not.toContain(opening)
+  expect(liveStep).not.toContain('先看安装情况')
+  expect(liveStep).toContain('truncate')
+  expect(liveStep).not.toContain('line-clamp-2')
+  expect(liveStep).not.toContain('items-start')
+
+  const settled = await renderTurn('zh-Hans', [{
+    id: 'think-done', type: 'thinking', status: 'completed', timestamp: 1,
+    content: `**先看**安装情况。\n${opening}${latest}`,
+  }], { isComplete: true, isStreaming: false, expanded: true, onOpenActivityDetails: () => {} })
+  const doneStep = settled.slice(settled.indexOf('data-thinking-step'))
+  expect(doneStep).toContain('data-thinking-preview="done"')
+  expect(doneStep).toContain('先看安装情况')
+  expect(doneStep).toContain(opening)
+  expect(doneStep).not.toContain('**先看**')
+  expect(doneStep).toContain('lucide-message-circle-dashed')
+  expect(doneStep).toContain('role="button"')
+
+  const redacted = await renderTurn('zh-Hans', [{
+    id: 'think-empty', type: 'thinking', status: 'completed', timestamp: 1, content: '  \n',
+  }], { isComplete: true, isStreaming: false, expanded: true, onOpenActivityDetails: () => {} })
+  expect(redacted).toContain('已深度思考')
+  expect(redacted).toContain('lucide-message-circle-dashed')
+  expect(redacted).not.toContain('data-thinking-preview')
+  expect(redacted).not.toContain('role="button"')
+  expect(redacted).not.toContain('lucide-circle')
 })

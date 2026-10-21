@@ -557,6 +557,30 @@ export function shouldShowStreamingFooter(input: {
 }
 
 /**
+ * Empty live thinking/commentary belongs to the status header, not the chain.
+ * A finished thinking block with no readable text (encrypted or redacted) is
+ * still a step: the row keeps its label and does not open empty details.
+ */
+export function isProcessPlaceholder(activity: Pick<ActivityItem, 'type' | 'status' | 'content'>): boolean {
+  if (activity.type !== 'intermediate' && activity.type !== 'thinking') return false
+  if (hasRenderableAssistantText(activity.content)) return false
+  return !(activity.type === 'thinking' && activity.status === 'completed')
+}
+
+export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
+  return new Set(activities
+    // Delivery is the card body, not a numbered work step.
+    .filter(activity => !isAnswerDeliveryTool(activity))
+    .filter(activity => activity.statusType !== 'compaction_complete')
+    // Empty live placeholders are transient indicators, not work records.
+    // Finished reasoning is a step, same as commentary between tools.
+    .filter(activity => !isProcessPlaceholder(activity))
+    .map(activity => activity.type === 'tool'
+      ? `tool:${activity.toolUseId ?? activity.id}`
+      : `${activity.type}:${activity.id}`)).size
+}
+
+/**
  * Select the newest semantic progress title while a turn is doing work.
  *
  * Tool intents and explicit system statuses are concise title candidates.
@@ -565,20 +589,6 @@ export function shouldShowStreamingFooter(input: {
  * live activities can briefly be received out of array order; array order only
  * breaks timestamp ties.
  */
-export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
-  return new Set(activities
-    // Delivery is the card body, not a numbered work step.
-    .filter(activity => !isAnswerDeliveryTool(activity))
-    .filter(activity => activity.statusType !== 'compaction_complete')
-    // Empty live placeholders are transient indicators, not work records.
-    // Finished reasoning is a step, same as commentary between tools.
-    .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
-      || hasRenderableAssistantText(activity.content))
-    .map(activity => activity.type === 'tool'
-      ? `tool:${activity.toolUseId ?? activity.id}`
-      : `${activity.type}:${activity.id}`)).size
-}
-
 export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
