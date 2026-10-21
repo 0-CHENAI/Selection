@@ -68,13 +68,13 @@ export function SessionItem({
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Resolve the bound project so the row can show a project stripe and reveal
-  // the project name on hover. Highlight treatment is no longer configurable.
+  // Resolve the bound project so the row can show a project color stripe.
+  // The project name is not repeated on the row. Highlight treatment is no
+  // longer configurable.
   const boundProject = item.projectId
     ? ctx.projects?.find(p => p.id === item.projectId)
     : undefined
   const projectColor = boundProject?.color
-  const projectName = boundProject?.name
   const handleClick = (e: React.MouseEvent) => {
     ctx.onFocusZone()
     if (e.button === 2) {
@@ -184,18 +184,9 @@ export function SessionItem({
       titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
       titleSuffix={
-        (projectName || hasMessagingBinding) ? (
+        hasMessagingBinding ? (
           <div className="flex items-center gap-1">
-            {projectName && (
-              <span
-                className="text-[11px] text-foreground/40 whitespace-nowrap truncate max-w-[120px] opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                style={projectColor ? { color: projectColor } : undefined}
-                title={projectName}
-              >
-                {projectName}
-              </span>
-            )}
-            {hasMessagingBinding && sessionBindings.map((binding) => {
+            {sessionBindings.map((binding) => {
               const pill = PLATFORM_PILL[binding.platform as 'lark']
               if (!pill) return null
               return (
