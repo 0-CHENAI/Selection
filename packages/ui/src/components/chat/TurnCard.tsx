@@ -76,6 +76,7 @@ import {
   deriveTurnPhase,
   getActiveTurnPreview,
   countWorkRecords,
+  isProcessPlaceholder,
   isVisibleCommentaryCard,
   isTaskStartAcknowledgment,
   isMirroredCommentaryActivity,
@@ -270,17 +271,47 @@ const thoughtDeeplyLabel = () => i18n.t('turnCard.thoughtDeeply')
 const PROCESS_SUMMARY_LIMIT = 72
 
 /**
- * Completed thinking is implicit. A short one-line process note stays as the
- * step summary; a paragraph is the same collapsed label, opened from the popup.
+ * A short one-line process note stays as the step summary. A paragraph uses
+ * the deep-thinking label and opens from the same details popup as other steps.
+ * Thinking rows do not use this — they keep the label plus a one-line preview.
  */
-function collapsedProcessLabel(activity: { type: string; content?: string }): string {
+function collapsedProcessLabel(activity: { content?: string }): string {
   const thought = thoughtDeeplyLabel()
-  if (activity.type === 'thinking') return thought
   const raw = activity.content ?? ''
   const plain = stripMarkdown(raw)
   if (!plain) return thought
   if (/[\r\n]/.test(raw.trim()) || plain.length > PROCESS_SUMMARY_LIMIT) return thought
   return plain
+}
+
+/** Live previews follow the newest sentence without growing the row. */
+const LIVE_THINKING_PREVIEW_LIMIT = 48
+
+function latestThinkingSentence(line: string): string {
+  const parts = line
+    .split(/(?<=[。！？!?])\s*|(?<=\.)\s+(?=[A-Z\u4e00-\u9fff])/)
+    .map(part => part.trim())
+    .filter(Boolean)
+  return parts[parts.length - 1] ?? line
+}
+
+/**
+ * One line of thinking text. A settled row keeps the opening, and CSS ellipsis
+ * cuts the end the same way other step summaries do. A live row follows the
+ * latest line, then the latest sentence, and slides to the tail once that
+ * sentence is longer than the row so new tokens stay visible. The string
+ * length stays bounded so the row height does not change as tokens arrive.
+ */
+function thinkingStepPreview(content: string | undefined, live: boolean): string {
+  const lines = (content ?? '')
+    .split(/\r?\n/)
+    .map(line => stripMarkdown(line))
+    .filter(Boolean)
+  if (lines.length === 0) return ''
+  if (!live) return lines.join(' ')
+  const sentence = latestThinkingSentence(lines[lines.length - 1] ?? '')
+  if (sentence.length <= LIVE_THINKING_PREVIEW_LIMIT) return sentence
+  return `…${sentence.slice(-(LIVE_THINKING_PREVIEW_LIMIT - 1))}`
 }
 
 // ============================================================================
@@ -1232,13 +1263,76 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   }
 
   // Commentary and model reasoning stay in the chain as steps.
-  // While tokens are arriving, show a short live preview. Once the step
-  // finishes, the row is a compact label; the same details popup as any
-  // other step holds the full text. No separate thinking panel.
-  if (activity.type === 'intermediate' || activity.type === 'thinking') {
+  // The same details popup as any other step holds the full text.
+  // No separate thinking panel.
+  if (activity.type === 'thinking') {
     const isRunning = activity.status === 'running'
-    const liveThinking = isRunning && hasRenderableAssistantText(activity.content)
-    const displayContent = liveThinking
+    // MessageCircleDashed is the completed thinking glyph. Pending tools use
+    // an open circle via ActivityStatusIcon; a finished thought is not that state.
+    const preview = thinkingStepPreview(activity.content, isRunning)
+    const canOpen = !isRunning && !!preview && !!onOpenDetails
+    const label = !isRunning || preview ? thoughtDeeplyLabel() : thinkingStatusLabel()
+    return (
+      <div
+        className="flex items-stretch"
+        data-process-step=""
+        data-thinking-step=""
+      >
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <div
+          data-thinking-live={isRunning && preview ? '' : undefined}
+          data-thinking-preview={preview ? (isRunning ? 'live' : 'done') : undefined}
+          className={cn(
+            "group/row flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
+            SIZE_CONFIG.fontSize
+          )}
+          onClick={canOpen ? onOpenDetails : undefined}
+        >
+          {isRunning ? (
+            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+              <Spinner className={SIZE_CONFIG.spinnerSize} />
+            </div>
+          ) : (
+            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
+          )}
+          <span className={cn("shrink-0", canOpen && "group-hover/row:underline")}>{label}</span>
+          {preview && (
+            <span className={cn("truncate flex-1 min-w-0", canOpen && "group-hover/row:underline")}>
+              <span className="opacity-60"> · </span>
+              <span>{preview}</span>
+            </span>
+          )}
+          {canOpen && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenDetails()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation()
+                  onOpenDetails()
+                }
+              }}
+              className={cn(
+                "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+                "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              )}
+            >
+              <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (activity.type === 'intermediate') {
+    const isRunning = activity.status === 'running'
+    const liveText = isRunning && hasRenderableAssistantText(activity.content)
+    const displayContent = liveText
       ? ''
       : (isRunning ? thinkingStatusLabel() : collapsedProcessLabel(activity))
     const isComplete = activity.status === 'completed'
@@ -1246,20 +1340,18 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
       <div
         className="flex items-stretch"
         data-process-step=""
-        data-thinking-step={activity.type === 'thinking' ? '' : undefined}
       >
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
-          data-thinking-live={liveThinking && activity.type === 'thinking' ? '' : undefined}
           className={cn(
             "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
-            liveThinking ? "items-start" : "items-center",
+            liveText ? "items-start" : "items-center",
             SIZE_CONFIG.fontSize
           )}
           onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
         >
           {isRunning ? (
-            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0", liveThinking && "mt-0.5")}>
+            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0", liveText && "mt-0.5")}>
               <Spinner className={SIZE_CONFIG.spinnerSize} />
             </div>
           ) : (
@@ -1267,10 +1359,9 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           )}
           <span className={cn(
             "min-w-0 flex-1",
-            liveThinking ? "line-clamp-2 break-words [overflow-wrap:anywhere]" : "truncate",
+            liveText ? "line-clamp-2 break-words [overflow-wrap:anywhere]" : "truncate",
             onOpenDetails && isComplete && "group-hover/row:underline",
-          )}>{liveThinking ? activity.content : displayContent}</span>
-          {/* Open details button */}
+          )}>{liveText ? activity.content : displayContent}</span>
           {onOpenDetails && isComplete && (
             <div
               role="button"
@@ -3366,9 +3457,8 @@ export const TurnCard = React.memo(function TurnCard({
         // Aggregate status is a fallback, not a work record or the latest step.
         && activity.statusType !== 'task_progress'
         // Empty SDK thinking messages are status placeholders, not work rows.
-        // The stable header/footer status owns their presentation.
-        && !((activity.type === 'intermediate' || activity.type === 'thinking')
-          && !hasRenderableAssistantText(activity.content))
+        // A finished block with no readable text stays as a non-expandable label.
+        && !isProcessPlaceholder(activity)
         && !isMirroredCommentaryActivity(activity, response, isComplete)
         // The settled row replaces this tool line. It only said "waiting".
         && !(hasClarifications && isClarificationToolActivity(activity)),
@@ -3439,7 +3529,7 @@ export const TurnCard = React.memo(function TurnCard({
       if (a.type === 'tool') return a.status === 'error'
       // Intermediate activities must have no meaningful content.
       // A finished reasoning block is the record of that wait, not an empty turn.
-      if (a.type === 'intermediate' || a.type === 'thinking') return !hasRenderableAssistantText(a.content)
+      if (a.type === 'intermediate' || a.type === 'thinking') return isProcessPlaceholder(a)
       // Plan activities are meaningful work
       if (a.type === 'plan') return false
       // Other activity types - consider as no meaningful work

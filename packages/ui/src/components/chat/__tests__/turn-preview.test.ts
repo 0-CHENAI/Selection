@@ -176,6 +176,8 @@ it('记录总数包含过程说明，忽略空占位并对工具更新去重', (
   const notes = Array.from({ length: 3 }, (_, i) => createActivity({ id: `note-${i}`, type: 'intermediate', content: `过程说明${i}` }))
   expect(countWorkRecords([...tools, ...notes])).toBe(5)
   expect(countWorkRecords([...tools, ...notes, createActivity({ id: 'empty', type: 'intermediate', content: '\n', status: 'running' })])).toBe(5)
+  expect(countWorkRecords([createActivity({ id: 'redacted', type: 'thinking', content: '', status: 'completed' })])).toBe(1)
+  expect(countWorkRecords([createActivity({ id: 'placeholder', type: 'thinking', content: '  ', status: 'running' })])).toBe(0)
   expect(countWorkRecords([...tools, ...notes.map(note => ({ ...note, status: 'completed' as const }))])).toBe(5)
   expect(countWorkRecords([...tools, ...notes, { ...tools[0]!, id: 'updated', status: 'completed' }])).toBe(5)
 })

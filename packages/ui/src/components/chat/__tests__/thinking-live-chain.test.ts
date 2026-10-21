@@ -111,10 +111,18 @@ describe('deepseek thinking stays in the process chain', () => {
     expect(done.response).toMatchObject({ text: reply, isStreaming: false })
     expect(done.activities.filter(activity => activity.type === 'thinking')).toHaveLength(2)
 
-    const reloaded = JSON.parse(JSON.stringify(settled.map(messageToStored))).map(storedToMessage)
+    const stored = settled.map(messageToStored)
+    expect(stored.filter(message => message.streamKind === 'thinking').map(message => message.content)).toEqual([first, second])
+    const reloaded = JSON.parse(JSON.stringify(stored)).map(storedToMessage)
     const restored = assistant(reloaded, false)
     expect(restored.response?.text).toBe(reply)
-    expect(restored.activities.filter(activity => activity.type === 'thinking').map(activity => activity.content)).toEqual([first, second])
+    expect(restored.activities.filter(activity => activity.type === 'thinking').map(activity => ({
+      content: activity.content,
+      status: activity.status,
+    }))).toEqual([
+      { content: first, status: 'completed' },
+      { content: second, status: 'completed' },
+    ])
   })
 
   it('does not treat a legacy unclassified thinking turn as reply text', () => {
