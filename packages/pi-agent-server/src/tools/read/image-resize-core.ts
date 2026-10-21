@@ -1,3 +1,4 @@
+import { IMAGE_ENCODING_QUALITIES, resolveImageSendSize } from '@craft-agent/shared/utils'
 import { applyExifOrientation } from './exif-orientation.ts'
 import { MAX_RESIZE_PASSES, MIN_JPEG_QUALITY } from './image-resize-types.ts'
 import type {
@@ -137,6 +138,89 @@ function searchJpegQuality(
   }
 }
 
+function pixelsHaveAlpha(image: PhotonImageLike): boolean {
+  const pixels = image.get_raw_pixels()
+  for (let index = 3; index < pixels.length; index += 4) {
+    if ((pixels[index] ?? 255) < 255) return true
+  }
+  return false
+}
+
+function encodeForSendPolicy(
+  photon: PhotonModuleLike,
+  image: PhotonImageLike,
+  limits: ImageResizeLimits,
+  originalWidth: number,
+  originalHeight: number,
+): ImageOptimizationResult {
+  const policy = limits.policy
+  if (!policy) return failure('image_resize_failed', 'missing image send policy')
+  let target = resolveImageSendSize(originalWidth, originalHeight, policy)
+  if (limits.applyDimensionBox) {
+    target = fitDimensions(target.width, target.height, Math.max(1, limits.maxWidth), Math.max(1, limits.maxHeight))
+  }
+
+  let working = image
+  if (target.width !== originalWidth || target.height !== originalHeight) {
+    try {
+      working = photon.resize(image, target.width, target.height, photon.SamplingFilter.Lanczos3)
+    } catch (error) {
+      return failure('image_resize_failed', error)
+    }
+  }
+
+  let smallest: Uint8Array | null = null
+  let mimeType: 'image/webp' | 'image/jpeg' = 'image/jpeg'
+  let jpegQuality: number | undefined
+  let encodingAttempts = 0
+  let composited: PhotonImageLike | null = null
+  try {
+    const alpha = pixelsHaveAlpha(working)
+    if (alpha && typeof working.get_bytes_webp === 'function') {
+      encodingAttempts += 1
+      smallest = working.get_bytes_webp()
+      mimeType = 'image/webp'
+    } else {
+      let jpegSource = working
+      if (alpha) {
+        composited = compositeOnWhite(photon, working)
+        if (composited) jpegSource = composited
+      }
+      for (const quality of IMAGE_ENCODING_QUALITIES) {
+        encodingAttempts += 1
+        const bytes = jpegSource.get_bytes_jpeg(quality)
+        if (!smallest || bytes.byteLength < smallest.byteLength) {
+          smallest = bytes
+          jpegQuality = quality
+        }
+        if (bytes.byteLength <= policy.maxBytes) break
+      }
+    }
+  } catch (error) {
+    return failure('image_conversion_failed', error)
+  } finally {
+    composited?.free()
+    if (working !== image) working.free()
+  }
+
+  if (!smallest || smallest.byteLength === 0) {
+    return failure('image_conversion_failed', 'encoder produced an empty image')
+  }
+  return {
+    ok: true,
+    bytes: smallest,
+    mimeType,
+    originalWidth,
+    originalHeight,
+    width: target.width,
+    height: target.height,
+    wasResized: target.width !== originalWidth || target.height !== originalHeight,
+    ...(jpegQuality !== undefined ? { jpegQuality } : {}),
+    encodingAttempts,
+    resizePasses: 1,
+  }
+}
+
 function nextDimensions(
   width: number,
   height: number,
@@ -185,6 +269,9 @@ export async function optimizeImageInProcess(
   try {
     const originalWidth = image.get_width()
     const originalHeight = image.get_height()
+    if (limits.policy) {
+      return encodeForSendPolicy(photon, image, limits, originalWidth, originalHeight)
+    }
     let current = fitDimensions(originalWidth, originalHeight, limits.maxWidth, limits.maxHeight)
     const preferJpeg = baseMimeType(mimeType) === 'image/jpeg' || baseMimeType(mimeType) === 'image/jpg'
     let encodingAttempts = 0

@@ -43,13 +43,13 @@ function isOptimizationResult(value: unknown): value is ImageOptimizationResult 
     ? Number.isInteger(success.jpegQuality)
       && (success.jpegQuality ?? 0) >= 1
       && (success.jpegQuality ?? 0) <= 100
-    : success.mimeType === 'image/png' && success.jpegQuality === undefined
+    : (success.mimeType === 'image/png' || success.mimeType === 'image/webp') && success.jpegQuality === undefined
   const dimensionsMatchResizeFlag = success.wasResized === (
     success.width !== success.originalWidth || success.height !== success.originalHeight
   )
   return success.bytes instanceof Uint8Array
     && success.bytes.byteLength > 0
-    && (success.mimeType === 'image/png' || success.mimeType === 'image/jpeg')
+    && (success.mimeType === 'image/png' || success.mimeType === 'image/jpeg' || success.mimeType === 'image/webp')
     && Number.isInteger(success.originalWidth) && (success.originalWidth ?? 0) > 0
     && Number.isInteger(success.originalHeight) && (success.originalHeight ?? 0) > 0
     && Number.isInteger(success.width) && (success.width ?? 0) > 0

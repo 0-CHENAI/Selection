@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import { resolveImageSendPolicy, resolveImageSendSize } from '@craft-agent/shared/utils'
 import type { ImageOptimizationResult, ImageResizeLimits } from './image-resize-types.ts'
 import { DEFAULT_JPEG_QUALITY, DEFAULT_MAX_ENCODED_BYTES, DEFAULT_MAX_HEIGHT, DEFAULT_MAX_WIDTH } from './image-resize-types.ts'
 import { createSelectionReadToolDefinition } from './create-read-tool.ts'
@@ -141,7 +141,7 @@ describe('Selection Pi read tool', () => {
     expect(text?.type === 'text' ? text.text : '').toContain('image_capability_mismatch')
   })
 
-  it('downscales a full original attachment to the prompt limit and leaves crops alone', async () => {
+  it('uses the same pixel budget for a full original attachment and a crop', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'selection-read-tool-'))
     tempDirs.push(cwd)
     const id = '11111111-1111-4111-8111-111111111111'
@@ -174,22 +174,20 @@ describe('Selection Pi read tool', () => {
     await tool.execute('read-original', { path: original }, undefined, undefined, imageContext())
     await tool.execute('read-crop', { path: crop }, undefined, undefined, imageContext())
 
-    expect(seen).toEqual([
-      {
-        maxWidth: IMAGE_LIMITS.OPTIMAL_EDGE,
-        maxHeight: IMAGE_LIMITS.OPTIMAL_EDGE,
-        maxEncodedBytes: DEFAULT_MAX_ENCODED_BYTES,
-        jpegQuality: DEFAULT_JPEG_QUALITY,
-      },
-      {
-        maxWidth: DEFAULT_MAX_WIDTH,
-        maxHeight: DEFAULT_MAX_HEIGHT,
-        maxEncodedBytes: DEFAULT_MAX_ENCODED_BYTES,
-        jpegQuality: DEFAULT_JPEG_QUALITY,
-      },
-    ])
-    expect(IMAGE_LIMITS.OPTIMAL_EDGE).toBe(1568)
-    expect(DEFAULT_MAX_WIDTH).toBeGreaterThan(IMAGE_LIMITS.OPTIMAL_EDGE)
+    const policy = resolveImageSendPolicy()
+    const target = resolveImageSendSize(3200, 1800, policy)
+    expect(target).toEqual({ width: 2730, height: 1536 })
+    const expected = {
+      maxWidth: DEFAULT_MAX_WIDTH,
+      maxHeight: DEFAULT_MAX_HEIGHT,
+      maxEncodedBytes: DEFAULT_MAX_ENCODED_BYTES,
+      jpegQuality: DEFAULT_JPEG_QUALITY,
+      policy,
+      applyDimensionBox: false,
+      rejectOverEncodedLimit: false,
+    }
+    expect(seen).toEqual([expected, expected])
+    expect(target.width).toBeGreaterThan(1568)
   })
 
   it('continues to delegate text files to the upstream read implementation', async () => {

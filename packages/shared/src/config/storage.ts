@@ -2867,6 +2867,9 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     oauthOrganizationUuid: updates.oauthOrganizationUuid !== undefined ? updates.oauthOrganizationUuid : existing.oauthOrganizationUuid,
     oauthOrganizationName: updates.oauthOrganizationName !== undefined ? updates.oauthOrganizationName : existing.oauthOrganizationName,
     oauthProfileVerifiedAt: updates.oauthProfileVerifiedAt !== undefined ? updates.oauthProfileVerifiedAt : existing.oauthProfileVerifiedAt,
+    imagePixelBudget: updates.imagePixelBudget !== undefined ? updates.imagePixelBudget : existing.imagePixelBudget,
+    imageMaxBytes: updates.imageMaxBytes !== undefined ? updates.imageMaxBytes : existing.imageMaxBytes,
+    imageMaxDimension: updates.imageMaxDimension !== undefined ? updates.imageMaxDimension : existing.imageMaxDimension,
     // Timestamps
     lastUsedAt: updates.lastUsedAt !== undefined ? updates.lastUsedAt : existing.lastUsedAt,
   };

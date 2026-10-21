@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import type { ImageSendPolicy } from '../utils/image-send-size.ts';
 import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
 
 // Tool result type - matches MCP CallToolResult content blocks
@@ -55,11 +56,16 @@ export interface BrowserScreenshotArgs {
   annotate?: boolean
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserScreenshotResult {
   imageBuffer: Buffer
   imageFormat: 'png' | 'jpeg'
+  sourceWidth?: number
+  sourceHeight?: number
+  width?: number
+  height?: number
   metadata?: Record<string, unknown>
 }
 
@@ -78,6 +84,7 @@ export interface BrowserScreenshotRegionArgs {
   padding?: number
   format?: 'png' | 'jpeg'
   jpegQuality?: number
+  imagePolicy?: ImageSendPolicy
 }
 
 export interface BrowserWindowResizeArgs {

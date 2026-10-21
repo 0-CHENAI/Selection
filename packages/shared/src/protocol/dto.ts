@@ -876,6 +876,8 @@ export interface FileAttachment {
   originalPath?: string
   originalWidth?: number
   originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
 }
 
 export interface SessionFile {

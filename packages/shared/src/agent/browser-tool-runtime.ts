@@ -1271,6 +1271,9 @@ async function executeSingleCommand(args: {
     if (viewport?.width && viewport?.height) {
       lines.push(`Viewport: ${viewport.width}x${viewport.height} @ DPR ${viewport.dpr ?? 1}`);
     }
+    if (result.sourceWidth && result.sourceHeight && result.width && result.height) {
+      lines.push(`Image size: sent ${result.width}x${result.height}, original ${result.sourceWidth}x${result.sourceHeight}`);
+    }
     const targets = (metadata?.targets as Array<unknown> | undefined)?.length;
     if (typeof targets === 'number') {
       lines.push(`Annotated targets: ${targets}`);
@@ -1357,6 +1360,9 @@ async function executeSingleCommand(args: {
       `Target: ${targetDescription}${typeof padding === 'number' ? `, padding=${padding}` : ''}`,
       `Capture time: ${elapsedMs}ms`,
     ];
+    if (result.sourceWidth && result.sourceHeight && result.width && result.height) {
+      lines.push(`Image size: sent ${result.width}x${result.height}, original ${result.sourceWidth}x${result.sourceHeight}`);
+    }
     if (result.metadata) {
       lines.push('', 'Metadata:', JSON.stringify(result.metadata, null, 2));
     }

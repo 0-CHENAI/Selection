@@ -3,6 +3,7 @@ export * from './artifact-links.ts';
 export * from './files.ts';
 export * from './image-attachment.ts';
 export * from './image-input.ts';
+export * from './image-send-size.ts';
 export * from './officecli.ts';
 export * from './open-url.ts';
 export * from './url-safety.ts';

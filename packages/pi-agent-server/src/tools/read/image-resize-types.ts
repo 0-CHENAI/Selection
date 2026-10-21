@@ -1,3 +1,5 @@
+import type { ImageSendPolicy } from '@craft-agent/shared/utils'
+
 export const DEFAULT_MAX_WIDTH = 2560
 export const DEFAULT_MAX_HEIGHT = 2560
 export const DEFAULT_MAX_ENCODED_BYTES = 4.5 * 1024 * 1024
@@ -17,13 +19,19 @@ export interface ImageResizeLimits {
   maxHeight: number
   maxEncodedBytes: number
   jpegQuality: number
+  /** When set, one projection plus the 85/75/60 ladder replaces the adaptive shrink loop. */
+  policy?: ImageSendPolicy
+  /** Apply maxWidth/maxHeight on top of the policy projection. */
+  applyDimensionBox?: boolean
+  /** Fail when the base64 size is at least maxEncodedBytes. */
+  rejectOverEncodedLimit?: boolean
 }
 
 export type ImageOptimizationResult =
   | {
       ok: true
       bytes: Uint8Array
-      mimeType: 'image/png' | 'image/jpeg'
+      mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
       originalWidth: number
       originalHeight: number
       width: number

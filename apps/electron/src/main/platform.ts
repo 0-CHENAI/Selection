@@ -6,6 +6,7 @@
  */
 
 import type { PlatformServices } from '../runtime/platform'
+import { encodeWithSharp, readSharpMetadata } from '@craft-agent/server-core/services'
 
 export interface ElectronPlatformOptions {
   app: Electron.App
@@ -33,12 +34,23 @@ export function createElectronPlatform(opts: ElectronPlatformOptions): PlatformS
     systemDarkMode: () => nativeTheme.shouldUseDarkColors,
     imageProcessor: {
       async getMetadata(buffer) {
+        try {
+          const metadata = await readSharpMetadata(buffer)
+          if (metadata) return metadata
+        } catch {
+          // sharp can be unavailable in a packaged layout; nativeImage still reports size
+        }
         const img = nativeImage.createFromBuffer(buffer)
         if (img.isEmpty()) return null
         const { width, height } = img.getSize()
         return (width && height) ? { width, height } : null
       },
       async process(input, processOpts = {}) {
+        try {
+          return await encodeWithSharp(input, processOpts)
+        } catch (error) {
+          if (processOpts.format === 'webp') throw error
+        }
         const img = typeof input === 'string'
           ? nativeImage.createFromPath(input)
           : nativeImage.createFromBuffer(input)

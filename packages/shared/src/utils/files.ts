@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempS
 import { extname, basename, resolve, join, relative } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
+import { resolveImageSendPolicy, resolveImageSendSize } from './image-send-size.ts';
 
 export interface FileFingerprint { hash: string; size: number }
 
@@ -80,6 +81,9 @@ export interface FileAttachment {
   originalPath?: string;
   originalWidth?: number;
   originalHeight?: number;
+  /** Pixel size of the copy actually sent to the model, when it differs from the original. */
+  sentWidth?: number;
+  sentHeight?: number;
   /** Legacy converted Markdown path. Modern Office files no longer generate or expose this sidecar. */
   markdownPath?: string;
 }
@@ -140,8 +144,7 @@ const MAX_TEXT_SIZE = 100 * 1024; // 100KB for text files
 // Claude API image limits - images exceeding these will fail silently
 // See: https://docs.anthropic.com/en/docs/build-with-claude/vision
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB - Claude API hard limit
-const MAX_IMAGE_DIMENSION = 8000; // 8000x8000 max pixels
-const OPTIMAL_IMAGE_EDGE = 1568; // Recommended max edge for quality/cost balance (~1.15MP)
+const MAX_IMAGE_DIMENSION = 8000; // Historical per-side note; the send resolver shrinks past this.
 
 /**
  * Result of validating an image for Claude API compatibility
@@ -183,29 +186,15 @@ export function validateImageForClaudeAPI(
     };
   }
 
-  // Check dimensions if provided
-  if (width !== undefined && height !== undefined) {
-    // Hard limit on dimensions - can be fixed by resizing
-    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-      return {
-        valid: false,
-        errorCode: 'dimension_exceeded',
-        error: `Image dimensions too large (${width}×${height}). Maximum is ${MAX_IMAGE_DIMENSION}×${MAX_IMAGE_DIMENSION} pixels.`,
-      };
-    }
-
-    // Check if resize is recommended for optimal performance
-    const maxEdge = Math.max(width, height);
-    if (maxEdge > OPTIMAL_IMAGE_EDGE) {
-      const scale = OPTIMAL_IMAGE_EDGE / maxEdge;
+  // Oversized geometry is shrunk by the shared pixel budget. It is not a hard failure.
+  if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+    const target = resolveImageSendSize(width, height, resolveImageSendPolicy());
+    if (target.width !== width || target.height !== height) {
       return {
         valid: true,
         needsResize: true,
-        warning: `Large image (${width}×${height}). Will be resized to optimize tokens and latency.`,
-        suggestedSize: {
-          width: Math.round(width * scale),
-          height: Math.round(height * scale),
-        },
+        warning: `Large image (${width}×${height}). Will be resized to ${target.width}×${target.height}.`,
+        suggestedSize: target,
       };
     }
   }
@@ -219,7 +208,6 @@ export const IMAGE_LIMITS = {
   /** Max raw file size before base64 encoding (base64 inflates by 4/3, so 5MB base64 ≈ 3.75MB raw) */
   MAX_RAW_SIZE: Math.floor(MAX_IMAGE_SIZE * 3 / 4),
   MAX_DIMENSION: MAX_IMAGE_DIMENSION,
-  OPTIMAL_EDGE: OPTIMAL_IMAGE_EDGE,
   /** JPEG quality for photo-like images */
   JPEG_QUALITY_HIGH: 90,
   /** JPEG quality for fallback compression when size still exceeds limits */
@@ -384,6 +372,8 @@ export interface StoredAttachmentSource {
   originalPath?: string
   originalWidth?: number
   originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
 }
 
 /**
@@ -407,6 +397,10 @@ export function fileAttachmentsFromStored(
       originalPath: attachment.originalPath,
       originalWidth: attachment.originalWidth,
       originalHeight: attachment.originalHeight,
+    } : {}),
+    ...(attachment.sentWidth && attachment.sentHeight ? {
+      sentWidth: attachment.sentWidth,
+      sentHeight: attachment.sentHeight,
     } : {}),
   }))
 }
@@ -450,6 +444,10 @@ export function withStoredImagePaths(
         originalPath: match.originalPath,
         originalWidth: match.originalWidth,
         originalHeight: match.originalHeight,
+        ...(match.sentWidth && match.sentHeight ? {
+          sentWidth: match.sentWidth,
+          sentHeight: match.sentHeight,
+        } : {}),
       }
     }
     if (!isImage || attachment.base64 || attachment.storedPath) return withOriginal(attachment)

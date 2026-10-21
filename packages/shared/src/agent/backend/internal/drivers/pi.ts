@@ -299,6 +299,9 @@ export const piDriver: ProviderDriver = {
     },
     piAuthProvider: providerOptions?.piAuthProvider || context.connection?.piAuthProvider,
     baseUrl: context.connection?.baseUrl,
+    imagePixelBudget: context.connection?.imagePixelBudget,
+    imageMaxBytes: context.connection?.imageMaxBytes,
+    imageMaxDimension: context.connection?.imageMaxDimension,
     customEndpoint: context.connection?.customEndpoint,
     customModels: context.connection?.models?.map((model) => (
       toCustomEndpointModelPayload(withResolvedContextWindow(model))

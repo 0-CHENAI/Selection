@@ -269,6 +269,9 @@ export interface StoredAttachment {
   originalPath?: string;
   originalWidth?: number;
   originalHeight?: number;
+  /** Pixel size of the copy sent to the model. */
+  sentWidth?: number;
+  sentHeight?: number;
 }
 
 /** Immutable feedback references accepted with a user message. */

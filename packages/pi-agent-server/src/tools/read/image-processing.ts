@@ -1,3 +1,4 @@
+import { IMAGE_LIMITS, resolveImageSendPolicy, resolveImageSendSize, type ImageSendPolicy } from '@craft-agent/shared/utils'
 import { encodedSize } from './image-resize-core.ts'
 import { runImageOptimizer, type ImageResizeRunnerDependencies } from './image-resize-runner.ts'
 import {
@@ -28,11 +29,14 @@ export interface ReadImageProcessingOptions {
   maxHeight?: number
   maxEncodedBytes?: number
   jpegQuality?: number
+  policy?: ImageSendPolicy
 }
 
 export interface ReadImageProcessingDependencies {
   optimize?: typeof runImageOptimizer
   runner?: ImageResizeRunnerDependencies
+  /** Live connection policy. Read at execution time so runtime updates apply. */
+  getPolicy?: () => ImageSendPolicy
 }
 
 interface ImageDimensions {
@@ -164,18 +168,6 @@ function failure(code: ImageProcessingFailureCode, detail: string): ProcessedRea
   }
 }
 
-function isWithinLimits(
-  dimensions: ImageDimensions,
-  byteLength: number,
-  maxWidth: number,
-  maxHeight: number,
-  maxEncodedBytes: number,
-): boolean {
-  return dimensions.width <= maxWidth
-    && dimensions.height <= maxHeight
-    && encodedSize(byteLength) < maxEncodedBytes
-}
-
 export async function processReadImage(
   bytes: Uint8Array,
   mimeType: string,
@@ -183,6 +175,9 @@ export async function processReadImage(
   dependencies: ReadImageProcessingDependencies = {},
   signal?: AbortSignal,
 ): Promise<ProcessedReadImage> {
+  const policy = options.policy ?? resolveImageSendPolicy()
+  const explicitBox = options.maxWidth !== undefined || options.maxHeight !== undefined
+  const explicitBytes = options.maxEncodedBytes !== undefined
   const maxWidth = options.maxWidth ?? DEFAULT_MAX_WIDTH
   const maxHeight = options.maxHeight ?? DEFAULT_MAX_HEIGHT
   const maxEncodedBytes = options.maxEncodedBytes ?? DEFAULT_MAX_ENCODED_BYTES
@@ -190,22 +185,33 @@ export async function processReadImage(
   const inlineMimeType = normalizeInlineMimeType(mimeType)
   const inspectedDimensions = inspectImageDimensions(bytes, mimeType)
 
-  if (inlineMimeType && inspectedDimensions && isWithinLimits(
-    inspectedDimensions,
-    bytes.byteLength,
-    maxWidth,
-    maxHeight,
-    maxEncodedBytes,
-  )) {
-    return {
-      ok: true,
-      data: Buffer.from(bytes).toString('base64'),
-      mimeType: inlineMimeType,
-      hints: [],
+  if (inlineMimeType && inspectedDimensions) {
+    const target = resolveImageSendSize(inspectedDimensions.width, inspectedDimensions.height, policy)
+    const geometryFits = target.width === inspectedDimensions.width && target.height === inspectedDimensions.height
+    const boxFits = !explicitBox || (
+      inspectedDimensions.width <= maxWidth && inspectedDimensions.height <= maxHeight
+    )
+    const bytesFit = bytes.byteLength <= policy.maxBytes
+    const encodedFits = !explicitBytes || encodedSize(bytes.byteLength) < maxEncodedBytes
+    if (geometryFits && boxFits && bytesFit && encodedFits) {
+      return {
+        ok: true,
+        data: Buffer.from(bytes).toString('base64'),
+        mimeType: inlineMimeType,
+        hints: [],
+      }
     }
   }
 
-  const limits: ImageResizeLimits = { maxWidth, maxHeight, maxEncodedBytes, jpegQuality }
+  const limits: ImageResizeLimits = {
+    maxWidth,
+    maxHeight,
+    maxEncodedBytes,
+    jpegQuality,
+    policy,
+    applyDimensionBox: explicitBox,
+    rejectOverEncodedLimit: explicitBytes,
+  }
   const optimized = await (dependencies.optimize ?? runImageOptimizer)(
     bytes,
     mimeType,
@@ -216,10 +222,16 @@ export async function processReadImage(
   if (!optimized.ok) return failure(optimized.code, optimized.detail)
 
   const outputEncodedSize = encodedSize(optimized.bytes.byteLength)
-  if (outputEncodedSize >= maxEncodedBytes) {
+  if (explicitBytes && outputEncodedSize >= maxEncodedBytes) {
     return failure(
       'image_size_limit_exceeded',
       `Encoded image is ${outputEncodedSize} bytes; limit is ${maxEncodedBytes} bytes.`,
+    )
+  }
+  if (!explicitBytes && optimized.bytes.byteLength > IMAGE_LIMITS.MAX_SIZE) {
+    return failure(
+      'image_size_limit_exceeded',
+      `Encoded image is ${optimized.bytes.byteLength} bytes; limit is ${IMAGE_LIMITS.MAX_SIZE} bytes.`,
     )
   }
   const data = Buffer.from(optimized.bytes).toString('base64')

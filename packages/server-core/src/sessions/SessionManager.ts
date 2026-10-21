@@ -177,7 +177,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
-import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath, resolveImageSendPolicy } from '@craft-agent/shared/utils'
 import { findRetryableCancelledUser } from '@craft-agent/shared/sessions/cancelled-turn'
 import { buildArtifactRestoreResult, parseArtifactRestoreResult } from '@craft-agent/shared/utils/artifact-restore-message'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -1567,6 +1567,9 @@ export function buildAgentRuntimeConfigUpdate(
       piAuthProvider: connection.piAuthProvider,
       customEndpoint: connection.customEndpoint,
       customModels: connection.models?.map(toCustomEndpointModelPayload),
+      imagePixelBudget: connection.imagePixelBudget,
+      imageMaxBytes: connection.imageMaxBytes,
+      imageMaxDimension: connection.imageMaxDimension,
     } : undefined,
   }
 }
@@ -4519,13 +4522,16 @@ export class SessionManager implements ISessionManager {
         onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
           try {
             const buffer = await readFile(filePath)
-            const result = await resizeImageForAPI(buffer, { maxSizeBytes })
+            const result = await resizeImageForAPI(buffer, {
+              maxSizeBytes,
+              policy: resolveImageSendPolicy(connection),
+            })
             if (!result) return null
 
             // Write to session tmp directory (cleaned up with session)
             const sessionTmpDir = join(sessionPath, 'tmp')
             await mkdir(sessionTmpDir, { recursive: true })
-            const ext = result.format === 'jpeg' ? 'jpg' : 'png'
+            const ext = result.format === 'jpeg' ? 'jpg' : result.format === 'webp' ? 'webp' : 'png'
             const outPath = join(sessionTmpDir, `resized-${randomUUID()}.${ext}`)
             await writeFile(outPath, result.buffer)
 
@@ -4755,11 +4761,17 @@ export class SessionManager implements ISessionManager {
             },
             screenshot: async (options) => {
               const instanceId = await resolveSessionBrowserInstance('browser_screenshot')
-              return bpm.screenshot(instanceId, options)
+              return bpm.screenshot(instanceId, {
+                ...options,
+                imagePolicy: resolveImageSendPolicy(connection),
+              })
             },
             screenshotRegion: async (options) => {
               const instanceId = await resolveSessionBrowserInstance('browser_screenshot_region')
-              return bpm.screenshotRegion(instanceId, options)
+              return bpm.screenshotRegion(instanceId, {
+                ...options,
+                imagePolicy: resolveImageSendPolicy(connection),
+              })
             },
             getConsoleLogs: async (options) => {
               const instanceId = await resolveSessionBrowserInstance('browser_console')

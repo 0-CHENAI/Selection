@@ -28,11 +28,16 @@ export function formatAttachedImagePrompt(input: {
   originalPath?: string
   originalWidth?: number
   originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
 }): string {
   const lines = [
     `[Attached image: ${input.name}]`,
     `The image is included as visual input — look at it. Path: ${input.path}`,
   ]
+  if (input.sentWidth && input.sentHeight) {
+    lines.push(`Sent to the model at ${input.sentWidth}x${input.sentHeight}.`)
+  }
   if (input.originalPath) {
     const sized = input.originalWidth && input.originalHeight
       ? ` (${input.originalWidth}x${input.originalHeight})`
@@ -54,6 +59,8 @@ export function buildAttachedImagePrompt(attachment: {
   originalPath?: string
   originalWidth?: number
   originalHeight?: number
+  sentWidth?: number
+  sentHeight?: number
 }): string | undefined {
   const stored = attachment.storedPath || attachment.path
   if (!stored) return undefined
@@ -68,5 +75,7 @@ export function buildAttachedImagePrompt(attachment: {
     originalPath,
     originalWidth: originalPath ? attachment.originalWidth : undefined,
     originalHeight: originalPath ? attachment.originalHeight : undefined,
+    sentWidth: originalPath ? attachment.sentWidth : undefined,
+    sentHeight: originalPath ? attachment.sentHeight : undefined,
   })
 }

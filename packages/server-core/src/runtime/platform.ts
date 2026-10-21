@@ -15,7 +15,7 @@ export interface Logger {
 
 export interface ImageProcessor {
   /** Get image dimensions. Returns null if buffer is not a valid image. */
-  getMetadata(buffer: Buffer): Promise<{ width: number; height: number } | null>
+  getMetadata(buffer: Buffer): Promise<{ width: number; height: number; hasAlpha?: boolean } | null>
 
   /**
    * Process an image: resize and/or re-encode.
@@ -23,15 +23,21 @@ export interface ImageProcessor {
    * @param opts.resize - target dimensions (default: no resize)
    * @param opts.fit - 'inside' to maintain aspect ratio (default: 'inside')
    * @param opts.format - output format (default: 'png')
-   * @param opts.quality - JPEG quality 0-100 (default: 90)
+   * @param opts.quality - JPEG/WebP quality 0-100 (default: 90 / 85)
+   * @param opts.effort - WebP encoder effort (0 matches the send ladder)
+   * @param opts.withoutEnlargement - keep a resize from growing the image
+   * @param opts.normalize - rotate from EXIF and convert to sRGB
    */
   process(
     input: Buffer | string,
     opts?: {
       resize?: { width: number; height: number }
       fit?: 'inside' | 'cover' | 'fill'
-      format?: 'png' | 'jpeg'
+      format?: 'png' | 'jpeg' | 'webp'
       quality?: number
+      effort?: number
+      withoutEnlargement?: boolean
+      normalize?: boolean
     },
   ): Promise<Buffer>
 }

@@ -16,9 +16,9 @@ beforeAll(async () => {
   }
 
   const photon = await import('@silvia-odwyer/photon-node')
-  const pixels = new Uint8Array(2700 * 4)
+  const pixels = new Uint8Array(8193 * 4)
   pixels.fill(255)
-  const image = new photon.PhotonImage(pixels, 2700, 1)
+  const image = new photon.PhotonImage(pixels, 8193, 1)
   try {
     writeFileSync(imagePath, image.get_bytes())
   } finally {
@@ -122,13 +122,13 @@ describe('bundled Pi image runtime', () => {
   it('uses the adjacent Worker and Photon WASM in a build-machine-independent bundle', () => {
     const success = runBundledProcessor(join(completeRuntimeDir, 'image-processing.js'))
     expect(success.ok).toBe(true)
-    expect(success.hints?.join('\n')).toContain('displayed at 2560x1')
+    expect(success.hints?.join('\n')).toContain('displayed at 8192x1')
   })
 
   it('falls back in-process when the Worker is unavailable', () => {
     const fallback = runBundledProcessor(join(withoutWorkerDir, 'image-processing.js'))
     expect(fallback.ok).toBe(true)
-    expect(fallback.hints?.join('\n')).toContain('displayed at 2560x1')
+    expect(fallback.hints?.join('\n')).toContain('displayed at 8192x1')
   })
 
   it('reports a missing adjacent Photon WASM explicitly', () => {
