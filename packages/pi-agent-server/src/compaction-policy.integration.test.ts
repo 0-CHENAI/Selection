@@ -6,7 +6,7 @@ import { createAgentSession, SessionManager, SettingsManager, type ModelRuntime 
 import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
 import { Type } from '@sinclair/typebox';
 import { installContextBudgetGuard } from './context-budget-stream.ts';
-import { applyCompactionSettings, COMPACTION_FOCUS, installCompactionPolicy } from './compaction-policy.ts';
+import { applyCompactionSettings, COMPACTION_FOCUS, installCompactionPolicy, PROTECTED_TOOL_CHAIN_STEPS } from './compaction-policy.ts';
 import { snapshotContextBreakdown } from './context-breakdown.ts';
 import { PiEventAdapter } from '../../shared/src/agent/backend/pi/event-adapter.ts';
 
@@ -208,6 +208,214 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
   }
   expect(requests.at(-1)!.messages.some(message => message.role === 'user'
     && JSON.stringify(message.content).includes('same user task'))).toBe(true);
+});
+
+function messageText(message: { content: unknown }): string {
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap(part => part && typeof part === 'object' && 'type' in part && part.type === 'text' && 'text' in part && typeof part.text === 'string' ? [part.text] : []).join('');
+}
+
+function toolCallIdsOf(messages: Context['messages']): string[] {
+  const ids: string[] = [];
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) if (block.type === 'toolCall') ids.push(block.id);
+  }
+  return ids;
+}
+
+it('mid-turn compaction keeps the current user message and the newest tool chain verbatim', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-chain-compaction-'));
+  tempDirs.push(cwd);
+  const userText = '当前任务：保护进行中的工具链，并保留思考签名';
+  const issued = new Map<string, AssistantMessage['content']>();
+  const payloads = new Map<string, string>();
+  const executedIds: string[] = [];
+  const requests: Context[] = [];
+  const lifecycle: string[] = [];
+  let steps = 0;
+  let summaries = 0;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === model.provider && modelId === model.id ? model : undefined,
+    streamSimple: (_model: typeof model, context: Context) => {
+      const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
+      const stream = createAssistantMessageEventStream();
+      if (summary) {
+        summaries++;
+        lifecycle.push('summary');
+        stream.push({ type: 'done', reason: 'stop', message: {
+          role: 'assistant', content: [{ type: 'text', text: '## Goal\nContinue the current user task.\n## Progress\nOlder tool steps were folded.' }],
+          api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now(),
+        } });
+        return stream;
+      }
+      requests.push({ systemPrompt: context.systemPrompt, messages: structuredClone(context.messages) });
+      lifecycle.push(`model-${requests.length}`);
+      const compacted = context.messages.some(message => message.role === 'user' && messageText(message).includes('<summary>'));
+      if (compacted || steps >= 6) {
+        stream.push({ type: 'done', reason: 'stop', message: {
+          role: 'assistant', content: [{ type: 'text', text: 'Final response' }],
+          api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now(),
+        } });
+        return stream;
+      }
+      const id = `chain-${steps}`;
+      const kind = steps % 3;
+      const thinking = kind === 0
+        ? { type: 'thinking' as const, thinking: `anthropic-${id}`, thinkingSignature: `sig_${id}` }
+        : kind === 1
+          ? { type: 'thinking' as const, thinking: '[Reasoning redacted]', thinkingSignature: `redacted_${id}`, redacted: true }
+          : { type: 'thinking' as const, thinking: `deepseek-${id}`, thinkingSignature: 'reasoning_content' };
+      // Dots stay on the chars/4 estimator. A base64-alphabet run is priced as dense text and
+      // crosses the window before four tool steps exist.
+      const chars = 180_000;
+      const payload = `${id}|` + '.'.repeat(chars) + `|${id}`;
+      payloads.set(id, payload);
+      const content: AssistantMessage['content'] = [
+        thinking,
+        { type: 'toolCall', id, name: 'chain_read', arguments: { marker: id, chars } },
+      ];
+      issued.set(id, content);
+      steps++;
+      stream.push({ type: 'done', reason: 'toolUse', message: {
+        role: 'assistant', content, api: model.api, provider: model.provider, model: model.id,
+        usage, stopReason: 'toolUse', timestamp: Date.now(),
+      } });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  installContextBudgetGuard(runtime);
+  const settingsManager = SettingsManager.inMemory();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({
+    cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off', modelRuntime: runtime,
+    settingsManager, sessionManager, tools: ['chain_read'],
+    customTools: [{ name: 'chain_read', label: 'Read', description: 'Read-only fixture',
+      parameters: Type.Object({ marker: Type.String(), chars: Type.Number() }),
+      execute: async (_id, args) => {
+        const marker = String((args as { marker?: string }).marker ?? '');
+        executedIds.push(marker);
+        lifecycle.push('tool-complete');
+        return { content: [{ type: 'text' as const, text: payloads.get(marker) ?? '' }], details: {} };
+      } }],
+  });
+  settingsManager.setCompactionEnabled(true);
+  applyCompactionSettings(settingsManager, model.contextWindow, true);
+  installCompactionPolicy(session);
+  session.subscribe(event => {
+    if (event.type === 'compaction_start') lifecycle.push('compaction-start');
+    if (event.type === 'compaction_end' && event.result) lifecycle.push('compaction-end');
+  });
+  await session.prompt(userText);
+
+  expect(steps).toBeGreaterThan(PROTECTED_TOOL_CHAIN_STEPS);
+  expect(executedIds).toEqual([...issued.keys()]);
+  expect(summaries).toBeGreaterThan(0);
+  expect(lifecycle).toContain('compaction-start');
+  expect(lifecycle).toContain('compaction-end');
+  expect(lifecycle.indexOf('tool-complete')).toBeLessThan(lifecycle.indexOf('compaction-start'));
+  expect(lifecycle.indexOf('compaction-end')).toBeLessThan(lifecycle.lastIndexOf(`model-${requests.length}`));
+  const resumed = requests.find(request => request.messages.some(message => message.role === 'user' && messageText(message).includes('<summary>')));
+  expect(resumed).toBeTruthy();
+  const resumedMessages = resumed!.messages;
+  expect(resumedMessages.some(message => message.role === 'user'
+    && messageText(message).includes(userText) && !messageText(message).includes('<summary>'))).toBe(true);
+  const keptIds = [...issued.keys()].slice(-PROTECTED_TOOL_CHAIN_STEPS);
+  const droppedIds = [...issued.keys()].slice(0, -PROTECTED_TOOL_CHAIN_STEPS);
+  expect(droppedIds.length).toBeGreaterThan(0);
+  expect(toolCallIdsOf(resumedMessages)).toEqual(keptIds);
+  for (const id of droppedIds) expect(toolCallIdsOf(resumedMessages)).not.toContain(id);
+  const signatures = new Set<string>();
+  let sawRedacted = false;
+  for (const id of keptIds) {
+    const assistant = resumedMessages.find(message => message.role === 'assistant' && toolCallIdsOf([message]).includes(id));
+    expect(assistant && 'content' in assistant ? assistant.content : undefined).toEqual(issued.get(id));
+    const result = resumedMessages.find(message => message.role === 'toolResult' && message.toolCallId === id);
+    expect(result ? messageText(result) : '').toBe(payloads.get(id));
+    for (const block of issued.get(id) ?? []) {
+      if (block.type !== 'thinking') continue;
+      if (block.thinkingSignature) signatures.add(block.thinkingSignature);
+      if (block.redacted) sawRedacted = true;
+    }
+  }
+  expect(signatures.has('reasoning_content')).toBe(true);
+  expect([...signatures].some(signature => signature.startsWith('sig_'))).toBe(true);
+  expect(sawRedacted).toBe(true);
+  const pending = new Set<string>();
+  for (const message of resumedMessages) {
+    if (message.role === 'assistant') {
+      for (const block of message.content) if (block.type === 'toolCall') pending.add(block.id);
+    } else if (message.role === 'toolResult') {
+      expect(pending.has(message.toolCallId)).toBe(true);
+      pending.delete(message.toolCallId);
+    }
+  }
+  expect(pending.size).toBe(0);
+});
+
+it('a giant in-progress tool result keeps the actionable context limit instead of compacting forever', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-giant-tool-'));
+  tempDirs.push(cwd);
+  const narrow = { ...model, id: 'offline-giant-tool', contextWindow: 32_000, maxTokens: 1024 };
+  let executed = 0;
+  let modelRequests = 0;
+  let summaries = 0;
+  let compactions = 0;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) =>
+      provider === narrow.provider && modelId === narrow.id ? narrow : undefined,
+    streamSimple: (_model: typeof narrow, context: Context) => {
+      const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
+      if (summary) summaries++;
+      else modelRequests++;
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'done', reason: modelRequests === 1 && !summary ? 'toolUse' : 'stop', message: {
+        role: 'assistant', api: narrow.api, provider: narrow.provider, model: narrow.id, usage,
+        content: modelRequests === 1 && !summary
+          ? [{ type: 'toolCall', id: 'giant-read', name: 'chain_read', arguments: {} }]
+          : [{ type: 'text', text: 'should not run' }],
+        stopReason: modelRequests === 1 && !summary ? 'toolUse' : 'stop', timestamp: Date.now(),
+      } });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  installContextBudgetGuard(runtime);
+  const settingsManager = SettingsManager.inMemory();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({
+    cwd, agentDir: join(cwd, 'agent'), model: narrow, thinkingLevel: 'off', modelRuntime: runtime,
+    settingsManager, sessionManager, tools: ['chain_read'],
+    customTools: [{ name: 'chain_read', label: 'Read', description: 'Read-only fixture', parameters: Type.Object({}),
+      execute: async () => { executed++; return { content: [{ type: 'text' as const, text: 'r'.repeat(200_000) }], details: {} }; } }],
+  });
+  settingsManager.setCompactionEnabled(true);
+  applyCompactionSettings(settingsManager, narrow.contextWindow, true);
+  installCompactionPolicy(session);
+  const adapter = new PiEventAdapter();
+  adapter.setContextWindow(narrow.contextWindow);
+  adapter.startTurn();
+  const errors: string[] = [];
+  session.subscribe(event => {
+    if (event.type === 'compaction_start') compactions++;
+    for (const adapted of adapter.adaptEvent(event as Parameters<typeof adapter.adaptEvent>[0])) {
+      if (adapted.type === 'typed_error') errors.push(adapted.error.code);
+    }
+  });
+  await session.prompt('读取这个超大结果');
+  expect(executed).toBe(1);
+  expect(modelRequests).toBe(1);
+  expect(summaries).toBeLessThanOrEqual(1);
+  expect(compactions).toBeLessThanOrEqual(1);
+  expect(errors).toEqual(['context_limit']);
 });
 
 it('compacts after a completed tool before its next provider request', async () => {
