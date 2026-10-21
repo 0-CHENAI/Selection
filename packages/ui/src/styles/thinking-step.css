@@ -1,0 +1,116 @@
+/*
+ * Thinking-step motion, adapted from transitions.dev Prototype 28
+ * ("AI thinking states") and Prototype 15 ("Beautiful shimmer on text"):
+ * https://transitions.dev/detail.html?t=thinking-states
+ *
+ * The highlight lives on ::before, duplicated with content: attr(data-text)
+ * and clipped to the glyphs. Colors follow Selection's theme tokens so the
+ * same sweep works in light and dark. Timing matches the prototype:
+ * 2000ms linear shimmer, 150ms ease-in-out swap, 50ms enter gap,
+ * 8px travel, 2px blur.
+ */
+
+:root {
+  --think-shimmer: 2000ms;
+  --think-swap: 150ms;
+  --think-gap: 50ms;
+  --think-distance: 8px;
+  --think-blur: 2px;
+  --think-ease: ease-in-out;
+  --think-base: var(--muted-foreground);
+  --think-highlight: var(--foreground);
+  --think-band: 400%;
+}
+
+.thinking-label-swap {
+  position: relative;
+  display: inline-block;
+}
+
+.thinking-swap-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  display: block;
+  color: var(--think-base);
+  white-space: nowrap;
+  transform: translateY(0);
+  filter: blur(0);
+  opacity: 1;
+  transition:
+    transform var(--think-swap) var(--think-ease),
+    filter var(--think-swap) var(--think-ease),
+    opacity var(--think-swap) var(--think-ease);
+  will-change: transform, filter, opacity;
+}
+
+/* Base glyphs stay in --think-base. The sweep is a second copy of the
+   same string, masked to the glyph shapes. */
+.thinking-text-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--think-highlight) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: var(--think-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-text-shimmer var(--think-shimmer) linear infinite;
+}
+
+@keyframes thinking-text-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
+}
+
+.thinking-swap-text.is-exit {
+  transform: translateY(calc(var(--think-distance) * -1));
+  filter: blur(var(--think-blur));
+  opacity: 0;
+}
+
+.thinking-preview-enter {
+  transform: translateY(0);
+  filter: blur(0);
+  opacity: 1;
+  transition:
+    transform var(--think-swap) var(--think-ease),
+    filter var(--think-swap) var(--think-ease),
+    opacity var(--think-swap) var(--think-ease);
+  will-change: transform, filter, opacity;
+}
+
+.thinking-swap-text.is-enter-start,
+.thinking-preview-enter.is-enter-start {
+  transition: none;
+  transform: translateY(var(--think-distance));
+  filter: blur(var(--think-blur));
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-text-shimmer::before {
+    content: none;
+    display: none;
+    animation: none;
+  }
+
+  .thinking-swap-text,
+  .thinking-preview-enter {
+    transition: none !important;
+    transform: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+  }
+}

@@ -2588,6 +2588,7 @@
   "turnCard.starting": "启动中…",
   "turnCard.stepsCompleted": "步骤已完成",
   "turnCard.thinking": "思考中…",
+  "turnCard.thinkingDeeply": "深度思考中",
   "turnCard.thoughtDeeply": "已深度思考",
   "turnCard.used": "已使用",
   "viewer.clearSession": "清除会话",

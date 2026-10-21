@@ -2588,6 +2588,7 @@
   "turnCard.starting": "開始中...",
   "turnCard.stepsCompleted": "ステップ完了",
   "turnCard.thinking": "考え中…",
+  "turnCard.thinkingDeeply": "深く考え中",
   "turnCard.thoughtDeeply": "深く考えた",
   "turnCard.used": "使用済み",
   "viewer.clearSession": "セッションをクリア",

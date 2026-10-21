@@ -24,6 +24,7 @@ import type { Message } from '@craft-agent/core/types'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
+import { thinkingLabelSizer, useThinkingCompletionSwap } from './thinking-step-motion'
 import {
   ChevronRight,
   CheckCircle2,
@@ -268,12 +269,14 @@ export const SIZE_CONFIG = {
 const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 /** Completed deep-thinking row. Short process notes keep their own summary. */
 const thoughtDeeplyLabel = () => i18n.t('turnCard.thoughtDeeply')
+/** In-progress deep-thinking row. The transcript stays off this line until it settles. */
+const thinkingDeeplyLabel = () => i18n.t('turnCard.thinkingDeeply')
 const PROCESS_SUMMARY_LIMIT = 72
 
 /**
  * A short one-line process note stays as the step summary. A paragraph uses
  * the deep-thinking label and opens from the same details popup as other steps.
- * Thinking rows do not use this — they keep the label plus a one-line preview.
+ * Settled thinking rows do not use this — they keep their own label plus a one-line preview.
  */
 function collapsedProcessLabel(activity: { content?: string }): string {
   const thought = thoughtDeeplyLabel()
@@ -284,34 +287,18 @@ function collapsedProcessLabel(activity: { content?: string }): string {
   return plain
 }
 
-/** Live previews follow the newest sentence without growing the row. */
-const LIVE_THINKING_PREVIEW_LIMIT = 48
-
-function latestThinkingSentence(line: string): string {
-  const parts = line
-    .split(/(?<=[。！？!?])\s*|(?<=\.)\s+(?=[A-Z\u4e00-\u9fff])/)
-    .map(part => part.trim())
-    .filter(Boolean)
-  return parts[parts.length - 1] ?? line
-}
-
 /**
- * One line of thinking text. A settled row keeps the opening, and CSS ellipsis
- * cuts the end the same way other step summaries do. A live row follows the
- * latest line, then the latest sentence, and slides to the tail once that
- * sentence is longer than the row so new tokens stay visible. The string
- * length stays bounded so the row height does not change as tokens arrive.
+ * One settled line of thinking text. CSS ellipsis cuts the end the same way
+ * other step summaries do. A live row does not call this — the transcript
+ * stays out of the line until the step completes, so tokens cannot jump it.
  */
-function thinkingStepPreview(content: string | undefined, live: boolean): string {
+function thinkingStepPreview(content: string | undefined): string {
   const lines = (content ?? '')
     .split(/\r?\n/)
     .map(line => stripMarkdown(line))
     .filter(Boolean)
   if (lines.length === 0) return ''
-  if (!live) return lines.join(' ')
-  const sentence = latestThinkingSentence(lines[lines.length - 1] ?? '')
-  if (sentence.length <= LIVE_THINKING_PREVIEW_LIMIT) return sentence
-  return `…${sentence.slice(-(LIVE_THINKING_PREVIEW_LIMIT - 1))}`
+  return lines.join(' ')
 }
 
 // ============================================================================
@@ -1202,6 +1189,126 @@ function GrowingResponse({ children }: { children: React.ReactNode }) {
   return <div className="flow-root">{children}</div>
 }
 
+/**
+ * Deep-thinking step. While it is running the label shimmers and the
+ * transcript stays hidden. The completion swap (label, then the gray
+ * summary) plays only for the instance that saw the running state.
+ */
+function ThinkingActivityRow({
+  activity,
+  onOpenDetails,
+  isLastChild,
+}: {
+  activity: ActivityItem
+  onOpenDetails?: () => void
+  isLastChild?: boolean
+}) {
+  const depth = activity.depth || 0
+  const isRunning = activity.status === 'running'
+  const preview = isRunning ? '' : thinkingStepPreview(activity.content)
+  const canOpen = !isRunning && !!preview && !!onOpenDetails
+  const liveLabel = thinkingDeeplyLabel()
+  const doneLabel = thoughtDeeplyLabel()
+  const swap = useThinkingCompletionSwap(isRunning)
+  const sizer = thinkingLabelSizer(liveLabel, doneLabel, swap.holdLiveWidth)
+
+  return (
+    <div
+      className="flex items-stretch"
+      data-process-step=""
+      data-thinking-step=""
+    >
+      <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+      <div
+        data-thinking-live={isRunning ? '' : undefined}
+        data-thinking-preview={preview ? 'done' : undefined}
+        data-thinking-swap={swap.phase === 'swapping' ? '' : undefined}
+        className={cn(
+          "group/row flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
+          SIZE_CONFIG.fontSize
+        )}
+        onClick={canOpen ? onOpenDetails : undefined}
+      >
+        {isRunning ? (
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <Spinner className={SIZE_CONFIG.spinnerSize} />
+          </div>
+        ) : (
+          // MessageCircleDashed is the completed thinking glyph. Pending tools use
+          // an open circle via ActivityStatusIcon; a finished thought is not that state.
+          <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
+        )}
+        {swap.holdLiveWidth ? (
+          <span className="thinking-label-swap shrink-0">
+            <span className="invisible block whitespace-nowrap" aria-hidden="true">{sizer}</span>
+            {(swap.phase === 'streaming' || swap.phase === 'swapping') && (
+              <span
+                key="live"
+                className={cn(
+                  "thinking-swap-text thinking-text-shimmer",
+                  swap.phase === 'swapping' && "is-exit",
+                )}
+                data-text={liveLabel}
+                aria-hidden={swap.phase === 'swapping' ? true : undefined}
+              >
+                {liveLabel}
+              </span>
+            )}
+            {swap.phase !== 'streaming' && (
+              <span
+                key="done"
+                ref={swap.liveRef}
+                className={cn(
+                  "thinking-swap-text",
+                  swap.entering && "is-enter-start",
+                  canOpen && "group-hover/row:underline",
+                )}
+              >
+                {doneLabel}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className={cn("shrink-0 whitespace-nowrap", canOpen && "group-hover/row:underline")}>{doneLabel}</span>
+        )}
+        {preview && (
+          <span className={cn(
+            "truncate flex-1 min-w-0",
+            swap.phase === 'swapping' && "thinking-preview-enter",
+            swap.entering && "is-enter-start",
+            canOpen && "group-hover/row:underline",
+          )}>
+            <span className="opacity-60"> · </span>
+            <span>{preview}</span>
+          </span>
+        )}
+        {canOpen && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenDetails()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                onOpenDetails()
+              }
+            }}
+            className={cn(
+              "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+              "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
@@ -1266,66 +1373,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // The same details popup as any other step holds the full text.
   // No separate thinking panel.
   if (activity.type === 'thinking') {
-    const isRunning = activity.status === 'running'
-    // MessageCircleDashed is the completed thinking glyph. Pending tools use
-    // an open circle via ActivityStatusIcon; a finished thought is not that state.
-    const preview = thinkingStepPreview(activity.content, isRunning)
-    const canOpen = !isRunning && !!preview && !!onOpenDetails
-    const label = !isRunning || preview ? thoughtDeeplyLabel() : thinkingStatusLabel()
     return (
-      <div
-        className="flex items-stretch"
-        data-process-step=""
-        data-thinking-step=""
-      >
-        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
-        <div
-          data-thinking-live={isRunning && preview ? '' : undefined}
-          data-thinking-preview={preview ? (isRunning ? 'live' : 'done') : undefined}
-          className={cn(
-            "group/row flex items-center gap-2 py-0.5 text-muted-foreground flex-1 min-w-0",
-            SIZE_CONFIG.fontSize
-          )}
-          onClick={canOpen ? onOpenDetails : undefined}
-        >
-          {isRunning ? (
-            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-              <Spinner className={SIZE_CONFIG.spinnerSize} />
-            </div>
-          ) : (
-            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
-          )}
-          <span className={cn("shrink-0", canOpen && "group-hover/row:underline")}>{label}</span>
-          {preview && (
-            <span className={cn("truncate flex-1 min-w-0", canOpen && "group-hover/row:underline")}>
-              <span className="opacity-60"> · </span>
-              <span>{preview}</span>
-            </span>
-          )}
-          {canOpen && (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenDetails()
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.stopPropagation()
-                  onOpenDetails()
-                }
-              }}
-              className={cn(
-                "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
-                "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              )}
-            >
-              <ArrowUpRight className={SIZE_CONFIG.iconSize} />
-            </div>
-          )}
-        </div>
-      </div>
+      <ThinkingActivityRow
+        activity={activity}
+        onOpenDetails={onOpenDetails}
+        isLastChild={isLastChild}
+      />
     )
   }
 

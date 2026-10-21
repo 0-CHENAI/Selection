@@ -25,6 +25,7 @@
 
 @import "tailwindcss";
 @import "./streaming-text.css";
+@import "./thinking-step.css";
 @plugin "@tailwindcss/typography";
 
 /* =============================================================================

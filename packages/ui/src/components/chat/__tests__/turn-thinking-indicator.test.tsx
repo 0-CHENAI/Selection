@@ -458,15 +458,28 @@ it('shows model reasoning inside the process chain while it is still running', a
   }], { expanded: true })
   const chain = live.slice(live.indexOf('data-process-chain'))
   expect(chain).toContain('data-thinking-live')
-  expect(chain).toContain('data-thinking-preview="live"')
+  expect(chain).not.toContain('data-thinking-preview')
   expect(chain).toContain('data-thinking-step')
-  expect(chain).toContain('已深度思考')
-  expect(chain).toContain('先整理结构')
-  expect(chain).toContain('truncate')
+  expect(chain).toContain('深度思考中')
+  expect(chain).toContain('data-text="深度思考中"')
+  expect(chain).toContain('thinking-text-shimmer')
+  expect(chain).not.toContain('已深度思考')
+  expect(chain).not.toContain('先整理结构')
+  expect(chain).not.toContain('thinking-preview-enter')
+  expect(chain).not.toContain('is-enter-start')
   expect(chain).not.toContain('line-clamp-2')
   expect(chain).not.toContain('lucide-message-circle-dashed')
   expect(live).not.toContain('data-thinking-done')
   expect(live).not.toContain('<details')
+
+  const english = await renderTurn('en', [{
+    id: 'think', type: 'thinking', status: 'running', content: 'Outline the structure first', timestamp: Date.now(),
+  }], { expanded: true })
+  const englishChain = english.slice(english.indexOf('data-process-chain'))
+  expect(englishChain).toContain('Thinking deeply')
+  expect(englishChain).toContain('data-text="Thinking deeply"')
+  expect(englishChain).not.toContain('Outline the structure first')
+  expect(englishChain).not.toContain('Thought deeply')
 })
 
 it('keeps thinking and intermediate rounds inside the chain and the final reply below it', async () => {
@@ -492,6 +505,10 @@ it('keeps thinking and intermediate rounds inside the chain and the final reply 
   const chain = html.slice(chainStart, replyStart)
   expect(chain).toContain('已深度思考')
   expect(chain).toContain('data-thinking-preview="done"')
+  expect(chain).not.toContain('thinking-text-shimmer')
+  expect(chain).not.toContain('is-enter-start')
+  expect(chain).not.toContain('is-exit')
+  expect(chain).not.toContain('data-thinking-swap')
   expect(chain).toContain('先看安装情况')
   expect(chain).toContain('签名已经失效')
   expect(chain).toContain('opacity-60')
@@ -528,7 +545,7 @@ it('collapses a long intermediate narrative to one process step instead of the p
   expect(html.slice(html.indexOf('结论写在这里。'))).toContain('结论写在这里。')
 })
 
-it('shows a one-line thinking preview and opens details only when the block has text', async () => {
+it('hides the streaming transcript, then shows a one-line summary only when the block has text', async () => {
   const opening = '甲'.repeat(80)
   const latest = '最新判断'
   const live = await renderTurn('zh-Hans', [{
@@ -536,12 +553,13 @@ it('shows a one-line thinking preview and opens details only when the block has 
     content: `先看安装情况。\n${opening}${latest}`,
   }], { expanded: true })
   const liveStep = live.slice(live.indexOf('data-thinking-step'))
-  expect(liveStep).toContain('data-thinking-preview="live"')
-  expect(liveStep).toContain('已深度思考')
-  expect(liveStep).toContain(`…${(`${opening}${latest}`).slice(-(48 - 1))}`)
+  expect(liveStep).not.toContain('data-thinking-preview')
+  expect(liveStep).toContain('深度思考中')
+  expect(liveStep).toContain('thinking-text-shimmer')
+  expect(liveStep).toContain('thinking-label-swap')
+  expect(liveStep).not.toContain(latest)
   expect(liveStep).not.toContain(opening)
   expect(liveStep).not.toContain('先看安装情况')
-  expect(liveStep).toContain('truncate')
   expect(liveStep).not.toContain('line-clamp-2')
   expect(liveStep).not.toContain('items-start')
 
@@ -551,11 +569,17 @@ it('shows a one-line thinking preview and opens details only when the block has 
   }], { isComplete: true, isStreaming: false, expanded: true, onOpenActivityDetails: () => {} })
   const doneStep = settled.slice(settled.indexOf('data-thinking-step'))
   expect(doneStep).toContain('data-thinking-preview="done"')
+  expect(doneStep).toContain('已深度思考')
+  expect(doneStep).not.toContain('深度思考中')
+  expect(doneStep).not.toContain('thinking-text-shimmer')
+  expect(doneStep).not.toContain('is-enter-start')
+  expect(doneStep).not.toContain('thinking-preview-enter')
   expect(doneStep).toContain('先看安装情况')
   expect(doneStep).toContain(opening)
   expect(doneStep).not.toContain('**先看**')
   expect(doneStep).toContain('lucide-message-circle-dashed')
   expect(doneStep).toContain('role="button"')
+  expect(doneStep).toContain('truncate')
 
   const redacted = await renderTurn('zh-Hans', [{
     id: 'think-empty', type: 'thinking', status: 'completed', timestamp: 1, content: '  \n',

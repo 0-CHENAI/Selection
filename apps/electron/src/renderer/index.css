@@ -1,4 +1,5 @@
 @import "tailwindcss" source(none);
+@import "../../../../packages/ui/src/styles/thinking-step.css";
 @plugin "@tailwindcss/typography";
 
 /* Tell Tailwind where to scan for utility classes */
