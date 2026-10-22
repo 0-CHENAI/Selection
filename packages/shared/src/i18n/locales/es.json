@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "Hace falta aclarar",
   "chat.clarificationYourAnswer": "Tu respuesta",
   "chat.clearDraft": "Borrar borrador",
+  "chat.clearWorkingDirectory": "Quitar la selección del directorio de trabajo",
   "chat.clickForTaskActions": "Haz clic para acciones de tarea",
   "chat.clickToOpen": "Clic para abrir {{name}}",
   "chat.collapseArtifacts": "Contraer archivos",

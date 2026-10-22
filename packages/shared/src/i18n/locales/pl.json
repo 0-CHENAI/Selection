@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "Potrzebne doprecyzowanie",
   "chat.clarificationYourAnswer": "Twoja odpowiedź",
   "chat.clearDraft": "Wyczyść szkic",
+  "chat.clearWorkingDirectory": "Wyczyść wybór katalogu roboczego",
   "chat.clickForTaskActions": "Kliknij, aby zobaczyć akcje zadania",
   "chat.clickToOpen": "Kliknij, aby otworzyć {{name}}",
   "chat.collapseArtifacts": "Zwiń pliki",

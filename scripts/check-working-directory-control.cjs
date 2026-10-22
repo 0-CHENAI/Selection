@@ -1,0 +1,97 @@
+/* Optional browser regression: start Vite with apps/electron/vite.config.ts,
+ * then run `node scripts/check-working-directory-control.cjs` with Playwright
+ * installed in the runner. BASE_URL (default :5183), CHROMIUM_PATH and
+ * SCREENSHOT_PATH configure the runner without changing application deps.
+ * The fixture uses the real component and CSS, with only the OS bridge stubbed.
+ */
+const assert = require('node:assert/strict')
+const { chromium } = require('playwright')
+
+;(async () => {
+  const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) })
+  const context = await browser.newContext({ viewport: { width: 680, height: 330 } })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  const url = `${process.env.BASE_URL || 'http://127.0.0.1:5183'}/components/app-shell/input/__tests__/fixtures/working-directory.html`
+  await page.goto(url)
+  await page.waitForFunction(() => window.folderFixture)
+  const configure = async options => {
+    await page.evaluate(options => window.folderFixture.configure(options), options)
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await page.waitForFunction(options => window.folderFixture.directory === options.directory, options)
+  }
+  const picker = () => page.locator('.working-directory-control > button').first()
+  const clear = () => page.locator('.working-directory-control-clear')
+  const calls = () => page.evaluate(() => ({ ...window.folderFixture.calls }))
+  const resolve = path => page.evaluate(path => window.folderFixture.resolve(path), path)
+  const settle = () => page.waitForFunction(() => !document.querySelector('.working-directory-control > button')?.disabled)
+
+  await picker().click()
+  assert.equal((await calls()).picker, 1, 'empty control calls native picker directly')
+  assert.equal(await page.getByRole('menu').count(), 0)
+  await resolve(null); await settle()
+  assert.deepEqual((await calls()).changes, [], 'cancel native dialog preserves selection')
+  await picker().click(); await resolve('/work/very-long-working-folder-name-for-gradient-regression'); await settle()
+  await picker().hover()
+  assert.equal(await clear().evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.equal(await clear().evaluate(el => getComputedStyle(el).borderTopWidth), '0px')
+  assert.match(await page.locator('.working-directory-control-label').evaluate(el => getComputedStyle(el).maskImage), /linear-gradient/)
+  assert.equal(await picker().locator('svg').evaluate(el => getComputedStyle(el).maskImage), 'none')
+  assert.equal(await clear().evaluate(el => getComputedStyle(el).maskImage), 'none')
+  assert.equal(await page.locator('button button').count(), 0, 'actions must not nest')
+  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH })
+  await page.evaluate(() => document.documentElement.classList.add('dark'))
+  assert.match(await page.locator('.working-directory-control-label').evaluate(el => getComputedStyle(el).maskImage), /linear-gradient/)
+  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH.replace(/\.png$/, '-dark.png') })
+  await page.evaluate(() => document.documentElement.classList.remove('dark'))
+  const beforeCancel = (await calls()).changes.length
+  await picker().click()
+  await picker().evaluate(el => el.click())
+  assert.equal((await calls()).picker, 3, 'pending picker ignores repeated activation')
+  await resolve(null); await settle()
+  assert.equal((await calls()).changes.length, beforeCancel, 'cancel preserves an existing selection')
+  await clear().click()
+  assert.equal((await calls()).picker, 3, 'clear must not reopen picker')
+  assert.equal((await calls()).changes.at(-1), 'none', 'draft unbind uses explicit opt-out')
+  await page.waitForFunction(() => !document.querySelector('.working-directory-control-clear'))
+  assert.equal(await picker().evaluate(el => document.activeElement === el), true, 'focus returns after clear')
+
+  await configure({ directory: '/work/chosen', root: '/session/root' })
+  await page.mouse.move(600, 300); await picker().focus(); await page.keyboard.press('Tab')
+  assert.equal(await clear().evaluate(el => document.activeElement === el && getComputedStyle(el).opacity === '1'), true)
+  await page.keyboard.press('Enter')
+  assert.equal((await calls()).changes.at(-1), '/session/root', 'existing session unbind returns to its root')
+  await configure({ directory: '/work/chosen', disabled: true })
+  assert.equal(await picker().isDisabled(), true); assert.equal(await clear().isDisabled(), true)
+  await configure({})
+  await picker().focus(); await page.keyboard.press('Enter')
+  await configure({ disabled: true }); await configure({})
+  const before = (await calls()).changes.length
+  await resolve('/late-after-processing'); await settle()
+  assert.equal((await calls()).changes.length, before, 'running turn invalidates pending dialog even after completion')
+  await picker().click(); await configure({ scope: 'another-session' })
+  await resolve('/late-other-session')
+  assert.equal((await calls()).changes.length, before, 'session switch discards stale dialog result')
+  await configure({ directory: '/project/fixed', project: true })
+  assert.equal(await picker().count(), 0); assert.equal(await clear().count(), 0)
+  assert.equal(await page.getByRole('note').getAttribute('aria-disabled'), 'true')
+
+  await configure({ directory: '/x' })
+  const glyph = await picker().locator('svg').boundingBox()
+  const closeBox = await clear().boundingBox()
+  assert.ok(glyph.x + glyph.width <= closeBox.x, 'short names keep the close hit area away from the folder glyph')
+
+  await configure({ directory: '/work/touch' })
+  await context.close()
+  const touchContext = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 400, height: 340 } })
+  const touch = await touchContext.newPage(); await touch.goto(url); await touch.waitForFunction(() => window.folderFixture)
+  await touch.evaluate(() => window.folderFixture.configure({ directory: '/work/touch' }))
+  await touch.locator('.working-directory-control-clear').waitFor()
+  assert.equal(await touch.locator('.working-directory-control-clear').evaluate(el => getComputedStyle(el).opacity), '1')
+  await touch.locator('.working-directory-control-clear').tap()
+  assert.equal(await touch.evaluate(() => window.folderFixture.calls.changes.at(-1)), 'none')
+  assert.deepEqual(errors, [], 'component has no browser runtime errors')
+  await browser.close()
+  console.log('PASS: direct picker, cancel, hover/text-only mask, borderless clear, no bubbling/nesting, keyboard, draft/session reset, busy/stale results, fixed project, touch')
+})().catch(error => { console.error(error); process.exit(1) })
