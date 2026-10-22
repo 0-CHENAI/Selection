@@ -22,3 +22,15 @@ export interface DraftComposerState {
 export const draftComposerAtomFamily = atomFamily((_id: string) => atom<DraftComposerState>({
   initialized: false, hydrated: false, model: '', swarmEnabled: false, sourceSlugs: [],
 }))
+
+export function resolveDraftSources(state: DraftComposerState, projectId: string | null | undefined, defaults?: string[]): string[] {
+  return state.sourcesChosen || !projectId ? state.sourceSlugs : defaults ?? state.sourceSlugs
+}
+
+/** Consume only this draft's source choice; existing sessions own their copy. */
+export function prepareNextDraft(state: DraftComposerState, projectId?: string): DraftComposerState {
+  return { ...state, ...(projectId ? { initialized: false, hydrated: false } : {}),
+    sourceSlugs: projectId ? state.sourceSlugs : [],
+    sourcesChosen: projectId ? state.sourcesChosen : false,
+  }
+}

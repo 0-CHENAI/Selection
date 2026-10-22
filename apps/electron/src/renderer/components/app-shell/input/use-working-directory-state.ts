@@ -17,6 +17,8 @@ export interface UseWorkingDirectoryStateInput {
   onWorkingDirectoryChange: (path: string) => void
   sessionFolderPath: string | undefined
   workspaceId: string | undefined
+  /** Chat drafts can explicitly opt out before their session folder exists. */
+  allowDraftReset?: boolean
   /** Whether the consumer's surface (popover / drawer) is currently open.
    *  The hook uses this to refresh history + reset the filter on every open. */
   isOpen: boolean
@@ -77,6 +79,7 @@ export function useWorkingDirectoryState(
     onWorkingDirectoryChange,
     sessionFolderPath,
     workspaceId,
+    allowDraftReset = false,
     isOpen,
     onClose,
   } = input
@@ -130,11 +133,12 @@ export function useWorkingDirectoryState(
   }, [onWorkingDirectoryChange, onClose, workspaceId])
 
   const handleReset = React.useCallback(() => {
-    if (sessionFolderPath) {
-      onWorkingDirectoryChange(sessionFolderPath)
-      onClose()
-    }
-  }, [onWorkingDirectoryChange, onClose, sessionFolderPath])
+    if (!sessionFolderPath && !allowDraftReset) return
+    // Drafts do not have a session folder yet. Keep an explicit opt-out so
+    // later workspace-default hydration cannot reselect the folder.
+    onWorkingDirectoryChange(sessionFolderPath ?? 'none')
+    onClose()
+  }, [onWorkingDirectoryChange, onClose, sessionFolderPath, allowDraftReset])
 
   const handleRemoveRecent = React.useCallback((e: React.MouseEvent, path: string) => {
     e.stopPropagation()
@@ -152,8 +156,8 @@ export function useWorkingDirectoryState(
   )
 
   const { hasFolder, folderName, showReset } = React.useMemo(
-    () => deriveSelectionFlags(workingDirectory, sessionFolderPath),
-    [workingDirectory, sessionFolderPath],
+    () => deriveSelectionFlags(workingDirectory, sessionFolderPath, allowDraftReset),
+    [workingDirectory, sessionFolderPath, allowDraftReset],
   )
 
   const showFilter = sortedRecent.length > WORKING_DIR_FILTER_THRESHOLD
@@ -217,13 +221,12 @@ export interface SelectionFlags {
 export function deriveSelectionFlags(
   workingDirectory: string | undefined,
   sessionFolderPath: string | undefined,
+  allowDraftReset = false,
 ): SelectionFlags {
   const hasFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
   const folderName = hasFolder
     ? (getPathBasename(workingDirectory!) || undefined)
     : undefined
-  const showReset = hasFolder
-    && !!sessionFolderPath
-    && sessionFolderPath !== workingDirectory
+  const showReset = hasFolder && (!!sessionFolderPath || allowDraftReset)
   return { hasFolder, folderName, showReset }
 }

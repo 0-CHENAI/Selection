@@ -39,6 +39,7 @@ import {
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import { parseMentions } from '@/lib/mentions'
 import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-text-input'
+import { reconcileSessionSourceSelection } from './session-source-selection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import {
   DropdownMenu,
@@ -345,6 +346,8 @@ export interface FreeFormInputProps {
   sources?: LoadedSource[]
   /** Currently enabled source slugs for this session */
   enabledSourceSlugs?: string[]
+  /** Stable composer identity, including drafts that have no real session ID. */
+  sourceSelectionKey?: string
   /** Callback when source selection changes */
   onSourcesChange?: (slugs: string[]) => void
   // Skill selection (for @mentions)
@@ -453,6 +456,7 @@ export function FreeFormInput({
   onFocusChange,
   sources = [],
   enabledSourceSlugs = [],
+  sourceSelectionKey,
   onSourcesChange,
   skills = [],
   labels = [],
@@ -669,21 +673,16 @@ export function FreeFormInput({
   }, [attachments])
 
   // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
-  const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
-
-  // Sync from prop when server state changes (reconciles after IPC or on external updates)
-  // Use content comparison (not reference) to avoid infinite loops with empty arrays
-  const prevEnabledSourceSlugsRef = React.useRef(enabledSourceSlugs)
-  React.useEffect(() => {
-    const prev = prevEnabledSourceSlugsRef.current
-    const changed = enabledSourceSlugs.length !== prev.length ||
-      enabledSourceSlugs.some((slug, i) => slug !== prev[i])
-
-    if (changed) {
-      setOptimisticSourceSlugs(enabledSourceSlugs)
-      prevEnabledSourceSlugsRef.current = enabledSourceSlugs
-    }
-  }, [enabledSourceSlugs])
+  const [sourceSelection, setSourceSelection] = React.useState(() =>
+    reconcileSessionSourceSelection(undefined, sourceSelectionKey ?? sessionId, enabledSourceSlugs))
+  const currentSourceSelection = reconcileSessionSourceSelection(sourceSelection, sourceSelectionKey ?? sessionId, enabledSourceSlugs)
+  // Reconcile during render so a session switch cannot expose the previous
+  // composer's unacknowledged selection even for one render/event.
+  if (currentSourceSelection !== sourceSelection) setSourceSelection(currentSourceSelection)
+  const optimisticSourceSlugs = currentSourceSelection.slugs
+  const setOptimisticSourceSlugs = React.useCallback((slugs: string[]) => {
+    setSourceSelection(previous => ({ ...previous, slugs }))
+  }, [])
 
   // Sync from parent when inputValue changes externally (e.g., switching sessions)
   const prevInputValueRef = React.useRef(coerceInputText(inputValue))
@@ -1609,7 +1608,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1764,7 +1763,7 @@ export function FreeFormInput({
         onSourcesChange(newSlugs)
       }
     }
-  }, [syncToParent, sources, optimisticSourceSlugs, onSourcesChange])
+  }, [syncToParent, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange])
 
   // Handle input with cursor position (for menu detection)
   const handleRichInput = React.useCallback((value: string, cursorPosition: number) => {
@@ -2717,6 +2716,7 @@ function WorkingDirectoryBadge({
   const { t } = useTranslation()
   return (
     <WorkingDirectorySelector
+      allowDraftReset
       workingDirectory={workingDirectory}
       onWorkingDirectoryChange={onWorkingDirectoryChange}
       sessionFolderPath={sessionFolderPath}

@@ -27,16 +27,17 @@ describe('draft to live session composer', () => {
     expect(input).toContain('const NO_SLASH_FOLDERS: string[] = []')
   })
 
-  it('uses app and workspace thinking defaults and sends the displayed supported level', () => {
+  it('uses thinking defaults and persists user intent while displaying a model-specific legal level', () => {
     const chatPage = read('../ChatPage.tsx')
     expect(chatPage).toContain('window.electronAPI.getDefaultThinkingLevel()')
     expect(chatPage).toContain('draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection')
     expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(2)
     expect(chatPage).toContain('if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))')
     expect(chatPage).toContain('resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)')
-    expect(chatPage).toContain('draftCreateRef.current.thinkingLevel = activeThinkingLevel')
+    expect(chatPage).not.toContain('draftCreateRef.current.thinkingLevel = activeThinkingLevel')
     expect(chatPage.match(/thinkingLevel=\{activeThinkingLevel\}/g)).toHaveLength(2)
-    expect(chatPage).toContain('handleThinkingLevelChange(activeThinkingLevel)')
+    expect(chatPage).not.toContain('handleThinkingLevelChange(activeThinkingLevel)')
+    expect(chatPage.match(/thinkingLevel: sessionOpts.thinkingLevel,/g)).toHaveLength(2)
   })
 
   it('maps an unsupported saved default to the level shown for the selected model', () => {

@@ -523,6 +523,9 @@ export class PiAgent extends BaseAgent {
    * Lazy initialization -- spawns on first use.
    */
   private async ensureSubprocess(timeoutMs = 30_000): Promise<void> {
+    // A cwd change cannot be applied to an already constructed Pi toolset.
+    // Idle auxiliary calls and the next chat must recreate it before use.
+    if (this.workingDirectoryChanged && !this._isProcessing) await this.refreshWorkingDirectory();
     if (this.subprocessTeardown) await this.subprocessTeardown;
     if (this.subprocessStartup) return this.subprocessStartup;
     if (this.subprocess && this.subprocessReady) return this.subprocessReady;
@@ -2721,6 +2724,7 @@ export class PiAgent extends BaseAgent {
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
     let message = messageParam;
+    if (this.workingDirectoryChanged) await this.refreshWorkingDirectory();
     // Reset state for new turn
     this._isProcessing = true;
     this.abortReason = undefined;
@@ -3071,13 +3075,15 @@ export class PiAgent extends BaseAgent {
   }
 
   override setThinkingLevel(level: ThinkingLevel): void {
-    level = this.resolveConfiguredThinkingLevel(level);
+    const effectiveLevel = this.resolveConfiguredThinkingLevel(level);
     const previousLevel = this.getThinkingLevel();
+    // Keep user intent across models with narrower/no reasoning support. Only
+    // the subprocess receives the model-specific legal value.
     super.setThinkingLevel(level);
     // Forward to subprocess so it uses the new thinking level on next turn
     if (this.subprocess) {
-      this.debug(`Forwarding thinking level change to subprocess: ${previousLevel} → ${level}`);
-      this.send({ type: 'set_thinking_level', level });
+      this.debug(`Forwarding thinking level change to subprocess: ${previousLevel} → ${effectiveLevel}`);
+      this.send({ type: 'set_thinking_level', level: effectiveLevel });
     } else {
       this.debug(`Thinking level updated but no subprocess to forward to: ${previousLevel} → ${level}`);
     }
@@ -3214,6 +3220,22 @@ export class PiAgent extends BaseAgent {
 
   override setSessionId(sessionId: string | null): void {
     this.piSessionId = sessionId;
+  }
+
+  private workingDirectoryChanged = false;
+
+  override updateWorkingDirectory(path: string): void {
+    if (path === this.workingDirectory) return;
+    super.updateWorkingDirectory(path);
+    this.workingDirectoryChanged = true;
+  }
+
+  private async refreshWorkingDirectory(): Promise<void> {
+    if (!this.workingDirectoryChanged) return;
+    if (this.config.session && this.piSessionId) this.config.session.sdkSessionId = this.piSessionId;
+    await this.killSubprocessGracefully();
+    this.workingDirectoryChanged = false;
+    this._sessionToolContext = null;
   }
 
   override setWorkspace(workspace: Workspace): void {

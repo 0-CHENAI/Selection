@@ -2645,6 +2645,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onAttachmentsChange,
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
+              sourceSelectionKey: session.id,
               onSourcesChange,
               skills,
               workspaceId,

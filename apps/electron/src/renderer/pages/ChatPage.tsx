@@ -44,7 +44,7 @@ import {
   updateSessionAtom,
   updateSessionMetaAtom,
 } from '@/atoms/sessions'
-import { draftComposerAtomFamily, workModeViewAtom } from '@/atoms/work-mode'
+import { draftComposerAtomFamily, prepareNextDraft, resolveDraftSources, workModeViewAtom } from '@/atoms/work-mode'
 import { complexCapabilityError } from '@craft-agent/shared/sessions/work-mode'
 import { projectsAtom } from '@/atoms/projects'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
@@ -342,11 +342,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     if (!isDraft || draftComposer.initialized) return
     setDraftComposer(previous => ({ ...previous, initialized: true,
       model: initialDraftConnection?.defaultModel ?? '', connection: initialDraftConnection?.slug,
-      sourceSlugs: enabledSources?.map(source => source.config.slug) ?? [],
+      sourceSlugs: resolveDraftSources(previous, orchestrationProjectId, enabledSources?.map(source => source.config.slug)),
     }))
     setPermissionMode(defaultSessionOptions.permissionMode)
     setOption('thinkingLevel', defaultSessionOptions.thinkingLevel)
-  }, [isDraft, draftComposer.initialized, initialDraftConnection, enabledSources, setDraftComposer, setPermissionMode, setOption])
+  }, [isDraft, draftComposer.initialized, orchestrationProjectId, initialDraftConnection, enabledSources, setDraftComposer, setPermissionMode, setOption])
 
   React.useEffect(() => {
     if (!isDraft || !activeWorkspaceId || draftComposer.hydrated) return
@@ -361,12 +361,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       if (!draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection) setOption('thinkingLevel', settings?.thinkingLevel ?? appDefault)
       setDraftComposer(previous => {
         return { ...previous, hydrated: true, workspaceWorkingDirectory: settings?.workingDirectory,
-          sourceSlugs: previous.sourcesChosen ? previous.sourceSlugs : settings?.enabledSourceSlugs ?? previous.sourceSlugs }
+          sourceSlugs: resolveDraftSources(previous, orchestrationProjectId, settings?.enabledSourceSlugs) }
       })
       if (settings?.permissionMode && sessionOpts.permissionMode === defaultSessionOptions.permissionMode) setPermissionMode(settings.permissionMode)
     })
     return () => { cancelled = true }
-  }, [isDraft, activeWorkspaceId, optionsSessionId, draftComposer.hydrated, setDraftComposer, setPermissionMode, setOption, sessionOpts.permissionMode, draftStore])
+  }, [isDraft, activeWorkspaceId, optionsSessionId, orchestrationProjectId, draftComposer.hydrated, setDraftComposer, setPermissionMode, setOption, sessionOpts.permissionMode, draftStore])
 
   // User-initiated mode changes only (badge, compact selector, plan approval).
   // Switching into Full Takeover asks for risk confirmation once per workspace.
@@ -513,7 +513,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     return connection?.defaultModel ?? ''
   }, [isDraft, draftModel, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
-  // Show and send the nearest stop this model actually accepts.
+  // Display the nearest legal stop without replacing the user's sticky choice.
+  // The backend maps that choice again against the actual execution model.
   const activeConnectionSlug = isDraft ? draftConnection : session?.llmConnection
   const activeConnectionDetails = llmConnections.find(c => c.slug === (activeConnectionSlug || workspaceDefaultLlmConnection))
   const activeModelId = isDraft ? draftModel : effectiveModel
@@ -524,12 +525,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     ? { ...activeThinkingEntry, provider: activeConnectionDetails?.piAuthProvider }
     : { id: typeof activeThinkingEntry === 'string' ? activeThinkingEntry : activeModelId, provider: activeConnectionDetails?.piAuthProvider }
   const activeThinkingLevel = resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)
-  draftCreateRef.current.thinkingLevel = activeThinkingLevel
-
-  React.useEffect(() => {
-    if (activeThinkingLevel === sessionOpts.thinkingLevel) return
-    handleThinkingLevelChange(activeThinkingLevel)
-  }, [activeThinkingLevel, sessionOpts.thinkingLevel, handleThinkingLevelChange])
 
   // Project conversations display the project folder. Other sessions keep their own.
   const conversationIdentity = isDraft
@@ -818,7 +813,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSendMessage(created.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
         onInputChange(optionsSessionId, '')
         onAttachmentsChange(optionsSessionId, [])
-        setDraftComposer(previous => ({ ...previous, initialized: false, hydrated: false }))
+        setDraftComposer(previous => prepareNextDraft(previous, created.projectId))
         navigate(routes.view.allSessions(created.id))
       }).catch((error: unknown) => {
         toast.error(error instanceof Error ? error.message : String(error))

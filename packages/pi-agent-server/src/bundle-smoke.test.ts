@@ -59,6 +59,52 @@ function driveBundle(messages: object[], done: (output: string, send: (message: 
 }
 
 describe('pi-agent-server bundle', () => {
+  it('orders rapid model/effort changes and sends only legal reasoning parameters', async () => {
+    const requests: Array<{ model: string; reasoning_effort?: string }> = [];
+    const server = Bun.serve({ port: 0, async fetch(request) {
+      requests.push(await request.json() as typeof requests[number]);
+      const chunks = [
+        { id: 'effort', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'OK' }, finish_reason: null }] },
+        { id: 'effort', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      ];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    } });
+    const sessionPath = join(scratchDir, 'effort-switch');
+    mkdirSync(sessionPath, { recursive: true });
+    const steps = [['wide', 'xhigh'], ['narrow', 'high'], ['plain', 'off'], ['wide', 'xhigh']];
+    let sent = 0;
+    try {
+      await driveBundle([
+        { type: 'init', apiKey: 'local-test-only', model: 'single-low', thinkingLevel: 'low', cwd: scratchDir,
+          workspaceRootPath: scratchDir, sessionId: 'effort-switch', sessionPath,
+          providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+          customEndpoint: { api: 'openai-completions' }, customModels: [
+            { id: 'single-low', contextWindow: 32768, maxTokens: 1024, supportedThinkingLevels: ['low'] },
+            { id: 'wide', contextWindow: 32768, maxTokens: 1024, supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
+            { id: 'narrow', contextWindow: 32768, maxTokens: 1024, supportedThinkingLevels: ['low', 'high'] },
+            { id: 'plain', contextWindow: 32768, maxTokens: 1024, supportedThinkingLevels: [] },
+          ] },
+        { type: 'ensure_session_ready', id: 'effort-ready' },
+      ], (output, send) => {
+        const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+        const completed = events.filter(event => event.type === 'event' && event.event?.type === 'agent_end').length;
+        if (completed === steps.length) return true;
+        if (events.some(event => event.type === 'ensure_session_ready_result') && sent === completed) {
+          const [model, level] = steps[sent]!;
+          sent++;
+          send({ type: 'set_model', model });
+          send({ type: 'set_thinking_level', level });
+          send({ type: 'prompt', id: `effort-${sent}`, message: 'Reply OK.', systemPrompt: 'Local reasoning parameter regression.' });
+        }
+        return false;
+      });
+      expect(requests.map(request => [request.model, request.reasoning_effort])).toEqual([
+        ['wide', 'xhigh'], ['narrow', 'high'], ['plain', undefined], ['wide', 'xhigh'],
+      ]);
+    } finally { server.stop(true); }
+  }, RUN_TIMEOUT_MS + 1000);
+
   it('cancels the underlying HTTP evaluation without running business tools', async () => {
     let started!: () => void; let disconnected!: () => void;
     const requestStarted = new Promise<void>(resolve => { started = resolve; });
