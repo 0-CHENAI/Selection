@@ -3274,7 +3274,7 @@ export function ResponseCard({
  * Memoized to prevent re-renders of completed turns during session switches.
  * Only complete, non-streaming turns are memoized - active turns always re-render.
  */
-export const TurnCard = React.memo(function TurnCard({
+function TurnCardContent({
   sessionId,
   turnId,
   activities,
@@ -3378,21 +3378,7 @@ export const TurnCard = React.memo(function TurnCard({
     if (!isComplete) wasLiveRef.current = true
   }, [isComplete])
 
-  // Open the chain once while reasoning is still arriving, so the live
-  // text is a step the reader can see. A later manual collapse stays closed.
-  const revealedThinking = useRef(false)
-  useEffect(() => {
-    if (revealedThinking.current || hasUserToggled.current || isExpanded) return
-    const live = activities.some(activity =>
-      (activity.type === 'thinking' || activity.type === 'intermediate')
-      && activity.status === 'running'
-      && hasRenderableAssistantText(activity.content))
-    if (!live) return
-    revealedThinking.current = true
-    if (onExpandedChange) onExpandedChange(true)
-    else setLocalExpandedTurns(prev => new Set(prev).add(turnId))
-  }, [activities, isExpanded, onExpandedChange, turnId])
-
+  // Process updates never change expansion; only the header's user action does.
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
     const newExpanded = !isExpanded
@@ -3987,6 +3973,11 @@ export const TurnCard = React.memo(function TurnCard({
       {retryAlreadyInCard ? null : standaloneRetryRow}
     </div>
   )
+}
+
+export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
+  // A reused component must not carry local folds into another message/session.
+  return <TurnCardContent key={JSON.stringify([props.sessionId, props.turnId])} {...props} />
 }, (prev, next) => {
   // Conservative memoization: only skip re-render for completed, non-streaming turns
   // Active turns (streaming or incomplete) always re-render to show updates

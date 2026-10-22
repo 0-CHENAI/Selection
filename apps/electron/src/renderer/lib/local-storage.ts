@@ -45,8 +45,8 @@ export const KEYS = {
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',
 
-  // TurnCard expansion state (persisted across session switches)
-  turnCardExpansion: 'turncard-expansion',
+  // Only user-selected folds. Legacy entries could contain automatic expansions.
+  turnCardExpansion: 'turncard-expansion-manual-v2',
   artifactFeedbackDrafts: 'artifact-feedback-drafts',
   annotationFeedbackDrafts: 'annotation-feedback-drafts',
 
