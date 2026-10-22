@@ -1,0 +1,32 @@
+.working-directory-control[data-selected] > button:first-child {
+  min-width: 72px;
+}
+
+.working-directory-control-clear {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.working-directory-control:hover .working-directory-control-clear,
+.working-directory-control:focus-within .working-directory-control-clear {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Mask only the text. The folder glyph and borderless close button stay crisp. */
+.working-directory-control[data-selected]:hover .working-directory-control-label,
+.working-directory-control[data-selected]:focus-within .working-directory-control-label {
+  mask-image: linear-gradient(to right, black max(0px, calc(100% - 40px)), transparent calc(100% - 16px));
+  text-overflow: clip;
+}
+
+/* Touch users cannot hover to discover the action. Reserve its full hit area. */
+@media (hover: none), (pointer: coarse) {
+  .working-directory-control[data-selected] > [type='button']:first-child {
+    padding-right: 28px;
+  }
+  .working-directory-control-clear {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

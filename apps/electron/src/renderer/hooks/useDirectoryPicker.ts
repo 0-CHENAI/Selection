@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { useTransportConnectionState } from './useTransportConnectionState'
@@ -8,7 +8,9 @@ type ServerBrowserMode = 'browse' | 'manual'
 
 interface DirectoryPickerResult {
   /** Open the picker (native dialog in local mode, ServerDirectoryBrowser in remote mode). */
-  pickDirectory: () => void
+  pickDirectory: () => Promise<void>
+  /** Native dialog is awaiting a selection. */
+  isPicking: boolean
   /** Whether the ServerDirectoryBrowser modal should be rendered. */
   showServerBrowser: boolean
   /** Which mode the ServerDirectoryBrowser should use. */
@@ -31,6 +33,8 @@ export function useDirectoryPicker(
     window.electronAPI.isChannelAvailable(RPC_CHANNELS.fs.LIST_DIRECTORY)
 
   const [showServerBrowser, setShowServerBrowser] = useState(false)
+  const [isPicking, setIsPicking] = useState(false)
+  const pending = useRef(false)
 
   const serverBrowserMode: ServerBrowserMode = canBrowse ? 'browse' : 'manual'
 
@@ -41,7 +45,10 @@ export function useDirectoryPicker(
       return
     }
 
-    // Local mode — native OS dialog
+    // Local mode — native OS dialog. Do not open multiple dialogs on a double click.
+    if (pending.current) return
+    pending.current = true
+    setIsPicking(true)
     try {
       const path = await window.electronAPI.openFolderDialog()
       if (path) onSelect(path)
@@ -50,8 +57,11 @@ export function useDirectoryPicker(
       toast.error(t('toast.failedToOpenFolderPicker'), {
         description: message,
       })
+    } finally {
+      pending.current = false
+      setIsPicking(false)
     }
-  }, [isRemote, onSelect])
+  }, [isRemote, onSelect, t])
 
   const cancelServerBrowser = useCallback(() => {
     setShowServerBrowser(false)
@@ -64,6 +74,7 @@ export function useDirectoryPicker(
 
   return {
     pickDirectory,
+    isPicking,
     showServerBrowser,
     serverBrowserMode,
     cancelServerBrowser,

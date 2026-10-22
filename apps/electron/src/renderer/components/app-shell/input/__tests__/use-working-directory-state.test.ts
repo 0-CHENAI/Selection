@@ -65,6 +65,9 @@ describe('deriveSortedRecent', () => {
 })
 
 describe('deriveSelectionFlags', () => {
+  it('treats the explicit draft opt-out as no external folder', () => {
+    expect(deriveSelectionFlags('none', undefined, true)).toEqual({ hasFolder: false, folderName: undefined, showReset: false })
+  })
   it('returns "no folder" when workingDirectory is undefined', () => {
     const flags = deriveSelectionFlags(undefined, undefined)
     expect(flags.hasFolder).toBe(false)

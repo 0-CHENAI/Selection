@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "確認が必要です",
   "chat.clarificationYourAnswer": "あなたの回答",
   "chat.clearDraft": "下書きをクリア",
+  "chat.clearWorkingDirectory": "作業ディレクトリの選択を解除",
   "chat.clickForTaskActions": "クリックしてタスクアクションを表示",
   "chat.clickToOpen": "クリックして{{name}}を開く",
   "chat.collapseArtifacts": "成果物を折りたたむ",

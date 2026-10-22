@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "Need a clarification",
   "chat.clarificationYourAnswer": "Your answer",
   "chat.clearDraft": "Clear draft",
+  "chat.clearWorkingDirectory": "Clear working directory selection",
   "chat.clickForTaskActions": "Click for task actions",
   "chat.clickToOpen": "Click to open {{name}}",
   "chat.collapseArtifacts": "Collapse deliverables",

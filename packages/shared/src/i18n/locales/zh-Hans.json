@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "需要确认",
   "chat.clarificationYourAnswer": "你的回答",
   "chat.clearDraft": "清除草稿",
+  "chat.clearWorkingDirectory": "取消工作目录选择",
   "chat.clickForTaskActions": "点击查看任务操作",
   "chat.clickToOpen": "点击打开 {{name}}",
   "chat.collapseArtifacts": "收起成果",

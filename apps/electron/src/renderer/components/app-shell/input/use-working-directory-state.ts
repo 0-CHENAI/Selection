@@ -62,9 +62,8 @@ export interface UseWorkingDirectoryStateResult {
 }
 
 /**
- * Shared state machine for the working-directory selector. Powers both the
- * desktop popover (FreeFormInput.WorkingDirectoryBadge) and the compact
- * drawer (CompactWorkingDirectorySelector) so they cannot drift.
+ * Shared state machine for menu-based directory selectors (including the task
+ * editor). Ordinary chat's direct picker shares the selection derivation below.
  *
  * The hook owns: recent-dirs list, home dir, git branch fetch, filter input
  * state, and all mutation handlers. The hook does **not** own: surface open
@@ -223,7 +222,7 @@ export function deriveSelectionFlags(
   sessionFolderPath: string | undefined,
   allowDraftReset = false,
 ): SelectionFlags {
-  const hasFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
+  const hasFolder = !!workingDirectory && workingDirectory !== 'none' && workingDirectory !== sessionFolderPath
   const folderName = hasFolder
     ? (getPathBasename(workingDirectory!) || undefined)
     : undefined

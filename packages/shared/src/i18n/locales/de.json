@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "Klärung nötig",
   "chat.clarificationYourAnswer": "Deine Antwort",
   "chat.clearDraft": "Entwurf löschen",
+  "chat.clearWorkingDirectory": "Auswahl des Arbeitsverzeichnisses aufheben",
   "chat.clickForTaskActions": "Für Aufgabenaktionen klicken",
   "chat.clickToOpen": "Klicken um {{name}} zu öffnen",
   "chat.collapseArtifacts": "Ergebnisdateien einklappen",

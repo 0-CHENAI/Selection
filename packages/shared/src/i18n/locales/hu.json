@@ -312,6 +312,7 @@
   "chat.clarificationTitle": "Pontosítás kell",
   "chat.clarificationYourAnswer": "A válaszod",
   "chat.clearDraft": "Piszkozat törlése",
+  "chat.clearWorkingDirectory": "Munkakönyvtár kiválasztásának törlése",
   "chat.clickForTaskActions": "Kattints a feladatműveletekért",
   "chat.clickToOpen": "Kattints a(z) {{name}} megnyitásához",
   "chat.collapseArtifacts": "Eredmények összecsukása",

@@ -17,7 +17,6 @@ import {
   ChevronUp,
   AlertCircle,
 } from 'lucide-react'
-import { Icon_Home } from '@craft-agent/ui'
 
 import * as storage from '@/lib/local-storage'
 import { Button } from '@/components/ui/button'
@@ -71,7 +70,7 @@ import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
 import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
-import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
+import { ChatWorkingDirectoryControl } from './ChatWorkingDirectoryControl'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
@@ -93,7 +92,6 @@ import {
   getRecentWorkingDirs,
   addRecentWorkingDir,
 } from './working-directory-history'
-import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirectorySelector'
 import { ProjectWorkingDirectoryMark } from './ProjectWorkingDirectoryMark'
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
@@ -2244,7 +2242,9 @@ export function FreeFormInput({
           {workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} />
           ) : onWorkingDirectoryChange && (
-            <CompactWorkingDirectorySelector
+            <ChatWorkingDirectoryControl
+              key={sourceSelectionKey ?? sessionId ?? workspaceId}
+              disabled={disabled || isProcessing}
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
@@ -2354,7 +2354,9 @@ export function FreeFormInput({
           {workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} isEmptySession={isEmptySession} />
           ) : onWorkingDirectoryChange && (
-            <WorkingDirectoryBadge
+            <ChatWorkingDirectoryControl
+              key={sourceSelectionKey ?? sessionId ?? workspaceId}
+              disabled={disabled || isProcessing}
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
@@ -2690,59 +2692,5 @@ export function FreeFormInput({
         </div>
       </div>
     </form>
-  )
-}
-
-/**
- * WorkingDirectoryBadge - chat-input trigger for the shared WorkingDirectorySelector.
- *
- * Renders the context-badge trigger; the picker popover + folder state machine
- * live in {@link WorkingDirectorySelector} so the Tasks editor reuses the same
- * picker (and can supply its own trigger).
- */
-function WorkingDirectoryBadge({
-  workingDirectory,
-  onWorkingDirectoryChange,
-  sessionFolderPath,
-  isEmptySession = false,
-  workspaceId,
-}: {
-  workingDirectory?: string
-  onWorkingDirectoryChange: (path: string) => void
-  sessionFolderPath?: string
-  isEmptySession?: boolean
-  workspaceId?: string
-}) {
-  const { t } = useTranslation()
-  return (
-    <WorkingDirectorySelector
-      allowDraftReset
-      workingDirectory={workingDirectory}
-      onWorkingDirectoryChange={onWorkingDirectoryChange}
-      sessionFolderPath={sessionFolderPath}
-      workspaceId={workspaceId}
-      renderTrigger={({ open, hasFolder, folderName, workingDirectory: wd, homeDir, gitBranch }) => (
-        <span className="shrink min-w-0 overflow-hidden">
-          <FreeFormInputContextBadge
-            icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName ?? t('chat.workInFolder')}
-            isExpanded={isEmptySession}
-            hasSelection={hasFolder}
-            selectionChrome={false}
-            showChevron={true}
-            isOpen={open}
-            tooltip={
-              hasFolder ? (
-                <span className="flex flex-col gap-0.5">
-                  <span className="font-medium">{t("chat.workingDirectory")}</span>
-                  <span className="text-xs opacity-70">{formatPathForDisplay(wd, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">{t("chat.onBranch", { branch: gitBranch })}</span>}
-                </span>
-              ) : t("chat.chooseWorkingDirectory")
-            }
-          />
-        </span>
-      )}
-    />
   )
 }
