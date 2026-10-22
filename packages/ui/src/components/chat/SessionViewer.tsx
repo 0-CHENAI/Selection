@@ -56,7 +56,11 @@ export interface SessionViewerProps {
 /**
  * SessionViewer - Read-only session transcript viewer component
  */
-export function SessionViewer({
+export function SessionViewer(props: SessionViewerProps) {
+  return <SessionViewerContent key={props.session.id} {...props} />
+}
+
+function SessionViewerContent({
   session,
   mode = 'readonly',
   platformActions = {},
