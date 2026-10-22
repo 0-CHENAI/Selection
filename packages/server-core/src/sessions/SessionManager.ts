@@ -6594,6 +6594,23 @@ export class SessionManager implements ISessionManager {
   updateWorkingDirectory(sessionId: string, path: string, options?: { preserveSdkCwd?: boolean }): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      // A sandbox owns its execution directory. Never let a UI reset move its
+      // tools outside that directory, including a cold sandbox recorded on disk.
+      if (managed.isolatedWorkspace || this.sessionHasIsolationRecord(managed.workspace.rootPath, sessionId)) {
+        this.sendEvent({ type: 'working_directory_error', sessionId,
+          error: 'An isolated session must keep its execution folder',
+        }, managed.workspace.id)
+        return
+      }
+      // The live Pi toolset cannot change cwd atomically in the middle of a
+      // turn. Reject external changes before mutating UI/persistence/permissions.
+      // Internal project alignment keeps its existing preserveSdkCwd contract.
+      if (managed.isProcessing && !options?.preserveSdkCwd) {
+        this.sendEvent({ type: 'working_directory_error', sessionId,
+          error: 'Wait for the current response to finish before changing its working folder',
+        }, managed.workspace.id)
+        return
+      }
       // Match CreateSessionOptions' explicit opt-out. Store a concrete session
       // root so startup cannot reapply the workspace's default directory.
       if (path === 'none') path = getSessionStoragePath(managed.workspace.rootPath, sessionId)

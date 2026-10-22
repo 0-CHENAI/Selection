@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -66,7 +66,8 @@ test.each([false, true])('ordinary folder reset persists through cold restore an
   const restored = loadSession(root, stored.id)!
   expect(restored.workingDirectory).toBe(sessionRoot)
   expect(restored.enabledSourceSlugs).toEqual(['kept'])
-  sessions.set(stored.id, createManagedSession(restored, workspace))
+  const { messages: _storedMessages, ...metadata } = restored
+  sessions.set(stored.id, createManagedSession(metadata, workspace))
   expect((await manager.getSession(stored.id))?.workingDirectory).toBe(sessionRoot)
   // Ordinary sessions still support selecting a folder again.
   manager.updateWorkingDirectory(stored.id, folder)
@@ -84,8 +85,8 @@ test('fresh ordinary sessions ignore source defaults; existing selections surviv
   expect((await manager.getSession(b.id))?.enabledSourceSlugs).toEqual([])
   await manager.flushAllSessions()
   for (const id of [a.id, b.id]) {
-    const restored = loadSession(root, id)!
-    sessions.set(id, createManagedSession(restored, workspace))
+    const { messages: _storedMessages, ...metadata } = loadSession(root, id)!
+    sessions.set(id, createManagedSession(metadata, workspace))
   }
   expect((await manager.getSession(b.id))?.enabledSourceSlugs).toEqual([])
   expect((await manager.getSession(a.id))?.enabledSourceSlugs).toEqual(['chosen'])
@@ -125,8 +126,51 @@ test('model switching and lazy restore preserve the selected thinking preference
     await manager.flushSession(created.id)
     expect(loadSession(root, created.id)?.thinkingLevel).toBe('xhigh')
   }
-  const stored = loadSession(root, created.id)!
-  sessions.set(created.id, createManagedSession(stored, workspace))
+  const { messages: _storedMessages, ...metadata } = loadSession(root, created.id)!
+  sessions.set(created.id, createManagedSession(metadata, workspace))
   expect((await manager.getSession(created.id))?.thinkingLevel).toBe('xhigh')
   expect(sessions.get(created.id)?.model).toBe('gpt-6-luna')
+})
+
+test('a running ordinary turn keeps its folder; clearing after it stops changes only that session', async () => {
+  const { root, folder, workspace, manager, sessions } = fixture()
+  const created = await manager.createSession(workspace.id, { workingDirectory: folder })
+  const other = await manager.createSession(workspace.id, { workingDirectory: folder })
+  const managed = sessions.get(created.id)!
+  const updates: string[] = []
+  managed.agent = { updateWorkingDirectory: (path: string) => updates.push(path) } as never
+  managed.isProcessing = true
+  sessions.get(other.id)!.isProcessing = true
+  const events: Array<{ type?: string }> = []
+  manager.setEventSink((_channel, _target, ...payload) => { events.push(...payload as Array<{ type?: string }>) })
+  manager.updateWorkingDirectory(created.id, 'none')
+  expect(events.at(-1)?.type).toBe('working_directory_error')
+  expect(managed.workingDirectory).toBe(folder)
+  expect(loadSession(root, created.id)?.workingDirectory).toBe(folder)
+  expect(updates).toEqual([])
+  managed.isProcessing = false
+  manager.updateWorkingDirectory(created.id, 'none')
+  await manager.flushSession(created.id)
+  expect(manager.getSessionWorkingDirectory(created.id)).toBe(getSessionPath(root, created.id))
+  expect(updates).toEqual([getSessionPath(root, created.id)])
+  expect(manager.getSessionWorkingDirectory(other.id)).toBe(folder)
+  expect(sessions.get(other.id)?.isProcessing).toBe(true)
+})
+
+test.each(['memory', 'disk'])('reset preserves an isolated execution folder recorded in %s', async location => {
+  const { root, folder, workspace, manager, sessions } = fixture()
+  const created = await manager.createSession(workspace.id, { workingDirectory: folder })
+  const managed = sessions.get(created.id)!
+  if (location === 'memory') managed.isolatedWorkspace = { directory: folder } as never
+  else {
+    const data = join(getSessionPath(root, created.id), 'data')
+    mkdirSync(data, { recursive: true })
+    writeFileSync(join(data, 'isolated-workspace.json'), JSON.stringify({ version: 1, directory: folder }))
+  }
+  const events: Array<{ type?: string }> = []
+  manager.setEventSink((_channel, _target, ...payload) => { events.push(...payload as Array<{ type?: string }>) })
+  manager.updateWorkingDirectory(created.id, 'none')
+  expect(events.at(-1)?.type).toBe('working_directory_error')
+  expect(managed.workingDirectory).toBe(folder)
+  expect(loadSession(root, created.id)?.workingDirectory).toBe(folder)
 })
