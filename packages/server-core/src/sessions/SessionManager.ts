@@ -3392,8 +3392,6 @@ export class SessionManager implements ISessionManager {
       ?? getDefaultThinkingLevel()
     // Get default model from workspace config (used when no session-specific model is set)
     const defaultModel = wsConfig?.defaults?.model
-    // Get default enabled sources from workspace config
-    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
 
     // Resolve model tier hints ('fast' / 'default') to actual model IDs.
     // EditPopover uses tier hints instead of hardcoded Anthropic model names
@@ -3702,6 +3700,7 @@ export class SessionManager implements ISessionManager {
       executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
+      thinkingLevel: defaultThinkingLevel,
       hidden: options?.hidden,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
@@ -3730,11 +3729,17 @@ export class SessionManager implements ISessionManager {
       orchestrationTokensUsed: options?.orchestrationTokensUsed,
       orchestrationTokenBudget: options?.orchestrationTokenBudget,
       orchestrationAggregation: options?.orchestrationAggregation,
-      // Persist only an EXPLICIT selection (e.g. a task's spec.sources on its subtasks).
-      // The workspace-default fallback stays dynamic — freezing it into the header would
-      // pin every ordinary session to the defaults as of its creation time.
-      enabledSourceSlugs: options?.enabledSourceSlugs,
+      // Ordinary conversations start empty. Persist the same selection used by
+      // the runtime so refresh/restore cannot change it. Explicit task/child
+      // selections and project defaults still apply.
+      enabledSourceSlugs: [...(options?.enabledSourceSlugs ?? (resolvedProjectId ? wsConfig?.defaults?.enabledSourceSlugs : undefined) ?? [])],
     })
+
+    if (options?.workingDirectory === 'none' && !resolvedWorkingDir) {
+      resolvedWorkingDir = getSessionStoragePath(workspaceRootPath, storedSession.id)
+      storedSession.workingDirectory = resolvedWorkingDir
+      await updateSessionMetadata(workspaceRootPath, storedSession.id, { workingDirectory: resolvedWorkingDir })
+    }
 
     if (!validatedBranch) {
       const freshStoredSession = loadStoredSession(workspaceRootPath, storedSession.id)
@@ -3844,7 +3849,7 @@ export class SessionManager implements ISessionManager {
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
-      enabledSourceSlugs: defaultEnabledSourceSlugs,
+      enabledSourceSlugs: storedSession.enabledSourceSlugs,
       swarmEnabled: resolvedSwarmEnabled,
       orchestrationId: options?.orchestrationId,
       orchestrationRootSessionId: options?.orchestrationRootSessionId,
@@ -6589,6 +6594,9 @@ export class SessionManager implements ISessionManager {
   updateWorkingDirectory(sessionId: string, path: string, options?: { preserveSdkCwd?: boolean }): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      // Match CreateSessionOptions' explicit opt-out. Store a concrete session
+      // root so startup cannot reapply the workspace's default directory.
+      if (path === 'none') path = getSessionStoragePath(managed.workspace.rootPath, sessionId)
       if (isProjectConversation(managed) && !managed.isolatedWorkspace && managed.projectId) {
         const project = loadProjectById(managed.workspace.rootPath, managed.projectId)
         const required = project?.config.workingDirectory?.trim()

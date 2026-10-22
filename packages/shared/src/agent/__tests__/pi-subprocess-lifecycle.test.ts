@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,46 @@ function fixture(code: string) {
 }
 
 describe('Pi subprocess lifecycle fault injection', () => {
+  it('recreates the tool subprocess in the new directory without losing transcript identity', async () => {
+    const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
+    const f = fixture(`
+      let init;
+      const send = message => console.log(JSON.stringify(message));
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const message = JSON.parse(line);
+        if (message.type === 'init') { init = message; send({ type: 'ready', sessionId: 'kept-transcript' }); }
+        if (message.type === 'set_auto_compaction') send({ type: 'set_auto_compaction_result', id: message.id, enabled: true });
+        if (message.type === 'mini_completion') send({ type: 'mini_completion_result', id: message.id,
+          text: JSON.stringify({ cwd: process.cwd(), workingDirectory: init.workingDirectory, resume: init.resumeSdkSessionId }) });
+        if (message.type === 'shutdown') process.exit(0);
+      });
+    `);
+    const next = join(f.root, 'session-root');
+    mkdirSync(next);
+    const initMessages: any[] = [];
+    const send = f.internal.send.bind(f.internal);
+    f.internal.send = (command: any) => { if (command.type === 'init') initMessages.push(command); send(command); };
+    try {
+      const first = JSON.parse((await f.agent.runMiniCompletion('cwd'))!);
+      expect(first.cwd).toBe(f.root);
+      f.internal.config.session.sdkCwd = f.root;
+      const originalProcess = f.internal.subprocess;
+      f.internal._isProcessing = true;
+      f.agent.updateWorkingDirectory(next);
+      await f.internal.ensureSubprocess();
+      expect(f.internal.subprocess).toBe(originalProcess);
+      f.internal._isProcessing = false;
+      const second = JSON.parse((await f.agent.runMiniCompletion('cwd'))!);
+      expect(second.cwd).toBe(next);
+      expect(second.workingDirectory).toBe(next);
+      expect(f.agent.getSessionId()).toBe('kept-transcript');
+      expect(f.internal.config.session.sdkCwd).toBe(f.root);
+      expect(initMessages).toHaveLength(2);
+      expect(second.resume).toBe('kept-transcript');
+      expect(initMessages[1].resumeSdkSessionId).toBe('kept-transcript');
+    } finally { await f.cleanup(); browserSetting.mockRestore(); }
+  });
+
   it.skipIf(!resolveOfficecliBinary({ trustEnvironment: false }))('passes the Office candidate and trusted runtime into its confined subprocess', async () => {
     const f = fixture(`
       require('node:readline').createInterface({ input: process.stdin }).on('line', line => {

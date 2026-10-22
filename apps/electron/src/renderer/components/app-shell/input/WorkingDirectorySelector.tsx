@@ -46,8 +46,10 @@ export interface WorkingDirectoryTriggerState {
 export interface WorkingDirectorySelectorProps {
   workingDirectory?: string
   onWorkingDirectoryChange: (path: string) => void
-  /** Session root, offered as the "Reset" target. Undefined disables reset. */
+  /** Session root used for reset. */
   sessionFolderPath?: string
+  /** Chat drafts can send 'none' before their session folder exists. */
+  allowDraftReset?: boolean
   workspaceId?: string
   /**
    * Renders the popover trigger. The returned element is wrapped in
@@ -73,6 +75,7 @@ export function WorkingDirectorySelector({
   workingDirectory,
   onWorkingDirectoryChange,
   sessionFolderPath,
+  allowDraftReset,
   workspaceId,
   renderTrigger,
   side = 'top',
@@ -108,6 +111,7 @@ export function WorkingDirectorySelector({
     workingDirectory,
     onWorkingDirectoryChange,
     sessionFolderPath,
+    allowDraftReset,
     workspaceId,
     isOpen: popoverOpen,
     onClose: closePopover,

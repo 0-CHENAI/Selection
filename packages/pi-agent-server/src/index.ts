@@ -111,9 +111,10 @@ import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/s
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
-import { constrainThinkingLevel, modelThinkingCapability } from '../../shared/src/agent/thinking-capabilities.ts';
+import { constrainThinkingLevel, modelThinkingCapability, resolveSessionThinkingLevel, type ThinkingModelRef } from '../../shared/src/agent/thinking-capabilities.ts';
 import { parseUnsupportedThinkingEffort } from '../../shared/src/agent/thinking-effort-error.ts';
-import type { ThinkingLevel } from '../../shared/src/agent/thinking-levels.ts';
+import { normalizeThinkingLevel, type ThinkingLevel } from '../../shared/src/agent/thinking-levels.ts';
+import { ModelConfigurationQueue } from './model-configuration-queue.ts';
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
 import { createDocumentTools } from './tools/documents.ts';
@@ -414,6 +415,7 @@ type AuthenticatedRuntime = {
 };
 let moduleRuntimePromise: Promise<AuthenticatedRuntime> | null = null;
 let runtimeConfigGeneration = 0;
+const modelConfigurationQueue = new ModelConfigurationQueue();
 const pendingAnySearchApiKeys = new Map<string, (apiKey: string) => void>();
 let unsubscribeEvents: (() => void) | null = null;
 
@@ -953,7 +955,12 @@ async function ensureSession(): Promise<AgentSession> {
   }
 
   // Set thinking level
-  const piThinkingLevel = THINKING_TO_PI[initConfig.thinkingLevel as keyof typeof THINKING_TO_PI];
+  const requestedThinking = normalizeThinkingLevel(initConfig.thinkingLevel);
+  const piThinkingLevel = requestedThinking
+    ? THINKING_TO_PI[sessionOptions.model
+      ? resolveSessionThinkingLevel(sessionOptions.model as ThinkingModelRef, requestedThinking)
+      : requestedThinking]
+    : undefined;
   if (piThinkingLevel) {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
@@ -2013,6 +2020,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   let imageResolution = activeModelImageResolution(undefined);
 
   try {
+    await modelConfigurationQueue.ready();
     // If proxy tools changed since last session creation, dispose and recreate.
     // This avoids calling _buildRuntime() for dynamic tool updates — instead
     // we create a fresh session via continueRecent() with all tools known upfront.
@@ -2372,6 +2380,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
 
       const compactionEnabled = piSession.autoCompactionEnabled;
       await piSession.setModel(piModel);
+      if (initConfig) await handleSetThinkingLevel({ type: 'set_thinking_level', level: initConfig.thinkingLevel });
       applyCompactionPolicy(piModel, compactionEnabled);
       setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
       debugLog(`[runtime_config] Updated runtime config and active model: ${piModel.provider}/${piModel.id}`);
@@ -2390,7 +2399,8 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
 async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }>): Promise<void> {
   debugLog(`[set_model] Received: ${msg.model}`);
   if (!piSession || !piModelRegistry) {
-    debugLog(`[set_model] No active session or model registry, ignoring`);
+    if (initConfig) initConfig.model = msg.model;
+    debugLog(`[set_model] Stored model for the next session`);
     return;
   }
   let piModel = resolveSessionPiModel(piModelRegistry, msg.model);
@@ -2416,6 +2426,7 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
     applyCompactionPolicy(piModel, compactionEnabled);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
     if (initConfig) initConfig.model = msg.model;
+    if (initConfig) await handleSetThinkingLevel({ type: 'set_thinking_level', level: initConfig.thinkingLevel });
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -2425,13 +2436,17 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
 
 async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_thinking_level' }>): Promise<void> {
   debugLog(`[set_thinking_level] Received: ${msg.level}`);
+  const requested = normalizeThinkingLevel(msg.level);
+  if (!requested) return;
+  if (initConfig) initConfig.thinkingLevel = requested;
 
   if (!piSession) {
-    debugLog('[set_thinking_level] No active session, ignoring');
+    debugLog('[set_thinking_level] Stored effort for the next session');
     return;
   }
 
-  const piLevel = THINKING_TO_PI[msg.level as keyof typeof THINKING_TO_PI];
+  const effective = resolveSessionThinkingLevel(piSession.model as ThinkingModelRef | undefined, requested);
+  const piLevel = THINKING_TO_PI[effective];
   if (!piLevel) {
     debugLog(`[set_thinking_level] No Pi mapping for level: ${msg.level}`);
     return;
@@ -2539,15 +2554,16 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       break;
 
     case 'ensure_session_ready':
+      await modelConfigurationQueue.ready();
       await handleEnsureSessionReady(msg);
       break;
 
     case 'set_model':
-      await handleSetModel(msg);
+      await modelConfigurationQueue.enqueue(() => handleSetModel(msg));
       break;
 
     case 'set_thinking_level':
-      await handleSetThinkingLevel(msg);
+      await modelConfigurationQueue.enqueue(() => handleSetThinkingLevel(msg));
       break;
 
     case 'compact':
@@ -2559,7 +2575,7 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       break;
 
     case 'update_runtime_config':
-      await handleUpdateRuntimeConfig(msg);
+      await modelConfigurationQueue.enqueue(() => handleUpdateRuntimeConfig(msg));
       break;
 
     case 'anysearch_api_key_result': {

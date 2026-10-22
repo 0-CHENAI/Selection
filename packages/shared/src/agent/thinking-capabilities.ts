@@ -488,7 +488,7 @@ export function constrainThinkingLevel(requested: ThinkingLevel, supported?: Thi
   return best
 }
 
-/** Level that should be stored and sent for this model. */
+/** Effective level for display/requests. Keep the user's stored preference separately. */
 export function resolveSessionThinkingLevel(model: ThinkingModelRef | undefined, requested: ThinkingLevel): ThinkingLevel {
   const capability = modelThinkingCapability(model)
   if (capability.mode === 'unsupported') return 'off'

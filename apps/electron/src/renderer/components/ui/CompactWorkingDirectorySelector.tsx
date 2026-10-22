@@ -67,6 +67,7 @@ export function CompactWorkingDirectorySelector({
       confirmServerBrowser,
     },
   } = useWorkingDirectoryState({
+    allowDraftReset: true,
     workingDirectory,
     onWorkingDirectoryChange,
     sessionFolderPath,
