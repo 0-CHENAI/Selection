@@ -1,9 +1,8 @@
 import { BodyFeedbackDialog, type BodyFeedbackTarget } from './BodyFeedbackDialog'
 import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
 import { HandoverMessageBubble } from './HandoverMessageBubble'
-import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
+import { type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
 import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
-import { isTerminalResponseError } from '@/utils/terminal-error'
 import * as React from "react"
 import { useSetAtom } from "jotai"
 import { useTranslation } from "react-i18next"
@@ -12,7 +11,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   FoldVertical,
   CircleAlert,
@@ -31,7 +29,6 @@ import { shouldReserveConversationNavigationColumn, shouldShowConversationNaviga
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { Markdown, CollapsibleMarkdownProvider, type RenderMode } from "@/components/markdown"
-import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import {
   Spinner,
   parseReadResult,
@@ -62,6 +59,8 @@ import { type ResponseSource } from '@craft-agent/ui/chat'
 import { withOrchestrationProgress } from './kanban/orchestration-run-progress'
 import {
   TurnCard,
+  ResponseActionRow,
+  TurnRetryButton,
   TaskProgressCard,
   latestTodoList,
   todoRailForTurn,
@@ -108,8 +107,8 @@ import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } fro
 import { shouldPreviewBackgroundTask } from "./background-task-chip"
 import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
 import { resolveBranchNewPanelOption } from "./branching"
-import { handleErrorMessageAction } from "./error-message-actions"
 import { NewSessionBrand, shouldShowNewSessionBrand } from "./NewSessionBrand"
+import { ErrorMessage } from "./ChatErrorMessage"
 import {
   forceStickToBottomState,
   isAtBottom,
@@ -1856,6 +1855,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const retryUserId = !sessionBusy && !disableSend
     ? findRetryableCancelledUser(session?.messages ?? [])?.id ?? null
     : null
+  const showsCancelledRetry = (index: number) => {
+    if (!retryUserId) return false
+    const timing = displayWorkTimings.get(index)
+    if (!timing?.interrupted) return false
+    const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)
+    return !isProcessing && workStatusOwnsUser(allTurns, index, retryUserId)
+  }
   const handleRetryCancelled = () => {
     if (!session || !retryUserId) return
     updateSession(session.id, (current) => current
@@ -1874,7 +1880,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const timing = displayWorkTimings.get(index)
     if (!timing) return null
     const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)
-    const showRetry = !!retryUserId && !isProcessing && timing.interrupted && workStatusOwnsUser(allTurns, index, retryUserId)
     return (
       <HeightPresence key="work-status" animateIn={isProcessing} reduceMotion={reduceMotion}>
         <ProcessingIndicator
@@ -1886,15 +1891,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           completedStartTime={timing.recorded ? timing.startTime : undefined}
           interrupted={timing.interrupted}
           statusMessage={isProcessing ? session?.currentStatus?.message : undefined}
-          trailing={showRetry ? (
-            <button
-              type="button"
-              className="turn-action-btn ml-auto flex items-center gap-1.5 text-muted-foreground transition-colors select-none hover:text-foreground focus:outline-none focus-visible:underline"
-              onClick={handleRetryCancelled}
-            >
-              {t('common.retry')}
-            </button>
-          ) : undefined}
         />
       </HeightPresence>
     )
@@ -1980,24 +1976,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         className="flex items-center justify-center h-64 px-4"
                       >
                         <div
-                          className="max-w-sm rounded-[8px] border border-destructive/20 px-4 py-3 text-center shadow-tinted"
+                          className="max-w-sm overflow-hidden rounded-[8px] border border-destructive/20 text-center shadow-tinted"
                           style={{
                             backgroundColor: 'oklch(from var(--destructive) l c h / 0.03)',
                             '--shadow-color': 'var(--destructive-rgb)',
                           } as React.CSSProperties}
                         >
-                          <AlertTriangle className="mx-auto mb-2 h-4 w-4 text-destructive/70" />
-                          <div className="text-sm font-medium text-destructive">{t("chat.failedToLoadConversation")}</div>
-                          <p className="mt-1 break-words text-xs text-destructive/70">{messagesLoadError}</p>
+                          <div className="px-4 py-3">
+                            <AlertTriangle className="mx-auto mb-2 h-4 w-4 text-destructive/70" />
+                            <div className="text-sm font-medium text-destructive">{t("chat.failedToLoadConversation")}</div>
+                            <p className="mt-1 break-words text-xs text-destructive/70">{messagesLoadError}</p>
+                          </div>
                           {onRetryMessagesLoad && (
-                            <button
-                              type="button"
-                              onClick={onRetryMessagesLoad}
-                              disabled={messagesRetrying}
-                              className="mt-3 rounded border border-destructive/20 px-2 py-0.5 text-xs text-destructive/70 transition-colors hover:border-destructive/40 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {messagesRetrying ? t("common.retrying") : t("common.retry")}
-                            </button>
+                            <ResponseActionRow compact={compactMode}>
+                              <TurnRetryButton
+                                label={messagesRetrying ? t("common.retrying") : t("common.retry")}
+                                onClick={onRetryMessagesLoad}
+                                disabled={messagesRetrying}
+                              />
+                            </ResponseActionRow>
                           )}
                         </div>
                       </motion.div>
@@ -2136,6 +2133,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               }
                             } : undefined}
                           />
+                          {showsCancelledRetry(index) && (
+                            <ResponseActionRow compact={compactMode}>
+                              <TurnRetryButton label={t('common.retry')} onClick={handleRetryCancelled} />
+                            </ResponseActionRow>
+                          )}
                         </div>
                       )
                     }
@@ -2303,6 +2305,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
                         resolveAnnotationResult={resolveAnnotationResult}
+                        onRetry={showsCancelledRetry(index) ? handleRetryCancelled : undefined}
                         onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy && !disableSend
                           ? async () => {
                             if (!session) return
@@ -2846,92 +2849,6 @@ interface MessageBubbleProps {
   executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus>
 }
 
-/**
- * ErrorMessage - Separate component for error messages to allow useState hook
- */
-function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery, executionRecovery }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void; contextRecovery?: ContextLimitRecoveryOptions; executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus> }) {
-  const { t } = useTranslation()
-  const terminalCode = isTerminalResponseError(message.errorCode) ? message.errorCode : undefined
-  const hasDetails = executionRecovery || (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
-  const [detailsOpen, setDetailsOpen] = React.useState(false)
-  const detailsId = React.useId()
-  const reduceMotion = useReducedMotion()
-  const actions = message.errorActions?.filter(a => {
-    if (a.action === 'retry' && (terminalCode || message.errorCanRetry === false)) return false
-    if (a.action === 'open_url') return !!a.url && !!onOpenUrl
-    return true
-  })
-
-  const detailsContent = <div className="mt-2 pt-2 border-t border-destructive/20 space-y-3">
-    {executionRecovery && <ExecutionRecoveryStatus {...executionRecovery} />}
-    <div className="text-xs text-destructive/60 font-mono space-y-0.5">
-      {message.errorDetails?.map((detail, i) => <div key={i}>{detail}</div>)}
-      {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>}
-    </div>
-  </div>
-
-  return (
-    <div className="flex justify-start mt-4">
-      {/* Subtle bg (3% opacity) + tinted shadow for softer error appearance */}
-      <div
-        className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
-        style={{
-          backgroundColor: terminalCode === 'context_limit' ? 'oklch(from var(--info) l c h / 0.03)' : 'oklch(from var(--destructive) l c h / 0.03)',
-          '--shadow-color': terminalCode === 'context_limit' ? 'var(--info-rgb)' : 'var(--destructive-rgb)',
-        } as React.CSSProperties}
-      >
-        <div className={cn('text-xs mb-0.5 font-semibold', terminalCode === 'context_limit' ? 'flex items-center gap-1.5 text-foreground' : 'text-destructive/50')}>
-          {terminalCode === 'context_limit' && <AlertTriangle aria-hidden="true" className="size-3.5 text-info" />}
-          {terminalCode ? t(`chat.terminal.${terminalCode}.title`) : message.errorTitle || t('common.error')}
-        </div>
-        <p className={cn('text-sm', terminalCode === 'context_limit' ? 'text-foreground/80' : 'text-destructive')}>{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
-        {terminalCode === 'context_limit' && contextRecovery && <ContextLimitRecoveryActions {...contextRecovery} />}
-
-        {/* Action buttons */}
-        {actions && actions.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {actions.map((action) => (
-              <button
-                key={action.key}
-                onClick={() => {
-                  handleErrorMessageAction(action, {
-                    sessionId,
-                    onOpenUrl,
-                    onRetry,
-                  })
-                }}
-                className="text-xs px-2 py-0.5 rounded border border-destructive/20 text-destructive/70 hover:text-destructive hover:border-destructive/40 transition-colors"
-              >
-                {action.action === 'retry' ? t('common.retry') : action.label}{action.action === 'open_url' ? ' ↗' : ''}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Collapsible Details Toggle */}
-        {hasDetails && (
-          <div className="mt-2">
-            <button
-              type="button"
-              aria-expanded={detailsOpen}
-              aria-controls={detailsId}
-              onClick={() => setDetailsOpen(!detailsOpen)}
-              className="flex items-center gap-1 text-xs text-destructive/70 hover:text-destructive transition-colors"
-            >
-              {detailsOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              <span>{detailsOpen ? t('chat.hideTechnicalDetails') : t('chat.showTechnicalDetails')}</span>
-            </button>
-
-            <div id={detailsId} aria-hidden={!detailsOpen}>
-              {reduceMotion ? detailsOpen && detailsContent : <AnimatedCollapsibleContent isOpen={detailsOpen} className="overflow-hidden">{detailsContent}</AnimatedCollapsibleContent>}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function MessageBubble({
   message,
   onOpenFile,
@@ -2992,7 +2909,7 @@ function MessageBubble({
 
   // === ERROR MESSAGE: Red bordered bubble with warning icon and collapsible details ===
   if (message.role === 'error') {
-    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} executionRecovery={executionRecovery} />
+    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} executionRecovery={executionRecovery} compactMode={compactMode} />
   }
 
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===

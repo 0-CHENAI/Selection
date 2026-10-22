@@ -63,6 +63,7 @@ import { Tooltip, TooltipTrigger, ErrorTooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
+import { ResponseActionRow, TurnActionButton, TurnRetryButton, TURN_ACTION_ICON_CLASS } from './TurnActionRow'
 import {
   computeLastChildSet,
   getRenderedActivityRows,
@@ -496,6 +497,8 @@ export interface TurnCardProps {
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
   /** Callback to regenerate the last assistant response */
   onRegenerate?: () => void
+  /** Retry a failed or interrupted turn. Rendered in the same action row as regenerate. */
+  onRetry?: () => void
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
@@ -1921,6 +1924,8 @@ export interface ResponseCardProps {
   onBranch?: (options?: { newPanel?: boolean }) => void
   /** Callback to regenerate this response from the last user prompt */
   onRegenerate?: () => void
+  /** Retry a failed or interrupted turn from the same action row as regenerate. */
+  onRetry?: () => void
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove persisted annotation */
@@ -2206,6 +2211,7 @@ export function ResponseCard({
   compactMode = false,
   onBranch,
   onRegenerate,
+  onRetry,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -3148,38 +3154,22 @@ export function ResponseCard({
               Compact mode falls through to the slim Accept-Plan-only footer below.
               Streaming reserves the same row so completion only reveals actions. */}
           {reserveDesktopFooter && (
-            <div
-              data-response-actions=""
-              aria-hidden={!actionsVisible}
-              style={{ opacity: actionsVisible ? 1 : 0 }}
-              className={cn(
-              "h-10 shrink-0 overflow-x-auto whitespace-nowrap flex items-center justify-between gap-3 transition-opacity duration-[400ms] ease-in-out motion-reduce:transition-none",
-              isPlan ? cn("pl-4 pr-2.5 border-t", showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent") : "px-2.5",
-              SIZE_CONFIG.fontSize
-            )}>
-              {/* Left side - Copy, View as Markdown, Annotation hint */}
+            <ResponseActionRow plan={isPlan} visible={actionsVisible} completed={showCompletedChrome}>
+              {/* Left side - Retry, Regenerate, Copy, View as Markdown */}
               <div className={cn("flex shrink-0 items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
-                {onRegenerate && !isCommentary && (
-                  <button
-                    onClick={onRegenerate}
-                    className={cn(
-                      "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
-                      "text-muted-foreground hover:text-foreground",
-                      "focus:outline-none focus-visible:underline"
-                    )}
-                  >
-                    <RefreshCw className={SIZE_CONFIG.iconSize} />
-                    <span>{t("chat.regenerate")}</span>
-                  </button>
+                {onRetry && !isCommentary && !isProgress && (
+                  <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
                 )}
-                <button
-                  onClick={handleCopy}
-                  className={cn(
-                    "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
-                    copied ? "text-success" : "text-muted-foreground hover:text-foreground",
-                    "focus:outline-none focus-visible:underline"
-                  )}
-                >
+                {onRegenerate && !isCommentary && (
+                  <TurnActionButton
+                    data-action="regenerate"
+                    onClick={onRegenerate}
+                    icon={<RefreshCw className={TURN_ACTION_ICON_CLASS} />}
+                  >
+                    <span>{t("chat.regenerate")}</span>
+                  </TurnActionButton>
+                )}
+                <TurnActionButton onClick={handleCopy} active={copied}>
                   {copied ? (
                     <>
                       <Check className={SIZE_CONFIG.iconSize} />
@@ -3191,19 +3181,14 @@ export function ResponseCard({
                       <span>{t("common.copy")}</span>
                     </>
                   )}
-                </button>
+                </TurnActionButton>
                 {onPopOut && (
-                  <button
+                  <TurnActionButton
                     onClick={onPopOut}
-                    className={cn(
-                      "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
-                      "text-muted-foreground hover:text-foreground",
-                      "focus:outline-none focus-visible:underline"
-                    )}
+                    icon={<FileText className={SIZE_CONFIG.iconSize} />}
                   >
-                    <FileText className={SIZE_CONFIG.iconSize} />
                     <span>Markdown</span>
-                  </button>
+                  </TurnActionButton>
                 )}
               </div>
 
@@ -3229,32 +3214,28 @@ export function ResponseCard({
                 )}
                 {onBranch && !isCommentary && <BranchDropdown onBranch={onBranch} />}
               </div>
-            </div>
+            </ResponseActionRow>
           )}
 
           {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {showCompletedChrome && compactMode && onRegenerate && !isStreaming && !isCommentary && (
-            <div
-              className={cn(
-                "pl-2.5 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
-                SIZE_CONFIG.fontSize
+          {showCompletedChrome && compactMode && (onRegenerate || onRetry) && !isStreaming && !isCommentary && !isProgress && (
+            <ResponseActionRow compact>
+              {onRetry && (
+                <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
               )}
-            >
-              <button
-                onClick={onRegenerate}
-                className={cn(
-                  "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
-                  "text-muted-foreground hover:text-foreground",
-                  "focus:outline-none focus-visible:underline"
-                )}
-              >
-                <RefreshCw className={SIZE_CONFIG.iconSize} />
-                <span>{t("chat.regenerate")}</span>
-              </button>
-            </div>
+              {onRegenerate && (
+                <TurnActionButton
+                  data-action="regenerate"
+                  onClick={onRegenerate}
+                  icon={<RefreshCw className={TURN_ACTION_ICON_CLASS} />}
+                >
+                  <span>{t("chat.regenerate")}</span>
+                </TurnActionButton>
+              )}
+            </ResponseActionRow>
           )}
           {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
             <div
@@ -3332,6 +3313,7 @@ export const TurnCard = React.memo(function TurnCard({
   taskPreview = false,
   onBranch,
   onRegenerate,
+  onRetry,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -3560,9 +3542,21 @@ export const TurnCard = React.memo(function TurnCard({
     hasRenderableAssistantText(response.text)
   )
 
+  // Interrupted turns with nothing to show still keep retry under the status line,
+  // in the same action row regenerate uses under a completed reply.
+  const standaloneRetryRow = onRetry ? (
+    <ResponseActionRow compact={compactMode}>
+      <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+    </ResponseActionRow>
+  ) : null
+  // A visible reply or a plan card already hosts retry in its action row.
+  // Progress notes hide that row, and a tool-only interruption has no card.
+  const retryAlreadyInCard = (hasVisibleResponse && !isTaskProgress)
+    || (!hasVisibleResponse && planActivities.length > 0)
+
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !hasVisibleResponse && isComplete && !hasClarifications) {
-    return null
+    return standaloneRetryRow
   }
 
   // Don't render turns that were interrupted before any meaningful work happened.
@@ -3591,7 +3585,7 @@ export const TurnCard = React.memo(function TurnCard({
     && !hasVisibleResponse
     && !hasClarifications
   if (hasNoMeaningfulWork) {
-    return null
+    return standaloneRetryRow
   }
 
   // Only count rows the user will actually see in the collapsible section
@@ -3853,6 +3847,7 @@ export const TurnCard = React.memo(function TurnCard({
             compactMode={compactMode}
             onBranch={onBranch ? (options?: { newPanel?: boolean }) => onBranch(planActivity.messageId ?? planActivity.id, options) : undefined}
             onRegenerate={onRegenerate}
+            onRetry={!hasVisibleResponse && index === planActivities.length - 1 ? onRetry : undefined}
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
@@ -3909,6 +3904,7 @@ export const TurnCard = React.memo(function TurnCard({
                 taskPreview={taskPreview}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
+                onRetry={isTaskProgress ? undefined : onRetry}
                 sendMessageKey={sendMessageKey}
                 hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
                 openAnnotationRequest={openAnnotationRequest}
@@ -3975,6 +3971,7 @@ export const TurnCard = React.memo(function TurnCard({
             taskPreview={taskPreview}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
+            onRetry={isTaskProgress ? undefined : onRetry}
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
@@ -3987,6 +3984,7 @@ export const TurnCard = React.memo(function TurnCard({
       </AnimatePresence>
       )}
       </GrowingResponse>
+      {retryAlreadyInCard ? null : standaloneRetryRow}
     </div>
   )
 }, (prev, next) => {
@@ -4011,6 +4009,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if compactMode changed (affects ResponseCard footer rendering)
   if (prev.compactMode !== next.compactMode) return false
+  if (prev.onRegenerate !== next.onRegenerate) return false
+  if (prev.onRetry !== next.onRetry) return false
   if (prev.taskPreview !== next.taskPreview) return false
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)

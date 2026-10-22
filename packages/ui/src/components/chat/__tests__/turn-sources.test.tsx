@@ -77,8 +77,8 @@ it('lines the source icon up with message actions and keeps the button padding',
   expect(artifacts).toContain('@container/artifacts px-2.5 pb-3 pt-1')
   expect(artifacts).toContain('-ml-3 flex flex-wrap gap-2')
   expect(artifacts).toContain('rounded-xl px-3 py-2.5')
-  const turn = readFileSync(join(import.meta.dir, '../TurnCard.tsx'), 'utf8')
-  expect(turn).toContain('"pl-2.5 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20"')
+  const turn = readFileSync(join(import.meta.dir, '../TurnActionRow.tsx'), 'utf8')
+  expect(turn).toContain('pl-2.5 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20')
 })
 
 it('reserves the same source shelf before completion and keeps it non-interactive', () => {
