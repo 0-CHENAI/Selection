@@ -112,8 +112,16 @@ for (const gitProject of [true, false]) for (const mode of (gitProject ? ['pass'
       expect(() => store.read(feedback.id)).toThrow()
       return
     }
+    const expectedStatus = succeeds ? 'applied' : (mode === 'fail' || mode === 'missing') ? 'failed' : mode.endsWith('cancel') ? 'cancelled' : 'conflict'
+    if (current.status !== expectedStatus) {
+      console.error('Unexpected feedback result', JSON.stringify(current))
+      const logs = join(root, '.project-validation', 'logs')
+      if (existsSync(logs)) for (const path of readdirSync(logs, { recursive: true }) as string[]) {
+        if (path.endsWith('.log')) console.error(path, readFileSync(join(logs, path), 'utf8'))
+      }
+    }
+    expect(current.status, JSON.stringify(current)).toBe(expectedStatus)
     expect(appliedWorkspaces).toEqual(succeeds ? [workspace.id] : [])
-    expect(current.status).toBe(succeeds ? 'applied' : (mode === 'fail' || mode === 'missing') ? 'failed' : mode.endsWith('cancel') ? 'cancelled' : 'conflict')
     expect(readFileSync(file, 'utf8')).toBe(succeeds ? 'approved' : mode === 'external' ? 'user edit' : 'original')
     expect(versions.read(initial.id).versions).toHaveLength(succeeds ? 2 : 1)
     if (mode.endsWith('cancel')) {
