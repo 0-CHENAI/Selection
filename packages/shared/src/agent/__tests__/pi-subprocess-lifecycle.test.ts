@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,8 @@ import * as configStorage from '../../config/storage.ts';
 import { resolveOfficecliBinary } from '../../utils/officecli.ts';
 
 function fixture(code: string) {
-  const root = mkdtempSync(join(tmpdir(), 'pi-lifecycle-'));
+  // Node reports physical cwd; macOS tmpdir() commonly uses the /var symlink.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'pi-lifecycle-')));
   const script = join(root, 'child.cjs');
   writeFileSync(script, code);
   const agent = new PiAgent({ provider: 'pi', isHeadless: true,
