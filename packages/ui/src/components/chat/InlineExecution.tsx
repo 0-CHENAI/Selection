@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle2, XCircle, X } from 'lucide-react'
 import { cn } from '@craft-agent/ui'
 import { ActivityStatusIcon, SIZE_CONFIG, type ActivityItem, type ActivityStatus } from './TurnCard'
+import { ResponseActionRow, TurnRetryButton } from './TurnActionRow'
 import { LoadingIndicator } from '../ui/LoadingIndicator'
 import { Markdown } from '../markdown'
 
@@ -177,32 +178,22 @@ export function InlineExecution({
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/30">
+      <ResponseActionRow compact>
+        {onRetry && (
+          <TurnRetryButton label={t('common.retry')} onClick={onRetry} />
+        )}
         <button
           type="button"
           onClick={onDismiss}
           className={cn(
-            "flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors",
+            "ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors",
             SIZE_CONFIG.fontSize
           )}
         >
           <X className="w-3 h-3" />
           {t('common.dismiss')}
         </button>
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className={cn(
-              "px-2 py-1 rounded-md bg-accent/10 text-accent hover:bg-accent/20 transition-colors",
-              SIZE_CONFIG.fontSize
-            )}
-          >
-            {t('common.retry')}
-          </button>
-        )}
-      </div>
+      </ResponseActionRow>
     </div>
   )
 }

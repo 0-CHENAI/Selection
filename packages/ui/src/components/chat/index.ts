@@ -15,6 +15,7 @@ export { useFrameSource } from './useFrameSource'
 
 // Components
 export { TurnCard, ResponseCard, SIZE_CONFIG, ActivityStatusIcon, HeightPresence, type TurnCardProps, type ResponseCardProps, type ActivityItem, type ActivityStatus, type ResponseContent, type TodoItem } from './TurnCard'
+export { ResponseActionRow, TurnActionButton, TurnRetryButton, TURN_ACTION_ICON_CLASS } from './TurnActionRow'
 export { TodoList } from './TodoList'
 export { TaskProgressCard, TaskTurnSummary, TaskProgressSummary, useSessionTaskCard } from './TaskProgressCard'
 export {
