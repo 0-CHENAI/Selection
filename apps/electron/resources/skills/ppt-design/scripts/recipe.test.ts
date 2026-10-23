@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertFits, estimateLines, renderRecipe, validateSpec, type Spec } from './recipe';
@@ -111,7 +111,7 @@ describe('recipe consumer safety', () => {
         expect(() => validateSpec(s)).toThrow();
     });
     test('output containment resolves symlinks and refuses overwrite', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'ppt-recipe-'));
+        const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ppt-recipe-')));
         try {
             mkdirSync(join(dir, 'data'));
             mkdirSync(join(dir, 'outside'));
