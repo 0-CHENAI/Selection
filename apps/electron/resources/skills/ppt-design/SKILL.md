@@ -15,7 +15,7 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 ## 先读，再执行
 
-1. 规划时读 [工作流](references/workflow.md)。选定风格前只读 [风格索引](references/styles.md)，然后只读那一套的 `design.md` 和 `deck.json`。
+1. 规划时读 [工作流](references/workflow.md)。选定风格前只读 [风格索引](references/styles.md)，然后只读那一套的 `design.md`。中文参考页是 `deck.json`，英文参考页是 `deck.en.json`。
 2. 写页面时读 [版式](references/layouts.md)、[排版](references/typography.md) 和 [格式](references/schema.md)。
 3. 看截图前读 [逐页视觉检查](references/visual-review.md)。
 4. 先读 [OfficeCLI 路由](../officecli/SKILL.md)。导出后的检查执行 `officecli load_skill pptx`；仅当用户要求募资叙事或跨页动画时，再追加 pitch-deck / morph-ppt / morph-ppt-3d。
@@ -27,8 +27,9 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 - 从用户材料提取受众、目的、核心结论、事实和假设、来源、页数。不捏造数据、日期、讲者或标志。
 - 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页不重复同一 `layout`。
-- 锁定 `swiss-signal` 或 `cobalt-brief` 中的一个。颜色、字体、边距、字号区间和封面构图都来自该风格，不能混用另一套。
-- 参考页在 `styles/<id>/deck.json`。沿用它的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。
+- 只锁定目录里的一套：`dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。颜色、字体、边距、字号区间和封面构图都来自该风格，不能混用另一套。
+- 参考页在 `styles/<id>/deck.json`（中文）和 `deck.en.json`（英文）。沿用它的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。
+- 两处中文源页面会在末行落下一个字：`dsh-course-workshop` 的 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 的 `03:t101`「明确每一层边界」。沿用这些页时重排用户句子，让末行不是一个字。不要为了通过而缩小字号，也不要把文本框加宽到撞上邻列。其余参考页预检是干净的。
 - 在会话 `dataFolderPath` 保存 `design-plan.md` 和 `deck.json`。它们是会话材料，不默认交付。
 - 默认规划完成后继续生成。只有用户明确要求先审方案时才停。恢复会话时读取磁盘上的计划和 deck，**不得自动重新选风格或把视觉检查次数清零**。
 

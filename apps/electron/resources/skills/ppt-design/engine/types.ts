@@ -31,24 +31,79 @@ export type ElementRole = 'panel' | 'rule' | 'decoration' | 'content'
 export type FontFamilyToken = '$cjk' | '$latin'
 export type TextAlign = 'left' | 'center' | 'right'
 export type TextValign = 'top' | 'middle' | 'bottom'
+export type LineStyle = 'solid' | 'dash' | 'dot'
+export type LineArrow = 'start' | 'end' | 'both'
+
+/** Latin face plus the CJK face for each platform. Names only; no font files. */
+export type FontFace = {
+  latin: string
+  cjk: FontPair
+}
 
 export type ChartKind = 'bar' | 'column' | 'line' | 'pie' | 'doughnut' | 'waterfall'
+export type GridStyle = 'solid' | 'dash' | 'dot' | 'none'
 
 export type ChartSpec = {
   kind: ChartKind
   categories: string[]
   series: { name: string; values: number[] }[]
-  /** Token (`$accent`) or `#RRGGBB`. Waterfall uses background, up, down. */
+  /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, up, down. */
   colors?: string[]
   showValues?: boolean
   showLegend?: boolean
+  /** Value axis. Omit to start bars and columns at 0. */
+  valMin?: number
+  valMax?: number
+  /** Doughnut hole as a percent of the diameter. */
+  holeSize?: number
+  lineWidth?: number
+  markerSize?: number
+  markerColor?: string
+  grid?: GridStyle
+  catLabelSize?: number
+  valLabelSize?: number
+  catLabelColor?: string
+  valLabelColor?: string
+}
+
+export type TableCell = {
+  text: string
+  bold?: boolean
+  fill?: string
+  color?: string
+  align?: TextAlign
+}
+
+export type TableSpec = {
+  /** Column widths as fractions of the table width. */
+  columns: number[]
+  /** Row heights in points. Omit to split the table height evenly. */
+  rowHeights?: number[]
+  rows: TableCell[][]
+  fontSize: number
+  fontFamily: FontFamilyToken
+  face?: FontFace
+  color: string
+  fill: string
+  border: { color: string; width: number }
+  header?: { bold?: boolean; color?: string; fill?: string }
+}
+
+export type LineSpec = {
+  color: string
+  width: number
+  style?: LineStyle
+  /** Endpoints relative to the element bounds. */
+  points?: { x1: number; y1: number; x2: number; y2: number }
 }
 
 export type DeckElement = {
   id: string
-  type: 'text' | 'shape' | 'image' | 'chart'
+  type: 'text' | 'shape' | 'image' | 'chart' | 'table'
   bounds: Bounds
   role?: ElementRole
+  /** Clockwise degrees. Rotates around the center of bounds. */
+  rotate?: number
   text?: string
   textCapacity?: TextCapacity
   font?: {
@@ -61,18 +116,21 @@ export type DeckElement = {
     /** Exact line spacing as a multiple of font size. */
     leading?: number
     tracking?: number
+    /** Per-element faces. Latin and CJK are written as separate PPT runs. */
+    face?: FontFace
   }
   shape?: ShapeName
-  /** Token or hex. Omitted on rules. */
+  /** Token, `#RRGGBB`, or `#RRGGBBAA`. Omitted on rules. */
   fill?: string
-  line?: { color: string; width: number }
+  line?: LineSpec
   /** Corner radius in points for roundRect. */
   radius?: number
-  /** Draw a triangle at the end of a rule. */
-  arrow?: 'end'
+  /** Triangle arrow on a line. */
+  arrow?: LineArrow
   src?: string
   alt?: string
   chart?: ChartSpec
+  table?: TableSpec
 }
 
 export type DeckPage = {

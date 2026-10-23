@@ -11,12 +11,14 @@ import {
   type DeckElement,
   type DeckIssue,
   type DeckPage,
+  type FontFace,
+  type TableSpec,
   type Theme,
 } from './types.ts'
 
 const HEX = /^#[0-9A-Fa-f]{6}$/
 const FONT_TOKEN = /^\$cjk$|^\$latin$/
-const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6})$/
+const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/
 
 export function issue(code: DeckIssue['code'], message: string, pageId?: string, elementId?: string): DeckIssue {
   return { code, message, pageId, elementId }
@@ -155,7 +157,7 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     issues.push(issue('schema', `${path}.chart 必须是对象`, pageId, elementId))
     return undefined
   }
-  rejectUnknown(value, ['kind', 'categories', 'series', 'colors', 'showValues', 'showLegend'], `${path}.chart`, issues, pageId, elementId)
+  rejectUnknown(value, ['kind', 'categories', 'series', 'colors', 'showValues', 'showLegend', 'valMin', 'valMax', 'holeSize', 'lineWidth', 'markerSize', 'markerColor', 'grid', 'catLabelSize', 'valLabelSize', 'catLabelColor', 'valLabelColor'], `${path}.chart`, issues, pageId, elementId)
   const kinds = ['bar', 'column', 'line', 'pie', 'doughnut', 'waterfall']
   if (typeof value.kind !== 'string' || !kinds.includes(value.kind)) {
     issues.push(issue('schema', `${path}.chart.kind 不支持`, pageId, elementId))
@@ -193,7 +195,7 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
   let colors: string[] | undefined
   if (value.colors !== undefined) {
     if (!Array.isArray(value.colors) || value.colors.some(item => typeof item !== 'string' || !COLOR_REF.test(item))) {
-      issues.push(issue('schema', `${path}.chart.colors 必须是颜色 token 或 #RRGGBB`, pageId, elementId))
+      issues.push(issue('schema', `${path}.chart.colors 必须是颜色 token、#RRGGBB 或 #RRGGBBAA`, pageId, elementId))
       return undefined
     }
     colors = value.colors as string[]
@@ -206,6 +208,29 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     issues.push(issue('schema', `${path}.chart.showLegend 必须是布尔值`, pageId, elementId))
     return undefined
   }
+  const valMin = optionalNumber(value.valMin, `${path}.chart.valMin`, issues, pageId, elementId)
+  const valMax = optionalNumber(value.valMax, `${path}.chart.valMax`, issues, pageId, elementId)
+  const holeSize = optionalNumber(value.holeSize, `${path}.chart.holeSize`, issues, pageId, elementId)
+  if (holeSize !== undefined && (holeSize < 0 || holeSize > 90)) issues.push(issue('schema', `${path}.chart.holeSize 必须在 0 到 90 之间`, pageId, elementId))
+  const lineWidth = optionalNumber(value.lineWidth, `${path}.chart.lineWidth`, issues, pageId, elementId)
+  if (lineWidth !== undefined && lineWidth < 0) issues.push(issue('schema', `${path}.chart.lineWidth 不能为负`, pageId, elementId))
+  const markerSize = optionalNumber(value.markerSize, `${path}.chart.markerSize`, issues, pageId, elementId)
+  if (markerSize !== undefined && (markerSize < 0 || markerSize > 72)) issues.push(issue('schema', `${path}.chart.markerSize 必须在 0 到 72 之间`, pageId, elementId))
+  if (value.markerColor !== undefined && (typeof value.markerColor !== 'string' || !COLOR_REF.test(value.markerColor))) {
+    issues.push(issue('schema', `${path}.chart.markerColor 无效`, pageId, elementId))
+  }
+  const grids = ['solid', 'dash', 'dot', 'none']
+  if (value.grid !== undefined && (typeof value.grid !== 'string' || !grids.includes(value.grid))) {
+    issues.push(issue('schema', `${path}.chart.grid 不支持`, pageId, elementId))
+  }
+  const catLabelSize = optionalNumber(value.catLabelSize, `${path}.chart.catLabelSize`, issues, pageId, elementId)
+  const valLabelSize = optionalNumber(value.valLabelSize, `${path}.chart.valLabelSize`, issues, pageId, elementId)
+  if (value.catLabelColor !== undefined && (typeof value.catLabelColor !== 'string' || !COLOR_REF.test(value.catLabelColor))) {
+    issues.push(issue('schema', `${path}.chart.catLabelColor 无效`, pageId, elementId))
+  }
+  if (value.valLabelColor !== undefined && (typeof value.valLabelColor !== 'string' || !COLOR_REF.test(value.valLabelColor))) {
+    issues.push(issue('schema', `${path}.chart.valLabelColor 无效`, pageId, elementId))
+  }
   return {
     kind: value.kind as ChartSpec['kind'],
     categories: value.categories as string[],
@@ -213,7 +238,27 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     colors,
     showValues: value.showValues as boolean | undefined,
     showLegend: value.showLegend as boolean | undefined,
+    valMin,
+    valMax,
+    holeSize,
+    lineWidth,
+    markerSize,
+    markerColor: typeof value.markerColor === 'string' ? value.markerColor : undefined,
+    grid: grids.includes(String(value.grid)) ? value.grid as ChartSpec['grid'] : undefined,
+    catLabelSize,
+    valLabelSize,
+    catLabelColor: typeof value.catLabelColor === 'string' ? value.catLabelColor : undefined,
+    valLabelColor: typeof value.valLabelColor === 'string' ? value.valLabelColor : undefined,
   }
+}
+
+function optionalNumber(value: unknown, path: string, issues: DeckIssue[], pageId?: string, elementId?: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    issues.push(issue('schema', `${path} 必须是有限数字`, pageId, elementId))
+    return undefined
+  }
+  return value
 }
 
 function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): DeckElement | null {
@@ -223,18 +268,23 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): Deck
   }
   const id = value.id
   const elementId = typeof id === 'string' ? id : undefined
-  rejectUnknown(value, ['id', 'type', 'bounds', 'role', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart'], `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
+  rejectUnknown(value, ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'table'], `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
   if (typeof id !== 'string' || !id.trim()) {
     issues.push(issue('schema', '元素缺少 id', pageId))
     return null
   }
-  if (value.type !== 'text' && value.type !== 'shape' && value.type !== 'image' && value.type !== 'chart') {
+  if (value.type !== 'text' && value.type !== 'shape' && value.type !== 'image' && value.type !== 'chart' && value.type !== 'table') {
     issues.push(issue('schema', `元素 ${id} 的 type 不支持`, pageId, id))
     return null
   }
   const bounds = parseBounds(value.bounds, id, issues, pageId, id)
   if (!bounds) return null
   const element: DeckElement = { id, type: value.type, bounds }
+  if (value.rotate !== undefined) {
+    if (typeof value.rotate !== 'number' || !Number.isFinite(value.rotate) || value.rotate < -360 || value.rotate > 360) {
+      issues.push(issue('schema', `元素 ${id} 的 rotate 必须在 -360 到 360 之间`, pageId, id))
+    } else element.rotate = value.rotate
+  }
   if (value.role !== undefined) {
     if (value.role !== 'panel' && value.role !== 'rule' && value.role !== 'decoration' && value.role !== 'content') {
       issues.push(issue('schema', `元素 ${id} 的 role 不支持`, pageId, id))
@@ -251,6 +301,10 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): Deck
   if (value.type === 'chart') {
     const chart = parseChart(value.chart, id, issues, pageId, id)
     if (chart) element.chart = chart
+  }
+  if (value.type === 'table') {
+    const table = parseTable(value.table, id, issues, pageId, id)
+    if (table) element.table = table
   }
   return element
 }
@@ -269,9 +323,9 @@ function parseText(value: Record<string, unknown>, element: DeckElement, pageId:
   }
   if (!isObject(value.font)) issues.push(issue('schema', `文本 ${element.id} 缺少 font`, pageId, element.id))
   else {
-    rejectUnknown(value.font, ['family', 'size', 'weight', 'color', 'align', 'valign', 'leading', 'tracking'], `${element.id}.font`, issues, pageId, element.id)
+    rejectUnknown(value.font, ['family', 'size', 'weight', 'color', 'align', 'valign', 'leading', 'tracking', 'face'], `${element.id}.font`, issues, pageId, element.id)
     if (typeof value.font.family !== 'string' || !FONT_TOKEN.test(value.font.family)) issues.push(issue('schema', `文本 ${element.id} 的 font.family 只能是 $cjk 或 $latin`, pageId, element.id))
-    if (typeof value.font.size !== 'number' || value.font.size < 8 || value.font.size > 120) issues.push(issue('schema', `文本 ${element.id} 的字号必须在 8 到 120 之间`, pageId, element.id))
+    if (typeof value.font.size !== 'number' || value.font.size < 6 || value.font.size > 160) issues.push(issue('schema', `文本 ${element.id} 的字号必须在 6 到 160 之间`, pageId, element.id))
     const weight = value.font.weight
     if (weight !== undefined && weight !== 'regular' && weight !== 'bold') issues.push(issue('schema', `文本 ${element.id} 的 font.weight 不支持`, pageId, element.id))
     if (value.font.color !== undefined && (typeof value.font.color !== 'string' || !COLOR_REF.test(value.font.color))) issues.push(issue('schema', `文本 ${element.id} 的颜色无效`, pageId, element.id))
@@ -279,6 +333,7 @@ function parseText(value: Record<string, unknown>, element: DeckElement, pageId:
     if (value.font.valign !== undefined && value.font.valign !== 'top' && value.font.valign !== 'middle' && value.font.valign !== 'bottom') issues.push(issue('schema', `文本 ${element.id} 的 valign 不支持`, pageId, element.id))
     if (value.font.leading !== undefined && (typeof value.font.leading !== 'number' || value.font.leading < 0.9 || value.font.leading > 2)) issues.push(issue('schema', `文本 ${element.id} 的 leading 必须在 0.9 到 2 之间`, pageId, element.id))
     if (value.font.tracking !== undefined && (typeof value.font.tracking !== 'number' || value.font.tracking < -4 || value.font.tracking > 12)) issues.push(issue('schema', `文本 ${element.id} 的 tracking 超出范围`, pageId, element.id))
+    const face = value.font.face === undefined ? undefined : parseFontFace(value.font.face, `${element.id}.font.face`, issues, pageId, element.id)
     if (typeof value.font.family === 'string' && FONT_TOKEN.test(value.font.family) && typeof value.font.size === 'number') {
       const align = value.font.align === 'left' || value.font.align === 'center' || value.font.align === 'right' ? value.font.align : undefined
       const valign = value.font.valign === 'top' || value.font.valign === 'middle' || value.font.valign === 'bottom' ? value.font.valign : undefined
@@ -291,9 +346,25 @@ function parseText(value: Record<string, unknown>, element: DeckElement, pageId:
         valign,
         leading: typeof value.font.leading === 'number' ? value.font.leading : undefined,
         tracking: typeof value.font.tracking === 'number' ? value.font.tracking : undefined,
+        face,
       }
     }
   }
+}
+
+function parseFontFace(value: unknown, path: string, issues: DeckIssue[], pageId?: string, elementId?: string): FontFace | undefined {
+  if (!isObject(value)) {
+    issues.push(issue('schema', `${path} 必须是对象`, pageId, elementId))
+    return undefined
+  }
+  rejectUnknown(value, ['latin', 'cjk'], path, issues, pageId, elementId)
+  if (typeof value.latin !== 'string' || !value.latin.trim()) {
+    issues.push(issue('schema', `${path}.latin 必须是非空字体名`, pageId, elementId))
+    return undefined
+  }
+  const cjk = parseFontPair(value.cjk, `${path}.cjk`, issues)
+  if (!cjk) return undefined
+  return { latin: value.latin, cjk }
 }
 
 function parseShape(value: Record<string, unknown>, element: DeckElement, pageId: string, issues: DeckIssue[]): void {
@@ -308,10 +379,19 @@ function parseShape(value: Record<string, unknown>, element: DeckElement, pageId
   if (value.line !== undefined) {
     if (!isObject(value.line)) issues.push(issue('schema', `形状 ${element.id} 的 line 必须是对象`, pageId, element.id))
     else {
-      rejectUnknown(value.line, ['color', 'width'], `${element.id}.line`, issues, pageId, element.id)
-      if (typeof value.line.color !== 'string' || !COLOR_REF.test(value.line.color) || typeof value.line.width !== 'number' || value.line.width < 0) {
+      rejectUnknown(value.line, ['color', 'width', 'style', 'points'], `${element.id}.line`, issues, pageId, element.id)
+      const styles = ['solid', 'dash', 'dot']
+      const styleOk = value.line.style === undefined || (typeof value.line.style === 'string' && styles.includes(value.line.style))
+      if (typeof value.line.color !== 'string' || !COLOR_REF.test(value.line.color) || typeof value.line.width !== 'number' || value.line.width < 0 || !styleOk) {
         issues.push(issue('schema', `形状 ${element.id} 的 line 无效`, pageId, element.id))
-      } else element.line = { color: value.line.color, width: value.line.width }
+      } else {
+        element.line = {
+          color: value.line.color,
+          width: value.line.width,
+          style: value.line.style === 'dash' || value.line.style === 'dot' || value.line.style === 'solid' ? value.line.style : undefined,
+          points: parseLinePoints(value.line.points, element.id, issues, pageId),
+        }
+      }
     }
   }
   if (element.shape !== 'line' && element.fill === undefined) issues.push(issue('schema', `形状 ${element.id} 缺少 fill`, pageId, element.id))
@@ -320,8 +400,133 @@ function parseShape(value: Record<string, unknown>, element: DeckElement, pageId
     else element.radius = value.radius
   }
   if (value.arrow !== undefined) {
-    if (value.arrow !== 'end') issues.push(issue('schema', `形状 ${element.id} 的 arrow 只支持 end`, pageId, element.id))
-    else element.arrow = 'end'
+    if (value.arrow !== 'start' && value.arrow !== 'end' && value.arrow !== 'both') issues.push(issue('schema', `形状 ${element.id} 的 arrow 只支持 start、end 或 both`, pageId, element.id))
+    else element.arrow = value.arrow
+  }
+}
+
+function parseLinePoints(value: unknown, elementId: string, issues: DeckIssue[], pageId: string): { x1: number; y1: number; x2: number; y2: number } | undefined {
+  if (value === undefined) return undefined
+  if (!isObject(value)) {
+    issues.push(issue('schema', `形状 ${elementId} 的 line.points 必须是 {x1,y1,x2,y2}`, pageId, elementId))
+    return undefined
+  }
+  rejectUnknown(value, ['x1', 'y1', 'x2', 'y2'], `${elementId}.line.points`, issues, pageId, elementId)
+  const points = { x1: value.x1, y1: value.y1, x2: value.x2, y2: value.y2 }
+  for (const key of ['x1', 'y1', 'x2', 'y2'] as const) {
+    if (typeof points[key] !== 'number' || !Number.isFinite(points[key])) {
+      issues.push(issue('schema', `形状 ${elementId} 的 line.points.${key} 必须是有限数字`, pageId, elementId))
+      return undefined
+    }
+  }
+  return points as { x1: number; y1: number; x2: number; y2: number }
+}
+
+function parseTable(value: unknown, path: string, issues: DeckIssue[], pageId: string, elementId: string): TableSpec | undefined {
+  if (!isObject(value)) {
+    issues.push(issue('schema', `${path}.table 必须是对象`, pageId, elementId))
+    return undefined
+  }
+  rejectUnknown(value, ['columns', 'rowHeights', 'rows', 'fontSize', 'fontFamily', 'face', 'color', 'fill', 'border', 'header'], `${path}.table`, issues, pageId, elementId)
+  if (!Array.isArray(value.columns) || value.columns.length === 0 || value.columns.some(item => typeof item !== 'number' || item <= 0)) {
+    issues.push(issue('schema', `${path}.table.columns 必须是正数数组`, pageId, elementId))
+    return undefined
+  }
+  if (!Array.isArray(value.rows) || value.rows.length === 0) {
+    issues.push(issue('schema', `${path}.table.rows 必须是非空数组`, pageId, elementId))
+    return undefined
+  }
+  const rows: TableSpec['rows'] = []
+  for (const row of value.rows) {
+    if (!Array.isArray(row) || row.length !== value.columns.length) {
+      issues.push(issue('schema', `${path}.table.rows 每一行都要与 columns 等长`, pageId, elementId))
+      return undefined
+    }
+    const cells: TableSpec['rows'][number] = []
+    for (const cell of row) {
+      if (!isObject(cell)) {
+        issues.push(issue('schema', `${path}.table 单元格必须是对象`, pageId, elementId))
+        return undefined
+      }
+      rejectUnknown(cell, ['text', 'bold', 'fill', 'color', 'align'], `${path}.table.cell`, issues, pageId, elementId)
+      if (typeof cell.text !== 'string') {
+        issues.push(issue('schema', `${path}.table 单元格缺少 text`, pageId, elementId))
+        return undefined
+      }
+      if (cell.fill !== undefined && (typeof cell.fill !== 'string' || !COLOR_REF.test(cell.fill))) {
+        issues.push(issue('schema', `${path}.table 单元格 fill 无效`, pageId, elementId))
+      }
+      if (cell.color !== undefined && (typeof cell.color !== 'string' || !COLOR_REF.test(cell.color))) {
+        issues.push(issue('schema', `${path}.table 单元格 color 无效`, pageId, elementId))
+      }
+      if (cell.align !== undefined && cell.align !== 'left' && cell.align !== 'center' && cell.align !== 'right') {
+        issues.push(issue('schema', `${path}.table 单元格 align 不支持`, pageId, elementId))
+      }
+      cells.push({
+        text: cell.text,
+        bold: cell.bold === true ? true : undefined,
+        fill: typeof cell.fill === 'string' ? cell.fill : undefined,
+        color: typeof cell.color === 'string' ? cell.color : undefined,
+        align: cell.align === 'left' || cell.align === 'center' || cell.align === 'right' ? cell.align : undefined,
+      })
+    }
+    rows.push(cells)
+  }
+  if (typeof value.fontSize !== 'number' || value.fontSize < 6 || value.fontSize > 160) {
+    issues.push(issue('schema', `${path}.table.fontSize 必须在 6 到 160 之间`, pageId, elementId))
+    return undefined
+  }
+  if (typeof value.fontFamily !== 'string' || !FONT_TOKEN.test(value.fontFamily)) {
+    issues.push(issue('schema', `${path}.table.fontFamily 只能是 $cjk 或 $latin`, pageId, elementId))
+    return undefined
+  }
+  if (typeof value.color !== 'string' || !COLOR_REF.test(value.color) || typeof value.fill !== 'string' || !COLOR_REF.test(value.fill)) {
+    issues.push(issue('schema', `${path}.table 的 color 或 fill 无效`, pageId, elementId))
+    return undefined
+  }
+  if (!isObject(value.border) || typeof value.border.color !== 'string' || !COLOR_REF.test(value.border.color) || typeof value.border.width !== 'number' || value.border.width < 0) {
+    issues.push(issue('schema', `${path}.table.border 无效`, pageId, elementId))
+    return undefined
+  }
+  let rowHeights: number[] | undefined
+  if (value.rowHeights !== undefined) {
+    if (!Array.isArray(value.rowHeights) || value.rowHeights.length !== rows.length || value.rowHeights.some(item => typeof item !== 'number' || item <= 0)) {
+      issues.push(issue('schema', `${path}.table.rowHeights 必须与行数等长且为正数`, pageId, elementId))
+      return undefined
+    }
+    rowHeights = value.rowHeights as number[]
+  }
+  let header: TableSpec['header']
+  if (value.header !== undefined) {
+    if (!isObject(value.header)) {
+      issues.push(issue('schema', `${path}.table.header 必须是对象`, pageId, elementId))
+      return undefined
+    }
+    rejectUnknown(value.header, ['bold', 'color', 'fill'], `${path}.table.header`, issues, pageId, elementId)
+    if (value.header.color !== undefined && (typeof value.header.color !== 'string' || !COLOR_REF.test(value.header.color))) {
+      issues.push(issue('schema', `${path}.table.header.color 无效`, pageId, elementId))
+    }
+    if (value.header.fill !== undefined && (typeof value.header.fill !== 'string' || !COLOR_REF.test(value.header.fill))) {
+      issues.push(issue('schema', `${path}.table.header.fill 无效`, pageId, elementId))
+    }
+    header = {
+      bold: value.header.bold === true ? true : undefined,
+      color: typeof value.header.color === 'string' ? value.header.color : undefined,
+      fill: typeof value.header.fill === 'string' ? value.header.fill : undefined,
+    }
+  }
+  const face = value.face === undefined ? undefined : parseFontFace(value.face, `${path}.table.face`, issues, pageId, elementId)
+  return {
+    columns: value.columns as number[],
+    rowHeights,
+    rows,
+    fontSize: value.fontSize,
+    fontFamily: value.fontFamily as TableSpec['fontFamily'],
+    face,
+    color: value.color,
+    fill: value.fill,
+    border: { color: value.border.color, width: value.border.width },
+    header,
   }
 }
 

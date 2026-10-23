@@ -9178,7 +9178,7 @@ function channel(value) {
   return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 function luminance(hex) {
-  const raw = hex.replace("#", "");
+  const raw = hex.replace("#", "").slice(0, 6);
   const n = Number.parseInt(raw, 16);
   const r = n >> 16 & 255;
   const g = n >> 8 & 255;
@@ -9197,6 +9197,29 @@ function contrastMinimum(fontSize, bold) {
     return 3;
   return 4.5;
 }
+function splitColor(hex) {
+  const raw = hex.replace("#", "");
+  const rgb = `#${raw.slice(0, 6).toUpperCase()}`;
+  if (raw.length >= 8)
+    return { rgb, alpha: Number.parseInt(raw.slice(6, 8), 16) / 255 };
+  return { rgb, alpha: 1 };
+}
+function composite(over, under) {
+  const src = splitColor(over);
+  const dst = splitColor(under);
+  if (src.alpha >= 0.999)
+    return src.rgb;
+  if (src.alpha <= 0.001)
+    return dst.rgb;
+  const mix = (a, b) => Math.round(a * src.alpha + b * (1 - src.alpha));
+  const left = channels(src.rgb);
+  const right = channels(dst.rgb);
+  return "#" + [mix(left.r, right.r), mix(left.g, right.g), mix(left.b, right.b)].map((channelByte) => channelByte.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+function channels(hex) {
+  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
+}
 
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
@@ -9211,17 +9234,17 @@ function charWidth(ch, fontSize, bold) {
   if (ch === "\t")
     return fontSize * 2;
   if (ch === " ")
-    return fontSize * (bold ? 0.36 : 0.33);
+    return fontSize * (bold ? 0.3 : 0.3);
   if (ch === "\xB7" || ch === "\u2026" || ch === "\u30FB")
     return fontSize * 0.5;
   if (isFullwidth(ch))
     return fontSize;
   if (/[0-9]/.test(ch))
-    return fontSize * (bold ? 0.64 : 0.58);
+    return fontSize * (bold ? 0.58 : 0.56);
   if (/[A-Z]/.test(ch))
-    return fontSize * (bold ? 0.74 : 0.68);
+    return fontSize * (bold ? 0.72 : 0.68);
   if (/[a-z]/.test(ch))
-    return fontSize * (bold ? 0.62 : 0.56);
+    return fontSize * (bold ? 0.56 : 0.51);
   if (ch === "%")
     return fontSize * 0.9;
   if (`.,:;'"`.includes(ch))
@@ -9230,11 +9253,19 @@ function charWidth(ch, fontSize, bold) {
     return fontSize * 0.55;
   return fontSize * (bold ? 0.62 : 0.55);
 }
-function textWidth(text, fontSize, bold) {
+function fitSlack(fontSize) {
+  return Math.max(6, fontSize * 0.5);
+}
+function textWidth(text, fontSize, bold, tracking = 0) {
+  const chars = Array.from(text);
+  if (chars.length === 0)
+    return 0;
   let width = 0;
-  for (const ch of Array.from(text))
+  for (const ch of chars)
     width += charWidth(ch, fontSize, bold);
-  return width;
+  if (tracking)
+    width += tracking * (chars.length - 1);
+  return Math.max(0, width);
 }
 function defaultLeading(fontSize) {
   if (fontSize >= 40)
@@ -9243,7 +9274,7 @@ function defaultLeading(fontSize) {
     return 1.12;
   return 1.28;
 }
-function wrapText(text, boxWidth, fontSize, bold) {
+function wrapText(text, boxWidth, fontSize, bold, tracking = 0) {
   const lines = [];
   for (const para of text.split(`
 `)) {
@@ -9256,8 +9287,9 @@ function wrapText(text, boxWidth, fontSize, bold) {
     let width = 0;
     for (let i = 0;i < chars.length; i++) {
       const ch = chars[i];
-      const w = charWidth(ch, fontSize, bold);
-      const overflows = current.length > 0 && width + w > boxWidth + 0.01;
+      const w = charWidth(ch, fontSize, bold) + (current.length > 0 ? tracking : 0);
+      const room = isFullwidth(ch) ? 0.75 : fitSlack(fontSize);
+      const overflows = current.length > 0 && width + w > boxWidth + room;
       if (!overflows) {
         current.push(ch);
         width += w;
@@ -12004,7 +12036,7 @@ var CANVAS_HEIGHT = 540;
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
-var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6})$/;
+var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
 function issue(code, message, pageId, elementId) {
   return { code, message, pageId, elementId };
 }
@@ -12145,7 +12177,7 @@ function parseChart(value, path, issues, pageId, elementId) {
     issues.push(issue("schema", `${path}.chart \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
     return;
   }
-  rejectUnknown(value, ["kind", "categories", "series", "colors", "showValues", "showLegend"], `${path}.chart`, issues, pageId, elementId);
+  rejectUnknown(value, ["kind", "categories", "series", "colors", "showValues", "showLegend", "valMin", "valMax", "holeSize", "lineWidth", "markerSize", "markerColor", "grid", "catLabelSize", "valLabelSize", "catLabelColor", "valLabelColor"], `${path}.chart`, issues, pageId, elementId);
   const kinds = ["bar", "column", "line", "pie", "doughnut", "waterfall"];
   if (typeof value.kind !== "string" || !kinds.includes(value.kind)) {
     issues.push(issue("schema", `${path}.chart.kind \u4E0D\u652F\u6301`, pageId, elementId));
@@ -12183,7 +12215,7 @@ function parseChart(value, path, issues, pageId, elementId) {
   let colors;
   if (value.colors !== undefined) {
     if (!Array.isArray(value.colors) || value.colors.some((item) => typeof item !== "string" || !COLOR_REF.test(item))) {
-      issues.push(issue("schema", `${path}.chart.colors \u5FC5\u987B\u662F\u989C\u8272 token \u6216 #RRGGBB`, pageId, elementId));
+      issues.push(issue("schema", `${path}.chart.colors \u5FC5\u987B\u662F\u989C\u8272 token\u3001#RRGGBB \u6216 #RRGGBBAA`, pageId, elementId));
       return;
     }
     colors = value.colors;
@@ -12196,14 +12228,60 @@ function parseChart(value, path, issues, pageId, elementId) {
     issues.push(issue("schema", `${path}.chart.showLegend \u5FC5\u987B\u662F\u5E03\u5C14\u503C`, pageId, elementId));
     return;
   }
+  const valMin = optionalNumber(value.valMin, `${path}.chart.valMin`, issues, pageId, elementId);
+  const valMax = optionalNumber(value.valMax, `${path}.chart.valMax`, issues, pageId, elementId);
+  const holeSize = optionalNumber(value.holeSize, `${path}.chart.holeSize`, issues, pageId, elementId);
+  if (holeSize !== undefined && (holeSize < 0 || holeSize > 90))
+    issues.push(issue("schema", `${path}.chart.holeSize \u5FC5\u987B\u5728 0 \u5230 90 \u4E4B\u95F4`, pageId, elementId));
+  const lineWidth = optionalNumber(value.lineWidth, `${path}.chart.lineWidth`, issues, pageId, elementId);
+  if (lineWidth !== undefined && lineWidth < 0)
+    issues.push(issue("schema", `${path}.chart.lineWidth \u4E0D\u80FD\u4E3A\u8D1F`, pageId, elementId));
+  const markerSize = optionalNumber(value.markerSize, `${path}.chart.markerSize`, issues, pageId, elementId);
+  if (markerSize !== undefined && (markerSize < 0 || markerSize > 72))
+    issues.push(issue("schema", `${path}.chart.markerSize \u5FC5\u987B\u5728 0 \u5230 72 \u4E4B\u95F4`, pageId, elementId));
+  if (value.markerColor !== undefined && (typeof value.markerColor !== "string" || !COLOR_REF.test(value.markerColor))) {
+    issues.push(issue("schema", `${path}.chart.markerColor \u65E0\u6548`, pageId, elementId));
+  }
+  const grids = ["solid", "dash", "dot", "none"];
+  if (value.grid !== undefined && (typeof value.grid !== "string" || !grids.includes(value.grid))) {
+    issues.push(issue("schema", `${path}.chart.grid \u4E0D\u652F\u6301`, pageId, elementId));
+  }
+  const catLabelSize = optionalNumber(value.catLabelSize, `${path}.chart.catLabelSize`, issues, pageId, elementId);
+  const valLabelSize = optionalNumber(value.valLabelSize, `${path}.chart.valLabelSize`, issues, pageId, elementId);
+  if (value.catLabelColor !== undefined && (typeof value.catLabelColor !== "string" || !COLOR_REF.test(value.catLabelColor))) {
+    issues.push(issue("schema", `${path}.chart.catLabelColor \u65E0\u6548`, pageId, elementId));
+  }
+  if (value.valLabelColor !== undefined && (typeof value.valLabelColor !== "string" || !COLOR_REF.test(value.valLabelColor))) {
+    issues.push(issue("schema", `${path}.chart.valLabelColor \u65E0\u6548`, pageId, elementId));
+  }
   return {
     kind: value.kind,
     categories: value.categories,
     series,
     colors,
     showValues: value.showValues,
-    showLegend: value.showLegend
+    showLegend: value.showLegend,
+    valMin,
+    valMax,
+    holeSize,
+    lineWidth,
+    markerSize,
+    markerColor: typeof value.markerColor === "string" ? value.markerColor : undefined,
+    grid: grids.includes(String(value.grid)) ? value.grid : undefined,
+    catLabelSize,
+    valLabelSize,
+    catLabelColor: typeof value.catLabelColor === "string" ? value.catLabelColor : undefined,
+    valLabelColor: typeof value.valLabelColor === "string" ? value.valLabelColor : undefined
   };
+}
+function optionalNumber(value, path, issues, pageId, elementId) {
+  if (value === undefined)
+    return;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    issues.push(issue("schema", `${path} \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57`, pageId, elementId));
+    return;
+  }
+  return value;
 }
 function parseElement(value, pageId, issues) {
   if (!isObject2(value)) {
@@ -12212,12 +12290,12 @@ function parseElement(value, pageId, issues) {
   }
   const id = value.id;
   const elementId = typeof id === "string" ? id : undefined;
-  rejectUnknown(value, ["id", "type", "bounds", "role", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
+  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "table"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
   if (typeof id !== "string" || !id.trim()) {
     issues.push(issue("schema", "\u5143\u7D20\u7F3A\u5C11 id", pageId));
     return null;
   }
-  if (value.type !== "text" && value.type !== "shape" && value.type !== "image" && value.type !== "chart") {
+  if (value.type !== "text" && value.type !== "shape" && value.type !== "image" && value.type !== "chart" && value.type !== "table") {
     issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 type \u4E0D\u652F\u6301`, pageId, id));
     return null;
   }
@@ -12225,6 +12303,12 @@ function parseElement(value, pageId, issues) {
   if (!bounds)
     return null;
   const element = { id, type: value.type, bounds };
+  if (value.rotate !== undefined) {
+    if (typeof value.rotate !== "number" || !Number.isFinite(value.rotate) || value.rotate < -360 || value.rotate > 360) {
+      issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 rotate \u5FC5\u987B\u5728 -360 \u5230 360 \u4E4B\u95F4`, pageId, id));
+    } else
+      element.rotate = value.rotate;
+  }
   if (value.role !== undefined) {
     if (value.role !== "panel" && value.role !== "rule" && value.role !== "decoration" && value.role !== "content") {
       issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 role \u4E0D\u652F\u6301`, pageId, id));
@@ -12250,6 +12334,11 @@ function parseElement(value, pageId, issues) {
     if (chart)
       element.chart = chart;
   }
+  if (value.type === "table") {
+    const table = parseTable(value.table, id, issues, pageId, id);
+    if (table)
+      element.table = table;
+  }
   return element;
 }
 function parseText(value, element, pageId, issues) {
@@ -12271,11 +12360,11 @@ function parseText(value, element, pageId, issues) {
   if (!isObject2(value.font))
     issues.push(issue("schema", `\u6587\u672C ${element.id} \u7F3A\u5C11 font`, pageId, element.id));
   else {
-    rejectUnknown(value.font, ["family", "size", "weight", "color", "align", "valign", "leading", "tracking"], `${element.id}.font`, issues, pageId, element.id);
+    rejectUnknown(value.font, ["family", "size", "weight", "color", "align", "valign", "leading", "tracking", "face"], `${element.id}.font`, issues, pageId, element.id);
     if (typeof value.font.family !== "string" || !FONT_TOKEN.test(value.font.family))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.family \u53EA\u80FD\u662F $cjk \u6216 $latin`, pageId, element.id));
-    if (typeof value.font.size !== "number" || value.font.size < 8 || value.font.size > 120)
-      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684\u5B57\u53F7\u5FC5\u987B\u5728 8 \u5230 120 \u4E4B\u95F4`, pageId, element.id));
+    if (typeof value.font.size !== "number" || value.font.size < 6 || value.font.size > 160)
+      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684\u5B57\u53F7\u5FC5\u987B\u5728 6 \u5230 160 \u4E4B\u95F4`, pageId, element.id));
     const weight = value.font.weight;
     if (weight !== undefined && weight !== "regular" && weight !== "bold")
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.weight \u4E0D\u652F\u6301`, pageId, element.id));
@@ -12289,6 +12378,7 @@ function parseText(value, element, pageId, issues) {
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 leading \u5FC5\u987B\u5728 0.9 \u5230 2 \u4E4B\u95F4`, pageId, element.id));
     if (value.font.tracking !== undefined && (typeof value.font.tracking !== "number" || value.font.tracking < -4 || value.font.tracking > 12))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 tracking \u8D85\u51FA\u8303\u56F4`, pageId, element.id));
+    const face = value.font.face === undefined ? undefined : parseFontFace(value.font.face, `${element.id}.font.face`, issues, pageId, element.id);
     if (typeof value.font.family === "string" && FONT_TOKEN.test(value.font.family) && typeof value.font.size === "number") {
       const align = value.font.align === "left" || value.font.align === "center" || value.font.align === "right" ? value.font.align : undefined;
       const valign = value.font.valign === "top" || value.font.valign === "middle" || value.font.valign === "bottom" ? value.font.valign : undefined;
@@ -12300,10 +12390,26 @@ function parseText(value, element, pageId, issues) {
         align,
         valign,
         leading: typeof value.font.leading === "number" ? value.font.leading : undefined,
-        tracking: typeof value.font.tracking === "number" ? value.font.tracking : undefined
+        tracking: typeof value.font.tracking === "number" ? value.font.tracking : undefined,
+        face
       };
     }
   }
+}
+function parseFontFace(value, path, issues, pageId, elementId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `${path} \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["latin", "cjk"], path, issues, pageId, elementId);
+  if (typeof value.latin !== "string" || !value.latin.trim()) {
+    issues.push(issue("schema", `${path}.latin \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u4F53\u540D`, pageId, elementId));
+    return;
+  }
+  const cjk = parseFontPair(value.cjk, `${path}.cjk`, issues);
+  if (!cjk)
+    return;
+  return { latin: value.latin, cjk };
 }
 function parseShape(value, element, pageId, issues) {
   const shape = value.shape ?? "rect";
@@ -12321,11 +12427,19 @@ function parseShape(value, element, pageId, issues) {
     if (!isObject2(value.line))
       issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 line \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, element.id));
     else {
-      rejectUnknown(value.line, ["color", "width"], `${element.id}.line`, issues, pageId, element.id);
-      if (typeof value.line.color !== "string" || !COLOR_REF.test(value.line.color) || typeof value.line.width !== "number" || value.line.width < 0) {
+      rejectUnknown(value.line, ["color", "width", "style", "points"], `${element.id}.line`, issues, pageId, element.id);
+      const styles = ["solid", "dash", "dot"];
+      const styleOk = value.line.style === undefined || typeof value.line.style === "string" && styles.includes(value.line.style);
+      if (typeof value.line.color !== "string" || !COLOR_REF.test(value.line.color) || typeof value.line.width !== "number" || value.line.width < 0 || !styleOk) {
         issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 line \u65E0\u6548`, pageId, element.id));
-      } else
-        element.line = { color: value.line.color, width: value.line.width };
+      } else {
+        element.line = {
+          color: value.line.color,
+          width: value.line.width,
+          style: value.line.style === "dash" || value.line.style === "dot" || value.line.style === "solid" ? value.line.style : undefined,
+          points: parseLinePoints(value.line.points, element.id, issues, pageId)
+        };
+      }
     }
   }
   if (element.shape !== "line" && element.fill === undefined)
@@ -12337,11 +12451,135 @@ function parseShape(value, element, pageId, issues) {
       element.radius = value.radius;
   }
   if (value.arrow !== undefined) {
-    if (value.arrow !== "end")
-      issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 arrow \u53EA\u652F\u6301 end`, pageId, element.id));
+    if (value.arrow !== "start" && value.arrow !== "end" && value.arrow !== "both")
+      issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 arrow \u53EA\u652F\u6301 start\u3001end \u6216 both`, pageId, element.id));
     else
-      element.arrow = "end";
+      element.arrow = value.arrow;
   }
+}
+function parseLinePoints(value, elementId, issues, pageId) {
+  if (value === undefined)
+    return;
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 line.points \u5FC5\u987B\u662F {x1,y1,x2,y2}`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["x1", "y1", "x2", "y2"], `${elementId}.line.points`, issues, pageId, elementId);
+  const points = { x1: value.x1, y1: value.y1, x2: value.x2, y2: value.y2 };
+  for (const key of ["x1", "y1", "x2", "y2"]) {
+    if (typeof points[key] !== "number" || !Number.isFinite(points[key])) {
+      issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 line.points.${key} \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57`, pageId, elementId));
+      return;
+    }
+  }
+  return points;
+}
+function parseTable(value, path, issues, pageId, elementId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `${path}.table \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["columns", "rowHeights", "rows", "fontSize", "fontFamily", "face", "color", "fill", "border", "header"], `${path}.table`, issues, pageId, elementId);
+  if (!Array.isArray(value.columns) || value.columns.length === 0 || value.columns.some((item) => typeof item !== "number" || item <= 0)) {
+    issues.push(issue("schema", `${path}.table.columns \u5FC5\u987B\u662F\u6B63\u6570\u6570\u7EC4`, pageId, elementId));
+    return;
+  }
+  if (!Array.isArray(value.rows) || value.rows.length === 0) {
+    issues.push(issue("schema", `${path}.table.rows \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4`, pageId, elementId));
+    return;
+  }
+  const rows = [];
+  for (const row of value.rows) {
+    if (!Array.isArray(row) || row.length !== value.columns.length) {
+      issues.push(issue("schema", `${path}.table.rows \u6BCF\u4E00\u884C\u90FD\u8981\u4E0E columns \u7B49\u957F`, pageId, elementId));
+      return;
+    }
+    const cells = [];
+    for (const cell of row) {
+      if (!isObject2(cell)) {
+        issues.push(issue("schema", `${path}.table \u5355\u5143\u683C\u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+        return;
+      }
+      rejectUnknown(cell, ["text", "bold", "fill", "color", "align"], `${path}.table.cell`, issues, pageId, elementId);
+      if (typeof cell.text !== "string") {
+        issues.push(issue("schema", `${path}.table \u5355\u5143\u683C\u7F3A\u5C11 text`, pageId, elementId));
+        return;
+      }
+      if (cell.fill !== undefined && (typeof cell.fill !== "string" || !COLOR_REF.test(cell.fill))) {
+        issues.push(issue("schema", `${path}.table \u5355\u5143\u683C fill \u65E0\u6548`, pageId, elementId));
+      }
+      if (cell.color !== undefined && (typeof cell.color !== "string" || !COLOR_REF.test(cell.color))) {
+        issues.push(issue("schema", `${path}.table \u5355\u5143\u683C color \u65E0\u6548`, pageId, elementId));
+      }
+      if (cell.align !== undefined && cell.align !== "left" && cell.align !== "center" && cell.align !== "right") {
+        issues.push(issue("schema", `${path}.table \u5355\u5143\u683C align \u4E0D\u652F\u6301`, pageId, elementId));
+      }
+      cells.push({
+        text: cell.text,
+        bold: cell.bold === true ? true : undefined,
+        fill: typeof cell.fill === "string" ? cell.fill : undefined,
+        color: typeof cell.color === "string" ? cell.color : undefined,
+        align: cell.align === "left" || cell.align === "center" || cell.align === "right" ? cell.align : undefined
+      });
+    }
+    rows.push(cells);
+  }
+  if (typeof value.fontSize !== "number" || value.fontSize < 6 || value.fontSize > 160) {
+    issues.push(issue("schema", `${path}.table.fontSize \u5FC5\u987B\u5728 6 \u5230 160 \u4E4B\u95F4`, pageId, elementId));
+    return;
+  }
+  if (typeof value.fontFamily !== "string" || !FONT_TOKEN.test(value.fontFamily)) {
+    issues.push(issue("schema", `${path}.table.fontFamily \u53EA\u80FD\u662F $cjk \u6216 $latin`, pageId, elementId));
+    return;
+  }
+  if (typeof value.color !== "string" || !COLOR_REF.test(value.color) || typeof value.fill !== "string" || !COLOR_REF.test(value.fill)) {
+    issues.push(issue("schema", `${path}.table \u7684 color \u6216 fill \u65E0\u6548`, pageId, elementId));
+    return;
+  }
+  if (!isObject2(value.border) || typeof value.border.color !== "string" || !COLOR_REF.test(value.border.color) || typeof value.border.width !== "number" || value.border.width < 0) {
+    issues.push(issue("schema", `${path}.table.border \u65E0\u6548`, pageId, elementId));
+    return;
+  }
+  let rowHeights;
+  if (value.rowHeights !== undefined) {
+    if (!Array.isArray(value.rowHeights) || value.rowHeights.length !== rows.length || value.rowHeights.some((item) => typeof item !== "number" || item <= 0)) {
+      issues.push(issue("schema", `${path}.table.rowHeights \u5FC5\u987B\u4E0E\u884C\u6570\u7B49\u957F\u4E14\u4E3A\u6B63\u6570`, pageId, elementId));
+      return;
+    }
+    rowHeights = value.rowHeights;
+  }
+  let header;
+  if (value.header !== undefined) {
+    if (!isObject2(value.header)) {
+      issues.push(issue("schema", `${path}.table.header \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+      return;
+    }
+    rejectUnknown(value.header, ["bold", "color", "fill"], `${path}.table.header`, issues, pageId, elementId);
+    if (value.header.color !== undefined && (typeof value.header.color !== "string" || !COLOR_REF.test(value.header.color))) {
+      issues.push(issue("schema", `${path}.table.header.color \u65E0\u6548`, pageId, elementId));
+    }
+    if (value.header.fill !== undefined && (typeof value.header.fill !== "string" || !COLOR_REF.test(value.header.fill))) {
+      issues.push(issue("schema", `${path}.table.header.fill \u65E0\u6548`, pageId, elementId));
+    }
+    header = {
+      bold: value.header.bold === true ? true : undefined,
+      color: typeof value.header.color === "string" ? value.header.color : undefined,
+      fill: typeof value.header.fill === "string" ? value.header.fill : undefined
+    };
+  }
+  const face = value.face === undefined ? undefined : parseFontFace(value.face, `${path}.table.face`, issues, pageId, elementId);
+  return {
+    columns: value.columns,
+    rowHeights,
+    rows,
+    fontSize: value.fontSize,
+    fontFamily: value.fontFamily,
+    face,
+    color: value.color,
+    fill: value.fill,
+    border: { color: value.border.color, width: value.border.width },
+    header
+  };
 }
 function parsePage(value, issues) {
   if (!isObject2(value)) {
@@ -12474,8 +12712,54 @@ function overlaps(a, b) {
   const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
   return ix > 0.75 && iy > 0.75;
 }
-function contains(outer, inner) {
-  return inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.w <= outer.x + outer.w + 0.5 && inner.y + inner.h <= outer.y + outer.h + 0.5;
+function contains(outer, inner, slack = 0.5) {
+  return inner.x >= outer.x - slack && inner.y >= outer.y - slack && inner.x + inner.w <= outer.x + outer.w + slack && inner.y + inner.h <= outer.y + outer.h + slack;
+}
+function glyphBox(element) {
+  const font = element.font;
+  const text = element.text ?? "";
+  if (!font || !text.trim())
+    return element.bounds;
+  const bold = font.weight === "bold";
+  const tracking = font.tracking ?? 0;
+  const leading = font.leading ?? defaultLeading(font.size);
+  const lines = wrapText(text, element.bounds.w, font.size, bold, tracking);
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0);
+  const height = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
+  const width = Math.min(widest, element.bounds.w);
+  const usedHeight = Math.min(height, element.bounds.h);
+  const align = font.align ?? "left";
+  const valign = font.valign ?? "top";
+  const x = align === "center" ? element.bounds.x + (element.bounds.w - width) / 2 : align === "right" ? element.bounds.x + element.bounds.w - width : element.bounds.x;
+  const y = valign === "middle" ? element.bounds.y + (element.bounds.h - usedHeight) / 2 : valign === "bottom" ? element.bounds.y + element.bounds.h - usedHeight : element.bounds.y;
+  return { x, y, w: width, h: usedHeight };
+}
+function lineCuts(rule, box) {
+  const points = rule.line?.points;
+  if (!points)
+    return overlaps(rule.bounds, box);
+  const x1 = rule.bounds.x + points.x1;
+  const y1 = rule.bounds.y + points.y1;
+  const x2 = rule.bounds.x + points.x2;
+  const y2 = rule.bounds.y + points.y2;
+  const inside = (x, y) => x > box.x && x < box.x + box.w && y > box.y && y < box.y + box.h;
+  if (inside(x1, y1) || inside(x2, y2))
+    return true;
+  const edges = [
+    [box.x, box.y, box.x + box.w, box.y],
+    [box.x + box.w, box.y, box.x + box.w, box.y + box.h],
+    [box.x, box.y + box.h, box.x + box.w, box.y + box.h],
+    [box.x, box.y, box.x, box.y + box.h]
+  ];
+  return edges.some(([ax, ay, bx, by]) => segmentsCross(x1, y1, x2, y2, ax, ay, bx, by));
+}
+function segmentsCross(ax, ay, bx, by, cx, cy, dx, dy) {
+  const cross = (x1, y1, x2, y2, x3, y3) => (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+  const d1 = cross(cx, cy, dx, dy, ax, ay);
+  const d2 = cross(cx, cy, dx, dy, bx, by);
+  const d3 = cross(ax, ay, bx, by, cx, cy);
+  const d4 = cross(ax, ay, bx, by, dx, dy);
+  return (d1 > 0 && d2 < 0 || d1 < 0 && d2 > 0) && (d3 > 0 && d4 < 0 || d3 < 0 && d4 > 0);
 }
 function inset(box, pad) {
   return { x: box.x + pad, y: box.y + pad, w: Math.max(0, box.w - pad * 2), h: Math.max(0, box.h - pad * 2) };
@@ -12484,8 +12768,11 @@ function roleOf(element) {
   if (element.role)
     return element.role;
   if (element.type === "shape") {
-    if (element.shape === "line" || element.bounds.h <= 2 || element.bounds.w <= 2)
+    if (element.shape === "line" || element.bounds.h <= 2 || element.bounds.w <= 2) {
+      if ((element.line?.width ?? 1) <= 0.75)
+        return "decoration";
       return "rule";
+    }
     return "panel";
   }
   return "content";
@@ -12525,6 +12812,9 @@ function checkPage(deck, page) {
     if (element.type === "chart" && element.chart?.kind === "waterfall") {
       issues.push(...checkWaterfall(page, element));
     }
+    if (element.type === "table" && element.table) {
+      issues.push(...checkTable(deck, page, element, background));
+    }
   }
   issues.push(...checkOverlap(page));
   return issues;
@@ -12546,28 +12836,30 @@ function checkText(deck, page, element, pageBackground) {
     issues.push(issue("over_capacity", `\u6587\u5B57 ${glyphs} \u5B57\uFF0C\u8D85\u8FC7 textCapacity.maxChars ${capacity.maxChars}`, page.id, element.id));
   }
   const leading = font.leading ?? defaultLeading(font.size);
-  const lines = wrapText(text, element.bounds.w, font.size, bold);
+  const tracking = font.tracking ?? 0;
+  const lines = wrapText(text, element.bounds.w, font.size, bold, tracking);
   if (lines.length > capacity.maxLines) {
     issues.push(issue("over_capacity", `\u6309\u5B57\u5BBD\u4F30\u8BA1\u9700\u8981 ${lines.length} \u884C\uFF0CtextCapacity.maxLines \u4E3A ${capacity.maxLines}`, page.id, element.id));
   }
-  const needed = lines.length * font.size * leading;
-  if (needed > element.bounds.h + 1) {
+  const needed = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
+  if (needed > element.bounds.h + 1.5) {
     issues.push(issue("over_capacity", `\u6587\u672C\u6846\u9AD8 ${element.bounds.h}pt\uFF0C\u6309\u884C\u8DDD\u9700\u8981 ${needed.toFixed(1)}pt`, page.id, element.id));
   }
-  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold)), 0);
-  if (widest > element.bounds.w + font.size) {
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0);
+  if (widest > element.bounds.w + fitSlack(font.size)) {
     issues.push(issue("over_capacity", `\u6700\u5BBD\u4E00\u884C\u7EA6 ${widest.toFixed(0)}pt\uFF0C\u6587\u672C\u6846\u53EA\u6709 ${element.bounds.w}pt`, page.id, element.id));
   }
   for (const problem of orphanLines(lines)) {
     issues.push(issue("orphan", `\u5B64\u5B57\u6216\u884C\u9996\u7981\u5219\uFF1A${problem}`, page.id, element.id));
   }
   try {
-    const fill = colorRef(font.color, deck.theme, "$ink");
+    const fill = splitColor(colorRef(font.color, deck.theme, "$ink")).rgb;
     const samples = samplePoints(element.bounds);
     for (const sample of samples) {
       const behind = backgroundAt(deck, page, element, sample.x, sample.y, pageBackground);
       const ratio = contrastRatio(fill, behind);
-      const minimum = contrastMinimum(font.size, bold);
+      const primary = font.color === undefined || font.color === "$ink";
+      const minimum = primary ? contrastMinimum(font.size, bold) : Math.min(3, contrastMinimum(font.size, bold));
       if (ratio + 0.02 < minimum) {
         issues.push(issue("contrast", `\u5BF9\u6BD4\u5EA6 ${ratio.toFixed(2)} \u4F4E\u4E8E ${minimum.toFixed(1)}\uFF08${fill} \u5728 ${behind} \u4E0A\uFF0C${font.size}pt${bold ? " \u7C97\u4F53" : ""}\uFF09`, page.id, element.id));
         break;
@@ -12590,17 +12882,23 @@ function samplePoints(box) {
   ];
 }
 function backgroundAt(deck, page, self2, x, y, pageBackground) {
-  for (let index = page.elements.length - 1;index >= 0; index--) {
-    const element = page.elements[index];
-    if (element.id === self2.id || element.type === "text" || element.type === "chart" || element.type === "image")
+  let color = splitColor(pageBackground).rgb;
+  for (const element of page.elements) {
+    if (element.id === self2.id)
+      break;
+    if (element.type !== "shape" || !element.fill)
       continue;
-    if (roleOf(element) === "rule" || roleOf(element) === "decoration")
+    if (element.shape === "line" || element.bounds.h <= 2 || element.bounds.w <= 2)
       continue;
-    if (!element.fill || !pointIn(element.bounds, x, y))
+    if (!pointIn(element.bounds, x, y))
       continue;
-    return colorRef(element.fill, deck.theme, pageBackground);
+    try {
+      color = composite(colorRef(element.fill, deck.theme, pageBackground), color);
+    } catch {
+      return color;
+    }
   }
-  return pageBackground;
+  return color;
 }
 function checkWaterfall(page, element) {
   const values = element.chart?.series[0]?.values;
@@ -12635,14 +12933,19 @@ function checkOverlap(page) {
     for (let j = i + 1;j < content.length; j++) {
       const a = content[i];
       const b = content[j];
-      if (overlaps(a.element.bounds, b.element.bounds)) {
+      const boxA = a.element.type === "text" ? glyphBox(a.element) : a.element.bounds;
+      const boxB = b.element.type === "text" ? glyphBox(b.element) : b.element.bounds;
+      if (overlaps(boxA, boxB)) {
         issues.push(issue("overlap", `\u5185\u5BB9 ${a.element.id} \u4E0E ${b.element.id} \u91CD\u53E0`, page.id, a.element.id));
       }
     }
     for (const panel of panels) {
-      if (!overlaps(content[i].element.bounds, panel.element.bounds))
+      const box = content[i].element.type === "text" ? glyphBox(content[i].element) : content[i].element.bounds;
+      const ix = Math.min(box.x + box.w, panel.element.bounds.x + panel.element.bounds.w) - Math.max(box.x, panel.element.bounds.x);
+      const iy = Math.min(box.y + box.h, panel.element.bounds.y + panel.element.bounds.h) - Math.max(box.y, panel.element.bounds.y);
+      if (ix <= 12 || iy <= 12)
         continue;
-      if (!contains(panel.element.bounds, content[i].element.bounds)) {
+      if (!contains(panel.element.bounds, box, 8)) {
         issues.push(issue("overlap", `\u5185\u5BB9 ${content[i].element.id} \u538B\u5728\u8272\u5757 ${panel.element.id} \u7684\u8FB9\u7F18\u4E0A`, page.id, content[i].element.id));
       }
     }
@@ -12651,18 +12954,53 @@ function checkOverlap(page) {
     for (const item of content) {
       if (item.element.type !== "text")
         continue;
-      const inner = inset(item.element.bounds, 1.5);
+      const inner = inset(glyphBox(item.element), 1.5);
       if (inner.w <= 0 || inner.h <= 0)
         continue;
-      if (overlaps(rule.element.bounds, inner)) {
-        issues.push(issue("overlap", `\u7EBF\u6761 ${rule.element.id} \u7A7F\u8FC7\u6587\u5B57 ${item.element.id}`, page.id, rule.element.id));
-      }
+      if (!lineCuts(rule.element, inner))
+        continue;
+      const length = Math.max(rule.element.bounds.w, rule.element.bounds.h);
+      if (length < 20)
+        continue;
+      issues.push(issue("overlap", `\u7EBF\u6761 ${rule.element.id} \u7A7F\u8FC7\u6587\u5B57 ${item.element.id}`, page.id, rule.element.id));
     }
   }
   return issues;
 }
+function checkTable(deck, page, element, pageBackground) {
+  const table = element.table;
+  if (!table)
+    return [];
+  const issues = [];
+  const rowHeights = table.rowHeights ?? table.rows.map(() => element.bounds.h / table.rows.length);
+  table.rows.forEach((row, rowIndex) => {
+    const rowHeight = rowHeights[rowIndex] ?? element.bounds.h / table.rows.length;
+    row.forEach((cell, columnIndex) => {
+      const width = (table.columns[columnIndex] ?? 0) * element.bounds.w;
+      const bold = rowIndex === 0 ? table.header?.bold ?? cell.bold ?? false : cell.bold ?? false;
+      const lines = wrapText(cell.text, Math.max(1, width - 8), table.fontSize, bold);
+      const needed = lines.length <= 1 ? table.fontSize : table.fontSize + (lines.length - 1) * table.fontSize * 1.15;
+      if (needed > rowHeight + 2) {
+        issues.push(issue("over_capacity", `\u8868\u683C\u7B2C ${rowIndex + 1} \u884C\u7B2C ${columnIndex + 1} \u5217\u9AD8 ${rowHeight.toFixed(0)}pt\uFF0C\u6587\u5B57\u7EA6\u9700 ${needed.toFixed(0)}pt`, page.id, element.id));
+      }
+      try {
+        const fill = colorRef(cell.fill ?? (rowIndex === 0 ? table.header?.fill : undefined) ?? table.fill, deck.theme, pageBackground);
+        const ink = splitColor(colorRef(cell.color ?? (rowIndex === 0 ? table.header?.color : undefined) ?? table.color, deck.theme, "$ink")).rgb;
+        const ratio = contrastRatio(ink, splitColor(fill).rgb);
+        const minimum = contrastMinimum(table.fontSize, bold);
+        if (ratio + 0.02 < minimum) {
+          issues.push(issue("contrast", `\u8868\u683C\u5BF9\u6BD4\u5EA6 ${ratio.toFixed(2)} \u4F4E\u4E8E ${minimum.toFixed(1)}`, page.id, element.id));
+        }
+      } catch (error) {
+        issues.push(issue("schema", error instanceof Error ? error.message : String(error), page.id, element.id));
+      }
+    });
+  });
+  return issues;
+}
 
 // apps/electron/resources/skills/ppt-design/engine/export-pptx.ts
+var import_jszip2 = __toESM(require_lib3(), 1);
 import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, writeFileSync } from "fs";
 import { dirname } from "path";
 
@@ -18483,14 +18821,25 @@ function platformFromProcess(platform = process.platform) {
     return "win";
   return "linux";
 }
-function resolveFontFace(deck, family, platform) {
+function resolveFontFace(deck, family, platform, face) {
+  if (face)
+    return family === "$cjk" ? face.cjk[platform] : face.latin;
   return deck.theme.fonts[family === "$cjk" ? "cjk" : "latin"][platform];
 }
 function inches(points) {
   return points / PT;
 }
 function hex(value) {
-  return value.replace("#", "").toUpperCase();
+  return value.replace("#", "").slice(0, 6).toUpperCase();
+}
+function paint(value) {
+  const raw = value.replace("#", "").toUpperCase();
+  if (raw.length >= 8) {
+    const alpha = Number.parseInt(raw.slice(6, 8), 16) / 255;
+    const transparency = Math.round((1 - alpha) * 100);
+    return transparency > 0 ? { color: raw.slice(0, 6), transparency } : { color: raw.slice(0, 6) };
+  }
+  return { color: raw.slice(0, 6) };
 }
 async function exportDeck(deck, outFile, options = {}) {
   const issues = options.enforceCheck === false ? [] : checkDeck(deck);
@@ -18521,7 +18870,7 @@ async function buildPptx(deck, platform) {
       slide.addNotes(page.notes);
   }
   const raw = await pres.write({ outputType: "nodebuffer" });
-  return Buffer.from(raw);
+  return applyFontFaces(Buffer.from(raw), deck, platform);
 }
 function addElement(pres, slide, deck, element, platform, pageBackground) {
   const x = inches(element.bounds.x);
@@ -18531,7 +18880,8 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
   if (element.type === "text" && element.text && element.font) {
     const bold = element.font.weight === "bold";
     const leading = element.font.leading ?? defaultLeading(element.font.size);
-    const face = resolveFontFace(deck, element.font.family, platform);
+    const face = resolveFontFace(deck, element.font.family, platform, element.font.face);
+    const ink = paint(colorRef(element.font.color, deck.theme, "$ink"));
     slide.addText(element.text, {
       x,
       y,
@@ -18540,12 +18890,14 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       fontFace: face,
       fontSize: element.font.size,
       bold,
-      color: hex(colorRef(element.font.color, deck.theme, "$ink")),
+      color: ink.color,
+      transparency: ink.transparency,
       align: element.font.align ?? "left",
       valign: element.font.valign ?? "top",
       margin: 0,
       wrap: true,
       fit: "none",
+      rotate: element.rotate,
       lineSpacing: element.font.size * leading,
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === "$cjk" ? "zh-CN" : "en-US",
@@ -18554,37 +18906,31 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
     return;
   }
   if (element.type === "shape") {
-    const fill = element.fill ? hex(colorRef(element.fill, deck.theme, "$surface")) : undefined;
-    const lineColor = element.line ? hex(colorRef(element.line.color, deck.theme, "$line")) : fill;
     if (element.shape === "line" || element.role === "rule") {
-      const vertical = element.bounds.h > element.bounds.w;
-      const color = lineColor ?? (fill ?? hex(colorRef("$line", deck.theme, "$ink")));
-      slide.addShape(pres.ShapeType.line, {
-        x: vertical ? x + w / 2 : x,
-        y: vertical ? y : y + h / 2,
-        w: vertical ? 0 : w,
-        h: vertical ? h : 0,
-        line: {
-          color,
-          width: element.line?.width ?? Math.max(vertical ? element.bounds.w : element.bounds.h, 0.75),
-          endArrowType: !vertical && element.arrow === "end" ? "triangle" : "none"
-        },
-        objectName: element.id
-      });
+      addLine(pres, slide, deck, element);
       return;
     }
+    const fill = element.fill ? paint(colorRef(element.fill, deck.theme, "$surface")) : undefined;
+    const line = element.line ? paint(colorRef(element.line.color, deck.theme, "$line")) : undefined;
+    if (fill && fill.transparency === 100 && !line)
+      return;
     const shape = element.shape === "ellipse" ? pres.ShapeType.ellipse : element.shape === "roundRect" ? pres.ShapeType.roundRect : pres.ShapeType.rect;
-    const radius = element.radius && element.shape === "roundRect" ? Math.min(0.5, element.radius / Math.min(element.bounds.w, element.bounds.h)) : undefined;
+    const radius = element.radius && element.shape === "roundRect" ? Math.min(element.radius, Math.min(element.bounds.w, element.bounds.h) / 2) / 72 : undefined;
     slide.addShape(shape, {
       x,
       y,
       w,
       h,
-      fill: fill ? { color: fill } : undefined,
-      line: element.line ? { color: lineColor, width: element.line.width } : { color: fill ?? "FFFFFF", width: 0 },
+      rotate: element.rotate,
+      fill: fill && fill.transparency !== 100 ? fill : { type: "none" },
+      line: element.line && line ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) } : { color: fill?.color ?? "FFFFFF", width: 0 },
       rectRadius: radius,
       objectName: element.id
     });
+    return;
+  }
+  if (element.type === "table" && element.table) {
+    addTable(pres, slide, deck, element, platform);
     return;
   }
   if (element.type === "image" && element.src) {
@@ -18641,6 +18987,100 @@ function readImageSize(file) {
   }
   return null;
 }
+function dashOf(style) {
+  if (style === "dash")
+    return "dash";
+  if (style === "dot")
+    return "sysDot";
+  return;
+}
+function addLine(pres, slide, deck, element) {
+  const stroke = element.line ? paint(colorRef(element.line.color, deck.theme, "$line")) : paint(colorRef(element.fill ?? "$line", deck.theme, "$ink"));
+  const points = element.line?.points;
+  let x1;
+  let y1;
+  let x2;
+  let y2;
+  if (points) {
+    x1 = element.bounds.x + points.x1;
+    y1 = element.bounds.y + points.y1;
+    x2 = element.bounds.x + points.x2;
+    y2 = element.bounds.y + points.y2;
+  } else if (element.bounds.h > element.bounds.w) {
+    x1 = element.bounds.x + element.bounds.w / 2;
+    x2 = x1;
+    y1 = element.bounds.y;
+    y2 = element.bounds.y + element.bounds.h;
+  } else {
+    y1 = element.bounds.y + element.bounds.h / 2;
+    y2 = y1;
+    x1 = element.bounds.x;
+    x2 = element.bounds.x + element.bounds.w;
+  }
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.max(Math.hypot(dx, dy), 0.01);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const arrow = element.arrow;
+  slide.addShape(pres.ShapeType.line, {
+    x: inches(cx - length / 2),
+    y: inches(cy),
+    w: inches(length),
+    h: 0,
+    rotate: Math.abs(angle) < 0.05 ? undefined : angle,
+    line: {
+      color: stroke.color,
+      transparency: stroke.transparency,
+      width: element.line?.width ?? Math.max(Math.min(element.bounds.w, element.bounds.h), 0.75),
+      dashType: dashOf(element.line?.style),
+      beginArrowType: arrow === "start" || arrow === "both" ? "triangle" : undefined,
+      endArrowType: arrow === "end" || arrow === "both" ? "triangle" : undefined
+    },
+    objectName: element.id
+  });
+}
+function addTable(pres, slide, deck, element, platform) {
+  const table = element.table;
+  const face = resolveFontFace(deck, table.fontFamily, platform, table.face);
+  const body = paint(colorRef(table.color, deck.theme, "$ink"));
+  const fill = paint(colorRef(table.fill, deck.theme, "$paper"));
+  const border = paint(colorRef(table.border.color, deck.theme, "$line"));
+  const rowHeights = table.rowHeights ?? table.rows.map(() => element.bounds.h / table.rows.length);
+  const rows = table.rows.map((row, rowIndex) => row.map((cell) => {
+    const header = rowIndex === 0 ? table.header : undefined;
+    const color = paint(colorRef(cell.color ?? header?.color ?? table.color, deck.theme, "$ink"));
+    const cellFill = paint(colorRef(cell.fill ?? header?.fill ?? table.fill, deck.theme, "$paper"));
+    return {
+      text: cell.text,
+      options: {
+        bold: cell.bold ?? header?.bold ?? false,
+        color: color.color,
+        fill: { color: cellFill.color, transparency: cellFill.transparency },
+        align: cell.align ?? "left",
+        valign: "middle"
+      }
+    };
+  }));
+  slide.addTable(rows, {
+    x: inches(element.bounds.x),
+    y: inches(element.bounds.y),
+    w: inches(element.bounds.w),
+    h: inches(element.bounds.h),
+    colW: table.columns.map((fraction) => inches(fraction * element.bounds.w)),
+    rowH: rowHeights.map((points) => inches(points)),
+    border: { pt: table.border.width, color: border.color },
+    fontFace: face,
+    fontSize: table.fontSize,
+    color: body.color,
+    fill: { color: fill.color },
+    align: "left",
+    valign: "middle",
+    margin: 0.04,
+    objectName: element.id
+  });
+}
 function addChart(pres, slide, deck, element, platform, pageBackground) {
   const chart = element.chart;
   const background = hex(pageBackground);
@@ -18663,18 +19103,20 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     showValue: chart.showValues ?? false,
     chartArea: { fill: { color: background }, border: { pt: 0, color: background }, roundedCorners: false },
     plotArea: { fill: { color: background }, border: { pt: 0, color: background } },
-    catAxisLabelColor: label,
+    catAxisLabelColor: chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, label)) : label,
     catAxisLabelFontFace: face,
-    catAxisLabelFontSize: 11,
-    valAxisLabelColor: label,
+    catAxisLabelFontSize: chart.catLabelSize ?? 11,
+    valAxisLabelColor: chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, label)) : label,
     valAxisLabelFontFace: face,
-    valAxisLabelFontSize: 11,
+    valAxisLabelFontSize: chart.valLabelSize ?? 11,
     catAxisLineColor: grid,
     valAxisLineShow: false,
-    valGridLine: { color: grid, size: 0.5, style: "solid" },
+    valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" },
     catGridLine: { style: "none" },
     dataBorder: { pt: 0, color: background },
-    chartColors: (chart.colors ?? ["$accent", "$ink"]).map((color) => hex(colorRef(color, deck.theme, "$accent")))
+    chartColors: (chart.colors ?? ["$accent", "$ink"]).map((color) => hex(colorRef(color, deck.theme, "$accent"))),
+    valAxisMinVal: chart.valMin,
+    valAxisMaxVal: chart.valMax
   };
   if (chart.kind === "waterfall") {
     const parts = waterfallParts(chart.series[0].values);
@@ -18704,14 +19146,58 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     barDir: chart.kind === "bar" ? "bar" : "col",
     barGrouping: "clustered",
     barGapWidthPct: 60,
-    lineSize: 2.25,
+    lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: "circle",
-    lineDataSymbolSize: 12,
-    lineDataSymbolLineColor: ink,
+    lineDataSymbolSize: chart.markerSize ?? (chart.kind === "line" ? 8 : 12),
+    lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : 0,
-    holeSize: chart.kind === "doughnut" ? 62 : undefined
+    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMin ?? 0,
+    valAxisMaxVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMax,
+    holeSize: chart.kind === "doughnut" ? chart.holeSize ?? 62 : undefined
   });
+}
+async function applyFontFaces(bytes, deck, platform) {
+  const zip = await import_jszip2.default.loadAsync(bytes);
+  let changed = false;
+  for (let index = 0;index < deck.pages.length; index++) {
+    const page = deck.pages[index];
+    const faces = new Map;
+    for (const element of page.elements) {
+      const face = element.font?.face ?? element.table?.face;
+      if (!face)
+        continue;
+      faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] });
+    }
+    if (faces.size === 0)
+      continue;
+    const path = `ppt/slides/slide${index + 1}.xml`;
+    const file = zip.file(path);
+    if (!file)
+      continue;
+    const xml = await file.async("string");
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShapeFaces(block, faces));
+    if (next !== xml) {
+      zip.file(path, next);
+      changed = true;
+    }
+  }
+  if (!changed)
+    return bytes;
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+function rewriteShapeFaces(block, faces) {
+  const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
+  if (!name)
+    return block;
+  const face = faces.get(name[1]);
+  if (!face)
+    return block;
+  const latin = escapeXml(face.latin);
+  const ea = escapeXml(face.ea);
+  return block.replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`).replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`).replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`);
+}
+function escapeXml(value) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 function waterfallParts(values) {
   const base = [];

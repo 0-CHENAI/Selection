@@ -1,6 +1,33 @@
 import { defaultLeading } from '../engine/metrics.ts'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, DECK_FORMAT, DECK_VERSION, type ChartSpec, type Deck, type DeckElement, type DeckPage, type TextCapacity, type Theme } from '../engine/types.ts'
 
+/** Small theme for engine tests. Not a shipped style. */
+export const fixtureTheme: Theme = {
+  id: 'fixture',
+  name: 'Fixture',
+  margin: 48,
+  colors: {
+    ink: '#111111',
+    paper: '#F5F3EE',
+    muted: '#5C5A55',
+    accent: '#C41628',
+    line: '#CBC8C0',
+    surface: '#E8E5DE',
+    inverse: '#FFFFFF',
+  },
+  fonts: {
+    cjk: { mac: 'PingFang SC', win: 'Microsoft YaHei', linux: 'Noto Sans CJK SC' },
+    latin: { mac: 'Helvetica Neue', win: 'Arial', linux: 'Noto Sans' },
+  },
+  type: {
+    display: { min: 44, max: 84 },
+    title: { min: 28, max: 36 },
+    body: { min: 16, max: 22 },
+    caption: { min: 11, max: 14 },
+  },
+  source: 'Test fixture. Not a shipped presentation style.',
+}
+
 type TextOpts = {
   color?: string
   bold?: boolean

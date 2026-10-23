@@ -1,14 +1,47 @@
 {
-  "swiss-signal": {
-    "name": "Swiss Signal",
-    "design": "styles/swiss-signal/design.md",
-    "deck": "styles/swiss-signal/deck.json",
-    "when": "经营复盘、履约和取舍。硬边、大数字、一个红色信号。封面是右侧数字板加底部墨色行动带。"
+  "dsh-cartesian": {
+    "name": "Cartesian / 理性简报",
+    "design": "styles/dsh-cartesian/design.md",
+    "deck": "styles/dsh-cartesian/deck.json",
+    "deckEn": "styles/dsh-cartesian/deck.en.json",
+    "when": "理性简报 · Cartesian",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-cartesian), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/cartesian",
+    "license": "MIT"
   },
-  "cobalt-brief": {
-    "name": "Cobalt Brief",
-    "design": "styles/cobalt-brief/design.md",
-    "deck": "styles/cobalt-brief/deck.json",
-    "when": "流程、检验和项目简报。奶油底、钴蓝只标当前要动的一项。封面是顶条、右侧数字板和底部三列事实。"
+  "dsh-course-workshop": {
+    "name": "课程培训 · Course Workshop",
+    "design": "styles/dsh-course-workshop/design.md",
+    "deck": "styles/dsh-course-workshop/deck.json",
+    "deckEn": "styles/dsh-course-workshop/deck.en.json",
+    "when": "固定学习目标边栏、概念图、实例与自测；用于培训、课程和工作坊。",
+    "source": "DSH Desktop v0.2.21 adaptation of html-anything deck-course-module, Apache-2.0, https://github.com/nexu-io/html-anything/tree/c31204544230578ac814026fecc153c6e36587ae",
+    "license": "Apache-2.0"
+  },
+  "dsh-editorial-notebook": {
+    "name": "编辑手记 · Editorial Notebook",
+    "design": "styles/dsh-editorial-notebook/design.md",
+    "deck": "styles/dsh-editorial-notebook/deck.json",
+    "deckEn": "styles/dsh-editorial-notebook/deck.en.json",
+    "when": "原创的双栏论述、边注、证据条和决策矩阵；用于研究、观点与业务叙事。",
+    "source": "DSH Desktop v0.2.21 original template, MIT, Copyright (c) 2026 DataElement",
+    "license": "MIT"
+  },
+  "dsh-engineering-blueprint": {
+    "name": "工程蓝图 · Engineering Blueprint",
+    "design": "styles/dsh-engineering-blueprint/design.md",
+    "deck": "styles/dsh-engineering-blueprint/deck.json",
+    "deckEn": "styles/dsh-engineering-blueprint/deck.en.json",
+    "when": "纸张底色、工程网格、流程盒和反馈路径；用于架构评审、技术方案及执行计划。",
+    "source": "DSH Desktop v0.2.21 adaptation of html-anything deck-blueprint, Apache-2.0, https://github.com/nexu-io/html-anything/tree/c31204544230578ac814026fecc153c6e36587ae",
+    "license": "Apache-2.0"
+  },
+  "dsh-soft-editorial": {
+    "name": "Soft Editorial / 柔和编辑部",
+    "design": "styles/dsh-soft-editorial/design.md",
+    "deck": "styles/dsh-soft-editorial/deck.json",
+    "deckEn": "styles/dsh-soft-editorial/deck.en.json",
+    "when": "柔和编辑部 · Soft Editorial",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-soft-editorial), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/soft-editorial",
+    "license": "MIT"
   }
 }

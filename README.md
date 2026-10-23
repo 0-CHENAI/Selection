@@ -99,7 +99,7 @@ bun run electron:start
 - **Theme System**: Cascading themes at app and workspace levels
 - **Multi-File Diff**: VS Code-style window for viewing all file changes in a turn
 - **Skills**: Specialized agent instructions stored per-workspace
-- **PPT Design System**: Built-in `ppt-design` plans new presentations as declarative 960×540 pt pages, checks them, and exports an editable PPTX. Two styles (`swiss-signal`, `cobalt-brief`) ship with reference pages. Targeted edits keep the existing deck and use OfficeCLI. No Python runtime. See the [skill workflow](apps/electron/resources/skills/ppt-design/SKILL.md).
+- **PPT Design System**: Built-in `ppt-design` plans new presentations as declarative 960×540 pt pages, checks them, and exports an editable PPTX. Five DSH-adapted styles (`dsh-cartesian`, `dsh-course-workshop`, `dsh-editorial-notebook`, `dsh-engineering-blueprint`, `dsh-soft-editorial`) each ship Chinese and English 12-page reference decks. Targeted edits keep the existing deck and use OfficeCLI. No Python runtime. See the [skill workflow](apps/electron/resources/skills/ppt-design/SKILL.md).
 - **File Attachments**: Drag-drop images, PDFs, Office documents with auto-conversion
 - **Automations**: Event-driven automation — create agent sessions on label changes, schedules, tool use, and more
 

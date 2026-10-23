@@ -21,22 +21,30 @@ export function isFullwidth(ch: string): boolean {
 
 export function charWidth(ch: string, fontSize: number, bold: boolean): number {
   if (ch === '\t') return fontSize * 2
-  if (ch === ' ') return fontSize * (bold ? 0.36 : 0.33)
+  if (ch === ' ') return fontSize * (bold ? 0.3 : 0.3)
   if (ch === '·' || ch === '…' || ch === '・') return fontSize * 0.5
   if (isFullwidth(ch)) return fontSize
-  if (/[0-9]/.test(ch)) return fontSize * (bold ? 0.64 : 0.58)
-  if (/[A-Z]/.test(ch)) return fontSize * (bold ? 0.74 : 0.68)
-  if (/[a-z]/.test(ch)) return fontSize * (bold ? 0.62 : 0.56)
+  if (/[0-9]/.test(ch)) return fontSize * (bold ? 0.58 : 0.56)
+  if (/[A-Z]/.test(ch)) return fontSize * (bold ? 0.72 : 0.68)
+  if (/[a-z]/.test(ch)) return fontSize * (bold ? 0.56 : 0.51)
   if (ch === '%') return fontSize * 0.9
   if ('.,:;\'"'.includes(ch)) return fontSize * 0.32
   if ('+−–-'.includes(ch)) return fontSize * 0.55
   return fontSize * (bold ? 0.62 : 0.55)
 }
 
-export function textWidth(text: string, fontSize: number, bold: boolean): number {
+/** Room for Latin sidebearings and a closing punctuation mark. Not enough for another CJK glyph. */
+export function fitSlack(fontSize: number): number {
+  return Math.max(6, fontSize * 0.5)
+}
+
+export function textWidth(text: string, fontSize: number, bold: boolean, tracking = 0): number {
+  const chars = Array.from(text)
+  if (chars.length === 0) return 0
   let width = 0
-  for (const ch of Array.from(text)) width += charWidth(ch, fontSize, bold)
-  return width
+  for (const ch of chars) width += charWidth(ch, fontSize, bold)
+  if (tracking) width += tracking * (chars.length - 1)
+  return Math.max(0, width)
 }
 
 export function defaultLeading(fontSize: number): number {
@@ -46,7 +54,7 @@ export function defaultLeading(fontSize: number): number {
 }
 
 /** Greedy wrap with a small kinsoku (避头尾) pass so punctuation does not start a line. */
-export function wrapText(text: string, boxWidth: number, fontSize: number, bold: boolean): string[] {
+export function wrapText(text: string, boxWidth: number, fontSize: number, bold: boolean, tracking = 0): string[] {
   const lines: string[] = []
   for (const para of text.split('\n')) {
     if (para.length === 0) {
@@ -58,8 +66,12 @@ export function wrapText(text: string, boxWidth: number, fontSize: number, bold:
     let width = 0
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i]!
-      const w = charWidth(ch, fontSize, bold)
-      const overflows = current.length > 0 && width + w > boxWidth + 0.01
+      const w = charWidth(ch, fontSize, bold) + (current.length > 0 ? tracking : 0)
+      // Fullwidth glyphs use the box. Latin keeps fitSlack so a slightly high
+      // width estimate does not wrap off one letter. Half an em of slack is
+      // enough to hide a CJK character that the renderer still wraps.
+      const room = isFullwidth(ch) ? 0.75 : fitSlack(fontSize)
+      const overflows = current.length > 0 && width + w > boxWidth + room
       if (!overflows) {
         current.push(ch)
         width += w

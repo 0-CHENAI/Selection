@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
 import { checkDeck } from './check.ts'
 import { luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
-import type { Deck, DeckElement, DeckIssue, PlatformName, ScreenshotResult } from './types.ts'
+import type { Deck, DeckElement, DeckIssue, FontFace, PlatformName, ScreenshotResult } from './types.ts'
 import { captureSlides } from './screenshot.ts'
 
 const PT = 72
@@ -16,7 +17,8 @@ export function platformFromProcess(platform = process.platform): PlatformName {
   return 'linux'
 }
 
-export function resolveFontFace(deck: Deck, family: '$cjk' | '$latin', platform: PlatformName): string {
+export function resolveFontFace(deck: Deck, family: '$cjk' | '$latin', platform: PlatformName, face?: FontFace): string {
+  if (face) return family === '$cjk' ? face.cjk[platform] : face.latin
   return deck.theme.fonts[family === '$cjk' ? 'cjk' : 'latin'][platform]
 }
 
@@ -25,7 +27,17 @@ function inches(points: number): number {
 }
 
 function hex(value: string): string {
-  return value.replace('#', '').toUpperCase()
+  return value.replace('#', '').slice(0, 6).toUpperCase()
+}
+
+function paint(value: string): { color: string; transparency?: number } {
+  const raw = value.replace('#', '').toUpperCase()
+  if (raw.length >= 8) {
+    const alpha = Number.parseInt(raw.slice(6, 8), 16) / 255
+    const transparency = Math.round((1 - alpha) * 100)
+    return transparency > 0 ? { color: raw.slice(0, 6), transparency } : { color: raw.slice(0, 6) }
+  }
+  return { color: raw.slice(0, 6) }
 }
 
 export type ExportOptions = {
@@ -72,7 +84,7 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
     if (page.notes) slide.addNotes(page.notes)
   }
   const raw = await pres.write({ outputType: 'nodebuffer' })
-  return Buffer.from(raw as Uint8Array)
+  return applyFontFaces(Buffer.from(raw as Uint8Array), deck, platform)
 }
 
 function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
@@ -83,18 +95,21 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
   if (element.type === 'text' && element.text && element.font) {
     const bold = element.font.weight === 'bold'
     const leading = element.font.leading ?? defaultLeading(element.font.size)
-    const face = resolveFontFace(deck, element.font.family, platform)
+    const face = resolveFontFace(deck, element.font.family, platform, element.font.face)
+    const ink = paint(colorRef(element.font.color, deck.theme, '$ink'))
     slide.addText(element.text, {
       x, y, w, h,
       fontFace: face,
       fontSize: element.font.size,
       bold,
-      color: hex(colorRef(element.font.color, deck.theme, '$ink')),
+      color: ink.color,
+      transparency: ink.transparency,
       align: element.font.align ?? 'left',
       valign: element.font.valign ?? 'top',
       margin: 0,
       wrap: true,
       fit: 'none',
+      rotate: element.rotate,
       lineSpacing: element.font.size * leading,
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === '$cjk' ? 'zh-CN' : 'en-US',
@@ -103,42 +118,35 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     return
   }
   if (element.type === 'shape') {
-    const fill = element.fill ? hex(colorRef(element.fill, deck.theme, '$surface')) : undefined
-    const lineColor = element.line ? hex(colorRef(element.line.color, deck.theme, '$line')) : fill
     if (element.shape === 'line' || element.role === 'rule') {
-      const vertical = element.bounds.h > element.bounds.w
-      const color = lineColor ?? (fill ?? hex(colorRef('$line', deck.theme, '$ink')))
-      slide.addShape(pres.ShapeType.line, {
-        x: vertical ? x + w / 2 : x,
-        y: vertical ? y : y + h / 2,
-        w: vertical ? 0 : w,
-        h: vertical ? h : 0,
-        line: {
-          color,
-          width: element.line?.width ?? Math.max(vertical ? element.bounds.w : element.bounds.h, 0.75),
-          endArrowType: !vertical && element.arrow === 'end' ? 'triangle' : 'none',
-        },
-        objectName: element.id,
-      })
+      addLine(pres, slide, deck, element)
       return
     }
+    const fill = element.fill ? paint(colorRef(element.fill, deck.theme, '$surface')) : undefined
+    const line = element.line ? paint(colorRef(element.line.color, deck.theme, '$line')) : undefined
+    if (fill && fill.transparency === 100 && !line) return
     const shape = element.shape === 'ellipse'
       ? pres.ShapeType.ellipse
       : element.shape === 'roundRect'
         ? pres.ShapeType.roundRect
         : pres.ShapeType.rect
     const radius = element.radius && element.shape === 'roundRect'
-      ? Math.min(0.5, element.radius / Math.min(element.bounds.w, element.bounds.h))
+      ? Math.min(element.radius, Math.min(element.bounds.w, element.bounds.h) / 2) / 72
       : undefined
     slide.addShape(shape, {
       x, y, w, h,
-      fill: fill ? { color: fill } : undefined,
-      line: element.line
-        ? { color: lineColor, width: element.line.width }
-        : { color: fill ?? 'FFFFFF', width: 0 },
+      rotate: element.rotate,
+      fill: fill && fill.transparency !== 100 ? fill : { type: 'none' },
+      line: element.line && line
+        ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) }
+        : { color: fill?.color ?? 'FFFFFF', width: 0 },
       rectRadius: radius,
       objectName: element.id,
     })
+    return
+  }
+  if (element.type === 'table' && element.table) {
+    addTable(pres, slide, deck, element, platform)
     return
   }
   if (element.type === 'image' && element.src) {
@@ -194,6 +202,101 @@ function readImageSize(file: string): { width: number; height: number } | null {
   return null
 }
 
+function dashOf(style: 'solid' | 'dash' | 'dot' | undefined): 'dash' | 'sysDot' | undefined {
+  if (style === 'dash') return 'dash'
+  if (style === 'dot') return 'sysDot'
+  return undefined
+}
+
+function addLine(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement): void {
+  const stroke = element.line ? paint(colorRef(element.line.color, deck.theme, '$line')) : paint(colorRef(element.fill ?? '$line', deck.theme, '$ink'))
+  const points = element.line?.points
+  let x1: number
+  let y1: number
+  let x2: number
+  let y2: number
+  if (points) {
+    x1 = element.bounds.x + points.x1
+    y1 = element.bounds.y + points.y1
+    x2 = element.bounds.x + points.x2
+    y2 = element.bounds.y + points.y2
+  } else if (element.bounds.h > element.bounds.w) {
+    x1 = element.bounds.x + element.bounds.w / 2
+    x2 = x1
+    y1 = element.bounds.y
+    y2 = element.bounds.y + element.bounds.h
+  } else {
+    y1 = element.bounds.y + element.bounds.h / 2
+    y2 = y1
+    x1 = element.bounds.x
+    x2 = element.bounds.x + element.bounds.w
+  }
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const length = Math.max(Math.hypot(dx, dy), 0.01)
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI
+  const cx = (x1 + x2) / 2
+  const cy = (y1 + y2) / 2
+  const arrow = element.arrow
+  slide.addShape(pres.ShapeType.line, {
+    x: inches(cx - length / 2),
+    y: inches(cy),
+    w: inches(length),
+    h: 0,
+    rotate: Math.abs(angle) < 0.05 ? undefined : angle,
+    line: {
+      color: stroke.color,
+      transparency: stroke.transparency,
+      width: element.line?.width ?? Math.max(Math.min(element.bounds.w, element.bounds.h), 0.75),
+      dashType: dashOf(element.line?.style),
+      beginArrowType: arrow === 'start' || arrow === 'both' ? 'triangle' : undefined,
+      endArrowType: arrow === 'end' || arrow === 'both' ? 'triangle' : undefined,
+    },
+    objectName: element.id,
+  })
+}
+
+function addTable(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName): void {
+  const table = element.table!
+  const face = resolveFontFace(deck, table.fontFamily, platform, table.face)
+  const body = paint(colorRef(table.color, deck.theme, '$ink'))
+  const fill = paint(colorRef(table.fill, deck.theme, '$paper'))
+  const border = paint(colorRef(table.border.color, deck.theme, '$line'))
+  const rowHeights = table.rowHeights ?? table.rows.map(() => element.bounds.h / table.rows.length)
+  const rows = table.rows.map((row, rowIndex) => row.map(cell => {
+    const header = rowIndex === 0 ? table.header : undefined
+    const color = paint(colorRef(cell.color ?? header?.color ?? table.color, deck.theme, '$ink'))
+    const cellFill = paint(colorRef(cell.fill ?? header?.fill ?? table.fill, deck.theme, '$paper'))
+    return {
+      text: cell.text,
+      options: {
+        bold: cell.bold ?? header?.bold ?? false,
+        color: color.color,
+        fill: { color: cellFill.color, transparency: cellFill.transparency },
+        align: cell.align ?? 'left' as const,
+        valign: 'middle' as const,
+      },
+    }
+  }))
+  slide.addTable(rows, {
+    x: inches(element.bounds.x),
+    y: inches(element.bounds.y),
+    w: inches(element.bounds.w),
+    h: inches(element.bounds.h),
+    colW: table.columns.map(fraction => inches(fraction * element.bounds.w)),
+    rowH: rowHeights.map(points => inches(points)),
+    border: { pt: table.border.width, color: border.color },
+    fontFace: face,
+    fontSize: table.fontSize,
+    color: body.color,
+    fill: { color: fill.color },
+    align: 'left',
+    valign: 'middle',
+    margin: 0.04,
+    objectName: element.id,
+  })
+}
+
 function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
   const chart = element.chart!
   const background = hex(pageBackground)
@@ -216,18 +319,20 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     showValue: chart.showValues ?? false,
     chartArea: { fill: { color: background }, border: { pt: 0, color: background }, roundedCorners: false },
     plotArea: { fill: { color: background }, border: { pt: 0, color: background } },
-    catAxisLabelColor: label,
+    catAxisLabelColor: chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, label)) : label,
     catAxisLabelFontFace: face,
-    catAxisLabelFontSize: 11,
-    valAxisLabelColor: label,
+    catAxisLabelFontSize: chart.catLabelSize ?? 11,
+    valAxisLabelColor: chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, label)) : label,
     valAxisLabelFontFace: face,
-    valAxisLabelFontSize: 11,
+    valAxisLabelFontSize: chart.valLabelSize ?? 11,
     catAxisLineColor: grid,
     valAxisLineShow: false,
-    valGridLine: { color: grid, size: 0.5, style: 'solid' as const },
+    valGridLine: { color: grid, size: 0.5, style: chart.grid ?? 'solid' },
     catGridLine: { style: 'none' as const },
     dataBorder: { pt: 0, color: background },
     chartColors: (chart.colors ?? ['$accent', '$ink']).map(color => hex(colorRef(color, deck.theme, '$accent'))),
+    valAxisMinVal: chart.valMin,
+    valAxisMaxVal: chart.valMax,
   }
   if (chart.kind === 'waterfall') {
     const parts = waterfallParts(chart.series[0]!.values)
@@ -263,14 +368,59 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     barDir: chart.kind === 'bar' ? 'bar' : 'col',
     barGrouping: 'clustered',
     barGapWidthPct: 60,
-    lineSize: 2.25,
+    lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: 'circle',
-    lineDataSymbolSize: 12,
-    lineDataSymbolLineColor: ink,
+    lineDataSymbolSize: chart.markerSize ?? (chart.kind === 'line' ? 8 : 12),
+    lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    valAxisMinVal: chart.kind === 'pie' || chart.kind === 'doughnut' ? undefined : 0,
-    holeSize: chart.kind === 'doughnut' ? 62 : undefined,
+    valAxisMinVal: chart.kind === 'pie' || chart.kind === 'doughnut' ? undefined : (chart.valMin ?? 0),
+    valAxisMaxVal: chart.kind === 'pie' || chart.kind === 'doughnut' ? undefined : chart.valMax,
+    holeSize: chart.kind === 'doughnut' ? (chart.holeSize ?? 62) : undefined,
   })
+}
+
+async function applyFontFaces(bytes: Buffer, deck: Deck, platform: PlatformName): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(bytes)
+  let changed = false
+  for (let index = 0; index < deck.pages.length; index++) {
+    const page = deck.pages[index]!
+    const faces = new Map<string, { latin: string; ea: string }>()
+    for (const element of page.elements) {
+      const face = element.font?.face ?? element.table?.face
+      if (!face) continue
+      faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] })
+    }
+    if (faces.size === 0) continue
+    const path = `ppt/slides/slide${index + 1}.xml`
+    const file = zip.file(path)
+    if (!file) continue
+    const xml = await file.async('string')
+    // `<p:sp` is also the prefix of `<p:spTree>`. Require the tag to end so the tree is left intact.
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShapeFaces(block, faces))
+    if (next !== xml) {
+      zip.file(path, next)
+      changed = true
+    }
+  }
+  if (!changed) return bytes
+  return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+}
+
+function rewriteShapeFaces(block: string, faces: Map<string, { latin: string; ea: string }>): string {
+  const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/)
+  if (!name) return block
+  const face = faces.get(name[1]!)
+  if (!face) return block
+  const latin = escapeXml(face.latin)
+  const ea = escapeXml(face.ea)
+  return block
+    .replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
+    .replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`)
+    .replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 export function waterfallParts(values: number[]): { base: number[]; up: number[]; down: number[] } {
