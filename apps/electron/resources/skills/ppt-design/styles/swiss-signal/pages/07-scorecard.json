@@ -1,0 +1,649 @@
+{
+  "id": "scorecard",
+  "layout": "scorecard",
+  "notes": "计分表：例外行必须有负责动作，而不是只标红。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "06  /  计分表",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "把每项指标连接到后续行动",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        140,
+        250,
+        20
+      ],
+      "text": "指标",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        320,
+        140,
+        140,
+        20
+      ],
+      "text": "实际",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        480,
+        140,
+        160,
+        20
+      ],
+      "text": "目标",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 14
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        668,
+        140,
+        244,
+        20
+      ],
+      "text": "行动",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "l7",
+      "type": "shape",
+      "bounds": [
+        48,
+        168,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        60,
+        188,
+        240,
+        32
+      ],
+      "text": "完成率",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        320,
+        184,
+        140,
+        40
+      ],
+      "text": "73%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        480,
+        190,
+        160,
+        28
+      ],
+      "text": "> 70%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        668,
+        190,
+        244,
+        28
+      ],
+      "text": "—  保持观察",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l12",
+      "type": "shape",
+      "bounds": [
+        48,
+        244,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        60,
+        264,
+        240,
+        32
+      ],
+      "text": "等待分钟",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        320,
+        260,
+        140,
+        40
+      ],
+      "text": "7",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        480,
+        266,
+        160,
+        28
+      ],
+      "text": "< 10",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        668,
+        266,
+        244,
+        28
+      ],
+      "text": "—  保持观察",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        48,
+        320,
+        864,
+        70
+      ],
+      "shape": "rect",
+      "fill": "#F4D4D6",
+      "z": 0
+    },
+    {
+      "id": "s18",
+      "type": "shape",
+      "bounds": [
+        48,
+        320,
+        4,
+        70
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "l19",
+      "type": "shape",
+      "bounds": [
+        48,
+        320,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        60,
+        340,
+        240,
+        32
+      ],
+      "text": "回访率",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        320,
+        336,
+        140,
+        40
+      ],
+      "text": "58%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        480,
+        342,
+        160,
+        28
+      ],
+      "text": "> 65%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        668,
+        342,
+        244,
+        28
+      ],
+      "text": "↗  复核缺口",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l24",
+      "type": "shape",
+      "bounds": [
+        48,
+        396,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t25",
+      "type": "text",
+      "bounds": [
+        60,
+        416,
+        240,
+        32
+      ],
+      "text": "单次任务成本",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        320,
+        412,
+        140,
+        40
+      ],
+      "text": "¥8",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        480,
+        418,
+        160,
+        28
+      ],
+      "text": "< ¥9",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        668,
+        418,
+        244,
+        28
+      ],
+      "text": "—  保持观察",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l29",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t31",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "07",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

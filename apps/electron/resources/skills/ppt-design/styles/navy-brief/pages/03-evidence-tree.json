@@ -1,0 +1,559 @@
+{
+  "id": "evidence-tree",
+  "layout": "evidence-tree",
+  "notes": "深色证据树：金色主干，右侧是可检验叶子。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "02  /  假设地图",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "每个分支都要能单独被否定",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "s5",
+      "type": "shape",
+      "bounds": [
+        48,
+        168,
+        240,
+        300
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        68,
+        220,
+        200,
+        80
+      ],
+      "text": "假设\n扩店可盈利",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "weight": 700,
+        "align": "center",
+        "lineHeight": 1.2,
+        "size": 24
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        68,
+        330,
+        200,
+        72
+      ],
+      "text": "先证伪，再扩规模。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "body",
+        "color": "inverse",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l8",
+      "type": "shape",
+      "bounds": [
+        288,
+        318,
+        42,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l9",
+      "type": "shape",
+      "bounds": [
+        330,
+        208,
+        1,
+        110
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l10",
+      "type": "shape",
+      "bounds": [
+        330,
+        208,
+        30,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        360,
+        168,
+        200,
+        80
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        376,
+        194,
+        168,
+        28
+      ],
+      "text": "用户证据",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        588,
+        180,
+        324,
+        28
+      ],
+      "text": "到店是否重复",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        588,
+        212,
+        324,
+        28
+      ],
+      "text": "等待是否过长",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l15",
+      "type": "shape",
+      "bounds": [
+        288,
+        318,
+        42,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l16",
+      "type": "shape",
+      "bounds": [
+        330,
+        312,
+        1,
+        6
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l17",
+      "type": "shape",
+      "bounds": [
+        330,
+        312,
+        30,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "s18",
+      "type": "shape",
+      "bounds": [
+        360,
+        272,
+        200,
+        80
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        376,
+        298,
+        168,
+        28
+      ],
+      "text": "能力缺口",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        588,
+        284,
+        324,
+        28
+      ],
+      "text": "周报能否自制",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        588,
+        316,
+        324,
+        28
+      ],
+      "text": "库存能否盘清",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l22",
+      "type": "shape",
+      "bounds": [
+        288,
+        318,
+        42,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l23",
+      "type": "shape",
+      "bounds": [
+        330,
+        318,
+        1,
+        98
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l24",
+      "type": "shape",
+      "bounds": [
+        330,
+        416,
+        30,
+        1
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "s25",
+      "type": "shape",
+      "bounds": [
+        360,
+        376,
+        200,
+        80
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        376,
+        402,
+        168,
+        28
+      ],
+      "text": "验证成本",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        588,
+        388,
+        324,
+        28
+      ],
+      "text": "试点六周预算",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        588,
+        420,
+        324,
+        28
+      ],
+      "text": "回退条件是否写清",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l29",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t31",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "03",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

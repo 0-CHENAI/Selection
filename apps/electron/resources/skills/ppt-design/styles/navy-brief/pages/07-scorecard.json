@@ -1,0 +1,598 @@
+{
+  "id": "scorecard",
+  "layout": "scorecard",
+  "notes": "记分：金色只标需要复核的一行。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "06  /  记分",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "把每项指标连接到后续行动",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "s5",
+      "type": "shape",
+      "bounds": [
+        48,
+        156,
+        864,
+        70
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "s6",
+      "type": "shape",
+      "bounds": [
+        48,
+        156,
+        6,
+        70
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        72,
+        176,
+        220,
+        30
+      ],
+      "text": "完成率",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        320,
+        170,
+        160,
+        42
+      ],
+      "text": "73%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        520,
+        178,
+        160,
+        28
+      ],
+      "text": "> 70%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        720,
+        178,
+        170,
+        28
+      ],
+      "text": "保持",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        48,
+        236,
+        864,
+        70
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "s12",
+      "type": "shape",
+      "bounds": [
+        48,
+        236,
+        6,
+        70
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        72,
+        256,
+        220,
+        30
+      ],
+      "text": "等待",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        320,
+        250,
+        160,
+        42
+      ],
+      "text": "7 min",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        520,
+        258,
+        160,
+        28
+      ],
+      "text": "< 10",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        720,
+        258,
+        170,
+        28
+      ],
+      "text": "保持",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        48,
+        316,
+        864,
+        70
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s18",
+      "type": "shape",
+      "bounds": [
+        48,
+        316,
+        6,
+        70
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        72,
+        336,
+        220,
+        30
+      ],
+      "text": "回访率",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        320,
+        330,
+        160,
+        42
+      ],
+      "text": "58%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "accent",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        520,
+        338,
+        160,
+        28
+      ],
+      "text": "> 65%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        720,
+        338,
+        170,
+        28
+      ],
+      "text": "复核",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "color": "accent",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s23",
+      "type": "shape",
+      "bounds": [
+        48,
+        396,
+        864,
+        70
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "s24",
+      "type": "shape",
+      "bounds": [
+        48,
+        396,
+        6,
+        70
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t25",
+      "type": "text",
+      "bounds": [
+        72,
+        416,
+        220,
+        30
+      ],
+      "text": "单次成本",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        320,
+        410,
+        160,
+        42
+      ],
+      "text": "¥8",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        520,
+        418,
+        160,
+        28
+      ],
+      "text": "< ¥9",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        720,
+        418,
+        170,
+        28
+      ],
+      "text": "保持",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l29",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t31",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "07",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

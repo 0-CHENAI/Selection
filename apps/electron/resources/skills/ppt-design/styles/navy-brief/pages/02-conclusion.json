@@ -1,0 +1,527 @@
+{
+  "id": "conclusion",
+  "layout": "conclusion",
+  "notes": "结论：四个条件是门槛，不是并列装饰卡片。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "01  /  当前主张",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "在全面投入前，先验核心假设",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        150,
+        864,
+        28
+      ],
+      "text": "四个必须同时成立的条件，缺一条就不应扩店。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 54
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s6",
+      "type": "shape",
+      "bounds": [
+        48,
+        196,
+        420,
+        120
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s7",
+      "type": "shape",
+      "bounds": [
+        48,
+        196,
+        4,
+        120
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        72,
+        214,
+        80,
+        24
+      ],
+      "text": "01",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        72,
+        240,
+        372,
+        28
+      ],
+      "text": "市场",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        72,
+        274,
+        372,
+        28
+      ],
+      "text": "目标走廊是否重复到店",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        492,
+        196,
+        420,
+        120
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s12",
+      "type": "shape",
+      "bounds": [
+        492,
+        196,
+        4,
+        120
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        516,
+        214,
+        80,
+        24
+      ],
+      "text": "02",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        516,
+        240,
+        372,
+        28
+      ],
+      "text": "能力",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        516,
+        274,
+        372,
+        28
+      ],
+      "text": "店长能否独立看懂周报",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s16",
+      "type": "shape",
+      "bounds": [
+        48,
+        332,
+        420,
+        120
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        48,
+        332,
+        4,
+        120
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        72,
+        350,
+        80,
+        24
+      ],
+      "text": "03",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        72,
+        376,
+        372,
+        28
+      ],
+      "text": "经济性",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        72,
+        410,
+        372,
+        28
+      ],
+      "text": "毛利能否覆盖班次成本",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s21",
+      "type": "shape",
+      "bounds": [
+        492,
+        332,
+        420,
+        120
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s22",
+      "type": "shape",
+      "bounds": [
+        492,
+        332,
+        4,
+        120
+      ],
+      "shape": "rect",
+      "fill": "rule",
+      "z": 0
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        516,
+        350,
+        80,
+        24
+      ],
+      "text": "04",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t24",
+      "type": "text",
+      "bounds": [
+        516,
+        376,
+        372,
+        28
+      ],
+      "text": "执行",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t25",
+      "type": "text",
+      "bounds": [
+        516,
+        410,
+        372,
+        28
+      ],
+      "text": "六周门槛是否写进预算",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l26",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "02",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

@@ -1,0 +1,516 @@
+{
+  "id": "evidence-tree",
+  "layout": "evidence-tree",
+  "notes": "证据树：每个分支都应能被单独证实或证伪。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "02  /  证据树",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "把问题拆成可独立验证的分支",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s3",
+      "type": "shape",
+      "bounds": [
+        48,
+        250,
+        200,
+        88
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        60,
+        272,
+        176,
+        52
+      ],
+      "text": "核心假设\n店面可核算",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "weight": 700,
+        "align": "center",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l5",
+      "type": "shape",
+      "bounds": [
+        248,
+        294,
+        52,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1.2,
+      "z": 1
+    },
+    {
+      "id": "l6",
+      "type": "shape",
+      "bounds": [
+        300,
+        176,
+        1,
+        118
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "l7",
+      "type": "shape",
+      "bounds": [
+        300,
+        176,
+        40,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "s8",
+      "type": "shape",
+      "bounds": [
+        340,
+        148,
+        168,
+        56
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        352,
+        164,
+        144,
+        28
+      ],
+      "text": "需求",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        528,
+        144,
+        384,
+        28
+      ],
+      "text": "复购是否稳定",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        528,
+        176,
+        384,
+        28
+      ],
+      "text": "客单价有没有被折扣买来",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l12",
+      "type": "shape",
+      "bounds": [
+        300,
+        288,
+        1,
+        6
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "l13",
+      "type": "shape",
+      "bounds": [
+        300,
+        288,
+        40,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "s14",
+      "type": "shape",
+      "bounds": [
+        340,
+        260,
+        168,
+        56
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        352,
+        276,
+        144,
+        28
+      ],
+      "text": "能力",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        528,
+        256,
+        384,
+        28
+      ],
+      "text": "店长能否看懂周报",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        528,
+        288,
+        384,
+        28
+      ],
+      "text": "库存是否按周盘清",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l18",
+      "type": "shape",
+      "bounds": [
+        300,
+        294,
+        1,
+        106
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "l19",
+      "type": "shape",
+      "bounds": [
+        300,
+        400,
+        40,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1,
+      "z": 1
+    },
+    {
+      "id": "s20",
+      "type": "shape",
+      "bounds": [
+        340,
+        372,
+        168,
+        56
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        352,
+        388,
+        144,
+        28
+      ],
+      "text": "经济性",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        528,
+        368,
+        384,
+        28
+      ],
+      "text": "毛利是否覆盖班次",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        528,
+        400,
+        384,
+        28
+      ],
+      "text": "投放能否从店面利润出",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 24
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l24",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t25",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "03",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

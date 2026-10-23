@@ -99,7 +99,7 @@ bun run electron:start
 - **Theme System**: Cascading themes at app and workspace levels
 - **Multi-File Diff**: VS Code-style window for viewing all file changes in a turn
 - **Skills**: Specialized agent instructions stored per-workspace
-- **PPT Design System**: Built-in `ppt-design` plans new presentations with three styles, 14 fixed-coordinate layouts, Chinese typography, and bounded per-slide visual review. Uses bundled OfficeCLI and Bun, without Python. Targeted edits retain the existing deck design. See the [skill workflow](apps/electron/resources/skills/ppt-design/SKILL.md).
+- **PPT Design System**: Built-in `ppt-design` plans new presentations on a 960×540 pt declarative canvas with argument-structure layouts, `deck_check` preflight, and PptxGenJS-native PPTX export. Two bundled styles (`swiss-signal`, `navy-brief`) each ship 12 reference pages. Targeted edits retain the existing deck and still use OfficeCLI. See the [skill workflow](apps/electron/resources/skills/ppt-design/SKILL.md).
 - **File Attachments**: Drag-drop images, PDFs, Office documents with auto-conversion
 - **Automations**: Event-driven automation — create agent sessions on label changes, schedules, tool use, and more
 

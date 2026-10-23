@@ -1,0 +1,450 @@
+{
+  "id": "matrix",
+  "layout": "matrix",
+  "notes": "矩阵：金色只落在被选中的一格。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "03  /  选择",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "根据证据选择下一步",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "s5",
+      "type": "shape",
+      "bounds": [
+        48,
+        156,
+        284,
+        148
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        68,
+        176,
+        244,
+        28
+      ],
+      "text": "继续研究",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        68,
+        220,
+        244,
+        60
+      ],
+      "text": "信号不足，先补观察。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s8",
+      "type": "shape",
+      "bounds": [
+        348,
+        156,
+        284,
+        148
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        368,
+        176,
+        244,
+        28
+      ],
+      "text": "优先投入",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        368,
+        220,
+        244,
+        60
+      ],
+      "text": "先验证假设 B。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "color": "inverse",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        48,
+        316,
+        284,
+        148
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        68,
+        336,
+        244,
+        28
+      ],
+      "text": "持续观察",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        68,
+        380,
+        244,
+        60
+      ],
+      "text": "低影响，放入观察名单。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s14",
+      "type": "shape",
+      "bounds": [
+        348,
+        316,
+        284,
+        148
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        368,
+        336,
+        244,
+        28
+      ],
+      "text": "安排实施",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        368,
+        380,
+        244,
+        60
+      ],
+      "text": "证据够了再排期。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        660,
+        156,
+        252,
+        320
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        680,
+        180,
+        212,
+        20
+      ],
+      "text": "建议行动",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 17
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        680,
+        214,
+        212,
+        80
+      ],
+      "text": "先验证 B",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        680,
+        310,
+        212,
+        120
+      ],
+      "text": "B 同时具备高影响\n和更强信号。\n其余候选先保留。",
+      "textCapacity": {
+        "maxLines": 6,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l21",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "04",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

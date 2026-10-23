@@ -1,0 +1,56 @@
+{
+  "id": "swiss-signal",
+  "name": "Swiss Signal",
+  "palette": {
+    "background": "#F5F3EE",
+    "surface": "#FFFFFF",
+    "text": "#111111",
+    "muted": "#4F4E49",
+    "accent": "#E52333",
+    "secondary": "#111111",
+    "rule": "#CBC8C0",
+    "inverse": "#FFFFFF",
+    "wash": "#E8E5DE"
+  },
+  "fonts": {
+    "heading": {
+      "darwin": {
+        "latin": "Helvetica Neue",
+        "cjk": "PingFang SC"
+      },
+      "win32": {
+        "latin": "Arial",
+        "cjk": "Microsoft YaHei"
+      },
+      "linux": {
+        "latin": "Noto Sans",
+        "cjk": "Noto Sans CJK SC"
+      }
+    },
+    "body": {
+      "darwin": {
+        "latin": "Helvetica Neue",
+        "cjk": "PingFang SC"
+      },
+      "win32": {
+        "latin": "Arial",
+        "cjk": "Microsoft YaHei"
+      },
+      "linux": {
+        "latin": "Noto Sans",
+        "cjk": "Noto Sans CJK SC"
+      }
+    }
+  },
+  "type": {
+    "hero": 42,
+    "title": 30,
+    "heading": 20,
+    "body": 18,
+    "label": 11,
+    "number": 56,
+    "footer": 11,
+    "caption": 13
+  },
+  "margin": 48
+}

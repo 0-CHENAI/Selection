@@ -1,0 +1,675 @@
+{
+  "id": "matrix",
+  "layout": "matrix",
+  "notes": "2×2：主视觉是选择，不是四张等大卡片。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "03  /  2×2",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "按准备度与回报选择下一步",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s3",
+      "type": "shape",
+      "bounds": [
+        48,
+        150,
+        560,
+        320
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        328,
+        150,
+        280,
+        160
+      ],
+      "shape": "rect",
+      "fill": "#F4D4D6",
+      "z": 0
+    },
+    {
+      "id": "l5",
+      "type": "shape",
+      "bounds": [
+        328,
+        150,
+        1,
+        320
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "l6",
+      "type": "shape",
+      "bounds": [
+        48,
+        310,
+        560,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        60,
+        162,
+        240,
+        20
+      ],
+      "text": "继续观察",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        344,
+        162,
+        240,
+        20
+      ],
+      "text": "优先投入",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "label",
+        "color": "text",
+        "weight": 700,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        60,
+        438,
+        240,
+        20
+      ],
+      "text": "暂缓",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        344,
+        438,
+        240,
+        20
+      ],
+      "text": "择机试点",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        430,
+        210,
+        18,
+        18
+      ],
+      "shape": "ellipse",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        454,
+        208,
+        80,
+        22
+      ],
+      "text": "B",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s13",
+      "type": "shape",
+      "bounds": [
+        150,
+        230,
+        12,
+        12
+      ],
+      "shape": "ellipse",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        168,
+        226,
+        80,
+        22
+      ],
+      "text": "A",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "body",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "s15",
+      "type": "shape",
+      "bounds": [
+        210,
+        360,
+        12,
+        12
+      ],
+      "shape": "ellipse",
+      "fill": "muted",
+      "z": 0
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        228,
+        356,
+        80,
+        22
+      ],
+      "text": "D",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "body",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        470,
+        360,
+        12,
+        12
+      ],
+      "shape": "ellipse",
+      "fill": "muted",
+      "z": 0
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        488,
+        356,
+        80,
+        22
+      ],
+      "text": "E",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "body",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        48,
+        476,
+        270,
+        16
+      ],
+      "text": "← 准备度更低",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        338,
+        476,
+        270,
+        16
+      ],
+      "text": "准备度更高 →",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "align": "right",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        640,
+        150,
+        272,
+        56
+      ],
+      "text": "先验证 B",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        640,
+        220,
+        272,
+        72
+      ],
+      "text": "高回报且准备度足够，适合做范围明确的试点。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l23",
+      "type": "shape",
+      "bounds": [
+        640,
+        320,
+        272,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t24",
+      "type": "text",
+      "bounds": [
+        640,
+        330,
+        100,
+        24
+      ],
+      "text": "潜力",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t25",
+      "type": "text",
+      "bounds": [
+        748,
+        330,
+        164,
+        24
+      ],
+      "text": "影响较大",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l26",
+      "type": "shape",
+      "bounds": [
+        640,
+        368,
+        272,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        640,
+        378,
+        100,
+        24
+      ],
+      "text": "证据",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        748,
+        378,
+        164,
+        24
+      ],
+      "text": "信号更强",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l29",
+      "type": "shape",
+      "bounds": [
+        640,
+        416,
+        272,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        640,
+        426,
+        100,
+        24
+      ],
+      "text": "投入",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t31",
+      "type": "text",
+      "bounds": [
+        748,
+        426,
+        164,
+        24
+      ],
+      "text": "先做六周试点",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l32",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t33",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t34",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "04",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

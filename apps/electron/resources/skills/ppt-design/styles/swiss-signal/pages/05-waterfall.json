@@ -1,0 +1,458 @@
+{
+  "id": "waterfall",
+  "layout": "waterfall",
+  "notes": "瀑布图：可见加减项必须能加总到净结果。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "04  /  瀑布",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "把收益与成本放在同一条桥上",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        140,
+        560,
+        18
+      ],
+      "text": "A  /  经营利润桥  ·  指数点",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 50
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "c4",
+      "type": "chart",
+      "bounds": [
+        48,
+        168,
+        560,
+        300
+      ],
+      "chart": {
+        "kind": "waterfall",
+        "categories": [
+          "基期",
+          "规模",
+          "服务",
+          "启动",
+          "结果"
+        ],
+        "series": [
+          {
+            "name": "变动",
+            "values": [
+              100,
+              32,
+              -13,
+              -7,
+              112
+            ]
+          }
+        ],
+        "showValues": true,
+        "hideBase": true
+      },
+      "z": 2
+    },
+    {
+      "id": "l5",
+      "type": "shape",
+      "bounds": [
+        640,
+        150,
+        1,
+        330
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        664,
+        150,
+        248,
+        18
+      ],
+      "text": "B  /  净影响",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        664,
+        178,
+        248,
+        72
+      ],
+      "text": "+12%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 56
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        664,
+        260,
+        248,
+        40
+      ],
+      "text": "扣除成本后的净变化",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l9",
+      "type": "shape",
+      "bounds": [
+        664,
+        330,
+        248,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        664,
+        338,
+        150,
+        24
+      ],
+      "text": "规模收益",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        824,
+        338,
+        88,
+        24
+      ],
+      "text": "+32",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l12",
+      "type": "shape",
+      "bounds": [
+        664,
+        374,
+        248,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        664,
+        382,
+        150,
+        24
+      ],
+      "text": "服务与启动",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 400,
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        824,
+        382,
+        88,
+        24
+      ],
+      "text": "−20",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l15",
+      "type": "shape",
+      "bounds": [
+        664,
+        418,
+        248,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.5,
+      "z": 1
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        664,
+        426,
+        150,
+        24
+      ],
+      "text": "净变化",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "weight": 700,
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        824,
+        426,
+        88,
+        24
+      ],
+      "text": "+12",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "color": "text",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l18",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "05",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

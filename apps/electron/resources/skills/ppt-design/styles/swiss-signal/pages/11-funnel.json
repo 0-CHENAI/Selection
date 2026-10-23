@@ -1,0 +1,505 @@
+{
+  "id": "funnel",
+  "layout": "funnel",
+  "notes": "漏斗：阶梯高度只示意规模，数字以标注为准。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "10  /  漏斗",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "沿漏斗追踪同一群体",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        140,
+        620,
+        18
+      ],
+      "text": "同一初始群体 1,000 人",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        170,
+        148,
+        260
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        60,
+        186,
+        124,
+        40
+      ],
+      "text": "1000",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        60,
+        390,
+        124,
+        28
+      ],
+      "text": "触达",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l7",
+      "type": "shape",
+      "bounds": [
+        196,
+        214,
+        20,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1.1,
+      "z": 1
+    },
+    {
+      "id": "s8",
+      "type": "shape",
+      "bounds": [
+        216,
+        206,
+        148,
+        224
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        228,
+        222,
+        124,
+        40
+      ],
+      "text": "640",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        228,
+        390,
+        124,
+        28
+      ],
+      "text": "进店",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l11",
+      "type": "shape",
+      "bounds": [
+        364,
+        250,
+        20,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1.1,
+      "z": 1
+    },
+    {
+      "id": "s12",
+      "type": "shape",
+      "bounds": [
+        384,
+        242,
+        148,
+        188
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        396,
+        258,
+        124,
+        40
+      ],
+      "text": "360",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "inverse",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        396,
+        390,
+        124,
+        28
+      ],
+      "text": "成交",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l15",
+      "type": "shape",
+      "bounds": [
+        532,
+        286,
+        20,
+        1
+      ],
+      "shape": "line",
+      "stroke": "text",
+      "strokeWidth": 1.1,
+      "z": 1
+    },
+    {
+      "id": "s16",
+      "type": "shape",
+      "bounds": [
+        552,
+        278,
+        148,
+        152
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 0
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        564,
+        294,
+        124,
+        40
+      ],
+      "text": "216",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "text",
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        564,
+        390,
+        124,
+        28
+      ],
+      "text": "复购",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l19",
+      "type": "shape",
+      "bounds": [
+        740,
+        160,
+        1,
+        300
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        760,
+        176,
+        152,
+        56
+      ],
+      "text": "21.6%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 36
+      },
+      "z": 2
+    },
+    {
+      "id": "t21",
+      "type": "text",
+      "bounds": [
+        760,
+        250,
+        152,
+        72
+      ],
+      "text": "全流程转化\n216 / 1,000",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l22",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t24",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "11",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

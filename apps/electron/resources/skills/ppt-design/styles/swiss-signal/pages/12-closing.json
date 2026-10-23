@@ -1,0 +1,292 @@
+{
+  "id": "closing",
+  "layout": "closing",
+  "notes": "收束：黑场只放行动，不再重复分析。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        28,
+        600,
+        16
+      ],
+      "text": "11  /  下一步",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 54
+      },
+      "style": {
+        "role": "label",
+        "color": "wash",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        70,
+        800,
+        80
+      ],
+      "text": "一个明确问题。\n一项具体行动。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "hero",
+        "color": "inverse",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 36
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        200,
+        70,
+        36
+      ],
+      "text": "01",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 2
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        130,
+        206,
+        740,
+        40
+      ],
+      "text": "冻结投放加码，直到 B 店完成六周试点。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 37
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l5",
+      "type": "shape",
+      "bounds": [
+        130,
+        256,
+        740,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        48,
+        280,
+        70,
+        36
+      ],
+      "text": "02",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 2
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        130,
+        286,
+        740,
+        40
+      ],
+      "text": "店长周报只保留完成率、等待和复购三列。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 37
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l8",
+      "type": "shape",
+      "bounds": [
+        130,
+        336,
+        740,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        48,
+        360,
+        70,
+        36
+      ],
+      "text": "03",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 2
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        130,
+        366,
+        740,
+        40
+      ],
+      "text": "W6 门槛：复购不低于 65%，否则回退。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 37
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "l11",
+      "type": "shape",
+      "bounds": [
+        130,
+        416,
+        740,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "wash",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "12",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "wash",
+        "align": "right",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

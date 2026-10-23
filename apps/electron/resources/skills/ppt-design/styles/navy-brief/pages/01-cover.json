@@ -1,0 +1,323 @@
+{
+  "id": "cover",
+  "layout": "cover",
+  "notes": "封面：低位大标题、金线和右侧决策条，不用大红数字块。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s2",
+      "type": "shape",
+      "bounds": [
+        48,
+        36,
+        12,
+        12
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        72,
+        32,
+        520,
+        20
+      ],
+      "text": "NAVY BRIEF  /  决策简报",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 43
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.3,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        188,
+        220,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        208,
+        560,
+        120
+      ],
+      "text": "把不确定性\n变成可执行决策",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "hero",
+        "weight": 700,
+        "lineHeight": 1.08,
+        "size": 44
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        48,
+        350,
+        540,
+        48
+      ],
+      "text": "在全面投入前，先验证\n那条会改写计划的核心假设。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 30
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "s7",
+      "type": "shape",
+      "bounds": [
+        680,
+        156,
+        232,
+        308
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s8",
+      "type": "shape",
+      "bounds": [
+        680,
+        156,
+        232,
+        6
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        700,
+        184,
+        192,
+        18
+      ],
+      "text": "验证窗口",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        700,
+        210,
+        192,
+        36
+      ],
+      "text": "6 周",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        700,
+        270,
+        192,
+        18
+      ],
+      "text": "回退门槛",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        700,
+        296,
+        192,
+        36
+      ],
+      "text": "复购 65%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        700,
+        356,
+        192,
+        18
+      ],
+      "text": "冻结项",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        700,
+        382,
+        192,
+        36
+      ],
+      "text": "投放加码",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "l15",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "01",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

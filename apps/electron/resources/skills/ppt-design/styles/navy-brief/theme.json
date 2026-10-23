@@ -1,0 +1,56 @@
+{
+  "id": "navy-brief",
+  "name": "Navy Brief",
+  "palette": {
+    "background": "#0B1220",
+    "surface": "#172033",
+    "text": "#F3EEE4",
+    "muted": "#A89F90",
+    "accent": "#C9A36A",
+    "secondary": "#8FA3C4",
+    "rule": "#2A3548",
+    "inverse": "#0B1220",
+    "wash": "#121A2A"
+  },
+  "fonts": {
+    "heading": {
+      "darwin": {
+        "latin": "Helvetica Neue",
+        "cjk": "PingFang SC"
+      },
+      "win32": {
+        "latin": "Segoe UI",
+        "cjk": "Microsoft YaHei"
+      },
+      "linux": {
+        "latin": "Noto Sans",
+        "cjk": "Noto Sans CJK SC"
+      }
+    },
+    "body": {
+      "darwin": {
+        "latin": "Helvetica Neue",
+        "cjk": "PingFang SC"
+      },
+      "win32": {
+        "latin": "Segoe UI",
+        "cjk": "Microsoft YaHei"
+      },
+      "linux": {
+        "latin": "Noto Sans",
+        "cjk": "Noto Sans CJK SC"
+      }
+    }
+  },
+  "type": {
+    "hero": 44,
+    "title": 32,
+    "heading": 20,
+    "body": 18,
+    "label": 12,
+    "number": 54,
+    "footer": 11,
+    "caption": 13
+  },
+  "margin": 48
+}

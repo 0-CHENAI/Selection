@@ -1,0 +1,394 @@
+{
+  "id": "waterfall",
+  "layout": "waterfall",
+  "notes": "深色瀑布：解读落在右侧面板，不跟柱子抢位置。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "04  /  价值桥",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "把收益与成本放在同一条桥上",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "c5",
+      "type": "chart",
+      "bounds": [
+        48,
+        160,
+        540,
+        310
+      ],
+      "chart": {
+        "kind": "waterfall",
+        "categories": [
+          "基期",
+          "规模",
+          "服务",
+          "启动",
+          "结果"
+        ],
+        "series": [
+          {
+            "name": "变动",
+            "values": [
+              100,
+              32,
+              -13,
+              -7,
+              112
+            ],
+            "color": "accent"
+          }
+        ],
+        "showValues": true,
+        "hideBase": true
+      },
+      "z": 2
+    },
+    {
+      "id": "s6",
+      "type": "shape",
+      "bounds": [
+        616,
+        160,
+        296,
+        310
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        640,
+        180,
+        252,
+        18
+      ],
+      "text": "净结果",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 21
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        640,
+        210,
+        252,
+        70
+      ],
+      "text": "+12%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 54
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        640,
+        290,
+        252,
+        48
+      ],
+      "text": "32 点收益里有 20 点\n被成本吃掉。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "body",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        640,
+        350,
+        140,
+        24
+      ],
+      "text": "收益",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "weight": 400,
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        800,
+        350,
+        88,
+        24
+      ],
+      "text": "+32",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        640,
+        384,
+        140,
+        24
+      ],
+      "text": "成本",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "weight": 400,
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        800,
+        384,
+        88,
+        24
+      ],
+      "text": "−20",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        640,
+        418,
+        140,
+        24
+      ],
+      "text": "净变化",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "body",
+        "color": "text",
+        "weight": 700,
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        800,
+        418,
+        88,
+        24
+      ],
+      "text": "+12",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 5
+      },
+      "style": {
+        "role": "heading",
+        "align": "right",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l16",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "05",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

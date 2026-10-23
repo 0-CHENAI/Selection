@@ -1,0 +1,639 @@
+{
+  "id": "gantt",
+  "layout": "gantt",
+  "notes": "甘特：时间条连接到一个明确的决策门槛。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "07  /  路线图",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "围绕决策门槛安排执行顺序",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        140,
+        240,
+        18
+      ],
+      "text": "工作流 / 负责人",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 21
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        320,
+        140,
+        140,
+        18
+      ],
+      "text": "W1–2",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        468,
+        140,
+        140,
+        18
+      ],
+      "text": "W3–4",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        616,
+        140,
+        140,
+        18
+      ],
+      "text": "W5–6",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        764,
+        140,
+        140,
+        18
+      ],
+      "text": "W7–8",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "l8",
+      "type": "shape",
+      "bounds": [
+        308,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "wash",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "l9",
+      "type": "shape",
+      "bounds": [
+        456,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "wash",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "l10",
+      "type": "shape",
+      "bounds": [
+        604,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "wash",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "l11",
+      "type": "shape",
+      "bounds": [
+        752,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "wash",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "l12",
+      "type": "shape",
+      "bounds": [
+        900,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "wash",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "l13",
+      "type": "shape",
+      "bounds": [
+        48,
+        172,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        48,
+        180,
+        240,
+        24
+      ],
+      "text": "基线与范围",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        48,
+        208,
+        240,
+        18
+      ],
+      "text": "研究团队",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s16",
+      "type": "shape",
+      "bounds": [
+        310,
+        188,
+        155.4,
+        28
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "l17",
+      "type": "shape",
+      "bounds": [
+        48,
+        242,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        48,
+        250,
+        240,
+        24
+      ],
+      "text": "小规模试点",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        48,
+        278,
+        240,
+        18
+      ],
+      "text": "门店运营",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s20",
+      "type": "shape",
+      "bounds": [
+        428.4,
+        258,
+        207.2,
+        28
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "l21",
+      "type": "shape",
+      "bounds": [
+        48,
+        312,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        48,
+        320,
+        240,
+        24
+      ],
+      "text": "评估证据",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        48,
+        348,
+        240,
+        18
+      ],
+      "text": "分析团队",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s24",
+      "type": "shape",
+      "bounds": [
+        606,
+        328,
+        170.2,
+        28
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "l25",
+      "type": "shape",
+      "bounds": [
+        48,
+        382,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.4,
+      "z": 1
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        48,
+        390,
+        240,
+        24
+      ],
+      "text": "决定下一步",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        48,
+        418,
+        240,
+        18
+      ],
+      "text": "项目负责人",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s28",
+      "type": "shape",
+      "bounds": [
+        761.4,
+        398,
+        133.20000000000002,
+        28
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "l29",
+      "type": "shape",
+      "bounds": [
+        604,
+        168,
+        1,
+        302
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.4,
+      "z": 1
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        560,
+        474,
+        120,
+        16
+      ],
+      "text": "W6 门槛",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "label",
+        "color": "text",
+        "align": "center",
+        "weight": 700,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "l31",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t32",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t33",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "08",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

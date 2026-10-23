@@ -1,0 +1,271 @@
+{
+  "id": "cover",
+  "layout": "cover",
+  "notes": "封面：左侧主张，右侧只用一个红色信号数字。所有数字均为示例。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        28,
+        520,
+        16
+      ],
+      "text": "SWISS SIGNAL  /  经营复盘",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 47
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "tracking": 1.4,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "s2",
+      "type": "shape",
+      "bounds": [
+        48,
+        56,
+        56,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        86,
+        500,
+        120
+      ],
+      "text": "从投放获客\n到门店经营",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "hero",
+        "weight": 700,
+        "lineHeight": 1.08,
+        "size": 42
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        48,
+        230,
+        500,
+        48
+      ],
+      "text": "华东零售网络如何把流量\n变成可复盘的店面利润。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 27
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        320,
+        500,
+        72
+      ],
+      "text": "受众：区域经营会\n决策：是否把投放预算改挂到门店单元\n范围：2024 示例账期",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 31
+      },
+      "style": {
+        "role": "body",
+        "lineHeight": 1.35,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "signal",
+      "type": "shape",
+      "bounds": [
+        620,
+        72,
+        300,
+        400
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        644,
+        140,
+        256,
+        88
+      ],
+      "text": "2.7×",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "color": "inverse",
+        "weight": 700,
+        "size": 64
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        644,
+        248,
+        256,
+        72
+      ],
+      "text": "同店销售相对\n投放获客期",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "heading",
+        "color": "inverse",
+        "weight": 600,
+        "lineHeight": 1.2,
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        644,
+        360,
+        256,
+        72
+      ],
+      "text": "分子：店面毛利\n分母：投放期获客成本",
+      "textCapacity": {
+        "maxLines": 4,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "caption",
+        "color": "inverse",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "l9",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "01",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

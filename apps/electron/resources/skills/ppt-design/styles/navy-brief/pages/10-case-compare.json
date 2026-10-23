@@ -1,0 +1,369 @@
+{
+  "id": "case-compare",
+  "layout": "case-compare",
+  "notes": "对照：左右是同一口径的前后状态，不是两个产品卖点。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "09  /  对照",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "小范围改变，可衡量的结果",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "s5",
+      "type": "shape",
+      "bounds": [
+        48,
+        156,
+        420,
+        320
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s6",
+      "type": "shape",
+      "bounds": [
+        492,
+        156,
+        420,
+        320
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "s7",
+      "type": "shape",
+      "bounds": [
+        48,
+        156,
+        420,
+        8
+      ],
+      "shape": "rect",
+      "fill": "muted",
+      "z": 0
+    },
+    {
+      "id": "s8",
+      "type": "shape",
+      "bounds": [
+        492,
+        156,
+        420,
+        8
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        72,
+        180,
+        372,
+        20
+      ],
+      "text": "试点前",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 31
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        516,
+        180,
+        372,
+        20
+      ],
+      "text": "试点后",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 31
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        72,
+        214,
+        372,
+        48
+      ],
+      "text": "等待 18 分钟",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 24
+      },
+      "z": 2
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        516,
+        214,
+        372,
+        48
+      ],
+      "text": "等待 7 分钟",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "accent",
+        "size": 24
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        72,
+        280,
+        372,
+        48
+      ],
+      "text": "完成率 46%",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "body",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        516,
+        280,
+        372,
+        48
+      ],
+      "text": "完成率 73%",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "body",
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        72,
+        350,
+        372,
+        80
+      ],
+      "text": "下一步不清晰，\n交接后常停住。",
+      "textCapacity": {
+        "maxLines": 4,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        516,
+        350,
+        372,
+        80
+      ],
+      "text": "任务定义不变，\n只让下一位负责人可见。",
+      "textCapacity": {
+        "maxLines": 4,
+        "maxCharsPerLine": 23
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "l17",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "10",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

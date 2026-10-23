@@ -1,0 +1,204 @@
+{
+  "id": "closing",
+  "layout": "closing",
+  "notes": "收束：金线加大标题，只留一个决定和两条行动。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s2",
+      "type": "shape",
+      "bounds": [
+        48,
+        160,
+        180,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        36,
+        400,
+        18
+      ],
+      "text": "12  /  行动",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 33
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        48,
+        180,
+        800,
+        100
+      ],
+      "text": "先验证核心假设。\n再决定是否扩店。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "hero",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 36
+      },
+      "z": 2
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        320,
+        64,
+        32
+      ],
+      "text": "01",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 2
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        124,
+        324,
+        700,
+        28
+      ],
+      "text": "W6 之前不增加投放。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 38
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        48,
+        384,
+        64,
+        32
+      ],
+      "text": "02",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 2
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 22
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        124,
+        388,
+        700,
+        28
+      ],
+      "text": "复购不到 65% 就回退。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 38
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "12",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

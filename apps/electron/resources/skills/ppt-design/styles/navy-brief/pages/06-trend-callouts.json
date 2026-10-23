@@ -1,0 +1,353 @@
+{
+  "id": "trend-callouts",
+  "layout": "trend-callouts",
+  "notes": "趋势在上、解读在下，避免左右挤在一起。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "05  /  趋势",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "阅读趋势，追问停顿的原因",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "c5",
+      "type": "chart",
+      "bounds": [
+        48,
+        156,
+        864,
+        210
+      ],
+      "chart": {
+        "kind": "line",
+        "categories": [
+          "W1",
+          "W2",
+          "W3",
+          "W4",
+          "W5",
+          "W6"
+        ],
+        "series": [
+          {
+            "name": "指数",
+            "values": [
+              100,
+              108,
+              114,
+              112,
+              128,
+              142
+            ],
+            "color": "accent"
+          }
+        ],
+        "showValues": true
+      },
+      "z": 2
+    },
+    {
+      "id": "s6",
+      "type": "shape",
+      "bounds": [
+        48,
+        384,
+        288,
+        100
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        64,
+        396,
+        256,
+        22
+      ],
+      "text": "W4 停顿",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "weight": 700,
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        64,
+        424,
+        256,
+        48
+      ],
+      "text": "连续上升后第一次回落\n需要解释。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 17
+      },
+      "style": {
+        "role": "body",
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "s9",
+      "type": "shape",
+      "bounds": [
+        352,
+        384,
+        288,
+        100
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        368,
+        394,
+        256,
+        36
+      ],
+      "text": "+42%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        368,
+        436,
+        256,
+        36
+      ],
+      "text": "期末相对基期的累计变化。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "s12",
+      "type": "shape",
+      "bounds": [
+        656,
+        384,
+        288,
+        100
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        672,
+        396,
+        256,
+        22
+      ],
+      "text": "下一步",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 18
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "weight": 700,
+        "size": 14
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        672,
+        424,
+        256,
+        48
+      ],
+      "text": "先核对第四周班次和库存\n而不是加投放。",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 17
+      },
+      "style": {
+        "role": "body",
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "l15",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t17",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "06",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

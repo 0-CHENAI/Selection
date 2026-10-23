@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **PPT 声明式页面引擎** — 新建或整套重设计改为 960×540 点声明式页面（bounds、textCapacity、主题 token），用 PptxGenJS 导出可编辑 PPTX，并一次报出越界、重叠、超容量、对比度、孤字和字面换行。附带 Swiss Signal 与 Navy Brief 两套各 12 页论证版式。已有文件的局部修改仍走 OfficeCLI。Issue #631.
+
 - **PPT 设计系统的三套版式** — 新建或整套重设计演示文稿时，商务、深色科技和杂志三套风格使用各自的满版构图、字号和图表样式，而不再是同一版式换色。局部修改仍走原来的 OfficeCLI 路径。Issue #626.
 
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.

@@ -1,6 +1,6 @@
 ---
 name: officecli
-description: "Inspect, edit, validate, and deliver Word, Excel, and PowerPoint files with Selection's bundled OfficeCLI. Creates Word and Excel; for new PowerPoint presentations or whole-deck redesigns, ppt-design owns design and this router supplies the engine. Targeted edits and conversion preserve the existing deck design. Read before officecli load_skill."
+description: "Inspect, edit, validate, and deliver Word, Excel, and PowerPoint files with Selection's bundled OfficeCLI. Creates Word and Excel; for new PowerPoint presentations or whole-deck redesigns, ppt-design owns design and PptxGenJS export. Targeted edits and conversion preserve the existing deck design. Read before officecli load_skill."
 ---
 
 # OfficeCLI
@@ -27,7 +27,7 @@ Before creating or editing a file, load the instructions in this order. Load eac
 
 ### Mandatory PowerPoint routing and precedence
 
-1. **New deck or whole-deck redesign:** read [`../ppt-design/SKILL.md`](../ppt-design/SKILL.md) and its required references before document commands. `ppt-design` owns the story, locked style, typography, content limits, fixed-coordinate layouts, and G1–G5 workflow. The official `pptx` guide supplies OfficeCLI syntax, not a second design process. Load pitch/Morph guides only for requested fundraising/motion deltas.
+1. **New deck or whole-deck redesign:** read [`../ppt-design/SKILL.md`](../ppt-design/SKILL.md) and its required references before creating slides. `ppt-design` owns the story, locked style, 960×540 declarative pages, `deck_check`/`deck_render` (PptxGenJS), and G1–G5. OfficeCLI is not the composer for a new deck. The official `pptx` guide supplies syntax for later edits, not a second design process. Load pitch/Morph guides only for requested fundraising/motion deltas.
 2. **Targeted edit to an existing deck:** use OfficeCLI directly and preserve the existing theme, masters, typography, palette, layout, and unrelated content. Do not route a local text/data/shape edit through a redesign or force a `ppt-design` style onto it. Inspect the existing file before editing.
 3. Load the official guide(s) from the table. **After all `load_skill` output, unconditionally read [`ppt-selection-override.md`](ppt-selection-override.md) for every PowerPoint task**, including targeted edits, pitch, Morph, and 3D Morph. If an additional PowerPoint guide is loaded later, reapply this override before the next document command. Do not execute legacy QA blocks or style-build instructions first.
 4. Precedence for PowerPoint is: user requirements and the targeted-edit boundary; this router and the Selection override; `ppt-design` for new/redesigned-deck design; official guide syntax and requested scene deltas. `officecli help` remains authoritative for the installed command schema. Older loaded guides cannot reinstate conflicting Gates, QA loops, `jq`, Python/shell helpers, manual grid design, palettes/fonts, or cover-fill requirements. Read the override as operative instructions, not optional advice.

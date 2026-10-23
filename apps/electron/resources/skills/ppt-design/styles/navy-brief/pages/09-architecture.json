@@ -1,0 +1,725 @@
+{
+  "id": "architecture",
+  "layout": "architecture",
+  "notes": "架构：四列主路径，金色行是正在跑的一层。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "08  /  系统",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "让交接顺序可以被检查",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        154,
+        150,
+        22
+      ],
+      "text": "接入",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "align": "center",
+        "size": 13
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        216,
+        154,
+        150,
+        22
+      ],
+      "text": "处理",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "align": "center",
+        "size": 13
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        384,
+        154,
+        150,
+        22
+      ],
+      "text": "履约",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "align": "center",
+        "size": 13
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        552,
+        154,
+        150,
+        22
+      ],
+      "text": "观测",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "align": "center",
+        "size": 13
+      },
+      "z": 2
+    },
+    {
+      "id": "s9",
+      "type": "shape",
+      "bounds": [
+        48,
+        186,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        56,
+        208,
+        134,
+        28
+      ],
+      "text": "订单",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        216,
+        186,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        224,
+        208,
+        134,
+        28
+      ],
+      "text": "调度",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s13",
+      "type": "shape",
+      "bounds": [
+        384,
+        186,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        392,
+        208,
+        134,
+        28
+      ],
+      "text": "配送",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s15",
+      "type": "shape",
+      "bounds": [
+        552,
+        186,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        560,
+        208,
+        134,
+        28
+      ],
+      "text": "等待",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        48,
+        274,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        56,
+        296,
+        134,
+        28
+      ],
+      "text": "库存",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s19",
+      "type": "shape",
+      "bounds": [
+        216,
+        274,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        224,
+        296,
+        134,
+        28
+      ],
+      "text": "分拣",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s21",
+      "type": "shape",
+      "bounds": [
+        384,
+        274,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        392,
+        296,
+        134,
+        28
+      ],
+      "text": "签收",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s23",
+      "type": "shape",
+      "bounds": [
+        552,
+        274,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t24",
+      "type": "text",
+      "bounds": [
+        560,
+        296,
+        134,
+        28
+      ],
+      "text": "异常",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "inverse",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s25",
+      "type": "shape",
+      "bounds": [
+        48,
+        362,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t26",
+      "type": "text",
+      "bounds": [
+        56,
+        384,
+        134,
+        28
+      ],
+      "text": "规则",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s27",
+      "type": "shape",
+      "bounds": [
+        216,
+        362,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        224,
+        384,
+        134,
+        28
+      ],
+      "text": "排队",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s29",
+      "type": "shape",
+      "bounds": [
+        384,
+        362,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t30",
+      "type": "text",
+      "bounds": [
+        392,
+        384,
+        134,
+        28
+      ],
+      "text": "回访",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s31",
+      "type": "shape",
+      "bounds": [
+        552,
+        362,
+        150,
+        72
+      ],
+      "shape": "rect",
+      "fill": "surface",
+      "z": 0
+    },
+    {
+      "id": "t32",
+      "type": "text",
+      "bounds": [
+        560,
+        384,
+        134,
+        28
+      ],
+      "text": "复盘",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "color": "text",
+        "align": "center",
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s33",
+      "type": "shape",
+      "bounds": [
+        732,
+        186,
+        180,
+        248
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t34",
+      "type": "text",
+      "bounds": [
+        748,
+        206,
+        148,
+        72
+      ],
+      "text": "先暴露失败路径",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 20
+      },
+      "z": 2
+    },
+    {
+      "id": "t35",
+      "type": "text",
+      "bounds": [
+        748,
+        290,
+        148,
+        120
+      ],
+      "text": "中间一行是\n当前主路径。\n上下两行不能空。",
+      "textCapacity": {
+        "maxLines": 6,
+        "maxCharsPerLine": 9
+      },
+      "style": {
+        "role": "body",
+        "color": "muted",
+        "size": 15
+      },
+      "z": 2
+    },
+    {
+      "id": "l36",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t37",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t38",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "09",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

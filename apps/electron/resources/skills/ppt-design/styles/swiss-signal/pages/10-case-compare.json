@@ -1,0 +1,494 @@
+{
+  "id": "case-compare",
+  "layout": "case-compare",
+  "notes": "案例对比：前后口径必须相同，不作因果夸大。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "09  /  案例",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "小范围改变，可衡量的结果",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        148,
+        300,
+        18
+      ],
+      "text": "关键改变",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 27
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t4",
+      "type": "text",
+      "bounds": [
+        48,
+        176,
+        300,
+        88
+      ],
+      "text": "一个清晰\n可见的下一步",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 10
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "lineHeight": 1.15,
+        "size": 28
+      },
+      "z": 2
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        48,
+        290,
+        300,
+        72
+      ],
+      "text": "六周试点，任务定义不变，\n只改交接可见性。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l6",
+      "type": "shape",
+      "bounds": [
+        372,
+        150,
+        1,
+        330
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        400,
+        156,
+        512,
+        18
+      ],
+      "text": "等待 / 分钟",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 46
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        400,
+        180,
+        200,
+        44
+      ],
+      "text": "18",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 6
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "muted",
+        "size": 32
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        640,
+        180,
+        272,
+        44
+      ],
+      "text": "7",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "accent",
+        "size": 32
+      },
+      "z": 2
+    },
+    {
+      "id": "s10",
+      "type": "shape",
+      "bounds": [
+        400,
+        234,
+        200,
+        14
+      ],
+      "shape": "rect",
+      "fill": "muted",
+      "z": 0
+    },
+    {
+      "id": "s11",
+      "type": "shape",
+      "bounds": [
+        640,
+        234,
+        77.77777777777779,
+        14
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        400,
+        256,
+        200,
+        18
+      ],
+      "text": "试点前",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        640,
+        256,
+        200,
+        18
+      ],
+      "text": "试点后",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "caption",
+        "color": "text",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        400,
+        316,
+        512,
+        18
+      ],
+      "text": "完成率 / %",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 46
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        400,
+        340,
+        200,
+        44
+      ],
+      "text": "46%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 6
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "muted",
+        "size": 32
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        640,
+        340,
+        272,
+        44
+      ],
+      "text": "73%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "number",
+        "weight": 700,
+        "color": "accent",
+        "size": 32
+      },
+      "z": 2
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        400,
+        394,
+        126.02739726027397,
+        14
+      ],
+      "shape": "rect",
+      "fill": "muted",
+      "z": 0
+    },
+    {
+      "id": "s18",
+      "type": "shape",
+      "bounds": [
+        640,
+        394,
+        200,
+        14
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        400,
+        416,
+        200,
+        18
+      ],
+      "text": "试点前",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "caption",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t20",
+      "type": "text",
+      "bounds": [
+        640,
+        416,
+        200,
+        18
+      ],
+      "text": "试点后",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 16
+      },
+      "style": {
+        "role": "caption",
+        "color": "text",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "l21",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "10",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

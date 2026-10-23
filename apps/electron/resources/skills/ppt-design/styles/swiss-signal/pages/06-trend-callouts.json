@@ -1,0 +1,377 @@
+{
+  "id": "trend-callouts",
+  "layout": "trend-callouts",
+  "notes": "趋势图：标注异常周，而不是只画一条上升线。",
+  "source": "示例数据，仅供版式对照，不构成经营结论。",
+  "elements": [
+    {
+      "id": "rail",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        18,
+        540
+      ],
+      "shape": "rect",
+      "fill": "text",
+      "z": 0
+    },
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        18,
+        0,
+        942,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "t1",
+      "type": "text",
+      "bounds": [
+        48,
+        22,
+        620,
+        16
+      ],
+      "text": "05  /  趋势",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 56
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "font": "body",
+        "tracking": 1.2,
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "tick",
+      "type": "shape",
+      "bounds": [
+        48,
+        46,
+        52,
+        3
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        48,
+        58,
+        864,
+        64
+      ],
+      "text": "阅读趋势，追问停顿的原因",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        140,
+        240,
+        18
+      ],
+      "text": "A  /  周指数  ·  基期 = 100",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 21
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        300,
+        168,
+        86,
+        280
+      ],
+      "shape": "rect",
+      "fill": "#F4D4D6",
+      "z": 0
+    },
+    {
+      "id": "c5",
+      "type": "chart",
+      "bounds": [
+        48,
+        176,
+        560,
+        260
+      ],
+      "chart": {
+        "kind": "line",
+        "categories": [
+          "W1",
+          "W2",
+          "W3",
+          "W4",
+          "W5",
+          "W6"
+        ],
+        "series": [
+          {
+            "name": "指数",
+            "values": [
+              100,
+              108,
+              114,
+              112,
+              128,
+              142
+            ],
+            "color": "text"
+          }
+        ],
+        "showValues": true
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        300,
+        148,
+        86,
+        18
+      ],
+      "text": "W4 停顿",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 7
+      },
+      "style": {
+        "role": "label",
+        "color": "text",
+        "weight": 700,
+        "align": "center",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "l7",
+      "type": "shape",
+      "bounds": [
+        640,
+        150,
+        1,
+        330
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        664,
+        150,
+        248,
+        18
+      ],
+      "text": "B  /  变化解读",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 22
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t9",
+      "type": "text",
+      "bounds": [
+        664,
+        178,
+        248,
+        72
+      ],
+      "text": "+42%",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 4
+      },
+      "style": {
+        "role": "number",
+        "color": "accent",
+        "weight": 700,
+        "size": 56
+      },
+      "z": 2
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        664,
+        260,
+        248,
+        40
+      ],
+      "text": "相对基期的累计增长",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l11",
+      "type": "shape",
+      "bounds": [
+        664,
+        320,
+        248,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.8,
+      "z": 1
+    },
+    {
+      "id": "t12",
+      "type": "text",
+      "bounds": [
+        664,
+        336,
+        248,
+        18
+      ],
+      "text": "下一步检查",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 20
+      },
+      "style": {
+        "role": "label",
+        "weight": 700,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t13",
+      "type": "text",
+      "bounds": [
+        664,
+        364,
+        248,
+        72
+      ],
+      "text": "第四周为何停顿，\n而不是只看期末点。",
+      "textCapacity": {
+        "maxLines": 3,
+        "maxCharsPerLine": 13
+      },
+      "style": {
+        "role": "body",
+        "size": 18
+      },
+      "z": 2
+    },
+    {
+      "id": "l14",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.6,
+      "z": 1
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "示例数据，仅供版式对照，不构成经营结论。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t16",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "06",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}

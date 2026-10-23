@@ -1,0 +1,520 @@
+{
+  "id": "gantt",
+  "layout": "gantt",
+  "notes": "深色泳道甘特：门槛是竖线，不是又一张卡片。",
+  "source": "决策简报示例。数字、门槛和责任人均为虚构。",
+  "elements": [
+    {
+      "id": "field",
+      "type": "shape",
+      "bounds": [
+        0,
+        0,
+        960,
+        540
+      ],
+      "shape": "rect",
+      "fill": "background",
+      "z": 0
+    },
+    {
+      "id": "s1",
+      "type": "shape",
+      "bounds": [
+        48,
+        26,
+        10,
+        10
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t2",
+      "type": "text",
+      "bounds": [
+        68,
+        22,
+        700,
+        18
+      ],
+      "text": "07  /  顺序",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 58
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "tracking": 1.1,
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t3",
+      "type": "text",
+      "bounds": [
+        48,
+        52,
+        864,
+        68
+      ],
+      "text": "围绕决策门槛安排执行顺序",
+      "textCapacity": {
+        "maxLines": 2,
+        "maxCharsPerLine": 28
+      },
+      "style": {
+        "role": "title",
+        "weight": 700,
+        "lineHeight": 1.12,
+        "size": 30
+      },
+      "z": 2
+    },
+    {
+      "id": "s4",
+      "type": "shape",
+      "bounds": [
+        48,
+        126,
+        120,
+        2
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "t5",
+      "type": "text",
+      "bounds": [
+        260,
+        150,
+        150,
+        18
+      ],
+      "text": "W1–2",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t6",
+      "type": "text",
+      "bounds": [
+        428,
+        150,
+        150,
+        18
+      ],
+      "text": "W3–4",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t7",
+      "type": "text",
+      "bounds": [
+        596,
+        150,
+        150,
+        18
+      ],
+      "text": "W5–6",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t8",
+      "type": "text",
+      "bounds": [
+        764,
+        150,
+        150,
+        18
+      ],
+      "text": "W7–8",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 12
+      },
+      "style": {
+        "role": "label",
+        "color": "muted",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "s9",
+      "type": "shape",
+      "bounds": [
+        48,
+        180,
+        864,
+        64
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t10",
+      "type": "text",
+      "bounds": [
+        60,
+        190,
+        180,
+        22
+      ],
+      "text": "研究",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t11",
+      "type": "text",
+      "bounds": [
+        60,
+        212,
+        180,
+        22
+      ],
+      "text": "基线与范围",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s12",
+      "type": "shape",
+      "bounds": [
+        260,
+        200,
+        184.8,
+        24
+      ],
+      "shape": "rect",
+      "fill": "secondary",
+      "z": 0
+    },
+    {
+      "id": "s13",
+      "type": "shape",
+      "bounds": [
+        48,
+        252,
+        864,
+        64
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t14",
+      "type": "text",
+      "bounds": [
+        60,
+        262,
+        180,
+        22
+      ],
+      "text": "运营",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t15",
+      "type": "text",
+      "bounds": [
+        60,
+        284,
+        180,
+        22
+      ],
+      "text": "小规模试点",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s16",
+      "type": "shape",
+      "bounds": [
+        377.6,
+        272,
+        252,
+        24
+      ],
+      "shape": "rect",
+      "fill": "secondary",
+      "z": 0
+    },
+    {
+      "id": "s17",
+      "type": "shape",
+      "bounds": [
+        48,
+        324,
+        864,
+        64
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t18",
+      "type": "text",
+      "bounds": [
+        60,
+        334,
+        180,
+        22
+      ],
+      "text": "分析",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t19",
+      "type": "text",
+      "bounds": [
+        60,
+        356,
+        180,
+        22
+      ],
+      "text": "评估证据",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s20",
+      "type": "shape",
+      "bounds": [
+        612.8,
+        344,
+        184.8,
+        24
+      ],
+      "shape": "rect",
+      "fill": "accent",
+      "z": 0
+    },
+    {
+      "id": "s21",
+      "type": "shape",
+      "bounds": [
+        48,
+        396,
+        864,
+        64
+      ],
+      "shape": "rect",
+      "fill": "wash",
+      "z": 0
+    },
+    {
+      "id": "t22",
+      "type": "text",
+      "bounds": [
+        60,
+        406,
+        180,
+        22
+      ],
+      "text": "负责人",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 15
+      },
+      "style": {
+        "role": "label",
+        "color": "accent",
+        "size": 12
+      },
+      "z": 2
+    },
+    {
+      "id": "t23",
+      "type": "text",
+      "bounds": [
+        60,
+        428,
+        180,
+        22
+      ],
+      "text": "决定下一步",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 11
+      },
+      "style": {
+        "role": "heading",
+        "weight": 700,
+        "size": 16
+      },
+      "z": 2
+    },
+    {
+      "id": "s24",
+      "type": "shape",
+      "bounds": [
+        780.8000000000001,
+        416,
+        142.79999999999998,
+        24
+      ],
+      "shape": "rect",
+      "fill": "secondary",
+      "z": 0
+    },
+    {
+      "id": "l25",
+      "type": "shape",
+      "bounds": [
+        596,
+        174,
+        1,
+        294
+      ],
+      "shape": "line",
+      "stroke": "accent",
+      "strokeWidth": 1.5,
+      "z": 1
+    },
+    {
+      "id": "l26",
+      "type": "shape",
+      "bounds": [
+        48,
+        500,
+        864,
+        1
+      ],
+      "shape": "line",
+      "stroke": "rule",
+      "strokeWidth": 0.7,
+      "z": 1
+    },
+    {
+      "id": "t27",
+      "type": "text",
+      "bounds": [
+        48,
+        508,
+        760,
+        18
+      ],
+      "text": "决策简报示例。数字、门槛和责任人均为虚构。",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 69
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    },
+    {
+      "id": "t28",
+      "type": "text",
+      "bounds": [
+        820,
+        508,
+        92,
+        18
+      ],
+      "text": "08",
+      "textCapacity": {
+        "maxLines": 1,
+        "maxCharsPerLine": 8
+      },
+      "style": {
+        "role": "footer",
+        "color": "muted",
+        "align": "right",
+        "font": "body",
+        "size": 11
+      },
+      "z": 2
+    }
+  ]
+}
