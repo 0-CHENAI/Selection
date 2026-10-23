@@ -1,0 +1,41 @@
+{
+  "business": {
+    "name": "Business / 商务简报",
+    "palette": {"background":"FFFFFF","surface":"F0F4F8","text":"142D4E","muted":"536477","accent":"1464A5","secondary":"6D91B4","rule":"CBD6E2","inverse":"FFFFFF"},
+    "fonts": {
+      "win32":{"heading":"Aptos Display","body":"Aptos","cjkHeading":"Microsoft YaHei","cjkBody":"Microsoft YaHei"},
+      "darwin":{"heading":"Helvetica Neue","body":"Helvetica Neue","cjkHeading":"PingFang SC","cjkBody":"PingFang SC"},
+      "linux":{"heading":"Noto Sans","body":"Noto Sans","cjkHeading":"Noto Sans CJK SC","cjkBody":"Noto Sans CJK SC"}
+    },
+    "type":{"title":36,"hero":48,"body":18,"heading":23,"number":78,"label":14,"footer":12},
+    "decoration":"Top navy band, short blue header rule, solid numbered labels; rectangular pale panels. No shadows, icons, gradients or decorative charts.",
+    "panel":"filled",
+    "chrome":"band"
+  },
+  "dark-tech": {
+    "name":"Dark technology / 深色科技",
+    "palette":{"background":"0B1220","surface":"152238","text":"F0F6FF","muted":"C1CFE0","accent":"60E6D2","secondary":"93B8FF","rule":"3B506C","inverse":"0B1220"},
+    "fonts": {
+      "win32":{"heading":"Bahnschrift","body":"Aptos","cjkHeading":"Microsoft YaHei","cjkBody":"Microsoft YaHei"},
+      "darwin":{"heading":"Menlo","body":"Helvetica Neue","cjkHeading":"PingFang SC","cjkBody":"PingFang SC"},
+      "linux":{"heading":"DejaVu Sans Mono","body":"Noto Sans","cjkHeading":"Noto Sans CJK SC","cjkBody":"Noto Sans CJK SC"}
+    },
+    "type":{"title":36,"hero":46,"body":18,"heading":23,"number":76,"label":14,"footer":12},
+    "decoration":"Dark negative space; cyan left rail and thin outlined modules; small square timeline nodes. No glow behind text, no wallpaper grids, no shadows or icons.",
+    "panel":"outlined",
+    "chrome":"rail"
+  },
+  "fresh-editorial": {
+    "name":"Fresh editorial / 清新编辑",
+    "palette":{"background":"F7F5EE","surface":"EBF0E7","text":"173F35","muted":"50635A","accent":"B44F39","secondary":"5A887B","rule":"C4CCBE","inverse":"FFFFFF"},
+    "fonts": {
+      "win32":{"heading":"Georgia","body":"Aptos","cjkHeading":"SimSun","cjkBody":"Microsoft YaHei"},
+      "darwin":{"heading":"Georgia","body":"Helvetica Neue","cjkHeading":"Songti SC","cjkBody":"PingFang SC"},
+      "linux":{"heading":"Noto Serif","body":"Noto Sans","cjkHeading":"Noto Serif CJK SC","cjkBody":"Noto Sans CJK SC"}
+    },
+    "type":{"title":36,"hero":49,"body":18,"heading":24,"number":80,"label":14,"footer":12},
+    "decoration":"Warm paper field, serif headlines and pull quotes, terracotta kicker, green hairlines. Open columns rather than filled card grids; no shadows, icons or ornamental images.",
+    "panel":"ruled",
+    "chrome":"editorial"
+  }
+}

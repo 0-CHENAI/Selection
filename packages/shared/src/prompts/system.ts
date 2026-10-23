@@ -691,7 +691,7 @@ Select at most one prose skill by language and genre. Read it before drafting or
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in: \`natural-writing\`, \`humanizer\`, \`academic-humanizer\`, and the \`officecli\` router (the router overrides a global \`officecli\` for named or attached Office files)
+- Built-in: \`natural-writing\`, \`humanizer\`, \`academic-humanizer\`, \`ppt-design\`, and \`officecli\` (overrides global \`officecli\` for named/attached Office files)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
