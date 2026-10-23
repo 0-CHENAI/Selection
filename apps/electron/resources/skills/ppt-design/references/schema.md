@@ -2,13 +2,14 @@
 
 格式名 `selection-deck`，`version` 为 `1`。JSON 或 YAML。对象以外的字段会被拒绝，一次报出全部问题。
 
-画布只能是 `{ "width": 960, "height": 540 }`，单位是 pt。
+画布单位是 pt。默认演示页是 `{ "width": 960, "height": 540 }`（16:9）。版式家族还可以用 768×576（4:3）、810×810（1:1）、810×1440（9:16）和 931.5×1245（3:4）。别的尺寸会被拒绝，错误信息里仍会提到 960×540。
 
 ## theme
 
 `id`、`name`、`margin`（0–96）、`source`，以及：
 
-- `colors`：至少 `ink`、`paper`、`muted`、`accent`、`line`、`surface`、`inverse`，值为 `#RRGGBB`。可以追加 token。主题色本身不写透明度。
+- `colors`：至少 `ink`、`paper`、`muted`、`accent`、`line`、`surface`、`inverse`，值为 `#RRGGBB`。可以追加 token，例如 `signal`、`good`、`watch`、`bad`。主题色本身不写透明度。
+- 可选 `logo`：用户标志的路径。引擎只保存这个字符串。要画出来时，页面上放一个 `image`，`src` 与 `logo` 相同，并写 `alt`。
 - `fonts.cjk` 和 `fonts.latin`：各有 `mac`、`win`、`linux`。
 - `type`：`display`、`title`、`body`、`caption`，每项 `{ "min", "max" }`。
 
@@ -46,9 +47,11 @@
 
 `columns` 是相对表宽的比例，和每行的单元格数相同。`rowHeights` 省略时均分表高。单元格可以单独写 `text`、`bold`、`fill`、`color`、`align`。表头用第一行配 `header`。
 
-### 这五套参考页实际用到的
+### 参考页实际用到的
 
-这五套只有文字、线和形状。斜向短线是课程页上的小折角，端点写在 `line.points` 里。`dsh-soft-editorial` 封面有一个圆角矩形；源 YAML 没有半径，转入时按该套设计说明的 24–36px 写成 28 pt。导出时半径是绝对磅值。没有图表、表格、旋转文本、虚线箭头、透明填色或渐变。引擎仍接受上面这些字段，方便以后再转入其他套。源页面里没有渐变，格式也不接受渐变。图片元素若出现，转入时变成虚线占位矩形，不放入第三方标志。
+五套 DSH 参考页只有文字、线和形状。斜向短线是课程页上的小折角，端点写在 `line.points` 里。`dsh-soft-editorial` 封面有一个圆角矩形；源 YAML 没有半径，转入时按该套设计说明的 24–36px 写成 28 pt。导出时半径是绝对磅值。
+
+ppt-master 的风格参考页还有图表和表格。版式页里的图片位是虚线框，渐变被铺成一块带透明度的矩形。格式不接受渐变对象，也不放入第三方标志。
 
 ## 预检与导出
 

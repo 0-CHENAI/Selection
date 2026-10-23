@@ -60,8 +60,51 @@ DSH v0.2.21 的署名是：十套模板改编自该提交下的 beautiful-html-t
 
 没有转入 DSH 已撤回的社区模板和木友圈材料，也没有转入 `packages/dsh-desktop-office/sources/legacy` 下的旧办公模板。DSH 另有的原生套（Modular Logistics、Swiss Signal Grid、Nordic Operating Report，提交 `de281a1ceccadb00b92df53adb106a2e87ec0b4b`）以及其余 Zara 改编套，这次都不在目录里。转换器仍可以按套名再导入。
 
+## ppt-master
+
+- 项目：<https://github.com/hugohe3/ppt-master>
+- 许可：MIT。
+- 版权行：Copyright (c) 2025-2026 Hugo He。
+- 转入范围：`templates/layouts` 的 7 套结构页，以及 `templates/styles` 的 14 份 `design_spec.md`。转换脚本是 `scripts/import-ppt-master.ts`。
+- 没有转入 `templates/brands` 的 21 套品牌，也没有转入企业整套（中国电信、中汽研）。没有标志、品牌手册或公司配色。
+
+版式是带 `data-pptx-*` 标注的 SVG。坐标按 96 dpi 的 0.75 倍换成磅。占位符换成简短中文。图片位是虚线框。渐变铺成一块约 40% 的黑色，因为本格式没有渐变。路径图形没有转入。
+
+风格参考页是按各份说明的方法新写的 12 页，不是示例站点的逐页描摹。说明里已经写了色板的五套（`duty-manual`、`incident-postmortem`、`mbb-consulting`、`operating-review`、`technical-deepdive`）沿用说明中的通用色。另外九套的说明没有色板，默认颜色取自对应示例封面的实际用色，缺的中性色按对比度补上：
+
+| 风格 | 色板所据示例 |
+|---|---|
+| `academic-research` | `ppt169_researchstudio_reel_paper` |
+| `consulting-decision` | `a4_four_day_week_decision_memo`（封面未取到，纸色和强调色按该示例的深色与暖纸补齐） |
+| `creative-pitch` | `ppt169_night_shelf_creative_pitch` |
+| `investor-pitch` | `ppt169_heatline_seed_pitch`（橙色加深，以便浅色字达到对比度） |
+| `narrative-keynote` | `ppt169_qianli_jiangshan_scroll` |
+| `product-launch` | `ppt169_uv_launch`（只用深色界面和冷光，没有名称、标志或路径） |
+| `science-explainer` | `ppt43_sleep_science_explainer` |
+| `solution-proposal` | `ppt169_every_day_counts_proposal` |
+| `workshop-teaching` | `ppt169_how_color_works_workshop` |
+
+`operating-review` 与 `incident-postmortem` 的官方示例里有公司材料。色板只用风格说明里的状态色，没有转入那些稿，也没有使用公司名称。
+
+十二套主题是 Selection 自拟的，可以和任意风格或版式组合。它们受示例的颜色关系启发，不复制画作、标志或品牌名：
+
+| 主题 | 启发 |
+|---|---|
+| `jiangshan` 千里青绿 | `ppt169_qianli_jiangshan_scroll` 的青绿色与暖纸。不嵌入画作 |
+| `sugar-rush` 糖彩 | `ppt169_sugar_rush_memphis` 的高饱和撞色 |
+| `glass-saas` 玻璃界面 | `ppt169_glassmorphism_demo` 的冷色雾面 |
+| `paper-cut` 剪纸月色 | `ppt169_mid_autumn_papercut` 的夜蓝与暖纸 |
+| `pixel-breakfast` 像素早餐 | `ppt169_pixel_breakfast_atlas` 的深靛、蛋黄与番茄色。不嵌入像素画 |
+| `swiss-grid` 瑞士网格 | `ppt169_swiss_grid_systems` 的网格和一块红 |
+| `tea-tasting` 点茶 | `xiaohongshu_song_diancha` 的茶褐、朱印与暖纸 |
+| `brutal-stone` 粗石 | `ppt169_brutalism_field_guide` 的石色、近黑与一块红 |
+| `zine-shelf` 独立书摊 | `ppt169_indie_bookstore_zine_guide` 的奶油纸、蓝与粉 |
+| `keynote-stage` 暗场讲台 | 自拟。近黑场加一处暖色信号，不是任何公司的发布会配色 |
+| `academic-ink` 论文墨色 | `ppt169_researchstudio_reel_paper` 的墨色与蓝色 |
+| `night-circuit` 夜航电路 | `ppt169_uv_launch` 的深色界面与冷光。不使用该示例的名称或标志 |
+
 ## 早前的审查习惯
 
-G1–G5 和「整项任务最多三次视觉检查」沿用本技能上一版已经写进 Selection 的交付习惯。那一版的配方、换色风格和 OfficeCLI 构图脚本已经移除。早前文档改编自 hugohe3/ppt-master（MIT，Copyright (c) 2025-2026 Hugo He），锁定提交 `622bf0148bca4f697b0184322c7e2aa2a04520a2` 与 `523e5bd972f94c3cac8742fec0d54d43824a17bb`。本目录不再附带那些 SVG、占位符协议或品牌材料。
+G1–G5 和「整项任务最多三次视觉检查」沿用本技能上一版已经写进 Selection 的交付习惯。那一版的配方、换色风格和 OfficeCLI 构图脚本已经移除。早前文档也曾改编自 hugohe3/ppt-master（MIT，Copyright (c) 2025-2026 Hugo He），锁定提交 `622bf0148bca4f697b0184322c7e2aa2a04520a2` 与 `523e5bd972f94c3cac8742fec0d54d43824a17bb`。那些旧配方和品牌材料没有恢复。上面这一节是后来按版式和风格说明重新转入的。
 
 许可保留不表示上游作者认可本集成，也不授予商标权利。

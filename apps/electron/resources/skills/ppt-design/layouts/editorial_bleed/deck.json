@@ -1,0 +1,1152 @@
+{
+  "format": "selection-deck",
+  "version": 1,
+  "title": "出血编辑 · Editorial Bleed",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "theme": {
+    "id": "editorial_bleed",
+    "name": "石板预览",
+    "margin": 48,
+    "colors": {
+      "ink": "#1E293B",
+      "paper": "#FFFFFF",
+      "muted": "#64748B",
+      "accent": "#334155",
+      "line": "#CBD5E1",
+      "surface": "#F4F6F8",
+      "inverse": "#F8FAFC",
+      "signal": "#475569",
+      "good": "#1F7A4D",
+      "watch": "#8A5A12",
+      "bad": "#8E2A24"
+    },
+    "fonts": {
+      "cjk": {
+        "mac": "PingFang SC",
+        "win": "Microsoft YaHei",
+        "linux": "Noto Sans CJK SC"
+      },
+      "latin": {
+        "mac": "Arial",
+        "win": "Arial",
+        "linux": "Arial"
+      }
+    },
+    "type": {
+      "display": {
+        "min": 32,
+        "max": 72
+      },
+      "title": {
+        "min": 22,
+        "max": 40
+      },
+      "body": {
+        "min": 14,
+        "max": 22
+      },
+      "caption": {
+        "min": 10,
+        "max": 14
+      }
+    },
+    "source": "ppt-master 版式的中性预览色，不是品牌色"
+  },
+  "pages": [
+    {
+      "id": "01",
+      "layout": "01_hero_full",
+      "name": "Hero Full",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "hero-full-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "hero-full-scrim",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 180,
+            "w": 960,
+            "h": 360
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "hero-full-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 336,
+            "w": 840,
+            "h": 72
+          },
+          "text": "把一件事说清楚",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 39,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "hero-full-subtitle-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 426,
+            "w": 660,
+            "h": 42
+          },
+          "text": "证据在左，下一步在右",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "layout": "02_hero_side_scrim",
+      "name": "Hero with Side Scrim",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "hero-side-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "hero-side-scrim",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 660,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "hero-side-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 177,
+            "w": 480,
+            "h": 66
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "hero-side-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 267,
+            "w": 480,
+            "h": 150
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构",
+          "textCapacity": {
+            "maxChars": 22,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "layout": "03_split_bleed",
+      "name": "Split Bleed",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "split-bleed-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 540,
+            "y": 126,
+            "w": 54,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$ink",
+          "radius": 2.25
+        },
+        {
+          "id": "split-bleed-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 480,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "split-bleed-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 540,
+            "y": 162,
+            "w": 360,
+            "h": 66
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 30,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "split-bleed-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 540,
+            "y": 252,
+            "w": 360,
+            "h": 180
+          },
+          "text": "先写结论，再放能核对的证据",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15.75,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "layout": "04_split_bleed_reverse",
+      "name": "Split Bleed Reverse",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "split-bleed-reverse-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 60,
+            "y": 126,
+            "w": 54,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$ink",
+          "radius": 2.25
+        },
+        {
+          "id": "split-bleed-reverse-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 0,
+            "w": 480,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "split-bleed-reverse-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 162,
+            "w": 360,
+            "h": 66
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 30,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "split-bleed-reverse-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 252,
+            "w": 360,
+            "h": 180
+          },
+          "text": "先写结论，再放能核对的证据",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15.75,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "layout": "05_chapter_full",
+      "name": "Chapter Full",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "chapter-full-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "chapter-full-wash",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "chapter-full-number-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 174,
+            "w": 240,
+            "h": 54
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 42,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chapter-full-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 249,
+            "w": 840,
+            "h": 72
+          },
+          "text": "这一章只讲一件事",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 39,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chapter-full-desc-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 339,
+            "w": 660,
+            "h": 42
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "layout": "06_quote_over_image",
+      "name": "Quote over Image",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "quote-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "quote-vignette",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "quote-text-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 120,
+            "y": 201,
+            "w": 720,
+            "h": 138
+          },
+          "text": "把句子留在能被听见的长度",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "quote-attribution-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 120,
+            "y": 369,
+            "w": 720,
+            "h": 36
+          },
+          "text": "示例说话人",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "layout": "07_triptych",
+      "name": "Triptych",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "triptych-picture-one-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 320.25,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "triptych-picture-two-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 320.25,
+            "y": 0,
+            "w": 320.25,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "triptych-picture-three-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 640.5,
+            "y": 0,
+            "w": 319.5,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "triptych-top-scrim",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 150
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "triptych-bottom-scrim",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 330,
+            "w": 960,
+            "h": 210
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "triptych-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 48,
+            "w": 840,
+            "h": 54
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25.5,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "triptych-caption-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 24,
+            "y": 420,
+            "w": 272.25,
+            "h": 96
+          },
+          "text": "第一张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "triptych-caption-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 344.25,
+            "y": 420,
+            "w": 272.25,
+            "h": 96
+          },
+          "text": "第二张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "triptych-caption-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 664.5,
+            "y": 420,
+            "w": 271.5,
+            "h": 96
+          },
+          "text": "第三张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "08",
+      "layout": "08_image_grid_four",
+      "name": "Four-Image Grid",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "grid-picture-one-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 480,
+            "h": 270
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "grid-picture-two-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 0,
+            "w": 480,
+            "h": 270
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "grid-picture-three-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 270,
+            "w": 480,
+            "h": 270
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "grid-picture-four-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 270,
+            "w": 480,
+            "h": 270
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "grid-scrim-one",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 180,
+            "w": 480,
+            "h": 90
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "grid-scrim-two",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 180,
+            "w": 480,
+            "h": 90
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "grid-scrim-three",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 450,
+            "w": 480,
+            "h": 90
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "grid-scrim-four",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 450,
+            "w": 480,
+            "h": 90
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "grid-caption-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 24,
+            "y": 201,
+            "w": 432,
+            "h": 48
+          },
+          "text": "第一张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "grid-caption-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 504,
+            "y": 201,
+            "w": 432,
+            "h": 48
+          },
+          "text": "第二张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "grid-caption-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 24,
+            "y": 471,
+            "w": 432,
+            "h": 48
+          },
+          "text": "第三张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "grid-caption-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 504,
+            "y": 471,
+            "w": 432,
+            "h": 48
+          },
+          "text": "第四张图注",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "09",
+      "layout": "09_full_statement",
+      "name": "Full Statement",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "full-statement-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 60,
+            "y": 204,
+            "w": 72,
+            "h": 6
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$ink",
+          "radius": 3
+        },
+        {
+          "id": "full-statement-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 246,
+            "w": 840,
+            "h": 150
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 48,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "full-statement-support-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 417,
+            "w": 660,
+            "h": 42
+          },
+          "text": "旁边这句是补充",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "layout": "10_closing_full",
+      "name": "Closing Full",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "closing-full-picture-carrier",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "w": 960,
+            "h": 540
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000000",
+          "line": {
+            "color": "$line",
+            "width": 1,
+            "style": "dash"
+          }
+        },
+        {
+          "id": "closing-full-scrim",
+          "type": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 225,
+            "w": 960,
+            "h": 315
+          },
+          "role": "decoration",
+          "shape": "rect",
+          "fill": "#00000066"
+        },
+        {
+          "id": "closing-full-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 351,
+            "w": 840,
+            "h": 66
+          },
+          "text": "带走这一句",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "closing-full-contact-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 60,
+            "y": 435,
+            "w": 660,
+            "h": 36
+          },
+          "text": "结构预览",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    }
+  ]
+}

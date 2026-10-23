@@ -296,7 +296,7 @@ describe('reference styles', () => {
 
   it('ships five bilingual 12-page DSH decks', async () => {
     const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck: string; deckEn: string; license: string }>
-    expect(Object.keys(catalog)).toEqual(ids)
+    expect(Object.keys(catalog).filter(key => key.startsWith('dsh-')).sort()).toEqual([...ids].sort())
     const accents = new Set<string>()
     for (const id of ids) {
       for (const file of [`styles/${id}/deck.json`, `styles/${id}/deck.en.json`]) {

@@ -12032,6 +12032,16 @@ var DECK_FORMAT = "selection-deck";
 var DECK_VERSION = 1;
 var CANVAS_WIDTH = 960;
 var CANVAS_HEIGHT = 540;
+var CANVAS_PRESETS = [
+  { id: "ppt169", label: "16:9", width: 960, height: 540 },
+  { id: "ppt43", label: "4:3", width: 768, height: 576 },
+  { id: "moments", label: "1:1", width: 810, height: 810 },
+  { id: "story", label: "9:16", width: 810, height: 1440 },
+  { id: "xiaohongshu", label: "3:4", width: 931.5, height: 1245 }
+];
+function canvasBySize(width, height) {
+  return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
+}
 
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
@@ -12080,7 +12090,7 @@ function parseTheme(value, issues) {
     issues.push(issue("schema", "theme \u5FC5\u987B\u662F\u5BF9\u8C61"));
     return null;
   }
-  rejectUnknown(value, ["id", "name", "margin", "colors", "fonts", "type", "source"], "theme", issues);
+  rejectUnknown(value, ["id", "name", "margin", "colors", "fonts", "type", "source", "logo"], "theme", issues);
   const id = need(value, "id", "theme", issues);
   const name = need(value, "name", "theme", issues);
   const margin = need(value, "margin", "theme", issues);
@@ -12096,6 +12106,8 @@ function parseTheme(value, issues) {
     issues.push(issue("schema", "theme.margin \u5FC5\u987B\u5728 0 \u5230 96 \u4E4B\u95F4"));
   if (typeof source !== "string" || !source.trim())
     issues.push(issue("schema", "theme.source \u5FC5\u987B\u8BF4\u660E\u914D\u8272\u4E0E\u7248\u5F0F\u6765\u6E90"));
+  if (value.logo !== undefined && (typeof value.logo !== "string" || !value.logo.trim()))
+    issues.push(issue("schema", "theme.logo \u5FC5\u987B\u662F\u975E\u7A7A\u8DEF\u5F84"));
   const parsedColors = {};
   if (!isObject2(colors))
     issues.push(issue("schema", "theme.colors \u5FC5\u987B\u662F\u5BF9\u8C61"));
@@ -12117,7 +12129,16 @@ function parseTheme(value, issues) {
     return null;
   if (!parsedFonts || !parsedType || typeof id !== "string" || typeof name !== "string" || typeof margin !== "number" || typeof source !== "string")
     return null;
-  return { id, name, margin, colors: parsedColors, fonts: parsedFonts, type: parsedType, source };
+  return {
+    id,
+    name,
+    margin,
+    colors: parsedColors,
+    fonts: parsedFonts,
+    type: parsedType,
+    source,
+    logo: typeof value.logo === "string" ? value.logo : undefined
+  };
 }
 function parseFonts(value, issues) {
   if (!isObject2(value)) {
@@ -12641,8 +12662,10 @@ function parseDeckDocument(value) {
     issues.push(issue("schema", "canvas \u5FC5\u987B\u662F\u5BF9\u8C61"));
   else {
     rejectUnknown(value.canvas, ["width", "height"], "canvas", issues);
-    if (value.canvas.width !== CANVAS_WIDTH || value.canvas.height !== CANVAS_HEIGHT) {
-      issues.push(issue("schema", `canvas \u5FC5\u987B\u662F ${CANVAS_WIDTH}\xD7${CANVAS_HEIGHT}`));
+    const width = value.canvas.width;
+    const height = value.canvas.height;
+    if (typeof width !== "number" || typeof height !== "number" || !canvasBySize(width, height)) {
+      issues.push(issue("schema", `canvas \u5FC5\u987B\u662F\u53D7\u652F\u6301\u7684\u5C3A\u5BF8\u4E4B\u4E00\uFF0C\u4F8B\u5982 ${CANVAS_WIDTH}\xD7${CANVAS_HEIGHT}\uFF0816:9\uFF09`));
     }
   }
   const theme = parseTheme(value.theme, issues);
@@ -12668,7 +12691,7 @@ function parseDeckDocument(value) {
       format: DECK_FORMAT,
       version: DECK_VERSION,
       title: value.title,
-      canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      canvas: { width: Number(value.canvas.width), height: Number(value.canvas.height) },
       theme,
       pages
     },
@@ -18855,8 +18878,8 @@ async function exportDeck(deck, outFile, options = {}) {
 }
 async function buildPptx(deck, platform) {
   const pres = new PptxGenJS;
-  pres.defineLayout({ name: "SELECTION_16x9", width: inches(deck.canvas.width), height: inches(deck.canvas.height) });
-  pres.layout = "SELECTION_16x9";
+  pres.defineLayout({ name: "SELECTION", width: inches(deck.canvas.width), height: inches(deck.canvas.height) });
+  pres.layout = "SELECTION";
   pres.title = deck.title;
   pres.author = "Selection";
   pres.subject = deck.theme.name;

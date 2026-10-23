@@ -1,8 +1,12 @@
 # 风格
 
-先读本页，再只打开选定风格的 `design.md`。中文参考页是 `deck.json`，英文参考页是 `deck.en.json`。不要一次读入两套参考页。
+先读本页，再只打开选定风格的 `design.md`。中文参考页是 `deck.json`。DSH 的五套还有英文 `deck.en.json`。不要一次读入两套参考页。
 
-索引：[styles/catalog.json](../styles/catalog.json)。五套都是 12 页、960×540 pt。页面从 DSH Desktop v0.2.21 转入，几何和示例文案保持源页面。许可见 [ATTRIBUTION](../ATTRIBUTION.md)。
+索引：[styles/catalog.json](../styles/catalog.json)。风格页都是 12 页、960×540 pt。许可见 [ATTRIBUTION](../ATTRIBUTION.md)。
+
+主题在 [styles/themes/catalog.json](../styles/themes/catalog.json)。主题只换颜色和字体，不换页面几何。`ink` 是字色，`paper` 是纸色：浅色主题的纸是浅的，深色主题的纸是深的，所以 `$ink` 写在 `$paper` 上始终可读。封面若要用反色，背景写 `$ink`、字写 `$paper`。任意主题都可以套到任意风格或版式上。预检会检查正文、辅助色、强调色上的反色，以及面板上的正文。
+
+用户品牌不是一份现成 JSON。给出主色、辅色，以及可选的标志路径，生成一套 token：纸色、文字、强调、辅助色和反色都会调到对比度门槛以上。标志只记在 `theme.logo`。页面要显示它时，用一个 `src` 相同的图片元素。不要把公司标志或品牌手册写进仓库。
 
 | id | 材料 | 封面气质 | 许可 |
 |---|---|---|---|
@@ -12,7 +16,43 @@
 | `dsh-engineering-blueprint` | 架构评审、技术方案、执行计划 | 纸张底色，工程网格，流程盒，反馈路径 | Apache-2.0 |
 | `dsh-soft-editorial` | 观察手记、需要细读的判断 | 奶油纸，圆角色卡，衬线大标题 | MIT |
 
-锁定一个 `theme.id`。字体、颜色、边距和字号区间以该风格的 `design.md` 为准。参考页里的句子和数字是虚构示例，必须换成用户材料；换完后几何可以调整，但要重新预检。
+下面十四套的方法来自 ppt-master 的风格说明。参考页是按该方法写的中文示例，不是示例站点的逐页描摹。`mbb-consulting` 只表示文档密度的决策写法，不代表任何咨询公司。
+
+| id | 材料 | 默认气质 |
+|---|---|---|
+| `academic-research` | 问题、方法、限度 | 分栏封面，衬线 |
+| `consulting-decision` | 结论先行的决定 | 暖纸，编号 |
+| `creative-pitch` | 一个洞察 | 近黑纸，金色 |
+| `duty-manual` | 机制先于规则 | 深色网格 |
+| `incident-postmortem` | 时间线与因素 | 白纸，红色标记 |
+| `investor-pitch` | 这一步买到什么 | 暖纸，一个大数字 |
+| `mbb-consulting` | 编号证据 | 白纸，蓝色 |
+| `narrative-keynote` | 一个节拍 | 暖纸，大字，无页脚 |
+| `operating-review` | 结果与偏离 | 白纸，状态色 |
+| `product-launch` | 先演示再命名 | 深色，一句 |
+| `science-explainer` | 现象先于名字 | 暖纸，衬线 |
+| `solution-proposal` | 可以被否决的做法 | 圆角卡片 |
+| `technical-deepdive` | 先画边界 | 深色网格 |
+| `workshop-teaching` | 目标、示范、练习 | 暖纸，圆角 |
+
+十二套自有主题可以套到任意风格或版式上。名字不使用公司或产品的品牌。
+
+| id | 名字 | 启发 |
+|---|---|---|
+| `jiangshan` | 千里青绿 | 青绿山水的纸色与青蓝 |
+| `sugar-rush` | 糖彩 | 高饱和撞色 |
+| `glass-saas` | 玻璃界面 | 冷色雾面 |
+| `paper-cut` | 剪纸月色 | 夜蓝与暖纸 |
+| `pixel-breakfast` | 像素早餐 | 深靛、蛋黄与番茄 |
+| `swiss-grid` | 瑞士网格 | 网格与一块红 |
+| `tea-tasting` | 点茶 | 茶褐与朱印 |
+| `brutal-stone` | 粗石 | 石色、近黑与一块红 |
+| `zine-shelf` | 独立书摊 | 奶油纸、蓝与粉 |
+| `keynote-stage` | 暗场讲台 | 自拟近黑场，不是任何发布会配色 |
+| `academic-ink` | 论文墨色 | 墨色与一处蓝 |
+| `night-circuit` | 夜航电路 | 深色界面与一处冷光 |
+
+默认用该风格 deck 里的主题。要换色时换成上面的一套，或生成用户品牌主题，然后重新预检。字体、边距和字号区间以锁定风格的 `design.md` 为准。参考页里的句子和数字是虚构示例，必须换成用户材料；换完后几何可以调整，但要重新预检。
 
 没有合适的参考页时，仍使用该风格的 token、边距和字号区间，新开一个 `layout` id，不要混入另一套的色值。
 

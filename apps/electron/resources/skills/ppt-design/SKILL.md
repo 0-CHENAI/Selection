@@ -27,15 +27,16 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 - 从用户材料提取受众、目的、核心结论、事实和假设、来源、页数。不捏造数据、日期、讲者或标志。
 - 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页不重复同一 `layout`。
-- 只锁定目录里的一套：`dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。颜色、字体、边距、字号区间和封面构图都来自该风格，不能混用另一套。
-- 参考页在 `styles/<id>/deck.json`（中文）和 `deck.en.json`（英文）。沿用它的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。
+- 只锁定目录里的一套。DSH 五套是 `dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。ppt-master 转入的十四套是 `academic-research`、`consulting-decision`、`creative-pitch`、`duty-manual`、`incident-postmortem`、`investor-pitch`、`mbb-consulting`、`narrative-keynote`、`operating-review`、`product-launch`、`science-explainer`、`solution-proposal`、`technical-deepdive`、`workshop-teaching`。几何和版式节奏来自锁定的那一套，不能混用另一套的坐标。
+- 颜色和字体可以整套换成 `styles/themes` 里的主题，或换成用户品牌主题。主题只提供 token，不改页面结构。用户给出主色、辅色和可选标志路径时，生成对比度安全的 token，把路径记在 `theme.logo`；要出现标志时再放一个 `src` 相同的图片。不要写入第三方公司的品牌色或标志。
+- 参考页在 `styles/<id>/deck.json`（中文）。DSH 五套另有 `deck.en.json`。沿用它的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。结构版式在 `layouts/`，画布不一定是 16:9。
 - 两处中文源页面会在末行落下一个字：`dsh-course-workshop` 的 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 的 `03:t101`「明确每一层边界」。沿用这些页时重排用户句子，让末行不是一个字。不要为了通过而缩小字号，也不要把文本框加宽到撞上邻列。其余参考页预检是干净的。
 - 在会话 `dataFolderPath` 保存 `design-plan.md` 和 `deck.json`。它们是会话材料，不默认交付。
 - 默认规划完成后继续生成。只有用户明确要求先审方案时才停。恢复会话时读取磁盘上的计划和 deck，**不得自动重新选风格或把视觉检查次数清零**。
 
 ## 预检和导出
 
-画布 **960×540 pt**，也就是 13.333×7.5 in、33.867×19.05 cm。Morph 的幻影对象仍然要留在 33.867 cm 的右缘之外。
+风格参考页的画布是 **960×540 pt**，也就是 13.333×7.5 in、33.867×19.05 cm。Morph 的幻影对象在 16:9 页上仍然要留在 33.867 cm 的右缘之外。版式家族还可以是 768×576、810×810、810×1440 或 931.5×1245；用哪一套，画布就用哪一套的尺寸。
 
 ```text
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" check "<dataFolderPath>/deck.json"

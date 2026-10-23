@@ -71,8 +71,8 @@ export async function exportDeck(deck: Deck, outFile: string, options: ExportOpt
 
 async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
   const pres = new PptxGenJS()
-  pres.defineLayout({ name: 'SELECTION_16x9', width: inches(deck.canvas.width), height: inches(deck.canvas.height) })
-  pres.layout = 'SELECTION_16x9'
+  pres.defineLayout({ name: 'SELECTION', width: inches(deck.canvas.width), height: inches(deck.canvas.height) })
+  pres.layout = 'SELECTION'
   pres.title = deck.title
   pres.author = 'Selection'
   pres.subject = deck.theme.name

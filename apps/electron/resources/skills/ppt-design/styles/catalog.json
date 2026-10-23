@@ -43,5 +43,117 @@
     "when": "柔和编辑部 · Soft Editorial",
     "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-soft-editorial), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/soft-editorial",
     "license": "MIT"
+  },
+  "academic-research": {
+    "name": "学术报告 · Academic Research",
+    "design": "styles/academic-research/design.md",
+    "deck": "styles/academic-research/deck.json",
+    "when": "从问题、方法和结果写出可以复核的判断，限度留在页上。",
+    "source": "ppt-master style academic-research, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_researchstudio_reel_paper",
+    "license": "MIT"
+  },
+  "consulting-decision": {
+    "name": "决策备忘 · Consulting Decision",
+    "design": "styles/consulting-decision/design.md",
+    "deck": "styles/consulting-decision/deck.json",
+    "when": "结论先行，证据跟着判断，用来做决定而不是做展示。",
+    "source": "ppt-master style consulting-decision, MIT, Copyright (c) 2025-2026 Hugo He; palette from example a4_four_day_week_decision_memo",
+    "license": "MIT"
+  },
+  "creative-pitch": {
+    "name": "创意提案 · Creative Pitch",
+    "design": "styles/creative-pitch/design.md",
+    "deck": "styles/creative-pitch/deck.json",
+    "when": "一个洞察先落地，再看它出现在每个接触点上。",
+    "source": "ppt-master style creative-pitch, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_night_shelf_creative_pitch",
+    "license": "MIT"
+  },
+  "duty-manual": {
+    "name": "值班手册 · Duty Manual",
+    "design": "styles/duty-manual/design.md",
+    "deck": "styles/duty-manual/deck.json",
+    "when": "把分散的规则收成一条判断轴：先讲机制，再写规则。",
+    "source": "ppt-master style duty-manual, MIT, Copyright (c) 2025-2026 Hugo He; palette from spec ppt169_fire_control_room_duty_manual",
+    "license": "MIT"
+  },
+  "incident-postmortem": {
+    "name": "事故复盘 · Incident Postmortem",
+    "design": "styles/incident-postmortem/design.md",
+    "deck": "styles/incident-postmortem/deck.json",
+    "when": "按时间线复盘，把因素和责备分开，行动要能核对。",
+    "source": "ppt-master style incident-postmortem, MIT, Copyright (c) 2025-2026 Hugo He; palette from spec spec:incident-postmortem",
+    "license": "MIT"
+  },
+  "investor-pitch": {
+    "name": "融资叙事 · Investor Pitch",
+    "design": "styles/investor-pitch/design.md",
+    "deck": "styles/investor-pitch/deck.json",
+    "when": "从为什么是现在讲到这一步要买到什么，靠证据而不是形容词。",
+    "source": "ppt-master style investor-pitch, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_heatline_seed_pitch",
+    "license": "MIT"
+  },
+  "mbb-consulting": {
+    "name": "战略备忘 · Strategy Document",
+    "design": "styles/mbb-consulting/design.md",
+    "deck": "styles/mbb-consulting/deck.json",
+    "when": "结论先行的文档密度：编号证据、一列判断、每页一个行动标题。不代表任何咨询公司。",
+    "source": "ppt-master style mbb-consulting, MIT, Copyright (c) 2025-2026 Hugo He; palette from spec ppt169_ev_market_priorities",
+    "license": "MIT"
+  },
+  "narrative-keynote": {
+    "name": "叙事主旨 · Narrative Keynote",
+    "design": "styles/narrative-keynote/design.md",
+    "deck": "styles/narrative-keynote/deck.json",
+    "when": "用张力、转折和具体细节把一个想法讲完。一页只有一个节拍。",
+    "source": "ppt-master style narrative-keynote, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_qianli_jiangshan_scroll",
+    "license": "MIT"
+  },
+  "operating-review": {
+    "name": "经营复盘 · Operating Review",
+    "design": "styles/operating-review/design.md",
+    "deck": "styles/operating-review/deck.json",
+    "when": "把结果、偏离、原因和承诺分开，坏数字不要涂软。",
+    "source": "ppt-master style operating-review, MIT, Copyright (c) 2025-2026 Hugo He; palette from spec spec:operating-review",
+    "license": "MIT"
+  },
+  "product-launch": {
+    "name": "产品发布 · Product Launch",
+    "design": "styles/product-launch/design.md",
+    "deck": "styles/product-launch/deck.json",
+    "when": "能力先被演示，再被命名。一页只讲一件事。",
+    "source": "ppt-master style product-launch, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_uv_launch",
+    "license": "MIT"
+  },
+  "science-explainer": {
+    "name": "科学讲解 · Science Explainer",
+    "design": "styles/science-explainer/design.md",
+    "deck": "styles/science-explainer/deck.json",
+    "when": "从熟悉的现象走到名字，不拿准确去换轻松。",
+    "source": "ppt-master style science-explainer, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt43_sleep_science_explainer",
+    "license": "MIT"
+  },
+  "solution-proposal": {
+    "name": "方案建议 · Solution Proposal",
+    "design": "styles/solution-proposal/design.md",
+    "deck": "styles/solution-proposal/deck.json",
+    "when": "先证明听懂了，再给出可以被否决的做法和代价。",
+    "source": "ppt-master style solution-proposal, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_every_day_counts_proposal",
+    "license": "MIT"
+  },
+  "technical-deepdive": {
+    "name": "技术深潜 · Technical Deep Dive",
+    "design": "styles/technical-deepdive/design.md",
+    "deck": "styles/technical-deepdive/deck.json",
+    "when": "先画边界和约束，再谈优化。机制要能被观察到。",
+    "source": "ppt-master style technical-deepdive, MIT, Copyright (c) 2025-2026 Hugo He; palette from spec ppt169_raft_consensus_deepdive",
+    "license": "MIT"
+  },
+  "workshop-teaching": {
+    "name": "工作坊 · Workshop Teaching",
+    "design": "styles/workshop-teaching/design.md",
+    "deck": "styles/workshop-teaching/deck.json",
+    "when": "目标、示范、练习和检查理解排成一次课。",
+    "source": "ppt-master style workshop-teaching, MIT, Copyright (c) 2025-2026 Hugo He; palette from example ppt169_how_color_works_workshop",
+    "license": "MIT"
   }
 }

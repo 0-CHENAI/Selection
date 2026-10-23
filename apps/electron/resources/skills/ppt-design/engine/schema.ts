@@ -3,6 +3,7 @@ import yaml from 'js-yaml'
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
+  canvasBySize,
   DECK_FORMAT,
   DECK_VERSION,
   type Bounds,
@@ -67,7 +68,7 @@ function parseTheme(value: unknown, issues: DeckIssue[]): Theme | null {
     issues.push(issue('schema', 'theme 必须是对象'))
     return null
   }
-  rejectUnknown(value, ['id', 'name', 'margin', 'colors', 'fonts', 'type', 'source'], 'theme', issues)
+  rejectUnknown(value, ['id', 'name', 'margin', 'colors', 'fonts', 'type', 'source', 'logo'], 'theme', issues)
   const id = need(value, 'id', 'theme', issues)
   const name = need(value, 'name', 'theme', issues)
   const margin = need(value, 'margin', 'theme', issues)
@@ -79,6 +80,7 @@ function parseTheme(value: unknown, issues: DeckIssue[]): Theme | null {
   if (typeof name !== 'string' || !name.trim()) issues.push(issue('schema', 'theme.name 必须是非空字符串'))
   if (typeof margin !== 'number' || margin < 0 || margin > 96) issues.push(issue('schema', 'theme.margin 必须在 0 到 96 之间'))
   if (typeof source !== 'string' || !source.trim()) issues.push(issue('schema', 'theme.source 必须说明配色与版式来源'))
+  if (value.logo !== undefined && (typeof value.logo !== 'string' || !value.logo.trim())) issues.push(issue('schema', 'theme.logo 必须是非空路径'))
   const parsedColors: Record<string, string> = {}
   if (!isObject(colors)) issues.push(issue('schema', 'theme.colors 必须是对象'))
   else {
@@ -94,7 +96,16 @@ function parseTheme(value: unknown, issues: DeckIssue[]): Theme | null {
   const parsedType = parseType(type, issues)
   if (issues.some(item => item.message.startsWith('theme')) && (!parsedFonts || !parsedType || typeof id !== 'string')) return null
   if (!parsedFonts || !parsedType || typeof id !== 'string' || typeof name !== 'string' || typeof margin !== 'number' || typeof source !== 'string') return null
-  return { id, name, margin, colors: parsedColors, fonts: parsedFonts, type: parsedType, source }
+  return {
+    id,
+    name,
+    margin,
+    colors: parsedColors,
+    fonts: parsedFonts,
+    type: parsedType,
+    source,
+    logo: typeof value.logo === 'string' ? value.logo : undefined,
+  }
 }
 
 function parseFonts(value: unknown, issues: DeckIssue[]): Theme['fonts'] | null {
@@ -579,8 +590,10 @@ export function parseDeckDocument(value: unknown): { deck: Deck | null; issues: 
   if (!isObject(value.canvas)) issues.push(issue('schema', 'canvas 必须是对象'))
   else {
     rejectUnknown(value.canvas, ['width', 'height'], 'canvas', issues)
-    if (value.canvas.width !== CANVAS_WIDTH || value.canvas.height !== CANVAS_HEIGHT) {
-      issues.push(issue('schema', `canvas 必须是 ${CANVAS_WIDTH}×${CANVAS_HEIGHT}`))
+    const width = value.canvas.width
+    const height = value.canvas.height
+    if (typeof width !== 'number' || typeof height !== 'number' || !canvasBySize(width, height)) {
+      issues.push(issue('schema', `canvas 必须是受支持的尺寸之一，例如 ${CANVAS_WIDTH}×${CANVAS_HEIGHT}（16:9）`))
     }
   }
   const theme = parseTheme(value.theme, issues)
@@ -603,7 +616,7 @@ export function parseDeckDocument(value: unknown): { deck: Deck | null; issues: 
       format: DECK_FORMAT,
       version: DECK_VERSION,
       title: value.title,
-      canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      canvas: { width: Number(value.canvas.width), height: Number(value.canvas.height) },
       theme,
       pages,
     },

@@ -1,0 +1,49 @@
+{
+  "id": "zine-shelf",
+  "name": "独立书摊",
+  "margin": 48,
+  "colors": {
+    "line": "#1A1A1A",
+    "signal": "#C22555",
+    "good": "#1F7A4D",
+    "watch": "#8A5A12",
+    "bad": "#8E2A24",
+    "ink": "#1A1A1A",
+    "paper": "#F5EFE0",
+    "muted": "#5A5A5A",
+    "accent": "#1E4DBC",
+    "surface": "#E7EFEA",
+    "inverse": "#FFFFFF"
+  },
+  "fonts": {
+    "cjk": {
+      "mac": "PingFang SC",
+      "win": "Microsoft YaHei",
+      "linux": "Noto Sans CJK SC"
+    },
+    "latin": {
+      "mac": "Arial",
+      "win": "Arial",
+      "linux": "Arial"
+    }
+  },
+  "type": {
+    "display": {
+      "min": 32,
+      "max": 72
+    },
+    "title": {
+      "min": 22,
+      "max": 40
+    },
+    "body": {
+      "min": 14,
+      "max": 22
+    },
+    "caption": {
+      "min": 10,
+      "max": 14
+    }
+  },
+  "source": "受独立书店小册子示例的奶油纸、一块蓝和一块粉启发。没有使用书店名称或封面。"
+}

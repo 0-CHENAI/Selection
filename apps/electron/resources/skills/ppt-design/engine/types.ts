@@ -5,6 +5,21 @@ export const DECK_VERSION = 1 as const
 export const CANVAS_WIDTH = 960
 export const CANVAS_HEIGHT = 540
 
+/** Point sizes for the canvases ppt-master layouts use. 1 px at 96 dpi is 0.75 pt. */
+export const CANVAS_PRESETS = [
+  { id: 'ppt169', label: '16:9', width: 960, height: 540 },
+  { id: 'ppt43', label: '4:3', width: 768, height: 576 },
+  { id: 'moments', label: '1:1', width: 810, height: 810 },
+  { id: 'story', label: '9:16', width: 810, height: 1440 },
+  { id: 'xiaohongshu', label: '3:4', width: 931.5, height: 1245 },
+] as const
+
+export type CanvasPresetId = (typeof CANVAS_PRESETS)[number]['id']
+
+export function canvasBySize(width: number, height: number): (typeof CANVAS_PRESETS)[number] | null {
+  return CANVAS_PRESETS.find(item => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null
+}
+
 export type PlatformName = 'mac' | 'win' | 'linux'
 
 export type Bounds = { x: number; y: number; w: number; h: number }
@@ -24,6 +39,8 @@ export type Theme = {
   type: { display: TypeRange; title: TypeRange; body: TypeRange; caption: TypeRange }
   /** Where the palette, type scale, and layout idea came from. */
   source: string
+  /** Optional user logo path. The deck draws it only from an image whose src is this path. */
+  logo?: string
 }
 
 export type ShapeName = 'rect' | 'roundRect' | 'ellipse' | 'line'
@@ -146,7 +163,7 @@ export type Deck = {
   format: typeof DECK_FORMAT
   version: typeof DECK_VERSION
   title: string
-  canvas: { width: typeof CANVAS_WIDTH; height: typeof CANVAS_HEIGHT }
+  canvas: { width: number; height: number }
   theme: Theme
   pages: DeckPage[]
 }

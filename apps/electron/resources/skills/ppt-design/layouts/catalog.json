@@ -1,0 +1,72 @@
+{
+  "editorial_bleed": {
+    "name": "出血编辑 · Editorial Bleed",
+    "design": "layouts/editorial_bleed/design.md",
+    "deck": "layouts/editorial_bleed/deck.json",
+    "canvas": "16:9",
+    "pages": 10,
+    "when": "图片铺满画布，文字落在压暗的区域上。",
+    "source": "ppt-master layout editorial_bleed, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "moments_square": {
+    "name": "方寸 · Moments Square",
+    "design": "layouts/moments_square/design.md",
+    "deck": "layouts/moments_square/deck.json",
+    "canvas": "1:1",
+    "pages": 8,
+    "when": "正方形画布，横竖都能分栏。",
+    "source": "ppt-master layout moments_square, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "presentation_core": {
+    "name": "演示核心 · Presentation Core",
+    "design": "layouts/presentation_core/design.md",
+    "deck": "layouts/presentation_core/deck.json",
+    "canvas": "16:9",
+    "pages": 20,
+    "when": "16:9 通用演示，含图表和表格页。",
+    "source": "ppt-master layout presentation_core, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "presentation_core_43": {
+    "name": "演示核心 4:3 · Presentation Core",
+    "design": "layouts/presentation_core_43/design.md",
+    "deck": "layouts/presentation_core_43/deck.json",
+    "canvas": "4:3",
+    "pages": 16,
+    "when": "4:3 投影或教室。",
+    "source": "ppt-master layout presentation_core_43, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "report_core": {
+    "name": "报告核心 · Report Core",
+    "design": "layouts/report_core/design.md",
+    "deck": "layouts/report_core/deck.json",
+    "canvas": "16:9",
+    "pages": 13,
+    "when": "带页眉页脚的报告页。",
+    "source": "ppt-master layout report_core, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "story_vertical": {
+    "name": "竖屏故事 · Story Vertical",
+    "design": "layouts/story_vertical/design.md",
+    "deck": "layouts/story_vertical/deck.json",
+    "canvas": "9:16",
+    "pages": 9,
+    "when": "9:16 竖屏故事，文字避开上下安全区。",
+    "source": "ppt-master layout story_vertical, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  },
+  "xiaohongshu_post": {
+    "name": "竖版图文 · Vertical Post",
+    "design": "layouts/xiaohongshu_post/design.md",
+    "deck": "layouts/xiaohongshu_post/deck.json",
+    "canvas": "3:4",
+    "pages": 10,
+    "when": "3:4 竖版图文。只借用版式，不使用平台标志。",
+    "source": "ppt-master layout xiaohongshu_post, MIT, Copyright (c) 2025-2026 Hugo He",
+    "license": "MIT"
+  }
+}
