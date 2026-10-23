@@ -65,26 +65,36 @@ DSH v0.2.21 的署名是：十套模板改编自该提交下的 beautiful-html-t
 - 项目：<https://github.com/hugohe3/ppt-master>
 - 许可：MIT。
 - 版权行：Copyright (c) 2025-2026 Hugo He。
-- 转入范围：`templates/layouts` 的 7 套结构页，以及 `templates/styles` 的 14 份 `design_spec.md`。转换脚本是 `scripts/import-ppt-master.ts`。
-- 没有转入 `templates/brands` 的 21 套品牌，也没有转入企业整套（中国电信、中汽研）。没有标志、品牌手册或公司配色。
+- 转入范围：`templates/layouts` 的 7 套结构页，以及 `templates/styles` 的 14 份 `design_spec.md`。版式脚本是 `scripts/import-ppt-master.ts`。
+- 没有转入 `templates/brands` 的 21 套品牌，也没有转入企业整套（中国电信、中汽研）。
 
-版式是带 `data-pptx-*` 标注的 SVG。坐标按 96 dpi 的 0.75 倍换成磅。占位符换成简短中文。图片位是虚线框。渐变铺成一块约 40% 的黑色，因为本格式没有渐变。路径图形没有转入。
+版式是带 `data-pptx-*` 标注的 SVG。坐标按 96 dpi 的 0.75 倍换成磅。占位符换成简短中文。图片位是虚线框。这些结构页里的渐变仍铺成一块约 40% 的黑色，路径图形没有转入。
 
-风格参考页是按各份说明的方法新写的 12 页，不是示例站点的逐页描摹。说明里已经写了色板的五套（`duty-manual`、`incident-postmortem`、`mbb-consulting`、`operating-review`、`technical-deepdive`）沿用说明中的通用色。另外九套的说明没有色板，默认颜色取自对应示例封面的实际用色，缺的中性色按对比度补上：
+## ppt-master-examples
 
-| 风格 | 色板所据示例 |
+- 项目：<https://github.com/hugohe3/ppt-master-examples>
+- 许可：MIT。
+- 版权行：Copyright (c) 2025-2026 Hugo He。
+- 转入范围：`examples.json` 列出的 70 套里，61 套官方成稿。转换脚本是 `scripts/import-ppt-master-examples.ts`。每套包含 `deck.json`、由 `design_spec.md` 与 `spec_lock.md` 组成的 `design.md`，以及按内容哈希去重的图片。
+- 每套 README 里写明的图片出处汇总在 `styles/examples/CREDITS.md`。
+
+下面 9 套没有转入。它们的设计建立在公司品牌、官方机构标识或商业商标上：
+
+| 示例 | 原因 |
 |---|---|
-| `academic-research` | `ppt169_researchstudio_reel_paper` |
-| `consulting-decision` | `a4_four_day_week_decision_memo`（封面未取到，纸色和强调色按该示例的深色与暖纸补齐） |
-| `creative-pitch` | `ppt169_night_shelf_creative_pitch` |
-| `investor-pitch` | `ppt169_heatline_seed_pitch`（橙色加深，以便浅色字达到对比度） |
-| `narrative-keynote` | `ppt169_qianli_jiangshan_scroll` |
-| `product-launch` | `ppt169_uv_launch`（只用深色界面和冷光，没有名称、标志或路径） |
-| `science-explainer` | `ppt43_sleep_science_explainer` |
-| `solution-proposal` | `ppt169_every_day_counts_proposal` |
-| `workshop-teaching` | `ppt169_how_color_works_workshop` |
+| `ppt169_china_telecom_2025` | 中国电信 2025 业绩稿，使用天翼/中国电信品牌标识 |
+| `ppt169_apple_fy2025_review` | 苹果 FY2025 官方财报复盘 |
+| `ppt169_cloudflare_outage_postmortem` | Cloudflare 官方事故复盘 |
+| `ppt169_uv_launch` | Astral uv 产品发布稿 |
+| `ppt169_china_rail_2024_zh` | 中国铁路 / 国铁集团官方统计 |
+| `ppt169_china_rail_2024_zh_sonnet` | 同一套中国铁路官方统计，并配有复兴号照片 |
+| `moments_nine_heritage_goods` | 回力、永久、大白兔等商业商标和包装 |
+| `ppt169_jilin_geohazard_rules_beautify` | 吉林省自然资源厅公文，页眉带机关标志 |
+| `ppt169_telford_feedback_2023_24_quick` | Telford & Wrekin 议会报告，页面含 council-logo |
 
-`operating-review` 与 `incident-postmortem` 的官方示例里有公司材料。色板只用风格说明里的状态色，没有转入那些稿，也没有使用公司名称。
+`incident-postmortem`、`operating-review`、`product-launch` 在示例库里只有上述被排除的成稿，因此这三套风格只保留说明，没有参考页。其余十一套风格的 `deck` 指向对应成稿。
+
+瑞士网格一页在正文里提到若干产品名，作为网格方法的后代，页面上没有那些标志，因此保留。讨论演示文稿概念、以及把通讯社列为资料来源的成稿同样保留。虚构公司的提案（Heatline、Fog & Fern、Every Day Counts）保留。
 
 十二套主题是 Selection 自拟的，可以和任意风格或版式组合。它们受示例的颜色关系启发，不复制画作、标志或品牌名：
 

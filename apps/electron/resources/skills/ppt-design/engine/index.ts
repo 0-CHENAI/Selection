@@ -4,6 +4,6 @@ export { exportDeck, platformFromProcess, resolveFontFace, waterfallParts } from
 export { charWidth, literalNewline, orphanLines, wrapText } from './metrics.ts'
 export { colorRef, loadDeckFile, parseDeckDocument, parseDeckSource } from './schema.ts'
 export { captureSlides } from './screenshot.ts'
-export { CANVAS_HEIGHT, CANVAS_PRESETS, CANVAS_WIDTH, canvasBySize, DECK_FORMAT, DECK_VERSION } from './types.ts'
+export { CANVAS_HEIGHT, CANVAS_PRESETS, CANVAS_WIDTH, canvasBySize, canvasSupported, DECK_FORMAT, DECK_VERSION } from './types.ts'
 export { applyTheme, checkTheme, generateBrandTheme } from './theme.ts'
 export type { Deck, DeckElement, DeckIssue, DeckPage, PlatformName, Theme } from './types.ts'

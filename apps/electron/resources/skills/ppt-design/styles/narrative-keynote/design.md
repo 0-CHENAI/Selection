@@ -1,11 +1,5 @@
 # 叙事主旨 · Narrative Keynote
-
-本文件从 ppt-master（MIT，Copyright (c) 2025-2026 Hugo He）的风格说明转入。上游说明没有写死色板。默认主题的颜色取自示例 `ppt169_qianli_jiangshan_scroll` 的实际用色，缺的中性色按对比度补上。参考页是按这个方法写的 12 页中文示例，不是示例站点的逐页描摹，也不含第三方标志或企业稿。换主题时保持这些页面的 token。
-
-- 示例：`ppt169_qianli_jiangshan_scroll`
-- 画布：960×540 pt
-- 默认配色：纸色 #F3ECDA，文字 #1F2422，强调 #2B5C8A
-
+参考页改为 ppt-master-examples 的成稿，不再使用原先那套 12 页线框。主示例是 `ppt169_qianli_jiangshan_scroll`（千里江山图·十八岁的青绿）。许可：MIT，Copyright (c) 2025-2026 Hugo He。
 下面是上游说明原文。
 
 ---

@@ -2,7 +2,9 @@
 
 格式名 `selection-deck`，`version` 为 `1`。JSON 或 YAML。对象以外的字段会被拒绝，一次报出全部问题。
 
-画布单位是 pt。默认演示页是 `{ "width": 960, "height": 540 }`（16:9）。版式家族还可以用 768×576（4:3）、810×810（1:1）、810×1440（9:16）和 931.5×1245（3:4）。别的尺寸会被拒绝，错误信息里仍会提到 960×540。
+画布单位是 pt。默认演示页是 `{ "width": 960, "height": 540 }`（16:9）。版式家族还可以用 768×576（4:3）、810×810（1:1）、810×1440（9:16）和 931.5×1245（3:4）。A4 成稿是 930×1315.5。除此之外，宽和高都在 200–2000 pt 的画布也可以，例如 1440×810、1440×450、675×287.25。超出这个范围会被拒绝，错误信息里仍会提到 960×540。
+
+可选 `profile`：`authored` 是新稿的默认检查；`example` 只用于已经出版的示例成稿，放宽对比度、孤字和正文之间的重叠，仍然检查完全落在画布外的元素。新稿不要写 `example`。
 
 ## theme
 
@@ -25,9 +27,9 @@
 
 | type | 还需要 |
 |---|---|
-| `text` | `text`、`textCapacity`、`font.family`（`$cjk` 或 `$latin`）、`font.size`（6–160）。可选 `font.face`、`leading`、`tracking`、`align`、`valign`、`weight`、`color` |
-| `shape` | `shape`：`rect`、`roundRect`、`ellipse`、`line`。除了 `line`，都要 `fill`。`roundRect` 的 `radius` 是 pt |
-| `image` | `src`、`alt`。按比例放进 `bounds` 并居中 |
+| `text` | `text`、`textCapacity`、`font.family`（`$cjk` 或 `$latin`）、`font.size`（6–240）。可选 `font.face`、`leading`、`tracking`（-20–80）、`align`、`valign`、`weight`、`italic`、`color` |
+| `shape` | `shape`：`rect`、`roundRect`、`ellipse`、`line`、`path`。除了 `line` 和只有描边的 `path`，都要 `fill`、`gradient` 或 `pattern`。`roundRect` 的 `radius` 是 pt。`path` 还要 `path`（SVG 路径，坐标是形状框内的 pt） |
+| `image` | `src`、`alt`。默认 `fit: contain`，按比例放进 `bounds` 并居中。`fit: fill` 铺满 `bounds`，用于已经裁好的图 |
 | `chart` | `chart.kind`：`bar`、`column`、`line`、`pie`、`doughnut`、`waterfall`。`categories` 与每条 `series.values` 等长 |
 | `table` | `table.columns`（宽度比例）、`rows`、`fontSize`、`fontFamily`、`color`、`fill`、`border`。可选 `rowHeights`、`face`、`header` |
 
@@ -41,7 +43,15 @@
 
 可选 `valMin`、`valMax`、`holeSize`（圆环孔径，直径的百分比，0–90）、`lineWidth`、`markerSize`、`markerColor`、`grid`（`solid`、`dash`、`dot`、`none`）、`catLabelSize`、`valLabelSize`、`catLabelColor`、`valLabelColor`。
 
-瀑布图只有一条序列，至少三个类别。第一项是起点总量，最后一项是终点总量，中间是变化量。起点加变化必须等于终点，容差 0.05。导出为堆积柱形图，隐形基座与页面背景同色。
+瀑布图只有一条序列，至少三个类别。第一项是起点总量，最后一项是终点总量，中间是变化量。起点加变化必须等于终点，容差 0.05。导出为堆积柱形图，隐形基座与页面背景同色。条形图导出时把第一个类别画在上方。
+
+### 渐变、图案、路径和阴影
+
+`gradient` 写在形状上：`kind` 为 `linear` 或 `radial`，`stops` 至少两个 `{offset, color}`，`offset` 从 0 到 1。线性渐变的 `angle` 从向右起、顺时针、y 向下，与 SVG 用户空间一致。`absolute: true` 时角度不跟形状框走。径向渐变用 `cx`、`cy`（0–1，相对形状框）。
+
+`pattern` 是 `{preset, foreground, background}`。`preset` 使用 PowerPoint 的图案名，例如 `pct5`。两种颜色都可以带透明度。半色调网点的空隙保持透明，避免一块不透明底盖住下面的照片。阿拉伯文和希伯来文使用 `font.rtl`，导出时从右向左排。
+
+`pathRule` 可以是 `evenodd`。`shadow` 可以写在形状或文字上：`color`，以及可选的 `opacity`、`blur`、`offset`、`angle`。
 
 ### 表格
 
@@ -51,7 +61,7 @@
 
 五套 DSH 参考页只有文字、线和形状。斜向短线是课程页上的小折角，端点写在 `line.points` 里。`dsh-soft-editorial` 封面有一个圆角矩形；源 YAML 没有半径，转入时按该套设计说明的 24–36px 写成 28 pt。导出时半径是绝对磅值。
 
-ppt-master 的风格参考页还有图表和表格。版式页里的图片位是虚线框，渐变被铺成一块带透明度的矩形。格式不接受渐变对象，也不放入第三方标志。
+ppt-master 的示例成稿还有图表、表格、路径、渐变、图案和图片。图片按内容哈希放在 `styles/examples/_assets/`，长边不超过 1600 px。版式页仍是结构示意：图片位是虚线框，渐变铺成一块带透明度的矩形。示例成稿不放入依赖第三方品牌标识的页面。
 
 ## 预检与导出
 

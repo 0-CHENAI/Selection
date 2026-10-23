@@ -33,6 +33,7 @@ type TextOpts = {
   bold?: boolean
   family?: '$cjk' | '$latin'
   align?: 'left' | 'center' | 'right'
+  rtl?: boolean
   valign?: 'top' | 'middle' | 'bottom'
   leading?: number
   tracking?: number
@@ -53,6 +54,7 @@ export function text(id: string, value: string, x: number, y: number, w: number,
       weight: bold ? 'bold' : 'regular',
       color: opts.color ?? '$ink',
       align: opts.align,
+      rtl: opts.rtl === true ? true : undefined,
       valign: opts.valign ?? 'top',
       leading,
       tracking: opts.tracking,

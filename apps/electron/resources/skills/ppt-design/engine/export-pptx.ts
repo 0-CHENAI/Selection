@@ -1,12 +1,14 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
 import { checkDeck } from './check.ts'
 import { luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
-import type { Deck, DeckElement, DeckIssue, FontFace, PlatformName, ScreenshotResult } from './types.ts'
+import { pathToDrawingPoints } from './svg-path.ts'
+import type { Deck, DeckElement, DeckIssue, FontFace, GradientFill, PatternFill, PlatformName, ScreenshotResult } from './types.ts'
 import { captureSlides } from './screenshot.ts'
 
 const PT = 72
@@ -84,7 +86,7 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
     if (page.notes) slide.addNotes(page.notes)
   }
   const raw = await pres.write({ outputType: 'nodebuffer' })
-  return applyFontFaces(Buffer.from(raw as Uint8Array), deck, platform)
+  return finishSlideXml(Buffer.from(raw as Uint8Array), deck, platform)
 }
 
 function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
@@ -109,7 +111,10 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
       margin: 0,
       wrap: true,
       fit: 'none',
+      italic: element.font.italic === true ? true : undefined,
+      rtlMode: element.font.rtl === true ? true : undefined,
       rotate: element.rotate,
+      shadow: shadowOptions(element),
       lineSpacing: element.font.size * leading,
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === '$cjk' ? 'zh-CN' : 'en-US',
@@ -122,9 +127,27 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
       addLine(pres, slide, deck, element)
       return
     }
-    const fill = element.fill ? paint(colorRef(element.fill, deck.theme, '$surface')) : undefined
+    const fill = shapeFill(deck, element)
     const line = element.line ? paint(colorRef(element.line.color, deck.theme, '$line')) : undefined
-    if (fill && fill.transparency === 100 && !line) return
+    if (fill && fill.transparency === 100 && !line && !element.gradient && !element.pattern) return
+    const lineOptions = element.line && line
+      ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) }
+      : { color: fill?.color ?? 'FFFFFF', width: 0 }
+    const fillOptions = fill && fill.transparency !== 100 ? fill : { type: 'none' as const }
+    if (element.shape === 'path' && element.path) {
+      const points = pathToDrawingPoints(element.path)
+      if (points.length === 0) return
+      slide.addShape('custGeom' as typeof pres.ShapeType.rect, {
+        x, y, w, h,
+        points,
+        rotate: element.rotate,
+        fill: fillOptions,
+        line: lineOptions,
+        shadow: shadowOptions(element),
+        objectName: element.id,
+      })
+      return
+    }
     const shape = element.shape === 'ellipse'
       ? pres.ShapeType.ellipse
       : element.shape === 'roundRect'
@@ -136,11 +159,10 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     slide.addShape(shape, {
       x, y, w, h,
       rotate: element.rotate,
-      fill: fill && fill.transparency !== 100 ? fill : { type: 'none' },
-      line: element.line && line
-        ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) }
-        : { color: fill?.color ?? 'FFFFFF', width: 0 },
+      fill: fillOptions,
+      line: lineOptions,
       rectRadius: radius,
+      shadow: shadowOptions(element),
       objectName: element.id,
     })
     return
@@ -152,7 +174,7 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
   if (element.type === 'image' && element.src) {
     const fitted = fitImage(element)
     slide.addImage({
-      path: element.src,
+      path: resolveAsset(element.src),
       x: inches(fitted.x),
       y: inches(fitted.y),
       w: inches(fitted.w),
@@ -166,7 +188,8 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
 }
 
 function fitImage(element: DeckElement): { x: number; y: number; w: number; h: number } {
-  const size = element.src ? readImageSize(element.src) : null
+  if (element.fit === 'fill') return element.bounds
+  const size = element.src ? readImageSize(resolveAsset(element.src)) : null
   if (!size) return element.bounds
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height)
   const w = size.width * scale
@@ -366,6 +389,9 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   slide.addChart(type, data, {
     ...base,
     barDir: chart.kind === 'bar' ? 'bar' : 'col',
+    // PowerPoint draws the first bar category at the bottom. maxMin matches the SVG, which draws it at the top.
+    // pptxgenjs 3.12 types only list minMax; the writer emits the string as given.
+    ...(chart.kind === 'bar' ? { catAxisOrientation: 'maxMin' as 'minMax' } : {}),
     barGrouping: 'clustered',
     barGapWidthPct: 60,
     lineSize: chart.lineWidth ?? 2.25,
@@ -379,24 +405,63 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   })
 }
 
-async function applyFontFaces(bytes: Buffer, deck: Deck, platform: PlatformName): Promise<Buffer> {
+function shapeFill(deck: Deck, element: DeckElement): { color: string; transparency?: number } | undefined {
+  if (element.pattern) return paint(colorRef(element.pattern.background, deck.theme, '$paper'))
+  if (element.gradient) {
+    const stop = [...element.gradient.stops].reverse().find(item => !item.color.replace('#', '').slice(6, 8).match(/^00$/i)) ?? element.gradient.stops[0]
+    if (!stop) return undefined
+    const color = paint(colorRef(stop.color, deck.theme, '$surface'))
+    return { color: color.color }
+  }
+  return element.fill ? paint(colorRef(element.fill, deck.theme, '$surface')) : undefined
+}
+
+function shadowOptions(element: DeckElement): { type: 'outer'; color: string; opacity: number; blur: number; offset: number; angle: number } | undefined {
+  const shadow = element.shadow
+  if (!shadow) return undefined
+  const angle = ((shadow.angle ?? 45) % 360 + 360) % 360
+  return {
+    type: 'outer',
+    color: shadow.color.replace('#', '').slice(0, 6),
+    opacity: shadow.opacity ?? 0.45,
+    blur: shadow.blur ?? 8,
+    offset: shadow.offset ?? 4,
+    angle,
+  }
+}
+
+function resolveAsset(src: string): string {
+  if (existsSync(src)) return src
+  const fromCwd = join(process.cwd(), src)
+  if (existsSync(fromCwd)) return fromCwd
+  const skill = fileURLToPath(new URL('..', import.meta.url))
+  const fromSkill = join(skill, src)
+  if (existsSync(fromSkill)) return fromSkill
+  return src
+}
+
+async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName): Promise<Buffer> {
   const zip = await JSZip.loadAsync(bytes)
   let changed = false
   for (let index = 0; index < deck.pages.length; index++) {
     const page = deck.pages[index]!
     const faces = new Map<string, { latin: string; ea: string }>()
+    const fills = new Map<string, string>()
+    const evenOdd = new Set<string>()
     for (const element of page.elements) {
       const face = element.font?.face ?? element.table?.face
-      if (!face) continue
-      faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] })
+      if (face) faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] })
+      const fill = fillOverride(element)
+      if (fill) fills.set(element.id, fill)
+      if (element.pathRule === 'evenodd') evenOdd.add(element.id)
     }
-    if (faces.size === 0) continue
+    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0) continue
     const path = `ppt/slides/slide${index + 1}.xml`
     const file = zip.file(path)
     if (!file) continue
     const xml = await file.async('string')
     // `<p:sp` is also the prefix of `<p:spTree>`. Require the tag to end so the tree is left intact.
-    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShapeFaces(block, faces))
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShape(block, faces, fills, evenOdd))
     if (next !== xml) {
       zip.file(path, next)
       changed = true
@@ -406,17 +471,75 @@ async function applyFontFaces(bytes: Buffer, deck: Deck, platform: PlatformName)
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
 }
 
-function rewriteShapeFaces(block: string, faces: Map<string, { latin: string; ea: string }>): string {
+function rewriteShape(block: string, faces: Map<string, { latin: string; ea: string }>, fills: Map<string, string>, evenOdd: Set<string>): string {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/)
   if (!name) return block
-  const face = faces.get(name[1]!)
-  if (!face) return block
-  const latin = escapeXml(face.latin)
-  const ea = escapeXml(face.ea)
-  return block
-    .replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
-    .replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`)
-    .replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
+  const id = name[1]!
+  let next = block
+  const face = faces.get(id)
+  if (face) {
+    const latin = escapeXml(face.latin)
+    const ea = escapeXml(face.ea)
+    next = next
+      .replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
+      .replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`)
+      .replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`)
+  }
+  const fill = fills.get(id)
+  if (fill) next = replaceShapeFill(next, fill)
+  if (evenOdd.has(id)) next = next.replace(/<a:path\b(?![^>]*\bfill=)/, '<a:path fill="evenOdd"')
+  return next
+}
+
+function replaceShapeFill(block: string, fillXml: string): string {
+  return block.replace(/<p:spPr>([\s\S]*?)<\/p:spPr>/, (_all, inner: string) => {
+    // A zero-width line can carry its own solid fill. Leave that alone so a transparent pattern lands on the shape.
+    const lineMatch = inner.match(/<a:ln\b[\s\S]*<\/a:ln>/)
+    const line = lineMatch?.[0] ?? ''
+    const body = line ? inner.replace(line, '') : inner
+    let next = body
+    if (body.includes('<a:solidFill>')) next = body.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, fillXml)
+    else if (body.includes('<a:noFill/>')) next = body.replace('<a:noFill/>', fillXml)
+    else next = `${body}${fillXml}`
+    return `<p:spPr>${next}${line}</p:spPr>`
+  })
+}
+
+function fillOverride(element: DeckElement): string | null {
+  if (element.gradient) return gradientXml(element.gradient)
+  if (element.pattern) return patternXml(element.pattern)
+  return null
+}
+
+function gradientXml(gradient: GradientFill): string {
+  const stops = gradient.stops.map(stop => {
+    const raw = stop.color.replace('#', '').toUpperCase()
+    const color = raw.slice(0, 6)
+    const alpha = raw.length >= 8 ? Math.round((Number.parseInt(raw.slice(6, 8), 16) / 255) * 100000) : 100000
+    return `<a:gs pos="${Math.round(Math.min(1, Math.max(0, stop.offset)) * 100000)}"><a:srgbClr val="${color}"><a:alpha val="${alpha}"/></a:srgbClr></a:gs>`
+  }).join('')
+  if (gradient.kind === 'radial') {
+    const cx = gradient.cx ?? 0.5
+    const cy = gradient.cy ?? 0.5
+    const l = Math.round(cx * 100000)
+    const t = Math.round(cy * 100000)
+    const r = Math.round((1 - cx) * 100000)
+    const b = Math.round((1 - cy) * 100000)
+    return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:path path="circle"><a:fillToRect l="${l}" t="${t}" r="${r}" b="${b}"/></a:path></a:gradFill>`
+  }
+  const angle = ((gradient.angle ?? 0) % 360 + 360) % 360
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:lin ang="${Math.round(angle * 60000)}" scaled="${gradient.absolute ? '0' : '1'}"/></a:gradFill>`
+}
+
+function patternColorXml(value: string): string {
+  const raw = value.replace('#', '').toUpperCase()
+  const color = raw.slice(0, 6)
+  const alpha = raw.length >= 8 ? Math.round((Number.parseInt(raw.slice(6, 8), 16) / 255) * 100000) : 100000
+  return `<a:srgbClr val="${color}"><a:alpha val="${alpha}"/></a:srgbClr>`
+}
+
+function patternXml(pattern: PatternFill): string {
+  return `<a:pattFill prst="${pattern.preset}"><a:fgClr>${patternColorXml(pattern.foreground)}</a:fgClr><a:bgClr>${patternColorXml(pattern.background)}</a:bgClr></a:pattFill>`
 }
 
 function escapeXml(value: string): string {

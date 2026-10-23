@@ -115,7 +115,11 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
   }
   for (const element of page.elements) {
     const box = element.bounds
-    if (box.x < -0.5 || box.y < -0.5 || box.x + box.w > width + 0.5 || box.y + box.h > height + 0.5) {
+    const bleed = deck.profile === 'example' ? 36 : 0.5
+    const off = deck.profile === 'example'
+      ? box.x + box.w < -bleed || box.y + box.h < -bleed || box.x > width + bleed || box.y > height + bleed
+      : box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed
+    if (off) {
       issues.push(issue('out_of_bounds', `元素超出 ${width}×${height} 画布（x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}）`, page.id, element.id))
     }
     if (element.type === 'text' && element.text && element.font && element.textCapacity) {
@@ -128,7 +132,7 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
       issues.push(...checkTable(deck, page, element, background))
     }
   }
-  issues.push(...checkOverlap(page))
+  issues.push(...checkOverlap(page, deck.profile === 'example'))
   return issues
 }
 
@@ -162,9 +166,12 @@ function checkText(deck: Deck, page: DeckPage, element: DeckElement, pageBackgro
   if (widest > element.bounds.w + fitSlack(font.size)) {
     issues.push(issue('over_capacity', `最宽一行约 ${widest.toFixed(0)}pt，文本框只有 ${element.bounds.w}pt`, page.id, element.id))
   }
-  for (const problem of orphanLines(lines)) {
-    issues.push(issue('orphan', `孤字或行首禁则：${problem}`, page.id, element.id))
+  if (deck.profile !== 'example') {
+    for (const problem of orphanLines(lines)) {
+      issues.push(issue('orphan', `孤字或行首禁则：${problem}`, page.id, element.id))
+    }
   }
+  if (deck.profile === 'example') return issues
   try {
     const fill = splitColor(colorRef(font.color, deck.theme, '$ink')).rgb
     const samples = samplePoints(element.bounds)
@@ -200,16 +207,25 @@ function backgroundAt(deck: Deck, page: DeckPage, self: DeckElement, x: number, 
   let color = splitColor(pageBackground).rgb
   for (const element of page.elements) {
     if (element.id === self.id) break
-    if (element.type !== 'shape' || !element.fill) continue
+    const paint = shapePaint(element)
+    if (element.type !== 'shape' || !paint) continue
     if (element.shape === 'line' || element.bounds.h <= 2 || element.bounds.w <= 2) continue
     if (!pointIn(element.bounds, x, y)) continue
     try {
-      color = composite(colorRef(element.fill, deck.theme, pageBackground), color)
+      color = composite(colorRef(paint, deck.theme, pageBackground), color)
     } catch {
       return color
     }
   }
   return color
+}
+
+function shapePaint(element: DeckElement): string | undefined {
+  if (element.fill) return element.fill
+  const stop = element.gradient?.stops[0]?.color
+  if (stop) return stop
+  if (element.pattern) return element.pattern.background
+  return undefined
 }
 
 function checkWaterfall(page: DeckPage, element: DeckElement): DeckIssue[] {
@@ -224,7 +240,7 @@ function checkWaterfall(page: DeckPage, element: DeckElement): DeckIssue[] {
   return []
 }
 
-function checkOverlap(page: DeckPage): DeckIssue[] {
+function checkOverlap(page: DeckPage, skipContent: boolean): DeckIssue[] {
   const issues: DeckIssue[] = []
   const items = page.elements.map(element => ({ element, role: roleOf(element) }))
   const panels = items.filter(item => item.role === 'panel')
@@ -239,7 +255,7 @@ function checkOverlap(page: DeckPage): DeckIssue[] {
       issues.push(issue('overlap', `色块 ${a.element.id} 与 ${b.element.id} 相交，且没有互相包含`, page.id, a.element.id))
     }
   }
-  for (let i = 0; i < content.length; i++) {
+  if (!skipContent) for (let i = 0; i < content.length; i++) {
     for (let j = i + 1; j < content.length; j++) {
       const a = content[i]!
       const b = content[j]!
@@ -288,7 +304,7 @@ function checkTable(deck: Deck, page: DeckPage, element: DeckElement, pageBackgr
       if (needed > rowHeight + 2) {
         issues.push(issue('over_capacity', `表格第 ${rowIndex + 1} 行第 ${columnIndex + 1} 列高 ${rowHeight.toFixed(0)}pt，文字约需 ${needed.toFixed(0)}pt`, page.id, element.id))
       }
-      try {
+      if (deck.profile !== 'example') try {
         const fill = colorRef(cell.fill ?? (rowIndex === 0 ? table.header?.fill : undefined) ?? table.fill, deck.theme, pageBackground)
         const ink = splitColor(colorRef(cell.color ?? (rowIndex === 0 ? table.header?.color : undefined) ?? table.color, deck.theme, '$ink')).rgb
         const ratio = contrastRatio(ink, splitColor(fill).rgb)

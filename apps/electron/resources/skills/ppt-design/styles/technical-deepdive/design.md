@@ -1,11 +1,5 @@
 # 技术深潜 · Technical Deep Dive
-
-本文件从 ppt-master（MIT，Copyright (c) 2025-2026 Hugo He）的风格说明转入。上游说明写了色板。默认主题沿用说明里的通用色，不使用任何公司的品牌色。参考页是按这个方法写的 12 页中文示例，不是示例站点的逐页描摹，也不含第三方标志或企业稿。换主题时保持这些页面的 token。
-
-- 示例：`ppt169_raft_consensus_deepdive`
-- 画布：960×540 pt
-- 默认配色：纸色 #0F1C2B，文字 #E6EDF5，强调 #4FC9E8
-
+参考页改为 ppt-master-examples 的成稿，不再使用原先那套 12 页线框。主示例是 `ppt169_raft_consensus_deepdive`（Raft：为了让人看懂而设计的共识算法）。许可：MIT，Copyright (c) 2025-2026 Hugo He。
 下面是上游说明原文。
 
 ---

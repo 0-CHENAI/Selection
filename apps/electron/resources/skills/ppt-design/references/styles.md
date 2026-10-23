@@ -2,7 +2,7 @@
 
 先读本页，再只打开选定风格的 `design.md`。中文参考页是 `deck.json`。DSH 的五套还有英文 `deck.en.json`。不要一次读入两套参考页。
 
-索引：[styles/catalog.json](../styles/catalog.json)。风格页都是 12 页、960×540 pt。许可见 [ATTRIBUTION](../ATTRIBUTION.md)。
+索引：[styles/catalog.json](../styles/catalog.json)。DSH 五套是 12 页、960×540 pt。ppt-master 的参考页是官方成稿，页数和画布写在目录里。许可见 [ATTRIBUTION](../ATTRIBUTION.md)。图片出处见 [styles/examples/CREDITS.md](../styles/examples/CREDITS.md)。
 
 主题在 [styles/themes/catalog.json](../styles/themes/catalog.json)。主题只换颜色和字体，不换页面几何。`ink` 是字色，`paper` 是纸色：浅色主题的纸是浅的，深色主题的纸是深的，所以 `$ink` 写在 `$paper` 上始终可读。封面若要用反色，背景写 `$ink`、字写 `$paper`。任意主题都可以套到任意风格或版式上。预检会检查正文、辅助色、强调色上的反色，以及面板上的正文。
 
@@ -16,7 +16,7 @@
 | `dsh-engineering-blueprint` | 架构评审、技术方案、执行计划 | 纸张底色，工程网格，流程盒，反馈路径 | Apache-2.0 |
 | `dsh-soft-editorial` | 观察手记、需要细读的判断 | 奶油纸，圆角色卡，衬线大标题 | MIT |
 
-下面十四套的方法来自 ppt-master 的风格说明。参考页是按该方法写的中文示例，不是示例站点的逐页描摹。`mbb-consulting` 只表示文档密度的决策写法，不代表任何咨询公司。
+下面十四套的方法来自 ppt-master 的风格说明。有参考页的十一套直接使用 ppt-master-examples 里的官方成稿，路径在目录的 `deck` 字段，画布可能是 16:9、4:3、A4、方形、竖版或横幅。`incident-postmortem`、`operating-review`、`product-launch` 的官方成稿依赖第三方品牌，目录只保留说明。`mbb-consulting` 只表示文档密度的决策写法，不代表任何咨询公司。
 
 | id | 材料 | 默认气质 |
 |---|---|---|

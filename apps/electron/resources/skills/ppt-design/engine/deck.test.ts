@@ -336,6 +336,129 @@ describe('reference styles', () => {
   })
 })
 
+describe('example canvas, gradients, and paths', () => {
+  it('accepts a banner canvas and exports gradFill and custGeom', async () => {
+    const deck: Deck = {
+      ...makeDeck('横幅', fixtureTheme, [
+        makePage('p1', 'banner', '横幅', '$paper', [
+          {
+            id: 'fade',
+            type: 'shape',
+            shape: 'rect',
+            role: 'decoration',
+            bounds: { x: 40, y: 40, w: 400, h: 180 },
+            fill: '#0E0E10',
+            gradient: {
+              kind: 'linear',
+              angle: 0,
+              stops: [
+                { offset: 0, color: '#0E0E1000' },
+                { offset: 1, color: '#0E0E10' },
+              ],
+            },
+          },
+          {
+            id: 'moon',
+            type: 'shape',
+            shape: 'path',
+            role: 'decoration',
+            bounds: { x: 80, y: 260, w: 48, h: 48 },
+            fill: '#E9C877',
+            path: 'M 0 40 L 40 0 L 40 40 Z',
+          },
+          text('label', 'Night', 500, 80, 220, 48, 28, { family: '$latin' }),
+        ], ''),
+      ]),
+      canvas: { width: 1440, height: 450 },
+      profile: 'example',
+    }
+    const parsed = parseDeckDocument(JSON.parse(JSON.stringify(deck)))
+    expect(parsed.issues).toEqual([])
+    const rejected = parseDeckDocument({ ...JSON.parse(JSON.stringify(deck)), canvas: { width: 100, height: 100 } })
+    expect(rejected.deck).toBeNull()
+    expect(rejected.issues.map(item => item.message).join('\n')).toContain('960×540')
+    const out = join(tempDir('geom-'), 'geom.pptx')
+    const result = await exportDeck(parsed.deck!, out, { platform: 'linux' })
+    expect(result.issues).toEqual([])
+    expect(result.status).toBe('ok')
+    const xml = await unzipEntry(out, 'ppt/slides/slide1.xml')
+    expect(xml).toContain('<a:gradFill')
+    expect(xml).toContain('val="0E0E10"')
+    expect(xml).toContain('<a:custGeom>')
+    const presentation = await unzipEntry(out, 'ppt/presentation.xml')
+    expect(presentation).toContain('cx="18288000"')
+    expect(presentation).toContain('cy="5715000"')
+  })
+
+  it('exports a halftone with transparent gaps', async () => {
+    const grain: DeckElement = {
+      id: 'grain',
+      type: 'shape',
+      shape: 'rect',
+      role: 'decoration',
+      bounds: { x: 0, y: 0, w: 960, h: 540 },
+      fill: '#FFFFFF00',
+      pattern: { preset: 'pct5', foreground: '#1A1A1A12', background: '#FFFFFF00' },
+    }
+    const deck: Deck = { ...makeDeck('网点', fixtureTheme, [makePage('p1', 'cover', '网点', '$paper', [grain], '')]), profile: 'example' }
+    const parsed = parseDeckDocument(JSON.parse(JSON.stringify(deck)))
+    expect(parsed.issues).toEqual([])
+    const out = join(tempDir('grain-'), 'grain.pptx')
+    const result = await exportDeck(parsed.deck!, out, { platform: 'linux' })
+    expect(result.status).toBe('ok')
+    const xml = await unzipEntry(out, 'ppt/slides/slide1.xml')
+    expect(xml).toContain('<a:pattFill prst="pct5">')
+    expect(xml).toContain('<a:fgClr><a:srgbClr val="1A1A1A"><a:alpha val="7059"/></a:srgbClr></a:fgClr>')
+    expect(xml).toContain('<a:bgClr><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:bgClr>')
+    expect(xml.indexOf('<a:pattFill')).toBeLessThan(xml.indexOf('<a:ln'))
+  })
+
+  it('exports Arabic as a right-to-left paragraph', async () => {
+    const deck = makeDeck('阿文', fixtureTheme, [
+      makePage('p1', 'cover', '阿文', '$paper', [
+        text('ar', 'التحميص', 400, 80, 280, 48, 28, { family: '$latin', align: 'right', rtl: true }),
+      ], ''),
+    ])
+    const out = join(tempDir('rtl-'), 'rtl.pptx')
+    const result = await exportDeck(deck, out, { platform: 'linux' })
+    expect(result.status).toBe('ok')
+    const xml = await unzipEntry(out, 'ppt/slides/slide1.xml')
+    expect(xml).toContain('<a:pPr rtl="1"')
+    expect(xml).toContain('algn="r"')
+  })
+
+  it('draws the first bar category at the top', async () => {
+    const deck = makeDeck('条形', fixtureTheme, [
+      makePage('p1', 'chart', '条形', '$paper', [
+        chart('bars', 48, 80, 500, 280, {
+          kind: 'bar',
+          categories: ['甲', '乙'],
+          series: [{ name: '数量', values: [5, 1] }],
+          colors: ['#A8452B', '#3E5C6B'],
+        }),
+      ], ''),
+    ])
+    const out = join(tempDir('bar-order-'), 'bar.pptx')
+    const result = await exportDeck(deck, out, { platform: 'linux' })
+    expect(result.status).toBe('ok')
+    const listing = await unzipList(out)
+    const name = listing.match(/ppt\/charts\/chart\d+\.xml/)?.[0]
+    expect(name).toBeTruthy()
+    const chartXml = await unzipEntry(out, name!)
+    expect(chartXml).toContain('<c:orientation val="maxMin"/>')
+    expect(chartXml).toContain('甲')
+  })
+
+  it('skips contrast on example pages and still flags authored pages', () => {
+    const washed = text('wash', '看不清', 48, 80, 200, 40, 18, { color: '#FFFFFF' })
+    const pages = [makePage('p1', 'cover', '封面', '$paper', [washed], '')]
+    const example: Deck = { ...makeDeck('示例', fixtureTheme, pages), profile: 'example' }
+    const authored: Deck = { ...makeDeck('成稿', fixtureTheme, pages), profile: 'authored' }
+    expect(checkDeck(example)).toEqual([])
+    expect(checkDeck(authored).some(item => item.code === 'contrast')).toBe(true)
+  })
+})
+
 describe('skill instructions', () => {
   it('points at the deck engine and keeps the OfficeCLI morph override', () => {
     const skill = read('SKILL.md')

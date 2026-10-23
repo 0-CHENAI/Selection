@@ -20,6 +20,13 @@ export function canvasBySize(width: number, height: number): (typeof CANVAS_PRES
   return CANVAS_PRESETS.find(item => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null
 }
 
+/** Preset sizes, plus the other canvases in the ppt-master examples (A4, banners, 1920×1080). */
+export function canvasSupported(width: number, height: number): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return false
+  if (canvasBySize(width, height)) return true
+  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000
+}
+
 export type PlatformName = 'mac' | 'win' | 'linux'
 
 export type Bounds = { x: number; y: number; w: number; h: number }
@@ -43,7 +50,35 @@ export type Theme = {
   logo?: string
 }
 
-export type ShapeName = 'rect' | 'roundRect' | 'ellipse' | 'line'
+export type ShapeName = 'rect' | 'roundRect' | 'ellipse' | 'line' | 'path'
+
+export type ColorStop = { offset: number; color: string }
+
+/** 0° points to the right and increases clockwise, matching SVG user space (y down). */
+export type GradientFill = {
+  kind: 'linear' | 'radial'
+  angle?: number
+  stops: ColorStop[]
+  cx?: number
+  cy?: number
+  /** When true, the angle is absolute (OOXML lin scaled="0"). Otherwise it follows the shape box. */
+  absolute?: boolean
+}
+
+/** PowerPoint preset pattern, used for paper grain and halftone. */
+export type PatternFill = {
+  preset: string
+  foreground: string
+  background: string
+}
+
+export type ShadowSpec = {
+  color: string
+  opacity?: number
+  blur?: number
+  offset?: number
+  angle?: number
+}
 export type ElementRole = 'panel' | 'rule' | 'decoration' | 'content'
 export type FontFamilyToken = '$cjk' | '$latin'
 export type TextAlign = 'left' | 'center' | 'right'
@@ -127,6 +162,9 @@ export type DeckElement = {
     family: FontFamilyToken
     size: number
     weight?: 'regular' | 'bold'
+    italic?: boolean
+    /** Arabic and Hebrew paragraphs. The box is still positioned from the SVG anchor. */
+    rtl?: boolean
     color?: string
     align?: TextAlign
     valign?: TextValign
@@ -142,6 +180,15 @@ export type DeckElement = {
   line?: LineSpec
   /** Corner radius in points for roundRect. */
   radius?: number
+  /** SVG path in the element's own box, origin at the top-left, units in points. */
+  path?: string
+  /** `evenodd` punches holes. The default is the nonzero winding rule. */
+  pathRule?: 'evenodd' | 'nonzero'
+  gradient?: GradientFill
+  pattern?: PatternFill
+  shadow?: ShadowSpec
+  /** `fill` stretches the bitmap to the box. `contain` keeps the aspect ratio. */
+  fit?: 'fill' | 'contain'
   /** Triangle arrow on a line. */
   arrow?: LineArrow
   src?: string
@@ -166,6 +213,11 @@ export type Deck = {
   canvas: { width: number; height: number }
   theme: Theme
   pages: DeckPage[]
+  /**
+   * `example` is a converted reference deck. Contrast and orphan checks are skipped
+   * because the pages were already published; schema, capacity, and bounds still run.
+   */
+  profile?: 'authored' | 'example'
 }
 
 export type IssueCode =

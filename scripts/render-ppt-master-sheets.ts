@@ -38,9 +38,17 @@ type Job = { id: string; file: string; deck: Deck; cols: number; thumb: number }
 async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true })
   const jobs: Job[] = []
-  const styles = Object.keys(JSON.parse(readFileSync(join(skill, 'styles/catalog.json'), 'utf8'))).filter(id => !id.startsWith('dsh-'))
-  for (const id of styles) {
-    jobs.push({ id: `pm-style-${id}-12p`, file: join(skill, 'styles', id, 'deck.json'), deck: load(join(skill, 'styles', id, 'deck.json')), cols: 4, thumb: 300 })
+  const styleCatalog = JSON.parse(readFileSync(join(skill, 'styles/catalog.json'), 'utf8')) as Record<string, { deck?: string }>
+  const styleIds = [
+    'academic-research', 'consulting-decision', 'creative-pitch', 'duty-manual', 'incident-postmortem',
+    'investor-pitch', 'mbb-consulting', 'narrative-keynote', 'operating-review', 'product-launch',
+    'science-explainer', 'solution-proposal', 'technical-deepdive', 'workshop-teaching',
+  ]
+  for (const id of styleIds) {
+    const relative = styleCatalog[id]?.deck
+    if (!relative) continue
+    const file = join(skill, relative)
+    jobs.push({ id: `pm-style-${id}`, file, deck: load(file), cols: 4, thumb: 240 })
   }
   const layouts = Object.keys(JSON.parse(readFileSync(join(skill, 'layouts/catalog.json'), 'utf8')))
   for (const id of layouts) {
@@ -76,7 +84,7 @@ function load(file: string): Deck {
 }
 
 function themeShowcase(): Deck {
-  const base = load(join(skill, 'styles/workshop-teaching/deck.json'))
+  const base = load(join(skill, 'layouts/editorial_bleed/deck.json'))
   const source = base.pages[2]!
   const catalog = JSON.parse(readFileSync(join(skill, 'styles/themes/catalog.json'), 'utf8')) as Record<string, { file: string; name: string }>
   const pages = Object.values(catalog).map(entry => {

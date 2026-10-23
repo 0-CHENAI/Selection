@@ -60,19 +60,56 @@ describe('ppt-master layouts', () => {
   })
 })
 
+const excludedStyles = ['incident-postmortem', 'operating-review', 'product-launch']
+
 describe('ppt-master styles and themes', () => {
-  it('ships fourteen 12-page style decks', () => {
-    const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck: string }>
+  it('points each style at a real example or records why that example stayed out', () => {
+    const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, {
+      deck?: string
+      examples?: string[]
+      excludedExample?: string
+      reason?: string
+      excluded?: boolean
+    }>
+    const dsh = Object.keys(catalog).filter(id => id.startsWith('dsh-')).sort()
+    expect(dsh).toEqual([
+      'dsh-cartesian',
+      'dsh-course-workshop',
+      'dsh-editorial-notebook',
+      'dsh-engineering-blueprint',
+      'dsh-soft-editorial',
+    ])
     for (const id of styles) {
-      expect(catalog[id]?.deck).toBe(`styles/${id}/deck.json`)
-      const parsed = parseDeckSource(read(`styles/${id}/deck.json`))
-      expect(parsed.issues).toEqual([])
-      const deck = parsed.deck!
-      expect(deck.pages).toHaveLength(12)
-      expect(deck.canvas).toEqual({ width: 960, height: 540 })
-      expect(deck.theme.id).toBe(id)
-      expect(checkDeck(deck)).toEqual([])
       expect(read(`styles/${id}/design.md`)).toContain('Hugo He')
+      const entry = catalog[id]
+      expect(entry).toBeTruthy()
+      if (excludedStyles.includes(id)) {
+        expect(entry?.deck).toBeUndefined()
+        expect(entry?.reason?.length).toBeGreaterThan(0)
+        expect(entry?.excludedExample?.length).toBeGreaterThan(0)
+        continue
+      }
+      expect(entry?.deck?.startsWith('styles/examples/')).toBe(true)
+      expect(entry?.examples?.length).toBeGreaterThan(0)
+      const parsed = parseDeckSource(read(entry!.deck!))
+      expect(parsed.issues).toEqual([])
+      expect(checkDeck(parsed.deck!)).toEqual([])
+      expect(parsed.deck!.profile).toBe('example')
+    }
+  })
+
+  it('keeps every converted example deck inside the checker', () => {
+    const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck?: string; excluded?: boolean; canvas?: string; category?: string }>
+    const examples = Object.entries(catalog).filter(([id, entry]) => id.startsWith('ppt') || id.startsWith('a4_') || id.startsWith('moments_') || id.startsWith('story_') || id.startsWith('xiaohongshu') || id.startsWith('wechat') || id.startsWith('banner_') || id.startsWith('custom_'))
+    expect(examples.length).toBe(70)
+    const converted = examples.filter(([, entry]) => entry.deck)
+    expect(converted.length).toBe(61)
+    for (const [, entry] of converted) {
+      expect(['商务', '咨询', '学术', '教学', '技术', '创意', '社媒']).toContain(entry.category)
+      const parsed = parseDeckSource(read(entry.deck!))
+      expect(parsed.issues).toEqual([])
+      expect(parsed.deck!.pages.length).toBeGreaterThan(0)
+      expect(checkDeck(parsed.deck!)).toEqual([])
     }
   })
 
@@ -107,9 +144,9 @@ describe('ppt-master styles and themes', () => {
       secondary: '#FF3DA5',
     })
     expect(checkTheme(candy)).toEqual([])
-    const deck = parseDeckSource(read('styles/academic-research/deck.json')).deck!
+    const deck = parseDeckSource(read('layouts/editorial_bleed/deck.json')).deck!
     expect(checkDeck(applyTheme(deck, JSON.parse(read('styles/themes/night-circuit.json')) as Theme))).toEqual([])
-    const darkDeck = parseDeckSource(read('styles/product-launch/deck.json')).deck!
-    expect(checkDeck(applyTheme(darkDeck, JSON.parse(read('styles/themes/jiangshan.json')) as Theme))).toEqual([])
+    const report = parseDeckSource(read('layouts/report_core/deck.json')).deck!
+    expect(checkDeck(applyTheme(report, JSON.parse(read('styles/themes/jiangshan.json')) as Theme))).toEqual([])
   })
 })

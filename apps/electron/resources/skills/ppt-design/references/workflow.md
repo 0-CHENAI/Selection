@@ -1,7 +1,7 @@
 # 从故事到文稿
 
 1. 从用户材料写出受众、目的、一个核心结论、每页主张、事实和假设、来源、页数。不编造数字、日期、讲者或标志。
-2. 只锁定一个风格。读它的 `design.md`，再读对应语言的参考页：中文 `deck.json`，有英文时再读 `deck.en.json`。ppt-master 转入的风格只有中文参考页。按那些页的坐标改文字和数据；需要挪动时改 `bounds`，不要另起一套网格。图示标签沿用参考页的字号。主题可以整套替换颜色和字体，见 [风格索引](styles.md)。用户给出主色和辅色时，生成对比度安全的品牌主题，不要手写一组未检查的色值。
+2. 只锁定一个风格。读它的 `design.md`，再按 `styles/catalog.json` 的 `deck` 字段读参考页。DSH 五套另有英文 `deck.en.json`。十一套 ppt-master 风格的参考页是 `styles/examples/` 里的官方成稿，画布以该文件的 `canvas` 为准。`incident-postmortem`、`operating-review`、`product-launch` 没有参考页，结构改从 `layouts/` 取，token 仍用该风格说明。按参考页的坐标改文字和数据；需要挪动时改 `bounds`，不要另起一套网格。图示标签沿用参考页的字号。主题可以整套替换颜色和字体，见 [风格索引](styles.md)。用户给出主色和辅色时，生成对比度安全的品牌主题，不要手写一组未检查的色值。新稿不要写 `profile: example`。
 3. 把完整 deck 写到会话 `dataFolderPath` 的新文件，例如 `deck.json`。参考页的虚构店名和数字不要留在正式稿里。
 4. 运行 `deck-cli.mjs check`。一次看完全部问题，按页和元素改完再查。不要为了通过而把字号降到风格下限以下。
 5. `render` 到 `dataFolderPath` 里的新 `.pptx`。需要截图时加 `--screenshot`。

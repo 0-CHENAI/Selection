@@ -30,7 +30,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **PPT 声明式页面** — 新建或整套重设计演示文稿时，先写可预检的页面描述，再导出可编辑的 PPTX。随附五套改编自 DSH Desktop v0.2.21 的参考风格（中英各 12 页），以及从 ppt-master 转入的十四套风格、七套版式和十二套自有色彩主题。16:9 仍是 960×540 pt，另有 4:3、方形和竖版画布。预检不过就不写出文件。局部修改仍走原来的 OfficeCLI 路径。Refs #631，并取代尚未发布的三套配方版式（#626）。
+- **PPT 声明式页面** — 新建或整套重设计演示文稿时，先写可预检的页面描述，再导出可编辑的 PPTX。随附五套改编自 DSH Desktop v0.2.21 的参考风格（中英各 12 页），ppt-master 的七套版式、十四套风格说明、十二套自有色彩主题，以及 ppt-master-examples 里 61 套官方成稿（依赖第三方品牌或官方机构标识的 9 套没有转入）。成稿保留文字、形状、路径、渐变和图片，画布覆盖 16:9、4:3、A4、方形、竖版和横幅。16:9 仍是 960×540 pt。预检不过就不写出文件。局部修改仍走原来的 OfficeCLI 路径。Refs #631，并取代尚未发布的三套配方版式（#626）。
 
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
 

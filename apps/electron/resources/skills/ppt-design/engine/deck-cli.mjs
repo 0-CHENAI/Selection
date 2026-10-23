@@ -12042,6 +12042,13 @@ var CANVAS_PRESETS = [
 function canvasBySize(width, height) {
   return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
 }
+function canvasSupported(width, height) {
+  if (!Number.isFinite(width) || !Number.isFinite(height))
+    return false;
+  if (canvasBySize(width, height))
+    return true;
+  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000;
+}
 
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
@@ -12311,7 +12318,7 @@ function parseElement(value, pageId, issues) {
   }
   const id = value.id;
   const elementId = typeof id === "string" ? id : undefined;
-  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "table"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
+  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
   if (typeof id !== "string" || !id.trim()) {
     issues.push(issue("schema", "\u5143\u7D20\u7F3A\u5C11 id", pageId));
     return null;
@@ -12349,6 +12356,24 @@ function parseElement(value, pageId, issues) {
       issues.push(issue("schema", `\u56FE\u7247 ${id} \u7F3A\u5C11 alt`, pageId, id));
     else
       element.alt = value.alt;
+    if (value.fit !== undefined) {
+      if (value.fit !== "fill" && value.fit !== "contain")
+        issues.push(issue("schema", `\u56FE\u7247 ${id} \u7684 fit \u53EA\u652F\u6301 fill \u6216 contain`, pageId, id));
+      else
+        element.fit = value.fit;
+    }
+  }
+  if (value.type !== "image" && value.fit !== undefined)
+    issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 fit \u53EA\u7528\u4E8E\u56FE\u7247`, pageId, id));
+  if (value.type !== "shape" && (value.path !== undefined || value.gradient !== undefined || value.pattern !== undefined || value.pathRule !== undefined)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 path\u3001gradient\u3001pattern \u53EA\u7528\u4E8E\u5F62\u72B6`, pageId, id));
+  }
+  if (value.shadow !== undefined && value.type !== "shape" && value.type !== "text") {
+    issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 shadow \u53EA\u7528\u4E8E\u5F62\u72B6\u6216\u6587\u672C`, pageId, id));
+  } else if ((value.type === "shape" || value.type === "text") && value.shadow !== undefined) {
+    const shadow = parseShadow(value.shadow, id, issues, pageId);
+    if (shadow)
+      element.shadow = shadow;
   }
   if (value.type === "chart") {
     const chart = parseChart(value.chart, id, issues, pageId, id);
@@ -12381,14 +12406,18 @@ function parseText(value, element, pageId, issues) {
   if (!isObject2(value.font))
     issues.push(issue("schema", `\u6587\u672C ${element.id} \u7F3A\u5C11 font`, pageId, element.id));
   else {
-    rejectUnknown(value.font, ["family", "size", "weight", "color", "align", "valign", "leading", "tracking", "face"], `${element.id}.font`, issues, pageId, element.id);
+    rejectUnknown(value.font, ["family", "size", "weight", "italic", "rtl", "color", "align", "valign", "leading", "tracking", "face"], `${element.id}.font`, issues, pageId, element.id);
     if (typeof value.font.family !== "string" || !FONT_TOKEN.test(value.font.family))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.family \u53EA\u80FD\u662F $cjk \u6216 $latin`, pageId, element.id));
-    if (typeof value.font.size !== "number" || value.font.size < 6 || value.font.size > 160)
-      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684\u5B57\u53F7\u5FC5\u987B\u5728 6 \u5230 160 \u4E4B\u95F4`, pageId, element.id));
+    if (typeof value.font.size !== "number" || value.font.size < 6 || value.font.size > 240)
+      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684\u5B57\u53F7\u5FC5\u987B\u5728 6 \u5230 240 \u4E4B\u95F4`, pageId, element.id));
     const weight = value.font.weight;
     if (weight !== undefined && weight !== "regular" && weight !== "bold")
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.weight \u4E0D\u652F\u6301`, pageId, element.id));
+    if (value.font.italic !== undefined && typeof value.font.italic !== "boolean")
+      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.italic \u5FC5\u987B\u662F\u5E03\u5C14\u503C`, pageId, element.id));
+    if (value.font.rtl !== undefined && typeof value.font.rtl !== "boolean")
+      issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 font.rtl \u5FC5\u987B\u662F\u5E03\u5C14\u503C`, pageId, element.id));
     if (value.font.color !== undefined && (typeof value.font.color !== "string" || !COLOR_REF.test(value.font.color)))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684\u989C\u8272\u65E0\u6548`, pageId, element.id));
     if (value.font.align !== undefined && value.font.align !== "left" && value.font.align !== "center" && value.font.align !== "right")
@@ -12397,7 +12426,7 @@ function parseText(value, element, pageId, issues) {
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 valign \u4E0D\u652F\u6301`, pageId, element.id));
     if (value.font.leading !== undefined && (typeof value.font.leading !== "number" || value.font.leading < 0.9 || value.font.leading > 2))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 leading \u5FC5\u987B\u5728 0.9 \u5230 2 \u4E4B\u95F4`, pageId, element.id));
-    if (value.font.tracking !== undefined && (typeof value.font.tracking !== "number" || value.font.tracking < -4 || value.font.tracking > 12))
+    if (value.font.tracking !== undefined && (typeof value.font.tracking !== "number" || value.font.tracking < -20 || value.font.tracking > 80))
       issues.push(issue("schema", `\u6587\u672C ${element.id} \u7684 tracking \u8D85\u51FA\u8303\u56F4`, pageId, element.id));
     const face = value.font.face === undefined ? undefined : parseFontFace(value.font.face, `${element.id}.font.face`, issues, pageId, element.id);
     if (typeof value.font.family === "string" && FONT_TOKEN.test(value.font.family) && typeof value.font.size === "number") {
@@ -12407,6 +12436,8 @@ function parseText(value, element, pageId, issues) {
         family: value.font.family,
         size: value.font.size,
         weight: weight === "bold" || weight === "regular" ? weight : undefined,
+        italic: value.font.italic === true ? true : undefined,
+        rtl: value.font.rtl === true ? true : undefined,
         color: typeof value.font.color === "string" ? value.font.color : undefined,
         align,
         valign,
@@ -12432,9 +12463,102 @@ function parseFontFace(value, path, issues, pageId, elementId) {
     return;
   return { latin: value.latin, cjk };
 }
+var PATTERN_PRESET = /^[A-Za-z][A-Za-z0-9]{0,20}$/;
+function parseGradient(value, elementId, issues, pageId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["kind", "angle", "stops", "cx", "cy", "absolute"], `${elementId}.gradient`, issues, pageId, elementId);
+  if (value.kind !== "linear" && value.kind !== "radial") {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient.kind \u53EA\u652F\u6301 linear \u6216 radial`, pageId, elementId));
+    return;
+  }
+  if (!Array.isArray(value.stops) || value.stops.length < 2) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient.stops \u81F3\u5C11\u8981\u6709\u4E24\u4E2A\u8272\u6807`, pageId, elementId));
+    return;
+  }
+  const stops = [];
+  for (const stop of value.stops) {
+    if (!isObject2(stop)) {
+      issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684\u8272\u6807\u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+      return;
+    }
+    rejectUnknown(stop, ["offset", "color"], `${elementId}.gradient.stops`, issues, pageId, elementId);
+    if (typeof stop.offset !== "number" || stop.offset < 0 || stop.offset > 1 || typeof stop.color !== "string" || !COLOR_REF.test(stop.color)) {
+      issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684\u8272\u6807\u65E0\u6548`, pageId, elementId));
+      return;
+    }
+    stops.push({ offset: stop.offset, color: stop.color });
+  }
+  if (value.angle !== undefined && (typeof value.angle !== "number" || !Number.isFinite(value.angle))) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient.angle \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57`, pageId, elementId));
+  }
+  for (const key of ["cx", "cy"]) {
+    const coord = value[key];
+    if (coord !== undefined && (typeof coord !== "number" || coord < 0 || coord > 1)) {
+      issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient.${key} \u5FC5\u987B\u5728 0 \u5230 1 \u4E4B\u95F4`, pageId, elementId));
+    }
+  }
+  if (value.absolute !== undefined && typeof value.absolute !== "boolean") {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 gradient.absolute \u5FC5\u987B\u662F\u5E03\u5C14\u503C`, pageId, elementId));
+  }
+  return {
+    kind: value.kind,
+    angle: typeof value.angle === "number" ? value.angle : undefined,
+    stops,
+    cx: typeof value.cx === "number" ? value.cx : undefined,
+    cy: typeof value.cy === "number" ? value.cy : undefined,
+    absolute: value.absolute === true ? true : undefined
+  };
+}
+function parsePattern(value, elementId, issues, pageId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 pattern \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["preset", "foreground", "background"], `${elementId}.pattern`, issues, pageId, elementId);
+  if (typeof value.preset !== "string" || !PATTERN_PRESET.test(value.preset)) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 pattern.preset \u65E0\u6548`, pageId, elementId));
+    return;
+  }
+  if (typeof value.foreground !== "string" || !COLOR_REF.test(value.foreground) || typeof value.background !== "string" || !COLOR_REF.test(value.background)) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${elementId} \u7684 pattern \u989C\u8272\u65E0\u6548`, pageId, elementId));
+    return;
+  }
+  return { preset: value.preset, foreground: value.foreground, background: value.background };
+}
+function parseShadow(value, elementId, issues, pageId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 shadow \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["color", "opacity", "blur", "offset", "angle"], `${elementId}.shadow`, issues, pageId, elementId);
+  if (typeof value.color !== "string" || !COLOR_REF.test(value.color)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 shadow.color \u65E0\u6548`, pageId, elementId));
+    return;
+  }
+  for (const key of ["opacity", "blur", "offset", "angle"]) {
+    const number = value[key];
+    if (number !== undefined && (typeof number !== "number" || !Number.isFinite(number))) {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 shadow.${key} \u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57`, pageId, elementId));
+      return;
+    }
+  }
+  if (typeof value.opacity === "number" && (value.opacity < 0 || value.opacity > 1)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 shadow.opacity \u5FC5\u987B\u5728 0 \u5230 1 \u4E4B\u95F4`, pageId, elementId));
+  }
+  return {
+    color: value.color,
+    opacity: typeof value.opacity === "number" ? value.opacity : undefined,
+    blur: typeof value.blur === "number" ? value.blur : undefined,
+    offset: typeof value.offset === "number" ? value.offset : undefined,
+    angle: typeof value.angle === "number" ? value.angle : undefined
+  };
+}
 function parseShape(value, element, pageId, issues) {
   const shape = value.shape ?? "rect";
-  if (shape !== "rect" && shape !== "roundRect" && shape !== "ellipse" && shape !== "line") {
+  if (shape !== "rect" && shape !== "roundRect" && shape !== "ellipse" && shape !== "line" && shape !== "path") {
     issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 shape \u4E0D\u652F\u6301`, pageId, element.id));
   } else
     element.shape = shape;
@@ -12443,6 +12567,30 @@ function parseShape(value, element, pageId, issues) {
       issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 fill \u65E0\u6548`, pageId, element.id));
     else
       element.fill = value.fill;
+  }
+  if (value.gradient !== undefined) {
+    const gradient = parseGradient(value.gradient, element.id, issues, pageId);
+    if (gradient)
+      element.gradient = gradient;
+  }
+  if (value.pattern !== undefined) {
+    const pattern = parsePattern(value.pattern, element.id, issues, pageId);
+    if (pattern)
+      element.pattern = pattern;
+  }
+  if (value.pathRule !== undefined) {
+    if (value.pathRule !== "evenodd" && value.pathRule !== "nonzero")
+      issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7684 pathRule \u53EA\u652F\u6301 evenodd \u6216 nonzero`, pageId, element.id));
+    else
+      element.pathRule = value.pathRule;
+  }
+  if (shape === "path") {
+    if (typeof value.path !== "string" || !value.path.trim() || value.path.length > 500000)
+      issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7F3A\u5C11 path`, pageId, element.id));
+    else
+      element.path = value.path;
+  } else if (value.path !== undefined) {
+    issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u53EA\u6709 path \u5F62\u72B6\u53EF\u4EE5\u5E26 path`, pageId, element.id));
   }
   if (value.line !== undefined) {
     if (!isObject2(value.line))
@@ -12463,7 +12611,10 @@ function parseShape(value, element, pageId, issues) {
       }
     }
   }
-  if (element.shape !== "line" && element.fill === undefined)
+  const painted = element.fill !== undefined || element.gradient !== undefined || element.pattern !== undefined;
+  if (element.shape === "path" && !painted && !element.line)
+    issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7F3A\u5C11 fill`, pageId, element.id));
+  if (element.shape !== "line" && element.shape !== "path" && !painted)
     issues.push(issue("schema", `\u5F62\u72B6 ${element.id} \u7F3A\u5C11 fill`, pageId, element.id));
   if (value.radius !== undefined) {
     if (typeof value.radius !== "number" || value.radius < 0)
@@ -12545,8 +12696,8 @@ function parseTable(value, path, issues, pageId, elementId) {
     }
     rows.push(cells);
   }
-  if (typeof value.fontSize !== "number" || value.fontSize < 6 || value.fontSize > 160) {
-    issues.push(issue("schema", `${path}.table.fontSize \u5FC5\u987B\u5728 6 \u5230 160 \u4E4B\u95F4`, pageId, elementId));
+  if (typeof value.fontSize !== "number" || value.fontSize < 6 || value.fontSize > 240) {
+    issues.push(issue("schema", `${path}.table.fontSize \u5FC5\u987B\u5728 6 \u5230 240 \u4E4B\u95F4`, pageId, elementId));
     return;
   }
   if (typeof value.fontFamily !== "string" || !FONT_TOKEN.test(value.fontFamily)) {
@@ -12651,7 +12802,7 @@ function parseDeckDocument(value) {
   const issues = [];
   if (!isObject2(value))
     return { deck: null, issues: [issue("schema", "deck \u5FC5\u987B\u662F\u5BF9\u8C61")] };
-  rejectUnknown(value, ["format", "version", "title", "canvas", "theme", "pages"], "deck", issues);
+  rejectUnknown(value, ["format", "version", "title", "canvas", "theme", "pages", "profile"], "deck", issues);
   if (value.format !== DECK_FORMAT)
     issues.push(issue("schema", `format \u5FC5\u987B\u662F ${DECK_FORMAT}`));
   if (value.version !== DECK_VERSION)
@@ -12664,9 +12815,12 @@ function parseDeckDocument(value) {
     rejectUnknown(value.canvas, ["width", "height"], "canvas", issues);
     const width = value.canvas.width;
     const height = value.canvas.height;
-    if (typeof width !== "number" || typeof height !== "number" || !canvasBySize(width, height)) {
+    if (typeof width !== "number" || typeof height !== "number" || !canvasSupported(width, height)) {
       issues.push(issue("schema", `canvas \u5FC5\u987B\u662F\u53D7\u652F\u6301\u7684\u5C3A\u5BF8\u4E4B\u4E00\uFF0C\u4F8B\u5982 ${CANVAS_WIDTH}\xD7${CANVAS_HEIGHT}\uFF0816:9\uFF09`));
     }
+  }
+  if (value.profile !== undefined && value.profile !== "authored" && value.profile !== "example") {
+    issues.push(issue("schema", "profile \u53EA\u652F\u6301 authored \u6216 example"));
   }
   const theme = parseTheme(value.theme, issues);
   if (!Array.isArray(value.pages) || value.pages.length === 0) {
@@ -12693,7 +12847,8 @@ function parseDeckDocument(value) {
       title: value.title,
       canvas: { width: Number(value.canvas.width), height: Number(value.canvas.height) },
       theme,
-      pages
+      pages,
+      profile: value.profile === "example" || value.profile === "authored" ? value.profile : undefined
     },
     issues
   };
@@ -12826,7 +12981,9 @@ function checkPage(deck, page) {
   }
   for (const element of page.elements) {
     const box = element.bounds;
-    if (box.x < -0.5 || box.y < -0.5 || box.x + box.w > width + 0.5 || box.y + box.h > height + 0.5) {
+    const bleed = deck.profile === "example" ? 36 : 0.5;
+    const off = deck.profile === "example" ? box.x + box.w < -bleed || box.y + box.h < -bleed || box.x > width + bleed || box.y > height + bleed : box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed;
+    if (off) {
       issues.push(issue("out_of_bounds", `\u5143\u7D20\u8D85\u51FA ${width}\xD7${height} \u753B\u5E03\uFF08x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}\uFF09`, page.id, element.id));
     }
     if (element.type === "text" && element.text && element.font && element.textCapacity) {
@@ -12839,7 +12996,7 @@ function checkPage(deck, page) {
       issues.push(...checkTable(deck, page, element, background));
     }
   }
-  issues.push(...checkOverlap(page));
+  issues.push(...checkOverlap(page, deck.profile === "example"));
   return issues;
 }
 function checkText(deck, page, element, pageBackground) {
@@ -12872,9 +13029,13 @@ function checkText(deck, page, element, pageBackground) {
   if (widest > element.bounds.w + fitSlack(font.size)) {
     issues.push(issue("over_capacity", `\u6700\u5BBD\u4E00\u884C\u7EA6 ${widest.toFixed(0)}pt\uFF0C\u6587\u672C\u6846\u53EA\u6709 ${element.bounds.w}pt`, page.id, element.id));
   }
-  for (const problem of orphanLines(lines)) {
-    issues.push(issue("orphan", `\u5B64\u5B57\u6216\u884C\u9996\u7981\u5219\uFF1A${problem}`, page.id, element.id));
+  if (deck.profile !== "example") {
+    for (const problem of orphanLines(lines)) {
+      issues.push(issue("orphan", `\u5B64\u5B57\u6216\u884C\u9996\u7981\u5219\uFF1A${problem}`, page.id, element.id));
+    }
   }
+  if (deck.profile === "example")
+    return issues;
   try {
     const fill = splitColor(colorRef(font.color, deck.theme, "$ink")).rgb;
     const samples = samplePoints(element.bounds);
@@ -12909,19 +13070,30 @@ function backgroundAt(deck, page, self2, x, y, pageBackground) {
   for (const element of page.elements) {
     if (element.id === self2.id)
       break;
-    if (element.type !== "shape" || !element.fill)
+    const paint = shapePaint(element);
+    if (element.type !== "shape" || !paint)
       continue;
     if (element.shape === "line" || element.bounds.h <= 2 || element.bounds.w <= 2)
       continue;
     if (!pointIn(element.bounds, x, y))
       continue;
     try {
-      color = composite(colorRef(element.fill, deck.theme, pageBackground), color);
+      color = composite(colorRef(paint, deck.theme, pageBackground), color);
     } catch {
       return color;
     }
   }
   return color;
+}
+function shapePaint(element) {
+  if (element.fill)
+    return element.fill;
+  const stop = element.gradient?.stops[0]?.color;
+  if (stop)
+    return stop;
+  if (element.pattern)
+    return element.pattern.background;
+  return;
 }
 function checkWaterfall(page, element) {
   const values = element.chart?.series[0]?.values;
@@ -12935,7 +13107,7 @@ function checkWaterfall(page, element) {
   }
   return [];
 }
-function checkOverlap(page) {
+function checkOverlap(page, skipContent) {
   const issues = [];
   const items = page.elements.map((element) => ({ element, role: roleOf(element) }));
   const panels = items.filter((item) => item.role === "panel");
@@ -12952,27 +13124,28 @@ function checkOverlap(page) {
       issues.push(issue("overlap", `\u8272\u5757 ${a.element.id} \u4E0E ${b.element.id} \u76F8\u4EA4\uFF0C\u4E14\u6CA1\u6709\u4E92\u76F8\u5305\u542B`, page.id, a.element.id));
     }
   }
-  for (let i = 0;i < content.length; i++) {
-    for (let j = i + 1;j < content.length; j++) {
-      const a = content[i];
-      const b = content[j];
-      const boxA = a.element.type === "text" ? glyphBox(a.element) : a.element.bounds;
-      const boxB = b.element.type === "text" ? glyphBox(b.element) : b.element.bounds;
-      if (overlaps(boxA, boxB)) {
-        issues.push(issue("overlap", `\u5185\u5BB9 ${a.element.id} \u4E0E ${b.element.id} \u91CD\u53E0`, page.id, a.element.id));
+  if (!skipContent)
+    for (let i = 0;i < content.length; i++) {
+      for (let j = i + 1;j < content.length; j++) {
+        const a = content[i];
+        const b = content[j];
+        const boxA = a.element.type === "text" ? glyphBox(a.element) : a.element.bounds;
+        const boxB = b.element.type === "text" ? glyphBox(b.element) : b.element.bounds;
+        if (overlaps(boxA, boxB)) {
+          issues.push(issue("overlap", `\u5185\u5BB9 ${a.element.id} \u4E0E ${b.element.id} \u91CD\u53E0`, page.id, a.element.id));
+        }
+      }
+      for (const panel of panels) {
+        const box = content[i].element.type === "text" ? glyphBox(content[i].element) : content[i].element.bounds;
+        const ix = Math.min(box.x + box.w, panel.element.bounds.x + panel.element.bounds.w) - Math.max(box.x, panel.element.bounds.x);
+        const iy = Math.min(box.y + box.h, panel.element.bounds.y + panel.element.bounds.h) - Math.max(box.y, panel.element.bounds.y);
+        if (ix <= 12 || iy <= 12)
+          continue;
+        if (!contains(panel.element.bounds, box, 8)) {
+          issues.push(issue("overlap", `\u5185\u5BB9 ${content[i].element.id} \u538B\u5728\u8272\u5757 ${panel.element.id} \u7684\u8FB9\u7F18\u4E0A`, page.id, content[i].element.id));
+        }
       }
     }
-    for (const panel of panels) {
-      const box = content[i].element.type === "text" ? glyphBox(content[i].element) : content[i].element.bounds;
-      const ix = Math.min(box.x + box.w, panel.element.bounds.x + panel.element.bounds.w) - Math.max(box.x, panel.element.bounds.x);
-      const iy = Math.min(box.y + box.h, panel.element.bounds.y + panel.element.bounds.h) - Math.max(box.y, panel.element.bounds.y);
-      if (ix <= 12 || iy <= 12)
-        continue;
-      if (!contains(panel.element.bounds, box, 8)) {
-        issues.push(issue("overlap", `\u5185\u5BB9 ${content[i].element.id} \u538B\u5728\u8272\u5757 ${panel.element.id} \u7684\u8FB9\u7F18\u4E0A`, page.id, content[i].element.id));
-      }
-    }
-  }
   for (const rule of rules) {
     for (const item of content) {
       if (item.element.type !== "text")
@@ -13006,17 +13179,18 @@ function checkTable(deck, page, element, pageBackground) {
       if (needed > rowHeight + 2) {
         issues.push(issue("over_capacity", `\u8868\u683C\u7B2C ${rowIndex + 1} \u884C\u7B2C ${columnIndex + 1} \u5217\u9AD8 ${rowHeight.toFixed(0)}pt\uFF0C\u6587\u5B57\u7EA6\u9700 ${needed.toFixed(0)}pt`, page.id, element.id));
       }
-      try {
-        const fill = colorRef(cell.fill ?? (rowIndex === 0 ? table.header?.fill : undefined) ?? table.fill, deck.theme, pageBackground);
-        const ink = splitColor(colorRef(cell.color ?? (rowIndex === 0 ? table.header?.color : undefined) ?? table.color, deck.theme, "$ink")).rgb;
-        const ratio = contrastRatio(ink, splitColor(fill).rgb);
-        const minimum = contrastMinimum(table.fontSize, bold);
-        if (ratio + 0.02 < minimum) {
-          issues.push(issue("contrast", `\u8868\u683C\u5BF9\u6BD4\u5EA6 ${ratio.toFixed(2)} \u4F4E\u4E8E ${minimum.toFixed(1)}`, page.id, element.id));
+      if (deck.profile !== "example")
+        try {
+          const fill = colorRef(cell.fill ?? (rowIndex === 0 ? table.header?.fill : undefined) ?? table.fill, deck.theme, pageBackground);
+          const ink = splitColor(colorRef(cell.color ?? (rowIndex === 0 ? table.header?.color : undefined) ?? table.color, deck.theme, "$ink")).rgb;
+          const ratio = contrastRatio(ink, splitColor(fill).rgb);
+          const minimum = contrastMinimum(table.fontSize, bold);
+          if (ratio + 0.02 < minimum) {
+            issues.push(issue("contrast", `\u8868\u683C\u5BF9\u6BD4\u5EA6 ${ratio.toFixed(2)} \u4F4E\u4E8E ${minimum.toFixed(1)}`, page.id, element.id));
+          }
+        } catch (error) {
+          issues.push(issue("schema", error instanceof Error ? error.message : String(error), page.id, element.id));
         }
-      } catch (error) {
-        issues.push(issue("schema", error instanceof Error ? error.message : String(error), page.id, element.id));
-      }
     });
   });
   return issues;
@@ -13024,8 +13198,9 @@ function checkTable(deck, page, element, pageBackground) {
 
 // apps/electron/resources/skills/ppt-design/engine/export-pptx.ts
 var import_jszip2 = __toESM(require_lib3(), 1);
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, writeFileSync } from "fs";
-import { dirname } from "path";
+import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, writeFileSync } from "fs";
+import { dirname, join as join2 } from "path";
+import { fileURLToPath } from "url";
 
 // node_modules/pptxgenjs/dist/pptxgen.es.js
 var import_jszip = __toESM(require_lib3());
@@ -18750,6 +18925,272 @@ var PptxGenJS = function() {
   return PptxGenJS;
 }();
 
+// apps/electron/resources/skills/ppt-design/engine/svg-path.ts
+function parseSvgPath(d) {
+  const tokens = [];
+  const pattern = /([MmLlHhVvCcSsQqTtAaZz])|([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/g;
+  let match;
+  while (match = pattern.exec(d))
+    tokens.push(match[1] ?? Number(match[2]));
+  const commands = [];
+  let index = 0;
+  let command = "";
+  let cx = 0;
+  let cy = 0;
+  let sx = 0;
+  let sy = 0;
+  let prevCubic = null;
+  let prevQuad = null;
+  const read = () => {
+    const value = tokens[index++];
+    return typeof value === "number" ? value : 0;
+  };
+  const hasNumber = () => typeof tokens[index] === "number";
+  while (index < tokens.length) {
+    if (typeof tokens[index] === "string")
+      command = String(tokens[index++]);
+    if (!command)
+      break;
+    const relative = command === command.toLowerCase();
+    const op = command.toUpperCase();
+    if (op !== "C" && op !== "S")
+      prevCubic = null;
+    if (op !== "Q" && op !== "T")
+      prevQuad = null;
+    if (op === "Z") {
+      commands.push({ op: "Z" });
+      cx = sx;
+      cy = sy;
+      if (typeof tokens[index] === "string")
+        continue;
+      continue;
+    }
+    if (op === "M") {
+      let first = true;
+      while (hasNumber()) {
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push({ op: first ? "M" : "L", x, y });
+        cx = x;
+        cy = y;
+        if (first) {
+          sx = x;
+          sy = y;
+        }
+        first = false;
+      }
+      continue;
+    }
+    if (op === "L") {
+      while (hasNumber()) {
+        cx = read() + (relative ? cx : 0);
+        cy = read() + (relative ? cy : 0);
+        commands.push({ op: "L", x: cx, y: cy });
+      }
+      continue;
+    }
+    if (op === "H") {
+      while (hasNumber()) {
+        cx = read() + (relative ? cx : 0);
+        commands.push({ op: "L", x: cx, y: cy });
+      }
+      continue;
+    }
+    if (op === "V") {
+      while (hasNumber()) {
+        cy = read() + (relative ? cy : 0);
+        commands.push({ op: "L", x: cx, y: cy });
+      }
+      continue;
+    }
+    if (op === "C") {
+      while (hasNumber()) {
+        const x1 = read() + (relative ? cx : 0);
+        const y1 = read() + (relative ? cy : 0);
+        const x2 = read() + (relative ? cx : 0);
+        const y2 = read() + (relative ? cy : 0);
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push({ op: "C", x1, y1, x2, y2, x, y });
+        prevCubic = { x: x2, y: y2 };
+        cx = x;
+        cy = y;
+      }
+      continue;
+    }
+    if (op === "S") {
+      while (hasNumber()) {
+        const reflected = reflect(prevCubic, cx, cy);
+        const x1 = reflected.x;
+        const y1 = reflected.y;
+        const x2 = read() + (relative ? cx : 0);
+        const y2 = read() + (relative ? cy : 0);
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push({ op: "C", x1, y1, x2, y2, x, y });
+        prevCubic = { x: x2, y: y2 };
+        cx = x;
+        cy = y;
+      }
+      continue;
+    }
+    if (op === "Q") {
+      while (hasNumber()) {
+        const x1 = read() + (relative ? cx : 0);
+        const y1 = read() + (relative ? cy : 0);
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push(quadToCubic(cx, cy, x1, y1, x, y));
+        prevQuad = { x: x1, y: y1 };
+        cx = x;
+        cy = y;
+      }
+      continue;
+    }
+    if (op === "T") {
+      while (hasNumber()) {
+        const reflected = reflect(prevQuad, cx, cy);
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push(quadToCubic(cx, cy, reflected.x, reflected.y, x, y));
+        prevQuad = reflected;
+        cx = x;
+        cy = y;
+      }
+      continue;
+    }
+    if (op === "A") {
+      while (hasNumber()) {
+        const rx = read();
+        const ry = read();
+        const angle = read();
+        const large = read();
+        const sweep = read();
+        const x = read() + (relative ? cx : 0);
+        const y = read() + (relative ? cy : 0);
+        commands.push(...arcToCubics(cx, cy, rx, ry, angle, large, sweep, x, y));
+        cx = x;
+        cy = y;
+      }
+      continue;
+    }
+    break;
+  }
+  return commands;
+}
+function reflect(control, x, y) {
+  if (!control)
+    return { x, y };
+  return { x: 2 * x - control.x, y: 2 * y - control.y };
+}
+function quadToCubic(x0, y0, x1, y1, x, y) {
+  return {
+    op: "C",
+    x1: x0 + 2 / 3 * (x1 - x0),
+    y1: y0 + 2 / 3 * (y1 - y0),
+    x2: x + 2 / 3 * (x1 - x),
+    y2: y + 2 / 3 * (y1 - y),
+    x,
+    y
+  };
+}
+function arcToCubics(x1, y1, rx, ry, angle, large, sweep, x2, y2) {
+  if (!rx || !ry || x1 === x2 && y1 === y2)
+    return [{ op: "L", x: x2, y: y2 }];
+  const phi = angle * Math.PI / 180;
+  const sinPhi = Math.sin(phi);
+  const cosPhi = Math.cos(phi);
+  const dx = (x1 - x2) / 2;
+  const dy = (y1 - y2) / 2;
+  const x1p = cosPhi * dx + sinPhi * dy;
+  const y1p = -sinPhi * dx + cosPhi * dy;
+  let radiusX = Math.abs(rx);
+  let radiusY = Math.abs(ry);
+  const lambda = x1p * x1p / (radiusX * radiusX) + y1p * y1p / (radiusY * radiusY);
+  if (lambda > 1) {
+    const scale = Math.sqrt(lambda);
+    radiusX *= scale;
+    radiusY *= scale;
+  }
+  const sign = large === 0 === (sweep === 0) ? -1 : 1;
+  const numerator = radiusX * radiusX * radiusY * radiusY - radiusX * radiusX * y1p * y1p - radiusY * radiusY * x1p * x1p;
+  const denominator = radiusX * radiusX * y1p * y1p + radiusY * radiusY * x1p * x1p;
+  const coef = sign * Math.sqrt(Math.max(0, numerator / denominator));
+  const cxp = coef * (radiusX * y1p / radiusY);
+  const cyp = coef * (-radiusY * x1p / radiusX);
+  const centerX = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+  const centerY = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+  const start = vectorAngle((x1p - cxp) / radiusX, (y1p - cyp) / radiusY);
+  let delta = vectorAngle((-x1p - cxp) / radiusX, (-y1p - cyp) / radiusY) - start;
+  if (sweep === 0 && delta > 0)
+    delta -= Math.PI * 2;
+  if (sweep !== 0 && delta < 0)
+    delta += Math.PI * 2;
+  const curves = [];
+  const slices = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2)));
+  for (let slice = 0;slice < slices; slice++) {
+    const theta1 = start + delta * slice / slices;
+    const step = delta / slices;
+    curves.push(arcSlice(centerX, centerY, radiusX, radiusY, phi, theta1, step));
+  }
+  return curves;
+}
+function vectorAngle(ux, uy) {
+  return Math.atan2(uy, ux);
+}
+function arcSlice(cx, cy, rx, ry, phi, theta1, delta) {
+  const alpha = Math.sin(delta) * (Math.sqrt(4 + 3 * Math.tan(delta / 2) ** 2) - 1) / 3;
+  const cosPhi = Math.cos(phi);
+  const sinPhi = Math.sin(phi);
+  const point = (theta) => {
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    return {
+      x: cx + rx * cosPhi * cos - ry * sinPhi * sin,
+      y: cy + rx * sinPhi * cos + ry * cosPhi * sin,
+      dx: -rx * cosPhi * sin - ry * sinPhi * cos,
+      dy: -rx * sinPhi * sin + ry * cosPhi * cos
+    };
+  };
+  const p1 = point(theta1);
+  const p2 = point(theta1 + delta);
+  return {
+    op: "C",
+    x1: p1.x + alpha * p1.dx,
+    y1: p1.y + alpha * p1.dy,
+    x2: p2.x - alpha * p2.dx,
+    y2: p2.y - alpha * p2.dy,
+    x: p2.x,
+    y: p2.y
+  };
+}
+function pathToDrawingPoints(d) {
+  const points = [];
+  for (const command of parseSvgPath(d)) {
+    if (command.op === "Z") {
+      points.push({ close: true });
+      continue;
+    }
+    if (command.op === "M") {
+      points.push({ x: inches(command.x), y: inches(command.y), moveTo: true });
+      continue;
+    }
+    if (command.op === "C") {
+      points.push({
+        x: inches(command.x),
+        y: inches(command.y),
+        curve: { type: "cubic", x1: inches(command.x1), y1: inches(command.y1), x2: inches(command.x2), y2: inches(command.y2) }
+      });
+      continue;
+    }
+    points.push({ x: inches(command.x), y: inches(command.y) });
+  }
+  return points;
+}
+function inches(points) {
+  return points / 72;
+}
+
 // apps/electron/resources/skills/ppt-design/engine/screenshot.ts
 import { mkdtempSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { spawn } from "child_process";
@@ -18849,7 +19290,7 @@ function resolveFontFace(deck, family, platform, face) {
     return family === "$cjk" ? face.cjk[platform] : face.latin;
   return deck.theme.fonts[family === "$cjk" ? "cjk" : "latin"][platform];
 }
-function inches(points) {
+function inches2(points) {
   return points / PT;
 }
 function hex(value) {
@@ -18878,7 +19319,7 @@ async function exportDeck(deck, outFile, options = {}) {
 }
 async function buildPptx(deck, platform) {
   const pres = new PptxGenJS;
-  pres.defineLayout({ name: "SELECTION", width: inches(deck.canvas.width), height: inches(deck.canvas.height) });
+  pres.defineLayout({ name: "SELECTION", width: inches2(deck.canvas.width), height: inches2(deck.canvas.height) });
   pres.layout = "SELECTION";
   pres.title = deck.title;
   pres.author = "Selection";
@@ -18893,13 +19334,13 @@ async function buildPptx(deck, platform) {
       slide.addNotes(page.notes);
   }
   const raw = await pres.write({ outputType: "nodebuffer" });
-  return applyFontFaces(Buffer.from(raw), deck, platform);
+  return finishSlideXml(Buffer.from(raw), deck, platform);
 }
 function addElement(pres, slide, deck, element, platform, pageBackground) {
-  const x = inches(element.bounds.x);
-  const y = inches(element.bounds.y);
-  const w = inches(element.bounds.w);
-  const h = inches(element.bounds.h);
+  const x = inches2(element.bounds.x);
+  const y = inches2(element.bounds.y);
+  const w = inches2(element.bounds.w);
+  const h = inches2(element.bounds.h);
   if (element.type === "text" && element.text && element.font) {
     const bold = element.font.weight === "bold";
     const leading = element.font.leading ?? defaultLeading(element.font.size);
@@ -18920,7 +19361,10 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       margin: 0,
       wrap: true,
       fit: "none",
+      italic: element.font.italic === true ? true : undefined,
+      rtlMode: element.font.rtl === true ? true : undefined,
       rotate: element.rotate,
+      shadow: shadowOptions(element),
       lineSpacing: element.font.size * leading,
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === "$cjk" ? "zh-CN" : "en-US",
@@ -18933,10 +19377,30 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       addLine(pres, slide, deck, element);
       return;
     }
-    const fill = element.fill ? paint(colorRef(element.fill, deck.theme, "$surface")) : undefined;
+    const fill = shapeFill(deck, element);
     const line = element.line ? paint(colorRef(element.line.color, deck.theme, "$line")) : undefined;
-    if (fill && fill.transparency === 100 && !line)
+    if (fill && fill.transparency === 100 && !line && !element.gradient && !element.pattern)
       return;
+    const lineOptions = element.line && line ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) } : { color: fill?.color ?? "FFFFFF", width: 0 };
+    const fillOptions = fill && fill.transparency !== 100 ? fill : { type: "none" };
+    if (element.shape === "path" && element.path) {
+      const points = pathToDrawingPoints(element.path);
+      if (points.length === 0)
+        return;
+      slide.addShape("custGeom", {
+        x,
+        y,
+        w,
+        h,
+        points,
+        rotate: element.rotate,
+        fill: fillOptions,
+        line: lineOptions,
+        shadow: shadowOptions(element),
+        objectName: element.id
+      });
+      return;
+    }
     const shape = element.shape === "ellipse" ? pres.ShapeType.ellipse : element.shape === "roundRect" ? pres.ShapeType.roundRect : pres.ShapeType.rect;
     const radius = element.radius && element.shape === "roundRect" ? Math.min(element.radius, Math.min(element.bounds.w, element.bounds.h) / 2) / 72 : undefined;
     slide.addShape(shape, {
@@ -18945,9 +19409,10 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       w,
       h,
       rotate: element.rotate,
-      fill: fill && fill.transparency !== 100 ? fill : { type: "none" },
-      line: element.line && line ? { color: line.color, transparency: line.transparency, width: element.line.width, dashType: dashOf(element.line.style) } : { color: fill?.color ?? "FFFFFF", width: 0 },
+      fill: fillOptions,
+      line: lineOptions,
       rectRadius: radius,
+      shadow: shadowOptions(element),
       objectName: element.id
     });
     return;
@@ -18959,11 +19424,11 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
   if (element.type === "image" && element.src) {
     const fitted = fitImage(element);
     slide.addImage({
-      path: element.src,
-      x: inches(fitted.x),
-      y: inches(fitted.y),
-      w: inches(fitted.w),
-      h: inches(fitted.h),
+      path: resolveAsset(element.src),
+      x: inches2(fitted.x),
+      y: inches2(fitted.y),
+      w: inches2(fitted.w),
+      h: inches2(fitted.h),
       altText: element.alt,
       objectName: element.id
     });
@@ -18973,7 +19438,9 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
     addChart(pres, slide, deck, element, platform, pageBackground);
 }
 function fitImage(element) {
-  const size = element.src ? readImageSize(element.src) : null;
+  if (element.fit === "fill")
+    return element.bounds;
+  const size = element.src ? readImageSize(resolveAsset(element.src)) : null;
   if (!size)
     return element.bounds;
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height);
@@ -19048,9 +19515,9 @@ function addLine(pres, slide, deck, element) {
   const cy = (y1 + y2) / 2;
   const arrow = element.arrow;
   slide.addShape(pres.ShapeType.line, {
-    x: inches(cx - length / 2),
-    y: inches(cy),
-    w: inches(length),
+    x: inches2(cx - length / 2),
+    y: inches2(cy),
+    w: inches2(length),
     h: 0,
     rotate: Math.abs(angle) < 0.05 ? undefined : angle,
     line: {
@@ -19087,12 +19554,12 @@ function addTable(pres, slide, deck, element, platform) {
     };
   }));
   slide.addTable(rows, {
-    x: inches(element.bounds.x),
-    y: inches(element.bounds.y),
-    w: inches(element.bounds.w),
-    h: inches(element.bounds.h),
-    colW: table.columns.map((fraction) => inches(fraction * element.bounds.w)),
-    rowH: rowHeights.map((points) => inches(points)),
+    x: inches2(element.bounds.x),
+    y: inches2(element.bounds.y),
+    w: inches2(element.bounds.w),
+    h: inches2(element.bounds.h),
+    colW: table.columns.map((fraction) => inches2(fraction * element.bounds.w)),
+    rowH: rowHeights.map((points) => inches2(points)),
     border: { pt: table.border.width, color: border.color },
     fontFace: face,
     fontSize: table.fontSize,
@@ -19116,10 +19583,10 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
   const grid = dark ? "4A4A4A" : line;
   const face = resolveFontFace(deck, "$cjk", platform);
   const base = {
-    x: inches(element.bounds.x),
-    y: inches(element.bounds.y),
-    w: inches(element.bounds.w),
-    h: inches(element.bounds.h),
+    x: inches2(element.bounds.x),
+    y: inches2(element.bounds.y),
+    w: inches2(element.bounds.w),
+    h: inches2(element.bounds.h),
     objectName: element.id,
     showTitle: false,
     showLegend: chart.showLegend ?? false,
@@ -19167,6 +19634,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
   slide.addChart(type, data, {
     ...base,
     barDir: chart.kind === "bar" ? "bar" : "col",
+    ...chart.kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
     barGrouping: "clustered",
     barGapWidthPct: 60,
     lineSize: chart.lineWidth ?? 2.25,
@@ -19179,26 +19647,70 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     holeSize: chart.kind === "doughnut" ? chart.holeSize ?? 62 : undefined
   });
 }
-async function applyFontFaces(bytes, deck, platform) {
+function shapeFill(deck, element) {
+  if (element.pattern)
+    return paint(colorRef(element.pattern.background, deck.theme, "$paper"));
+  if (element.gradient) {
+    const stop = [...element.gradient.stops].reverse().find((item) => !item.color.replace("#", "").slice(6, 8).match(/^00$/i)) ?? element.gradient.stops[0];
+    if (!stop)
+      return;
+    const color = paint(colorRef(stop.color, deck.theme, "$surface"));
+    return { color: color.color };
+  }
+  return element.fill ? paint(colorRef(element.fill, deck.theme, "$surface")) : undefined;
+}
+function shadowOptions(element) {
+  const shadow = element.shadow;
+  if (!shadow)
+    return;
+  const angle = ((shadow.angle ?? 45) % 360 + 360) % 360;
+  return {
+    type: "outer",
+    color: shadow.color.replace("#", "").slice(0, 6),
+    opacity: shadow.opacity ?? 0.45,
+    blur: shadow.blur ?? 8,
+    offset: shadow.offset ?? 4,
+    angle
+  };
+}
+function resolveAsset(src) {
+  if (existsSync(src))
+    return src;
+  const fromCwd = join2(process.cwd(), src);
+  if (existsSync(fromCwd))
+    return fromCwd;
+  const skill = fileURLToPath(new URL("..", import.meta.url));
+  const fromSkill = join2(skill, src);
+  if (existsSync(fromSkill))
+    return fromSkill;
+  return src;
+}
+async function finishSlideXml(bytes, deck, platform) {
   const zip = await import_jszip2.default.loadAsync(bytes);
   let changed = false;
   for (let index = 0;index < deck.pages.length; index++) {
     const page = deck.pages[index];
     const faces = new Map;
+    const fills = new Map;
+    const evenOdd = new Set;
     for (const element of page.elements) {
       const face = element.font?.face ?? element.table?.face;
-      if (!face)
-        continue;
-      faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] });
+      if (face)
+        faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] });
+      const fill = fillOverride(element);
+      if (fill)
+        fills.set(element.id, fill);
+      if (element.pathRule === "evenodd")
+        evenOdd.add(element.id);
     }
-    if (faces.size === 0)
+    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0)
       continue;
     const path = `ppt/slides/slide${index + 1}.xml`;
     const file = zip.file(path);
     if (!file)
       continue;
     const xml = await file.async("string");
-    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShapeFaces(block, faces));
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShape(block, faces, fills, evenOdd));
     if (next !== xml) {
       zip.file(path, next);
       changed = true;
@@ -19208,16 +19720,74 @@ async function applyFontFaces(bytes, deck, platform) {
     return bytes;
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
-function rewriteShapeFaces(block, faces) {
+function rewriteShape(block, faces, fills, evenOdd) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
   if (!name)
     return block;
-  const face = faces.get(name[1]);
-  if (!face)
-    return block;
-  const latin = escapeXml(face.latin);
-  const ea = escapeXml(face.ea);
-  return block.replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`).replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`).replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`);
+  const id = name[1];
+  let next = block;
+  const face = faces.get(id);
+  if (face) {
+    const latin = escapeXml(face.latin);
+    const ea = escapeXml(face.ea);
+    next = next.replace(/(<a:latin[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`).replace(/(<a:ea[^>]*\stypeface=")[^"]*(")/g, `$1${ea}$2`).replace(/(<a:cs[^>]*\stypeface=")[^"]*(")/g, `$1${latin}$2`);
+  }
+  const fill = fills.get(id);
+  if (fill)
+    next = replaceShapeFill(next, fill);
+  if (evenOdd.has(id))
+    next = next.replace(/<a:path\b(?![^>]*\bfill=)/, '<a:path fill="evenOdd"');
+  return next;
+}
+function replaceShapeFill(block, fillXml) {
+  return block.replace(/<p:spPr>([\s\S]*?)<\/p:spPr>/, (_all, inner) => {
+    const lineMatch = inner.match(/<a:ln\b[\s\S]*<\/a:ln>/);
+    const line = lineMatch?.[0] ?? "";
+    const body = line ? inner.replace(line, "") : inner;
+    let next = body;
+    if (body.includes("<a:solidFill>"))
+      next = body.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, fillXml);
+    else if (body.includes("<a:noFill/>"))
+      next = body.replace("<a:noFill/>", fillXml);
+    else
+      next = `${body}${fillXml}`;
+    return `<p:spPr>${next}${line}</p:spPr>`;
+  });
+}
+function fillOverride(element) {
+  if (element.gradient)
+    return gradientXml(element.gradient);
+  if (element.pattern)
+    return patternXml(element.pattern);
+  return null;
+}
+function gradientXml(gradient) {
+  const stops = gradient.stops.map((stop) => {
+    const raw = stop.color.replace("#", "").toUpperCase();
+    const color = raw.slice(0, 6);
+    const alpha = raw.length >= 8 ? Math.round(Number.parseInt(raw.slice(6, 8), 16) / 255 * 1e5) : 1e5;
+    return `<a:gs pos="${Math.round(Math.min(1, Math.max(0, stop.offset)) * 1e5)}"><a:srgbClr val="${color}"><a:alpha val="${alpha}"/></a:srgbClr></a:gs>`;
+  }).join("");
+  if (gradient.kind === "radial") {
+    const cx = gradient.cx ?? 0.5;
+    const cy = gradient.cy ?? 0.5;
+    const l = Math.round(cx * 1e5);
+    const t = Math.round(cy * 1e5);
+    const r = Math.round((1 - cx) * 1e5);
+    const b = Math.round((1 - cy) * 1e5);
+    return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:path path="circle"><a:fillToRect l="${l}" t="${t}" r="${r}" b="${b}"/></a:path></a:gradFill>`;
+  }
+  const angle = ((gradient.angle ?? 0) % 360 + 360) % 360;
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:lin ang="${Math.round(angle * 60000)}" scaled="${gradient.absolute ? "0" : "1"}"/></a:gradFill>`;
+}
+function patternColorXml(value) {
+  const raw = value.replace("#", "").toUpperCase();
+  const color = raw.slice(0, 6);
+  const alpha = raw.length >= 8 ? Math.round(Number.parseInt(raw.slice(6, 8), 16) / 255 * 1e5) : 1e5;
+  return `<a:srgbClr val="${color}"><a:alpha val="${alpha}"/></a:srgbClr>`;
+}
+function patternXml(pattern) {
+  return `<a:pattFill prst="${pattern.preset}"><a:fgClr>${patternColorXml(pattern.foreground)}</a:fgClr><a:bgClr>${patternColorXml(pattern.background)}</a:bgClr></a:pattFill>`;
 }
 function escapeXml(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
