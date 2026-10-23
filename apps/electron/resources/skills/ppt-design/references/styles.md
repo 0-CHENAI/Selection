@@ -1,63 +1,59 @@
-# 三套风格与真实字体
+# 风格
 
-在选择风格时只读本页概览及所选条目；机器值在 [styles/catalog.json](../styles/catalog.json)，不要求一次加载所有条目。颜色值无 `#`，字号为 pt。风格同时决定配色、字体角色和整页构图；不能把各套漂亮部分拼成第四套，也不能只换色。
+先读本页，再只打开选定风格的 `design.md`。中文参考页是 `deck.json`。DSH 的五套还有英文 `deck.en.json`。不要一次读入两套参考页。
 
-## 选择概览
+索引：[styles/catalog.json](../styles/catalog.json)。DSH 五套是 12 页、960×540 pt。ppt-master 的参考页是官方成稿，页数和画布写在目录里。许可见 [ATTRIBUTION](../ATTRIBUTION.md)。图片出处见 [styles/examples/CREDITS.md](../styles/examples/CREDITS.md)。
 
-| ID | 适合 | 识别特征 |
+主题在 [styles/themes/catalog.json](../styles/themes/catalog.json)。主题只换颜色和字体，不换页面几何。`ink` 是字色，`paper` 是纸色：浅色主题的纸是浅的，深色主题的纸是深的，所以 `$ink` 写在 `$paper` 上始终可读。封面若要用反色，背景写 `$ink`、字写 `$paper`。任意主题都可以套到任意风格或版式上。预检会检查正文、辅助色、强调色上的反色，以及面板上的正文。
+
+用户品牌不是一份现成 JSON。给出主色、辅色，以及可选的标志路径，生成一套 token：纸色、文字、强调、辅助色和反色都会调到对比度门槛以上。标志只记在 `theme.logo`。页面要显示它时，用一个 `src` 相同的图片元素。不要把用户公司的标志或品牌手册写进仓库。示例成稿里随来源保留的第三方标识只作参考模板，新稿不要照搬那些标志。
+
+| id | 材料 | 封面气质 | 许可 |
+|---|---|---|---|
+| `dsh-cartesian` | 理性简报、取舍、可检验的判断 | 暖石色纸面，衬线标题，细圆和发丝线 | MIT |
+| `dsh-course-workshop` | 培训、课程、工作坊 | 学习目标边栏，概念图，练习和自测 | Apache-2.0 |
+| `dsh-editorial-notebook` | 研究、观点、业务叙事 | 双栏论述，边注，证据条，决策矩阵 | MIT |
+| `dsh-engineering-blueprint` | 架构评审、技术方案、执行计划 | 纸张底色，工程网格，流程盒，反馈路径 | Apache-2.0 |
+| `dsh-soft-editorial` | 观察手记、需要细读的判断 | 奶油纸，圆角色卡，衬线大标题 | MIT |
+
+下面十四套的方法来自 ppt-master 的风格说明。每一套的参考页都是 ppt-master-examples 里的官方成稿，路径在目录的 `deck` 字段，画布可能是 16:9、4:3、A4、方形、竖版或横幅。`incident-postmortem` 指向事故复盘成稿，`operating-review` 指向经营复盘成稿，`product-launch` 指向产品发布成稿。这些成稿里的第三方标识只作参考。`mbb-consulting` 只表示文档密度的决策写法，不代表任何咨询公司。
+
+| id | 材料 | 默认气质 |
 |---|---|---|
-| `business` | 商务汇报、方案、决策材料 | 海军蓝满版分隔页、内容页标题色带、等分证据卡片、侧栏读数 |
-| `dark-tech` | 技术说明、产品系统、深色舞台展示 | 深色场、同心环、角括号、节点脊线、不对称模块 |
-| `fresh-editorial` | 研究解读、内容策划、杂志式叙事 | 陶土/森林出血色块、衬线标题、超大序号、竖向阅读 |
+| `academic-research` | 问题、方法、限度 | 分栏封面，衬线 |
+| `consulting-decision` | 结论先行的决定 | 暖纸，编号 |
+| `creative-pitch` | 一个洞察 | 近黑纸，金色 |
+| `duty-manual` | 机制先于规则 | 深色网格 |
+| `incident-postmortem` | 时间线与因素 | 白纸，红色标记 |
+| `investor-pitch` | 这一步买到什么 | 暖纸，一个大数字 |
+| `mbb-consulting` | 编号证据 | 白纸，蓝色 |
+| `narrative-keynote` | 一个节拍 | 暖纸，大字，无页脚 |
+| `operating-review` | 结果与偏离 | 白纸，状态色 |
+| `product-launch` | 先演示再命名 | 深色，一句 |
+| `science-explainer` | 现象先于名字 | 暖纸，衬线 |
+| `solution-proposal` | 可以被否决的做法 | 圆角卡片 |
+| `technical-deepdive` | 先画边界 | 深色网格 |
+| `workshop-teaching` | 目标、示范、练习 | 暖纸，圆角 |
 
-这不是场景强绑定；以用户目标与内容密度为准。同一 layout 名称在三套里表示同一种信息关系，几何各自设计。画布仍是 33.8667 × 19.05 cm。内容标题至少 32 pt，封面和数字用 hero/number，正文 18 pt，来源 12 pt。不要在规格 JSON 里写坐标。
+十二套自有主题可以套到任意风格或版式上。名字不使用公司或产品的品牌。
 
-## business
-
-背景 `FFFFFF`；surface `F3F6FA`；正文/满版 `0E2744`；次要文字 `5C6F82`；accent `1D6FB8`；secondary `8FB4D4`；rule `D3DDE6`；inverse `FFFFFF`；满版上次要字 `D6E4F2`。封面左侧满版，章节和结尾整页色场，内容页用海军蓝标题带。图表无网格、无数值轴，直接标数据。
-
-| 平台 | Latin 标题 / 正文 | CJK 标题 / 正文 |
+| id | 名字 | 启发 |
 |---|---|---|
-| Windows | Aptos Display / Aptos | Microsoft YaHei / Microsoft YaHei |
-| macOS | Helvetica Neue / Helvetica Neue | PingFang SC / PingFang SC |
-| Linux | Noto Sans / Noto Sans | Noto Sans CJK SC / Noto Sans CJK SC |
+| `jiangshan` | 千里青绿 | 青绿山水的纸色与青蓝 |
+| `sugar-rush` | 糖彩 | 高饱和撞色 |
+| `glass-saas` | 玻璃界面 | 冷色雾面 |
+| `paper-cut` | 剪纸月色 | 夜蓝与暖纸 |
+| `pixel-breakfast` | 像素早餐 | 深靛、蛋黄与番茄 |
+| `swiss-grid` | 瑞士网格 | 网格与一块红 |
+| `tea-tasting` | 点茶 | 茶褐与朱印 |
+| `brutal-stone` | 粗石 | 石色、近黑与一块红 |
+| `zine-shelf` | 独立书摊 | 奶油纸、蓝与粉 |
+| `keynote-stage` | 暗场讲台 | 自拟近黑场，不是任何发布会配色 |
+| `academic-ink` | 论文墨色 | 墨色与一处蓝 |
+| `night-circuit` | 夜航电路 | 深色界面与一处冷光 |
 
-实际渲染角色：title 32、hero 40、body 18、heading 22、number 64、label 16、footer 12、quote 28。章节大号可以更大。不要把未使用的 metadata token 当成另一套字号。
+默认用该风格 deck 里的主题。要换色时换成上面的一套，或生成用户品牌主题，然后重新预检。字体、边距和字号区间以锁定风格的 `design.md` 为准。参考页里的句子和数字是虚构示例，必须换成用户材料；换完后几何可以调整，但要重新预检。
 
-## dark-tech
+没有合适的参考页时，仍使用该风格的 token、边距和字号区间，新开一个 `layout` id，不要混入另一套的色值。
 
-背景 `07111A`；surface `122033`；正文 `F4F8FC`；次要文字 `B7C6D6`；accent `3EE0C7`；secondary `7AA2FF`；rule `2C4158`；inverse `07111A`；mist `9FB4C8`。封面用同心环和底部信息条，章节用强调轨加圆角面板，KPI 用轨道环，时间线脊线在右侧。强调色只标节点和读数。
-
-| 平台 | Latin 标题 / 正文 | CJK 标题 / 正文 |
-|---|---|---|
-| Windows | Bahnschrift / Aptos | Microsoft YaHei / Microsoft YaHei |
-| macOS | Menlo / Helvetica Neue | PingFang SC / PingFang SC |
-| Linux | DejaVu Sans Mono / Noto Sans | Noto Sans CJK SC / Noto Sans CJK SC |
-
-实际渲染角色：title 32、hero 44、body 18、heading 22、number 72、label 16、footer 12、quote 28。等宽 Latin 标题不意味着用等宽西文字体覆盖中文。
-
-## fresh-editorial
-
-背景 `F7F3EA`；surface `EFE6D6`；正文 `1A1916`；次要文字 `5C564C`；accent `C2452D`；secondary `1B4336`；rule `D9D0C0`；inverse `FFFCF7`；mist `F6E7D4`。封面右侧陶土出血，章节为森林满版加大号裁切，对比页左右各半出血，流程竖排。标题衬线且非粗体。没有照片时用色块出血。
-
-| 平台 | Latin 标题 / 正文 | CJK 标题 / 正文 |
-|---|---|---|
-| Windows | Georgia / Aptos | SimSun / Microsoft YaHei |
-| macOS | Georgia / Helvetica Neue | Songti SC / PingFang SC |
-| Linux | Noto Serif / Noto Sans | Noto Serif CJK SC / Noto Sans CJK SC |
-
-实际渲染角色：title 34、hero 42、body 18、heading 22、number 68、label 16、footer 12、quote 30。个别大号可以更大。标题衬线与正文无衬线是设计身份；不要为了统一 CJK 参数抹掉这个差异。
-
-## 字体解析与跨平台边界
-
-上表是候选名，不保证机器已经安装。锁定前检查实际渲染环境的字体清单；用系统可用的字体检查能力，不能只看某个路径存在或假设 macOS/Windows 都有最新 Office 字体。把最终选用的真实字族分别记入设计锁；运行结果的实际字体应与锁一致。
-
-- Windows：Aptos/Aptos Display 或 Bahnschrift 不存在时不能静默接受渲染器代选；先选已安装的同角色替代并更新锁。CJK 以 Microsoft YaHei 为默认候选，缺失时可选已安装 DengXian 等完整 CJK 字族；编辑式标题需要保留衬线角色，不把所有字体改成微软雅黑。
-- macOS：用真实可用的 Helvetica Neue、PingFang SC；编辑式中文标题用 Songti SC。不能把一个 CSS fallback 列表当作 OfficeCLI 已设置多字族的证据。
-- Linux：默认无衬线是 Noto Sans CJK SC；编辑式中文标题 Noto Serif CJK SC、正文 Noto Sans CJK SC，Latin 标题 Noto Serif。未安装时先明确缺失和可用替代，不能把缺字方块视为通过。
-- `--font-cjk` 是显式覆盖，使用时必须了解其角色影响并记入锁；默认可满足时不要用它统一覆盖所有 CJK 角色。字体替换改变字宽，须重新做适配与 G4。
-- 通过当前 `officecli help` 支持的 theme/font 属性及实际文本角色设置 CJK 字体；不要把未验证的属性拼写、字体栈或字体嵌入开关写进命令。
-- 本机画面正确不证明接收者安装相同字体或 PPTX 已嵌入字体。交付时如实说明依赖，不宣称跨平台像素一致。
-
-字号 floor、中文标点压缩能力边界、断行与孤字检查见 [typography.md](typography.md)，在字体和内容锁定阶段按需读取。
-配方按平台 catalog 选名，**不探测安装情况或自动解析 fallback**。Windows 的 Latin 替代可显式选已安装 Arial（商务/科技标题及正文），编辑风保留 Georgia 标题；macOS Latin 缺失时可显式选 Arial，编辑风仍保留已安装 Georgia。任何替换都需记录实际值，并在生成前对相应 catalog/受控字体配置作明确调整；JSON 没有 Latin 字体覆盖字段，不可声称脚本自动检测并完成了替换。`--font-cjk` 同时覆盖 CJK 标题和正文，编辑风通常应省略该参数以保留衬线/无衬线区分。
+两处中文源页面会报 `orphan`：`dsh-course-workshop` 第 3 页 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 第 3 页 `03:t101`「明确每一层边界」。沿用这些页时重排句子。不要缩小字号，也不要把框加宽到撞上邻列。其余参考页没有这个问题。

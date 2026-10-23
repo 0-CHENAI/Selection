@@ -30,7 +30,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **PPT 设计系统的三套版式** — 新建或整套重设计演示文稿时，商务、深色科技和杂志三套风格使用各自的满版构图、字号和图表样式，而不再是同一版式换色。局部修改仍走原来的 OfficeCLI 路径。Issue #626.
+- **PPT 声明式页面** — 新建或整套重设计演示文稿时，先写可预检的页面描述，再导出可编辑的 PPTX。随附五套改编自 DSH Desktop v0.2.21 的参考风格（中英各 12 页），ppt-master 的七套版式、十四套风格说明、十二套自有色彩主题，以及 ppt-master-examples 里全部 70 套官方成稿。其中 9 套保留来源中的商标与官方标识，只作参考模板；Selection 本体仍为 Apache-2.0，并按非商业用途提供，纳入这些页面不授予商标权利。成稿保留文字、形状、路径、渐变和图片，画布覆盖 16:9、4:3、A4、方形、竖版和横幅。16:9 仍是 960×540 pt。预检不过就不写出文件。局部修改仍走原来的 OfficeCLI 路径。Refs #631，并取代尚未发布的三套配方版式（#626）。
 
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
 

@@ -1,5 +1,7 @@
 # PPT 设计第二轮：ppt-master 视觉研究
 
+> 历史记录。现行流程见 `apps/electron/resources/skills/ppt-design/SKILL.md`（#631）。本文不是操作说明。
+
 分支 `feat/ppt-design-skill`。研究对象是仓库外浅克隆 `https://github.com/hugohe3/ppt-master` 的 `523e5bd972f94c3cac8742fec0d54d43824a17bb`。SVG 用 `rsvg-convert` 渲染成 1280×720 PNG 后逐张查看，没有把这些 PNG 或 SVG 贴进成品。
 
 ## 看过的页面

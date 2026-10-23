@@ -1,0 +1,49 @@
+{
+  "id": "swiss-grid",
+  "name": "瑞士网格",
+  "margin": 48,
+  "colors": {
+    "line": "#141414",
+    "signal": "#C8102E",
+    "good": "#1F7A4D",
+    "watch": "#8A5A12",
+    "bad": "#8E2A24",
+    "ink": "#141414",
+    "paper": "#F7F7F5",
+    "muted": "#5A5A5A",
+    "accent": "#C8102E",
+    "surface": "#EEEEEE",
+    "inverse": "#FFFFFF"
+  },
+  "fonts": {
+    "cjk": {
+      "mac": "PingFang SC",
+      "win": "Microsoft YaHei",
+      "linux": "Noto Sans CJK SC"
+    },
+    "latin": {
+      "mac": "Arial",
+      "win": "Arial",
+      "linux": "Arial"
+    }
+  },
+  "type": {
+    "display": {
+      "min": 32,
+      "max": 72
+    },
+    "title": {
+      "min": 22,
+      "max": 40
+    },
+    "body": {
+      "min": 14,
+      "max": 22
+    },
+    "caption": {
+      "min": 10,
+      "max": 14
+    }
+  },
+  "source": "受瑞士网格示例和一张红黑信息图的网格、单一红色启发。不是任何国家或机构的标志色使用规范。"
+}

@@ -1,0 +1,3129 @@
+{
+  "format": "selection-deck",
+  "version": 1,
+  "title": "报告核心 · Report Core",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "theme": {
+    "id": "report_core",
+    "name": "石板预览",
+    "margin": 48,
+    "colors": {
+      "ink": "#1E293B",
+      "paper": "#FFFFFF",
+      "muted": "#64748B",
+      "accent": "#334155",
+      "line": "#CBD5E1",
+      "surface": "#F4F6F8",
+      "inverse": "#F8FAFC",
+      "signal": "#475569",
+      "good": "#1F7A4D",
+      "watch": "#8A5A12",
+      "bad": "#8E2A24"
+    },
+    "fonts": {
+      "cjk": {
+        "mac": "PingFang SC",
+        "win": "Microsoft YaHei",
+        "linux": "Noto Sans CJK SC"
+      },
+      "latin": {
+        "mac": "Arial",
+        "win": "Arial",
+        "linux": "Arial"
+      }
+    },
+    "type": {
+      "display": {
+        "min": 32,
+        "max": 72
+      },
+      "title": {
+        "min": 22,
+        "max": 40
+      },
+      "body": {
+        "min": 14,
+        "max": 22
+      },
+      "caption": {
+        "min": 10,
+        "max": 14
+      }
+    },
+    "source": "ppt-master 版式的中性预览色，不是品牌色"
+  },
+  "pages": [
+    {
+      "id": "01",
+      "layout": "01_cover",
+      "name": "Cover",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "cover-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 174,
+            "w": 66,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$ink",
+          "radius": 2.25
+        },
+        {
+          "id": "cover-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 210,
+            "w": 888,
+            "h": 72
+          },
+          "text": "把一件事说清楚",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 39,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "cover-subtitle-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 300,
+            "w": 675,
+            "h": 36
+          },
+          "text": "证据在左，下一步在右",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16.5,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "cover-date-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 450,
+            "w": 300,
+            "h": 24
+          },
+          "text": "2026",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "layout": "02_section_divider",
+      "name": "Section Divider",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "section-divider-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 225,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "section-divider-number-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 150,
+            "w": 150,
+            "h": 54
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 42,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "section-divider-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 252,
+            "w": 888,
+            "h": 60
+          },
+          "text": "这一章只讲一件事",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "section-divider-desc-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 330,
+            "w": 675,
+            "h": 42
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "layout": "03_agenda",
+      "name": "Agenda",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-rule-one",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 195,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-rule-two",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 266.25,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-rule-three",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 337.5,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-rule-four",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 408.75,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-rule-five",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 480,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "agenda-index-one",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 150,
+            "w": 21.92,
+            "h": 15
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "bold",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-index-two",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 221.25,
+            "w": 21.92,
+            "h": 15
+          },
+          "text": "02",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "bold",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-index-three",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 292.5,
+            "w": 21.92,
+            "h": 15
+          },
+          "text": "03",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "bold",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-index-four",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 363.75,
+            "w": 21.92,
+            "h": 15
+          },
+          "text": "04",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "bold",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-index-five",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 435,
+            "w": 21.92,
+            "h": 15
+          },
+          "text": "05",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "bold",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 90,
+            "y": 132,
+            "w": 834,
+            "h": 63
+          },
+          "text": "先确认事实",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 90,
+            "y": 203.25,
+            "w": 834,
+            "h": 63
+          },
+          "text": "再写判断",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 90,
+            "y": 274.5,
+            "w": 834,
+            "h": 63
+          },
+          "text": "最后给出下一步",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 90,
+            "y": 345.75,
+            "w": 834,
+            "h": 63
+          },
+          "text": "记下还不知道的",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-five-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 90,
+            "y": 417,
+            "w": 834,
+            "h": 63
+          },
+          "text": "把来源放在页脚",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "agenda-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "layout": "04_title_content",
+      "name": "Title and Content",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "title-content-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "title-content-body-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 888,
+            "h": 348
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构，不代表真实数据，换主题时这些字仍然可读。",
+          "textCapacity": {
+            "maxChars": 43,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "title-content-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "title-content-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "layout": "05_two_content",
+      "name": "Two Content",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "two-content-left-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 432,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "two-content-right-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 492,
+            "y": 132,
+            "w": 432,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "two-content-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-left-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 54,
+            "y": 150,
+            "w": 396,
+            "h": 312
+          },
+          "text": "先写下现在的做法",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-right-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 510,
+            "y": 150,
+            "w": 396,
+            "h": 312
+          },
+          "text": "再写下打算改的做法",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "two-content-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "layout": "06_three_block",
+      "name": "Three Block",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "three-block-one-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 282,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "three-block-two-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 339,
+            "y": 132,
+            "w": 282,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "three-block-three-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 642,
+            "y": 132,
+            "w": 282,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "three-block-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-block-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 54,
+            "y": 150,
+            "w": 246,
+            "h": 312
+          },
+          "text": "第一块",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-block-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 357,
+            "y": 150,
+            "w": 246,
+            "h": 312
+          },
+          "text": "第二块",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-block-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 660,
+            "y": 150,
+            "w": 246,
+            "h": 312
+          },
+          "text": "第三块",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-block-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "three-block-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "layout": "07_kpi_row",
+      "name": "KPI Row",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "kpi-row-card-one",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 208.5,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "kpi-row-card-two",
+          "type": "shape",
+          "bounds": {
+            "x": 262.5,
+            "y": 132,
+            "w": 208.5,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "kpi-row-card-three",
+          "type": "shape",
+          "bounds": {
+            "x": 489,
+            "y": 132,
+            "w": 208.5,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "kpi-row-card-four",
+          "type": "shape",
+          "bounds": {
+            "x": 715.5,
+            "y": 132,
+            "w": 208.5,
+            "h": 90
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "kpi-row-evidence-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 240,
+            "w": 888,
+            "h": 240
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "kpi-row-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 54,
+            "y": 144,
+            "w": 172.5,
+            "h": 66
+          },
+          "text": "128",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 280.5,
+            "y": 144,
+            "w": 172.5,
+            "h": 66
+          },
+          "text": "36",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 507,
+            "y": 144,
+            "w": 172.5,
+            "h": 66
+          },
+          "text": "4",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 733.5,
+            "y": 144,
+            "w": 172.5,
+            "h": 66
+          },
+          "text": "12",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-evidence-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 54,
+            "y": 258,
+            "w": 852,
+            "h": 204
+          },
+          "text": "先写结论，再放能核对的证据。这一格只示范结构，不代表真实数据，换主题时这些字仍然可读。",
+          "textCapacity": {
+            "maxChars": 43,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "kpi-row-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "08",
+      "layout": "08_chart_insight",
+      "name": "Chart and Insight",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "chart-insight-chart-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 600,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "chart-insight-insight-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 654,
+            "y": 132,
+            "w": 270,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "chart-insight-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-chart-carrier",
+          "type": "chart",
+          "bounds": {
+            "x": 51,
+            "y": 147,
+            "w": 570,
+            "h": 318
+          },
+          "role": "content",
+          "chart": {
+            "kind": "column",
+            "categories": [
+              "Q1",
+              "Q2",
+              "Q3",
+              "Q4"
+            ],
+            "series": [
+              {
+                "name": "Actual",
+                "values": [
+                  42,
+                  55,
+                  63,
+                  78
+                ]
+              },
+              {
+                "name": "Plan",
+                "values": [
+                  48,
+                  58,
+                  68,
+                  74
+                ]
+              }
+            ],
+            "colors": [
+              "$accent",
+              "$muted"
+            ],
+            "showLegend": true,
+            "grid": "solid"
+          }
+        },
+        {
+          "id": "chart-insight-insight-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 672,
+            "y": 150,
+            "w": 234,
+            "h": 252
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-source-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 672,
+            "y": 435,
+            "w": 234,
+            "h": 24
+          },
+          "text": "示例来源",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9.75,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "chart-insight-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "09",
+      "layout": "09_table_summary",
+      "name": "Table and Summary",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "table-summary-table-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 642,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "table-summary-summary-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 696,
+            "y": 132,
+            "w": 228,
+            "h": 348
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "table-summary-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-table-carrier",
+          "type": "table",
+          "bounds": {
+            "x": 51,
+            "y": 147,
+            "w": 612,
+            "h": 318
+          },
+          "role": "content",
+          "table": {
+            "columns": [
+              0.42857142857142855,
+              0.2857142857142857,
+              0.2857142857142857
+            ],
+            "rowHeights": [
+              48,
+              67.5,
+              67.5,
+              67.5,
+              67.5
+            ],
+            "rows": [
+              [
+                {
+                  "text": "指标",
+                  "bold": true,
+                  "align": "left"
+                },
+                {
+                  "text": "现状",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "目标",
+                  "bold": true,
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "采用",
+                  "align": "left"
+                },
+                {
+                  "text": "68%",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "80%",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "周期",
+                  "align": "left"
+                },
+                {
+                  "text": "12 d",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "8 d",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "质量",
+                  "align": "left"
+                },
+                {
+                  "text": "94%",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "97%",
+                  "align": "right"
+                }
+              ],
+              [
+                {
+                  "text": "成本",
+                  "align": "left"
+                },
+                {
+                  "text": "1.08",
+                  "bold": true,
+                  "align": "right"
+                },
+                {
+                  "text": "1.00",
+                  "align": "right"
+                }
+              ]
+            ],
+            "fontSize": 11.25,
+            "fontFamily": "$cjk",
+            "color": "$ink",
+            "fill": "$paper",
+            "border": {
+              "color": "$line",
+              "width": 0.75
+            },
+            "header": {
+              "bold": true,
+              "color": "$ink",
+              "fill": "$surface"
+            }
+          }
+        },
+        {
+          "id": "table-summary-summary-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 714,
+            "y": 150,
+            "w": 192,
+            "h": 252
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-source-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 714,
+            "y": 435,
+            "w": 192,
+            "h": 24
+          },
+          "text": "示例来源",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9.75,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "table-summary-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "layout": "10_process_timeline",
+      "name": "Process Timeline",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "process-timeline-axis",
+          "type": "shape",
+          "bounds": {
+            "x": 147,
+            "y": 210,
+            "w": 666,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 2.25,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 666,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "process-timeline-node-one",
+          "type": "shape",
+          "bounds": {
+            "x": 139.5,
+            "y": 202.5,
+            "w": 15,
+            "h": 15
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 2.25
+          }
+        },
+        {
+          "id": "process-timeline-node-two",
+          "type": "shape",
+          "bounds": {
+            "x": 361.5,
+            "y": 202.5,
+            "w": 15,
+            "h": 15
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 2.25
+          }
+        },
+        {
+          "id": "process-timeline-node-three",
+          "type": "shape",
+          "bounds": {
+            "x": 583.5,
+            "y": 202.5,
+            "w": 15,
+            "h": 15
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 2.25
+          }
+        },
+        {
+          "id": "process-timeline-node-four",
+          "type": "shape",
+          "bounds": {
+            "x": 805.5,
+            "y": 202.5,
+            "w": 15,
+            "h": 15
+          },
+          "role": "decoration",
+          "shape": "ellipse",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 2.25
+          }
+        },
+        {
+          "id": "process-timeline-takeaway-panel",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 426,
+            "w": 888,
+            "h": 48
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "process-timeline-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 45,
+            "y": 240,
+            "w": 204,
+            "h": 150
+          },
+          "text": "发现",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 267,
+            "y": 240,
+            "w": 204,
+            "h": 150
+          },
+          "text": "判断",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 489,
+            "y": 240,
+            "w": 204,
+            "h": 150
+          },
+          "text": "行动",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 711,
+            "y": 240,
+            "w": 204,
+            "h": 150
+          },
+          "text": "复核",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-takeaway-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 54,
+            "y": 438,
+            "w": 852,
+            "h": 24
+          },
+          "text": "先看变化，再谈原因",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12.75,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "center",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "process-timeline-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "layout": "11_matrix_2x2",
+      "name": "Two-by-Two Matrix",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "matrix-quadrant-one",
+          "type": "shape",
+          "bounds": {
+            "x": 150,
+            "y": 132,
+            "w": 294,
+            "h": 168
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "matrix-quadrant-two",
+          "type": "shape",
+          "bounds": {
+            "x": 456,
+            "y": 132,
+            "w": 294,
+            "h": 168
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "matrix-quadrant-three",
+          "type": "shape",
+          "bounds": {
+            "x": 150,
+            "y": 312,
+            "w": 294,
+            "h": 168
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "matrix-quadrant-four",
+          "type": "shape",
+          "bounds": {
+            "x": 456,
+            "y": 312,
+            "w": 294,
+            "h": 168
+          },
+          "role": "panel",
+          "shape": "roundRect",
+          "fill": "$paper",
+          "line": {
+            "color": "$line",
+            "width": 0.75
+          },
+          "radius": 6
+        },
+        {
+          "id": "matrix-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-y-axis-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 108,
+            "h": 42
+          },
+          "text": "结果",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11.25,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-x-axis-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 762,
+            "y": 438,
+            "w": 162,
+            "h": 42
+          },
+          "text": "时间",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11.25,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-quadrant-one-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 168,
+            "y": 150,
+            "w": 258,
+            "h": 132
+          },
+          "text": "先做",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-quadrant-two-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 474,
+            "y": 150,
+            "w": 258,
+            "h": 132
+          },
+          "text": "排后",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-quadrant-three-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 168,
+            "y": 330,
+            "w": 258,
+            "h": 132
+          },
+          "text": "少做",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-quadrant-four-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 474,
+            "y": 330,
+            "w": 258,
+            "h": 132
+          },
+          "text": "不做",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13.5,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "matrix-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "layout": "12_appendix",
+      "name": "Appendix",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "master-header-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 48,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "master-footer-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 498,
+            "w": 888,
+            "h": 1
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 888,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "appendix-column-rule",
+          "type": "shape",
+          "bounds": {
+            "x": 480,
+            "y": 132,
+            "w": 1,
+            "h": 348
+          },
+          "role": "decoration",
+          "shape": "line",
+          "line": {
+            "color": "$line",
+            "width": 0.75,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 348
+            }
+          }
+        },
+        {
+          "id": "appendix-title-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 66,
+            "w": 888,
+            "h": 42
+          },
+          "text": "这一页只留一个判断",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "bold",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "appendix-left-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 132,
+            "w": 432,
+            "h": 348
+          },
+          "text": "先写下现在的做法",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "appendix-right-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 492,
+            "y": 132,
+            "w": 432,
+            "h": 348
+          },
+          "text": "再写下打算改的做法",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11.25,
+            "weight": "regular",
+            "color": "$ink",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "appendix-footer-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 507,
+            "w": 675,
+            "h": 24
+          },
+          "text": "示例 · 非真实数据",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "appendix-pagenum-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 834,
+            "y": 507,
+            "w": 90,
+            "h": 24
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$muted",
+            "align": "right",
+            "valign": "top"
+          }
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "layout": "13_closing",
+      "name": "Closing",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "closing-accent",
+          "type": "shape",
+          "bounds": {
+            "x": 36,
+            "y": 210,
+            "w": 66,
+            "h": 4.5
+          },
+          "role": "decoration",
+          "shape": "roundRect",
+          "fill": "$ink",
+          "radius": 2.25
+        },
+        {
+          "id": "closing-message-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 247.5,
+            "w": 888,
+            "h": 72
+          },
+          "text": "带走这一句",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 33,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        },
+        {
+          "id": "closing-contact-carrier",
+          "type": "text",
+          "bounds": {
+            "x": 36,
+            "y": 339,
+            "w": 675,
+            "h": 36
+          },
+          "text": "结构预览",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$paper",
+            "align": "left",
+            "valign": "top"
+          }
+        }
+      ]
+    }
+  ]
+}
