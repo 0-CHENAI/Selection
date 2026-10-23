@@ -12,6 +12,7 @@ export {
   getBundledSkillDirectories,
   isUserFacingSkill,
   filterUserFacingSkills,
+  BUNDLED_PROSE_SKILL_SLUGS,
   resolveBundledSkillMdPath,
   loadSkill,
   loadAllSkills,

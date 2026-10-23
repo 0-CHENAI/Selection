@@ -518,6 +518,11 @@ describe('lean context contracts', () => {
     expect(prompt).not.toContain('Use simple Markdown tables for small static comparisons');
     expect(prompt).not.toContain('Spawn only if **one** of these is true');
     expect(prompt).not.toContain("it's 2026");
+    expect(prompt).toContain('`natural-writing` is Chinese prose only');
+    expect(prompt).toContain('`humanizer` is English general prose');
+    expect(prompt).toContain('`academic-humanizer` is English papers');
+    expect(prompt).toContain('verbatim quotes or translation');
+    expect(prompt).toContain('academic-paper guide');
     // Real system prose mentions these tags several times. Only the appended catalog counts.
     const catalog = '<available_skills>\n- natural-writing: /skills/natural-writing/SKILL.md\n</available_skills>';
     const stats = estimateContextInputBreakdown({ systemPrompt: prompt + '\n' + catalog, messages: [] });

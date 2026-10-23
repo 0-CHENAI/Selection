@@ -72,7 +72,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { invalidateSkillsCacheIfSkillMarkdown, loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { BUNDLED_PROSE_SKILL_SLUGS, invalidateSkillsCacheIfSkillMarkdown, loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
 import { toSkillCatalogEntries } from '../skills/catalog.ts';
 import { formatSkillSuggestions, matchSkillsByGlobs } from '../skills/match.ts';
 
@@ -207,6 +207,38 @@ export const MINI_AGENT_MCP_KEYS = ['session'] as const;
 // ============================================================
 // BaseAgent Abstract Class
 // ============================================================
+
+/**
+ * Load bundled prose skills the user named on this turn.
+ * A workspace or project file with the same slug stays on the Read path.
+ */
+function loadExplicitBundledProseSkills(skillPaths: Map<string, string>): { text: string | null; error?: string } {
+  const slugs: string[] = [];
+  const blocks: string[] = [];
+  for (const slug of BUNDLED_PROSE_SKILL_SLUGS) {
+    const selected = skillPaths.get(slug);
+    if (!selected) continue;
+    const bundled = resolveBundledSkillMdPath(slug);
+    if (!bundled || resolve(selected) !== resolve(bundled)) continue;
+    try {
+      blocks.push(readFileSync(selected, 'utf8'));
+    } catch {
+      return { text: null, error: `Could not read the selected ${slug} skill.` };
+    }
+    skillPaths.delete(slug);
+    slugs.push(slug);
+  }
+  if (slugs.length === 0) return { text: null };
+  if (slugs.length === 1) {
+    return {
+      text: `The user explicitly selected ${slugs[0]} for this turn. Its full SKILL.md is already loaded below; do not Read it again this turn. Follow its instructions for the requested prose:\n\n${blocks[0]}`,
+    };
+  }
+  const labeled = slugs.map((slug, index) => `### ${slug}\n\n${blocks[index]}`).join('\n\n');
+  return {
+    text: `The user explicitly selected ${slugs.join(', ')} for this turn. Each full SKILL.md is already loaded below; do not Read them again this turn. Follow their instructions for the requested prose:\n\n${labeled}`,
+  };
+}
 
 /**
  * Abstract base class for agent backends.
@@ -1129,28 +1161,25 @@ ${formattedMessages}
       return;
     }
 
-    // Only the app-owned skill may enter the system prefix. Workspace/project
-    // overrides keep their existing model-Read path and trust level.
+    // Only an app-owned prose skill may enter the system prefix. Workspace or
+    // project overrides keep their existing model-Read path and trust level.
     // Recovery/progress prompts are new chat() calls but still belong to the
-    // original request. Resolve its selection again so a recreated agent can
+    // original request. Resolve that selection again so a recreated agent can
     // restore the skill without carrying it into a later user turn.
-    const explicitWritingPath = skillPaths.get('natural-writing')
-      ?? (options?.continueUserTask && options.userTaskMessage
-        ? this.extractSkillPaths(options.userTaskMessage).skillPaths.get('natural-writing')
-        : undefined);
-    if (explicitWritingPath) skillPaths.set('natural-writing', explicitWritingPath);
-    const bundledWritingPath = resolveBundledSkillMdPath('natural-writing');
-    let explicitWritingInstructions: string | null = null;
-    if (explicitWritingPath && bundledWritingPath && resolve(explicitWritingPath) === resolve(bundledWritingPath)) {
-      try {
-        explicitWritingInstructions = readFileSync(explicitWritingPath, 'utf8');
-      } catch {
-        yield { type: 'error', message: 'Could not read the selected natural-writing skill.' };
-        yield { type: 'complete' };
-        return;
-      }
-      skillPaths.delete('natural-writing');
+    const continuedSkillPaths = options?.continueUserTask && options.userTaskMessage
+      ? this.extractSkillPaths(options.userTaskMessage).skillPaths
+      : undefined;
+    for (const slug of BUNDLED_PROSE_SKILL_SLUGS) {
+      const selectedPath = skillPaths.get(slug) ?? continuedSkillPaths?.get(slug);
+      if (selectedPath) skillPaths.set(slug, selectedPath);
     }
+    const explicitWriting = loadExplicitBundledProseSkills(skillPaths);
+    if (explicitWriting.error) {
+      yield { type: 'error', message: explicitWriting.error };
+      yield { type: 'complete' };
+      return;
+    }
+    const explicitWritingInstructions = explicitWriting.text;
 
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
@@ -1199,9 +1228,7 @@ ${formattedMessages}
     // Capture the raw user message for source-activation auto-retry. This is the
     // user-facing text only (no system-reminder, no prior activation suffix).
     const skillContextGeneration = ++this.skillContextGeneration;
-    this.promptBuilder.setTurnSkillInstructions(explicitWritingInstructions
-      ? `The user explicitly selected natural-writing for this turn. Its full SKILL.md is already loaded below; do not Read it again this turn. Follow its instructions for the requested prose:\n\n${explicitWritingInstructions}`
-      : null);
+    this.promptBuilder.setTurnSkillInstructions(explicitWritingInstructions);
     this.setCurrentTurnUserMessage(userFacingMessage);
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);

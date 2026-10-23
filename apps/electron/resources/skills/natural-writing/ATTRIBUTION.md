@@ -1,7 +1,11 @@
 # 来源与适配
 
-此技能参考并精简改写了 [blader/humanizer](https://github.com/blader/humanizer)，调研版本 commit `9862685f575c65a8247f90369951df1b3416e3d6`（2026-09-21 获取）。上游 MIT 许可证保留在同目录 LICENSE。
+此技能的正文完整来自 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)。获取的提交是 `f4518a8eab97b8bfebc66a89d34320a89bef6930`（2026-09-23，`fix: preserve meaning and author voice in Chinese rewrites`）。同目录 `LICENSE` 是上游 MIT 许可证原文。
 
-Selection 适配：面向中文文档正文，默认轻改，保留专业文体和证据；不加载完整模式库、不做多稿输出或检测评分、不添加作者扮演流程。调研也参考了 [humanizer-chinese](https://github.com/jiji262/humanizer-chinese)、[humanizer-zh](https://github.com/ai-zixun/humanizer-zh) 和 [社区使用反馈](https://www.reddit.com/r/claudeskills/comments/1v8wa5r/whats_the_best_humanizer_skill_out_there/)，未复制其技能或运行脚本。
+Selection 适配：
 
-运行时由现有技能目录根据任务语义选取，只读取 SKILL.md；不做关键词硬匹配或额外模型分类调用。本文件与 LICENSE 用于来源追溯，不需要加载到模型上下文。开源热度和社区评价不是写作效果的基准测试，效果仍受模型、材料与文体影响。
+- 目录 id 仍是 `natural-writing`。显式选择会把这份捆绑技能注入当前回合，工作区里的同名覆盖仍走 Read，已有会话里的 `[skill:natural-writing]` 也继续指向这里。仓库没有技能别名，改成 `humanizer-zh` 会让这些路径直接失败。
+- frontmatter 改成 Selection 的 `name` 与 `description`。显示名为 Humanizer-zh。描述只覆盖中文正文，并与 `humanizer`、`academic-humanizer` 分开；普通问答、代码、检索、逐字引用、逐字翻译和纯排版不使用。
+- 去掉上游的 `allowed-tools` 和 `metadata`，避免指向 Selection 没有的工具。中文正文、31 条模式、优先级（保留事实与确定程度 > 用户范围和文体 > 作者声音 > 具体模式）以及默认只交付最终文本，都保持原样。
+
+本文件和 `LICENSE` 只用于来源追溯，不要加载到模型上下文。

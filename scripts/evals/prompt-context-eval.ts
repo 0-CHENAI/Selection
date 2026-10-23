@@ -30,13 +30,21 @@ const out = arg('out', resolve(tmpdir(), 'selection-prompt-context-eval.json'));
 // A sibling file preserves relative imports. Always remove it, including failed runs.
 const baselineFile = resolve(root, `packages/shared/src/prompts/.eval-baseline-${process.pid}.ts`);
 const writingSkill = loadSkillBySlug('/evaluation/workspace', 'natural-writing');
-if (!writingSkill) throw new Error('Bundled natural-writing skill is unavailable');
+const humanizerSkill = loadSkillBySlug('/evaluation/workspace', 'humanizer');
+const academicSkill = loadSkillBySlug('/evaluation/workspace', 'academic-humanizer');
+if (!writingSkill || !humanizerSkill || !academicSkill) throw new Error('Bundled prose skills are unavailable');
 const writingCatalogFor = (description: string) => formatSkillCatalog([{
   slug: writingSkill.slug,
   title: writingSkill.metadata.name,
   description,
   skillMdPath: join(writingSkill.path, 'SKILL.md'),
 }])!;
+const currentProseCatalog = formatSkillCatalog([writingSkill, humanizerSkill, academicSkill].map(skill => ({
+  slug: skill.slug,
+  title: skill.metadata.name,
+  description: skill.metadata.description,
+  skillMdPath: join(skill.path, 'SKILL.md'),
+})))!;
 const priorSkill = execFileSync('git', ['show', `${baseline}:apps/electron/resources/skills/natural-writing/SKILL.md`], { cwd: root, encoding: 'utf8' });
 const oldWritingDescription = matter(priorSkill).data.description;
 if (typeof oldWritingDescription !== 'string') throw new Error('Baseline natural-writing description is unavailable');
@@ -54,11 +62,11 @@ if (caseGroup === 'writing') {
   } finally { if (createdBaselineFile) unlinkSync(baselineFile); }
 }
 const oldPrompt = oldCorePrompt + '\n\n' + writingCatalogFor(oldWritingDescription);
-const newPrompt = getSystemPrompt(...promptArgs) + '\n\n' + writingCatalogFor(writingSkill.metadata.description);
+const newPrompt = getSystemPrompt(...promptArgs) + '\n\n' + currentProseCatalog;
 const tools = getSessionToolProxyDefs();
 const report: { measurement: unknown; scope: string; runs: unknown[] } = {
   measurement: { baseline, system: { before: tokens(oldPrompt), after: tokens(newPrompt) }, toolFactory: { before: tokens(JSON.stringify(tools)), after: tokens(JSON.stringify(modelVisibleTools(tools))) } },
-  scope: `${selectedCases.length} synthetic ${caseGroup} policy-comprehension questions with each revision's natural-writing catalog${caseGroup === 'writing' ? ' and the same current system prompt' : ''}, batched per request; three repetitions per prompt/model. Not end-to-end agent execution or document quality.`,
+  scope: `${selectedCases.length} synthetic ${caseGroup} policy-comprehension questions. The baseline catalog is natural-writing only; the current catalog lists natural-writing, humanizer, and academic-humanizer${caseGroup === 'writing' ? '. Both sides use the current system prompt' : ''}, batched per request; three repetitions per prompt/model. Not end-to-end agent execution or document quality.`,
   runs: [],
 };
 console.log(JSON.stringify(report.measurement));

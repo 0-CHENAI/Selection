@@ -70,6 +70,13 @@ export function filterUserFacingSkills<T extends Pick<LoadedSkill, 'source'>>(sk
   return skills.filter(isUserFacingSkill);
 }
 
+/**
+ * App-owned prose skills. Explicit `[skill:slug]` selection of the bundled
+ * file may enter the stable prefix for that turn. `natural-writing` keeps its
+ * original directory id so existing mentions and workspace overrides still resolve.
+ */
+export const BUNDLED_PROSE_SKILL_SLUGS = ['natural-writing', 'humanizer', 'academic-humanizer'] as const;
+
 /** First app-bundled `SKILL.md` for a slug. Versioned OfficeCLI guides stay private. */
 export function resolveBundledSkillMdPath(slug: string): string | undefined {
   for (const dir of getBundledSkillDirectories()) {

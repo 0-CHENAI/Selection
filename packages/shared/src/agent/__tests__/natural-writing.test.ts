@@ -14,14 +14,17 @@ class WritingAgent extends TestAgent {
 }
 
 describe('natural writing skill integration', () => {
-  it('ships a discoverable, compact skill instead of adding its body to every message', () => {
+  it('ships a discoverable skill instead of adding its body to every message', () => {
     const entries = toSkillCatalogEntries(loadAllSkills('/test/writing-workspace'));
     const entry = entries.find(e => e.slug === 'natural-writing');
     expect(entry).toBeDefined();
     const content = readFileSync(entry!.skillMdPath, 'utf8');
-    expect(content.length).toBeLessThan(2000);
+    expect(content).toContain('## 编辑约束与优先级');
+    expect(content).toContain('### 31. 套话收尾');
+    expect(Buffer.byteLength(content)).toBeGreaterThan(18000);
     expect(entry!.description.length).toBeLessThan(250);
-    expect(entry!.description).not.toContain('交付前一次检查');
+    expect(entry!.description).toContain('中文正文');
+    expect(entry!.description).not.toContain('编辑约束与优先级');
   });
 
   it('supports model-selected catalog reads and resets reading state after compaction', async () => {
@@ -47,17 +50,18 @@ describe('natural writing skill integration', () => {
       await turn.next();
       expect(agent.chatCalls[0]!.message).toContain('(slug: natural-writing)');
       expect(agent.chatCalls[0]!.message).toContain('(skill: officecli)');
-      expect(agent.chatCalls[0]!.message).not.toContain('## 写作与修订');
+      expect(agent.chatCalls[0]!.message).not.toContain('## 编辑约束与优先级');
       const stableContext = agent.getPromptBuilder().buildStableContextParts().join('\n');
       expect(stableContext).toContain('The user explicitly selected natural-writing');
-      expect(stableContext).toContain('## 写作与修订');
+      expect(stableContext).toContain('## 编辑约束与优先级');
+      expect(stableContext).toContain('### 31. 套话收尾');
       expect(agent.canWrite()).toBe(false);
       agent.markSkillRead(resolveBundledSkillMdPath('officecli')!);
       expect(agent.canWrite()).toBe(true);
       agent.resetPrerequisiteState();
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 编辑约束与优先级');
       await turn.next();
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 编辑约束与优先级');
     } finally { agent.destroy(); }
   });
 
@@ -67,11 +71,11 @@ describe('natural writing skill integration', () => {
       const turn = agent.chat('[skill:natural-writing] 修改文章正文');
       await turn.next();
       expect(agent.canWrite()).toBe(true);
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 编辑约束与优先级');
       await turn.next();
       await collectEvents(agent.chat('修复编译器错误'));
-      expect(agent.chatCalls[1]!.message).not.toContain('## 写作与修订');
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 写作与修订');
+      expect(agent.chatCalls[1]!.message).not.toContain('## 编辑约束与优先级');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 编辑约束与优先级');
     } finally { agent.destroy(); }
   });
 
@@ -82,12 +86,12 @@ describe('natural writing skill integration', () => {
       const recovery = agent.chat('请继续完成并提交答案', undefined,
         { continueUserTask: true, userTaskMessage: original });
       await recovery.next();
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 写作与修订');
-      expect(agent.chatCalls[0]!.message).not.toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 编辑约束与优先级');
+      expect(agent.chatCalls[0]!.message).not.toContain('## 编辑约束与优先级');
       await recovery.next();
       const next = agent.chat('修复编译器错误');
       await next.next();
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 编辑约束与优先级');
       await next.next();
     } finally { agent.destroy(); }
   });
@@ -101,9 +105,9 @@ describe('natural writing skill integration', () => {
       await newer.next();
       await older.next();
       expect(agent.getCurrentTurnUserMessage()).toContain('修改新稿');
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).toContain('## 编辑约束与优先级');
       await newer.next();
-      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 写作与修订');
+      expect(agent.getPromptBuilder().buildStableContextParts().join('\n')).not.toContain('## 编辑约束与优先级');
     } finally { agent.destroy(); }
   });
 
@@ -139,7 +143,37 @@ describe('natural writing skill integration', () => {
       await collectEvents(agent.chat('请修复报告生成器的代码'));
       await collectEvents(agent.chat('写报告之前先检查这些数字，暂时不要写正文'));
       await collectEvents(agent.chat('帮我写一份报告'));
-      for (const call of agent.chatCalls) expect(call.message).not.toContain('(skill: natural-writing)');
+      for (const call of agent.chatCalls) {
+        expect(call.message).not.toContain('(skill: natural-writing)');
+        expect(call.message).not.toContain('(skill: humanizer)');
+        expect(call.message).not.toContain('(skill: academic-humanizer)');
+        expect(call.message).not.toContain('## 编辑约束与优先级');
+      }
+    } finally { agent.destroy(); }
+  });
+
+  it('injects the other bundled prose skills when the user names them', async () => {
+    const agent = new WritingAgent(createMockBackendConfig());
+    try {
+      const humanizer = agent.chat('[skill:humanizer] Rewrite this English blog post.');
+      await humanizer.next();
+      const humanizerContext = agent.getPromptBuilder().buildStableContextParts().join('\n');
+      expect(humanizerContext).toContain('The user explicitly selected humanizer');
+      expect(humanizerContext).toContain('## F. Writing for the wrong reader');
+      expect(agent.chatCalls[0]!.message).not.toContain('## F. Writing for the wrong reader');
+      expect(agent.canWrite()).toBe(true);
+      await humanizer.next();
+
+      const academic = agent.chat('[skill:academic-humanizer] Edit this English paper abstract.');
+      await academic.next();
+      const academicContext = agent.getPromptBuilder().buildStableContextParts().join('\n');
+      expect(academicContext).toContain('The user explicitly selected academic-humanizer');
+      expect(academicContext).toContain('## Layer 4: Claim-evidence discipline');
+      expect(academicContext).toContain('## Layer 6: Funding-proposal mode');
+      expect(academicContext).toContain("author's sample rate");
+      expect(academicContext).not.toContain('remove entirely');
+      expect(agent.chatCalls[1]!.message).not.toContain('## Layer 4: Claim-evidence discipline');
+      await academic.next();
     } finally { agent.destroy(); }
   });
 });
