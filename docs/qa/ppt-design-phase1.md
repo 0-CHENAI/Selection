@@ -1,5 +1,7 @@
 # PPT design phase 1 acceptance
 
+> Historical note for #626. The live workflow is the selection-deck engine in `apps/electron/resources/skills/ppt-design/SKILL.md` (#631). This file is not an operating instruction.
+
 Tracking: #626. Branch: `feat/ppt-design-skill`, target `test`.
 
 ## Scope and decisions

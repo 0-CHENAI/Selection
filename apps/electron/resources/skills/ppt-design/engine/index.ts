@@ -1,0 +1,8 @@
+export { checkDeck } from './check.ts'
+export { contrastMinimum, contrastRatio } from './contrast.ts'
+export { exportDeck, platformFromProcess, resolveFontFace, waterfallParts } from './export-pptx.ts'
+export { charWidth, literalNewline, orphanLines, wrapText } from './metrics.ts'
+export { colorRef, loadDeckFile, parseDeckDocument, parseDeckSource } from './schema.ts'
+export { captureSlides } from './screenshot.ts'
+export { CANVAS_HEIGHT, CANVAS_WIDTH, DECK_FORMAT, DECK_VERSION } from './types.ts'
+export type { Deck, DeckElement, DeckIssue, DeckPage, PlatformName, Theme } from './types.ts'

@@ -30,7 +30,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **PPT 设计系统的三套版式** — 新建或整套重设计演示文稿时，商务、深色科技和杂志三套风格使用各自的满版构图、字号和图表样式，而不再是同一版式换色。局部修改仍走原来的 OfficeCLI 路径。Issue #626.
+- **PPT 声明式页面** — 新建或整套重设计演示文稿时，先写可预检的页面描述，再导出可编辑的 PPTX。随附两套参考风格，每套有自己的封面。预检不过就不写出文件。局部修改仍走原来的 OfficeCLI 路径。Issue #631，并取代尚未发布的三套配方版式（#626）。
 
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
 
