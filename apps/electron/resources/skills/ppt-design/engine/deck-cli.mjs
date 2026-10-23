@@ -19359,7 +19359,7 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       align: element.font.align ?? "left",
       valign: element.font.valign ?? "top",
       margin: 0,
-      wrap: true,
+      wrap: (element.textCapacity?.maxLines ?? 1) > 1,
       fit: "none",
       italic: element.font.italic === true ? true : undefined,
       rtlMode: element.font.rtl === true ? true : undefined,

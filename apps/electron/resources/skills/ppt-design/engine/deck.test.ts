@@ -413,6 +413,23 @@ describe('example canvas, gradients, and paths', () => {
     expect(xml.indexOf('<a:pattFill')).toBeLessThan(xml.indexOf('<a:ln'))
   })
 
+  it('keeps a one-line run from wrapping and still wraps a taller block', async () => {
+    const deck = makeDeck('折行', fixtureTheme, [
+      makePage('p1', 'cover', '折行', '$paper', [
+        text('num', '416,161', 48, 360, 180, 56, 48, { family: '$latin' }),
+        text('body', '这是一段需要在框内换行的说明文字。', 48, 80, 160, 72, 16),
+      ], ''),
+    ])
+    const out = join(tempDir('wrap-'), 'wrap.pptx')
+    const result = await exportDeck(deck, out, { platform: 'linux' })
+    expect(result.status).toBe('ok')
+    const xml = await unzipEntry(out, 'ppt/slides/slide1.xml')
+    const numberAt = xml.indexOf('416,161')
+    const bodyAt = xml.indexOf('这是一段')
+    expect(xml.slice(Math.max(0, numberAt - 600), numberAt)).toContain('wrap="none"')
+    expect(xml.slice(Math.max(0, bodyAt - 600), bodyAt)).toContain('wrap="square"')
+  })
+
   it('exports Arabic as a right-to-left paragraph', async () => {
     const deck = makeDeck('阿文', fixtureTheme, [
       makePage('p1', 'cover', '阿文', '$paper', [

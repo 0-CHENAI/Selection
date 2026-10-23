@@ -1,8 +1,6 @@
 # 事故复盘 · Incident Postmortem
-
-这个风格在示例库里的成稿是 `ppt169_cloudflare_outage_postmortem`。该稿依赖第三方品牌或官方机构标识，没有转入参考页。原因：Cloudflare 2025-11-18 官方事故复盘，设计建立在该公司的事故材料上。
-风格说明仍保留，供以后用自己的内容重做。许可：MIT，Copyright (c) 2025-2026 Hugo He。
-
+参考页改为 ppt-master-examples 的成稿，不再使用原先那套 12 页线框。主示例是 `ppt169_cloudflare_outage_postmortem`（Cloudflare Outage Postmortem, 18 November 2025）。许可：MIT，Copyright (c) 2025-2026 Hugo He。
+这些成稿保留来源页面中的商标与官方标识，只作参考模板。模板来自 ppt-master-examples（MIT，Copyright (c) 2025-2026 Hugo He）。Selection 本体仍为 Apache-2.0，并按非商业用途提供。纳入这些页面不授予商标权利。
 下面是上游说明原文。
 
 ---

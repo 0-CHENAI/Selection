@@ -109,7 +109,8 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
       align: element.font.align ?? 'left',
       valign: element.font.valign ?? 'top',
       margin: 0,
-      wrap: true,
+      // SVG runs are one line. A box that only fits one line must not wrap the last word onto the next title.
+      wrap: (element.textCapacity?.maxLines ?? 1) > 1,
       fit: 'none',
       italic: element.font.italic === true ? true : undefined,
       rtlMode: element.font.rtl === true ? true : undefined,

@@ -1,8 +1,7 @@
 # 经营复盘 · Operating Review
-
-这个风格在示例库里的成稿是 `ppt169_apple_fy2025_review`。该稿依赖第三方品牌或官方机构标识，没有转入参考页。原因：苹果 FY2025 官方财报复盘，页面按 Apple 财报材料编排，并链到 FY25 文件。
-风格说明仍保留，供以后用自己的内容重做。许可：MIT，Copyright (c) 2025-2026 Hugo He。
-
+参考页改为 ppt-master-examples 的成稿，不再使用原先那套 12 页线框。主示例是 `ppt169_apple_fy2025_review`（Apple FY2025 经营复盘:收入创新高,增长的一半来自服务）。许可：MIT，Copyright (c) 2025-2026 Hugo He。
+同风格还有：`ppt169_china_telecom_2025`、`ppt169_china_rail_2024_zh`、`ppt169_china_rail_2024_zh_sonnet`。
+这些成稿保留来源页面中的商标与官方标识，只作参考模板。模板来自 ppt-master-examples（MIT，Copyright (c) 2025-2026 Hugo He）。Selection 本体仍为 Apache-2.0，并按非商业用途提供。纳入这些页面不授予商标权利。
 下面是上游说明原文。
 
 ---

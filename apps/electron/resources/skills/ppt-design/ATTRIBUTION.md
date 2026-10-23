@@ -75,24 +75,24 @@ DSH v0.2.21 的署名是：十套模板改编自该提交下的 beautiful-html-t
 - 项目：<https://github.com/hugohe3/ppt-master-examples>
 - 许可：MIT。
 - 版权行：Copyright (c) 2025-2026 Hugo He。
-- 转入范围：`examples.json` 列出的 70 套里，61 套官方成稿。转换脚本是 `scripts/import-ppt-master-examples.ts`。每套包含 `deck.json`、由 `design_spec.md` 与 `spec_lock.md` 组成的 `design.md`，以及按内容哈希去重的图片。
+- 转入范围：`examples.json` 列出的 70 套官方成稿全部随应用打包。转换脚本是 `scripts/import-ppt-master-examples.ts`。每套包含 `deck.json`、由 `design_spec.md` 与 `spec_lock.md` 组成的 `design.md`，以及按内容哈希去重的图片。标识按来源保留，不从页面上摘掉。
 - 每套 README 里写明的图片出处汇总在 `styles/examples/CREDITS.md`。
 
-下面 9 套没有转入。它们的设计建立在公司品牌、官方机构标识或商业商标上：
+下面 9 套含有第三方商标、官方机构标识或商业包装。它们只作为参考模板，随包提供。模板文本来自 ppt-master-examples（MIT，Copyright (c) 2025-2026 Hugo He）。Selection 本体仍为 Apache-2.0，并按非商业用途提供。纳入这些页面不授予商标权利，也不表示权利人认可本集成。
 
-| 示例 | 原因 |
-|---|---|
-| `ppt169_china_telecom_2025` | 中国电信 2025 业绩稿，使用天翼/中国电信品牌标识 |
-| `ppt169_apple_fy2025_review` | 苹果 FY2025 官方财报复盘 |
-| `ppt169_cloudflare_outage_postmortem` | Cloudflare 官方事故复盘 |
-| `ppt169_uv_launch` | Astral uv 产品发布稿 |
-| `ppt169_china_rail_2024_zh` | 中国铁路 / 国铁集团官方统计 |
-| `ppt169_china_rail_2024_zh_sonnet` | 同一套中国铁路官方统计，并配有复兴号照片 |
-| `moments_nine_heritage_goods` | 回力、永久、大白兔等商业商标和包装 |
-| `ppt169_jilin_geohazard_rules_beautify` | 吉林省自然资源厅公文，页眉带机关标志 |
-| `ppt169_telford_feedback_2023_24_quick` | Telford & Wrekin 议会报告，页面含 council-logo |
+| 示例 | 页面上保留的标识 | 目录分类 | 接到的风格 |
+|---|---|---|---|
+| `ppt169_china_rail_2024_zh` | 中国铁路 / 国铁集团统计口径与现场照片 | 商务 | `operating-review` 的附加参考 |
+| `ppt169_china_rail_2024_zh_sonnet` | 同一套中国铁路材料，含复兴号照片 | 商务 | `operating-review` 的附加参考 |
+| `ppt169_jilin_geohazard_rules_beautify` | 吉林省自然资源厅公文与机关标志 | 商务 | 仅作示例，不挂风格 |
+| `ppt169_telford_feedback_2023_24_quick` | Telford & Wrekin 议会徽标（来源为 EMF，转入时栅格化） | 商务 | 仅作示例，不挂风格 |
+| `ppt169_apple_fy2025_review` | Apple FY2025 财报材料中的标识 | 经营复盘 | `operating-review` 的主参考页 |
+| `ppt169_uv_launch` | Astral uv 发布物料中的名称与标识 | 产品发布 | `product-launch` 的主参考页 |
+| `ppt169_cloudflare_outage_postmortem` | Cloudflare 事故复盘中的标识 | 事故复盘 | `incident-postmortem` 的主参考页 |
+| `moments_nine_heritage_goods` | 回力、永久、大白兔等商标与包装 | 社媒 | 仅作示例，不挂风格 |
+| `ppt169_china_telecom_2025` | 天翼 / 中国电信品牌标识 | 经营复盘 | `operating-review` 的附加参考 |
 
-`incident-postmortem`、`operating-review`、`product-launch` 在示例库里只有上述被排除的成稿，因此这三套风格只保留说明，没有参考页。其余十一套风格的 `deck` 指向对应成稿。
+十四套 ppt-master 风格的 `deck` 都指向 `styles/examples/` 里的成稿。`incident-postmortem` 的主参考页是 Cloudflare 复盘，`product-launch` 的主参考页是 uv 发布稿，`operating-review` 的主参考页是 Apple FY2025，并附中国电信与两套中国铁路成稿。新稿沿用版式时换成用户自己的文字、数据和标识。
 
 瑞士网格一页在正文里提到若干产品名，作为网格方法的后代，页面上没有那些标志，因此保留。讨论演示文稿概念、以及把通讯社列为资料来源的成稿同样保留。虚构公司的提案（Heatline、Fog & Fern、Every Day Counts）保留。
 

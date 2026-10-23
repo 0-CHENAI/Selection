@@ -3,14 +3,14 @@
  *
  *   bun scripts/render-example-fidelity.ts
  *
- * Writes a numbered cover sheet and ten side-by-side comparisons under /opt/cursor/artifacts.
+ * Writes a numbered cover sheet and nine side-by-side comparisons under /opt/cursor/artifacts.
  * The remaining page comparisons and the numeric report go into a zip there.
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { exportDeck } from '../apps/electron/resources/skills/ppt-design/engine/export-pptx.ts'
 import { parseDeckSource } from '../apps/electron/resources/skills/ppt-design/engine/schema.ts'
 import type { Deck } from '../apps/electron/resources/skills/ppt-design/engine/types.ts'
@@ -23,16 +23,15 @@ const work = join(tmpdir(), 'pm-fidelity')
 const fonts = join(tmpdir(), 'pm-fid-fonts.conf')
 
 const PAIRS: Array<[string, string]> = [
-  ['ppt169_night_shelf_creative_pitch', '01-night-shelf'],
-  ['ppt169_how_color_works_workshop', '02-color-workshop'],
-  ['ppt169_qianli_jiangshan_scroll', '03-qianli'],
-  ['custom_1920x600_autumn_web_banner', '04-autumn-banner'],
-  ['a4_four_day_week_decision_memo', '05-four-day-week'],
-  ['moments_midautumn_moon_quick', '06-midautumn'],
-  ['story_art_of_war_reading_cards', '07-art-of-war'],
-  ['xiaohongshu_first_aid_kit_zh', '08-first-aid'],
-  ['ppt169_swiss_grid_systems', '09-swiss-grid'],
-  ['ppt43_sleep_science_explainer', '10-sleep-science'],
+  ['ppt169_china_rail_2024_zh', '01-china-rail'],
+  ['ppt169_china_rail_2024_zh_sonnet', '02-china-rail-sonnet'],
+  ['ppt169_jilin_geohazard_rules_beautify', '03-jilin'],
+  ['ppt169_telford_feedback_2023_24_quick', '04-telford'],
+  ['ppt169_apple_fy2025_review', '05-apple'],
+  ['ppt169_uv_launch', '06-uv'],
+  ['ppt169_cloudflare_outage_postmortem', '07-cloudflare'],
+  ['moments_nine_heritage_goods', '08-heritage'],
+  ['ppt169_china_telecom_2025', '09-telecom'],
 ]
 
 type Project = { id: string; title: string; slides: Array<{ file: string }> }
@@ -132,8 +131,25 @@ async function renderDeck(id: string, deck: Deck, dir: string): Promise<string[]
     .map(name => join(dir, name))
 }
 
+function referenceSvg(svg: string, dest: string): string {
+  const text = readFileSync(svg, 'utf8')
+  if (!text.includes('.emf')) return svg
+  const rewritten = text.replace(/href="([^"]+\.emf)"/gi, (_match, href: string) => {
+    const file = resolve(dirname(svg), href.split('?')[0]!)
+    const trimmed = file.replace(/\.emf$/i, '.trimmed.png')
+    const png = existsSync(trimmed) ? trimmed : file.replace(/\.emf$/i, '.png')
+    // librsvg will not load an absolute image path when the SVG itself sits in another directory.
+    return `href="data:image/png;base64,${readFileSync(png).toString('base64')}"`
+  })
+  writeFileSync(dest, rewritten)
+  return dest
+}
+
 async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true })
+  for (const name of readdirSync(outDir)) {
+    if (/^compare-/.test(name) && name.endsWith('.png')) rmSync(join(outDir, name))
+  }
   rmSync(work, { recursive: true, force: true })
   mkdirSync(work, { recursive: true })
   const manifest = JSON.parse(readFileSync(join(skill, 'styles/examples/manifest.json'), 'utf8')) as {
@@ -173,7 +189,7 @@ async function main(): Promise<void> {
     const files = project.slides.map(slide => slide.file).filter(file => file.endsWith('.svg'))
     const pageCount = Math.min(slides.length, files.length, parsed.deck.pages.length)
     for (let page = 0; page < pageCount; page++) {
-      const svg = join(svgDir, files[page]!)
+      const svg = referenceSvg(join(svgDir, files[page]!), join(dir, `ref-${page + 1}.svg`))
       const reference = join(dir, `ref-${page + 1}.png`)
       const meta = await sharp(slides[page]!).metadata()
       const drawn = await run('rsvg-convert', ['-w', String(meta.width ?? 960), '-h', String(meta.height ?? 540), '-o', reference, svg])

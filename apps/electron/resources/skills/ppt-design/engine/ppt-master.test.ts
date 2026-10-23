@@ -60,10 +60,8 @@ describe('ppt-master layouts', () => {
   })
 })
 
-const excludedStyles = ['incident-postmortem', 'operating-review', 'product-launch']
-
 describe('ppt-master styles and themes', () => {
-  it('points each style at a real example or records why that example stayed out', () => {
+  it('points each style at a real example', () => {
     const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, {
       deck?: string
       examples?: string[]
@@ -83,12 +81,6 @@ describe('ppt-master styles and themes', () => {
       expect(read(`styles/${id}/design.md`)).toContain('Hugo He')
       const entry = catalog[id]
       expect(entry).toBeTruthy()
-      if (excludedStyles.includes(id)) {
-        expect(entry?.deck).toBeUndefined()
-        expect(entry?.reason?.length).toBeGreaterThan(0)
-        expect(entry?.excludedExample?.length).toBeGreaterThan(0)
-        continue
-      }
       expect(entry?.deck?.startsWith('styles/examples/')).toBe(true)
       expect(entry?.examples?.length).toBeGreaterThan(0)
       const parsed = parseDeckSource(read(entry!.deck!))
@@ -96,21 +88,41 @@ describe('ppt-master styles and themes', () => {
       expect(checkDeck(parsed.deck!)).toEqual([])
       expect(parsed.deck!.profile).toBe('example')
     }
+    expect(catalog['incident-postmortem']?.examples?.[0]).toBe('ppt169_cloudflare_outage_postmortem')
+    expect(catalog['product-launch']?.examples?.[0]).toBe('ppt169_uv_launch')
+    expect(catalog['operating-review']?.examples).toEqual([
+      'ppt169_apple_fy2025_review',
+      'ppt169_china_telecom_2025',
+      'ppt169_china_rail_2024_zh',
+      'ppt169_china_rail_2024_zh_sonnet',
+    ])
+    expect(catalog['operating-review']?.deck).toBe('styles/examples/ppt169_apple_fy2025_review/deck.json')
   })
 
   it('keeps every converted example deck inside the checker', () => {
     const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck?: string; excluded?: boolean; canvas?: string; category?: string }>
     const examples = Object.entries(catalog).filter(([id, entry]) => id.startsWith('ppt') || id.startsWith('a4_') || id.startsWith('moments_') || id.startsWith('story_') || id.startsWith('xiaohongshu') || id.startsWith('wechat') || id.startsWith('banner_') || id.startsWith('custom_'))
     expect(examples.length).toBe(70)
-    const converted = examples.filter(([, entry]) => entry.deck)
-    expect(converted.length).toBe(61)
+    const converted = examples.filter(([, entry]) => entry.deck && !entry.excluded)
+    expect(converted.length).toBe(70)
     for (const [, entry] of converted) {
-      expect(['商务', '咨询', '学术', '教学', '技术', '创意', '社媒']).toContain(entry.category)
+      expect(['商务', '咨询', '学术', '教学', '技术', '创意', '社媒', '事故复盘', '经营复盘', '产品发布']).toContain(entry.category)
       const parsed = parseDeckSource(read(entry.deck!))
       expect(parsed.issues).toEqual([])
       expect(parsed.deck!.pages.length).toBeGreaterThan(0)
       expect(checkDeck(parsed.deck!)).toEqual([])
     }
+    const byId = Object.fromEntries(examples)
+    expect(byId.ppt169_cloudflare_outage_postmortem?.category).toBe('事故复盘')
+    expect(byId.ppt169_apple_fy2025_review?.category).toBe('经营复盘')
+    expect(byId.ppt169_china_telecom_2025?.category).toBe('经营复盘')
+    expect(byId.ppt169_uv_launch?.category).toBe('产品发布')
+    expect(byId.moments_nine_heritage_goods?.category).toBe('社媒')
+    expect(byId.ppt169_china_rail_2024_zh?.category).toBe('商务')
+    expect(byId.ppt169_china_rail_2024_zh_sonnet?.category).toBe('商务')
+    expect(byId.ppt169_jilin_geohazard_rules_beautify?.category).toBe('商务')
+    expect(byId.ppt169_telford_feedback_2023_24_quick?.category).toBe('商务')
+    expect(byId.ppt169_telford_feedback_2023_24_quick?.canvas).toBe('16:9')
   })
 
   it('checks contrast for every named theme and a user brand', () => {

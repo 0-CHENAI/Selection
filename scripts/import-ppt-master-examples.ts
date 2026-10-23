@@ -5,11 +5,13 @@
  *   bun scripts/import-ppt-master-examples.ts --only ppt169_night_shelf_creative_pitch
  *
  * Source checkout defaults to /tmp/ppt-master-examples/examples.
- * Brand and official-corporate decks are recorded and skipped.
+ * Company-brand decks stay in the bundle as reference templates. Logos are kept.
  */
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { checkDeck } from '../apps/electron/resources/skills/ppt-design/engine/check.ts'
 import { containsCjk, fitSlack, textWidth, wrapText } from '../apps/electron/resources/skills/ppt-design/engine/metrics.ts'
@@ -44,6 +46,7 @@ type SharpPipe = {
   flatten: (options: { background: string }) => SharpPipe
   jpeg: (options: { quality: number }) => SharpPipe
   png: (options?: { compressionLevel?: number }) => SharpPipe
+  trim: (options?: { threshold?: number }) => SharpPipe
   raw: () => SharpPipe
   toBuffer: {
     (): Promise<Buffer>
@@ -58,16 +61,30 @@ const ASSET_HREF = 'styles/examples/_assets'
 const ASCENT_LATIN = 0.8
 const ASCENT_CJK = 0.88
 
-const EXCLUSIONS: Record<string, string> = {
-  ppt169_china_telecom_2025: '中国电信 2025 业绩稿，封面和内页使用天翼/中国电信品牌标识与官方口径。',
-  ppt169_apple_fy2025_review: '苹果 FY2025 官方财报复盘，页面按 Apple 财报材料编排，并链到 FY25 文件。',
-  ppt169_cloudflare_outage_postmortem: 'Cloudflare 2025-11-18 官方事故复盘，设计建立在该公司的事故材料上。',
-  ppt169_uv_launch: 'Astral uv 产品发布稿，页面指向 astral.sh，并使用该产品的发布物料。',
-  ppt169_china_rail_2024_zh: '中国铁路 / 国铁集团 2024 官方统计口径，属于企业官方材料。',
-  ppt169_china_rail_2024_zh_sonnet: '同一套中国铁路官方统计，并配有复兴号列车照片。',
-  moments_nine_heritage_goods: '回力、永久、大白兔等商业商标和包装，页面依赖第三方品牌标识。',
-  ppt169_jilin_geohazard_rules_beautify: '吉林省自然资源厅公文，页眉带该机关标志。',
-  ppt169_telford_feedback_2023_24_quick: 'Telford & Wrekin 议会 Corporate Feedback Report，页面含 council-logo。',
+/** Kept so a later exclusion still records a reason and skips conversion. Currently empty: all 70 decks ship. */
+const EXCLUSIONS: Record<string, string> = {}
+
+type ExampleCategory = '商务' | '咨询' | '学术' | '教学' | '技术' | '创意' | '社媒' | '事故复盘' | '经营复盘' | '产品发布'
+
+const CATEGORY_OVERRIDES: Record<string, ExampleCategory> = {
+  ppt169_cloudflare_outage_postmortem: '事故复盘',
+  ppt169_apple_fy2025_review: '经营复盘',
+  ppt169_china_telecom_2025: '经营复盘',
+  ppt169_uv_launch: '产品发布',
+  moments_nine_heritage_goods: '社媒',
+  ppt169_china_rail_2024_zh: '商务',
+  ppt169_china_rail_2024_zh_sonnet: '商务',
+  ppt169_jilin_geohazard_rules_beautify: '商务',
+  ppt169_telford_feedback_2023_24_quick: '商务',
+}
+
+const BRAND_IDS = new Set(Object.keys(CATEGORY_OVERRIDES))
+
+const BRAND_NOTE = '这些成稿保留来源页面中的商标与官方标识，只作参考模板。模板来自 ppt-master-examples（MIT，Copyright (c) 2025-2026 Hugo He）。Selection 本体仍为 Apache-2.0，并按非商业用途提供。纳入这些页面不授予商标权利。'
+
+/** Appended after styleName matches so the name match stays examples[0]. */
+const EXTRA_EXAMPLES: Record<string, string[]> = {
+  'operating-review': ['ppt169_china_telecom_2025', 'ppt169_china_rail_2024_zh', 'ppt169_china_rail_2024_zh_sonnet'],
 }
 
 const STYLE_LINKS: Array<{ id: string; test: (styleName: string) => boolean }> = [
@@ -1196,7 +1213,7 @@ function markerArrow(node: Xml): DeckElement['arrow'] | undefined {
 
 async function emitImage(node: Xml, page: PageBuilder, matrix: Matrix, clip: Clip): Promise<void> {
   const href = attr(node, 'href')
-  const bytes = decodeHref(href, page.svgDir)
+  const bytes = await decodeHref(href, page.svgDir)
   if (!bytes) {
     page.gap('image')
     return
@@ -1258,7 +1275,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function decodeHref(href: string, svgDir: string): Buffer | null {
+async function decodeHref(href: string, svgDir: string): Promise<Buffer | null> {
   const value = href.trim()
   if (!value) return null
   if (value.startsWith('data:')) {
@@ -1273,8 +1290,48 @@ function decodeHref(href: string, svgDir: string): Buffer | null {
     }
   }
   const file = join(svgDir, value.split('?')[0]!)
-  if (existsSync(file)) return readFileSync(file)
-  return null
+  if (!existsSync(file)) return null
+  if (/\.emf$/i.test(file)) return rasterizeEmf(file)
+  return readFileSync(file)
+}
+
+async function rasterizeEmf(file: string): Promise<Buffer | null> {
+  const cached = file.replace(/\.emf$/i, '.trimmed.png')
+  if (existsSync(cached) && statSync(cached).mtimeMs >= statSync(file).mtimeMs) return readFileSync(cached)
+  const dir = dirname(file)
+  const png = file.replace(/\.emf$/i, '.png')
+  const profile = mkdtempSync(join(tmpdir(), 'pm-emf-'))
+  try {
+    execFileSync('soffice', [
+      '--headless', '--norestore', '--nolockcheck',
+      `-env:UserInstallation=file://${profile}`,
+      '--convert-to', 'png', '--outdir', dir, file,
+    ], { stdio: 'pipe', timeout: 120000 })
+  } catch (error) {
+    console.log(`emf-fail ${file} ${error instanceof Error ? error.message : error}`)
+    return null
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
+  if (!existsSync(png)) return null
+  let trimmed: Buffer
+  try {
+    const page = await sharp(readFileSync(png)).trim({ threshold: 12 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    const pixels = page.data
+    for (let i = 0; i < pixels.length; i += 4) {
+      const red = pixels[i] ?? 0
+      const green = pixels[i + 1] ?? 0
+      const blue = pixels[i + 2] ?? 0
+      if (red >= 246 && green >= 246 && blue >= 246) pixels[i + 3] = 0
+    }
+    trimmed = await sharp(pixels, { raw: { width: page.info.width, height: page.info.height, channels: 4 } }).png().toBuffer()
+  } catch {
+    trimmed = readFileSync(png)
+  }
+  if (trimmed.length < 32) return readFileSync(png)
+  writeFileSync(cached, trimmed)
+  console.log(`emf ${file} -> ${trimmed.length}`)
+  return trimmed
 }
 
 async function storeImage(bytes: Buffer, imageW: number, imageH: number, crop: { left: number; top: number; right: number; bottom: number }, circle: boolean): Promise<string | null> {
@@ -1393,7 +1450,9 @@ function repair(deck: Deck): void {
   }
 }
 
-function categoryOf(project: Project): '商务' | '咨询' | '学术' | '教学' | '技术' | '创意' | '社媒' {
+function categoryOf(project: Project): ExampleCategory {
+  const override = CATEGORY_OVERRIDES[project.id]
+  if (override) return override
   const blob = `${project.id} ${project.styleName}`
   if (/^(xiaohongshu|wechat|story_|moments_|banner_|custom_)/.test(project.id)) return '社媒'
   if (/academic|attention|lora|researchstudio/i.test(blob)) return '学术'
@@ -1441,6 +1500,7 @@ function designDoc(project: Project, canvas: string, credits: string, dir: strin
     `- 上游风格名：${project.styleName}`,
     `- 图片与素材：${credits}`,
     '',
+    ...(BRAND_IDS.has(project.id) ? [BRAND_NOTE, ''] : []),
     '页面由 `svg_final` 转入 selection-deck。图表在能表达为柱、条、折线、饼、环、瀑布时用原生图表，其余图形保持形状。',
     '',
     spec ? `## design_spec\n\n${spec.trim()}\n` : '',
@@ -1513,6 +1573,11 @@ function rewriteStyles(projects: Project[], converted: Converted[]): void {
     const previous = catalog[link.id] ?? {}
     const matches = projects.filter(project => link.test(project.styleName))
     const included = matches.filter(project => converted.some(item => item.id === project.id))
+    for (const id of EXTRA_EXAMPLES[link.id] ?? []) {
+      if (included.some(project => project.id === id)) continue
+      const project = projects.find(item => item.id === id)
+      if (project && converted.some(item => item.id === id)) included.push(project)
+    }
     const excluded = matches.filter(project => EXCLUSIONS[project.id])
     const entry: Record<string, unknown> = {
       name: previous.name,
@@ -1541,6 +1606,7 @@ function rewriteStyles(projects: Project[], converted: Converted[]): void {
         '',
         `参考页改为 ppt-master-examples 的成稿，不再使用原先那套 12 页线框。主示例是 \`${included[0]!.id}\`（${included[0]!.title}）。许可：MIT，Copyright (c) 2025-2026 Hugo He。`,
         included.length > 1 ? `同风格还有：${included.slice(1).map(project => `\`${project.id}\``).join('、')}。` : '',
+        included.some(project => BRAND_IDS.has(project.id)) ? BRAND_NOTE : '',
         '',
       ].filter(Boolean).join('\n')
       : [
@@ -1591,6 +1657,8 @@ function writeCredits(projects: Project[], converted: Converted[]): void {
     '',
     '来源：<https://github.com/hugohe3/ppt-master-examples>，MIT，Copyright (c) 2025-2026 Hugo He。',
     '下面每条是该示例 README 里写明的图片或素材说明。',
+    '',
+    `其中 ${BRAND_IDS.size} 套成稿含有这些标识：${[...BRAND_IDS].map(id => `\`${id}\``).join('、')}。${BRAND_NOTE}`,
     '',
   ]
   for (const project of projects) {
