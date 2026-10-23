@@ -16,7 +16,14 @@
       "enum": [
         "business",
         "dark-tech",
-        "fresh-editorial"
+        "fresh-editorial",
+        "swiss-grid",
+        "academic-paper",
+        "workshop",
+        "data-brief",
+        "midnight-stage",
+        "blueprint",
+        "ink-journal"
       ]
     },
     "slides": {

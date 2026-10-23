@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "canvas": { "widthCm": 33.8667, "heightCm": 19.05 },
+  "thumbnailKeys": ["cover", "content", "data"],
+  "styles": [
+    {
+      "id": "business",
+      "name": "商务简报",
+      "nameEn": "Business Brief",
+      "useCases": ["商务汇报", "方案决策", "咨询材料"],
+      "summary": "海军蓝满版分隔页、标题色带、等分证据卡与侧栏读数。",
+      "thumbnails": {
+        "cover": "thumbnails/business/cover.png",
+        "content": "thumbnails/business/content.png",
+        "data": "thumbnails/business/data.png"
+      }
+    },
+    {
+      "id": "dark-tech",
+      "name": "深色科技",
+      "nameEn": "Dark Technology",
+      "useCases": ["技术说明", "产品系统", "深色舞台展示"],
+      "summary": "深色场、同心环、角括号、节点脊线与不对称模块。",
+      "thumbnails": {
+        "cover": "thumbnails/dark-tech/cover.png",
+        "content": "thumbnails/dark-tech/content.png",
+        "data": "thumbnails/dark-tech/data.png"
+      }
+    },
+    {
+      "id": "fresh-editorial",
+      "name": "杂志编辑",
+      "nameEn": "Fresh Editorial",
+      "useCases": ["研究解读", "内容策划", "杂志式叙事"],
+      "summary": "陶土与森林出血色块、衬线标题、内收大号与竖向阅读。",
+      "thumbnails": {
+        "cover": "thumbnails/fresh-editorial/cover.png",
+        "content": "thumbnails/fresh-editorial/content.png",
+        "data": "thumbnails/fresh-editorial/data.png"
+      }
+    },
+    {
+      "id": "swiss-grid",
+      "name": "瑞士网格",
+      "nameEn": "Swiss Grid",
+      "useCases": ["设计评审", "国际简报", "品牌提案"],
+      "summary": "齐左无衬线、细线分栏、单块红色色场与建筑级数字。",
+      "thumbnails": {
+        "cover": "thumbnails/swiss-grid/cover.png",
+        "content": "thumbnails/swiss-grid/content.png",
+        "data": "thumbnails/swiss-grid/data.png"
+      }
+    },
+    {
+      "id": "academic-paper",
+      "name": "学术报告",
+      "nameEn": "Academic Paper",
+      "useCases": ["学术汇报", "研究报告", "课题答辩"],
+      "summary": "页眉页脚、双栏正文、图注式图表，不用贴边巨号。",
+      "thumbnails": {
+        "cover": "thumbnails/academic-paper/cover.png",
+        "content": "thumbnails/academic-paper/content.png",
+        "data": "thumbnails/academic-paper/data.png"
+      }
+    },
+    {
+      "id": "workshop",
+      "name": "教学工作坊",
+      "nameEn": "Workshop Teaching",
+      "useCases": ["教学培训", "工作坊", "课程提纲"],
+      "summary": "米色画布、珊瑚色课时块、内收步骤号与圆角练习板。",
+      "thumbnails": {
+        "cover": "thumbnails/workshop/cover.png",
+        "content": "thumbnails/workshop/content.png",
+        "data": "thumbnails/workshop/data.png"
+      }
+    },
+    {
+      "id": "data-brief",
+      "name": "数据简报",
+      "nameEn": "Data Brief",
+      "useCases": ["经营复盘", "数据简报", "周报月报"],
+      "summary": "侧轨仪表、KPI 条、图表为主、叠放读数卡。",
+      "thumbnails": {
+        "cover": "thumbnails/data-brief/cover.png",
+        "content": "thumbnails/data-brief/content.png",
+        "data": "thumbnails/data-brief/data.png"
+      }
+    },
+    {
+      "id": "midnight-stage",
+      "name": "深夜舞台",
+      "nameEn": "Midnight Stage",
+      "useCases": ["路演演讲", "发布会", "叙事演讲"],
+      "summary": "黑场留白、金色光斑、上下对照而非左右分栏。",
+      "thumbnails": {
+        "cover": "thumbnails/midnight-stage/cover.png",
+        "content": "thumbnails/midnight-stage/content.png",
+        "data": "thumbnails/midnight-stage/data.png"
+      }
+    },
+    {
+      "id": "blueprint",
+      "name": "工程蓝图",
+      "nameEn": "Blueprint",
+      "useCases": ["技术方案", "工程说明", "系统架构"],
+      "summary": "海军蓝图纸、青色刻度、角标与图框标题栏。",
+      "thumbnails": {
+        "cover": "thumbnails/blueprint/cover.png",
+        "content": "thumbnails/blueprint/content.png",
+        "data": "thumbnails/blueprint/data.png"
+      }
+    },
+    {
+      "id": "ink-journal",
+      "name": "墨笔记事",
+      "nameEn": "Ink Journal",
+      "useCases": ["笔记综述", "文化讲述", "书评分享"],
+      "summary": "宣纸底、左侧笔记栏、朱红印记与墨线批注。",
+      "thumbnails": {
+        "cover": "thumbnails/ink-journal/cover.png",
+        "content": "thumbnails/ink-journal/content.png",
+        "data": "thumbnails/ink-journal/data.png"
+      }
+    }
+  ]
+}

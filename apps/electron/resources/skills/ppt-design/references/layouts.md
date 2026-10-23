@@ -1,10 +1,10 @@
 # 14 种布局：先语义，再按风格构图
 
-[layouts/catalog.json](../layouts/catalog.json) 只帮助选择信息关系。可执行几何在 `scripts/compose-business.ts`、`scripts/compose-dark.ts`、`scripts/compose-editorial.ts`，由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 调用。严格输入与容量来自 [scripts/spec.schema.json](../scripts/spec.schema.json)。画布宽 33.8667、高 19.05 cm。同一 layout 在三套风格里结构不同，不能假设一套共用槽位。
+[layouts/catalog.json](../layouts/catalog.json) 只帮助选择信息关系。可执行几何在 `scripts/compose-*.ts`，由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 按 [风格包](styles.md) 分派。严格输入与容量来自 [scripts/spec.schema.json](../scripts/spec.schema.json)。画布宽 33.8667、高 19.05 cm。同一 layout 在各套风格里结构不同，不能假设一套共用槽位。
 
 | layout | 信息关系与内容 | 典型节奏/构图 |
 |---|---|---|
-| `cover` | 主题、真实讲者与日期，subtitle 解释范围 | anchor；商务左栏满版，深色环形舞台，杂志右侧出血 |
+| `cover` | 主题、真实讲者与日期，subtitle 解释范围 | anchor；商务左栏满版，深色环形舞台，杂志右侧出血，瑞士红柱，学术居中，工作坊底栏，数据 KPI 块，舞台光斑，蓝图标题栏，墨笔边栏 |
 | `agenda` | 3–6 个并列章节/问题，供受众预期路径 | dense；商务编号行、深色节点、杂志大序号，不能拿目录代替叙事 |
 | `section` | 章节号、转场主张和简短说明 | breathing；放大章节数字，错位标题/正文 |
 | `bullets` | 3–5 个同级论据/要点，没有时序或对比关系 | dense；编号可读行，不是默认万能列表 |
@@ -23,7 +23,7 @@
 
 严格 schema 为每个 slot 给出字符串上限、项数与组成；catalog 仅供选型阅读，不另定义一份输入契约。这些上限是输入边界，不是建议塞满的目标。脚本还按实际固定字号、保守字宽、显式空行/末尾换行及 1.24 行距做布局预检，过长即在创建前停止。中文/英文混排、字体替换、长单词、换行都可能改变实际宽度，G4 的真实截图才是最终适配依据。
 
-内容标题至少 32 pt，正文 18 pt，来源 12 pt；封面、章节号和拉引文字用各 style 的 hero/number/quote。配方不自动缩字、不截断、不丢 slot。溢出时按 [排版回退](typography.md) 更新计划与锁：保真换行、改布局或拆页。
+内容标题至少 28 pt（默认 34），正文 16 pt（默认 20），来源 12 pt；封面、章节号和拉引文字用各 style 的 hero/number/quote。配方不自动缩字、不截断、不丢 slot。溢出时按 [排版回退](typography.md) 更新计划与锁：保真换行、改布局或拆页。
 
 图片由用户提供，当前 `image-text` 配方使用 PNG/JPEG 等比 contain 适配，不拉伸、不假设自动裁切，不把 SVG picture 能力等同于配方已接受 SVG。图片比例不合时选择合适资产/布局；不要声称未实现的 crop 行为。
 
@@ -33,4 +33,4 @@
 
 相邻页禁止重复同一 layout；脚本拒绝相邻重复。计划层还要检查每 3–4 页有一次真实的冲击页（section、big-number、quote、closing 等按内容选），不把这项要求变成必须添加无证据数字/引用的配额。变化来自叙事、信息关系和该风格自己的构图，不靠每页换色。
 
-上游代表性 layout/deck/chart 用于理解“结构与身份分离、证据与解释相邻、密集与留白交替”，未复制其 SVG、品牌、标志、占位符协议或原生化导出实现。风格只来自本技能 [三套风格](styles.md)。
+上游代表性 layout/deck/chart 用于理解“结构与身份分离、证据与解释相邻、密集与留白交替”，未复制其 SVG、品牌、标志、占位符协议或原生化导出实现。风格只来自本技能 [风格包](styles.md)。

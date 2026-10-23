@@ -15,15 +15,15 @@ export function paintBusiness(d: Painter): void {
 function frame(d: Painter): Frame {
   const eyebrow = d.slide.eyebrow;
   const subtitle = d.slide.subtitle;
-  const band = 0.4 + (eyebrow ? 0.9 : 0) + 2.95 + (subtitle ? 0.9 : 0);
+  const band = 0.4 + (eyebrow ? 0.9 : 0) + 3.25 + (subtitle ? 0.9 : 0);
   d.shape('header-band', 0, 0, W, band, { fill: d.p.text });
   let y = 0.28;
   if (eyebrow) {
     d.text('eyebrow', eyebrow, 1.2, y, 30, 0.8, { size: d.type.label, color: d.p.mist, heading: true, bold: true });
     y += 0.88;
   }
-  d.text('title', d.slide.title, 1.2, y, 31.3, 2.85, { size: d.type.title, color: d.p.inverse, heading: true, valign: 'middle' });
-  y += 2.95;
+  d.text('title', d.slide.title, 1.2, y, 31.3, 3.15, { size: d.type.title, color: d.p.inverse, heading: true, valign: 'middle' });
+  y += 3.25;
   if (subtitle) d.text('subtitle', subtitle, 1.2, y, 31.3, 0.8, { size: d.type.body, color: d.p.mist, valign: 'middle' });
   d.shape('footer-rule', 0, 17.72, W, 0.04, { fill: d.p.rule });
   footer(d, d.p.muted);
@@ -41,7 +41,7 @@ function cover(d: Painter): void {
   d.shape('cover-field', 0, 0, 15.2, H, { fill: d.p.text });
   d.shape('cover-accent', 1.25, 3.55, 3.4, 0.18, { fill: d.p.accent });
   if (d.slide.eyebrow) d.text('eyebrow', d.slide.eyebrow, 1.25, 2.35, 12.6, 0.85, { size: d.type.label, color: d.p.mist, heading: true, bold: true });
-  d.text('title', d.slide.title, 1.25, 4.05, 12.7, 4.6, { size: d.type.hero, color: d.p.inverse, heading: true });
+  d.text('title', d.slide.title, 1.25, 4.05, 12.7, 4.8, { size: d.type.hero, color: d.p.inverse, heading: true });
   if (d.slide.subtitle) d.text('subtitle', d.slide.subtitle, 1.25, 9.0, 12.7, 2.6, { size: d.type.body, color: d.p.mist });
   const metas: [string, string][] = [['讲者', s.presenter as string], ['日期', s.date as string]];
   if (d.slide.source) metas.push(['来源', d.slide.source]);
@@ -61,7 +61,7 @@ function section(d: Painter): void {
   const s = d.slide.slots;
   d.shape('section-field', 0, 0, W, H, { fill: d.p.text });
   d.shape('section-accent', 0, 16.55, W, 2.5, { fill: d.p.accent });
-  d.text('section-number', s.number as string, 19.2, 1.1, 13.2, 7.2, { size: 108, color: d.p.secondary, heading: true, align: 'right' });
+  d.text('section-number', s.number as string, 18.8, 1.1, 13.4, 6.8, { size: 108, color: d.p.secondary, heading: true, align: 'right' });
   if (d.slide.eyebrow) d.text('eyebrow', d.slide.eyebrow, 1.4, 4.3, 16.5, 0.8, { size: d.type.label, color: d.p.mist, heading: true, bold: true });
   d.text('title', d.slide.title, 1.4, 5.3, 16.8, 4.2, { size: d.type.hero, color: d.p.inverse, heading: true });
   d.text('body', s.body as string, 1.4, 10.2, 20, 4.6, { size: d.type.heading, color: d.p.mist });
@@ -170,7 +170,7 @@ function process(d: Painter, box: Frame): void {
   items.forEach((item, i) => {
     const x = box.x + i * (w + gap);
     d.shape(`node-${i}`, x + w / 2 - 0.72, box.y + 0.12, 1.44, 1.44, { geometry: 'ellipse', fill: d.p.text });
-    d.text(`num-${i}`, String(i + 1).padStart(2, '0'), x + w / 2 - 0.72, box.y + 0.12, 1.44, 1.44, { size: 14, color: d.p.inverse, align: 'center', valign: 'middle', heading: true, bold: true });
+    d.text(`num-${i}`, String(i + 1).padStart(2, '0'), x + w / 2 - 0.72, box.y + 0.12, 1.44, 1.44, { size: 16, color: d.p.inverse, align: 'center', valign: 'middle', heading: true, bold: true });
     d.shape(`card-${i}`, x, box.y + 2.05, w, box.h - 2.05, { fill: d.p.surface });
     d.text(`title-${i}`, item.title, x + 0.35, box.y + 2.3, w - 0.7, 2.4, { size: d.type.heading, heading: true });
     d.text(`body-${i}`, item.body, x + 0.35, box.y + 4.85, w - 0.7, box.h - 5.2, { size: d.type.body });

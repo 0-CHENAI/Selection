@@ -2,7 +2,7 @@
 
 入口：`"<absolute-CRAFT_BUN>" "<skill>/scripts/compose.ts" --spec "/ABS/spec.json" --out "/ABS/dataFolder/deck.pptx" [--officecli "/ABS/bin"] [--font-cjk "Noto Sans CJK SC"]`。从环境 `CRAFT_BUN` 解析应用附带 Bun 的绝对路径，以参数数组调用；POSIX 是 `"$CRAFT_BUN"`，PowerShell 是 `& $env:CRAFT_BUN`，不依赖 PATH 的 `bun`、不安装运行时。所有路径占位符须换成真实绝对路径；OfficeCLI 进程设置 `OFFICECLI_SKIP_UPDATE=1`。
 
-完整机器规则及每 slot 字数/项数容量见 [scripts/spec.schema.json](../scripts/spec.schema.json)；[layouts/catalog.json](../layouts/catalog.json) 只说明选型，不提供可执行坐标。实际几何按风格分别写在 `scripts/compose-business.ts`、`scripts/compose-dark.ts`、`scripts/compose-editorial.ts`，由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 调用。脚本按固定字号做适配预检；未知字段、空的必填内容、超量数组或过长文本不能靠忽略字段通过。
+完整机器规则及每 slot 字数/项数容量见 [scripts/spec.schema.json](../scripts/spec.schema.json)；[layouts/catalog.json](../layouts/catalog.json) 只说明选型，不提供可执行坐标。实际几何按风格分别写在 `scripts/compose-*.ts`，由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 调用。脚本按固定字号做适配预检；未知字段、空的必填内容、超量数组或过长文本不能靠忽略字段通过。
 
 ## 根与通用页
 
@@ -12,7 +12,7 @@
 |---|---|
 | `version` | 数字常量 `1` |
 | `dataFolderPath` | 会话 scratch 绝对目录；输出必须在其中，不覆盖已有文件 |
-| `style` | `business` / `dark-tech` / `fresh-editorial` |
+| `style` | [风格包索引](../styles/index.json) 中的 id：`business` / `dark-tech` / `fresh-editorial` / `swiss-grid` / `academic-paper` / `workshop` / `data-brief` / `midnight-stage` / `blueprint` / `ink-journal` |
 | `slides` | 按交付顺序排列的非空 slide 数组 |
 
 每个 slide **仅**包含必填 `layout`、`title`、`notes`、`slots`，以及可选 `eyebrow`、`subtitle`、`source`。`layout` 是下面 14 个 ID 之一；其余通用字段均为字符串，`slots` 按 layout 严格匹配。`notes` 是实际讲稿/说明，不拿备注隐藏本应可见的证据或溢出正文。来源可选不代表事实免于引用：事实页应提供可追溯 `source`，完整依据可保留于 notes/计划。示例/演示数据明确标识。

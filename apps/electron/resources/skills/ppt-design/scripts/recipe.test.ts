@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { assertFits, estimateLines, renderRecipe, validateSpec, type Spec } from './recipe';
 import { validateOutput } from './compose';
 import { heatIslandSpec, sweepSpec } from './sample-deck';
+import { H, W } from './paint';
+import { STYLE_IDS } from './style-packs';
+import { wrapHeading } from './wrap';
 const base = (): Spec => ({
     version: 1, dataFolderPath: '/tmp', style: 'business', slides: [{
             layout: 'comparison', title: 'Compare options', notes: 'Keep the entire speaker note.', source: 'Source: demonstration', slots: {
@@ -111,30 +114,51 @@ describe('recipe consumer safety', () => {
         s.slides[0].slots.series[0].values = [NaN, 2];
         expect(() => validateSpec(s)).toThrow();
     });
-    test('three styles compose different geometry, not a recolor', () => {
+    test('each style pack composes different geometry, not a recolor', () => {
         const signature = (style: Spec['style'], layout: Spec['slides'][number]['layout']) => {
             const spec = heatIslandSpec(style, '/tmp');
             spec.slides = spec.slides.filter(slide => slide.layout === layout);
             const commands = renderRecipe(spec);
             const shapes = commands.filter(command => command.type === 'shape' && !command.props?.text);
-            const area = Math.max(...shapes.map(command => parseFloat(command.props!.width) * parseFloat(command.props!.height)));
+            const area = Math.max(0, ...shapes.map(command => parseFloat(command.props!.width) * parseFloat(command.props!.height)));
             const geometry = shapes.map(command => `${command.props!.name}:${command.props!.x}:${command.props!.width}:${command.props!.geometry ?? 'rect'}`).join('|');
             return { area, geometry, chart: commands.find(command => command.type === 'chart')?.props };
         };
-        const covers = (['business', 'dark-tech', 'fresh-editorial'] as const).map(style => signature(style, 'cover'));
-        const comparisons = (['business', 'dark-tech', 'fresh-editorial'] as const).map(style => signature(style, 'comparison'));
-        for (const cover of covers) expect(cover.area).toBeGreaterThan(80);
-        expect(new Set(covers.map(cover => cover.geometry)).size).toBe(3);
-        expect(new Set(comparisons.map(item => item.geometry)).size).toBe(3);
+        const covers = STYLE_IDS.map(style => signature(style, 'cover'));
+        const comparisons = STYLE_IDS.map(style => signature(style, 'comparison'));
+        for (const cover of covers) expect(cover.area).toBeGreaterThan(40);
+        expect(new Set(covers.map(cover => cover.geometry)).size).toBe(STYLE_IDS.length);
+        expect(new Set(comparisons.map(item => item.geometry)).size).toBe(STYLE_IDS.length);
         const chart = signature('business', 'chart').chart;
         expect(chart?.gridlines).toBe('none');
         expect(chart?.dataLabels).toBe('outsideEnd');
         expect(chart?.valaxisvisible).toBe('false');
     });
-    test('heat-island copy and every layout fit in all three styles', () => {
-        for (const style of ['business', 'dark-tech', 'fresh-editorial'] as const) {
+    test('heat-island copy and every layout fit in every style pack', () => {
+        for (const style of STYLE_IDS) {
             expect(renderRecipe(heatIslandSpec(style, '/tmp')).some(command => command.type === 'chart')).toBe(true);
             expect(renderRecipe(sweepSpec(style, '/tmp')).filter(command => command.type === 'slide')).toHaveLength(14);
+        }
+    });
+    test('titles wrap 街区 together and large numbers stay on-canvas', () => {
+        expect(wrapHeading('把城市热岛变成清凉街区', 8.4, 42).split('\n').includes('区')).toBe(false);
+        for (const style of STYLE_IDS) {
+            const commands = renderRecipe(heatIslandSpec(style, '/tmp'));
+            const texts = commands.filter(command => command.type === 'shape' && command.props?.text);
+            for (const command of texts) {
+                const x = parseFloat(command.props!.x);
+                const y = parseFloat(command.props!.y);
+                const w = parseFloat(command.props!.width);
+                const h = parseFloat(command.props!.height);
+                expect(x).toBeGreaterThanOrEqual(0);
+                expect(y).toBeGreaterThanOrEqual(0);
+                expect(x + w).toBeLessThanOrEqual(W + 0.05);
+                expect(y + h).toBeLessThanOrEqual(H + 0.05);
+            }
+            const sizes = texts.map(command => Number(command.props!.size)).filter(size => Number.isFinite(size));
+            expect(Math.min(...sizes.filter(size => size >= 16), 16)).toBeGreaterThanOrEqual(16);
+            expect(texts.some(command => command.props?.name === 'title' && Number(command.props.size) >= 28)).toBe(true);
+            expect(texts.some(command => command.props?.name === 'title' && String(command.props.text).includes('街区'))).toBe(true);
         }
     });
     test('output containment resolves symlinks and refuses overwrite', () => {

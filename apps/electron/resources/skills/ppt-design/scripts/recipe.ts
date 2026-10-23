@@ -2,9 +2,7 @@ import schema from './spec.schema.json';
 import styles from '../styles/catalog.json';
 import { isAbsolute } from 'node:path';
 import { Painter, type FontSet, type Palette, type TypeScale } from './paint';
-import { paintBusiness } from './compose-business';
-import { paintDark } from './compose-dark';
-import { paintEditorial } from './compose-editorial';
+import { PAINTERS } from './painters';
 export const LAYOUTS = ['cover', 'agenda', 'section', 'bullets', 'image-text', 'comparison', 'big-number', 'timeline', 'process', 'chart', 'quote', 'closing', 'cards', 'matrix'] as const;
 export type Layout = typeof LAYOUTS[number];
 export type Slide = {
@@ -191,10 +189,11 @@ export function renderRecipe(spec: Spec, options: {
         }, {
             command: 'add', parent, type: 'notes', props: { text: slide.notes },
         });
-        const painter = new Painter(commands, parent, slide, index, p, f, style.type as TypeScale, spec.style, options.images ?? new Map(), assertFits);
-        if (spec.style === 'business') paintBusiness(painter);
-        else if (spec.style === 'dark-tech') paintDark(painter);
-        else paintEditorial(painter);
+        const type = { ...(style.type as TypeScale), headingBold: style.headingBold !== false };
+        const painter = new Painter(commands, parent, slide, index, p, f, type, spec.style, options.images ?? new Map(), assertFits);
+        const paint = PAINTERS[spec.style];
+        if (!paint) throw new Error(`no painter for style ${spec.style}`);
+        paint(painter);
     });
     return commands;
 }

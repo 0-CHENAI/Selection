@@ -1,6 +1,7 @@
 {
   "business": {
     "name": "Business / 商务简报",
+    "headingBold": true,
     "palette": {
       "background": "FFFFFF",
       "surface": "F3F6FA",
@@ -17,11 +18,12 @@
       "darwin": {"heading": "Helvetica Neue", "body": "Helvetica Neue", "cjkHeading": "PingFang SC", "cjkBody": "PingFang SC"},
       "linux": {"heading": "Noto Sans", "body": "Noto Sans", "cjkHeading": "Noto Sans CJK SC", "cjkBody": "Noto Sans CJK SC"}
     },
-    "type": {"title": 32, "hero": 40, "body": 18, "heading": 22, "number": 64, "label": 16, "footer": 12, "quote": 28},
-    "decoration": "Full-bleed navy divider pages, content pages with a navy title band, square index badges, equal evidence cards and a side insight panel. No shared grid with the other styles."
+    "type": {"title": 34, "hero": 42, "body": 20, "heading": 22, "number": 64, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Full-bleed navy divider pages, content pages with a navy title band, square index badges, equal evidence cards and a side insight panel."
   },
   "dark-tech": {
     "name": "Dark technology / 深色科技",
+    "headingBold": true,
     "palette": {
       "background": "07111A",
       "surface": "122033",
@@ -38,11 +40,12 @@
       "darwin": {"heading": "Menlo", "body": "Helvetica Neue", "cjkHeading": "PingFang SC", "cjkBody": "PingFang SC"},
       "linux": {"heading": "DejaVu Sans Mono", "body": "Noto Sans", "cjkHeading": "Noto Sans CJK SC", "cjkBody": "Noto Sans CJK SC"}
     },
-    "type": {"title": 32, "hero": 44, "body": 18, "heading": 22, "number": 72, "label": 16, "footer": 12, "quote": 28},
-    "decoration": "Dark field, concentric rings, corner brackets, node spines and asymmetric bento cards. Luminous accent is local, not a recolor of the business band."
+    "type": {"title": 34, "hero": 44, "body": 20, "heading": 22, "number": 72, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Dark field, concentric rings, corner brackets, node spines and asymmetric bento cards. Luminous accent is local."
   },
   "fresh-editorial": {
     "name": "Fresh editorial / 杂志编辑",
+    "headingBold": false,
     "palette": {
       "background": "F7F3EA",
       "surface": "EFE6D6",
@@ -59,7 +62,161 @@
       "darwin": {"heading": "Georgia", "body": "Helvetica Neue", "cjkHeading": "Songti SC", "cjkBody": "PingFang SC"},
       "linux": {"heading": "Noto Serif", "body": "Noto Sans", "cjkHeading": "Noto Serif CJK SC", "cjkBody": "Noto Sans CJK SC"}
     },
-    "type": {"title": 34, "hero": 42, "body": 18, "heading": 22, "number": 68, "label": 16, "footer": 12, "quote": 30},
-    "decoration": "Edge-bleed terracotta and forest planes, drop numerals, vertical reading, and a thick cross instead of cards. Serif headlines stay regular weight."
+    "type": {"title": 36, "hero": 44, "body": 20, "heading": 22, "number": 68, "label": 16, "footer": 12, "quote": 30},
+    "decoration": "Edge-bleed terracotta and forest planes, inset drop numerals, vertical reading, and a thick cross instead of cards."
+  },
+  "swiss-grid": {
+    "name": "Swiss grid / 瑞士网格",
+    "headingBold": true,
+    "palette": {
+      "background": "F4F4F1",
+      "surface": "FFFFFF",
+      "text": "111111",
+      "muted": "5A5A55",
+      "accent": "C41E3A",
+      "secondary": "2A2A28",
+      "rule": "C8C8C2",
+      "inverse": "F4F4F1",
+      "mist": "8A8A84"
+    },
+    "fonts": {
+      "win32": {"heading": "Arial", "body": "Arial", "cjkHeading": "Microsoft YaHei", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Helvetica Neue", "body": "Helvetica Neue", "cjkHeading": "PingFang SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Sans", "body": "Noto Sans", "cjkHeading": "Noto Sans CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 34, "hero": 48, "body": 20, "heading": 22, "number": 80, "label": 16, "footer": 12, "quote": 32},
+    "decoration": "Flush-left grotesque type, hairline columns, one oversized red plane, and architectural numerals kept inside the canvas."
+  },
+  "academic-paper": {
+    "name": "Academic paper / 学术报告",
+    "headingBold": false,
+    "palette": {
+      "background": "F7F4EC",
+      "surface": "EFE8DA",
+      "text": "1C1A16",
+      "muted": "5E584C",
+      "accent": "2C4A6E",
+      "secondary": "8C4A2F",
+      "rule": "D4CBB8",
+      "inverse": "F7F4EC",
+      "mist": "8A8170"
+    },
+    "fonts": {
+      "win32": {"heading": "Georgia", "body": "Aptos", "cjkHeading": "SimSun", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Georgia", "body": "Helvetica Neue", "cjkHeading": "Songti SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Serif", "body": "Noto Sans", "cjkHeading": "Noto Serif CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 34, "hero": 40, "body": 20, "heading": 22, "number": 56, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Running header, two-column body, figure-plus-caption charts, footnote band. No giant edge-clipped numerals."
+  },
+  "workshop": {
+    "name": "Workshop / 教学工作坊",
+    "headingBold": true,
+    "palette": {
+      "background": "FFF6E8",
+      "surface": "FFE7C8",
+      "text": "2A2118",
+      "muted": "6A5846",
+      "accent": "E25C3A",
+      "secondary": "1F6F6A",
+      "rule": "E6D2B4",
+      "inverse": "FFF6E8",
+      "mist": "F3C9A4"
+    },
+    "fonts": {
+      "win32": {"heading": "Aptos Display", "body": "Aptos", "cjkHeading": "Microsoft YaHei", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Helvetica Neue", "body": "Helvetica Neue", "cjkHeading": "PingFang SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Sans", "body": "Noto Sans", "cjkHeading": "Noto Sans CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 34, "hero": 42, "body": 20, "heading": 22, "number": 60, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Cream field, coral lesson tiles, giant inset step numbers, rounded practice boards."
+  },
+  "data-brief": {
+    "name": "Data brief / 数据简报",
+    "headingBold": true,
+    "palette": {
+      "background": "F5F2EA",
+      "surface": "FFFFFF",
+      "text": "1B2430",
+      "muted": "5C6774",
+      "accent": "C98512",
+      "secondary": "2F5C8F",
+      "rule": "D7D1C4",
+      "inverse": "F5F2EA",
+      "mist": "B9A27A"
+    },
+    "fonts": {
+      "win32": {"heading": "Georgia", "body": "Aptos", "cjkHeading": "SimSun", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Georgia", "body": "Helvetica Neue", "cjkHeading": "Songti SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Serif", "body": "Noto Sans", "cjkHeading": "Noto Serif CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 34, "hero": 40, "body": 20, "heading": 22, "number": 62, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Dashboard rail, KPI strip, chart-first well and stacked callout cards. Hairlines instead of heavy chrome."
+  },
+  "midnight-stage": {
+    "name": "Midnight stage / 深夜舞台",
+    "headingBold": true,
+    "palette": {
+      "background": "08080A",
+      "surface": "16141C",
+      "text": "F6F1E6",
+      "muted": "B7AFA0",
+      "accent": "E6C36A",
+      "secondary": "7A5C9E",
+      "rule": "3A3428",
+      "inverse": "08080A",
+      "mist": "D9C89A"
+    },
+    "fonts": {
+      "win32": {"heading": "Georgia", "body": "Aptos", "cjkHeading": "SimSun", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Georgia", "body": "Helvetica Neue", "cjkHeading": "Songti SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Serif", "body": "Noto Sans", "cjkHeading": "Noto Serif CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 36, "hero": 48, "body": 20, "heading": 22, "number": 76, "label": 16, "footer": 12, "quote": 32},
+    "decoration": "Sparse black field, gold spotlight disc, stacked (not side-by-side) comparison, and one huge statement per impact page."
+  },
+  "blueprint": {
+    "name": "Blueprint / 工程蓝图",
+    "headingBold": true,
+    "palette": {
+      "background": "0B1F3A",
+      "surface": "123152",
+      "text": "E8F4F8",
+      "muted": "9BB8C8",
+      "accent": "5EC8E5",
+      "secondary": "F0C14A",
+      "rule": "24506E",
+      "inverse": "0B1F3A",
+      "mist": "7FA3B5"
+    },
+    "fonts": {
+      "win32": {"heading": "Consolas", "body": "Aptos", "cjkHeading": "Microsoft YaHei", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Menlo", "body": "Helvetica Neue", "cjkHeading": "PingFang SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "DejaVu Sans Mono", "body": "Noto Sans", "cjkHeading": "Noto Sans CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 34, "hero": 40, "body": 20, "heading": 22, "number": 58, "label": 16, "footer": 12, "quote": 28},
+    "decoration": "Navy drawing sheet, cyan ticks, corner brackets, title-block metadata and dimensioned numerals."
+  },
+  "ink-journal": {
+    "name": "Ink journal / 墨笔记事",
+    "headingBold": false,
+    "palette": {
+      "background": "F4EFE4",
+      "surface": "E7DFD0",
+      "text": "1A1A1A",
+      "muted": "6B6458",
+      "accent": "C23A2E",
+      "secondary": "2F3D32",
+      "rule": "C9C0B0",
+      "inverse": "F4EFE4",
+      "mist": "A89880"
+    },
+    "fonts": {
+      "win32": {"heading": "Georgia", "body": "Aptos", "cjkHeading": "SimSun", "cjkBody": "Microsoft YaHei"},
+      "darwin": {"heading": "Georgia", "body": "Helvetica Neue", "cjkHeading": "Songti SC", "cjkBody": "PingFang SC"},
+      "linux": {"heading": "Noto Serif", "body": "Noto Sans", "cjkHeading": "Noto Serif CJK SC", "cjkBody": "Noto Sans CJK SC"}
+    },
+    "type": {"title": 36, "hero": 44, "body": 20, "heading": 22, "number": 64, "label": 16, "footer": 12, "quote": 30},
+    "decoration": "Rice-paper field, left notebook margin, red seal disc, ink rules and margin notes. No third-party marks."
   }
 }

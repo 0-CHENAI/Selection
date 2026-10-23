@@ -21,8 +21,8 @@ function frame(d: Painter): Frame {
     d.text('eyebrow', d.slide.eyebrow, 1.4, y, 28, 0.8, { size: d.type.label, color: d.p.accent, heading: true });
     y += 0.88;
   }
-  d.text('title', d.slide.title, 1.4, y, 30.5, 2.5, { size: d.type.title, heading: true });
-  y += 2.6;
+  d.text('title', d.slide.title, 1.4, y, 30.5, 2.85, { size: d.type.title, heading: true });
+  y += 2.95;
   d.shape('title-rule', 1.4, y, 3.6, 0.16, { fill: d.p.accent });
   y += 0.4;
   if (d.slide.subtitle) {
@@ -53,7 +53,7 @@ function cover(d: Painter): void {
 function section(d: Painter): void {
   const s = d.slide.slots;
   d.shape('field', 0, 0, W, H, { fill: d.p.secondary });
-  d.text('section-number', s.number as string, -0.4, 1.0, 16, 8, { size: 120, color: d.p.accent, heading: true });
+  d.text('section-number', s.number as string, 0.7, 0.9, 14.8, 7.2, { size: 110, color: d.p.accent, heading: true });
   if (d.slide.eyebrow) d.text('eyebrow', d.slide.eyebrow, 14.5, 4.6, 17.5, 0.8, { size: d.type.label, color: d.p.mist, heading: true });
   d.text('title', d.slide.title, 1.5, 9.2, 30, 3.8, { size: d.type.hero, color: d.p.inverse, heading: true });
   d.text('body', s.body as string, 1.5, 13.3, 24, 3.4, { size: d.type.heading, color: d.p.mist });

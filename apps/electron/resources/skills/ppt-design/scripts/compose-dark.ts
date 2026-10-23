@@ -20,8 +20,8 @@ function frame(d: Painter): Frame {
     d.text('eyebrow', d.slide.eyebrow, 1.2, y, 26, 0.8, { size: d.type.label, color: d.p.accent, heading: true, bold: true });
     y += 0.88;
   }
-  d.text('title', d.slide.title, 1.2, y, 28.2, 2.15, { size: d.type.title, heading: true, valign: 'middle' });
-  y += 2.25;
+  d.text('title', d.slide.title, 1.2, y, 28.2, 2.45, { size: d.type.title, heading: true, valign: 'middle' });
+  y += 2.55;
   if (d.slide.subtitle) {
     d.text('subtitle', d.slide.subtitle, 1.2, y, 28, 0.85, { size: d.type.body, color: d.p.muted, valign: 'middle' });
     y += 0.95;

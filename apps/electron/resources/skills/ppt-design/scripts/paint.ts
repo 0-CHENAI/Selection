@@ -1,7 +1,9 @@
 import type { Command, Slide } from './recipe';
+import { shouldWrapText, wrapHeading } from './wrap';
 
 export const W = 33.8667;
 export const H = 19.05;
+export const SAFE = 0.45;
 
 export type Palette = {
   background: string;
@@ -31,6 +33,7 @@ export type TypeScale = {
   label: number;
   footer: number;
   quote: number;
+  headingBold?: boolean;
 };
 
 export type Frame = { x: number; y: number; w: number; h: number };
@@ -70,12 +73,13 @@ export class Painter {
 
   text(name: string, value: string, x: number, y: number, w: number, h: number, opts: TextOpts = {}): void {
     const size = opts.size ?? this.type.body;
-    this.assertFits(value, w, h, size, `slide ${this.index + 1} ${name}`);
     const heading = opts.heading ?? false;
-    const bold = opts.bold ?? (heading && this.styleId !== 'fresh-editorial');
+    const rendered = shouldWrapText(name, value, heading) ? wrapHeading(value, w, size) : value;
+    this.assertFits(rendered, w, h, size, `slide ${this.index + 1} ${name}`);
+    const bold = opts.bold ?? (heading && this.type.headingBold !== false);
     this.commands.push({
       command: 'add', parent: this.parent, type: 'shape', props: {
-        name, text: value, x: cm(x), y: cm(y), width: cm(w), height: cm(h),
+        name, text: rendered, x: cm(x), y: cm(y), width: cm(w), height: cm(h),
         size: String(size), font: heading ? this.f.heading : this.f.body, 'font.ea': heading ? this.f.cjkHeading : this.f.cjkBody,
         bold: String(bold), color: opts.color ?? this.p.text, fill: 'none', line: 'none', margin: '0cm',
         autoFit: 'none', valign: opts.valign ?? 'top', align: opts.align ?? 'left',
@@ -121,6 +125,14 @@ export function cm(n: number): string {
 
 export function pageNo(index: number): string {
   return String(index + 1).padStart(2, '0');
+}
+
+export function inset(x: number, y: number, w: number, h: number): Frame {
+  const left = Math.max(x, SAFE);
+  const top = Math.max(y, 0.3);
+  const right = Math.min(x + w, W - SAFE);
+  const bottom = Math.min(y + h, H - 0.3);
+  return { x: left, y: top, w: Math.max(0.8, right - left), h: Math.max(0.6, bottom - top) };
 }
 
 export function contain(box: Frame, image: { width: number; height: number }): Frame {
