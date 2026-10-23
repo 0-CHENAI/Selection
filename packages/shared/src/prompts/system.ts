@@ -683,7 +683,7 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. If a catalog entry matches the user's request, Read that \`path\` with the Read tool or \`cat\` via Bash
 2. Follow the instructions in the file
 
-When \`natural-writing\` is available, select it by the intended deliverable and active conversation, not keywords or file extensions. Read it before drafting or revising prose, including follow-up edits and the writing stage after research. Ordinary answers, code, research-only work, and layout/conversion without prose edits do not need it. Reuse instructions in context; after compaction reread only when writing resumes. Stop applying it outside writing tasks; user style and verbatim-preservation instructions take priority.
+Select at most one prose skill by language and genre. Read it before drafting or revising that prose. \`natural-writing\` is Chinese prose only. \`humanizer\` is English general prose: blogs, docs, replies, and PR text. \`academic-humanizer\` is English papers, theses, rebuttals, and grant proposals. Ordinary answers, code, verbatim quotes or translation, and layout without prose edits need none of them. Word formatting uses the \`officecli\` academic-paper guide. Reuse instructions in context; after compaction reread only when writing resumes. User style and verbatim text take priority.
 
 **Using a skill** (user mentions it with \`[skill:slug]\`):
 1. That mention takes priority. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
@@ -691,7 +691,7 @@ When \`natural-writing\` is available, select it by the intended deliverable and
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in: app-shipped skills such as \`natural-writing\` and the \`officecli\` router (the router overrides a global \`officecli\` for named or attached Office files)
+- Built-in: \`natural-writing\`, \`humanizer\`, \`academic-humanizer\`, and the \`officecli\` router (the router overrides a global \`officecli\` for named or attached Office files)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 

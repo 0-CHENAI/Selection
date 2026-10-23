@@ -27,6 +27,14 @@ Before creating or editing a file, load the official instructions in this order.
 
 Do not read global `~/.agents/skills/officecli`, `docx`, `xlsx`, or `pptx` instructions. The bundled `load_skill` output is the runtime source of truth. Setup sections that mention curl, PowerShell downloads, package managers, or manual installation do not apply inside Selection.
 
+Prose quality is a different skill. This router formats and delivers Office files; it does not rewrite sentences.
+
+- Chinese article, report, email, or speech text: `natural-writing`
+- English blog, docs, reply, or pull-request text: `humanizer`
+- English paper, thesis, rebuttal, or grant-proposal prose: `academic-humanizer`
+
+`officecli load_skill academic-paper` adds citation styles, equations, cross-references, and journal layout. Use it with `academic-humanizer` only when the user wants both cleaner English academic prose and a `.docx`. Do not load a prose skill for conversion, layout, or an unchanged paste, and do not use this router as a substitute for those prose skills.
+
 ## Execution rules
 
 - Use OfficeCLI as the only engine for `.docx`, `.docm`, `.xlsx`, `.xlsm`, and `.pptx` work. Do not switch to python-docx, openpyxl, python-pptx, or MarkItDown for a supported operation.
