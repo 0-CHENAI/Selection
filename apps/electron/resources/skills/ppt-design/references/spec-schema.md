@@ -2,7 +2,7 @@
 
 入口：`"<absolute-CRAFT_BUN>" "<skill>/scripts/compose.ts" --spec "/ABS/spec.json" --out "/ABS/dataFolder/deck.pptx" [--officecli "/ABS/bin"] [--font-cjk "Noto Sans CJK SC"]`。从环境 `CRAFT_BUN` 解析应用附带 Bun 的绝对路径，以参数数组调用；POSIX 是 `"$CRAFT_BUN"`，PowerShell 是 `& $env:CRAFT_BUN`，不依赖 PATH 的 `bun`、不安装运行时。所有路径占位符须换成真实绝对路径；OfficeCLI 进程设置 `OFFICECLI_SKIP_UPDATE=1`。
 
-完整机器规则及每 slot 字数/项数容量见 [scripts/spec.schema.json](../scripts/spec.schema.json)；[layouts/catalog.json](../layouts/catalog.json) 仅为选型与坐标的可读摘要，实际几何由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 决定。脚本还进行固定字号适配预检；未知字段、空的必填内容、超量数组或过长文本不能靠忽略字段通过。
+完整机器规则及每 slot 字数/项数容量见 [scripts/spec.schema.json](../scripts/spec.schema.json)；[layouts/catalog.json](../layouts/catalog.json) 只说明选型，不提供可执行坐标。实际几何按风格分别写在 `scripts/compose-business.ts`、`scripts/compose-dark.ts`、`scripts/compose-editorial.ts`，由 [scripts/recipe.ts](../scripts/recipe.ts) 的 `renderRecipe` 调用。脚本按固定字号做适配预检；未知字段、空的必填内容、超量数组或过长文本不能靠忽略字段通过。
 
 ## 根与通用页
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertFits, estimateLines, renderRecipe, validateSpec, type Spec } from './recipe';
 import { validateOutput } from './compose';
+import { heatIslandSpec, sweepSpec } from './sample-deck';
 const base = (): Spec => ({
     version: 1, dataFolderPath: '/tmp', style: 'business', slides: [{
             layout: 'comparison', title: 'Compare options', notes: 'Keep the entire speaker note.', source: 'Source: demonstration', slots: {
@@ -109,6 +110,32 @@ describe('recipe consumer safety', () => {
         s.slides[0].slots.categories = ['A', 'B'];
         s.slides[0].slots.series[0].values = [NaN, 2];
         expect(() => validateSpec(s)).toThrow();
+    });
+    test('three styles compose different geometry, not a recolor', () => {
+        const signature = (style: Spec['style'], layout: Spec['slides'][number]['layout']) => {
+            const spec = heatIslandSpec(style, '/tmp');
+            spec.slides = spec.slides.filter(slide => slide.layout === layout);
+            const commands = renderRecipe(spec);
+            const shapes = commands.filter(command => command.type === 'shape' && !command.props?.text);
+            const area = Math.max(...shapes.map(command => parseFloat(command.props!.width) * parseFloat(command.props!.height)));
+            const geometry = shapes.map(command => `${command.props!.name}:${command.props!.x}:${command.props!.width}:${command.props!.geometry ?? 'rect'}`).join('|');
+            return { area, geometry, chart: commands.find(command => command.type === 'chart')?.props };
+        };
+        const covers = (['business', 'dark-tech', 'fresh-editorial'] as const).map(style => signature(style, 'cover'));
+        const comparisons = (['business', 'dark-tech', 'fresh-editorial'] as const).map(style => signature(style, 'comparison'));
+        for (const cover of covers) expect(cover.area).toBeGreaterThan(80);
+        expect(new Set(covers.map(cover => cover.geometry)).size).toBe(3);
+        expect(new Set(comparisons.map(item => item.geometry)).size).toBe(3);
+        const chart = signature('business', 'chart').chart;
+        expect(chart?.gridlines).toBe('none');
+        expect(chart?.dataLabels).toBe('outsideEnd');
+        expect(chart?.valaxisvisible).toBe('false');
+    });
+    test('heat-island copy and every layout fit in all three styles', () => {
+        for (const style of ['business', 'dark-tech', 'fresh-editorial'] as const) {
+            expect(renderRecipe(heatIslandSpec(style, '/tmp')).some(command => command.type === 'chart')).toBe(true);
+            expect(renderRecipe(sweepSpec(style, '/tmp')).filter(command => command.type === 'slide')).toHaveLength(14);
+        }
     });
     test('output containment resolves symlinks and refuses overwrite', () => {
         const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ppt-recipe-')));

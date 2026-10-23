@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **PPT 设计系统的三套版式** — 新建或整套重设计演示文稿时，商务、深色科技和杂志三套风格使用各自的满版构图、字号和图表样式，而不再是同一版式换色。局部修改仍走原来的 OfficeCLI 路径。Issue #626.
+
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.
 
 - **Fair model request concurrency** — Conversations, coordinators, workers and utility calls now share host-owned request slots by provider account and endpoint. Queues rotate between runs, release slots during rate-limit backoff, honor Retry-After, and adapt concurrency after throttling. Waiting time is excluded from the active request timeout; cancellation returns queued and active slots. Codex uses its supported SSE transport so requests participate in the same accounting.
