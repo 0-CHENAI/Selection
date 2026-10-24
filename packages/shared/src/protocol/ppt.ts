@@ -1,4 +1,4 @@
-export type PptCategory = '商务' | '咨询' | '学术' | '教学' | '技术' | '创意' | '社媒'
+export type PptCategory = '商务' | '咨询' | '学术' | '教学' | '技术' | '创意' | '社媒' | '自定义'
 
 export interface PptTemplate {
   id: string
@@ -23,6 +23,16 @@ export interface PptTheme {
 export interface PptCatalog {
   templates: PptTemplate[]
   themes: PptTheme[]
+}
+
+export interface PptTemplateImportResult {
+  template: PptTemplate
+  duplicate: boolean
+}
+
+export interface PptTemplateExport {
+  name: string
+  base64: string
 }
 
 export interface PptRequest {
