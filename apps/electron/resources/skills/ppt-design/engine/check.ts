@@ -1,3 +1,4 @@
+import { argumentLayoutById } from './argument-layouts.ts'
 import { composite, contrastMinimum, contrastRatio, splitColor } from './contrast.ts'
 import { containsCjk, defaultLeading, fitSlack, literalNewline, orphanLines, textWidth, wrapText } from './metrics.ts'
 import { colorRef } from './schema.ts'
@@ -104,8 +105,37 @@ export function checkDeck(deck: Deck): DeckIssue[] {
   return issues
 }
 
-function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
+function checkArgumentLayout(page: DeckPage): DeckIssue[] {
+  const layout = argumentLayoutById(page.layout)
+  if (!layout) return []
   const issues: DeckIssue[] = []
+  const byId = new Map(page.elements.map(element => [element.id, element]))
+  for (const slot of layout.slots) {
+    const element = byId.get(slot.id)
+    if (!element) {
+      issues.push(issue('schema', `版式 ${layout.id} 缺少元素 ${slot.id}`, page.id, slot.id))
+      continue
+    }
+    if (element.type !== slot.kind) {
+      issues.push(issue('schema', `版式 ${layout.id} 的 ${slot.id} 应为 ${slot.kind}`, page.id, slot.id))
+    }
+    const box = element.bounds
+    const placed = Math.abs(box.x - slot.bounds.x) <= 0.51
+      && Math.abs(box.y - slot.bounds.y) <= 0.51
+      && Math.abs(box.w - slot.bounds.w) <= 0.51
+      && Math.abs(box.h - slot.bounds.h) <= 0.51
+    if (!placed) issues.push(issue('schema', `版式 ${layout.id} 的 ${slot.id} 不在目录几何上`, page.id, slot.id))
+    if (slot.textCapacity && element.textCapacity) {
+      if (element.textCapacity.maxChars > slot.textCapacity.maxChars || element.textCapacity.maxLines > slot.textCapacity.maxLines) {
+        issues.push(issue('schema', `版式 ${layout.id} 的 ${slot.id} 把 textCapacity 放到了目录容量之外`, page.id, slot.id))
+      }
+    }
+  }
+  return issues
+}
+
+function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
+  const issues: DeckIssue[] = [...checkArgumentLayout(page)]
   const { width, height } = deck.canvas
   let background = '#FFFFFF'
   try {

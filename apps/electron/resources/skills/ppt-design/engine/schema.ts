@@ -4,9 +4,11 @@ import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   canvasSupported,
+  comboSeriesRoles,
   DECK_FORMAT,
   DECK_VERSION,
   type Bounds,
+  type ChartSeries,
   type ChartSpec,
   type ColorStop,
   type Deck,
@@ -173,7 +175,7 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     return undefined
   }
   rejectUnknown(value, ['kind', 'categories', 'series', 'colors', 'showValues', 'showLegend', 'valMin', 'valMax', 'holeSize', 'lineWidth', 'markerSize', 'markerColor', 'grid', 'catLabelSize', 'valLabelSize', 'catLabelColor', 'valLabelColor'], `${path}.chart`, issues, pageId, elementId)
-  const kinds = ['bar', 'column', 'line', 'pie', 'doughnut', 'waterfall']
+  const kinds = ['bar', 'column', 'line', 'pie', 'doughnut', 'waterfall', 'area', 'scatter', 'bubble', 'radar', 'combo', 'stacked', 'stackedPercent']
   if (typeof value.kind !== 'string' || !kinds.includes(value.kind)) {
     issues.push(issue('schema', `${path}.chart.kind 不支持`, pageId, elementId))
     return undefined
@@ -186,26 +188,81 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     issues.push(issue('schema', `${path}.chart.series 必须是非空数组`, pageId, elementId))
     return undefined
   }
-  const series: ChartSpec['series'] = []
+  const series: ChartSeries[] = []
+  const pointCount = value.categories.length
+  const xy = value.kind === 'scatter' || value.kind === 'bubble'
   for (const entry of value.series) {
     if (!isObject(entry)) {
       issues.push(issue('schema', `${path}.chart.series 项必须是对象`, pageId, elementId))
       return undefined
     }
-    rejectUnknown(entry, ['name', 'values'], `${path}.chart.series`, issues, pageId, elementId)
+    rejectUnknown(entry, ['name', 'values', 'x', 'sizes', 'render'], `${path}.chart.series`, issues, pageId, elementId)
     if (typeof entry.name !== 'string' || !entry.name.trim()) {
       issues.push(issue('schema', `${path}.chart.series.name 必须是非空字符串`, pageId, elementId))
       return undefined
     }
-    if (!Array.isArray(entry.values) || entry.values.length !== value.categories.length || entry.values.some(item => typeof item !== 'number' || !Number.isFinite(item))) {
+    if (!Array.isArray(entry.values) || entry.values.length !== pointCount || entry.values.some(item => typeof item !== 'number' || !Number.isFinite(item))) {
       issues.push(issue('schema', `${path}.chart.series.values 必须与 categories 等长且为有限数字`, pageId, elementId))
       return undefined
     }
-    series.push({ name: entry.name, values: entry.values as number[] })
+    const point = readPointField(entry.x, `${path}.chart.series.x`, pointCount, issues, pageId, elementId)
+    if (point === null) return undefined
+    if (xy && !point) {
+      issues.push(issue('schema', `${path}.chart.series.x 必须与 categories 等长`, pageId, elementId))
+      return undefined
+    }
+    if (!xy && point) {
+      issues.push(issue('schema', `${path}.chart.series.x 只用于散点图和气泡图`, pageId, elementId))
+      return undefined
+    }
+    if (point && series[0]?.x && point.some((item, index) => item !== series[0]!.x![index])) {
+      issues.push(issue('schema', `${path}.chart 的每条序列必须共用同一组 x`, pageId, elementId))
+      return undefined
+    }
+    const sizes = readPointField(entry.sizes, `${path}.chart.series.sizes`, pointCount, issues, pageId, elementId)
+    if (sizes === null) return undefined
+    if (value.kind === 'bubble' && (!sizes || sizes.some(item => item <= 0))) {
+      issues.push(issue('schema', `${path}.chart.series.sizes 必须是正数，并与 categories 等长`, pageId, elementId))
+      return undefined
+    }
+    if (value.kind !== 'bubble' && sizes) {
+      issues.push(issue('schema', `${path}.chart.series.sizes 只用于气泡图`, pageId, elementId))
+      return undefined
+    }
+    if (entry.render !== undefined && entry.render !== 'column' && entry.render !== 'line') {
+      issues.push(issue('schema', `${path}.chart.series.render 只能是 column 或 line`, pageId, elementId))
+      return undefined
+    }
+    if (value.kind !== 'combo' && entry.render !== undefined) {
+      issues.push(issue('schema', `${path}.chart.series.render 只用于柱线组合`, pageId, elementId))
+      return undefined
+    }
+    series.push({
+      name: entry.name,
+      values: entry.values as number[],
+      x: point,
+      sizes: sizes ?? undefined,
+      render: entry.render === 'column' || entry.render === 'line' ? entry.render : undefined,
+    })
   }
   if (value.kind === 'waterfall' && (series.length !== 1 || value.categories.length < 3)) {
     issues.push(issue('schema', `${path}.chart 瀑布图需要一条序列，且至少三个类别（起点、变化、终点）`, pageId, elementId))
     return undefined
+  }
+  if (value.kind === 'radar' && value.categories.length < 3) {
+    issues.push(issue('schema', `${path}.chart 雷达图至少三个类别`, pageId, elementId))
+    return undefined
+  }
+  if ((value.kind === 'stacked' || value.kind === 'stackedPercent') && series.length < 2) {
+    issues.push(issue('schema', `${path}.chart 堆积图至少两条序列`, pageId, elementId))
+    return undefined
+  }
+  if (value.kind === 'combo') {
+    const roles = comboSeriesRoles(series)
+    if (series.length < 2 || !roles.includes('column') || !roles.includes('line')) {
+      issues.push(issue('schema', `${path}.chart 柱线组合至少一条柱和一条线`, pageId, elementId))
+      return undefined
+    }
   }
   let colors: string[] | undefined
   if (value.colors !== undefined) {
@@ -265,6 +322,15 @@ function parseChart(value: unknown, path: string, issues: DeckIssue[], pageId: s
     catLabelColor: typeof value.catLabelColor === 'string' ? value.catLabelColor : undefined,
     valLabelColor: typeof value.valLabelColor === 'string' ? value.valLabelColor : undefined,
   }
+}
+
+function readPointField(value: unknown, path: string, count: number, issues: DeckIssue[], pageId?: string, elementId?: string): number[] | undefined | null {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length !== count || value.some(item => typeof item !== 'number' || !Number.isFinite(item))) {
+    issues.push(issue('schema', `${path} 必须与 categories 等长且为有限数字`, pageId, elementId))
+    return null
+  }
+  return value as number[]
 }
 
 function optionalNumber(value: unknown, path: string, issues: DeckIssue[], pageId?: string, elementId?: string): number | undefined {

@@ -92,13 +92,31 @@ export type FontFace = {
   cjk: FontPair
 }
 
-export type ChartKind = 'bar' | 'column' | 'line' | 'pie' | 'doughnut' | 'waterfall'
+export type ChartKind = 'bar' | 'column' | 'line' | 'pie' | 'doughnut' | 'waterfall' | 'area' | 'scatter' | 'bubble' | 'radar' | 'combo' | 'stacked' | 'stackedPercent'
 export type GridStyle = 'solid' | 'dash' | 'dot' | 'none'
+export type ChartSeriesRender = 'column' | 'line'
+
+export type ChartSeries = {
+  name: string
+  values: number[]
+  /** Scatter and bubble X coordinates. Every series on the chart shares this list. */
+  x?: number[]
+  /** Bubble sizes. Positive, one per category. */
+  sizes?: number[]
+  /** Combo series drawn as columns or a line. Omit and the last series is the line. */
+  render?: ChartSeriesRender
+}
+
+/** Last series is the line when no series sets `render`. An explicit render wins. */
+export function comboSeriesRoles(series: ChartSeries[]): ChartSeriesRender[] {
+  const explicit = series.some(item => item.render)
+  return series.map((item, index) => item.render ?? (explicit || index < series.length - 1 ? 'column' : 'line'))
+}
 
 export type ChartSpec = {
   kind: ChartKind
   categories: string[]
-  series: { name: string; values: number[] }[]
+  series: ChartSeries[]
   /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, up, down. */
   colors?: string[]
   showValues?: boolean

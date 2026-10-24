@@ -1,9 +1,11 @@
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { strFromU8, unzipSync } from 'fflate'
 import type { PptTemplate } from '@craft-agent/shared/protocol'
+import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 
 const ID_PATTERN = /^custom-[a-f0-9]{16}$/
 const MAX_BYTES = 8 * 1024 * 1024
@@ -35,6 +37,8 @@ export interface PptLibraryRecord {
   pageCount: number
   createdAt: number
   updatedAt: number
+  /** How slide previews were produced. Older libraries omit this and keep SVG files. */
+  preview?: 'officecli' | 'geometry' | 'mixed'
 }
 
 interface ParsedDeck {
@@ -249,6 +253,10 @@ function parseSlide(slide: string, page: number, cx: number, cy: number, slots: 
   return parts.join('')
 }
 
+export function geometricPptxPreviews(bytes: Uint8Array): string[] {
+  return parsePptx(bytes).previews
+}
+
 export function parsePptx(bytes: Uint8Array): ParsedDeck {
   if (bytes.byteLength < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error('Invalid PPTX')
   const files = unzip(bytes)
@@ -283,16 +291,132 @@ export function listPptCustomTemplates(root = pptTemplateLibraryRoot()): PptLibr
   return records.sort((a, b) => b.createdAt - a.createdAt || a.title.localeCompare(b.title))
 }
 
+type PreviewRaster = (pptxPath: string, page: number, outPath: string) => boolean
+
+let previewRaster: PreviewRaster | undefined
+
+/** Tests inject a raster so preview assertions do not depend on a local browser. */
+export function setPptPreviewRasterForTests(raster: PreviewRaster | null): void {
+  previewRaster = raster ?? undefined
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function fileSize(path: string): number {
+  try { return statSync(path).size } catch { return 0 }
+}
+
+function pngMagic(path: string): boolean {
+  try {
+    const fd = openSync(path, 'r')
+    const header = Buffer.alloc(8)
+    try { readSync(fd, header, 0, 8, 0) } finally { closeSync(fd) }
+    return header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47
+  } catch { return false }
+}
+
+function killProcess(child: ChildProcess): void {
+  if (!child.pid) return
+  if (process.platform !== 'win32') {
+    try { process.kill(-child.pid, 'SIGKILL') } catch { /* already gone */ }
+  }
+  try { child.kill('SIGKILL') } catch { /* already gone */ }
+}
+
+function officecliScreenshot(bin: string, pptx: string, page: number, outFile: string): boolean {
+  let child: ChildProcess
+  try {
+    child = spawn(bin, [
+      'view', pptx, 'screenshot',
+      '--page', String(page),
+      '--render', 'html',
+      '--screenshot-width', '1600',
+      '--screenshot-height', '900',
+      '-o', outFile,
+    ], {
+      detached: process.platform !== 'win32',
+      stdio: 'ignore',
+      env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },
+    })
+  } catch {
+    return false
+  }
+  const deadline = Date.now() + 10_000
+  let last = -1
+  let stableSince = 0
+  let ready = false
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      ready = fileSize(outFile) > 800 && pngMagic(outFile)
+      break
+    }
+    const size = fileSize(outFile)
+    if (size > 800 && size === last) {
+      if (stableSince === 0) stableSince = Date.now()
+      if (Date.now() - stableSince >= 300 && pngMagic(outFile)) {
+        ready = true
+        break
+      }
+    } else {
+      last = size
+      stableSince = 0
+    }
+    sleepSync(100)
+  }
+  if (!ready) ready = fileSize(outFile) > 800 && pngMagic(outFile)
+  killProcess(child)
+  return ready
+}
+
+function rasterSlide(pptx: string, page: number, outFile: string): boolean {
+  try {
+    if (previewRaster) return previewRaster(pptx, page, outFile) && pngMagic(outFile)
+    const bin = resolveOfficecliBinary({ env: { ...process.env, CRAFT_OFFICECLI: undefined } })
+    if (!bin || /\.(cmd|bat)$/i.test(bin)) return false
+    return officecliScreenshot(bin, pptx, page, outFile)
+  } catch {
+    return false
+  }
+}
+
+function writePreviews(dir: string, pptxPath: string, geometry: string[]): 'officecli' | 'geometry' | 'mixed' {
+  let pngs = 0
+  geometry.forEach((svg, index) => {
+    const stem = join(dir, 'previews', String(index + 1).padStart(2, '0'))
+    const png = `${stem}.png`
+    let ok = false
+    try { ok = rasterSlide(pptxPath, index + 1, png) } catch { ok = false }
+    if (ok) {
+      pngs += 1
+      return
+    }
+    try { unlinkSync(png) } catch { /* no partial file */ }
+    writeFileSync(`${stem}.svg`, svg)
+  })
+  if (pngs === geometry.length) return 'officecli'
+  if (pngs === 0) return 'geometry'
+  return 'mixed'
+}
+
+function previewFile(dir: string, page: number): string {
+  const stem = join(dir, 'previews', String(page).padStart(2, '0'))
+  if (existsSync(`${stem}.png`)) return `${stem}.png`
+  return `${stem}.svg`
+}
+
 function previewDataUrl(path: string): string {
-  return `data:image/svg+xml;base64,${readFileSync(path).toString('base64')}`
+  const mime = path.endsWith('.png') ? 'image/png' : 'image/svg+xml'
+  return `data:${mime};base64,${readFileSync(path).toString('base64')}`
 }
 
 export function customTemplateCard(record: PptLibraryRecord, root = pptTemplateLibraryRoot()): PptTemplate {
   const dir = templateDir(root, record.id)
-  const cover = previewDataUrl(join(dir, 'previews', '01.svg'))
+  const cover = previewDataUrl(previewFile(dir, 1))
   const references = [2, 3]
     .filter(page => page <= record.pageCount)
-    .map(page => previewDataUrl(join(dir, 'previews', `${String(page).padStart(2, '0')}.svg`)))
+    .map(page => previewDataUrl(previewFile(dir, page)))
   return {
     id: record.id,
     title: record.title,
@@ -314,7 +438,7 @@ export function customTemplatePages(id: string, root = pptTemplateLibraryRoot())
   const record = readRecord(templateDir(root, id))
   if (!record || record.id !== id) throw new Error('Unknown PPT template')
   const pages: string[] = []
-  for (let page = 1; page <= record.pageCount; page++) pages.push(previewDataUrl(join(templateDir(root, id), 'previews', `${String(page).padStart(2, '0')}.svg`)))
+  for (let page = 1; page <= record.pageCount; page++) pages.push(previewDataUrl(previewFile(templateDir(root, id), page)))
   return pages
 }
 
@@ -326,7 +450,7 @@ export function customTemplateReference(id: string, root = pptTemplateLibraryRoo
   const source = join(dir, 'source.pptx')
   const theme = join(dir, 'theme.json')
   const slots = join(dir, 'slots.json')
-  const previews = Array.from({ length: record.pageCount }, (_, index) => join(dir, 'previews', `${String(index + 1).padStart(2, '0')}.svg`))
+  const previews = Array.from({ length: record.pageCount }, (_, index) => previewFile(dir, index + 1))
   return [
     `Selected custom template ${record.id} (${record.title}) from the user's template library.`,
     `Use this stored copy, not a temporary upload: ${source}`,
@@ -351,7 +475,7 @@ export function importPptTemplate(bytes: Uint8Array, fileName: string, root = pp
   writeFileSync(join(dir, 'source.pptx'), bytes)
   writeFileSync(join(dir, 'theme.json'), `${JSON.stringify(parsed.theme, null, 2)}\n`)
   writeFileSync(join(dir, 'slots.json'), `${JSON.stringify(parsed.slots, null, 2)}\n`)
-  parsed.previews.forEach((svg, index) => writeFileSync(join(dir, 'previews', `${String(index + 1).padStart(2, '0')}.svg`), svg))
+  const preview = writePreviews(dir, join(dir, 'source.pptx'), parsed.previews)
   const now = Date.now()
   const record: PptLibraryRecord = {
     id,
@@ -361,6 +485,7 @@ export function importPptTemplate(bytes: Uint8Array, fileName: string, root = pp
     pageCount: parsed.previews.length,
     createdAt: now,
     updatedAt: now,
+    preview,
   }
   writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(record, null, 2)}\n`)
   return { record, duplicate: false }
