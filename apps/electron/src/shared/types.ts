@@ -1,7 +1,7 @@
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
-import type { PptCatalog } from '@craft-agent/shared/protocol'
+import type { PptCatalog, PptLiveSnapshot } from '@craft-agent/shared/protocol'
 export * from '@craft-agent/shared/protocol'
 
 // =============================================================================
@@ -548,6 +548,7 @@ export interface ElectronAPI {
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getPptCatalog(): Promise<PptCatalog>
   getPptTemplatePages(templateId: string): Promise<string[]>
+  getPptLive(sessionId: string, known?: Record<string, string>): Promise<PptLiveSnapshot | null>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
   deleteSkill(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>

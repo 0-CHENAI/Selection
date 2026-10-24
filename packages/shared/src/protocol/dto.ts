@@ -1,4 +1,4 @@
-import type { PptRequest } from './ppt'
+import type { PptProgress, PptRequest, PptRevision } from './ppt'
 import type { HandoverLink, HandoverOperation } from './handover'
 /**
  * Server DTO types — data shapes used by RPC handlers and SessionManager.
@@ -70,6 +70,7 @@ export interface RuntimeRecoveryView {
 
 export interface Session extends WorkModeMetadata {
   ppt?: PptRequest
+  pptProgress?: PptProgress
   handover?: HandoverLink
   runtimeRecovery?: RuntimeRecoveryView
   progressSupervision?: ProgressSupervisionView
@@ -713,7 +714,7 @@ export type SessionEvent =
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'thinking_probe'; sessionId: string; modelId: string; provider?: string; mode: 'unsupported' | 'always-on' | 'levels'; levels: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; level?: string }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'ppt' | 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'ppt' | 'pptProgress' | 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -732,6 +733,8 @@ export type SessionEvent =
 
 export interface SendMessageOptions {
   ppt?: PptRequest
+  /** Appended to model input only. Never stored on the user message. */
+  pptRevision?: PptRevision
   officeSelection?: import('./artifacts').OfficeSelection
   /** Optional document context for ordinary chat; the host validates the session's file scope. */
   officeContext?: { path: string }
