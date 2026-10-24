@@ -325,6 +325,7 @@ export interface UserMessageBubbleProps {
   onFileClick?: (path: string) => void
   /** Stored attachments (images, documents) */
   attachments?: StoredAttachment[]
+  leadingAttachment?: ReactNode
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[]
   /** Whether the message is awaiting backend confirmation. User bubbles stay visually stable. */
@@ -359,6 +360,7 @@ export function UserMessageBubble({
   onUrlClick,
   onFileClick,
   attachments,
+  leadingAttachment,
   badges,
   isQueued,
   compactMode,
@@ -477,9 +479,10 @@ export function UserMessageBubble({
   const bubble = (
     <div className={cn("group flex flex-col items-end gap-3 w-full", className)}>
       {/* Attachment preview row - stored attachments with thumbnails */}
-      {hasAttachments && (
-        <div className="flex gap-2 justify-end max-w-[80%] flex-wrap">
-          {attachments!.map((att, i) => {
+      {(hasAttachments || leadingAttachment) && (
+        <div className="flex items-end gap-2 justify-end max-w-[80%] flex-wrap">
+          {leadingAttachment}
+          {attachments?.map((att, i) => {
             const isImage = att.type === 'image'
             const hasThumbnail = !!att.thumbnailBase64
 

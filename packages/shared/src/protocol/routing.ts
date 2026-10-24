@@ -374,6 +374,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // preferences — workspace-level preferences
   RPC_CHANNELS.preferences.READ,
   RPC_CHANNELS.preferences.WRITE,
+  RPC_CHANNELS.skills.GET_PPT_CATALOG,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
 
   // drafts — workspace content
   RPC_CHANNELS.drafts.GET,

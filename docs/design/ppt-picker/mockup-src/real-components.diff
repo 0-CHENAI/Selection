@@ -1,0 +1,80 @@
+diff --git a/apps/electron/src/renderer/components/app-shell/AttachmentPreview.tsx b/apps/electron/src/renderer/components/app-shell/AttachmentPreview.tsx
+index 9831778..1dbe546 100644
+--- a/apps/electron/src/renderer/components/app-shell/AttachmentPreview.tsx
++++ b/apps/electron/src/renderer/components/app-shell/AttachmentPreview.tsx
+@@ -1,3 +1,4 @@
++import { useMockSlots } from '@/mockup/slots'
+ import * as React from "react"
+ import { X, Image as ImageIcon } from "lucide-react"
+ import { Spinner, FileTypeIcon, getFileTypeLabel } from "@craft-agent/ui"
+@@ -25,10 +26,12 @@ interface AttachmentPreviewProps {
+  * - Loading placeholders while files are being read
+  */
+ export function AttachmentPreview({ attachments, onRemove, disabled, loadingCount = 0 }: AttachmentPreviewProps) {
+-  if (attachments.length === 0 && loadingCount === 0) return null
++  const mockSlots = useMockSlots()
++  if (attachments.length === 0 && loadingCount === 0 && !mockSlots.leadingAttachments) return null
+ 
+   return (
+-    <div className="flex gap-2 px-4 py-3 border-b border-border/50 overflow-x-auto">
++    <div className={`flex gap-2 px-4 border-b border-border/50 overflow-x-auto ${mockSlots.leadingAttachments ? 'items-end pt-5 pb-3.5' : 'py-3'}`}>
++      {mockSlots.leadingAttachments}
+       {attachments.map((attachment, index) => (
+         <AttachmentBubble
+           key={`${attachment.path}-${index}`}
+diff --git a/apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx b/apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx
+index faf93f6..6d6afa1 100644
+--- a/apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx
++++ b/apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx
+@@ -58,6 +58,7 @@ import { coerceInputText } from '@/lib/input-text'
+ import { isMac } from '@/lib/platform'
+ import { applySmartTypography } from '@/lib/smart-typography'
+ import { AttachmentPreview } from '../AttachmentPreview'
++import { useMockSlots } from '@/mockup/slots'
+ import { SessionModeBadge } from '../SessionModeBadge'
+ import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
+ import { getModelShortName, getModelDisplayName } from '@config/models'
+@@ -2080,6 +2081,7 @@ export function FreeFormInput({
+         {/* In compact mode, hide input while the agent is processing — until the
+             user clicks / hovers the collapsed bar to expand it back. */}
+         {!isCollapsedInCompact && (
++        <div className="flex min-w-0 items-start"><MockPromptLeading /><div className="min-w-0 flex-1">
+         <RichTextInput
+           ref={richInputRef}
+           value={input}
+@@ -2105,6 +2107,7 @@ export function FreeFormInput({
+           data-tutorial="chat-input"
+           spellCheck={spellCheck}
+         />
++        </div></div>
+         )}
+ 
+         {/* Bottom Row: Controls - wrapped in relative container for status slot overlay */}
+@@ -2272,6 +2275,7 @@ export function FreeFormInput({
+             tooltip={t("chat.attachFilesTooltip")}
+             disabled={disabled}
+           />
++          <MockAfterAttach />
+ 
+           {/* 2. Source Selector Badge - only show if onSourcesChange is provided */}
+           {onSourcesChange && (
+@@ -2694,3 +2698,7 @@ export function FreeFormInput({
+     </form>
+   )
+ }
++
++function MockAfterAttach() { const s = useMockSlots(); return <>{s.afterAttachBadge}</> }
++
++function MockPromptLeading() { const s = useMockSlots(); return <>{s.promptLeading}</> }
+diff --git a/apps/electron/src/renderer/index.css b/apps/electron/src/renderer/index.css
+index 4f3011b..7338e1f 100644
+--- a/apps/electron/src/renderer/index.css
++++ b/apps/electron/src/renderer/index.css
+@@ -12,6 +12,7 @@
+ @source "../renderer/tabs/**/*.{ts,tsx,jsx}";
+ @source "../renderer/playground/**/*.{ts,tsx,jsx}";
+ @source "../renderer/utils/**/*.{ts,tsx,jsx}";
++@source "../renderer/mockup/**/*.{ts,tsx,jsx}";
+ @source "../renderer/config/**/*.{ts,tsx,jsx}";
+ @source "../../../../packages/ui/src/components/**/*.{ts,tsx,jsx}";
+ @source "../../../../packages/ui/src/lib/**/*.{ts,tsx,jsx}";

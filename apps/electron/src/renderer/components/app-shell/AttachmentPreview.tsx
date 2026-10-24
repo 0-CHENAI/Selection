@@ -3,11 +3,16 @@ import { X, Image as ImageIcon } from "lucide-react"
 import { Spinner, FileTypeIcon, getFileTypeLabel } from "@craft-agent/ui"
 import { cn } from "@/lib/utils"
 import type { FileAttachment } from "../../../shared/types"
+import { motion, useReducedMotion } from 'motion/react'
+import { SelectedTemplate } from '@/components/ppt/SelectedTemplate'
+import { CARD_WIDTH, tiltExtent } from '@/components/ppt/geometry'
 
 // Re-export for backward compatibility
 export { FileTypeIcon, getFileTypeLabel }
 
 interface AttachmentPreviewProps {
+  pptComposerKey?: string
+  hasPptTemplate?: boolean
   attachments: FileAttachment[]
   onRemove: (index: number) => void
   disabled?: boolean
@@ -24,18 +29,17 @@ interface AttachmentPreviewProps {
  * - Horizontally scrollable when many files
  * - Loading placeholders while files are being read
  */
-export function AttachmentPreview({ attachments, onRemove, disabled, loadingCount = 0 }: AttachmentPreviewProps) {
-  if (attachments.length === 0 && loadingCount === 0) return null
+export function AttachmentPreview({ attachments, onRemove, disabled, loadingCount = 0, pptComposerKey, hasPptTemplate }: AttachmentPreviewProps) {
+  const reduced = useReducedMotion()
+  if (attachments.length === 0 && loadingCount === 0 && !hasPptTemplate) return null
 
   return (
-    <div className="flex gap-2 px-4 py-3 border-b border-border/50 overflow-x-auto">
+    <div data-testid="composer-attachment-row" className="flex items-end gap-2 px-4 pb-3 border-b border-border/50 overflow-x-auto" style={{ paddingTop: hasPptTemplate ? Math.max(20, Math.ceil(tiltExtent(CARD_WIDTH).overhangTop)) : 12 }}>
+      {hasPptTemplate && pptComposerKey !== undefined && <SelectedTemplate composerKey={pptComposerKey} disabled={disabled} />}
       {attachments.map((attachment, index) => (
-        <AttachmentBubble
-          key={`${attachment.path}-${index}`}
-          attachment={attachment}
-          onRemove={() => onRemove(index)}
-          disabled={disabled}
-        />
+        <motion.div layout={!reduced} key={`${attachment.path}-${index}`} className="shrink-0" transition={{ duration: reduced ? 0 : .3 }}>
+          <AttachmentBubble attachment={attachment} onRemove={() => onRemove(index)} disabled={disabled} />
+        </motion.div>
       ))}
       {/* Loading placeholders */}
       {Array.from({ length: loadingCount }).map((_, i) => (
