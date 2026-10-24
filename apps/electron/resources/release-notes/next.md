@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **PPT 论证版式与真实模板预览** — 声明式页面现在可以直接调用 14 类论证版式（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍），并导出跟随模板主题的面积、散点、气泡、雷达、柱线组合、堆积和百分比堆积图。自定义模板库会逐页保存原 PPTX 的画面；渲染不可用时仍保留原来的几何草图。Part of #628.
+
 - **PPT 声明式页面** — 新建或整套重设计演示文稿时，先写可预检的页面描述，再导出可编辑的 PPTX。随附五套改编自 DSH Desktop v0.2.21 的参考风格（中英各 12 页），ppt-master 的七套版式、十四套风格说明、十二套自有色彩主题，以及 ppt-master-examples 里全部 70 套官方成稿。其中 9 套保留来源中的商标与官方标识，只作参考模板；Selection 本体仍为 Apache-2.0，并按非商业用途提供，纳入这些页面不授予商标权利。成稿保留文字、形状、路径、渐变和图片，画布覆盖 16:9、4:3、A4、方形、竖版和横幅。16:9 仍是 960×540 pt。预检不过就不写出文件。局部修改仍走原来的 OfficeCLI 路径。Refs #631，并取代尚未发布的三套配方版式（#626）。
 
 - **Independent premise review and research stages** — New research plans record conditions that could overturn important conclusions, independent premise critiques and explicit decisions for alternative-premise candidates. Fact repairs remain on their original line; local reports can complete while unrelated lines continue. Stage readiness follows current evidence, review and issue disposition, independently of worker completion. Older records explicitly show missing judgment history. Issue #449.

@@ -30,7 +30,7 @@
 | `text` | `text`、`textCapacity`、`font.family`（`$cjk` 或 `$latin`）、`font.size`（6–240）。可选 `font.face`、`leading`、`tracking`（-20–80）、`align`、`valign`、`weight`、`italic`、`color` |
 | `shape` | `shape`：`rect`、`roundRect`、`ellipse`、`line`、`path`。除了 `line` 和只有描边的 `path`，都要 `fill`、`gradient` 或 `pattern`。`roundRect` 的 `radius` 是 pt。`path` 还要 `path`（SVG 路径，坐标是形状框内的 pt） |
 | `image` | `src`、`alt`。默认 `fit: contain`，按比例放进 `bounds` 并居中。`fit: fill` 铺满 `bounds`，用于已经裁好的图 |
-| `chart` | `chart.kind`：`bar`、`column`、`line`、`pie`、`doughnut`、`waterfall`。`categories` 与每条 `series.values` 等长 |
+| `chart` | `chart.kind`：`bar`（横向条形）、`column`、`line`、`pie`、`doughnut`、`waterfall`、`area`、`scatter`、`bubble`、`radar`、`combo`、`stacked`、`stackedPercent`。`categories` 与每条 `series.values` 等长 |
 | `table` | `table.columns`（宽度比例）、`rows`、`fontSize`、`fontFamily`、`color`、`fill`、`border`。可选 `rowHeights`、`face`、`header` |
 
 不写 `role` 时：线宽不超过 0.75 pt 的线是 `decoration`；其他线条，或宽/高不超过 2 pt 的形状，是 `rule`；其余形状是 `panel`；文字、图片、图表和表格是 `content`。`decoration` 不参与重叠检查。
@@ -43,7 +43,11 @@
 
 可选 `valMin`、`valMax`、`holeSize`（圆环孔径，直径的百分比，0–90）、`lineWidth`、`markerSize`、`markerColor`、`grid`（`solid`、`dash`、`dot`、`none`）、`catLabelSize`、`valLabelSize`、`catLabelColor`、`valLabelColor`。
 
-瀑布图只有一条序列，至少三个类别。第一项是起点总量，最后一项是终点总量，中间是变化量。起点加变化必须等于终点，容差 0.05。导出为堆积柱形图，隐形基座与页面背景同色。条形图导出时把第一个类别画在上方。
+瀑布图只有一条序列，至少三个类别。第一项是起点总量，最后一项是终点总量，中间是变化量。起点加变化必须等于终点，容差 0.05。导出为堆积柱形图，隐形基座与页面背景同色。条形图 `bar` 是横向的，导出时把第一个类别画在上方。
+
+`area` 是面积图。`stacked` 和 `stackedPercent` 是纵向堆积柱，至少两条序列。`radar` 至少三个类别，导出为填充雷达。`scatter` 和 `bubble` 的每条序列都要带与 `categories` 等长的 `x`，而且各条序列的 `x` 必须相同；`bubble` 还要正数 `sizes`。`combo` 至少一条柱和一条线：在序列上写 `render: column` 或 `render: line`；都不写时，最后一条是线。柱和线分轴。
+
+颜色、图例和数据标签跟随主题的 `$accent`、`$ink`、`$muted` 和中文字体，不使用 Office 默认蓝和 Arial。省略 `colors` 时按主题循环取色。
 
 ### 渐变、图案、路径和阴影
 
@@ -68,6 +72,7 @@ ppt-master 的示例成稿还有图表、表格、路径、渐变、图案和图
 路径里的 `<skill>` 是本技能目录，`<deck.json>` 和 `<pptx>` 使用会话 `dataFolderPath` 下的绝对路径。Bun 用环境变量 `CRAFT_BUN` 的绝对路径。设置 `OFFICECLI_SKIP_UPDATE=1`。
 
 ```text
+"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" layouts
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" check "<deck.json>"
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" render "<deck.json>" --out "<pptx>" --screenshot "<dir>" --platform mac|win|linux
 ```

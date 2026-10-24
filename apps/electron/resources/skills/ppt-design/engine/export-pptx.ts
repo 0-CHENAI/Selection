@@ -8,7 +8,7 @@ import { luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
 import { pathToDrawingPoints } from './svg-path.ts'
-import type { Deck, DeckElement, DeckIssue, FontFace, GradientFill, PatternFill, PlatformName, ScreenshotResult } from './types.ts'
+import { comboSeriesRoles, type ChartSpec, type Deck, type DeckElement, type DeckIssue, type FontFace, type GradientFill, type PatternFill, type PlatformName, type ScreenshotResult } from './types.ts'
 import { captureSlides } from './screenshot.ts'
 
 const PT = 72
@@ -321,6 +321,13 @@ function addTable(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   })
 }
 
+function themeChartPalette(deck: Deck, chart: ChartSpec, count: number): string[] {
+  const tokens = chart.colors ?? ['accent', 'ink', 'signal', 'muted'].filter(name => deck.theme.colors[name]).map(name => `$${name}`)
+  const resolved = (tokens.length ? tokens : ['$accent']).map(color => hex(colorRef(color, deck.theme, '$accent')))
+  const width = Math.max(count, resolved.length, 1)
+  return Array.from({ length: width }, (_, index) => resolved[index % resolved.length]!)
+}
+
 function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
   const chart = element.chart!
   const background = hex(pageBackground)
@@ -330,8 +337,10 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   const inverse = hex(colorRef('$inverse', deck.theme, '#FFFFFF'))
   const dark = luminance(pageBackground) < 0.4
   const label = dark ? inverse : muted
+  const valueInk = dark ? inverse : ink
   const grid = dark ? '4A4A4A' : line
   const face = resolveFontFace(deck, '$cjk', platform)
+  const palette = themeChartPalette(deck, chart, Math.max(chart.series.length, chart.categories.length, 2))
   const base = {
     x: inches(element.bounds.x),
     y: inches(element.bounds.y),
@@ -354,10 +363,18 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     valGridLine: { color: grid, size: 0.5, style: chart.grid ?? 'solid' },
     catGridLine: { style: 'none' as const },
     dataBorder: { pt: 0, color: background },
-    chartColors: (chart.colors ?? ['$accent', '$ink']).map(color => hex(colorRef(color, deck.theme, '$accent'))),
+    chartColors: palette,
+    legendFontFace: face,
+    legendFontSize: 12,
+    legendColor: label,
+    legendPos: 'b' as const,
+    dataLabelFontFace: face,
+    dataLabelFontSize: 11,
+    dataLabelColor: valueInk,
     valAxisMinVal: chart.valMin,
     valAxisMaxVal: chart.valMax,
   }
+  const rows = chart.series.map(series => ({ name: series.name, labels: chart.categories, values: series.values }))
   if (chart.kind === 'waterfall') {
     const parts = waterfallParts(chart.series[0]!.values)
     const colors = chart.colors ?? ['$paper', '$accent', '$ink']
@@ -379,29 +396,110 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     })
     return
   }
+  if (chart.kind === 'combo') {
+    const roles = comboSeriesRoles(chart.series)
+    const columns = chart.series.filter((_, index) => roles[index] === 'column')
+    const lines = chart.series.filter((_, index) => roles[index] === 'line')
+    let colorIndex = 0
+    const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]!)
+    const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]!)
+    const axisLabel = {
+      valAxisLabelColor: label,
+      valAxisLabelFontFace: face,
+      valAxisLabelFontSize: chart.valLabelSize ?? 11,
+      valAxisLineShow: false,
+    }
+    slide.addChart([
+      {
+        type: pres.ChartType.bar,
+        data: columns.map(series => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: { barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 50, chartColors: columnColors },
+      },
+      {
+        type: pres.ChartType.line,
+        data: lines.map(series => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: {
+          secondaryValAxis: true,
+          chartColors: lineColors,
+          lineSize: chart.lineWidth ?? 2.25,
+          lineDataSymbol: 'circle',
+          lineDataSymbolSize: chart.markerSize ?? 10,
+          lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : lineColors[0],
+          lineDataSymbolLineSize: 0,
+        },
+      },
+    ], {
+      ...base,
+      showLegend: chart.showLegend ?? true,
+      valAxisMinVal: undefined,
+      valAxisMaxVal: undefined,
+      valAxes: [
+        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valAxisMaxVal: chart.valMax, valGridLine: { color: grid, size: 0.5, style: chart.grid ?? 'solid' } },
+        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valGridLine: { style: 'none' as const } },
+      ],
+    })
+    return
+  }
+  if (chart.kind === 'scatter' || chart.kind === 'bubble') {
+    const x = chart.series[0]?.x ?? []
+    const xs = chart.series.flatMap(series => series.x ?? [])
+    const ys = chart.series.flatMap(series => series.values)
+    const xExtent = markerExtent(xs, chart.kind === 'bubble' ? 0.45 : 0.14)
+    const yExtent = markerExtent(ys, chart.kind === 'bubble' ? 1.15 : 0.16)
+    slide.addChart(chart.kind === 'bubble' ? pres.ChartType.bubble : pres.ChartType.scatter, [
+      { name: 'X', values: x },
+      ...chart.series.map(series => ({
+        name: series.name,
+        labels: chart.categories,
+        values: series.values,
+        sizes: series.sizes,
+      })),
+    ], {
+      ...base,
+      lineSize: chart.kind === 'scatter' ? 0 : (chart.lineWidth ?? 0),
+      lineDataSymbol: 'circle',
+      lineDataSymbolSize: chart.markerSize ?? (chart.kind === 'bubble' ? 12 : 14),
+      lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
+      lineDataSymbolLineSize: 1.25,
+      showLegend: chart.showLegend ?? chart.series.length > 1,
+      catAxisMinVal: xExtent.min,
+      catAxisMaxVal: xExtent.max,
+      valAxisMinVal: chart.valMin ?? yExtent.min,
+      valAxisMaxVal: chart.valMax ?? yExtent.max,
+      catGridLine: { color: grid, size: 0.5, style: chart.grid ?? 'solid' },
+    })
+    return
+  }
   const type = chart.kind === 'line'
     ? pres.ChartType.line
-    : chart.kind === 'pie'
-      ? pres.ChartType.pie
-      : chart.kind === 'doughnut'
-        ? pres.ChartType.doughnut
-        : pres.ChartType.bar
-  const data = chart.series.map(series => ({ name: series.name, labels: chart.categories, values: series.values }))
-  slide.addChart(type, data, {
+    : chart.kind === 'area'
+      ? pres.ChartType.area
+      : chart.kind === 'pie'
+        ? pres.ChartType.pie
+        : chart.kind === 'doughnut'
+          ? pres.ChartType.doughnut
+          : chart.kind === 'radar'
+            ? pres.ChartType.radar
+            : pres.ChartType.bar
+  const grouped = chart.kind === 'stacked' || chart.kind === 'stackedPercent'
+  slide.addChart(type, rows, {
     ...base,
     barDir: chart.kind === 'bar' ? 'bar' : 'col',
     // PowerPoint draws the first bar category at the bottom. maxMin matches the SVG, which draws it at the top.
     // pptxgenjs 3.12 types only list minMax; the writer emits the string as given.
     ...(chart.kind === 'bar' ? { catAxisOrientation: 'maxMin' as 'minMax' } : {}),
-    barGrouping: 'clustered',
-    barGapWidthPct: 60,
+    barGrouping: chart.kind === 'stackedPercent' ? 'percentStacked' : grouped ? 'stacked' : chart.kind === 'area' ? 'standard' : 'clustered',
+    barGapWidthPct: grouped ? 40 : 60,
+    chartColorsOpacity: chart.kind === 'area' || chart.kind === 'radar' ? 46 : undefined,
+    radarStyle: chart.kind === 'radar' ? 'filled' : undefined,
     lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: 'circle',
-    lineDataSymbolSize: chart.markerSize ?? (chart.kind === 'line' ? 8 : 12),
+    lineDataSymbolSize: chart.markerSize ?? (chart.kind === 'line' || chart.kind === 'radar' ? 8 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    valAxisMinVal: chart.kind === 'pie' || chart.kind === 'doughnut' ? undefined : (chart.valMin ?? 0),
-    valAxisMaxVal: chart.kind === 'pie' || chart.kind === 'doughnut' ? undefined : chart.valMax,
+    showLegend: chart.showLegend ?? (chart.series.length > 1 || chart.kind === 'pie' || chart.kind === 'doughnut'),
+    valAxisMinVal: chart.kind === 'pie' || chart.kind === 'doughnut' || chart.kind === 'radar' ? undefined : chart.kind === 'stackedPercent' ? 0 : (chart.valMin ?? 0),
+    valAxisMaxVal: chart.kind === 'pie' || chart.kind === 'doughnut' || chart.kind === 'radar' || chart.kind === 'stackedPercent' ? undefined : chart.valMax,
     holeSize: chart.kind === 'doughnut' ? (chart.holeSize ?? 62) : undefined,
   })
 }
@@ -468,8 +566,25 @@ async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName)
       changed = true
     }
   }
+  if (await shrinkBubbleScale(zip)) changed = true
   if (!changed) return bytes
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+}
+
+/** PptxGenJS leaves bubbleScale at the PowerPoint default, which clips the largest bubble against the plot. */
+async function shrinkBubbleScale(zip: JSZip): Promise<boolean> {
+  let changed = false
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    let xml = await file.async('string')
+    if (!xml.includes('<c:bubbleChart') || xml.includes('<c:bubbleScale')) continue
+    const start = xml.indexOf('<c:bubbleChart')
+    const axis = xml.indexOf('<c:axId', start)
+    if (axis < 0) continue
+    xml = `${xml.slice(0, axis)}<c:bubbleScale val="48"/>${xml.slice(axis)}`
+    zip.file(file.name, xml)
+    changed = true
+  }
+  return changed
 }
 
 function rewriteShape(block: string, faces: Map<string, { latin: string; ea: string }>, fills: Map<string, string>, evenOdd: Set<string>): string {
@@ -545,6 +660,14 @@ function patternXml(pattern: PatternFill): string {
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+
+function markerExtent(values: number[], ratio: number): { min: number; max: number } {
+  const finite = values.filter(value => Number.isFinite(value))
+  const min = Math.min(...finite)
+  const max = Math.max(...finite)
+  const span = Math.max(max - min, 1)
+  return { min: min - span * ratio, max: max + span * ratio }
 }
 
 export function waterfallParts(values: number[]): { base: number[]; up: number[]; down: number[] } {

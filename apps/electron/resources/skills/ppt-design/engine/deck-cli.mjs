@@ -9172,55 +9172,6 @@ var require_lib3 = __commonJS(function(exports, module) {
 import { realpathSync as realpathSync2 } from "fs";
 import { resolve } from "path";
 
-// apps/electron/resources/skills/ppt-design/engine/contrast.ts
-function channel(value) {
-  const c = value / 255;
-  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-function luminance(hex) {
-  const raw = hex.replace("#", "").slice(0, 6);
-  const n = Number.parseInt(raw, 16);
-  const r = n >> 16 & 255;
-  const g = n >> 8 & 255;
-  const b = n & 255;
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-function contrastRatio(foreground, background) {
-  const a = luminance(foreground);
-  const b = luminance(background);
-  const hi = Math.max(a, b);
-  const lo = Math.min(a, b);
-  return (hi + 0.05) / (lo + 0.05);
-}
-function contrastMinimum(fontSize, bold) {
-  if (fontSize >= 24 || bold && fontSize >= 18)
-    return 3;
-  return 4.5;
-}
-function splitColor(hex) {
-  const raw = hex.replace("#", "");
-  const rgb = `#${raw.slice(0, 6).toUpperCase()}`;
-  if (raw.length >= 8)
-    return { rgb, alpha: Number.parseInt(raw.slice(6, 8), 16) / 255 };
-  return { rgb, alpha: 1 };
-}
-function composite(over, under) {
-  const src = splitColor(over);
-  const dst = splitColor(under);
-  if (src.alpha >= 0.999)
-    return src.rgb;
-  if (src.alpha <= 0.001)
-    return dst.rgb;
-  const mix = (a, b) => Math.round(a * src.alpha + b * (1 - src.alpha));
-  const left = channels(src.rgb);
-  const right = channels(dst.rgb);
-  return "#" + [mix(left.r, right.r), mix(left.g, right.g), mix(left.b, right.b)].map((channelByte) => channelByte.toString(16).padStart(2, "0")).join("").toUpperCase();
-}
-function channels(hex) {
-  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
-  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
-}
-
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
 var NO_LINE_END = new Set(Array.from("\uFF08\u300A\u300C\u300E\u3010\u3008([{\u201C\u2018"));
@@ -9337,6 +9288,521 @@ function orphanLines(lines) {
 }
 function literalNewline(text) {
   return text.includes("\\n") || text.includes("\\r") || text.includes("\\t");
+}
+
+// apps/electron/resources/skills/ppt-design/engine/types.ts
+var DECK_FORMAT = "selection-deck";
+var DECK_VERSION = 1;
+var CANVAS_WIDTH = 960;
+var CANVAS_HEIGHT = 540;
+var CANVAS_PRESETS = [
+  { id: "ppt169", label: "16:9", width: 960, height: 540 },
+  { id: "ppt43", label: "4:3", width: 768, height: 576 },
+  { id: "moments", label: "1:1", width: 810, height: 810 },
+  { id: "story", label: "9:16", width: 810, height: 1440 },
+  { id: "xiaohongshu", label: "3:4", width: 931.5, height: 1245 }
+];
+function canvasBySize(width, height) {
+  return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
+}
+function canvasSupported(width, height) {
+  if (!Number.isFinite(width) || !Number.isFinite(height))
+    return false;
+  if (canvasBySize(width, height))
+    return true;
+  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000;
+}
+function comboSeriesRoles(series) {
+  const explicit = series.some((item) => item.render);
+  return series.map((item, index) => item.render ?? (explicit || index < series.length - 1 ? "column" : "line"));
+}
+
+// apps/electron/resources/skills/ppt-design/engine/argument-layouts.ts
+var SHADOW = { color: "#141414", opacity: 0.12, blur: 16, offset: 4, angle: 90 };
+var SOURCE = "\u793A\u4F8B\u6570\u5B57\uFF0C\u6B63\u5F0F\u7A3F\u6362\u6210\u7528\u6237\u6750\u6599\u3002";
+function capacity(value, width, height, size, leading) {
+  const maxLines = Math.max(1, Math.floor((height + 0.5) / (size * leading)));
+  const perLine = Math.max(1, Math.floor(width / size));
+  const glyphs = Array.from(value.replaceAll(`
+`, "")).length;
+  return { maxChars: Math.max(glyphs, perLine * maxLines), maxLines };
+}
+function text(id, value, x, y, w, h, size, style = {}) {
+  const leading = style.leading ?? defaultLeading(size);
+  const bold = style.bold ?? false;
+  const element = {
+    id,
+    type: "text",
+    role: "content",
+    bounds: { x, y, w, h },
+    text: value,
+    textCapacity: capacity(value, w, h, size, leading),
+    font: {
+      family: style.family ?? "$cjk",
+      size,
+      weight: bold ? "bold" : "regular",
+      color: style.color ?? "$ink",
+      align: style.align,
+      valign: style.valign ?? "top",
+      leading
+    }
+  };
+  assertFits(element);
+  return element;
+}
+function assertFits(element) {
+  const font = element.font;
+  const value = element.text ?? "";
+  if (!font)
+    return;
+  const bold = font.weight === "bold";
+  const lines = wrapText(value, element.bounds.w, font.size, bold);
+  const problems = [];
+  if (literalNewline(value))
+    problems.push("\u5B57\u9762\u6362\u884C");
+  const glyphs = Array.from(value.replaceAll(`
+`, "")).length;
+  if (glyphs > (element.textCapacity?.maxChars ?? 0))
+    problems.push("\u5B57\u6570");
+  if (lines.length > (element.textCapacity?.maxLines ?? 0))
+    problems.push(`\u884C\u6570 ${lines.length} ${JSON.stringify(lines)}`);
+  const leading = font.leading ?? defaultLeading(font.size);
+  const needed = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
+  if (needed > element.bounds.h + 1.5)
+    problems.push(`\u9AD8\u5EA6 ${needed.toFixed(1)}`);
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold)), 0);
+  if (widest > element.bounds.w + fitSlack(font.size))
+    problems.push(`\u5BBD\u5EA6 ${widest.toFixed(1)}`);
+  problems.push(...orphanLines(lines));
+  if (problems.length)
+    throw new Error(`${element.id}: ${problems.join("\uFF1B")}`);
+}
+function panel(id, x, y, w, h, fill, shape = "roundRect", radius = 12, shadow = true) {
+  return {
+    id,
+    type: "shape",
+    shape,
+    role: "panel",
+    bounds: { x, y, w, h },
+    fill,
+    radius: shape === "roundRect" ? radius : undefined,
+    shadow: shadow && shape !== "ellipse" ? SHADOW : undefined
+  };
+}
+function accentTick(id, x, y, w) {
+  return { id, type: "shape", shape: "rect", role: "decoration", bounds: { x, y, w, h: 4 }, fill: "$accent" };
+}
+function rule(id, x, y, w) {
+  return { id, type: "shape", shape: "line", role: "rule", bounds: { x, y, w, h: 1 }, line: { color: "$line", width: 1 } };
+}
+function deco(id, x, y, w, h, fill) {
+  return { id, type: "shape", shape: "rect", role: "decoration", bounds: { x, y, w, h }, fill };
+}
+function link(id, x1, y1, x2, y2) {
+  const x = Math.min(x1, x2);
+  const y = Math.min(y1, y2);
+  const w = Math.max(1, Math.abs(x2 - x1));
+  const h = Math.max(1, Math.abs(y2 - y1));
+  return {
+    id,
+    type: "shape",
+    shape: "line",
+    role: "decoration",
+    bounds: { x, y, w, h },
+    line: {
+      color: "$accent",
+      width: 1.5,
+      points: { x1: x1 - x, y1: y1 - y, x2: x2 - x, y2: y2 - y }
+    }
+  };
+}
+function chartEl(id, x, y, w, h, spec) {
+  return { id, type: "chart", role: "content", bounds: { x, y, w, h }, chart: { showLegend: false, catLabelSize: 11, valLabelSize: 11, ...spec } };
+}
+function rail() {
+  return { id: "rail", type: "shape", shape: "rect", role: "decoration", bounds: { x: 0, y: 0, w: 8, h: 540 }, fill: "$accent" };
+}
+function furniture(kicker, title, exhibit, pageNo) {
+  return [
+    rail(),
+    text("kicker", kicker, 40, 16, 460, 18, 12, { bold: true, color: "$accent" }),
+    text("exhibit", exhibit, 680, 16, 240, 18, 12, { color: "$muted", align: "right", family: "$latin" }),
+    text("title", title, 40, 40, 880, 34, 26, { bold: true }),
+    rule("top-rule", 40, 82, 880),
+    rule("footer-rule", 40, 498, 880),
+    text("source", SOURCE, 40, 508, 700, 20, 11, { color: "$muted" }),
+    text("page-no", pageNo, 820, 508, 100, 20, 11, { bold: true, align: "right", family: "$latin" })
+  ];
+}
+function finish(id, name, relation, summary, notes, elements) {
+  const seen = new Set;
+  for (const element of elements) {
+    if (seen.has(element.id))
+      throw new Error(`${id} \u91CD\u590D\u5143\u7D20 ${element.id}`);
+    seen.add(element.id);
+  }
+  return { id, layout: id, name, background: "$paper", elements, notes };
+}
+function slotsOf(page) {
+  return page.elements.filter((element) => element.type === "text" || element.type === "chart" || element.type === "table" || element.type === "shape" && element.role === "panel").map((element) => ({
+    id: element.id,
+    kind: element.type,
+    bounds: { ...element.bounds },
+    textCapacity: element.textCapacity ? { ...element.textCapacity } : undefined,
+    required: true
+  }));
+}
+function conclusion() {
+  const cards = [
+    { id: "stock", value: "45 \u5929", label: "\u5E93\u5B58\u5468\u8F6C", note: "\u6BD4\u5CF0\u503C\u5C11 19 \u5929" },
+    { id: "stockout", value: "12%", label: "\u7F3A\u8D27\u7387", note: "\u4E09\u4E2A\u4ED3\u4E00\u8D77\u4E0B\u964D" },
+    { id: "sites", value: "3 \u4ED3", label: "\u5148\u6062\u590D", note: "\u534E\u4E1C\u3001\u534E\u5357\u3001\u534E\u5317" }
+  ];
+  const elements = [
+    panel("claim-panel", 0, 0, 408, 540, "$accent", "rect", 0),
+    text("kicker", "\u7ED3\u8BBA\u5148\u884C", 36, 48, 320, 22, 14, { bold: true, color: "$inverse" }),
+    text("claim", `\u5468\u8F6C\u5148\u56DE\u5230 45 \u5929
+\u518D\u51B3\u5B9A\u662F\u5426\u6269\u4EA7`, 36, 168, 332, 120, 32, { bold: true, color: "$inverse", leading: 1.12 }),
+    text("claim-note", "\u4E09\u6761\u8BC1\u636E\u6307\u5411\u540C\u4E00\u4EF6\u4E8B", 36, 312, 332, 28, 16, { color: "$inverse" }),
+    text("source", SOURCE, 36, 488, 332, 22, 12, { color: "$inverse" })
+  ];
+  cards.forEach((card, index) => {
+    const y = 36 + index * 156;
+    elements.push(panel(`${card.id}-card`, 440, y, 480, 140, "$surface"), accentTick(`${card.id}-tick`, 440, y, 56), text(`${card.id}-value`, card.value, 464, y + 28, 200, 48, 32, { bold: true, color: "$accent" }), text(`${card.id}-label`, card.label, 464, y + 84, 180, 28, 16, { bold: true }), text(`${card.id}-note`, card.note, 680, y + 40, 210, 56, 16, { color: "$muted", valign: "middle" }));
+  });
+  elements.push(text("page-no", "01", 820, 500, 100, 20, 12, { bold: true, align: "right", family: "$latin", color: "$muted" }));
+  return elements;
+}
+function evidenceTree() {
+  const children = [
+    { id: "gap", title: "\u7F3A\u8D27\u8FD8\u5728", body: "\u4E09\u4E2A\u4ED3\u6CA1\u6709\u540C\u65F6\u6062\u590D" },
+    { id: "cash", title: "\u73B0\u91D1\u8FD8\u7D27", body: "\u5468\u671F\u505C\u5728 18 \u5929" },
+    { id: "order", title: "\u8BA2\u5355\u4E0D\u7A33", body: "\u6CA1\u6709\u8FDE\u7EED\u4E24\u4E2A\u5B63\u5EA6" }
+  ];
+  const elements = [
+    ...furniture("\u8BC1\u636E\u6811", "\u5468\u8F6C\u5148\u4E8E\u6269\u4EA7", "02", "02"),
+    panel("root", 250, 108, 460, 100, "$accent"),
+    text("root-title", "\u5148\u770B\u5468\u8F6C\uFF0C\u518D\u8C08\u4EA7\u80FD", 274, 124, 412, 36, 22, { bold: true, color: "$inverse", align: "center" }),
+    text("root-note", "\u4E09\u6761\u8BC1\u636E\u4E92\u76F8\u72EC\u7ACB", 274, 164, 412, 24, 14, { color: "$inverse", align: "center" })
+  ];
+  children.forEach((child, index) => {
+    const x = 48 + index * 304;
+    elements.push(panel(`${child.id}-card`, x, 292, 280, 172, "$surface"), accentTick(`${child.id}-tick`, x, 292, 48), text(`${child.id}-index`, `0${index + 1}`, x + 24, 316, 80, 20, 12, { bold: true, color: "$accent", family: "$latin" }), text(`${child.id}-title`, child.title, x + 24, 344, 232, 32, 20, { bold: true }), text(`${child.id}-body`, child.body, x + 24, 386, 232, 48, 15, { color: "$muted" }), link(`link-${child.id}`, 480, 208, x + 140, 292));
+  });
+  return elements;
+}
+function matrix() {
+  const cells = [
+    { id: "do", title: "\u5148\u505A", kicker: "\u9AD8\u5F71\u54CD \xB7 \u597D\u505A", body: "\u628A\u5468\u8F6C\u6253\u56DE 45 \u5929", fill: "$accent", titleColor: "$inverse", bodyColor: "$inverse" },
+    { id: "plan", title: "\u6392\u671F", kicker: "\u9AD8\u5F71\u54CD \xB7 \u96BE\u505A", body: "\u7B2C\u4E09\u4ED3\u653E\u5230\u4E0B\u5B63", fill: "$surface", titleColor: "$ink", bodyColor: "$muted" },
+    { id: "watch", title: "\u89C2\u5BDF", kicker: "\u4F4E\u5F71\u54CD \xB7 \u597D\u505A", body: "\u4EBA\u6548\u5148\u8BB0\u5728\u8868\u4E0A", fill: "$surface", titleColor: "$ink", bodyColor: "$muted" },
+    { id: "stop", title: "\u4E0D\u505A", kicker: "\u4F4E\u5F71\u54CD \xB7 \u96BE\u505A", body: "\u73B0\u5728\u4E0D\u52A0\u4EA7\u7EBF", fill: "$ink", titleColor: "$inverse", bodyColor: "$inverse" }
+  ];
+  const elements = furniture("\u77E9\u9635", "\u53EA\u7A81\u51FA\u5E94\u8BE5\u5148\u505A\u7684\u90A3\u4E00\u683C", "03", "03");
+  cells.forEach((cell, index) => {
+    const x = index % 2 === 0 ? 40 : 508;
+    const y = index < 2 ? 108 : 300;
+    elements.push(panel(`${cell.id}-card`, x, y, 412, 172, cell.fill), text(`${cell.id}-kicker`, cell.kicker, x + 24, y + 22, 360, 20, 13, { bold: true, color: cell.bodyColor }), text(`${cell.id}-title`, cell.title, x + 24, y + 52, 360, 40, 28, { bold: true, color: cell.titleColor }), text(`${cell.id}-body`, cell.body, x + 24, y + 108, 360, 36, 16, { color: cell.bodyColor }));
+  });
+  return elements;
+}
+function waterfall() {
+  const notes = [
+    { id: "open", value: "120", label: "\u671F\u521D\u5E93\u5B58", note: "\u53D8\u5316\u4ECE\u8FD9\u4E2A\u6570\u8D77\u7B97" },
+    { id: "move", value: "+27", label: "\u6DA8\u4EF7\u4E0E\u65B0\u54C1", note: "\u6DA8\u4EF7 18\uFF0C\u65B0\u54C1 9" },
+    { id: "end", value: "117", label: "\u671F\u672B\u5E93\u5B58", note: "\u6D41\u5931 30 \u540E\u8F67\u5E73" }
+  ];
+  const elements = [
+    ...furniture("\u7011\u5E03", "\u671F\u672B\u53EA\u6BD4\u671F\u521D\u5C11 3", "04", "04"),
+    chartEl("bridge", 40, 108, 520, 360, {
+      kind: "waterfall",
+      categories: ["\u671F\u521D", "\u6DA8\u4EF7", "\u6D41\u5931", "\u65B0\u54C1", "\u671F\u672B"],
+      series: [{ name: "\u5E93\u5B58", values: [120, 18, -30, 9, 117] }],
+      colors: ["$paper", "$accent", "$ink"]
+    })
+  ];
+  notes.forEach((item, index) => {
+    const y = 108 + index * 120;
+    elements.push(panel(`${item.id}-card`, 584, y, 336, 108, "$surface"), accentTick(`${item.id}-tick`, 584, y, 48), text(`${item.id}-value`, item.value, 608, y + 18, 140, 40, 26, { bold: true, color: "$accent" }), text(`${item.id}-label`, item.label, 760, y + 24, 136, 28, 16, { bold: true }), text(`${item.id}-note`, item.note, 608, y + 64, 280, 24, 13, { color: "$muted" }));
+  });
+  return elements;
+}
+function trend() {
+  return [
+    ...furniture("\u8D8B\u52BF", "\u516D\u6708\u662F\u8FD9\u534A\u5E74\u7684\u9AD8\u70B9", "05", "05"),
+    chartEl("trend", 40, 112, 560, 356, {
+      kind: "line",
+      categories: ["\u4E00\u6708", "\u4E8C\u6708", "\u4E09\u6708", "\u56DB\u6708", "\u4E94\u6708", "\u516D\u6708"],
+      series: [{ name: "\u5468\u8F6C\u5929\u6570", values: [42, 48, 45, 61, 58, 74] }],
+      colors: ["$accent"],
+      showValues: false,
+      valMin: 0,
+      valMax: 90
+    }),
+    panel("dip-card", 624, 128, 296, 150, "$surface"),
+    accentTick("dip-tick", 624, 128, 48),
+    text("dip-kicker", "\u4E09\u6708", 648, 152, 248, 20, 13, { bold: true, color: "$accent" }),
+    text("dip-title", "\u56DE\u843D\u5230 45", 648, 180, 248, 36, 22, { bold: true }),
+    text("dip-body", "\u8865\u8D27\u8FD8\u6CA1\u8DDF\u4E0A\u8282\u540E", 648, 224, 248, 28, 14, { color: "$muted" }),
+    panel("peak-card", 624, 300, 296, 150, "$accent"),
+    text("peak-kicker", "\u516D\u6708", 648, 324, 248, 20, 13, { bold: true, color: "$inverse" }),
+    text("peak-title", "\u5347\u5230 74", 648, 352, 248, 36, 22, { bold: true, color: "$inverse" }),
+    text("peak-body", "\u9AD8\u70B9\u8FD8\u6CA1\u6709\u7B2C\u4E8C\u4E2A\u6708", 648, 396, 248, 28, 14, { color: "$inverse" })
+  ];
+}
+function scorecard() {
+  const rows = [
+    { id: "turn", name: "\u5E93\u5B58\u5468\u8F6C", value: "45 \u5929", delta: "\u221219", note: "\u8FBE\u6807", width: 210 },
+    { id: "miss", name: "\u7F3A\u8D27\u7387", value: "3.1%", delta: "\u22121.4", note: "\u6539\u5584", width: 96 },
+    { id: "fill", name: "\u5C65\u7EA6", value: "96%", delta: "+2", note: "\u7A33\u4F4F", width: 250 },
+    { id: "labor", name: "\u4EBA\u6548", value: "1.8", delta: "+0.2", note: "\u5173\u6CE8", width: 120 },
+    { id: "cash", name: "\u73B0\u91D1\u5468\u671F", value: "18 \u5929", delta: "\u22126", note: "\u6536\u7D27", width: 78 }
+  ];
+  const elements = furniture("\u8BA1\u5206\u8868", "\u504F\u79BB\u7684\u884C\u548C\u7A33\u4F4F\u7684\u884C\u5206\u5F00", "06", "06");
+  rows.forEach((row, index) => {
+    const y = 104 + index * 76;
+    const alert = row.delta.startsWith("+");
+    elements.push(panel(`${row.id}-row`, 40, y, 880, 68, "$surface", "roundRect", 10), text(`${row.id}-name`, row.name, 64, y + 20, 160, 28, 16, { bold: true }), text(`${row.id}-value`, row.value, 236, y + 18, 110, 32, 18, { bold: true, color: "$accent" }), deco(`${row.id}-track`, 360, y + 28, 260, 12, "$paper"), deco(`${row.id}-bar`, 360, y + 28, row.width, 12, "$accent"), panel(`${row.id}-pill`, 648, y + 16, 92, 36, alert ? "$accent" : "$ink", "roundRect", 18), text(`${row.id}-delta`, row.delta, 656, y + 22, 76, 24, 14, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`${row.id}-note`, row.note, 760, y + 20, 130, 28, 15, { color: "$muted" }));
+  });
+  return elements;
+}
+function gantt() {
+  const lanes = [
+    { id: "safety", name: "\u8865\u5B89\u5168\u5E93\u5B58", start: 0, span: 5 },
+    { id: "freight", name: "\u91CD\u8C08\u8FD0\u8D39", start: 3, span: 4 },
+    { id: "site", name: "\u5F00\u7B2C\u4E09\u4ED3", start: 6, span: 4 },
+    { id: "review", name: "\u590D\u76D8\u6269\u4EA7", start: 10, span: 2 }
+  ];
+  const trackX = 220;
+  const trackW = 680;
+  const total = 12;
+  const elements = [
+    ...furniture("\u8DEF\u7EBF", "\u6269\u4EA7\u653E\u5728\u5E93\u5B58\u7A33\u4F4F\u4E4B\u540E", "07", "07"),
+    text("q1", "\u4E00\u5B63", 220, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q2", "\u4E8C\u5B63", 390, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q3", "\u4E09\u5B63", 560, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q4", "\u56DB\u5B63", 730, 104, 72, 22, 13, { bold: true, color: "$muted" })
+  ];
+  lanes.forEach((lane, index) => {
+    const y = 146 + index * 82;
+    const barX = trackX + lane.start / total * trackW;
+    const barW = lane.span / total * trackW;
+    elements.push(text(`${lane.id}-name`, lane.name, 40, y + 16, 164, 28, 15, { bold: true }), panel(`${lane.id}-track`, trackX, y + 22, trackW, 16, "$surface", "roundRect", 8, false), panel(`${lane.id}-bar`, barX, y + 22, barW, 16, "$accent", "roundRect", 8, false));
+  });
+  elements.push(deco("now-line", 476, 146, 2, 324, "$ink"), text("now-label", "\u73B0\u5728", 468, 104, 56, 22, 12, { bold: true, color: "$ink", align: "center" }));
+  return elements;
+}
+function architecture() {
+  const layers = [
+    { id: "user", name: "\u7528\u6237", fill: "$surface", ink: "$ink", items: ["\u95E8\u5E97", "\u7ECF\u9500\u5546", "\u603B\u90E8"] },
+    { id: "channel", name: "\u6E20\u9053", fill: "$surface", ink: "$ink", items: ["\u5C0F\u7A0B\u5E8F", "\u4E1A\u52A1\u5458", "\u5F00\u653E\u63A5\u53E3"] },
+    { id: "core", name: "\u4E2D\u53F0", fill: "$accent", ink: "$inverse", items: ["\u5E93\u5B58", "\u8BA2\u5355", "\u7ED3\u7B97"] },
+    { id: "base", name: "\u5E95\u5EA7", fill: "$ink", ink: "$inverse", items: ["\u4ED3\u914D", "\u4E3B\u6570\u636E", "\u6743\u9650"] }
+  ];
+  const elements = furniture("\u67B6\u6784", "\u6269\u4EA7\u524D\u5148\u770B\u4E2D\u53F0\u627F\u4E0D\u627F\u5F97\u4F4F", "08", "08");
+  layers.forEach((layer, index) => {
+    const y = 104 + index * 94;
+    const pillFill = layer.fill === "$surface" ? "$paper" : "$inverse";
+    const pillInk = "$ink";
+    elements.push(panel(`${layer.id}-band`, 40, y, 880, 82, layer.fill, "roundRect", 12), text(`${layer.id}-name`, layer.name, 64, y + 26, 96, 32, 20, { bold: true, color: layer.ink }));
+    layer.items.forEach((item, itemIndex) => {
+      const x = 190 + itemIndex * 230;
+      elements.push(panel(`${layer.id}-pill-${itemIndex}`, x, y + 20, 200, 42, pillFill, "roundRect", 21), text(`${layer.id}-item-${itemIndex}`, item, x + 16, y + 30, 168, 24, 15, { bold: true, color: pillInk, align: "center" }));
+    });
+  });
+  return elements;
+}
+function caseCompare() {
+  const rows = [
+    { id: "turn", label: "\u5468\u8F6C", left: "62 \u5929", right: "45 \u5929", delta: "\u221217" },
+    { id: "miss", label: "\u7F3A\u8D27", left: "8%", right: "3%", delta: "\u22125" },
+    { id: "days", label: "\u4EBA\u5929", left: "14", right: "9", delta: "\u22125" }
+  ];
+  const elements = [
+    ...furniture("\u5BF9\u7167", "\u76EE\u6807\u4ED3\u6BD4\u73B0\u72B6\u5C11 17 \u5929", "09", "09"),
+    panel("left-card", 40, 108, 400, 364, "$surface"),
+    accentTick("left-tick", 40, 108, 56),
+    text("left-kicker", "\u73B0\u72B6", 64, 132, 340, 22, 13, { bold: true, color: "$accent" }),
+    text("left-title", "\u73B0\u5728\u7684\u4E09\u4E2A\u4ED3", 64, 160, 340, 36, 22, { bold: true }),
+    panel("right-card", 560, 108, 360, 364, "$accent"),
+    text("right-kicker", "\u76EE\u6807", 584, 132, 312, 22, 13, { bold: true, color: "$inverse" }),
+    text("right-title", "\u5148\u6062\u590D\u5230\u7684\u6C34\u4F4D", 584, 160, 312, 36, 22, { bold: true, color: "$inverse" })
+  ];
+  rows.forEach((row, index) => {
+    const y = 230 + index * 70;
+    elements.push(text(`left-${row.id}-label`, row.label, 64, y, 90, 28, 15, { color: "$muted" }), text(`left-${row.id}-value`, row.left, 160, y - 4, 180, 36, 22, { bold: true }), panel(`${row.id}-chip`, 460, y - 4, 80, 36, "$ink", "roundRect", 18), text(`${row.id}-delta`, row.delta, 468, y + 2, 64, 22, 14, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`right-${row.id}-label`, row.label, 584, y, 80, 28, 15, { color: "$inverse" }), text(`right-${row.id}-value`, row.right, 680, y - 4, 210, 36, 22, { bold: true, color: "$inverse" }));
+  });
+  return elements;
+}
+function funnel() {
+  const steps = [
+    { id: "lead", label: "\u7EBF\u7D22 1280", rate: "100% \u8FDB\u6C60", width: 620 },
+    { id: "quote", label: "\u62A5\u4EF7 820", rate: "64% \u62A5\u4EF7", width: 480 },
+    { id: "trial", label: "\u8BD5\u6837 390", rate: "48% \u8BD5\u6837", width: 350 },
+    { id: "won", label: "\u6210\u4EA4 280", rate: "22% \u6210\u4EA4", width: 230 }
+  ];
+  const elements = [...furniture("\u6F0F\u6597", "\u6700\u5927\u6D41\u5931\u5728\u62A5\u4EF7\u5230\u6210\u4EA4", "10", "10")];
+  steps.forEach((step, index) => {
+    const y = 104 + index * 78;
+    elements.push(panel(`${step.id}-bar`, 40, y, step.width, 66, "$accent", "roundRect", 10), text(`${step.id}-label`, step.label, 64, y + 18, 150, 30, 18, { bold: true, color: "$inverse" }), text(`${step.id}-rate`, step.rate, 720, y + 18, 200, 30, 16, { bold: true, color: "$ink" }));
+  });
+  elements.push(panel("drop-card", 40, 420, 880, 64, "$ink", "roundRect", 10), text("drop-copy", "\u62A5\u4EF7\u5230\u6210\u4EA4\u6389\u5F97\u6700\u591A\uFF0C\u5148\u6539\u62A5\u4EF7\u5355\uFF0C\u4E0D\u5148\u52A0\u4EA7\u7EBF\u3002", 64, 438, 832, 28, 16, { bold: true, color: "$inverse" }));
+  return elements;
+}
+function process2() {
+  const steps = [
+    { id: "count", title: "\u76D8\u70B9", body: "\u5148\u6570\u6E05\u4E09\u4E2A\u4ED3" },
+    { id: "split", title: "\u5206\u4ED3", body: "\u7F3A\u8D27\u4ED3\u5355\u72EC\u8865" },
+    { id: "fill", title: "\u8865\u8D27", body: "\u53EA\u8865\u5B89\u5168\u5E93\u5B58" },
+    { id: "look", title: "\u590D\u76D8", body: "\u4E24\u5468\u540E\u770B\u5468\u8F6C" },
+    { id: "decide", title: "\u51B3\u7B56", body: "\u518D\u8C08\u662F\u5426\u6269\u4EA7" }
+  ];
+  const elements = [...furniture("\u6D41\u7A0B", "\u4EA4\u63A5\u5199\u6E05\u4E4B\u540E\u624D\u52A0\u5FEB", "11", "11")];
+  steps.forEach((step, index) => {
+    const x = 56 + index * 180;
+    elements.push(panel(`${step.id}-mark`, x + 38, 128, 64, 64, "$accent", "ellipse"), text(`${step.id}-num`, String(index + 1), x + 38, 146, 64, 28, 20, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`${step.id}-title`, step.title, x, 212, 140, 28, 18, { bold: true, align: "center" }), text(`${step.id}-body`, step.body, x, 246, 140, 32, 14, { color: "$muted", align: "center" }));
+    if (index < steps.length - 1)
+      elements.push(deco(`${step.id}-join`, x + 110, 158, 100, 3, "$accent"));
+  });
+  elements.push(panel("synthesis", 40, 320, 880, 150, "$surface"), accentTick("synthesis-tick", 40, 320, 64), text("synthesis-kicker", "\u8FD9\u4E00\u9875\u7684\u4EA4\u63A5", 68, 348, 400, 22, 13, { bold: true, color: "$accent" }), text("synthesis-title", "\u8865\u8D27\u5355\u4E0A\u5199\u6E05\u8D23\u4EFB\u4ED3", 68, 380, 760, 36, 24, { bold: true }), text("synthesis-body", "\u6CA1\u6709\u8D23\u4EFB\u4ED3\u7684\u6B65\u9AA4\uFF0C\u4E0D\u8FDB\u5165\u4E0B\u4E00\u5468\u3002", 68, 424, 760, 28, 15, { color: "$muted" }));
+  return elements;
+}
+function timeline() {
+  const events = [
+    { id: "spring24", when: "2024 \u6625", title: "\u7F3A\u8D27\u6269\u5927", body: "\u4E09\u4E2A\u4ED3\u540C\u65F6\u544A\u6025", above: true },
+    { id: "autumn24", when: "2024 \u79CB", title: "\u5206\u4ED3\u8865\u8D27", body: "\u7F3A\u8D27\u7387\u5F00\u59CB\u56DE\u843D", above: false },
+    { id: "spring25", when: "2025 \u6625", title: "\u5468\u8F6C\u56DE\u843D", body: "\u56DE\u5230 45 \u5929\u6C34\u4F4D", above: true },
+    { id: "autumn25", when: "2025 \u79CB", title: "\u518D\u8BAE\u6269\u4EA7", body: "\u8BA2\u5355\u8FDE\u7EED\u624D\u52A0\u7EBF", above: false }
+  ];
+  const elements = [
+    ...furniture("\u65F6\u95F4\u7EBF", "\u6269\u4EA7\u6392\u5728\u5468\u8F6C\u56DE\u6765\u4E4B\u540E", "12", "12"),
+    deco("spine", 80, 268, 800, 4, "$accent")
+  ];
+  events.forEach((event, index) => {
+    const x = 48 + index * 228;
+    const y = event.above ? 112 : 304;
+    elements.push(panel(`${event.id}-card`, x, y, 208, 132, event.above ? "$surface" : "$ink"), text(`${event.id}-when`, event.when, x + 16, y + 16, 176, 20, 12, { bold: true, color: event.above ? "$accent" : "$inverse" }), text(`${event.id}-title`, event.title, x + 16, y + 44, 176, 30, 18, { bold: true, color: event.above ? "$ink" : "$inverse" }), text(`${event.id}-body`, event.body, x + 16, y + 82, 176, 28, 14, { color: event.above ? "$muted" : "$inverse" }), deco(`${event.id}-dot`, x + 96, 260, 16, 20, "$accent"));
+  });
+  return elements;
+}
+function closing() {
+  return [
+    ...furniture("\u6536\u675F", "\u4E0B\u4E00\u6B65\u53EA\u505A\u54EA\u4E00\u4EF6\uFF1F", "13", "13"),
+    panel("now-card", 40, 140, 424, 320, "$accent"),
+    text("now-kicker", "\u672C\u5468", 68, 172, 360, 22, 14, { bold: true, color: "$inverse" }),
+    text("now-title", "\u628A\u5468\u8F6C\u9501\u56DE 45 \u5929", 68, 214, 360, 80, 28, { bold: true, color: "$inverse", leading: 1.15 }),
+    text("now-body", "\u4E09\u4E2A\u4ED3\u5206\u5F00\u8865\uFF0C\u4E0D\u65B0\u5F00\u4EA7\u7EBF\u3002", 68, 320, 360, 64, 16, { color: "$inverse" }),
+    panel("later-card", 496, 140, 424, 320, "$surface"),
+    accentTick("later-tick", 496, 140, 56),
+    text("later-kicker", "\u4E0B\u6708\u518D\u8BAE", 524, 172, 360, 22, 14, { bold: true, color: "$accent" }),
+    text("later-title", "\u662F\u5426\u589E\u52A0\u4E00\u6761\u4EA7\u7EBF", 524, 214, 360, 80, 28, { bold: true, leading: 1.15 }),
+    text("later-body", "\u8BA2\u5355\u8981\u8FDE\u7EED\u4E24\u4E2A\u5B63\u5EA6\u3002", 524, 320, 360, 64, 16, { color: "$muted" })
+  ];
+}
+function decision() {
+  return [
+    ...furniture("\u53D6\u820D", "\u5148\u6536\u56DE\u5468\u8F6C\uFF0C\u4E0D\u6025\u7740\u6269\u4EA7", "14", "14"),
+    panel("yes-card", 40, 116, 520, 352, "$accent"),
+    text("yes-kicker", "\u5EFA\u8BAE", 68, 144, 200, 22, 14, { bold: true, color: "$inverse" }),
+    text("yes-title", "\u5148\u628A\u5468\u8F6C\u6253\u56DE\u53BB", 68, 180, 460, 44, 28, { bold: true, color: "$inverse" }),
+    text("yes-1", "\u7F3A\u8D27\u8FD8\u5728\u4E09\u4E2A\u4ED3", 68, 252, 440, 32, 16, { color: "$inverse" }),
+    text("yes-2", "\u73B0\u91D1\u5468\u671F\u8FD8\u6CA1\u7A33\u4F4F", 68, 292, 440, 32, 16, { color: "$inverse" }),
+    text("yes-3", "\u6269\u4EA7\u8981\u7B49\u5468\u8F6C\u56DE\u5230 45 \u5929", 68, 332, 440, 32, 16, { color: "$inverse" }),
+    panel("no-card", 584, 116, 336, 352, "$surface"),
+    accentTick("no-tick", 584, 116, 56),
+    text("no-kicker", "\u5148\u4E0D\u505A", 608, 144, 280, 22, 14, { bold: true, color: "$accent" }),
+    text("no-title", "\u7ACB\u523B\u52A0\u4EA7\u7EBF", 608, 180, 280, 44, 26, { bold: true }),
+    text("no-1", "\u8BA2\u5355\u8FD8\u6CA1\u8FDE\u7EED", 608, 252, 280, 32, 16, { color: "$muted" }),
+    text("no-2", "\u7B2C\u4E09\u4ED3\u8FD8\u6CA1\u6EE1", 608, 292, 280, 32, 16, { color: "$muted" }),
+    text("no-3", "\u4EBA\u6548\u6CA1\u6709\u4F59\u91CF", 608, 332, 280, 32, 16, { color: "$muted" })
+  ];
+}
+var SPECS = [
+  { id: "conclusion", name: "\u7ED3\u8BBA\u9875", relation: "\u7ED3\u8BBA\u5148\u884C", summary: "\u5224\u65AD\u5148\u5360\u5DE6\u534A\u9875\uFF0C\u53F3\u8FB9\u53EA\u7559\u4E09\u4E2A\u8BC1\u636E\u3002", notes: "\u66FF\u6362\u5DE6\u680F\u5224\u65AD\u548C\u53F3\u680F\u4E09\u4E2A\u6570\u5B57\u3002\u6570\u5B57\u8981\u80FD\u5BF9\u4E0A\u6765\u6E90\u3002", build: conclusion },
+  { id: "evidence-tree", name: "\u8BC1\u636E\u6811", relation: "\u5206\u53C9", summary: "\u4E00\u4E2A\u5224\u65AD\u8FDE\u5230\u4E09\u6761\u4E92\u76F8\u72EC\u7ACB\u7684\u8BC1\u636E\u3002", notes: "\u4E09\u6761\u8BC1\u636E\u4E0D\u80FD\u4E92\u76F8\u5305\u542B\u3002\u8FDE\u7EBF\u53EA\u8868\u793A\u652F\u6491\uFF0C\u4E0D\u8868\u793A\u987A\u5E8F\u3002", build: evidenceTree },
+  { id: "matrix-2x2", name: "\u77E9\u9635", relation: "\u77E9\u9635", summary: "\u4E24\u4E2A\u7EF4\u5EA6\uFF0C\u53EA\u628A\u5148\u505A\u7684\u90A3\u4E00\u683C\u505A\u6210\u5F3A\u8C03\u8272\u3002", notes: "\u9AD8\u5F71\u54CD\u4E14\u597D\u505A\u7684\u683C\u5B50\u4FDD\u6301\u5F3A\u8C03\u3002\u4E0D\u8981\u56DB\u683C\u540C\u7B49\u5F3A\u8C03\u3002", build: matrix },
+  { id: "waterfall", name: "\u7011\u5E03\u56FE", relation: "\u6865", summary: "\u8D77\u70B9\u52A0\u53D8\u5316\u7B49\u4E8E\u7EC8\u70B9\uFF0C\u53F3\u4FA7\u53EA\u89E3\u91CA\u8F67\u5E73\u540E\u7684\u8BFB\u6CD5\u3002", notes: "\u7011\u5E03\u56FE\u5FC5\u987B\u8F67\u5E73\u3002\u53F3\u4FA7\u53E5\u5B50\u89E3\u91CA\u6865\uFF0C\u4E0D\u53E6\u8D77\u4E00\u5957\u6570\u5B57\u3002", build: waterfall },
+  { id: "trend-annotated", name: "\u8D8B\u52BF\u52A0\u6807\u6CE8", relation: "\u5E8F\u5217", summary: "\u4E00\u6761\u5E8F\u5217\uFF0C\u65C1\u8FB9\u6807\u51FA\u56DE\u843D\u548C\u9AD8\u70B9\u3002", notes: "\u6807\u6CE8\u6307\u5411\u56FE\u4E0A\u7684\u6708\u4EFD\uFF0C\u4E0D\u5199\u56FE\u91CC\u6CA1\u6709\u7684\u62D0\u70B9\u3002", build: trend },
+  { id: "scorecard", name: "\u8BA1\u5206\u8868", relation: "\u6E05\u5355", summary: "\u6BCF\u884C\u4E00\u4E2A\u6307\u6807\u3001\u5F53\u524D\u503C\u3001\u6761\u5F62\u548C\u504F\u79BB\u3002", notes: "\u504F\u79BB\u7684\u884C\u7528\u5F3A\u8C03\u8272\u836F\u4E38\uFF0C\u7A33\u4F4F\u7684\u884C\u7528\u6DF1\u8272\u836F\u4E38\u3002", build: scorecard },
+  { id: "gantt-roadmap", name: "\u7518\u7279\u8DEF\u7EBF\u56FE", relation: "\u8DEF\u7EBF", summary: "\u56DB\u6761\u5DE5\u4F5C\u6309\u5B63\u5EA6\u94FA\u5F00\uFF0C\u73B0\u5728\u7EBF\u5207\u5728\u590D\u76D8\u4E4B\u524D\u3002", notes: "\u73B0\u5728\u7EBF\u4E0D\u8981\u538B\u5230\u8FD8\u6CA1\u5F00\u59CB\u7684\u6269\u4EA7\u6761\u4E0A\u3002", build: gantt },
+  { id: "architecture", name: "\u67B6\u6784", relation: "\u5206\u5C42", summary: "\u7528\u6237\u3001\u6E20\u9053\u3001\u4E2D\u53F0\u3001\u5E95\u5EA7\u56DB\u5C42\uFF0C\u4E2D\u53F0\u7528\u5F3A\u8C03\u8272\u3002", notes: "\u6BCF\u5C42\u7684\u836F\u4E38\u662F\u8FD9\u4E00\u5C42\u7684\u5BF9\u8C61\uFF0C\u4E0D\u8981\u628A\u6D41\u7A0B\u6B65\u9AA4\u585E\u8FDB\u67B6\u6784\u3002", build: architecture },
+  { id: "case-compare", name: "\u6848\u4F8B\u5BF9\u6BD4", relation: "\u5BF9\u7167", summary: "\u73B0\u72B6\u548C\u76EE\u6807\u7528\u540C\u4E00\u7EC4\u6307\u6807\uFF0C\u5DEE\u989D\u653E\u5728\u4E2D\u95F4\u3002", notes: "\u5DE6\u53F3\u884C\u540D\u5BF9\u9F50\u3002\u4E2D\u95F4\u7684\u5DEE\u989D\u8981\u80FD\u4ECE\u5DE6\u53F3\u4E24\u4E2A\u6570\u51CF\u51FA\u6765\u3002", build: caseCompare },
+  { id: "funnel", name: "\u6F0F\u6597", relation: "\u8F6C\u5316", summary: "\u56DB\u6BB5\u6536\u7A84\uFF0C\u53F3\u4FA7\u5199\u8F6C\u5316\uFF0C\u5E95\u90E8\u70B9\u51FA\u6700\u5927\u6D41\u5931\u3002", notes: "\u6761\u7684\u957F\u77ED\u8DDF\u7740\u6570\u91CF\u8D70\u3002\u5E95\u90E8\u7ED3\u8BBA\u53EA\u8BB2\u6389\u5F97\u6700\u591A\u7684\u90A3\u4E00\u6BB5\u3002", build: funnel },
+  { id: "process", name: "\u6D41\u7A0B", relation: "\u6D41\u7A0B", summary: "\u4E94\u6B65\u4ECE\u5DE6\u5230\u53F3\uFF0C\u5E95\u90E8\u5199\u6E05\u4EA4\u63A5\u3002", notes: "\u8FDE\u7EBF\u5FC5\u987B\u5BF9\u5F97\u4E0A\u53E5\u5B50\u91CC\u7684\u987A\u5E8F\u3002\u4E0D\u8981\u753B\u6CA1\u6709\u4EA4\u63A5\u7684\u7BAD\u5934\u3002", build: process2 },
+  { id: "timeline", name: "\u65F6\u95F4\u7EBF", relation: "\u65F6\u95F4", summary: "\u56DB\u4E2A\u65F6\u70B9\u4EA4\u9519\u6392\u5728\u810A\u67F1\u4E24\u4FA7\u3002", notes: "\u65F6\u95F4\u4ECE\u5DE6\u5230\u53F3\u3002\u4E0A\u4E0B\u4EA4\u9519\u53EA\u4E3A\u8BFB\u5F97\u5F00\uFF0C\u4E0D\u8868\u793A\u4E24\u7EC4\u5BF9\u8C61\u3002", build: timeline },
+  { id: "closing", name: "\u6536\u675F", relation: "\u6536\u675F", summary: "\u4E00\u4E2A\u95EE\u9898\uFF0C\u4E00\u9879\u672C\u5468\u884C\u52A8\uFF0C\u4E00\u9879\u4EE5\u540E\u518D\u8BAE\u3002", notes: "\u672C\u5468\u53EA\u6709\u4E00\u4EF6\u4E8B\u3002\u4EE5\u540E\u518D\u8BAE\u7684\u6761\u4EF6\u5199\u5728\u53F3\u5361\u3002", build: closing },
+  { id: "decision", name: "\u53D6\u820D", relation: "\u53D6\u820D", summary: "\u5DE6\u8FB9\u662F\u5EFA\u8BAE\uFF0C\u53F3\u8FB9\u662F\u8FD9\u6B21\u4E0D\u505A\u7684\u4E8B\u3002", notes: "\u5EFA\u8BAE\u548C\u5426\u51B3\u4F7F\u7528\u540C\u4E00\u7EC4\u4E8B\u5B9E\uFF0C\u4E0D\u5F15\u5165\u65B0\u6570\u5B57\u3002", build: decision }
+];
+var BUILT = SPECS.map((spec) => {
+  const page = finish(spec.id, spec.name, spec.relation, spec.summary, spec.notes, spec.build());
+  return {
+    id: spec.id,
+    name: spec.name,
+    relation: spec.relation,
+    summary: spec.summary,
+    slots: slotsOf(page),
+    build: () => finish(spec.id, spec.name, spec.relation, spec.summary, spec.notes, spec.build())
+  };
+});
+var BY_ID = new Map(BUILT.map((layout) => [layout.id, layout]));
+var argumentLayouts = BUILT.map(({ id, name, relation, summary, slots }) => ({ id, name, relation, summary, slots }));
+function argumentLayoutById(id) {
+  const layout = BY_ID.get(id);
+  if (!layout)
+    return;
+  return { id: layout.id, name: layout.name, relation: layout.relation, summary: layout.summary, slots: layout.slots };
+}
+function argumentLayoutCatalog() {
+  return argumentLayouts.map((layout) => ({ ...layout, slots: layout.slots.map((slot) => ({ ...slot, bounds: { ...slot.bounds }, textCapacity: slot.textCapacity ? { ...slot.textCapacity } : undefined })) }));
+}
+
+// apps/electron/resources/skills/ppt-design/engine/contrast.ts
+function channel(value) {
+  const c = value / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+function luminance(hex) {
+  const raw = hex.replace("#", "").slice(0, 6);
+  const n = Number.parseInt(raw, 16);
+  const r = n >> 16 & 255;
+  const g = n >> 8 & 255;
+  const b = n & 255;
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+function contrastRatio(foreground, background) {
+  const a = luminance(foreground);
+  const b = luminance(background);
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function contrastMinimum(fontSize, bold) {
+  if (fontSize >= 24 || bold && fontSize >= 18)
+    return 3;
+  return 4.5;
+}
+function splitColor(hex) {
+  const raw = hex.replace("#", "");
+  const rgb = `#${raw.slice(0, 6).toUpperCase()}`;
+  if (raw.length >= 8)
+    return { rgb, alpha: Number.parseInt(raw.slice(6, 8), 16) / 255 };
+  return { rgb, alpha: 1 };
+}
+function composite(over, under) {
+  const src = splitColor(over);
+  const dst = splitColor(under);
+  if (src.alpha >= 0.999)
+    return src.rgb;
+  if (src.alpha <= 0.001)
+    return dst.rgb;
+  const mix = (a, b) => Math.round(a * src.alpha + b * (1 - src.alpha));
+  const left = channels(src.rgb);
+  const right = channels(dst.rgb);
+  return "#" + [mix(left.r, right.r), mix(left.g, right.g), mix(left.b, right.b)].map((channelByte) => channelByte.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+function channels(hex) {
+  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
 }
 
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
@@ -12027,29 +12493,6 @@ var jsYaml = {
   safeDump
 };
 
-// apps/electron/resources/skills/ppt-design/engine/types.ts
-var DECK_FORMAT = "selection-deck";
-var DECK_VERSION = 1;
-var CANVAS_WIDTH = 960;
-var CANVAS_HEIGHT = 540;
-var CANVAS_PRESETS = [
-  { id: "ppt169", label: "16:9", width: 960, height: 540 },
-  { id: "ppt43", label: "4:3", width: 768, height: 576 },
-  { id: "moments", label: "1:1", width: 810, height: 810 },
-  { id: "story", label: "9:16", width: 810, height: 1440 },
-  { id: "xiaohongshu", label: "3:4", width: 931.5, height: 1245 }
-];
-function canvasBySize(width, height) {
-  return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
-}
-function canvasSupported(width, height) {
-  if (!Number.isFinite(width) || !Number.isFinite(height))
-    return false;
-  if (canvasBySize(width, height))
-    return true;
-  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000;
-}
-
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
@@ -12206,7 +12649,7 @@ function parseChart(value, path, issues, pageId, elementId) {
     return;
   }
   rejectUnknown(value, ["kind", "categories", "series", "colors", "showValues", "showLegend", "valMin", "valMax", "holeSize", "lineWidth", "markerSize", "markerColor", "grid", "catLabelSize", "valLabelSize", "catLabelColor", "valLabelColor"], `${path}.chart`, issues, pageId, elementId);
-  const kinds = ["bar", "column", "line", "pie", "doughnut", "waterfall"];
+  const kinds = ["bar", "column", "line", "pie", "doughnut", "waterfall", "area", "scatter", "bubble", "radar", "combo", "stacked", "stackedPercent"];
   if (typeof value.kind !== "string" || !kinds.includes(value.kind)) {
     issues.push(issue("schema", `${path}.chart.kind \u4E0D\u652F\u6301`, pageId, elementId));
     return;
@@ -12220,25 +12663,82 @@ function parseChart(value, path, issues, pageId, elementId) {
     return;
   }
   const series = [];
+  const pointCount = value.categories.length;
+  const xy = value.kind === "scatter" || value.kind === "bubble";
   for (const entry of value.series) {
     if (!isObject2(entry)) {
       issues.push(issue("schema", `${path}.chart.series \u9879\u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
       return;
     }
-    rejectUnknown(entry, ["name", "values"], `${path}.chart.series`, issues, pageId, elementId);
+    rejectUnknown(entry, ["name", "values", "x", "sizes", "render"], `${path}.chart.series`, issues, pageId, elementId);
     if (typeof entry.name !== "string" || !entry.name.trim()) {
       issues.push(issue("schema", `${path}.chart.series.name \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`, pageId, elementId));
       return;
     }
-    if (!Array.isArray(entry.values) || entry.values.length !== value.categories.length || entry.values.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
+    if (!Array.isArray(entry.values) || entry.values.length !== pointCount || entry.values.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
       issues.push(issue("schema", `${path}.chart.series.values \u5FC5\u987B\u4E0E categories \u7B49\u957F\u4E14\u4E3A\u6709\u9650\u6570\u5B57`, pageId, elementId));
       return;
     }
-    series.push({ name: entry.name, values: entry.values });
+    const point = readPointField(entry.x, `${path}.chart.series.x`, pointCount, issues, pageId, elementId);
+    if (point === null)
+      return;
+    if (xy && !point) {
+      issues.push(issue("schema", `${path}.chart.series.x \u5FC5\u987B\u4E0E categories \u7B49\u957F`, pageId, elementId));
+      return;
+    }
+    if (!xy && point) {
+      issues.push(issue("schema", `${path}.chart.series.x \u53EA\u7528\u4E8E\u6563\u70B9\u56FE\u548C\u6C14\u6CE1\u56FE`, pageId, elementId));
+      return;
+    }
+    if (point && series[0]?.x && point.some((item, index) => item !== series[0].x[index])) {
+      issues.push(issue("schema", `${path}.chart \u7684\u6BCF\u6761\u5E8F\u5217\u5FC5\u987B\u5171\u7528\u540C\u4E00\u7EC4 x`, pageId, elementId));
+      return;
+    }
+    const sizes = readPointField(entry.sizes, `${path}.chart.series.sizes`, pointCount, issues, pageId, elementId);
+    if (sizes === null)
+      return;
+    if (value.kind === "bubble" && (!sizes || sizes.some((item) => item <= 0))) {
+      issues.push(issue("schema", `${path}.chart.series.sizes \u5FC5\u987B\u662F\u6B63\u6570\uFF0C\u5E76\u4E0E categories \u7B49\u957F`, pageId, elementId));
+      return;
+    }
+    if (value.kind !== "bubble" && sizes) {
+      issues.push(issue("schema", `${path}.chart.series.sizes \u53EA\u7528\u4E8E\u6C14\u6CE1\u56FE`, pageId, elementId));
+      return;
+    }
+    if (entry.render !== undefined && entry.render !== "column" && entry.render !== "line") {
+      issues.push(issue("schema", `${path}.chart.series.render \u53EA\u80FD\u662F column \u6216 line`, pageId, elementId));
+      return;
+    }
+    if (value.kind !== "combo" && entry.render !== undefined) {
+      issues.push(issue("schema", `${path}.chart.series.render \u53EA\u7528\u4E8E\u67F1\u7EBF\u7EC4\u5408`, pageId, elementId));
+      return;
+    }
+    series.push({
+      name: entry.name,
+      values: entry.values,
+      x: point,
+      sizes: sizes ?? undefined,
+      render: entry.render === "column" || entry.render === "line" ? entry.render : undefined
+    });
   }
   if (value.kind === "waterfall" && (series.length !== 1 || value.categories.length < 3)) {
     issues.push(issue("schema", `${path}.chart \u7011\u5E03\u56FE\u9700\u8981\u4E00\u6761\u5E8F\u5217\uFF0C\u4E14\u81F3\u5C11\u4E09\u4E2A\u7C7B\u522B\uFF08\u8D77\u70B9\u3001\u53D8\u5316\u3001\u7EC8\u70B9\uFF09`, pageId, elementId));
     return;
+  }
+  if (value.kind === "radar" && value.categories.length < 3) {
+    issues.push(issue("schema", `${path}.chart \u96F7\u8FBE\u56FE\u81F3\u5C11\u4E09\u4E2A\u7C7B\u522B`, pageId, elementId));
+    return;
+  }
+  if ((value.kind === "stacked" || value.kind === "stackedPercent") && series.length < 2) {
+    issues.push(issue("schema", `${path}.chart \u5806\u79EF\u56FE\u81F3\u5C11\u4E24\u6761\u5E8F\u5217`, pageId, elementId));
+    return;
+  }
+  if (value.kind === "combo") {
+    const roles = comboSeriesRoles(series);
+    if (series.length < 2 || !roles.includes("column") || !roles.includes("line")) {
+      issues.push(issue("schema", `${path}.chart \u67F1\u7EBF\u7EC4\u5408\u81F3\u5C11\u4E00\u6761\u67F1\u548C\u4E00\u6761\u7EBF`, pageId, elementId));
+      return;
+    }
   }
   let colors;
   if (value.colors !== undefined) {
@@ -12301,6 +12801,15 @@ function parseChart(value, path, issues, pageId, elementId) {
     catLabelColor: typeof value.catLabelColor === "string" ? value.catLabelColor : undefined,
     valLabelColor: typeof value.valLabelColor === "string" ? value.valLabelColor : undefined
   };
+}
+function readPointField(value, path, count, issues, pageId, elementId) {
+  if (value === undefined)
+    return;
+  if (!Array.isArray(value) || value.length !== count || value.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
+    issues.push(issue("schema", `${path} \u5FC5\u987B\u4E0E categories \u7B49\u957F\u4E14\u4E3A\u6709\u9650\u6570\u5B57`, pageId, elementId));
+    return null;
+  }
+  return value;
 }
 function optionalNumber(value, path, issues, pageId, elementId) {
   if (value === undefined)
@@ -12970,8 +13479,35 @@ function checkDeck(deck) {
   });
   return issues;
 }
-function checkPage(deck, page) {
+function checkArgumentLayout(page) {
+  const layout = argumentLayoutById(page.layout);
+  if (!layout)
+    return [];
   const issues = [];
+  const byId = new Map(page.elements.map((element) => [element.id, element]));
+  for (const slot of layout.slots) {
+    const element = byId.get(slot.id);
+    if (!element) {
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7F3A\u5C11\u5143\u7D20 ${slot.id}`, page.id, slot.id));
+      continue;
+    }
+    if (element.type !== slot.kind) {
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u5E94\u4E3A ${slot.kind}`, page.id, slot.id));
+    }
+    const box = element.bounds;
+    const placed = Math.abs(box.x - slot.bounds.x) <= 0.51 && Math.abs(box.y - slot.bounds.y) <= 0.51 && Math.abs(box.w - slot.bounds.w) <= 0.51 && Math.abs(box.h - slot.bounds.h) <= 0.51;
+    if (!placed)
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u4E0D\u5728\u76EE\u5F55\u51E0\u4F55\u4E0A`, page.id, slot.id));
+    if (slot.textCapacity && element.textCapacity) {
+      if (element.textCapacity.maxChars > slot.textCapacity.maxChars || element.textCapacity.maxLines > slot.textCapacity.maxLines) {
+        issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u628A textCapacity \u653E\u5230\u4E86\u76EE\u5F55\u5BB9\u91CF\u4E4B\u5916`, page.id, slot.id));
+      }
+    }
+  }
+  return issues;
+}
+function checkPage(deck, page) {
+  const issues = [...checkArgumentLayout(page)];
   const { width, height } = deck.canvas;
   let background = "#FFFFFF";
   try {
@@ -19571,6 +20107,12 @@ function addTable(pres, slide, deck, element, platform) {
     objectName: element.id
   });
 }
+function themeChartPalette(deck, chart, count) {
+  const tokens = chart.colors ?? ["accent", "ink", "signal", "muted"].filter((name) => deck.theme.colors[name]).map((name) => `$${name}`);
+  const resolved = (tokens.length ? tokens : ["$accent"]).map((color) => hex(colorRef(color, deck.theme, "$accent")));
+  const width = Math.max(count, resolved.length, 1);
+  return Array.from({ length: width }, (_, index) => resolved[index % resolved.length]);
+}
 function addChart(pres, slide, deck, element, platform, pageBackground) {
   const chart = element.chart;
   const background = hex(pageBackground);
@@ -19580,8 +20122,10 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
   const inverse = hex(colorRef("$inverse", deck.theme, "#FFFFFF"));
   const dark = luminance(pageBackground) < 0.4;
   const label = dark ? inverse : muted;
+  const valueInk = dark ? inverse : ink;
   const grid = dark ? "4A4A4A" : line;
   const face = resolveFontFace(deck, "$cjk", platform);
+  const palette = themeChartPalette(deck, chart, Math.max(chart.series.length, chart.categories.length, 2));
   const base = {
     x: inches2(element.bounds.x),
     y: inches2(element.bounds.y),
@@ -19604,10 +20148,18 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" },
     catGridLine: { style: "none" },
     dataBorder: { pt: 0, color: background },
-    chartColors: (chart.colors ?? ["$accent", "$ink"]).map((color) => hex(colorRef(color, deck.theme, "$accent"))),
+    chartColors: palette,
+    legendFontFace: face,
+    legendFontSize: 12,
+    legendColor: label,
+    legendPos: "b",
+    dataLabelFontFace: face,
+    dataLabelFontSize: 11,
+    dataLabelColor: valueInk,
     valAxisMinVal: chart.valMin,
     valAxisMaxVal: chart.valMax
   };
+  const rows = chart.series.map((series) => ({ name: series.name, labels: chart.categories, values: series.values }));
   if (chart.kind === "waterfall") {
     const parts = waterfallParts(chart.series[0].values);
     const colors = chart.colors ?? ["$paper", "$accent", "$ink"];
@@ -19629,21 +20181,98 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     });
     return;
   }
-  const type = chart.kind === "line" ? pres.ChartType.line : chart.kind === "pie" ? pres.ChartType.pie : chart.kind === "doughnut" ? pres.ChartType.doughnut : pres.ChartType.bar;
-  const data = chart.series.map((series) => ({ name: series.name, labels: chart.categories, values: series.values }));
-  slide.addChart(type, data, {
+  if (chart.kind === "combo") {
+    const roles = comboSeriesRoles(chart.series);
+    const columns = chart.series.filter((_, index) => roles[index] === "column");
+    const lines = chart.series.filter((_, index) => roles[index] === "line");
+    let colorIndex = 0;
+    const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]);
+    const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]);
+    const axisLabel = {
+      valAxisLabelColor: label,
+      valAxisLabelFontFace: face,
+      valAxisLabelFontSize: chart.valLabelSize ?? 11,
+      valAxisLineShow: false
+    };
+    slide.addChart([
+      {
+        type: pres.ChartType.bar,
+        data: columns.map((series) => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: { barDir: "col", barGrouping: "clustered", barGapWidthPct: 50, chartColors: columnColors }
+      },
+      {
+        type: pres.ChartType.line,
+        data: lines.map((series) => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: {
+          secondaryValAxis: true,
+          chartColors: lineColors,
+          lineSize: chart.lineWidth ?? 2.25,
+          lineDataSymbol: "circle",
+          lineDataSymbolSize: chart.markerSize ?? 10,
+          lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : lineColors[0],
+          lineDataSymbolLineSize: 0
+        }
+      }
+    ], {
+      ...base,
+      showLegend: chart.showLegend ?? true,
+      valAxisMinVal: undefined,
+      valAxisMaxVal: undefined,
+      valAxes: [
+        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valAxisMaxVal: chart.valMax, valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" } },
+        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valGridLine: { style: "none" } }
+      ]
+    });
+    return;
+  }
+  if (chart.kind === "scatter" || chart.kind === "bubble") {
+    const x = chart.series[0]?.x ?? [];
+    const xs = chart.series.flatMap((series) => series.x ?? []);
+    const ys = chart.series.flatMap((series) => series.values);
+    const xExtent = markerExtent(xs, chart.kind === "bubble" ? 0.45 : 0.14);
+    const yExtent = markerExtent(ys, chart.kind === "bubble" ? 1.15 : 0.16);
+    slide.addChart(chart.kind === "bubble" ? pres.ChartType.bubble : pres.ChartType.scatter, [
+      { name: "X", values: x },
+      ...chart.series.map((series) => ({
+        name: series.name,
+        labels: chart.categories,
+        values: series.values,
+        sizes: series.sizes
+      }))
+    ], {
+      ...base,
+      lineSize: chart.kind === "scatter" ? 0 : chart.lineWidth ?? 0,
+      lineDataSymbol: "circle",
+      lineDataSymbolSize: chart.markerSize ?? (chart.kind === "bubble" ? 12 : 14),
+      lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
+      lineDataSymbolLineSize: 1.25,
+      showLegend: chart.showLegend ?? chart.series.length > 1,
+      catAxisMinVal: xExtent.min,
+      catAxisMaxVal: xExtent.max,
+      valAxisMinVal: chart.valMin ?? yExtent.min,
+      valAxisMaxVal: chart.valMax ?? yExtent.max,
+      catGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" }
+    });
+    return;
+  }
+  const type = chart.kind === "line" ? pres.ChartType.line : chart.kind === "area" ? pres.ChartType.area : chart.kind === "pie" ? pres.ChartType.pie : chart.kind === "doughnut" ? pres.ChartType.doughnut : chart.kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
+  const grouped = chart.kind === "stacked" || chart.kind === "stackedPercent";
+  slide.addChart(type, rows, {
     ...base,
     barDir: chart.kind === "bar" ? "bar" : "col",
     ...chart.kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
-    barGrouping: "clustered",
-    barGapWidthPct: 60,
+    barGrouping: chart.kind === "stackedPercent" ? "percentStacked" : grouped ? "stacked" : chart.kind === "area" ? "standard" : "clustered",
+    barGapWidthPct: grouped ? 40 : 60,
+    chartColorsOpacity: chart.kind === "area" || chart.kind === "radar" ? 46 : undefined,
+    radarStyle: chart.kind === "radar" ? "filled" : undefined,
     lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: "circle",
-    lineDataSymbolSize: chart.markerSize ?? (chart.kind === "line" ? 8 : 12),
+    lineDataSymbolSize: chart.markerSize ?? (chart.kind === "line" || chart.kind === "radar" ? 8 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMin ?? 0,
-    valAxisMaxVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMax,
+    showLegend: chart.showLegend ?? (chart.series.length > 1 || chart.kind === "pie" || chart.kind === "doughnut"),
+    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" || chart.kind === "radar" ? undefined : chart.kind === "stackedPercent" ? 0 : chart.valMin ?? 0,
+    valAxisMaxVal: chart.kind === "pie" || chart.kind === "doughnut" || chart.kind === "radar" || chart.kind === "stackedPercent" ? undefined : chart.valMax,
     holeSize: chart.kind === "doughnut" ? chart.holeSize ?? 62 : undefined
   });
 }
@@ -19716,9 +20345,27 @@ async function finishSlideXml(bytes, deck, platform) {
       changed = true;
     }
   }
+  if (await shrinkBubbleScale(zip))
+    changed = true;
   if (!changed)
     return bytes;
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+async function shrinkBubbleScale(zip) {
+  let changed = false;
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    let xml = await file.async("string");
+    if (!xml.includes("<c:bubbleChart") || xml.includes("<c:bubbleScale"))
+      continue;
+    const start = xml.indexOf("<c:bubbleChart");
+    const axis = xml.indexOf("<c:axId", start);
+    if (axis < 0)
+      continue;
+    xml = `${xml.slice(0, axis)}<c:bubbleScale val="48"/>${xml.slice(axis)}`;
+    zip.file(file.name, xml);
+    changed = true;
+  }
+  return changed;
 }
 function rewriteShape(block, faces, fills, evenOdd) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
@@ -19792,6 +20439,13 @@ function patternXml(pattern) {
 function escapeXml(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
+function markerExtent(values, ratio) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const span = Math.max(max - min, 1);
+  return { min: min - span * ratio, max: max + span * ratio };
+}
 function waterfallParts(values) {
   const base = [];
   const up = [];
@@ -19824,7 +20478,7 @@ function waterfallParts(values) {
 function usage() {
   console.log(JSON.stringify({
     status: "error",
-    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]"
+    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]"
   }));
   process.exit(1);
 }
@@ -19861,6 +20515,10 @@ function emit(status, body, code) {
   process.exit(code);
 }
 var flags = parseArgs(process.argv.slice(2));
+if (flags.command === "layouts") {
+  console.log(JSON.stringify({ status: "ok", layouts: argumentLayoutCatalog() }));
+  process.exit(0);
+}
 if (!flags.file)
   usage();
 var file = resolve(flags.file);
