@@ -12,7 +12,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
-import type { ManagedArtifact } from '@craft-agent/shared/protocol'
+import type { ManagedArtifact, PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -1356,8 +1356,9 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest) => {
     let locallyCommitted = false
+    let optimisticMessageId: string | undefined
     try {
       const officeCommand = message.trim().match(/^\/office-edit(?:\s+([\s\S]+))?$/i)
       const naturalOfficeOpen = /^(?:请)?打开(?:这个|这份)?(?:Excel|Word|PPT|PowerPoint|文档|表格|演示文稿)(?:让我|供我|以便我)?选(?:择)?(?:区域|元素|内容)[。！!]?$/i.test(message.replace(/\s+/g, ''))
@@ -1415,6 +1416,10 @@ export default function App() {
         const failedCount = storeResults.filter(r => r.status === 'rejected').length
         if (failedCount > 0) {
           console.warn(`${failedCount} attachment(s) failed to store`)
+          if (ppt) {
+            toast.error(t('ppt.attachmentStoreFailed'))
+            return false
+          }
           // Add warning message to session so user knows some attachments weren't included
           const failedNames = attachments
             .filter((_, i) => storeResults[i].status === 'rejected')
@@ -1433,7 +1438,7 @@ export default function App() {
             && (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
           )
           if (failedImages.length > 0) {
-            return
+            return false
           }
         }
 
@@ -1524,6 +1529,7 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         isPending: true,  // Optimistic - will be confirmed by backend
         isQueued: sendingMidStream,
+        ...(ppt ? { turnContext: { ppt } } : {}),
       }
 
       // Optimistic UI update - add user message and set processing state
@@ -1534,6 +1540,7 @@ export default function App() {
         lastMessageAt: sendingMidStream ? s.lastMessageAt : Date.now()
       }))
       locallyCommitted = true
+      optimisticMessageId = userMessage.id
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, outgoingMessage, processedAttachments, storedAttachments, {
@@ -1543,6 +1550,7 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
         annotationFollowUps,
+        ppt,
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
@@ -1552,6 +1560,7 @@ export default function App() {
           permissionMode: optionSnapshot?.permissionMode ?? 'ask',
         } : undefined,
       })
+      if (ppt) updateSessionById(sessionId, { ppt })
       // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
@@ -1559,7 +1568,7 @@ export default function App() {
       updateSessionById(sessionId, (s) => ({
         isProcessing: locallyCommitted ? false : s.isProcessing,
         messages: [
-          ...s.messages,
+          ...s.messages.filter(item => item.id !== optimisticMessageId),
           {
             id: generateMessageId(),
             role: 'error' as const,
@@ -1568,7 +1577,7 @@ export default function App() {
           }
         ]
       }))
-      return locallyCommitted
+      return false
     }
   }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext, t])
 

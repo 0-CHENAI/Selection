@@ -5,9 +5,12 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { getPptCatalog, getPptTemplatePages } from '../../services/ppt-catalog'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
+  RPC_CHANNELS.skills.GET_PPT_CATALOG,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
@@ -16,6 +19,8 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, () => getPptCatalog())
+  server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES, (_ctx, templateId: string) => getPptTemplatePages(templateId))
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)

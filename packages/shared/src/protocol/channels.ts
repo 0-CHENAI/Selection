@@ -309,6 +309,8 @@ export const RPC_CHANNELS = {
   },
   skills: {
     GET: 'skills:get',
+    GET_PPT_CATALOG: 'skills:getPptCatalog',
+    GET_PPT_TEMPLATE_PAGES: 'skills:getPptTemplatePages',
     GET_FILES: 'skills:getFiles',
     DELETE: 'skills:delete',
     OPEN_EDITOR: 'skills:openEditor',

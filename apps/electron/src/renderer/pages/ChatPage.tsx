@@ -35,6 +35,10 @@ import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDi
 import { isProjectConversation } from '@craft-agent/shared/projects/working-directory'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
+import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { FileAttachment } from '../../shared/types'
+import { pptComposerAtomFamily } from '@/atoms/ppt'
+import { ensurePptProSession } from '@/lib/ppt-handover'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import {
   ensureSessionMessagesLoadedAtom,
@@ -62,9 +66,10 @@ function SourcesResizeHandle(props: React.HTMLAttributes<HTMLDivElement>) {
 
 export interface ChatPageProps {
   sessionId: string | null
+  pptMode?: boolean
 }
 
-const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
+const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: ChatPageProps) {
   const { t } = useTranslation()
   const isDraft = sessionId == null
   // Diagnostic: mark when component runs
@@ -109,8 +114,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   } = useAppShellContext()
 
   const draftStore = useStore()
-  const draftWorkMode = useAtomValue(workModeViewAtom)
-  const optionsSessionId = sessionId ?? draftSessionOptionsId(activeWorkspaceId ?? '', orchestrationProjectId ?? undefined, draftWorkMode)
+  const selectedDraftWorkMode = useAtomValue(workModeViewAtom)
+  const draftWorkMode = pptMode ? 'PRO' : selectedDraftWorkMode
+  const optionsSessionId = sessionId ?? `${draftSessionOptionsId(activeWorkspaceId ?? '', pptMode ? undefined : orchestrationProjectId ?? undefined, draftWorkMode)}${pptMode ? ':ppt' : ''}`
   const [draftComposer, setDraftComposer] = useAtom(draftComposerAtomFamily(optionsSessionId))
 
   // Use the unified session options hook for clean access
@@ -130,6 +136,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Check if session exists in metadata (for loading state detection)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const sessionMeta = sessionId ? sessionMetaMap.get(sessionId) : undefined
+  const isPptSession = pptMode || session?.ppt !== undefined || sessionMeta?.ppt !== undefined
+  const pptSendAbort = React.useRef<AbortController>()
+  React.useEffect(() => () => pptSendAbort.current?.abort(), [optionsSessionId])
+  React.useEffect(() => {
+    if (!isFocusedPanel) pptSendAbort.current?.abort()
+  }, [isFocusedPanel])
 
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
@@ -302,7 +314,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const submitDraftRef = React.useRef(createDraftSubmission<Session>(() => {
     const ctx = draftCreateRef.current
     return ctx.onCreateSession(ctx.activeWorkspaceId!, {
-      workMode: ctx.workMode,
+      workMode: pptMode || draftStore.get(pptComposerAtomFamily(optionsSessionId)) ? 'PRO' : ctx.workMode,
+      ppt: draftStore.get(pptComposerAtomFamily(optionsSessionId)) ?? (pptMode ? {} : undefined),
       projectId: ctx.projectId,
       model: ctx.model || undefined,
       llmConnection: ctx.connection,
@@ -318,7 +331,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     submitDraftRef.current = createDraftSubmission<Session>(() => {
       const ctx = draftCreateRef.current
       return ctx.onCreateSession(ctx.activeWorkspaceId!, {
-        workMode: ctx.workMode,
+        workMode: pptMode || draftStore.get(pptComposerAtomFamily(optionsSessionId)) ? 'PRO' : ctx.workMode,
+        ppt: draftStore.get(pptComposerAtomFamily(optionsSessionId)) ?? (pptMode ? {} : undefined),
         projectId: ctx.projectId,
         model: ctx.model || undefined,
         llmConnection: ctx.connection,
@@ -330,7 +344,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       })
     })
     setDraftBusy(false)
-  }, [isDraft, optionsSessionId])
+  }, [isDraft, optionsSessionId, draftStore, pptMode])
 
   React.useEffect(() => {
     if (isDraft && draftComposer.initialized && !draftComposer.model && initialDraftConnection) {
@@ -596,7 +610,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Get display title for header - use getSessionTitle for consistent fallback logic with SessionList
   // Priority: name > first user message > preview > "New chat"
   const displayTitle = isDraft
-    ? t('session.newSession')
+    ? t(pptMode ? 'ppt.new' : 'session.newSession')
     : session ? getSessionTitle(session) : (sessionMeta ? getSessionTitle(sessionMeta) : t('chat.session'))
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
@@ -715,7 +729,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         {currentWorkMode}
       </span>}
       {sessionHeaderActions}
-      {sessionId && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
+      {sessionId && !isPptSession && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
         canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
     </div>
   )
@@ -804,26 +818,49 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   ])
 
   const pendingCreatedSessionRef = React.useRef<Session | null>(null)
-  const handleSendMessage = React.useCallback((message: string, attachments?: import('../../shared/types').FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
-    if (isDraft) {
-      if (!activeWorkspaceId || draftBusy) return
-      setDraftBusy(true)
-      void submitDraftRef.current(async (created) => {
-        pendingCreatedSessionRef.current = created
-        onSendMessage(created.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
-        onInputChange(optionsSessionId, '')
-        onAttachmentsChange(optionsSessionId, [])
-        setDraftComposer(previous => prepareNextDraft(previous, created.projectId))
-        navigate(routes.view.allSessions(created.id))
-      }).catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : String(error))
-      }).finally(() => {
-        setDraftBusy(false)
-      })
-      return
+  const pptHandoverRef = React.useRef<{ sourceId: string; handoverId: string }>()
+  const handleSendMessage = React.useCallback(async (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: SendMessageOptions['annotationFollowUps']) => {
+    const chosen = draftStore.get(pptComposerAtomFamily(optionsSessionId))
+    const ppt: PptRequest | undefined = chosen === null ? (isPptSession ? {} : undefined) : chosen ?? session?.ppt ?? sessionMeta?.ppt ?? (pptMode ? {} : undefined)
+    const outgoingSkills = ppt ? [...new Set([...(skillSlugs ?? []), 'ppt-design'])] : skillSlugs
+    if (draftBusy) return false
+    setDraftBusy(true)
+    const abort = new AbortController()
+    pptSendAbort.current = abort
+    try {
+      if (isDraft) {
+        if (!activeWorkspaceId) return false
+        let accepted = false
+        await submitDraftRef.current(async created => {
+          pendingCreatedSessionRef.current = created
+          abort.signal.throwIfAborted()
+          accepted = await onSendMessage(created.id, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt) === true
+          if (!accepted) return
+          onInputChange(optionsSessionId, '')
+          onAttachmentsChange(optionsSessionId, [])
+          setDraftComposer(previous => prepareNextDraft(previous, created.projectId))
+          if (!abort.signal.aborted) navigate(ppt ? routes.view.ppt(created.id) : routes.view.allSessions(created.id))
+        })
+        return accepted
+      }
+      if (!session) return false
+      let targetId = session.id
+      if (ppt && session.workMode !== 'PRO') {
+        pptHandoverRef.current = { sourceId: session.id, handoverId: crypto.randomUUID() }
+        targetId = await ensurePptProSession(session, pptHandoverRef.current.handoverId, (id, command) => window.electronAPI.sessionCommand(id, command), abort.signal)
+        await draftStore.set(ensureSessionMessagesLoadedAtom, targetId)
+      }
+      abort.signal.throwIfAborted()
+      const accepted = await onSendMessage(targetId, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt) === true
+      if (accepted && ppt && !abort.signal.aborted) navigate(routes.view.ppt(targetId))
+      return accepted
+    } catch (error) {
+      if (!abort.signal.aborted) toast.error(error instanceof Error ? error.message : String(error))
+      return false
+    } finally {
+      if (pptSendAbort.current === abort) setDraftBusy(false)
     }
-    if (session) onSendMessage(session.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
-  }, [isDraft, activeWorkspaceId, draftBusy, onSendMessage, session, optionsSessionId, onInputChange, onAttachmentsChange, setDraftComposer])
+  }, [draftStore, optionsSessionId, session, sessionMeta?.ppt, pptMode, isPptSession, draftBusy, isDraft, activeWorkspaceId, onSendMessage, onInputChange, onAttachmentsChange, setDraftComposer])
 
   if (session && pendingCreatedSessionRef.current?.id === session.id) {
     pendingCreatedSessionRef.current = null
@@ -978,6 +1015,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             <ChatDisplay
               ref={chatDisplayRef}
               session={displaySession ?? draftSession}
+              pptMode={isPptSession}
+              pptComposerKey={optionsSessionId}
               onSendMessage={handleSendMessage}
               onOpenFile={handleOpenFile}
               onOpenArtifact={handleOpenArtifact}

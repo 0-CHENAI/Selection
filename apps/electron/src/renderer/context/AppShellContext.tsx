@@ -11,6 +11,8 @@ import { createContext, useContext, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import type { ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
+import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { ContentBadge } from '@craft-agent/core'
 import type {
   Session,
   Workspace,
@@ -85,7 +87,7 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => boolean | void | Promise<boolean | void>
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest) => boolean | void | Promise<boolean | void>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

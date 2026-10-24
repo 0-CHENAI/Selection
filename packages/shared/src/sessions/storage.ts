@@ -181,6 +181,7 @@ export async function createSession(
     reservedSessionId?: string;
     handover?: SessionConfig['handover'];
     workMode?: SessionConfig['workMode'];
+    ppt?: SessionConfig['ppt'];
     executionRootSessionId?: string;
     name?: string;
     workingDirectory?: string;
@@ -236,7 +237,8 @@ export async function createSession(
   const session: SessionConfig = {
     id: sessionId,
     handover: options?.handover,
-    workMode: options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
+    ppt: options?.ppt,
+    workMode: options?.ppt ? 'PRO' : options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
     workModeNeedsReview: false,
     executionRootSessionId: options?.executionRootSessionId ?? sessionId,
     workspaceRootPath,

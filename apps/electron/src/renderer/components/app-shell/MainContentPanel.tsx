@@ -326,7 +326,7 @@ export function MainContentPanel({
 
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <ChatPage sessionId={navState.details?.sessionId ?? null} />
+        <ChatPage sessionId={navState.details?.sessionId ?? null} pptMode={navState.filter.kind === 'ppt'} />
       </Panel>
     )
   }

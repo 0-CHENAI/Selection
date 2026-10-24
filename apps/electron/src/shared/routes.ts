@@ -97,6 +97,10 @@ export const routes = {
     allSessions: (sessionId?: string) =>
       sessionId ? `allSessions/session/${sessionId}` as const : 'allSessions' as const,
 
+    /** PPT history and composer share the session runtime, with a dedicated filter. */
+    ppt: (sessionId?: string) =>
+      sessionId ? `ppt/session/${sessionId}` as const : 'ppt' as const,
+
     /** Flagged view (sessions navigator, flagged filter) */
     flagged: (sessionId?: string) =>
       sessionId ? `flagged/session/${sessionId}` as const : 'flagged' as const,

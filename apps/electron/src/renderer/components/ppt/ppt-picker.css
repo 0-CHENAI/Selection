@@ -1,0 +1,11 @@
+/* Approved picker geometry uses a deliberately stronger photographic-card shadow. */
+.ppt-template-cover,
+.ppt-template-flight {
+  box-shadow: 0 4px 14px #0000002e;
+}
+.ppt-template-remove {
+  box-shadow: 0 3px 10px #00000047;
+}
+.ppt-template-flight {
+  z-index: var(--z-floating-menu, 400);
+}
