@@ -65,10 +65,11 @@ interface UiEvent {
 }
 
 /**
- * Simulated Moonshot Anthropic SSE. Not a live api.moonshot.cn call.
- * Public framing: each event is `data:{json}` plus one LF (Kimi coding clients)
- * or official `event:` / blank-line SSE. Bytes are pushed in pieces, then the
- * next character waits a realistic token gap (well under the old 50ms hold).
+ * Simulated Moonshot Anthropic SSE. Not a live api.moonshot.cn call, and not
+ * the official Kimi Code provider (Chat Completions since Pi 1.3.0).
+ * Public framing: each event is `data:{json}` plus one LF (Kimi-style Anthropic
+ * gateways) or official `event:` / blank-line SSE. Bytes are pushed in pieces,
+ * then the next character waits a realistic token gap (well under the old 50ms hold).
  */
 async function readLiveUiEvents(): Promise<UiEvent[]> {
   const repoRoot = resolve(import.meta.dir, '../../../../../../')

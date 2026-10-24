@@ -728,10 +728,12 @@ export const PI_PREFERRED_DEFAULTS: Record<string, string[]> = {
   // provider's Pi catalog still lists them. gpt-4* is excluded from the
   // selectable OpenAI catalog, so it is not a preferred default.
   openai: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3'],
-  // Codex ChatGPT catalog (Pi 1.2.0) is gpt-6.1-sol, gpt-6-*, gpt-5.6-*, gpt-5.5,
-  // and gpt-5.3-codex-spark. gpt-5.2 / gpt-5.1 / gpt-5 / o4-mini / o3 / gpt-4o
-  // are not in that catalog.
-  'openai-codex': ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'],
+  // Codex ChatGPT catalog (Pi 1.4.0) is gpt-6.1-sol, gpt-6-*, and gpt-5.6-*.
+  // Pi 1.4.0 removed gpt-5.5 and gpt-5.3-codex-spark because the Codex backend
+  // rejects them for ChatGPT accounts. gpt-5.2 / gpt-5.1 / gpt-5 / o4-mini /
+  // o3 / gpt-4o are not in that catalog. The OpenAI API-key catalog still
+  // lists gpt-5.5, so it stays on the `openai` preferred list above.
+  'openai-codex': ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   // Stable models first so the connection-setup test (which uses
   // getDefaultModelForConnection) lands on a reliable model.
   // gemini-3-pro-preview and gemini-3.1-pro-preview are intermittently
