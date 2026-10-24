@@ -49,6 +49,8 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 实时侧窗读取会话 `data/deck.json` 和 `data/slides/slide-01.png` 起的逐页截图（页码从 1 开始，两位数字）。每写完一页就渲染到这两个位置。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和 `deck_render`。
 
+用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。生成时以那里的 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准，不要再去找临时上传路径。
+
 截图失败但 PPTX 已写出时，`screenshots.available` 为 `false`。这时 G4 不能通过。
 
 ## 质量门：G1 → G5

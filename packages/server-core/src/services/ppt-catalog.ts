@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { getBundledSkillsDir } from '@craft-agent/shared/skills'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { PptCatalog, PptCategory, PptRequest, PptTheme, SendMessageOptions } from '@craft-agent/shared/protocol'
+import { customTemplateReference, listCustomCatalogTemplates } from './ppt-library'
 
 type CatalogEntry = { name: string; design: string; deck: string; canvas?: string }
 type Picker = { homeOrder: string[]; templates: Record<string, { title: string; category: PptCategory; previewId: string }> }
@@ -68,6 +69,14 @@ export function getPptCatalog(root = getPptSkillRoot()): PptCatalog {
   return result
 }
 
+/** Custom templates stay out of the bundled cache and are read from the user library on each request. */
+export function getPptCatalogWithLibrary(root = getPptSkillRoot()): PptCatalog {
+  const bundled = getPptCatalog(root)
+  let custom: PptCatalog['templates'] = []
+  try { custom = listCustomCatalogTemplates() } catch { custom = [] }
+  return { templates: [...bundled.templates, ...custom], themes: bundled.themes }
+}
+
 /** Full pages are deliberately excluded from the compact catalog and loaded per template. */
 export function getPptTemplatePages(templateId: string, root = getPptSkillRoot()): string[] {
   root = realpathSync(root)
@@ -89,7 +98,11 @@ export function validatePptRequest(value: PptRequest, root = getPptSkillRoot()):
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid PPT request')
   const request: PptRequest = {}
   if (value.templateId !== undefined) {
-    if (typeof value.templateId !== 'string' || !Object.hasOwn(entries(root), value.templateId)) throw new Error('Unknown PPT template')
+    if (typeof value.templateId !== 'string') throw new Error('Unknown PPT template')
+    const custom = value.templateId.startsWith('custom-') ? customTemplateReference(value.templateId) : null
+    if (value.templateId.startsWith('custom-')) {
+      if (!custom) throw new Error('Unknown PPT template')
+    } else if (!Object.hasOwn(entries(root), value.templateId)) throw new Error('Unknown PPT template')
     request.templateId = value.templateId
   }
   if (value.themeId !== undefined) {
@@ -126,6 +139,10 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
   request = validatePptRequest(request, root)
   const parts = ['[skill:ppt-design]', '<ppt_generation_context>', 'Create an editable PPT using ppt-design and its selection-deck engine. Follow the user’s natural-language requirements and attached source files.']
   if (request.templateId) {
+    const custom = customTemplateReference(request.templateId)
+    if (custom) {
+      parts.push(custom, 'Use the stored library copy as the visual reference. Adapt structure, page count, narrative and content to the user. Do not look for a temporary upload.')
+    } else {
     const entry = entries(root)[request.templateId]
     if (!entry) throw new Error('Unknown PPT template')
     const display = picker(root).templates[request.templateId]!
@@ -140,6 +157,7 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
         return `Reference page ${page}: ${realpathSync(join(root, asset))}`
       }),
       `Selected design.md:\n${design}`)
+    }
   }
   if (request.themeId) {
     const theme = json<{ name: string; colors: Record<string, string>; fonts: unknown }>(root, `styles/themes/${request.themeId}.json`)
