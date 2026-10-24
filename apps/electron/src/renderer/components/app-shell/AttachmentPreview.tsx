@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import type { FileAttachment } from "../../../shared/types"
 import { motion, useReducedMotion } from 'motion/react'
 import { SelectedTemplate } from '@/components/ppt/SelectedTemplate'
-import { CARD_WIDTH, tiltExtent } from '@/components/ppt/geometry'
+import { CARD_WIDTH, centeredOverhangBottom, centeredOverhangTop } from '@/components/ppt/geometry'
 
 // Re-export for backward compatibility
 export { FileTypeIcon, getFileTypeLabel }
@@ -34,7 +34,7 @@ export function AttachmentPreview({ attachments, onRemove, disabled, loadingCoun
   if (attachments.length === 0 && loadingCount === 0 && !hasPptTemplate) return null
 
   return (
-    <div data-testid="composer-attachment-row" className="flex items-end gap-2 px-4 pb-3 border-b border-border/50 overflow-x-auto" style={{ paddingTop: hasPptTemplate ? Math.max(20, Math.ceil(tiltExtent(CARD_WIDTH).overhangTop)) : 12 }}>
+    <div data-testid="composer-attachment-row" className="flex items-end gap-2 border-b border-border/50 px-4 overflow-x-auto" style={{ paddingTop: hasPptTemplate ? Math.max(20, Math.ceil(centeredOverhangTop(CARD_WIDTH))) : 12, paddingBottom: hasPptTemplate ? Math.max(12, Math.ceil(centeredOverhangBottom(CARD_WIDTH)) + 2) : 12 }}>
       {hasPptTemplate && pptComposerKey !== undefined && <SelectedTemplate composerKey={pptComposerKey} disabled={disabled} />}
       {attachments.map((attachment, index) => (
         <motion.div layout={!reduced} key={`${attachment.path}-${index}`} className="shrink-0" transition={{ duration: reduced ? 0 : .3 }}>

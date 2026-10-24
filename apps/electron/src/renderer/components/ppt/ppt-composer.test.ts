@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { createStore } from 'jotai'
 import { pptComposerAtomFamily, replacePptTemplate } from '../../atoms/ppt'
-import { attachTrail, CARD_HEIGHT, CARD_WIDTH, ROW_GAP, tiltExtent, VISUAL_GAP } from './geometry'
+import { attachTrail, CARD_HEIGHT, CARD_WIDTH, centeredCardTop, centeredOverhangBottom, centeredOverhangTop, CHIP_HEIGHT, ROW_GAP, tiltExtent, VISUAL_GAP } from './geometry'
 import { groupPptHistory } from './history'
 import { sessionAtomFamily } from '../../atoms/sessions'
 import type { Session } from '../../../shared/types'
@@ -68,6 +68,16 @@ describe('attachment painted geometry', () => {
     expect(20 + extent.top).toBeGreaterThanOrEqual(0)
     expect(attachTrail()).toBeGreaterThanOrEqual(20)
     expect(attachTrail()).toBeLessThan(30)
+  })
+  it('centers the rotated cover on the chip instead of the fan and control box', () => {
+    const top = centeredCardTop()
+    const coverCenter = top + CARD_HEIGHT / 2
+    const chipCenter = CHIP_HEIGHT / 2
+    expect(Math.abs(coverCenter - chipCenter)).toBeLessThanOrEqual(2)
+    expect(centeredOverhangTop()).toBeLessThanOrEqual(20)
+    const below = centeredOverhangBottom()
+    expect(below).toBeGreaterThan(0)
+    expect(Math.max(12, Math.ceil(below) + 2)).toBeGreaterThan(below)
   })
   it('scales clearance rather than hard-coding a gap for one width', () => {
     for (const width of [76, 92, 124, 180]) {

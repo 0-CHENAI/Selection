@@ -1,5 +1,10 @@
 export const CARD_WIDTH = 124
 export const CARD_HEIGHT = CARD_WIDTH * 9 / 16
+/**
+ * Attachment chips use Tailwind `h-16` (4rem). The app root font size is 15px,
+ * so the rendered chip is 60px, not the 64px default rem.
+ */
+export const CHIP_HEIGHT = 60
 export const FAN = [{ r: 8, x: 12, y: -3 }, { r: 4, x: 6, y: -1.5 }] as const
 export const CTRL = { size: 20, xOff: 8, menuOff: 9 }
 export const VISUAL_GAP = 10
@@ -40,4 +45,21 @@ export function tiltExtent(width: number) {
 }
 export function attachTrail(width = CARD_WIDTH) {
   return Math.ceil(tiltExtent(width).overhangRight + VISUAL_GAP - ROW_GAP)
+}
+
+/** Top of the unrotated cover when its center shares the chip's center. */
+export function centeredCardTop(chipHeight = CHIP_HEIGHT, cardHeight = CARD_HEIGHT) {
+  return (chipHeight - cardHeight) / 2
+}
+
+/** Painted pixels of the tilted cover above the chip box. Fan pages and the × are included. */
+export function centeredOverhangTop(width = CARD_WIDTH, chipHeight = CHIP_HEIGHT) {
+  const height = width * 9 / 16
+  return -(centeredCardTop(chipHeight, height) + tiltExtent(width).top)
+}
+
+/** Painted pixels below the chip box. The row pad must cover this so the ⋯ and fan stay above the input. */
+export function centeredOverhangBottom(width = CARD_WIDTH, chipHeight = CHIP_HEIGHT) {
+  const height = width * 9 / 16
+  return centeredCardTop(chipHeight, height) + tiltExtent(width).bottom - chipHeight
 }

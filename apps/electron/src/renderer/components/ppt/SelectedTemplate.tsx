@@ -31,6 +31,7 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
   const patch = (value: Partial<PptRequest>) => setRequest(previous => ({ ...previous, ...value }))
   const extent = tiltExtent(CARD_WIDTH)
   const tilt = hover ? -1.5 : -3
+  const left = Math.ceil(Math.max(2, -extent.left))
   React.useLayoutEffect(() => {
     const target = ref.current
     const source = consumeTemplateFlight(composerKey)
@@ -45,8 +46,8 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
     animation.onfinish = () => image.remove()
     return () => { animation.cancel(); image.remove() }
   }, [template.id, template.cover, composerKey, reduced])
-  return <motion.div layout={!reduced} data-testid="ppt-selected-template" className="shrink-0 self-end" style={{ width: CARD_WIDTH + attachTrail() + Math.ceil(Math.max(2, -extent.left)), paddingLeft: Math.ceil(Math.max(2, -extent.left)), paddingBottom: Math.ceil(Math.max(0, extent.bottom - CARD_HEIGHT)) }}>
-    <motion.div ref={ref} key={template.id} initial={reduced ? false : { scale: .92, rotate: -3 }} animate={{ scale: hover ? 1.03 : 1, rotate: tilt }} transition={{ duration: reduced ? 0 : .2, ease: [.34, 1.56, .64, 1] }} className="relative" style={{ width: CARD_WIDTH, height: CARD_HEIGHT }} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocusCapture={() => setHover(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHover(false) }} aria-label={t('ppt.selectedTemplate', { title: template.title })}>
+  return <motion.div layout={!reduced} data-testid="ppt-selected-template" className="relative h-16 shrink-0 self-end" style={{ width: CARD_WIDTH + attachTrail() + left }}>
+    <motion.div ref={ref} key={template.id} initial={reduced ? false : { scale: .92, rotate: -3 }} animate={{ scale: hover ? 1.03 : 1, rotate: tilt }} transition={{ duration: reduced ? 0 : .2, ease: [.34, 1.56, .64, 1] }} className="absolute" style={{ width: CARD_WIDTH, height: CARD_HEIGHT, left, top: `calc(50% - ${CARD_HEIGHT / 2}px)` }} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocusCapture={() => setHover(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHover(false) }} aria-label={t('ppt.selectedTemplate', { title: template.title })}>
       {FAN.map((fan, index) => <span key={index} className="absolute inset-0 overflow-hidden rounded-lg border border-black/10 bg-background shadow-minimal" style={{ transform: `translate(${fan.x}px,${fan.y}px) rotate(${fan.r}deg)`, transformOrigin: '20% 80%' }}><img src={template.referencePages[index] ?? template.cover} alt="" className="h-full w-full object-cover" /></span>)}
       <span className="ppt-template-cover absolute inset-0 overflow-hidden rounded-[9px] border-2 border-accent bg-background"><img src={template.cover} alt={template.title} className="h-full w-full object-cover" /></span>
       <button type="button" data-testid="ppt-remove-template" disabled={disabled} onClick={onRemove} aria-label={t('ppt.removeTemplate')} className="ppt-template-remove absolute z-10 grid place-items-center rounded-full border border-white/30 bg-black/90 text-white transition-opacity motion-reduce:transition-none" style={{ top: -CTRL.xOff, right: -CTRL.xOff, width: CTRL.size, height: CTRL.size, opacity: hover || open ? 1 : 0, transform: `rotate(${-tilt}deg)` }}><X className="size-3" /></button>
