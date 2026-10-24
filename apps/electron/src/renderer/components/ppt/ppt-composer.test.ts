@@ -9,7 +9,7 @@ import type { Session } from '../../../shared/types'
 describe('PPT composer selection', () => {
   it('replaces the selected template while retaining real request options', () => {
     const logo = { name: 'brand.png', mimeType: 'image/png', base64: 'aGVsbG8=' }
-    const before = { templateId: 'first', themeId: 'theme', brandColor: '#123456', logo, aspectRatio: '4:3' as const, chartSkill: 'sample-charts' }
+    const before = { templateId: 'first', themeId: 'theme', brandColor: '#123456', logo, aspectRatio: '4:3' as const }
     expect(replacePptTemplate(before, 'second')).toEqual({ ...before, templateId: 'second' })
     expect(before.templateId).toBe('first')
     expect(replacePptTemplate(undefined, 'first')).toEqual({ templateId: 'first' })

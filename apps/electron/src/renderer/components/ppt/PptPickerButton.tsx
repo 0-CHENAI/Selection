@@ -2,8 +2,6 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { Presentation } from 'lucide-react'
-import { listChartSkills } from '@craft-agent/shared/skills'
-import { skillsAtom } from '@/atoms/skills'
 import { pptComposerAtomFamily, pptComposerOverrideAtomFamily, replacePptTemplate } from '@/atoms/ppt'
 import { FreeFormInputContextBadge } from '@/components/app-shell/input/FreeFormInputContextBadge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -17,7 +15,6 @@ export function PptPickerButton({ composerKey, disabled, pptMode }: { composerKe
   const navigation = React.useContext(NavigationContext)
   const setRequest = useSetAtom(pptComposerAtomFamily(composerKey))
   const selectedId = useAtomValue(pptComposerOverrideAtomFamily(composerKey))?.templateId
-  const chartStyles = listChartSkills(useAtomValue(skillsAtom))
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -57,7 +54,7 @@ export function PptPickerButton({ composerKey, disabled, pptMode }: { composerKe
           />
         </div>
         <div className="mt-3 flex items-center gap-2 border-t border-border/50 px-1 pt-2.5">
-          <p className="min-w-0 text-[11px] leading-snug text-muted-foreground">{t(chartStyles.length ? 'ppt.pickerFooterCharts' : 'ppt.pickerFooter')}</p>
+          <p className="min-w-0 text-[11px] leading-snug text-muted-foreground">{t('ppt.pickerFooter')}</p>
           {navigation && (
             <button
               type="button"

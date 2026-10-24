@@ -7269,7 +7269,7 @@ export class SessionManager implements ISessionManager {
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     const replayPpt = existingMessageId ? managed.messages.find(item => item.id === existingMessageId)?.turnContext?.ppt as PptRequest | undefined : undefined
     const installedSkills = loadAllSkills(managed.workspace.rootPath, managed.workingDirectory)
-    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills)
+    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills, message)
     if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
     if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
       managed.ppt = options.ppt
@@ -8084,7 +8084,7 @@ export class SessionManager implements ISessionManager {
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
       if (options?.ppt || options?.pptRevision) markPptGenerating(chatSessionDir, true)
-      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills) : undefined
+      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills, message) : undefined
       const pptRevisionContext = options?.pptRevision ? buildPptRevisionPrompt(options.pptRevision, chatSessionDir) : undefined
       const currentInput = [pptContext, pptRevisionContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
