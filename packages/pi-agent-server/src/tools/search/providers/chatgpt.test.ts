@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { formatUserAgent } from '@earendil-works/pi-ai';
 import { ChatGPTBackendSearchProvider, extractChatGptAccountId } from './chatgpt.ts';
 
 const originalFetch = globalThis.fetch;
@@ -91,7 +92,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledHeaders.Authorization).toBe('Bearer my-access-token');
     expect(calledHeaders['chatgpt-account-id']).toBe('acc_12345');
     expect(calledHeaders.originator).toBe('pi');
-    expect(calledHeaders['User-Agent']).toMatch(/^pi \(/);
+    expect(calledHeaders['User-Agent']).toBe(formatUserAgent());
     expect(calledBody.model).toBe('gpt-6.1-sol');
     expect(calledBody.store).toBe(false);
     expect(calledBody.stream).toBe(true);

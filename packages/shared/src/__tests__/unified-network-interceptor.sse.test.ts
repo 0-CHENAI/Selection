@@ -249,7 +249,7 @@ describe('unified-network-interceptor SSE processors', () => {
   });
 
   /**
-   * Same rule as @earendil-works/pi-ai 1.2.0 anthropic-messages stream():
+   * Same rule as @earendil-works/pi-ai anthropic-messages stream() (still true in 1.4.0):
    * text_delta is appended only when event.index still points at an open text block.
    * content_block_stop clears that index, so later deltas on it are dropped.
    */

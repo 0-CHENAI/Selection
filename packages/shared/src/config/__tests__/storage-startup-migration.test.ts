@@ -262,7 +262,7 @@ describe('startup migration (integration)', () => {
 
   it('does not overwrite a genuine Codex Best/Balanced/Fast tier list', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
-    const tier = ['pi/gpt-5.5', 'pi/gpt-5.6-sol', 'pi/gpt-5.6-luna']
+    const tier = ['pi/gpt-5.6-sol', 'pi/gpt-5.6-terra', 'pi/gpt-5.6-luna']
 
     writeRootConfig(configPath, workspaceRoot, [
       {
@@ -285,6 +285,34 @@ describe('startup migration (integration)', () => {
     expect(connection.models).toEqual(tier)
     expect(connection.defaultModel).toBe(tier[0])
     expect(modelIdsOf(connection)).not.toContain('pi/gpt-6.1-sol')
+  })
+
+  it('drops Codex ids removed in Pi 1.4.0 from a genuine tier and moves the default', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    // gpt-5.5 is no longer in the live Codex catalog. A real three-tier list
+    // keeps its mode and loses only the unknown id.
+    const tier = ['pi/gpt-5.5', 'pi/gpt-5.6-sol', 'pi/gpt-5.6-luna']
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: tier,
+        defaultModel: 'pi/gpt-5.5',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'chatgpt-plus')
+    expect(connection.modelSelectionMode).toBe('userDefined3Tier')
+    expect(connection.models).toEqual(['pi/gpt-5.6-sol', 'pi/gpt-5.6-luna'])
+    expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
   })
 
   it('normalizes legacy unprefixed userDefined3Tier model IDs instead of resetting', () => {

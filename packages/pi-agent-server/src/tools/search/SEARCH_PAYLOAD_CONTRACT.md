@@ -1,6 +1,6 @@
 # Search Payload Contract
 
-Last updated: 2026-03-06
+Last updated: 2026-10-24
 
 This file documents the **known-good request shape** for provider-native web search calls in `pi-agent-server`.
 
@@ -15,7 +15,7 @@ Required headers:
 - `Authorization: Bearer <oauth-access-token>`
 - `chatgpt-account-id: <JWT claim https://api.openai.com/auth.chatgpt_account_id>`
 - `originator: pi` (Pi SDK Codex client identity; not `codex_cli_rs`)
-- `User-Agent: pi (<platform> <release>; <arch>)` from `getPiUserAgent()`
+- `User-Agent` from `formatUserAgent()` (`@earendil-works/pi-ai`). Pi 1.4.0 removed `getPiUserAgent()`; the detailed value is `pi/<version> (<platform>; <runtime>; <arch>)`, the same identity the Codex Responses client sends.
 - `OpenAI-Beta: responses=experimental`
 - `Content-Type: application/json`
 
@@ -38,5 +38,5 @@ The backend may reply with either JSON or SSE-like payloads depending on edge be
 If search starts failing again (HTTP or parse path):
 1. Verify this payload shape in tests (`providers/chatgpt.test.ts`).
 2. Compare against current upstream SDK behavior (`@earendil-works/pi-ai` codex responses provider).
-3. Confirm model remains codex-compatible (`gpt-5.x-codex` family).
+3. Confirm the model is still in the Codex ChatGPT catalog (`gpt-6.1-sol`, `gpt-6-*`, `gpt-5.6-*`). Pi 1.4.0 removed `gpt-5.5` and `gpt-5.3-codex-spark`.
 4. Inspect error fingerprint in thrown error (`tool/model/stream/tool_choice/text.verbosity`) and parse metadata (`content-type`, compact response snippet).

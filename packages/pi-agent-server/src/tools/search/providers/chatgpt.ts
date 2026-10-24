@@ -13,7 +13,7 @@ import type { WebSearchProvider, WebSearchResult } from '../types.ts';
 import { parseResponsesApiResults, type ResponsesApiResponse } from './responses-api-parser.ts';
 import { isModelRejectionError } from '../../../model-resolution.ts';
 import { stripPiPrefix } from '../../../custom-endpoint-models.ts';
-import { getPiUserAgent } from '@earendil-works/pi-ai/utils/pi-user-agent';
+import { formatUserAgent } from '@earendil-works/pi-ai';
 import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-connections.ts';
 
 /**
@@ -114,7 +114,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
             Authorization: `Bearer ${this.accessToken}`,
             'chatgpt-account-id': this.accountId,
             originator: CODEX_ORIGINATOR,
-            'User-Agent': getPiUserAgent(),
+            'User-Agent': formatUserAgent(),
             'OpenAI-Beta': 'responses=experimental',
           },
           body: JSON.stringify(requestBody),

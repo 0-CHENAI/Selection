@@ -408,9 +408,12 @@ function bearerToken(value: string | undefined): string | undefined {
  * Choose Anthropic Messages auth from the host.
  *
  * api.anthropic.com accepts `x-api-key` plus `anthropic-version` and must not
- * also receive `Authorization: Bearer`. Third-party gateways (Kimi, MiniMax)
- * document Bearer and can reject `x-api-key`, so that header is removed when
- * Bearer is already present. Header values are not logged.
+ * also receive `Authorization: Bearer`. Third-party Anthropic Messages
+ * gateways (MiniMax, GLM, DeepSeek, Qwen, and a custom Kimi-style Messages
+ * host) document Bearer and can reject `x-api-key`, so that header is removed
+ * when Bearer is already present. Official Kimi Code is Chat Completions at
+ * `/v1/chat/completions` as of Pi 1.3.0 and does not pass through this
+ * function. Header values are not logged.
  */
 function isAnthropicMessagesRequest(url: string): boolean {
   if (isOfficialAnthropicApiUrl(url)) return true;
@@ -528,8 +531,10 @@ function scanJsonObjectEnd(input: string, start: number): number {
 
 /**
  * Split a buffer into top-level JSON objects.
- * Pretty-printed Anthropic data stays one object. Kimi's `data:{...}\\ndata:{...}`
- * (no blank line) is several objects, which `JSON.parse` would otherwise reject.
+ * Pretty-printed Anthropic data stays one object. Some gateways frame
+ * `data:{...}\\ndata:{...}` with no blank line. Official Kimi Code no longer
+ * uses this path (Chat Completions since Pi 1.3.0); custom Anthropic-compatible
+ * hosts still do. `JSON.parse` would otherwise reject the joined objects.
  */
 function splitTopLevelJsonObjects(input: string): { objects: string[]; rest: string } | null {
   const objects: string[] = [];
@@ -602,13 +607,15 @@ export function createAnthropicSseStrippingStream(options?: {
   const trackedBlocks = new Map<number, TrackedToolBlock>();
   /**
    * Pi only appends a delta when that index still belongs to an open block of
-   * the same kind. Third-party Anthropic Messages endpoints (Kimi Coding,
-   * MiniMax, GLM, DeepSeek, Qwen, and other gateways) sometimes continue after
-   * content_block_stop, reuse a thinking index for text, or name the block
-   * `reasoning`. Those deltas would otherwise disappear while the socket stays
-   * open. Ping, errors, usage, and unknown events are forwarded unchanged.
+   * the same kind. Third-party Anthropic Messages endpoints (MiniMax, GLM,
+   * DeepSeek, Qwen, and other gateways, including a Kimi-style Messages host)
+   * sometimes continue after content_block_stop, reuse a thinking index for
+   * text, or name the block `reasoning`. Official Kimi Code is Chat Completions
+   * as of Pi 1.3.0 and does not hit this Anthropic framer. Those deltas would
+   * otherwise disappear while the socket stays open. Ping, errors, usage, and
+   * unknown events are forwarded unchanged.
    *
-   * Kimi's Anthropic gateway also frames each event as `data:{json}` plus a
+   * Some of those gateways also frame each event as `data:{json}` plus a
    * single LF and no blank line. Holding every data line until a blank line
    * glues those objects into one payload, `JSON.parse` fails, and the reply
    * is dropped. A finished JSON object is therefore its own event.
@@ -1079,8 +1086,9 @@ export function createAnthropicSseStrippingStream(options?: {
     eventName = '';
     const split = data ? splitTopLevelJsonObjects(data) : null;
     // One object keeps the original payload so a normal Anthropic frame stays
-    // byte-identical. Several objects are separate events (Kimi omits the
-    // blank line, so they would otherwise be joined and discarded).
+    // byte-identical. Several objects are separate events (a Kimi-style
+    // Anthropic gateway omits the blank line, so they would otherwise be
+    // joined and discarded). Official Kimi Code is Chat Completions.
     if (split && split.objects.length > 1 && split.rest.trim() === '') {
       for (let i = 0; i < split.objects.length; i++) {
         const object = split.objects[i];
@@ -1116,7 +1124,7 @@ export function createAnthropicSseStrippingStream(options?: {
     if (value.startsWith(' ')) value = value.slice(1);
 
     if (field === 'event') {
-      // Kimi sometimes omits the blank line. A new event field after data
+      // A Kimi-style Anthropic gateway sometimes omits the blank line. A new event field after data
       // ends the previous event. A second event field before any data only
       // replaces the name, which matches the SSE spec.
       if (dataLines.length > 0) dispatchEvent(controller);
@@ -1132,7 +1140,7 @@ export function createAnthropicSseStrippingStream(options?: {
       dataChars = nextChars;
       dataLines.push(value);
       // Release a finished object before the next network chunk. Waiting for
-      // a blank line drops Kimi's single-LF frames and, when a later frame
+      // a blank line drops single-LF frames and, when a later frame
       // does end a group, paints that whole group at once.
       if (dataBufferIsComplete()) dispatchEvent(controller);
     }
