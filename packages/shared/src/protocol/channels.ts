@@ -309,9 +309,13 @@ export const RPC_CHANNELS = {
   },
   skills: {
     GET: 'skills:get',
+    DELETE_PPT_TEMPLATE: 'skills:deletePptTemplate',
+    EXPORT_PPT_TEMPLATE: 'skills:exportPptTemplate',
     GET_PPT_CATALOG: 'skills:getPptCatalog',
     GET_PPT_LIVE: 'skills:getPptLive',
     GET_PPT_TEMPLATE_PAGES: 'skills:getPptTemplatePages',
+    IMPORT_PPT_TEMPLATE: 'skills:importPptTemplate',
+    RENAME_PPT_TEMPLATE: 'skills:renamePptTemplate',
     GET_FILES: 'skills:getFiles',
     DELETE: 'skills:delete',
     OPEN_EDITOR: 'skills:openEditor',

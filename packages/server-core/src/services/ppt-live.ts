@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { PptLiveElement, PptLivePage, PptLiveSnapshot, PptPageStatus, PptProgress, PptRevision, PptRevisionTarget } from '@craft-agent/shared/protocol'
 import { getPptCatalog, getPptSkillRoot } from './ppt-catalog'
+import { customTemplateReference } from './ppt-library'
 
 const MARKER = '.ppt-generating'
 const PROGRESS_FILE = 'ppt-progress.json'
@@ -354,7 +355,8 @@ export function validatePptRevision(value: unknown, root = getPptSkillRoot()): P
   const revision: PptRevision = { action, targets: raw.targets.map(target => ({ page: target.page, ...(target.elementId ? { elementId: target.elementId } : {}) })) }
   const catalog = action === 'revise' ? undefined : getPptCatalog(root)
   if (action === 'restyle') {
-    if (typeof raw.templateId !== 'string' || !catalog!.templates.some(template => template.id === raw.templateId)) throw new Error('Unknown PPT template')
+    const known = typeof raw.templateId === 'string' && (catalog!.templates.some(template => template.id === raw.templateId) || !!customTemplateReference(raw.templateId))
+    if (!known) throw new Error('Unknown PPT template')
     revision.templateId = raw.templateId
   }
   if (action === 'recolor') {
@@ -374,6 +376,8 @@ export function buildPptRevisionPrompt(revision: PptRevision, sessionPath: strin
   const lines = ['<ppt_revision>', 'Revise the deck already stored for this session. Do not start a second deck.']
   if (revision.action === 'restyle') {
     lines.push(`Restyle and reflow the whole deck using template ${revision.templateId}. Keep the user's facts, sources, and conclusions.`)
+    const custom = revision.templateId ? customTemplateReference(revision.templateId) : null
+    if (custom) lines.push(custom)
   } else if (revision.action === 'recolor') {
     lines.push(`Recolor the existing deck with theme ${revision.themeId}. Keep the layout, copy, page count, and charts.`)
   } else {
