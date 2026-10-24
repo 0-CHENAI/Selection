@@ -20113,7 +20113,7 @@ function themeChartPalette(deck, chart, count) {
   return Array.from({ length: width }, (_, index) => resolved[index % resolved.length]);
 }
 var CHART_CATEGORY_PT = 13;
-var CHART_TICK_PT = 11;
+var CHART_TICK_PT = 12;
 var CHART_LEGEND_PT = 12;
 var CHART_VALUE_PT = 12;
 function addChart(pres, slide, deck, element, platform, pageBackground) {
@@ -20130,8 +20130,8 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
   const legend = chart.showLegend ?? (chart.series.length > 1 && kind !== "pie" && kind !== "doughnut" && kind !== "waterfall");
   const outside = readableOn(background, ink, inverse);
   const ticks = contrastRatio(muted, background) >= 3 ? muted : outside;
-  const categoryColor = chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, outside)) : numericAxis ? ticks : outside;
-  const tickColor = chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, ticks)) : ticks;
+  const tickColor = chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, ticks)) : deeperTick(ticks, ink);
+  const categoryColor = chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, outside)) : numericAxis ? tickColor : outside;
   const axis = quietColor(ink, background, 0.72);
   const gridTint = quietColor(ink, background, 0.86);
   const themedGrid = (fallback) => {
@@ -20187,6 +20187,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     const increase = hex(colorRef(chart.colors?.[1] ?? "$accent", deck.theme, "$accent"));
     const decrease = hex(colorRef(chart.colors?.[2] ?? "$muted", deck.theme, "$muted"));
     const peak = Math.max(...columns.base.map((value, index) => value + columns.total[index] + columns.up[index] + columns.down[index]), 0);
+    const scale = chartValueScale(chart, [peak], false);
     slide.addChart(pres.ChartType.bar, [
       { name: "\u57FA\u5EA7", labels: chart.categories, values: columns.base },
       { name: "\u5408\u8BA1", labels: chart.categories, values: columns.total },
@@ -20201,11 +20202,12 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       showLegend: false,
       layout: chartLayout(kind, false),
       chartColors: [background, ink, increase, decrease],
-      valAxisMinVal: chart.valMin ?? 0,
-      valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom([peak]) : undefined)
+      valAxisMinVal: scale.min,
+      valAxisMaxVal: scale.max,
+      valAxisMajorUnit: scale.step
     });
     if (on)
-      addWaterfallCallouts(slide, element, chart, face, inverse, outside, peak);
+      addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale);
     return;
   }
   if (kind === "combo") {
@@ -20215,6 +20217,9 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     let colorIndex = 0;
     const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]);
     const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]);
+    const columnScale = chartValueScale(chart, columns.flatMap((series) => series.values), true);
+    const lineScale = chartValueScale(chart, lines.flatMap((series) => series.values), true);
+    const legend = chart.showLegend ?? true;
     const axisLabel = {
       valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
@@ -20231,7 +20236,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
         options: {
           barDir: "col",
           barGrouping: "clustered",
-          barGapWidthPct: 60,
+          barGapWidthPct: 100,
           chartColors: columnColors,
           showValue: on,
           dataLabelPosition: "inEnd"
@@ -20253,23 +20258,42 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       }
     ], {
       ...base,
-      showLegend: chart.showLegend ?? true,
+      barDir: "col",
+      showLegend: false,
+      layout: chartLayout(kind, legend),
+      barGapWidthPct: 100,
       valAxisMinVal: undefined,
       valAxisMaxVal: undefined,
       valAxes: [
         {
           ...axisLabel,
-          valAxisMinVal: chart.valMin ?? 0,
-          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(columns.flatMap((series) => series.values)) : undefined),
+          valAxisMinVal: columnScale.min,
+          valAxisMaxVal: columnScale.max,
+          valAxisMajorUnit: columnScale.step,
           valGridLine: themedGrid("none")
         },
         {
           ...axisLabel,
-          valAxisMinVal: chart.valMin ?? 0,
-          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(lines.flatMap((series) => series.values)) : undefined),
+          valAxisMinVal: lineScale.min,
+          valAxisMaxVal: lineScale.max,
+          valAxisMajorUnit: lineScale.step,
           valGridLine: { style: "none" }
         }
       ]
+    });
+    addComboOverlay(pres, slide, element, chart, {
+      background,
+      ink,
+      inverse,
+      face,
+      axis,
+      tickColor,
+      columnColors,
+      lineColors,
+      columnScale,
+      lineScale,
+      legend,
+      labels: on
     });
     return;
   }
@@ -20278,8 +20302,8 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     const xs = chart.series.flatMap((series) => series.x ?? []);
     const ys = chart.series.flatMap((series) => series.values);
     const labelScatter = kind === "scatter" && on;
-    const xExtent = markerExtent(xs, kind === "bubble" ? 0.45 : 0.14);
-    const yExtent = markerExtent(ys, kind === "bubble" ? 1.15 : labelScatter ? 0.42 : 0.16);
+    const xScale = paddedScale(xs, kind === "bubble" ? 0.35 : 0.16);
+    const yScale = chart.valMax !== undefined || chart.valMin !== undefined ? chartValueScale(chart, ys, kind === "bubble") : paddedScale(ys, kind === "bubble" ? 0.45 : labelScatter ? 0.28 : 0.16);
     slide.addChart(kind === "bubble" ? pres.ChartType.bubble : pres.ChartType.scatter, [
       { name: "X", values: x },
       ...chart.series.map((series) => ({
@@ -20298,22 +20322,41 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       showLabel: labelScatter,
       dataLabelFormatScatter: labelScatter ? "custom" : undefined,
       dataLabelPosition: labelScatter ? "t" : undefined,
-      showLegend: chart.showLegend ?? chart.series.length > 1,
-      catAxisMinVal: xExtent.min,
-      catAxisMaxVal: xExtent.max,
-      valAxisMinVal: chart.valMin ?? yExtent.min,
-      valAxisMaxVal: chart.valMax ?? yExtent.max,
+      showLegend: kind === "bubble" ? false : chart.showLegend ?? chart.series.length > 1,
+      catAxisMinVal: xScale.min,
+      catAxisMaxVal: xScale.max,
+      catAxisMajorUnit: xScale.step,
+      valAxisMinVal: yScale.min,
+      valAxisMaxVal: yScale.max,
+      valAxisMajorUnit: yScale.step,
       catGridLine: themedGrid("solid"),
       valGridLine: themedGrid("solid")
     });
+    if (kind === "scatter")
+      addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background);
+    if (kind === "bubble") {
+      addBubbleOverlay(pres, slide, element, chart, {
+        background,
+        ink,
+        face,
+        axis,
+        grid: gridTint,
+        tickColor,
+        colors: palette,
+        xScale,
+        yScale,
+        legend: chart.showLegend ?? chart.series.length > 1
+      });
+    }
     return;
   }
   const pieLike = kind === "pie" || kind === "doughnut";
   const grouped = kind === "stacked" || kind === "stackedPercent";
   const bars = kind === "bar" || kind === "column" || grouped;
   const type = kind === "line" ? pres.ChartType.line : kind === "area" ? pres.ChartType.area : kind === "pie" ? pres.ChartType.pie : kind === "doughnut" ? pres.ChartType.doughnut : kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
-  const flat = chart.series.flatMap((series) => series.values);
+  const flat = kind === "stacked" ? columnSums(chart.series) : chart.series.flatMap((series) => series.values);
   const needsHeadroom = on && (kind === "bar" || kind === "column" || kind === "line" || kind === "area");
+  const scale = kind === "stackedPercent" ? { min: 0, max: 1, step: 0.2 } : kind === "radar" ? chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, flat, false) : pieLike ? undefined : chartValueScale(chart, flat, needsHeadroom);
   slide.addChart(type, rows, {
     ...base,
     barDir: kind === "bar" ? "bar" : "col",
@@ -20327,7 +20370,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     lineDataSymbolSize: chart.markerSize ?? (kind === "line" || kind === "radar" ? 10 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    showLegend: legend,
+    showLegend: kind === "radar" ? false : legend,
     showValue: on && (bars || pieLike || kind === "line" || kind === "area"),
     showLabel: on && pieLike,
     ...kind === "bar" ? { catAxisLabelPos: "none" } : {},
@@ -20337,8 +20380,9 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     dataLabelColor: grouped ? insideLabel(palette, ink, inverse) : outside,
     dataBorder: pieLike ? { pt: 2, color: background } : base.dataBorder,
     valAxisLabelFormatCode: kind === "stackedPercent" ? "0%" : undefined,
-    valAxisMinVal: pieLike || kind === "radar" ? undefined : kind === "stackedPercent" ? 0 : chart.valMin ?? (bars || kind === "line" || kind === "area" ? 0 : undefined),
-    valAxisMaxVal: pieLike || kind === "radar" || kind === "stackedPercent" ? undefined : chart.valMax ?? (needsHeadroom ? labelHeadroom(flat) : undefined),
+    valAxisMinVal: scale?.min,
+    valAxisMaxVal: scale?.max,
+    valAxisMajorUnit: scale?.step,
     holeSize: kind === "doughnut" ? chart.holeSize ?? 62 : undefined,
     ...kind === "radar" ? { valGridLine: themedGrid("solid"), catGridLine: themedGrid("solid") } : {}
   });
@@ -20346,6 +20390,8 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     addPieLeaders(pres, slide, element, chart, muted);
   if (on && (kind === "line" || kind === "area"))
     addEdgeCallouts(slide, element, chart, kind, legend, face, outside);
+  if (kind === "radar")
+    addRadarValueLabels(pres, slide, element, chart, legend, face, tickColor, background, ink, palette);
 }
 function shapeFill(deck, element) {
   if (element.pattern)
@@ -20529,14 +20575,65 @@ function mixHex(from, to, toward) {
 function quietColor(foreground, background, toward) {
   return luminance(foreground) > luminance(background) ? mixHex(background, foreground, toward) : mixHex(foreground, background, toward);
 }
-function labelHeadroom(values) {
+function cleanNumber(value) {
+  const rounded = Math.round(value * 1e6) / 1e6;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+function niceStep(span) {
+  if (!(span > 0) || !Number.isFinite(span))
+    return 1;
+  const rough = span / 4;
+  const mag = 10 ** Math.floor(Math.log10(rough));
+  const residual = rough / mag;
+  const nice = residual <= 1.5 ? 1 : residual <= 3 ? 2 : residual <= 7 ? 5 : 10;
+  return cleanNumber(nice * mag);
+}
+function niceAxis(min, max, headroom) {
+  let lo = Number.isFinite(min) ? min : 0;
+  let hi = Number.isFinite(max) ? max : lo + 1;
+  if (hi < lo)
+    [lo, hi] = [hi, lo];
+  if (hi === lo)
+    hi = lo + Math.max(Math.abs(lo), 1);
+  const span = hi - lo;
+  const step = niceStep(headroom ? span * 1.18 : span);
+  const axisMin = lo === 0 ? 0 : cleanNumber(Math.floor(lo / step) * step);
+  let axisMax = cleanNumber(Math.ceil((hi - axisMin) / step) * step + axisMin);
+  if (axisMax < hi)
+    axisMax = cleanNumber(axisMax + step);
+  if (headroom && (axisMax - hi) / step < 0.6)
+    axisMax = cleanNumber(axisMax + step);
+  return { min: axisMin, max: axisMax, step };
+}
+function chartValueScale(chart, values, headroom) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  const dataMax = finite.length ? Math.max(...finite) : 0;
+  const dataMin = finite.length ? Math.min(...finite) : 0;
+  const min = chart.valMin ?? Math.min(0, dataMin);
+  if (chart.valMax !== undefined) {
+    const max = chart.valMax;
+    return { min, max, step: niceStep(Math.max(max - min, Math.abs(dataMax) || 1)) };
+  }
+  return niceAxis(min, Math.max(dataMax, min), headroom);
+}
+function paddedScale(values, ratio) {
   const finite = values.filter((value) => Number.isFinite(value));
   if (finite.length === 0)
-    return;
-  const peak = Math.max(...finite);
-  if (peak <= 0)
-    return;
-  return Math.ceil(peak * 1.22);
+    return { min: 0, max: 1, step: 1 };
+  const dataMin = Math.min(...finite);
+  const dataMax = Math.max(...finite);
+  const span = Math.max(dataMax - dataMin, 1);
+  const lo = dataMin >= 0 ? Math.max(0, dataMin - span * ratio) : dataMin - span * ratio;
+  return niceAxis(lo, dataMax + span * ratio, false);
+}
+function columnSums(series) {
+  const count = Math.max(...series.map((item) => item.values.length), 0);
+  return Array.from({ length: count }, (_, index) => series.reduce((sum, item) => sum + (item.values[index] ?? 0), 0));
+}
+function deeperTick(color, ink) {
+  if (color.toUpperCase() === ink.toUpperCase())
+    return color.toUpperCase();
+  return mixHex(color, ink, 0.45);
 }
 function plotBox(kind, legend, bounds) {
   const layout = chartLayout(kind, legend);
@@ -20553,7 +20650,7 @@ function polar(cx, cy, radius, clockwiseFromTop) {
     y: cy - radius * Math.cos(clockwiseFromTop)
   };
 }
-function addLeader(pres, slide, x1, y1, x2, y2, color, name) {
+function addLeader(pres, slide, x1, y1, x2, y2, color, name, width = 1) {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const length = Math.max(Math.hypot(dx, dy), 0.01);
@@ -20566,11 +20663,11 @@ function addLeader(pres, slide, x1, y1, x2, y2, color, name) {
     w: inches2(length),
     h: 0,
     rotate: Math.abs(angle) < 0.05 ? undefined : angle,
-    line: { color, width: 1 },
+    line: { color, width },
     objectName: name
   });
 }
-function addCallout(slide, text, x, y, w, h, face, color, name) {
+function addCallout(slide, text, x, y, w, h, face, color, name, bold = true, align = "center") {
   slide.addText(text, {
     x: inches2(x),
     y: inches2(y),
@@ -20578,9 +20675,9 @@ function addCallout(slide, text, x, y, w, h, face, color, name) {
     h: inches2(h),
     fontFace: face,
     fontSize: CHART_VALUE_PT,
-    bold: true,
+    bold,
     color,
-    align: "center",
+    align,
     valign: "middle",
     margin: 0,
     wrap: false,
@@ -20618,32 +20715,37 @@ function addEdgeCallouts(slide, element, chart, kind, legend, face, color) {
   if (categories < 2)
     return;
   const plot = plotBox(kind, legend, element.bounds);
-  const valMin = chart.valMin ?? 0;
-  const valMax = chart.valMax ?? labelHeadroom(chart.series.flatMap((series) => series.values));
-  if (valMax === undefined || valMax <= valMin)
+  const scale = chartValueScale(chart, chart.series.flatMap((series) => series.values), true);
+  if (scale.max <= scale.min)
     return;
+  const yOf = (value) => plot.y + plot.h - (value - scale.min) / (scale.max - scale.min) * plot.h;
   chart.series.forEach((series, seriesIndex) => {
     for (const point of keyIndexes(series.values)) {
-      if (point !== 0)
+      if (point !== 0 && point !== categories - 1)
         continue;
       const value = series.values[point];
       if (value === undefined || !Number.isFinite(value))
         continue;
-      const py = plot.y + plot.h - (value - valMin) / (valMax - valMin) * plot.h;
       const text = magnitude(value);
-      addCallout(slide, text, plot.x + 16, py - 18, Math.max(28, text.length * 8), 16, face, color, `${element.id}-edge-${seriesIndex}`);
+      const boxW = Math.max(28, text.length * 8);
+      const py = yOf(value);
+      const steps = Math.round((value - scale.min) / scale.step);
+      const tickY = yOf(scale.min + steps * scale.step);
+      const tight = point === 0 && Math.abs(py - tickY) < 8;
+      const x = point === 0 ? plot.x + (tight ? 56 : 28) : plot.x + plot.w - 28 - boxW;
+      addCallout(slide, text, x, tight ? py - 28 : py - 20, boxW, 16, face, color, point === 0 ? `${element.id}-edge-${seriesIndex}` : `${element.id}-edge-${seriesIndex}-end`);
     }
   });
 }
-function addWaterfallCallouts(slide, element, chart, face, inverse, ink, peak) {
+function addWaterfallCallouts(slide, element, chart, face, inverse, ink, scale) {
   const values = chart.series[0]?.values ?? [];
   if (values.length === 0)
     return;
   const columns = waterfallColumns(values);
   const plot = plotBox("waterfall", false, element.bounds);
   const slot = plot.w / values.length;
-  const valMin = chart.valMin ?? 0;
-  const valMax = chart.valMax ?? labelHeadroom([peak]) ?? peak;
+  const valMin = scale.min;
+  const valMax = scale.max;
   if (valMax <= valMin)
     return;
   const yOf = (value) => plot.y + plot.h - (value - valMin) / (valMax - valMin) * plot.h;
@@ -20665,6 +20767,341 @@ function addWaterfallCallouts(slide, element, chart, face, inverse, ink, peak) {
       addCallout(slide, segment.text, cx - boxW / 2, tall ? (top + bottom) / 2 - boxH / 2 : top - boxH - 1, boxW, boxH, face, tall ? inverse : ink, `${element.id}-wf-${index}`);
     }
   });
+}
+function formatTick(value) {
+  const rounded = cleanNumber(value);
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+function addComboOverlay(pres, slide, element, chart, paint) {
+  const roles = comboSeriesRoles(chart.series);
+  const columns = chart.series.filter((_, index) => roles[index] === "column");
+  const lines = chart.series.filter((_, index) => roles[index] === "line");
+  const count = chart.categories.length;
+  if (count === 0 || columns.length === 0)
+    return;
+  const plot = plotBox("combo", paint.legend, element.bounds);
+  const slot = plot.w / count;
+  const yOf = (value, scale) => {
+    const span = scale.max - scale.min;
+    if (!(span > 0))
+      return plot.y + plot.h;
+    return plot.y + plot.h - (value - scale.min) / span * plot.h;
+  };
+  const columnTop = (index) => yOf(Math.max(...columns.map((series) => series.values[index] ?? 0), paint.columnScale.min), paint.columnScale);
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 3),
+    y: inches2(plot.y - 2),
+    w: inches2(plot.w + 8),
+    h: inches2(plot.h + 4),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-plot-cover`
+  });
+  const barWidth = slot / (columns.length + 1);
+  const cluster = barWidth * columns.length;
+  const clusterStart = (slot - cluster) / 2;
+  const taken = [];
+  const overlaps = (box, gap = 2) => taken.some((item) => box.x < item.x + item.w + gap && box.x + box.w + gap > item.x && box.y < item.y + item.h + gap && box.y + box.h + gap > item.y);
+  const columnBoxes = [];
+  columns.forEach((series, seriesIndex) => {
+    const color = paint.columnColors[seriesIndex] ?? paint.ink;
+    series.values.forEach((value, index) => {
+      if (!Number.isFinite(value))
+        return;
+      const top = yOf(value, paint.columnScale);
+      const bottom = yOf(paint.columnScale.min, paint.columnScale);
+      const x = plot.x + slot * index + clusterStart + seriesIndex * barWidth;
+      const height = Math.max(bottom - top, 0.4);
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(x),
+        y: inches2(Math.min(top, bottom)),
+        w: inches2(barWidth),
+        h: inches2(height),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-col-${seriesIndex}-${index}`
+      });
+      if (!paint.labels)
+        return;
+      const text = magnitude(value);
+      const boxW = Math.max(28, text.length * 8);
+      const lineNear = lines.some((line) => {
+        const sample = line.values[index];
+        return Number.isFinite(sample) && Math.abs(yOf(sample, paint.lineScale) - top) < 36;
+      });
+      const inside = lineNear && height > 24;
+      const box = {
+        x: x + barWidth / 2 - boxW / 2,
+        y: inside ? Math.min(top, bottom) + 3 : Math.min(top, bottom) - 16,
+        w: boxW,
+        h: 16
+      };
+      taken.push(box);
+      columnBoxes.push({ ...box, text, color: inside ? paint.inverse : paint.ink, name: `${element.id}-col-label-${seriesIndex}-${index}` });
+    });
+  });
+  const linePoints = [];
+  lines.forEach((series, seriesIndex) => {
+    const color = paint.lineColors[seriesIndex] ?? paint.ink;
+    const points = series.values.map((value, index) => ({ index, value, x: plot.x + slot * (index + 0.5), y: yOf(value, paint.lineScale) })).filter((point) => Number.isFinite(point.value));
+    for (let index = 1;index < points.length; index++) {
+      const previous = points[index - 1];
+      const point = points[index];
+      addLeader(pres, slide, previous.x, previous.y, point.x, point.y, color, `${element.id}-line-${seriesIndex}-${index}`, 2.25);
+    }
+    for (const point of points) {
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches2(point.x - 4),
+        y: inches2(point.y - 4),
+        w: inches2(8),
+        h: inches2(8),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-marker-${seriesIndex}-${point.index}`
+      });
+      taken.push({ x: point.x - 4, y: point.y - 4, w: 8, h: 8 });
+      linePoints.push({ seriesIndex, index: point.index, x: point.x, y: point.y, value: point.value, color });
+    }
+  });
+  for (const box of columnBoxes)
+    addCallout(slide, box.text, box.x, box.y, box.w, box.h, paint.face, box.color, box.name);
+  const segments = linePoints.map((point) => {
+    const neighbors = linePoints.filter((other) => other.seriesIndex === point.seriesIndex && Math.abs(other.index - point.index) === 1);
+    return { point, neighbors };
+  });
+  for (const { point, neighbors } of segments) {
+    if (!paint.labels)
+      continue;
+    const text = magnitude(point.value);
+    const boxW = Math.max(22, text.length * 9);
+    const boxH = 16;
+    const barTop = columnTop(point.index);
+    const candidates = [
+      { x: point.x - boxW / 2, y: point.y - boxH - 6 },
+      { x: point.x - boxW / 2, y: point.y + 8 },
+      { x: point.x + 12, y: point.y - boxH / 2 },
+      { x: point.x - boxW - 12, y: point.y - boxH / 2 }
+    ];
+    const placed = candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).filter((candidate) => candidate.x >= plot.x + 1 && candidate.y >= plot.y + 1 && candidate.x + candidate.w <= plot.x + plot.w - 1 && candidate.y + candidate.h <= plot.y + plot.h - 1).filter((candidate) => !overlaps(candidate) && !lineHitsBox(candidate, point, neighbors));
+    const box = placed[0] ?? candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).find((candidate) => !overlaps(candidate)) ?? {
+      x: Math.max(plot.x + 1, Math.min(point.x - boxW / 2, plot.x + plot.w - boxW - 1)),
+      y: Math.max(plot.y + 1, point.y - boxH - 6),
+      w: boxW,
+      h: boxH
+    };
+    taken.push(box);
+    const onBar = box.y + box.h / 2 > barTop + 2;
+    addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`);
+  }
+  const rightWidth = Math.max(28, element.bounds.x + element.bounds.w - plot.x - plot.w - 2);
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x + plot.w + 1),
+    y: inches2(plot.y - 12),
+    w: inches2(rightWidth),
+    h: inches2(plot.h + 24),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-rtick-cover`
+  });
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
+  addLeader(pres, slide, plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-y2`, 0.75);
+  const ticks = [];
+  for (let value = paint.lineScale.min;value <= paint.lineScale.max + paint.lineScale.step * 0.001; value += paint.lineScale.step)
+    ticks.push(cleanNumber(value));
+  ticks.forEach((value, index) => {
+    addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, "left");
+  });
+  if (!paint.legend)
+    return;
+  const items = [
+    ...columns.map((series, index) => ({ name: series.name, color: paint.columnColors[index] ?? paint.ink, line: false })),
+    ...lines.map((series, index) => ({ name: series.name, color: paint.lineColors[index] ?? paint.ink, line: true }))
+  ];
+  const pieces = items.map((item) => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }));
+  const total = pieces.reduce((sum, item) => sum + 18 + item.textW, 0) + Math.max(0, pieces.length - 1) * 18;
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2;
+  const rowY = element.bounds.y + element.bounds.h - 22;
+  pieces.forEach((item, index) => {
+    if (item.line)
+      addLeader(pres, slide, cursor, rowY + 8, cursor + 14, rowY + 8, item.color, `${element.id}-legend-line-${index}`, 2.25);
+    else {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(cursor),
+        y: inches2(rowY + 2),
+        w: inches2(12),
+        h: inches2(12),
+        fill: { color: item.color },
+        line: { color: item.color, pt: 0 },
+        objectName: `${element.id}-legend-swatch-${index}`
+      });
+    }
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, paint.face, paint.ink, `${element.id}-legend-${index}`, false, "left");
+    cursor += 18 + item.textW + 18;
+  });
+}
+function lineHitsBox(box, point, neighbors) {
+  return neighbors.some((other) => {
+    for (let step = 1;step <= 16; step++) {
+      const t = step / 16;
+      const x = point.x + (other.x - point.x) * t;
+      const y = point.y + (other.y - point.y) * t;
+      if (x >= box.x - 1 && x <= box.x + box.w + 1 && y >= box.y - 1 && y <= box.y + box.h + 1)
+        return true;
+    }
+    return false;
+  });
+}
+function axisTicks(scale) {
+  if (!(scale.step > 0) || !Number.isFinite(scale.min) || !Number.isFinite(scale.max))
+    return [];
+  const ticks = [];
+  for (let value = scale.min;value <= scale.max + scale.step * 0.001; value += scale.step)
+    ticks.push(cleanNumber(value));
+  return ticks;
+}
+function addSwatchLegend(pres, slide, element, face, ink, items) {
+  const pieces = items.map((item) => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }));
+  const total = pieces.reduce((sum, item) => sum + 16 + item.textW, 0) + Math.max(0, pieces.length - 1) * 16;
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2;
+  const rowY = element.bounds.y + element.bounds.h - 22;
+  pieces.forEach((item, index) => {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(cursor),
+      y: inches2(rowY + 2),
+      w: inches2(12),
+      h: inches2(12),
+      fill: { color: item.color },
+      line: { color: item.color, pt: 0 },
+      objectName: `${element.id}-legend-swatch-${index}`
+    });
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, face, ink, `${element.id}-legend-${index}`, false, "left");
+    cursor += 16 + item.textW + 16;
+  });
+}
+function addScatterCategoryTicks(pres, slide, element, scale, face, color, background) {
+  const plot = plotBox("scatter", false, element.bounds);
+  if (!(scale.max > scale.min))
+    return;
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 8),
+    y: inches2(plot.y + plot.h + 2),
+    w: inches2(plot.w + 16),
+    h: inches2(18),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-xtick-cover`
+  });
+  axisTicks(scale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(22, text.length * 8);
+    const x = plot.x + (value - scale.min) / (scale.max - scale.min) * plot.w - boxW / 2;
+    addCallout(slide, text, x, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-xtick-${index}`, false);
+  });
+}
+function addBubbleOverlay(pres, slide, element, chart, paint) {
+  const plot = plotBox("bubble", paint.legend, element.bounds);
+  const xSpan = paint.xScale.max - paint.xScale.min;
+  const ySpan = paint.yScale.max - paint.yScale.min;
+  if (!(xSpan > 0) || !(ySpan > 0))
+    return;
+  const xOf = (value) => plot.x + (value - paint.xScale.min) / xSpan * plot.w;
+  const yOf = (value) => plot.y + plot.h - (value - paint.yScale.min) / ySpan * plot.h;
+  const paper = {
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 }
+  };
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches2(plot.x - 2),
+    y: inches2(plot.y - 10),
+    w: inches2(plot.w + 8),
+    h: inches2(plot.h + 28),
+    objectName: `${element.id}-plot-cover`
+  });
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches2(element.bounds.x),
+    y: inches2(plot.y - 10),
+    w: inches2(Math.max(8, plot.x - element.bounds.x)),
+    h: inches2(plot.h + 20),
+    objectName: `${element.id}-ytick-cover`
+  });
+  for (const value of axisTicks(paint.yScale)) {
+    const y = yOf(value);
+    addLeader(pres, slide, plot.x, y, plot.x + plot.w, y, paint.grid, `${element.id}-grid-y-${formatTick(value)}`, 0.75);
+  }
+  for (const value of axisTicks(paint.xScale)) {
+    const x = xOf(value);
+    addLeader(pres, slide, x, plot.y, x, plot.y + plot.h, paint.grid, `${element.id}-grid-x-${formatTick(value)}`, 0.75);
+  }
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
+  chart.series.forEach((series, seriesIndex) => {
+    const color = paint.colors[seriesIndex] ?? paint.ink;
+    series.values.forEach((value, index) => {
+      const x = series.x?.[index];
+      const size = series.sizes?.[index];
+      if (!Number.isFinite(value) || x === undefined || !Number.isFinite(x) || !size || size <= 0)
+        return;
+      const radius = Math.max(5, (11.3 + 0.8 * size) * (plot.w / 878));
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches2(xOf(x) - radius),
+        y: inches2(yOf(value) - radius),
+        w: inches2(radius * 2),
+        h: inches2(radius * 2),
+        fill: { color, transparency: 40 },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-bubble-${seriesIndex}-${index}`
+      });
+    });
+  });
+  axisTicks(paint.yScale).forEach((value, index) => {
+    const text = formatTick(value);
+    addCallout(slide, text, plot.x - 36, yOf(value) - 8, 30, 16, paint.face, paint.tickColor, `${element.id}-ytick-${index}`, false, "right");
+  });
+  axisTicks(paint.xScale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(22, text.length * 8);
+    addCallout(slide, text, xOf(value) - boxW / 2, plot.y + plot.h + 4, boxW, 16, paint.face, paint.tickColor, `${element.id}-xtick-${index}`, false);
+  });
+  if (paint.legend)
+    addSwatchLegend(pres, slide, element, paint.face, paint.ink, chart.series.map((series, index) => ({ name: series.name, color: paint.colors[index] ?? paint.ink })));
+}
+function addRadarValueLabels(pres, slide, element, chart, legend, face, color, background, ink, colors) {
+  const plot = plotBox("radar", legend, element.bounds);
+  const scale = chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, chart.series.flatMap((series) => series.values), false);
+  const span = scale.max - scale.min;
+  if (!(span > 0))
+    return;
+  const cx = plot.x + plot.w / 2;
+  const cy = plot.y + plot.h * 0.611;
+  const radius = plot.h * 0.457;
+  for (const value of axisTicks(scale)) {
+    if (value <= scale.min)
+      continue;
+    const y = cy - (value - scale.min) / span * radius;
+    const text = formatTick(value);
+    const boxW = 16;
+    const boxH = 14;
+    const x = cx + 7;
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(x - 1),
+      y: inches2(y - boxH / 2),
+      w: inches2(boxW + 2),
+      h: inches2(boxH),
+      fill: { color: background },
+      line: { color: background, pt: 0 },
+      objectName: `${element.id}-valtick-chip-${text}`
+    });
+    addCallout(slide, text, x, y - boxH / 2, boxW, boxH, face, color, `${element.id}-valtick-${text}`, false, "left");
+  }
+  if (!legend)
+    return;
+  addSwatchLegend(pres, slide, element, face, ink, chart.series.map((series, index) => ({
+    name: series.name,
+    color: colors[index] ?? ink
+  })));
 }
 function chartLayout(kind, legend) {
   const bottom = legend ? 0.18 : 0.12;
@@ -20735,8 +21172,10 @@ function polishChartXml(xml, deck, element, platform, pageBackground) {
   }
   if (chart.kind === "bar" && chart.showValues !== false)
     next = polishBarLabels(next);
-  if (chart.kind === "combo")
+  if (chart.kind === "combo") {
     next = polishComboLines(next, chart);
+    next = polishComboAxes(next);
+  }
   if ((chart.kind === "line" || chart.kind === "area") && chart.showValues !== false)
     next = polishKeyLabels(next, chart);
   if (chart.kind === "scatter" && chart.showValues !== false)
@@ -20776,8 +21215,21 @@ function polishComboLines(xml, chart) {
     const count = lineCounts[index] ?? 0;
     index += 1;
     const labels = Array.from({ length: count }, (_, point) => deletedLabel(point)).join("");
-    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`).replace(/<c:showVal val="0"\/>/g, '<c:showVal val="1"/>');
+    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`).replace(/<c:showVal val="[01]"\/>/g, '<c:showVal val="0"/>');
   }));
+}
+function polishComboAxes(xml) {
+  const bar = xml.match(/<c:barChart>[\s\S]*?<\/c:barChart>/);
+  const cat = bar?.[0].match(/<c:axId val="(\d+)"\/>/);
+  if (!cat)
+    return xml;
+  const catId = cat[1];
+  return xml.replace(/<c:valAx>[\s\S]*?<\/c:valAx>/g, (block) => {
+    if (!block.includes('<c:axPos val="r"/>'))
+      return block;
+    const next = block.replace(/<c:crossAx val="\d+"\/>/, `<c:crossAx val="${catId}"/>`);
+    return next.includes("<c:crossBetween") ? next.replace(/<c:crossBetween val="[^"]+"\/>/, '<c:crossBetween val="between"/>') : next.replace("</c:valAx>", '<c:crossBetween val="between"/></c:valAx>');
+  });
 }
 function polishKeyLabels(xml, chart) {
   let index = 0;
@@ -20785,7 +21237,8 @@ function polishKeyLabels(xml, chart) {
     const values = chart.series[index]?.values ?? [];
     index += 1;
     const keep = new Set(keyIndexes(values));
-    const labels = values.map((_, point) => keep.has(point) && point !== 0 ? "" : deletedLabel(point)).join("");
+    const last = values.length - 1;
+    const labels = values.map((_, point) => keep.has(point) && point !== 0 && point !== last ? "" : deletedLabel(point)).join("");
     if (!labels)
       return series;
     return series.replace("<c:dLbls>", `<c:dLbls>${labels}`);
@@ -20816,13 +21269,6 @@ function keyIndexes(values) {
 function addEastAsiaFace(xml, face) {
   const ea = `<a:ea typeface="${escapeXml(face)}"/>`;
   return xml.replace(/<a:latin typeface="[^"]*"\/>(?!<a:ea\b)/g, (match) => `${match}${ea}`);
-}
-function markerExtent(values, ratio) {
-  const finite = values.filter((value) => Number.isFinite(value));
-  const min = Math.min(...finite);
-  const max = Math.max(...finite);
-  const span = Math.max(max - min, 1);
-  return { min: min - span * ratio, max: max + span * ratio };
 }
 function waterfallParts(values) {
   const base = [];

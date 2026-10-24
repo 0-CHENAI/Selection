@@ -330,7 +330,7 @@ function themeChartPalette(deck: Deck, chart: ChartSpec, count: number): string[
 
 /** 960×540 defaults. Page titles stay outside the chart, at about 26pt. */
 const CHART_CATEGORY_PT = 13
-const CHART_TICK_PT = 11
+const CHART_TICK_PT = 12
 const CHART_LEGEND_PT = 12
 const CHART_VALUE_PT = 12
 
@@ -348,10 +348,12 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   const legend = chart.showLegend ?? (chart.series.length > 1 && kind !== 'pie' && kind !== 'doughnut' && kind !== 'waterfall')
   const outside = readableOn(background, ink, inverse)
   const ticks = contrastRatio(muted, background) >= 3 ? muted : outside
+  const tickColor = chart.valLabelColor
+    ? hex(colorRef(chart.valLabelColor, deck.theme, ticks))
+    : deeperTick(ticks, ink)
   const categoryColor = chart.catLabelColor
     ? hex(colorRef(chart.catLabelColor, deck.theme, outside))
-    : (numericAxis ? ticks : outside)
-  const tickColor = chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, ticks)) : ticks
+    : (numericAxis ? tickColor : outside)
   const axis = quietColor(ink, background, 0.72)
   const gridTint = quietColor(ink, background, 0.86)
   const themedGrid = (fallback: 'none' | 'solid') => {
@@ -406,6 +408,7 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     const increase = hex(colorRef(chart.colors?.[1] ?? '$accent', deck.theme, '$accent'))
     const decrease = hex(colorRef(chart.colors?.[2] ?? '$muted', deck.theme, '$muted'))
     const peak = Math.max(...columns.base.map((value, index) => value + columns.total[index]! + columns.up[index]! + columns.down[index]!), 0)
+    const scale = chartValueScale(chart, [peak], false)
     slide.addChart(pres.ChartType.bar, [
       { name: '基座', labels: chart.categories, values: columns.base },
       { name: '合计', labels: chart.categories, values: columns.total },
@@ -420,10 +423,11 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       showLegend: false,
       layout: chartLayout(kind, false),
       chartColors: [background, ink, increase, decrease],
-      valAxisMinVal: chart.valMin ?? 0,
-      valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom([peak]) : undefined),
+      valAxisMinVal: scale.min,
+      valAxisMaxVal: scale.max,
+      valAxisMajorUnit: scale.step,
     })
-    if (on) addWaterfallCallouts(slide, element, chart, face, inverse, outside, peak)
+    if (on) addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale)
     return
   }
   if (kind === 'combo') {
@@ -433,6 +437,9 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     let colorIndex = 0
     const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]!)
     const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]!)
+    const columnScale = chartValueScale(chart, columns.flatMap(series => series.values), true)
+    const lineScale = chartValueScale(chart, lines.flatMap(series => series.values), true)
+    const legend = chart.showLegend ?? true
     const axisLabel = {
       valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
@@ -449,7 +456,7 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
         options: {
           barDir: 'col',
           barGrouping: 'clustered',
-          barGapWidthPct: 60,
+          barGapWidthPct: 100,
           chartColors: columnColors,
           showValue: on,
           dataLabelPosition: 'inEnd',
@@ -471,23 +478,45 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       },
     ], {
       ...base,
-      showLegend: chart.showLegend ?? true,
+      // The HTML preview draws a combo line from plot edge to plot edge and ignores the
+      // secondary scale. Native legend is off so the chart box maps 1:1 onto the slide;
+      // addComboOverlay repaints the line on the column centers and the right-hand ticks.
+      barDir: 'col',
+      showLegend: false,
+      layout: chartLayout(kind, legend),
+      barGapWidthPct: 100,
       valAxisMinVal: undefined,
       valAxisMaxVal: undefined,
       valAxes: [
         {
           ...axisLabel,
-          valAxisMinVal: chart.valMin ?? 0,
-          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(columns.flatMap(series => series.values)) : undefined),
+          valAxisMinVal: columnScale.min,
+          valAxisMaxVal: columnScale.max,
+          valAxisMajorUnit: columnScale.step,
           valGridLine: themedGrid('none'),
         },
         {
           ...axisLabel,
-          valAxisMinVal: chart.valMin ?? 0,
-          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(lines.flatMap(series => series.values)) : undefined),
+          valAxisMinVal: lineScale.min,
+          valAxisMaxVal: lineScale.max,
+          valAxisMajorUnit: lineScale.step,
           valGridLine: { style: 'none' as const },
         },
       ],
+    })
+    addComboOverlay(pres, slide, element, chart, {
+      background,
+      ink,
+      inverse,
+      face,
+      axis,
+      tickColor,
+      columnColors,
+      lineColors,
+      columnScale,
+      lineScale,
+      legend,
+      labels: on,
     })
     return
   }
@@ -496,8 +525,10 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     const xs = chart.series.flatMap(series => series.x ?? [])
     const ys = chart.series.flatMap(series => series.values)
     const labelScatter = kind === 'scatter' && on
-    const xExtent = markerExtent(xs, kind === 'bubble' ? 0.45 : 0.14)
-    const yExtent = markerExtent(ys, kind === 'bubble' ? 1.15 : (labelScatter ? 0.42 : 0.16))
+    const xScale = paddedScale(xs, kind === 'bubble' ? 0.35 : 0.16)
+    const yScale = chart.valMax !== undefined || chart.valMin !== undefined
+      ? chartValueScale(chart, ys, kind === 'bubble')
+      : paddedScale(ys, kind === 'bubble' ? 0.45 : (labelScatter ? 0.28 : 0.16))
     slide.addChart(kind === 'bubble' ? pres.ChartType.bubble : pres.ChartType.scatter, [
       { name: 'X', values: x },
       ...chart.series.map(series => ({
@@ -516,14 +547,34 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       showLabel: labelScatter,
       dataLabelFormatScatter: labelScatter ? 'custom' : undefined,
       dataLabelPosition: labelScatter ? 't' : undefined,
-      showLegend: chart.showLegend ?? chart.series.length > 1,
-      catAxisMinVal: xExtent.min,
-      catAxisMaxVal: xExtent.max,
-      valAxisMinVal: chart.valMin ?? yExtent.min,
-      valAxisMaxVal: chart.valMax ?? yExtent.max,
+      // Bubble keeps the native series for PowerPoint and repaints the plot. The HTML
+      // preview ignores the axis extent, pins the first bubble to the spine, and numbers
+      // the category axis 12, 17, 22. Scatter's category ticks stay at 9pt black.
+      showLegend: kind === 'bubble' ? false : (chart.showLegend ?? chart.series.length > 1),
+      catAxisMinVal: xScale.min,
+      catAxisMaxVal: xScale.max,
+      catAxisMajorUnit: xScale.step,
+      valAxisMinVal: yScale.min,
+      valAxisMaxVal: yScale.max,
+      valAxisMajorUnit: yScale.step,
       catGridLine: themedGrid('solid'),
       valGridLine: themedGrid('solid'),
     })
+    if (kind === 'scatter') addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background)
+    if (kind === 'bubble') {
+      addBubbleOverlay(pres, slide, element, chart, {
+        background,
+        ink,
+        face,
+        axis,
+        grid: gridTint,
+        tickColor,
+        colors: palette,
+        xScale,
+        yScale,
+        legend: chart.showLegend ?? chart.series.length > 1,
+      })
+    }
     return
   }
   const pieLike = kind === 'pie' || kind === 'doughnut'
@@ -540,8 +591,13 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
           : kind === 'radar'
             ? pres.ChartType.radar
             : pres.ChartType.bar
-  const flat = chart.series.flatMap(series => series.values)
+  const flat = kind === 'stacked' ? columnSums(chart.series) : chart.series.flatMap(series => series.values)
   const needsHeadroom = on && (kind === 'bar' || kind === 'column' || kind === 'line' || kind === 'area')
+  const scale = kind === 'stackedPercent'
+    ? { min: 0, max: 1, step: 0.2 }
+    : kind === 'radar'
+      ? chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, flat, false)
+      : (pieLike ? undefined : chartValueScale(chart, flat, needsHeadroom))
   slide.addChart(type, rows, {
     ...base,
     barDir: kind === 'bar' ? 'bar' : 'col',
@@ -557,7 +613,7 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     lineDataSymbolSize: chart.markerSize ?? (kind === 'line' || kind === 'radar' ? 10 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    showLegend: legend,
+    showLegend: kind === 'radar' ? false : legend,
     showValue: on && (bars || pieLike || kind === 'line' || kind === 'area'),
     showLabel: on && pieLike,
     ...(kind === 'bar' ? { catAxisLabelPos: 'none' as const } : {}),
@@ -567,13 +623,15 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     dataLabelColor: grouped ? insideLabel(palette, ink, inverse) : outside,
     dataBorder: pieLike ? { pt: 2, color: background } : base.dataBorder,
     valAxisLabelFormatCode: kind === 'stackedPercent' ? '0%' : undefined,
-    valAxisMinVal: pieLike || kind === 'radar' ? undefined : kind === 'stackedPercent' ? 0 : (chart.valMin ?? (bars || kind === 'line' || kind === 'area' ? 0 : undefined)),
-    valAxisMaxVal: pieLike || kind === 'radar' || kind === 'stackedPercent' ? undefined : (chart.valMax ?? (needsHeadroom ? labelHeadroom(flat) : undefined)),
+    valAxisMinVal: scale?.min,
+    valAxisMaxVal: scale?.max,
+    valAxisMajorUnit: scale?.step,
     holeSize: kind === 'doughnut' ? (chart.holeSize ?? 62) : undefined,
     ...(kind === 'radar' ? { valGridLine: themedGrid('solid'), catGridLine: themedGrid('solid') } : {}),
   })
   if (on && pieLike) addPieLeaders(pres, slide, element, chart, muted)
   if (on && (kind === 'line' || kind === 'area')) addEdgeCallouts(slide, element, chart, kind, legend, face, outside)
+  if (kind === 'radar') addRadarValueLabels(pres, slide, element, chart, legend, face, tickColor, background, ink, palette)
 }
 
 function shapeFill(deck: Deck, element: DeckElement): { color: string; transparency?: number } | undefined {
@@ -758,12 +816,68 @@ function quietColor(foreground: string, background: string, toward: number): str
     : mixHex(foreground, background, toward)
 }
 
-function labelHeadroom(values: number[]): number | undefined {
+type AxisScale = { min: number; max: number; step: number }
+
+function cleanNumber(value: number): number {
+  const rounded = Math.round(value * 1e6) / 1e6
+  return Object.is(rounded, -0) ? 0 : rounded
+}
+
+/** 1-2-5 step aimed at about four intervals across `span`. */
+function niceStep(span: number): number {
+  if (!(span > 0) || !Number.isFinite(span)) return 1
+  const rough = span / 4
+  const mag = 10 ** Math.floor(Math.log10(rough))
+  const residual = rough / mag
+  const nice = residual <= 1.5 ? 1 : residual <= 3 ? 2 : residual <= 7 ? 5 : 10
+  return cleanNumber(nice * mag)
+}
+
+/** Snap an axis so the labeled ticks are round. Headroom keeps outside labels off the frame. */
+function niceAxis(min: number, max: number, headroom: boolean): AxisScale {
+  let lo = Number.isFinite(min) ? min : 0
+  let hi = Number.isFinite(max) ? max : lo + 1
+  if (hi < lo) [lo, hi] = [hi, lo]
+  if (hi === lo) hi = lo + Math.max(Math.abs(lo), 1)
+  const span = hi - lo
+  const step = niceStep(headroom ? span * 1.18 : span)
+  const axisMin = lo === 0 ? 0 : cleanNumber(Math.floor(lo / step) * step)
+  let axisMax = cleanNumber(Math.ceil((hi - axisMin) / step) * step + axisMin)
+  if (axisMax < hi) axisMax = cleanNumber(axisMax + step)
+  if (headroom && (axisMax - hi) / step < 0.6) axisMax = cleanNumber(axisMax + step)
+  return { min: axisMin, max: axisMax, step }
+}
+
+function chartValueScale(chart: ChartSpec, values: number[], headroom: boolean): AxisScale {
   const finite = values.filter(value => Number.isFinite(value))
-  if (finite.length === 0) return undefined
-  const peak = Math.max(...finite)
-  if (peak <= 0) return undefined
-  return Math.ceil(peak * 1.22)
+  const dataMax = finite.length ? Math.max(...finite) : 0
+  const dataMin = finite.length ? Math.min(...finite) : 0
+  const min = chart.valMin ?? Math.min(0, dataMin)
+  if (chart.valMax !== undefined) {
+    const max = chart.valMax
+    return { min, max, step: niceStep(Math.max(max - min, Math.abs(dataMax) || 1)) }
+  }
+  return niceAxis(min, Math.max(dataMax, min), headroom)
+}
+
+function paddedScale(values: number[], ratio: number): AxisScale {
+  const finite = values.filter(value => Number.isFinite(value))
+  if (finite.length === 0) return { min: 0, max: 1, step: 1 }
+  const dataMin = Math.min(...finite)
+  const dataMax = Math.max(...finite)
+  const span = Math.max(dataMax - dataMin, 1)
+  const lo = dataMin >= 0 ? Math.max(0, dataMin - span * ratio) : dataMin - span * ratio
+  return niceAxis(lo, dataMax + span * ratio, false)
+}
+
+function columnSums(series: ChartSpec['series']): number[] {
+  const count = Math.max(...series.map(item => item.values.length), 0)
+  return Array.from({ length: count }, (_, index) => series.reduce((sum, item) => sum + (item.values[index] ?? 0), 0))
+}
+
+function deeperTick(color: string, ink: string): string {
+  if (color.toUpperCase() === ink.toUpperCase()) return color.toUpperCase()
+  return mixHex(color, ink, 0.45)
 }
 
 function plotBox(kind: ChartKind, legend: boolean, bounds: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } {
@@ -783,7 +897,7 @@ function polar(cx: number, cy: number, radius: number, clockwiseFromTop: number)
   }
 }
 
-function addLeader(pres: PptxGenJS, slide: PptxGenJS.Slide, x1: number, y1: number, x2: number, y2: number, color: string, name: string): void {
+function addLeader(pres: PptxGenJS, slide: PptxGenJS.Slide, x1: number, y1: number, x2: number, y2: number, color: string, name: string, width = 1): void {
   const dx = x2 - x1
   const dy = y2 - y1
   const length = Math.max(Math.hypot(dx, dy), 0.01)
@@ -796,12 +910,12 @@ function addLeader(pres: PptxGenJS, slide: PptxGenJS.Slide, x1: number, y1: numb
     w: inches(length),
     h: 0,
     rotate: Math.abs(angle) < 0.05 ? undefined : angle,
-    line: { color, width: 1 },
+    line: { color, width },
     objectName: name,
   })
 }
 
-function addCallout(slide: PptxGenJS.Slide, text: string, x: number, y: number, w: number, h: number, face: string, color: string, name: string): void {
+function addCallout(slide: PptxGenJS.Slide, text: string, x: number, y: number, w: number, h: number, face: string, color: string, name: string, bold = true, align: 'center' | 'left' | 'right' = 'center'): void {
   slide.addText(text, {
     x: inches(x),
     y: inches(y),
@@ -809,9 +923,9 @@ function addCallout(slide: PptxGenJS.Slide, text: string, x: number, y: number, 
     h: inches(h),
     fontFace: face,
     fontSize: CHART_VALUE_PT,
-    bold: true,
+    bold,
     color,
-    align: 'center',
+    align,
     valign: 'middle',
     margin: 0,
     wrap: false,
@@ -850,29 +964,35 @@ function addEdgeCallouts(slide: PptxGenJS.Slide, element: DeckElement, chart: Ch
   const categories = chart.categories.length
   if (categories < 2) return
   const plot = plotBox(kind, legend, element.bounds)
-  const valMin = chart.valMin ?? 0
-  const valMax = chart.valMax ?? labelHeadroom(chart.series.flatMap(series => series.values))
-  if (valMax === undefined || valMax <= valMin) return
+  const scale = chartValueScale(chart, chart.series.flatMap(series => series.values), true)
+  if (scale.max <= scale.min) return
+  const yOf = (value: number) => plot.y + plot.h - ((value - scale.min) / (scale.max - scale.min)) * plot.h
   chart.series.forEach((series, seriesIndex) => {
     for (const point of keyIndexes(series.values)) {
-      if (point !== 0) continue
+      if (point !== 0 && point !== categories - 1) continue
       const value = series.values[point]
       if (value === undefined || !Number.isFinite(value)) continue
-      const py = plot.y + plot.h - ((value - valMin) / (valMax - valMin)) * plot.h
       const text = magnitude(value)
-      addCallout(slide, text, plot.x + 16, py - 18, Math.max(28, text.length * 8), 16, face, color, `${element.id}-edge-${seriesIndex}`)
+      const boxW = Math.max(28, text.length * 8)
+      const py = yOf(value)
+      const steps = Math.round((value - scale.min) / scale.step)
+      const tickY = yOf(scale.min + steps * scale.step)
+      // A value that lands on a tick sits on the axis label. Move that callout into the plot.
+      const tight = point === 0 && Math.abs(py - tickY) < 8
+      const x = point === 0 ? plot.x + (tight ? 56 : 28) : plot.x + plot.w - 28 - boxW
+      addCallout(slide, text, x, tight ? py - 28 : py - 20, boxW, 16, face, color, point === 0 ? `${element.id}-edge-${seriesIndex}` : `${element.id}-edge-${seriesIndex}-end`)
     }
   })
 }
 
-function addWaterfallCallouts(slide: PptxGenJS.Slide, element: DeckElement, chart: ChartSpec, face: string, inverse: string, ink: string, peak: number): void {
+function addWaterfallCallouts(slide: PptxGenJS.Slide, element: DeckElement, chart: ChartSpec, face: string, inverse: string, ink: string, scale: AxisScale): void {
   const values = chart.series[0]?.values ?? []
   if (values.length === 0) return
   const columns = waterfallColumns(values)
   const plot = plotBox('waterfall', false, element.bounds)
   const slot = plot.w / values.length
-  const valMin = chart.valMin ?? 0
-  const valMax = chart.valMax ?? labelHeadroom([peak]) ?? peak
+  const valMin = scale.min
+  const valMax = scale.max
   if (valMax <= valMin) return
   const yOf = (value: number) => plot.y + plot.h - ((value - valMin) / (valMax - valMin)) * plot.h
   values.forEach((_, index) => {
@@ -902,6 +1022,379 @@ function addWaterfallCallouts(slide: PptxGenJS.Slide, element: DeckElement, char
       )
     }
   })
+}
+
+function formatTick(value: number): string {
+  const rounded = cleanNumber(value)
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded)
+}
+
+function addComboOverlay(
+  pres: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  element: DeckElement,
+  chart: ChartSpec,
+  paint: {
+    background: string
+    ink: string
+    inverse: string
+    face: string
+    axis: string
+    tickColor: string
+    columnColors: string[]
+    lineColors: string[]
+    columnScale: AxisScale
+    lineScale: AxisScale
+    legend: boolean
+    labels: boolean
+  },
+): void {
+  const roles = comboSeriesRoles(chart.series)
+  const columns = chart.series.filter((_, index) => roles[index] === 'column')
+  const lines = chart.series.filter((_, index) => roles[index] === 'line')
+  const count = chart.categories.length
+  if (count === 0 || columns.length === 0) return
+  const plot = plotBox('combo', paint.legend, element.bounds)
+  const slot = plot.w / count
+  const yOf = (value: number, scale: AxisScale) => {
+    const span = scale.max - scale.min
+    if (!(span > 0)) return plot.y + plot.h
+    return plot.y + plot.h - ((value - scale.min) / span) * plot.h
+  }
+  const columnTop = (index: number) => yOf(Math.max(...columns.map(series => series.values[index] ?? 0), paint.columnScale.min), paint.columnScale)
+  // The preview draws the native line on the plot edges. Cover that plot and paint the line on the column centers.
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches(plot.x - 3),
+    y: inches(plot.y - 2),
+    w: inches(plot.w + 8),
+    h: inches(plot.h + 4),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-plot-cover`,
+  })
+  const barWidth = slot / (columns.length + 1)
+  const cluster = barWidth * columns.length
+  const clusterStart = (slot - cluster) / 2
+  const taken: Array<{ x: number; y: number; w: number; h: number }> = []
+  const overlaps = (box: { x: number; y: number; w: number; h: number }, gap = 2) => taken.some(item =>
+    box.x < item.x + item.w + gap && box.x + box.w + gap > item.x && box.y < item.y + item.h + gap && box.y + box.h + gap > item.y)
+  const columnBoxes: Array<{ x: number; y: number; w: number; h: number; text: string; color: string; name: string }> = []
+  columns.forEach((series, seriesIndex) => {
+    const color = paint.columnColors[seriesIndex] ?? paint.ink
+    series.values.forEach((value, index) => {
+      if (!Number.isFinite(value)) return
+      const top = yOf(value, paint.columnScale)
+      const bottom = yOf(paint.columnScale.min, paint.columnScale)
+      const x = plot.x + slot * index + clusterStart + seriesIndex * barWidth
+      const height = Math.max(bottom - top, 0.4)
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches(x),
+        y: inches(Math.min(top, bottom)),
+        w: inches(barWidth),
+        h: inches(height),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-col-${seriesIndex}-${index}`,
+      })
+      if (!paint.labels) return
+      const text = magnitude(value)
+      const boxW = Math.max(28, text.length * 8)
+      const lineNear = lines.some(line => {
+        const sample = line.values[index]
+        return Number.isFinite(sample) && Math.abs(yOf(sample!, paint.lineScale) - top) < 36
+      })
+      const inside = lineNear && height > 24
+      const box = {
+        x: x + barWidth / 2 - boxW / 2,
+        y: inside ? Math.min(top, bottom) + 3 : Math.min(top, bottom) - 16,
+        w: boxW,
+        h: 16,
+      }
+      taken.push(box)
+      columnBoxes.push({ ...box, text, color: inside ? paint.inverse : paint.ink, name: `${element.id}-col-label-${seriesIndex}-${index}` })
+    })
+  })
+  const linePoints: Array<{ seriesIndex: number; index: number; x: number; y: number; value: number; color: string }> = []
+  lines.forEach((series, seriesIndex) => {
+    const color = paint.lineColors[seriesIndex] ?? paint.ink
+    const points = series.values.map((value, index) => ({ index, value, x: plot.x + slot * (index + 0.5), y: yOf(value, paint.lineScale) }))
+      .filter(point => Number.isFinite(point.value))
+    for (let index = 1; index < points.length; index++) {
+      const previous = points[index - 1]!
+      const point = points[index]!
+      addLeader(pres, slide, previous.x, previous.y, point.x, point.y, color, `${element.id}-line-${seriesIndex}-${index}`, 2.25)
+    }
+    for (const point of points) {
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches(point.x - 4),
+        y: inches(point.y - 4),
+        w: inches(8),
+        h: inches(8),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-marker-${seriesIndex}-${point.index}`,
+      })
+      taken.push({ x: point.x - 4, y: point.y - 4, w: 8, h: 8 })
+      linePoints.push({ seriesIndex, index: point.index, x: point.x, y: point.y, value: point.value, color })
+    }
+  })
+  for (const box of columnBoxes) addCallout(slide, box.text, box.x, box.y, box.w, box.h, paint.face, box.color, box.name)
+  const segments = linePoints.map(point => {
+    const neighbors = linePoints.filter(other => other.seriesIndex === point.seriesIndex && Math.abs(other.index - point.index) === 1)
+    return { point, neighbors }
+  })
+  for (const { point, neighbors } of segments) {
+    if (!paint.labels) continue
+    const text = magnitude(point.value)
+    const boxW = Math.max(22, text.length * 9)
+    const boxH = 16
+    const barTop = columnTop(point.index)
+    const candidates = [
+      { x: point.x - boxW / 2, y: point.y - boxH - 6 },
+      { x: point.x - boxW / 2, y: point.y + 8 },
+      { x: point.x + 12, y: point.y - boxH / 2 },
+      { x: point.x - boxW - 12, y: point.y - boxH / 2 },
+    ]
+    const placed = candidates
+      .map(candidate => ({ ...candidate, w: boxW, h: boxH }))
+      .filter(candidate => candidate.x >= plot.x + 1 && candidate.y >= plot.y + 1 && candidate.x + candidate.w <= plot.x + plot.w - 1 && candidate.y + candidate.h <= plot.y + plot.h - 1)
+      .filter(candidate => !overlaps(candidate) && !lineHitsBox(candidate, point, neighbors))
+    const box = placed[0] ?? candidates.map(candidate => ({ ...candidate, w: boxW, h: boxH })).find(candidate => !overlaps(candidate)) ?? {
+      x: Math.max(plot.x + 1, Math.min(point.x - boxW / 2, plot.x + plot.w - boxW - 1)),
+      y: Math.max(plot.y + 1, point.y - boxH - 6),
+      w: boxW,
+      h: boxH,
+    }
+    taken.push(box)
+    const onBar = box.y + box.h / 2 > barTop + 2
+    addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`)
+  }
+  const rightWidth = Math.max(28, element.bounds.x + element.bounds.w - plot.x - plot.w - 2)
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches(plot.x + plot.w + 1),
+    y: inches(plot.y - 12),
+    w: inches(rightWidth),
+    h: inches(plot.h + 24),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-rtick-cover`,
+  })
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75)
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75)
+  addLeader(pres, slide, plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-y2`, 0.75)
+  const ticks: number[] = []
+  for (let value = paint.lineScale.min; value <= paint.lineScale.max + paint.lineScale.step * 0.001; value += paint.lineScale.step) ticks.push(cleanNumber(value))
+  ticks.forEach((value, index) => {
+    addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, 'left')
+  })
+  if (!paint.legend) return
+  const items = [
+    ...columns.map((series, index) => ({ name: series.name, color: paint.columnColors[index] ?? paint.ink, line: false })),
+    ...lines.map((series, index) => ({ name: series.name, color: paint.lineColors[index] ?? paint.ink, line: true })),
+  ]
+  const pieces = items.map(item => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }))
+  const total = pieces.reduce((sum, item) => sum + 18 + item.textW, 0) + Math.max(0, pieces.length - 1) * 18
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2
+  const rowY = element.bounds.y + element.bounds.h - 22
+  pieces.forEach((item, index) => {
+    if (item.line) addLeader(pres, slide, cursor, rowY + 8, cursor + 14, rowY + 8, item.color, `${element.id}-legend-line-${index}`, 2.25)
+    else {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches(cursor),
+        y: inches(rowY + 2),
+        w: inches(12),
+        h: inches(12),
+        fill: { color: item.color },
+        line: { color: item.color, pt: 0 },
+        objectName: `${element.id}-legend-swatch-${index}`,
+      })
+    }
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, paint.face, paint.ink, `${element.id}-legend-${index}`, false, 'left')
+    cursor += 18 + item.textW + 18
+  })
+}
+
+function lineHitsBox(
+  box: { x: number; y: number; w: number; h: number },
+  point: { x: number; y: number },
+  neighbors: Array<{ x: number; y: number }>,
+): boolean {
+  return neighbors.some(other => {
+    for (let step = 1; step <= 16; step++) {
+      const t = step / 16
+      const x = point.x + (other.x - point.x) * t
+      const y = point.y + (other.y - point.y) * t
+      if (x >= box.x - 1 && x <= box.x + box.w + 1 && y >= box.y - 1 && y <= box.y + box.h + 1) return true
+    }
+    return false
+  })
+}
+
+function axisTicks(scale: AxisScale): number[] {
+  if (!(scale.step > 0) || !Number.isFinite(scale.min) || !Number.isFinite(scale.max)) return []
+  const ticks: number[] = []
+  for (let value = scale.min; value <= scale.max + scale.step * 0.001; value += scale.step) ticks.push(cleanNumber(value))
+  return ticks
+}
+
+function addSwatchLegend(pres: PptxGenJS, slide: PptxGenJS.Slide, element: DeckElement, face: string, ink: string, items: Array<{ name: string; color: string }>): void {
+  const pieces = items.map(item => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }))
+  const total = pieces.reduce((sum, item) => sum + 16 + item.textW, 0) + Math.max(0, pieces.length - 1) * 16
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2
+  const rowY = element.bounds.y + element.bounds.h - 22
+  pieces.forEach((item, index) => {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches(cursor),
+      y: inches(rowY + 2),
+      w: inches(12),
+      h: inches(12),
+      fill: { color: item.color },
+      line: { color: item.color, pt: 0 },
+      objectName: `${element.id}-legend-swatch-${index}`,
+    })
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, face, ink, `${element.id}-legend-${index}`, false, 'left')
+    cursor += 16 + item.textW + 16
+  })
+}
+
+/** The preview paints scatter category ticks at 9pt black and ignores the axis text style. */
+function addScatterCategoryTicks(pres: PptxGenJS, slide: PptxGenJS.Slide, element: DeckElement, scale: AxisScale, face: string, color: string, background: string): void {
+  const plot = plotBox('scatter', false, element.bounds)
+  if (!(scale.max > scale.min)) return
+  // Cover only the band under the axis. The value-axis zero sits on the spine and must stay visible.
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches(plot.x - 8),
+    y: inches(plot.y + plot.h + 2),
+    w: inches(plot.w + 16),
+    h: inches(18),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-xtick-cover`,
+  })
+  axisTicks(scale).forEach((value, index) => {
+    const text = formatTick(value)
+    const boxW = Math.max(22, text.length * 8)
+    const x = plot.x + ((value - scale.min) / (scale.max - scale.min)) * plot.w - boxW / 2
+    addCallout(slide, text, x, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-xtick-${index}`, false)
+  })
+}
+
+function addBubbleOverlay(
+  pres: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  element: DeckElement,
+  chart: ChartSpec,
+  paint: {
+    background: string
+    ink: string
+    face: string
+    axis: string
+    grid: string
+    tickColor: string
+    colors: string[]
+    xScale: AxisScale
+    yScale: AxisScale
+    legend: boolean
+  },
+): void {
+  const plot = plotBox('bubble', paint.legend, element.bounds)
+  const xSpan = paint.xScale.max - paint.xScale.min
+  const ySpan = paint.yScale.max - paint.yScale.min
+  if (!(xSpan > 0) || !(ySpan > 0)) return
+  const xOf = (value: number) => plot.x + ((value - paint.xScale.min) / xSpan) * plot.w
+  const yOf = (value: number) => plot.y + plot.h - ((value - paint.yScale.min) / ySpan) * plot.h
+  const paper = {
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+  }
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches(plot.x - 2),
+    y: inches(plot.y - 10),
+    w: inches(plot.w + 8),
+    h: inches(plot.h + 28),
+    objectName: `${element.id}-plot-cover`,
+  })
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches(element.bounds.x),
+    y: inches(plot.y - 10),
+    w: inches(Math.max(8, plot.x - element.bounds.x)),
+    h: inches(plot.h + 20),
+    objectName: `${element.id}-ytick-cover`,
+  })
+  for (const value of axisTicks(paint.yScale)) {
+    const y = yOf(value)
+    addLeader(pres, slide, plot.x, y, plot.x + plot.w, y, paint.grid, `${element.id}-grid-y-${formatTick(value)}`, 0.75)
+  }
+  for (const value of axisTicks(paint.xScale)) {
+    const x = xOf(value)
+    addLeader(pres, slide, x, plot.y, x, plot.y + plot.h, paint.grid, `${element.id}-grid-x-${formatTick(value)}`, 0.75)
+  }
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75)
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75)
+  chart.series.forEach((series, seriesIndex) => {
+    const color = paint.colors[seriesIndex] ?? paint.ink
+    series.values.forEach((value, index) => {
+      const x = series.x?.[index]
+      const size = series.sizes?.[index]
+      if (!Number.isFinite(value) || x === undefined || !Number.isFinite(x) || !size || size <= 0) return
+      const radius = Math.max(5, (11.3 + 0.8 * size) * (plot.w / 878))
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches(xOf(x) - radius),
+        y: inches(yOf(value) - radius),
+        w: inches(radius * 2),
+        h: inches(radius * 2),
+        fill: { color, transparency: 40 },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-bubble-${seriesIndex}-${index}`,
+      })
+    })
+  })
+  axisTicks(paint.yScale).forEach((value, index) => {
+    const text = formatTick(value)
+    addCallout(slide, text, plot.x - 36, yOf(value) - 8, 30, 16, paint.face, paint.tickColor, `${element.id}-ytick-${index}`, false, 'right')
+  })
+  axisTicks(paint.xScale).forEach((value, index) => {
+    const text = formatTick(value)
+    const boxW = Math.max(22, text.length * 8)
+    addCallout(slide, text, xOf(value) - boxW / 2, plot.y + plot.h + 4, boxW, 16, paint.face, paint.tickColor, `${element.id}-xtick-${index}`, false)
+  })
+  if (paint.legend) addSwatchLegend(pres, slide, element, paint.face, paint.ink, chart.series.map((series, index) => ({ name: series.name, color: paint.colors[index] ?? paint.ink })))
+}
+
+/** The preview hardcodes radar value labels at 8pt, on top of the filled polygon. */
+function addRadarValueLabels(pres: PptxGenJS, slide: PptxGenJS.Slide, element: DeckElement, chart: ChartSpec, legend: boolean, face: string, color: string, background: string, ink: string, colors: string[]): void {
+  const plot = plotBox('radar', legend, element.bounds)
+  const scale = chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, chart.series.flatMap(series => series.values), false)
+  const span = scale.max - scale.min
+  if (!(span > 0)) return
+  const cx = plot.x + plot.w / 2
+  const cy = plot.y + plot.h * 0.611
+  const radius = plot.h * 0.457
+  for (const value of axisTicks(scale)) {
+    if (value <= scale.min) continue
+    const y = cy - ((value - scale.min) / span) * radius
+    const text = formatTick(value)
+    const boxW = 16
+    const boxH = 14
+    const x = cx + 7
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches(x - 1),
+      y: inches(y - boxH / 2),
+      w: inches(boxW + 2),
+      h: inches(boxH),
+      fill: { color: background },
+      line: { color: background, pt: 0 },
+      objectName: `${element.id}-valtick-chip-${text}`,
+    })
+    addCallout(slide, text, x, y - boxH / 2, boxW, boxH, face, color, `${element.id}-valtick-${text}`, false, 'left')
+  }
+  if (!legend) return
+  addSwatchLegend(pres, slide, element, face, ink, chart.series.map((series, index) => ({
+    name: series.name,
+    color: colors[index] ?? ink,
+  })))
 }
 
 function chartLayout(kind: ChartKind, legend: boolean): { x: number; y: number; w: number; h: number } {
@@ -963,7 +1456,10 @@ function polishChartXml(xml: string, deck: Deck, element: DeckElement, platform:
     next = next.replace(/<c:dLblPos val="inEnd"\/>/g, '<c:dLblPos val="outEnd"/>')
   }
   if (chart.kind === 'bar' && chart.showValues !== false) next = polishBarLabels(next)
-  if (chart.kind === 'combo') next = polishComboLines(next, chart)
+  if (chart.kind === 'combo') {
+    next = polishComboLines(next, chart)
+    next = polishComboAxes(next)
+  }
   if ((chart.kind === 'line' || chart.kind === 'area') && chart.showValues !== false) next = polishKeyLabels(next, chart)
   if (chart.kind === 'scatter' && chart.showValues !== false) next = polishScatterLabels(next, face, ink)
   next = next.replace(/typeface="Arial"/g, `typeface="${escapeXml(face)}"`)
@@ -1005,10 +1501,26 @@ function polishComboLines(xml: string, chart: ChartSpec): string {
     const count = lineCounts[index] ?? 0
     index += 1
     const labels = Array.from({ length: count }, (_, point) => deletedLabel(point)).join('')
+    // The preview ignores per-point deletes and paints showVal at the plot edge, which clips 8 and 9.
     return series
       .replace('<c:dLbls>', `<c:dLbls>${labels}`)
-      .replace(/<c:showVal val="0"\/>/g, '<c:showVal val="1"/>')
+      .replace(/<c:showVal val="[01]"\/>/g, '<c:showVal val="0"/>')
   }))
+}
+
+/** The secondary value axis otherwise crosses a category axis that was never written. */
+function polishComboAxes(xml: string): string {
+  const bar = xml.match(/<c:barChart>[\s\S]*?<\/c:barChart>/)
+  const cat = bar?.[0].match(/<c:axId val="(\d+)"\/>/)
+  if (!cat) return xml
+  const catId = cat[1]
+  return xml.replace(/<c:valAx>[\s\S]*?<\/c:valAx>/g, block => {
+    if (!block.includes('<c:axPos val="r"/>')) return block
+    const next = block.replace(/<c:crossAx val="\d+"\/>/, `<c:crossAx val="${catId}"/>`)
+    return next.includes('<c:crossBetween')
+      ? next.replace(/<c:crossBetween val="[^"]+"\/>/, '<c:crossBetween val="between"/>')
+      : next.replace('</c:valAx>', '<c:crossBetween val="between"/></c:valAx>')
+  })
 }
 
 function polishKeyLabels(xml: string, chart: ChartSpec): string {
@@ -1017,8 +1529,9 @@ function polishKeyLabels(xml: string, chart: ChartSpec): string {
     const values = chart.series[index]?.values ?? []
     index += 1
     const keep = new Set(keyIndexes(values))
-    // A label centered on the first category sits on the value axis. That point is redrawn beside the marker.
-    const labels = values.map((_, point) => keep.has(point) && point !== 0 ? '' : deletedLabel(point)).join('')
+    const last = values.length - 1
+    // Labels centered on either end sit on the frame. Those points are redrawn inside the plot.
+    const labels = values.map((_, point) => keep.has(point) && point !== 0 && point !== last ? '' : deletedLabel(point)).join('')
     if (!labels) return series
     return series.replace('<c:dLbls>', `<c:dLbls>${labels}`)
   })
@@ -1049,14 +1562,6 @@ function keyIndexes(values: number[]): number[] {
 function addEastAsiaFace(xml: string, face: string): string {
   const ea = `<a:ea typeface="${escapeXml(face)}"/>`
   return xml.replace(/<a:latin typeface="[^"]*"\/>(?!<a:ea\b)/g, match => `${match}${ea}`)
-}
-
-function markerExtent(values: number[], ratio: number): { min: number; max: number } {
-  const finite = values.filter(value => Number.isFinite(value))
-  const min = Math.min(...finite)
-  const max = Math.max(...finite)
-  const span = Math.max(max - min, 1)
-  return { min: min - span * ratio, max: max + span * ratio }
 }
 
 export function waterfallParts(values: number[]): { base: number[]; up: number[]; down: number[] } {
