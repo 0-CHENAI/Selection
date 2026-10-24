@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
+import type { ChartSkillCandidate } from '@craft-agent/shared/skills'
 import { buildPptPrompt, getPptCatalog, getPptTemplatePages, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
 
 const root = realpathSync(resolve(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design'))
@@ -108,4 +109,45 @@ test('PRO request enables skill without changing user transport options and adds
   expect(validatePptRequest({ themeId }, root)).toEqual({ themeId })
   expect(readFileSync(join(session, 'attachments/ppt-brand/logo.png')).toString()).toBe('logo bytes')
   expect(prepared.ppt).toEqual(ppt)
+})
+
+const sampleCharts: ChartSkillCandidate = {
+  slug: 'sample-charts',
+  source: 'workspace',
+  metadata: { name: 'Sample Charts', description: '把表格画成图表，支持自定义色板。' },
+  content: 'Return one SVG file. A custom palette may be supplied by the caller.',
+}
+
+test('an installed chart skill is named in the prompt only when the user names it', () => {
+  const themeId = getPptCatalog(root).themes[0]!.id
+  const request = { templateId: 'dsh-cartesian', themeId, brandColor: '#123456' }
+  expect(validatePptRequest(Object.assign({}, request, { chartSkill: 'sample-charts' }), root)).toEqual(request)
+  expect(validatePptRequest(JSON.parse('{"chartSkill":"../sample-charts"}'), root)).toEqual({})
+  const named = '用 sample-charts 画图'
+  const prepared = pptSendOptions('PRO', undefined, { skillSlugs: ['research'], ppt: request }, root, [sampleCharts], named)!
+  expect(prepared.skillSlugs).toEqual(['research', 'ppt-design', 'sample-charts'])
+  expect(prepared.ppt).toEqual(request)
+  const namedSession = temp()
+  const context = buildPptPrompt(request, namedSession, root, [sampleCharts], named)
+  expect(context).toContain('[skill:sample-charts]')
+  expect(context).toContain('custom palette')
+  expect(context).toContain('#123456')
+  expect(context).toContain('chart-fallback.json')
+  expect(context).toContain('chartImage')
+  expect(context).not.toContain('templates/color')
+  expect(JSON.parse(readFileSync(join(namedSession, 'data', 'chart-fallback.json'), 'utf8'))).toEqual({ fallbacks: [] })
+  const quietSession = temp()
+  const quiet = buildPptPrompt(request, quietSession, root, [sampleCharts], '画个图表')
+  expect(quiet).toContain('sample-charts')
+  expect(quiet).not.toContain('[skill:sample-charts]')
+  expect(quiet.toLowerCase()).toContain('do not ask')
+  expect(pptSendOptions('PRO', request, undefined, root, [sampleCharts], '画个图表')?.skillSlugs).toEqual(['ppt-design'])
+  expect(JSON.parse(readFileSync(join(quietSession, 'data', 'chart-fallback.json'), 'utf8')).fallbacks).toEqual([])
+  const missingSession = temp()
+  const missing = buildPptPrompt(request, missingSession, root, [], '用 lieflat-charts 画图')
+  expect(missing).toContain('not installed')
+  expect(missing).toContain('native editable charts')
+  expect(missing).not.toContain('[skill:lieflat-charts]')
+  expect(pptSendOptions('PRO', request, undefined, root, [], '用 lieflat-charts 画图')?.skillSlugs).toEqual(['ppt-design'])
+  expect(JSON.parse(readFileSync(join(missingSession, 'data', 'chart-fallback.json'), 'utf8')).fallbacks).toEqual([{ skill: 'lieflat-charts', reason: 'missing' }])
 })

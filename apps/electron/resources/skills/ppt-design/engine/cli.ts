@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { argumentLayoutCatalog } from './argument-layouts.ts'
 import { checkDeck } from './check.ts'
 import { exportDeck, platformFromProcess } from './export-pptx.ts'
 import { loadDeckFile } from './schema.ts'
@@ -19,7 +20,7 @@ type Flags = {
 function usage(): never {
   console.log(JSON.stringify({
     status: 'error',
-    message: '用法：deck-cli.mjs check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]',
+    message: '用法：deck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]',
   }))
   process.exit(1)
 }
@@ -51,6 +52,10 @@ function emit(status: RenderStatus, body: Record<string, unknown>, code: number)
 }
 
 const flags = parseArgs(process.argv.slice(2))
+if (flags.command === 'layouts') {
+  console.log(JSON.stringify({ status: 'ok', layouts: argumentLayoutCatalog() }))
+  process.exit(0)
+}
 if (!flags.file) usage()
 const file = resolve(flags.file)
 

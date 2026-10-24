@@ -9172,55 +9172,6 @@ var require_lib3 = __commonJS(function(exports, module) {
 import { realpathSync as realpathSync2 } from "fs";
 import { resolve } from "path";
 
-// apps/electron/resources/skills/ppt-design/engine/contrast.ts
-function channel(value) {
-  const c = value / 255;
-  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-function luminance(hex) {
-  const raw = hex.replace("#", "").slice(0, 6);
-  const n = Number.parseInt(raw, 16);
-  const r = n >> 16 & 255;
-  const g = n >> 8 & 255;
-  const b = n & 255;
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-function contrastRatio(foreground, background) {
-  const a = luminance(foreground);
-  const b = luminance(background);
-  const hi = Math.max(a, b);
-  const lo = Math.min(a, b);
-  return (hi + 0.05) / (lo + 0.05);
-}
-function contrastMinimum(fontSize, bold) {
-  if (fontSize >= 24 || bold && fontSize >= 18)
-    return 3;
-  return 4.5;
-}
-function splitColor(hex) {
-  const raw = hex.replace("#", "");
-  const rgb = `#${raw.slice(0, 6).toUpperCase()}`;
-  if (raw.length >= 8)
-    return { rgb, alpha: Number.parseInt(raw.slice(6, 8), 16) / 255 };
-  return { rgb, alpha: 1 };
-}
-function composite(over, under) {
-  const src = splitColor(over);
-  const dst = splitColor(under);
-  if (src.alpha >= 0.999)
-    return src.rgb;
-  if (src.alpha <= 0.001)
-    return dst.rgb;
-  const mix = (a, b) => Math.round(a * src.alpha + b * (1 - src.alpha));
-  const left = channels(src.rgb);
-  const right = channels(dst.rgb);
-  return "#" + [mix(left.r, right.r), mix(left.g, right.g), mix(left.b, right.b)].map((channelByte) => channelByte.toString(16).padStart(2, "0")).join("").toUpperCase();
-}
-function channels(hex) {
-  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
-  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
-}
-
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
 var NO_LINE_END = new Set(Array.from("\uFF08\u300A\u300C\u300E\u3010\u3008([{\u201C\u2018"));
@@ -9337,6 +9288,520 @@ function orphanLines(lines) {
 }
 function literalNewline(text) {
   return text.includes("\\n") || text.includes("\\r") || text.includes("\\t");
+}
+
+// apps/electron/resources/skills/ppt-design/engine/types.ts
+var DECK_FORMAT = "selection-deck";
+var DECK_VERSION = 1;
+var CANVAS_WIDTH = 960;
+var CANVAS_HEIGHT = 540;
+var CANVAS_PRESETS = [
+  { id: "ppt169", label: "16:9", width: 960, height: 540 },
+  { id: "ppt43", label: "4:3", width: 768, height: 576 },
+  { id: "moments", label: "1:1", width: 810, height: 810 },
+  { id: "story", label: "9:16", width: 810, height: 1440 },
+  { id: "xiaohongshu", label: "3:4", width: 931.5, height: 1245 }
+];
+function canvasBySize(width, height) {
+  return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
+}
+function canvasSupported(width, height) {
+  if (!Number.isFinite(width) || !Number.isFinite(height))
+    return false;
+  if (canvasBySize(width, height))
+    return true;
+  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000;
+}
+function comboSeriesRoles(series) {
+  const explicit = series.some((item) => item.render);
+  return series.map((item, index) => item.render ?? (explicit || index < series.length - 1 ? "column" : "line"));
+}
+
+// apps/electron/resources/skills/ppt-design/engine/argument-layouts.ts
+var SHADOW = { color: "#141414", opacity: 0.12, blur: 16, offset: 4, angle: 90 };
+var SOURCE = "\u793A\u4F8B\u6570\u5B57\uFF0C\u6B63\u5F0F\u7A3F\u6362\u6210\u7528\u6237\u6750\u6599\u3002";
+function capacity(value, width, height, size, leading) {
+  const maxLines = Math.max(1, Math.floor((height + 0.5) / (size * leading)));
+  const perLine = Math.max(1, Math.floor(width / size));
+  const glyphs = Array.from(value.replaceAll(`
+`, "")).length;
+  return { maxChars: Math.max(glyphs, perLine * maxLines), maxLines };
+}
+function text(id, value, x, y, w, h, size, style = {}) {
+  const leading = style.leading ?? defaultLeading(size);
+  const bold = style.bold ?? false;
+  const element = {
+    id,
+    type: "text",
+    role: "content",
+    bounds: { x, y, w, h },
+    text: value,
+    textCapacity: capacity(value, w, h, size, leading),
+    font: {
+      family: style.family ?? "$cjk",
+      size,
+      weight: bold ? "bold" : "regular",
+      color: style.color ?? "$ink",
+      align: style.align,
+      valign: style.valign ?? "top",
+      leading
+    }
+  };
+  assertFits(element);
+  return element;
+}
+function assertFits(element) {
+  const font = element.font;
+  const value = element.text ?? "";
+  if (!font)
+    return;
+  const bold = font.weight === "bold";
+  const lines = wrapText(value, element.bounds.w, font.size, bold);
+  const problems = [];
+  if (literalNewline(value))
+    problems.push("\u5B57\u9762\u6362\u884C");
+  const glyphs = Array.from(value.replaceAll(`
+`, "")).length;
+  if (glyphs > (element.textCapacity?.maxChars ?? 0))
+    problems.push("\u5B57\u6570");
+  if (lines.length > (element.textCapacity?.maxLines ?? 0))
+    problems.push(`\u884C\u6570 ${lines.length} ${JSON.stringify(lines)}`);
+  const leading = font.leading ?? defaultLeading(font.size);
+  const needed = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
+  if (needed > element.bounds.h + 1.5)
+    problems.push(`\u9AD8\u5EA6 ${needed.toFixed(1)}`);
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold)), 0);
+  if (widest > element.bounds.w + fitSlack(font.size))
+    problems.push(`\u5BBD\u5EA6 ${widest.toFixed(1)}`);
+  problems.push(...orphanLines(lines));
+  if (problems.length)
+    throw new Error(`${element.id}: ${problems.join("\uFF1B")}`);
+}
+function panel(id, x, y, w, h, fill, shape = "roundRect", radius = 12, shadow = true) {
+  return {
+    id,
+    type: "shape",
+    shape,
+    role: "panel",
+    bounds: { x, y, w, h },
+    fill,
+    radius: shape === "roundRect" ? radius : undefined,
+    shadow: shadow && shape !== "ellipse" ? SHADOW : undefined
+  };
+}
+function accentTick(id, x, y, w) {
+  return { id, type: "shape", shape: "rect", role: "decoration", bounds: { x, y, w, h: 4 }, fill: "$accent" };
+}
+function rule(id, x, y, w) {
+  return { id, type: "shape", shape: "line", role: "rule", bounds: { x, y, w, h: 1 }, line: { color: "$line", width: 1 } };
+}
+function deco(id, x, y, w, h, fill) {
+  return { id, type: "shape", shape: "rect", role: "decoration", bounds: { x, y, w, h }, fill };
+}
+function link(id, x1, y1, x2, y2) {
+  const x = Math.min(x1, x2);
+  const y = Math.min(y1, y2);
+  const w = Math.max(1, Math.abs(x2 - x1));
+  const h = Math.max(1, Math.abs(y2 - y1));
+  return {
+    id,
+    type: "shape",
+    shape: "line",
+    role: "decoration",
+    bounds: { x, y, w, h },
+    line: {
+      color: "$accent",
+      width: 1.5,
+      points: { x1: x1 - x, y1: y1 - y, x2: x2 - x, y2: y2 - y }
+    }
+  };
+}
+function chartEl(id, x, y, w, h, spec) {
+  return { id, type: "chart", role: "content", bounds: { x, y, w, h }, chart: { showLegend: false, ...spec } };
+}
+function rail() {
+  return { id: "rail", type: "shape", shape: "rect", role: "decoration", bounds: { x: 0, y: 0, w: 8, h: 540 }, fill: "$accent" };
+}
+function furniture(kicker, title, exhibit, pageNo) {
+  return [
+    rail(),
+    text("kicker", kicker, 40, 16, 460, 18, 12, { bold: true, color: "$accent" }),
+    text("exhibit", exhibit, 680, 16, 240, 18, 12, { color: "$muted", align: "right", family: "$latin" }),
+    text("title", title, 40, 40, 880, 34, 26, { bold: true }),
+    rule("top-rule", 40, 82, 880),
+    rule("footer-rule", 40, 498, 880),
+    text("source", SOURCE, 40, 508, 700, 20, 11, { color: "$muted" }),
+    text("page-no", pageNo, 820, 508, 100, 20, 11, { bold: true, align: "right", family: "$latin" })
+  ];
+}
+function finish(id, name, relation, summary, notes, elements) {
+  const seen = new Set;
+  for (const element of elements) {
+    if (seen.has(element.id))
+      throw new Error(`${id} \u91CD\u590D\u5143\u7D20 ${element.id}`);
+    seen.add(element.id);
+  }
+  return { id, layout: id, name, background: "$paper", elements, notes };
+}
+function slotsOf(page) {
+  return page.elements.filter((element) => element.type === "text" || element.type === "chart" || element.type === "table" || element.type === "shape" && element.role === "panel").map((element) => ({
+    id: element.id,
+    kind: element.type,
+    bounds: { ...element.bounds },
+    textCapacity: element.textCapacity ? { ...element.textCapacity } : undefined,
+    required: true
+  }));
+}
+function conclusion() {
+  const cards = [
+    { id: "stock", value: "45 \u5929", label: "\u5E93\u5B58\u5468\u8F6C", note: "\u6BD4\u5CF0\u503C\u5C11 19 \u5929" },
+    { id: "stockout", value: "12%", label: "\u7F3A\u8D27\u7387", note: "\u4E09\u4E2A\u4ED3\u4E00\u8D77\u4E0B\u964D" },
+    { id: "sites", value: "3 \u4ED3", label: "\u5148\u6062\u590D", note: "\u534E\u4E1C\u3001\u534E\u5357\u3001\u534E\u5317" }
+  ];
+  const elements = [
+    panel("claim-panel", 0, 0, 408, 540, "$accent", "rect", 0),
+    text("kicker", "\u7ED3\u8BBA\u5148\u884C", 36, 48, 320, 22, 14, { bold: true, color: "$inverse" }),
+    text("claim", `\u5468\u8F6C\u5148\u56DE\u5230 45 \u5929
+\u518D\u51B3\u5B9A\u662F\u5426\u6269\u4EA7`, 36, 168, 332, 120, 32, { bold: true, color: "$inverse", leading: 1.12 }),
+    text("claim-note", "\u4E09\u6761\u8BC1\u636E\u6307\u5411\u540C\u4E00\u4EF6\u4E8B", 36, 312, 332, 28, 16, { color: "$inverse" }),
+    text("source", SOURCE, 36, 488, 332, 22, 12, { color: "$inverse" })
+  ];
+  cards.forEach((card, index) => {
+    const y = 36 + index * 156;
+    elements.push(panel(`${card.id}-card`, 440, y, 480, 140, "$surface"), accentTick(`${card.id}-tick`, 440, y, 56), text(`${card.id}-value`, card.value, 464, y + 28, 200, 48, 32, { bold: true, color: "$accent" }), text(`${card.id}-label`, card.label, 464, y + 84, 180, 28, 16, { bold: true }), text(`${card.id}-note`, card.note, 680, y + 40, 210, 56, 16, { color: "$muted", valign: "middle" }));
+  });
+  elements.push(text("page-no", "01", 820, 500, 100, 20, 12, { bold: true, align: "right", family: "$latin", color: "$muted" }));
+  return elements;
+}
+function evidenceTree() {
+  const children = [
+    { id: "gap", title: "\u7F3A\u8D27\u8FD8\u5728", body: "\u4E09\u4E2A\u4ED3\u6CA1\u6709\u540C\u65F6\u6062\u590D" },
+    { id: "cash", title: "\u73B0\u91D1\u8FD8\u7D27", body: "\u5468\u671F\u505C\u5728 18 \u5929" },
+    { id: "order", title: "\u8BA2\u5355\u4E0D\u7A33", body: "\u6CA1\u6709\u8FDE\u7EED\u4E24\u4E2A\u5B63\u5EA6" }
+  ];
+  const elements = [
+    ...furniture("\u8BC1\u636E\u6811", "\u5468\u8F6C\u5148\u4E8E\u6269\u4EA7", "02", "02"),
+    panel("root", 250, 108, 460, 100, "$accent"),
+    text("root-title", "\u5148\u770B\u5468\u8F6C\uFF0C\u518D\u8C08\u4EA7\u80FD", 274, 124, 412, 36, 22, { bold: true, color: "$inverse", align: "center" }),
+    text("root-note", "\u4E09\u6761\u8BC1\u636E\u4E92\u76F8\u72EC\u7ACB", 274, 164, 412, 24, 14, { color: "$inverse", align: "center" })
+  ];
+  children.forEach((child, index) => {
+    const x = 48 + index * 304;
+    elements.push(panel(`${child.id}-card`, x, 292, 280, 172, "$surface"), accentTick(`${child.id}-tick`, x, 292, 48), text(`${child.id}-index`, `0${index + 1}`, x + 24, 316, 80, 20, 12, { bold: true, color: "$accent", family: "$latin" }), text(`${child.id}-title`, child.title, x + 24, 344, 232, 32, 20, { bold: true }), text(`${child.id}-body`, child.body, x + 24, 386, 232, 48, 15, { color: "$muted" }), link(`link-${child.id}`, 480, 208, x + 140, 292));
+  });
+  return elements;
+}
+function matrix() {
+  const cells = [
+    { id: "do", title: "\u5148\u505A", kicker: "\u9AD8\u5F71\u54CD \xB7 \u597D\u505A", body: "\u628A\u5468\u8F6C\u6253\u56DE 45 \u5929", fill: "$accent", titleColor: "$inverse", bodyColor: "$inverse" },
+    { id: "plan", title: "\u6392\u671F", kicker: "\u9AD8\u5F71\u54CD \xB7 \u96BE\u505A", body: "\u7B2C\u4E09\u4ED3\u653E\u5230\u4E0B\u5B63", fill: "$surface", titleColor: "$ink", bodyColor: "$muted" },
+    { id: "watch", title: "\u89C2\u5BDF", kicker: "\u4F4E\u5F71\u54CD \xB7 \u597D\u505A", body: "\u4EBA\u6548\u5148\u8BB0\u5728\u8868\u4E0A", fill: "$surface", titleColor: "$ink", bodyColor: "$muted" },
+    { id: "stop", title: "\u4E0D\u505A", kicker: "\u4F4E\u5F71\u54CD \xB7 \u96BE\u505A", body: "\u73B0\u5728\u4E0D\u52A0\u4EA7\u7EBF", fill: "$ink", titleColor: "$inverse", bodyColor: "$inverse" }
+  ];
+  const elements = furniture("\u77E9\u9635", "\u53EA\u7A81\u51FA\u5E94\u8BE5\u5148\u505A\u7684\u90A3\u4E00\u683C", "03", "03");
+  cells.forEach((cell, index) => {
+    const x = index % 2 === 0 ? 40 : 508;
+    const y = index < 2 ? 108 : 300;
+    elements.push(panel(`${cell.id}-card`, x, y, 412, 172, cell.fill), text(`${cell.id}-kicker`, cell.kicker, x + 24, y + 22, 360, 20, 13, { bold: true, color: cell.bodyColor }), text(`${cell.id}-title`, cell.title, x + 24, y + 52, 360, 40, 28, { bold: true, color: cell.titleColor }), text(`${cell.id}-body`, cell.body, x + 24, y + 108, 360, 36, 16, { color: cell.bodyColor }));
+  });
+  return elements;
+}
+function waterfall() {
+  const notes = [
+    { id: "open", value: "120", label: "\u671F\u521D\u5E93\u5B58", note: "\u53D8\u5316\u4ECE\u8FD9\u4E2A\u6570\u8D77\u7B97" },
+    { id: "move", value: "+27", label: "\u6DA8\u4EF7\u4E0E\u65B0\u54C1", note: "\u6DA8\u4EF7 18\uFF0C\u65B0\u54C1 9" },
+    { id: "end", value: "117", label: "\u671F\u672B\u5E93\u5B58", note: "\u6D41\u5931 30 \u540E\u8F67\u5E73" }
+  ];
+  const elements = [
+    ...furniture("\u7011\u5E03", "\u671F\u672B\u53EA\u6BD4\u671F\u521D\u5C11 3", "04", "04"),
+    chartEl("bridge", 40, 108, 520, 360, {
+      kind: "waterfall",
+      categories: ["\u671F\u521D", "\u6DA8\u4EF7", "\u6D41\u5931", "\u65B0\u54C1", "\u671F\u672B"],
+      series: [{ name: "\u5E93\u5B58", values: [120, 18, -30, 9, 117] }],
+      colors: ["$paper", "$accent", "$muted"]
+    })
+  ];
+  notes.forEach((item, index) => {
+    const y = 108 + index * 120;
+    elements.push(panel(`${item.id}-card`, 584, y, 336, 108, "$surface"), accentTick(`${item.id}-tick`, 584, y, 48), text(`${item.id}-value`, item.value, 608, y + 18, 140, 40, 26, { bold: true, color: "$accent" }), text(`${item.id}-label`, item.label, 760, y + 24, 136, 28, 16, { bold: true }), text(`${item.id}-note`, item.note, 608, y + 64, 280, 24, 13, { color: "$muted" }));
+  });
+  return elements;
+}
+function trend() {
+  return [
+    ...furniture("\u8D8B\u52BF", "\u516D\u6708\u662F\u8FD9\u534A\u5E74\u7684\u9AD8\u70B9", "05", "05"),
+    chartEl("trend", 40, 112, 560, 356, {
+      kind: "line",
+      categories: ["\u4E00\u6708", "\u4E8C\u6708", "\u4E09\u6708", "\u56DB\u6708", "\u4E94\u6708", "\u516D\u6708"],
+      series: [{ name: "\u5468\u8F6C\u5929\u6570", values: [42, 48, 45, 61, 58, 74] }],
+      colors: ["$accent"],
+      valMin: 0,
+      valMax: 90
+    }),
+    panel("dip-card", 624, 128, 296, 150, "$surface"),
+    accentTick("dip-tick", 624, 128, 48),
+    text("dip-kicker", "\u4E09\u6708", 648, 152, 248, 20, 13, { bold: true, color: "$accent" }),
+    text("dip-title", "\u56DE\u843D\u5230 45", 648, 180, 248, 36, 22, { bold: true }),
+    text("dip-body", "\u8865\u8D27\u8FD8\u6CA1\u8DDF\u4E0A\u8282\u540E", 648, 224, 248, 28, 14, { color: "$muted" }),
+    panel("peak-card", 624, 300, 296, 150, "$accent"),
+    text("peak-kicker", "\u516D\u6708", 648, 324, 248, 20, 13, { bold: true, color: "$inverse" }),
+    text("peak-title", "\u5347\u5230 74", 648, 352, 248, 36, 22, { bold: true, color: "$inverse" }),
+    text("peak-body", "\u9AD8\u70B9\u8FD8\u6CA1\u6709\u7B2C\u4E8C\u4E2A\u6708", 648, 396, 248, 28, 14, { color: "$inverse" })
+  ];
+}
+function scorecard() {
+  const rows = [
+    { id: "turn", name: "\u5E93\u5B58\u5468\u8F6C", value: "45 \u5929", delta: "\u221219", note: "\u8FBE\u6807", width: 210 },
+    { id: "miss", name: "\u7F3A\u8D27\u7387", value: "3.1%", delta: "\u22121.4", note: "\u6539\u5584", width: 96 },
+    { id: "fill", name: "\u5C65\u7EA6", value: "96%", delta: "+2", note: "\u7A33\u4F4F", width: 250 },
+    { id: "labor", name: "\u4EBA\u6548", value: "1.8", delta: "+0.2", note: "\u5173\u6CE8", width: 120 },
+    { id: "cash", name: "\u73B0\u91D1\u5468\u671F", value: "18 \u5929", delta: "\u22126", note: "\u6536\u7D27", width: 78 }
+  ];
+  const elements = furniture("\u8BA1\u5206\u8868", "\u504F\u79BB\u7684\u884C\u548C\u7A33\u4F4F\u7684\u884C\u5206\u5F00", "06", "06");
+  rows.forEach((row, index) => {
+    const y = 104 + index * 76;
+    const alert = row.delta.startsWith("+");
+    elements.push(panel(`${row.id}-row`, 40, y, 880, 68, "$surface", "roundRect", 10), text(`${row.id}-name`, row.name, 64, y + 20, 160, 28, 16, { bold: true }), text(`${row.id}-value`, row.value, 236, y + 18, 110, 32, 18, { bold: true, color: "$accent" }), deco(`${row.id}-track`, 360, y + 28, 260, 12, "$paper"), deco(`${row.id}-bar`, 360, y + 28, row.width, 12, "$accent"), panel(`${row.id}-pill`, 648, y + 16, 92, 36, alert ? "$accent" : "$ink", "roundRect", 18), text(`${row.id}-delta`, row.delta, 656, y + 22, 76, 24, 14, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`${row.id}-note`, row.note, 760, y + 20, 130, 28, 15, { color: "$muted" }));
+  });
+  return elements;
+}
+function gantt() {
+  const lanes = [
+    { id: "safety", name: "\u8865\u5B89\u5168\u5E93\u5B58", start: 0, span: 5 },
+    { id: "freight", name: "\u91CD\u8C08\u8FD0\u8D39", start: 3, span: 4 },
+    { id: "site", name: "\u5F00\u7B2C\u4E09\u4ED3", start: 6, span: 4 },
+    { id: "review", name: "\u590D\u76D8\u6269\u4EA7", start: 10, span: 2 }
+  ];
+  const trackX = 220;
+  const trackW = 680;
+  const total = 12;
+  const elements = [
+    ...furniture("\u8DEF\u7EBF", "\u6269\u4EA7\u653E\u5728\u5E93\u5B58\u7A33\u4F4F\u4E4B\u540E", "07", "07"),
+    text("q1", "\u4E00\u5B63", 220, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q2", "\u4E8C\u5B63", 390, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q3", "\u4E09\u5B63", 560, 104, 72, 22, 13, { bold: true, color: "$muted" }),
+    text("q4", "\u56DB\u5B63", 730, 104, 72, 22, 13, { bold: true, color: "$muted" })
+  ];
+  lanes.forEach((lane, index) => {
+    const y = 146 + index * 82;
+    const barX = trackX + lane.start / total * trackW;
+    const barW = lane.span / total * trackW;
+    elements.push(text(`${lane.id}-name`, lane.name, 40, y + 16, 164, 28, 15, { bold: true }), panel(`${lane.id}-track`, trackX, y + 22, trackW, 16, "$surface", "roundRect", 8, false), panel(`${lane.id}-bar`, barX, y + 22, barW, 16, "$accent", "roundRect", 8, false));
+  });
+  elements.push(deco("now-line", 476, 146, 2, 324, "$ink"), text("now-label", "\u73B0\u5728", 468, 104, 56, 22, 12, { bold: true, color: "$ink", align: "center" }));
+  return elements;
+}
+function architecture() {
+  const layers = [
+    { id: "user", name: "\u7528\u6237", fill: "$surface", ink: "$ink", items: ["\u95E8\u5E97", "\u7ECF\u9500\u5546", "\u603B\u90E8"] },
+    { id: "channel", name: "\u6E20\u9053", fill: "$surface", ink: "$ink", items: ["\u5C0F\u7A0B\u5E8F", "\u4E1A\u52A1\u5458", "\u5F00\u653E\u63A5\u53E3"] },
+    { id: "core", name: "\u4E2D\u53F0", fill: "$accent", ink: "$inverse", items: ["\u5E93\u5B58", "\u8BA2\u5355", "\u7ED3\u7B97"] },
+    { id: "base", name: "\u5E95\u5EA7", fill: "$ink", ink: "$inverse", items: ["\u4ED3\u914D", "\u4E3B\u6570\u636E", "\u6743\u9650"] }
+  ];
+  const elements = furniture("\u67B6\u6784", "\u6269\u4EA7\u524D\u5148\u770B\u4E2D\u53F0\u627F\u4E0D\u627F\u5F97\u4F4F", "08", "08");
+  layers.forEach((layer, index) => {
+    const y = 104 + index * 94;
+    const pillFill = layer.fill === "$surface" ? "$paper" : "$inverse";
+    const pillInk = "$ink";
+    elements.push(panel(`${layer.id}-band`, 40, y, 880, 82, layer.fill, "roundRect", 12), text(`${layer.id}-name`, layer.name, 64, y + 26, 96, 32, 20, { bold: true, color: layer.ink }));
+    layer.items.forEach((item, itemIndex) => {
+      const x = 190 + itemIndex * 230;
+      elements.push(panel(`${layer.id}-pill-${itemIndex}`, x, y + 20, 200, 42, pillFill, "roundRect", 21), text(`${layer.id}-item-${itemIndex}`, item, x + 16, y + 30, 168, 24, 15, { bold: true, color: pillInk, align: "center" }));
+    });
+  });
+  return elements;
+}
+function caseCompare() {
+  const rows = [
+    { id: "turn", label: "\u5468\u8F6C", left: "62 \u5929", right: "45 \u5929", delta: "\u221217" },
+    { id: "miss", label: "\u7F3A\u8D27", left: "8%", right: "3%", delta: "\u22125" },
+    { id: "days", label: "\u4EBA\u5929", left: "14", right: "9", delta: "\u22125" }
+  ];
+  const elements = [
+    ...furniture("\u5BF9\u7167", "\u76EE\u6807\u4ED3\u6BD4\u73B0\u72B6\u5C11 17 \u5929", "09", "09"),
+    panel("left-card", 40, 108, 400, 364, "$surface"),
+    accentTick("left-tick", 40, 108, 56),
+    text("left-kicker", "\u73B0\u72B6", 64, 132, 340, 22, 13, { bold: true, color: "$accent" }),
+    text("left-title", "\u73B0\u5728\u7684\u4E09\u4E2A\u4ED3", 64, 160, 340, 36, 22, { bold: true }),
+    panel("right-card", 560, 108, 360, 364, "$accent"),
+    text("right-kicker", "\u76EE\u6807", 584, 132, 312, 22, 13, { bold: true, color: "$inverse" }),
+    text("right-title", "\u5148\u6062\u590D\u5230\u7684\u6C34\u4F4D", 584, 160, 312, 36, 22, { bold: true, color: "$inverse" })
+  ];
+  rows.forEach((row, index) => {
+    const y = 230 + index * 70;
+    elements.push(text(`left-${row.id}-label`, row.label, 64, y, 90, 28, 15, { color: "$muted" }), text(`left-${row.id}-value`, row.left, 160, y - 4, 180, 36, 22, { bold: true }), panel(`${row.id}-chip`, 460, y - 4, 80, 36, "$ink", "roundRect", 18), text(`${row.id}-delta`, row.delta, 468, y + 2, 64, 22, 14, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`right-${row.id}-label`, row.label, 584, y, 80, 28, 15, { color: "$inverse" }), text(`right-${row.id}-value`, row.right, 680, y - 4, 210, 36, 22, { bold: true, color: "$inverse" }));
+  });
+  return elements;
+}
+function funnel() {
+  const steps = [
+    { id: "lead", label: "\u7EBF\u7D22 1280", rate: "100% \u8FDB\u6C60", width: 620 },
+    { id: "quote", label: "\u62A5\u4EF7 820", rate: "64% \u62A5\u4EF7", width: 480 },
+    { id: "trial", label: "\u8BD5\u6837 390", rate: "48% \u8BD5\u6837", width: 350 },
+    { id: "won", label: "\u6210\u4EA4 280", rate: "22% \u6210\u4EA4", width: 230 }
+  ];
+  const elements = [...furniture("\u6F0F\u6597", "\u6700\u5927\u6D41\u5931\u5728\u62A5\u4EF7\u5230\u6210\u4EA4", "10", "10")];
+  steps.forEach((step, index) => {
+    const y = 104 + index * 78;
+    elements.push(panel(`${step.id}-bar`, 40, y, step.width, 66, "$accent", "roundRect", 10), text(`${step.id}-label`, step.label, 64, y + 18, 150, 30, 18, { bold: true, color: "$inverse" }), text(`${step.id}-rate`, step.rate, 720, y + 18, 200, 30, 16, { bold: true, color: "$ink" }));
+  });
+  elements.push(panel("drop-card", 40, 420, 880, 64, "$ink", "roundRect", 10), text("drop-copy", "\u62A5\u4EF7\u5230\u6210\u4EA4\u6389\u5F97\u6700\u591A\uFF0C\u5148\u6539\u62A5\u4EF7\u5355\uFF0C\u4E0D\u5148\u52A0\u4EA7\u7EBF\u3002", 64, 438, 832, 28, 16, { bold: true, color: "$inverse" }));
+  return elements;
+}
+function process2() {
+  const steps = [
+    { id: "count", title: "\u76D8\u70B9", body: "\u5148\u6570\u6E05\u4E09\u4E2A\u4ED3" },
+    { id: "split", title: "\u5206\u4ED3", body: "\u7F3A\u8D27\u4ED3\u5355\u72EC\u8865" },
+    { id: "fill", title: "\u8865\u8D27", body: "\u53EA\u8865\u5B89\u5168\u5E93\u5B58" },
+    { id: "look", title: "\u590D\u76D8", body: "\u4E24\u5468\u540E\u770B\u5468\u8F6C" },
+    { id: "decide", title: "\u51B3\u7B56", body: "\u518D\u8C08\u662F\u5426\u6269\u4EA7" }
+  ];
+  const elements = [...furniture("\u6D41\u7A0B", "\u4EA4\u63A5\u5199\u6E05\u4E4B\u540E\u624D\u52A0\u5FEB", "11", "11")];
+  steps.forEach((step, index) => {
+    const x = 56 + index * 180;
+    elements.push(panel(`${step.id}-mark`, x + 38, 128, 64, 64, "$accent", "ellipse"), text(`${step.id}-num`, String(index + 1), x + 38, 146, 64, 28, 20, { bold: true, color: "$inverse", align: "center", family: "$latin" }), text(`${step.id}-title`, step.title, x, 212, 140, 28, 18, { bold: true, align: "center" }), text(`${step.id}-body`, step.body, x, 246, 140, 32, 14, { color: "$muted", align: "center" }));
+    if (index < steps.length - 1)
+      elements.push(deco(`${step.id}-join`, x + 110, 158, 100, 3, "$accent"));
+  });
+  elements.push(panel("synthesis", 40, 320, 880, 150, "$surface"), accentTick("synthesis-tick", 40, 320, 64), text("synthesis-kicker", "\u8FD9\u4E00\u9875\u7684\u4EA4\u63A5", 68, 348, 400, 22, 13, { bold: true, color: "$accent" }), text("synthesis-title", "\u8865\u8D27\u5355\u4E0A\u5199\u6E05\u8D23\u4EFB\u4ED3", 68, 380, 760, 36, 24, { bold: true }), text("synthesis-body", "\u6CA1\u6709\u8D23\u4EFB\u4ED3\u7684\u6B65\u9AA4\uFF0C\u4E0D\u8FDB\u5165\u4E0B\u4E00\u5468\u3002", 68, 424, 760, 28, 15, { color: "$muted" }));
+  return elements;
+}
+function timeline() {
+  const events = [
+    { id: "spring24", when: "2024 \u6625", title: "\u7F3A\u8D27\u6269\u5927", body: "\u4E09\u4E2A\u4ED3\u540C\u65F6\u544A\u6025", above: true },
+    { id: "autumn24", when: "2024 \u79CB", title: "\u5206\u4ED3\u8865\u8D27", body: "\u7F3A\u8D27\u7387\u5F00\u59CB\u56DE\u843D", above: false },
+    { id: "spring25", when: "2025 \u6625", title: "\u5468\u8F6C\u56DE\u843D", body: "\u56DE\u5230 45 \u5929\u6C34\u4F4D", above: true },
+    { id: "autumn25", when: "2025 \u79CB", title: "\u518D\u8BAE\u6269\u4EA7", body: "\u8BA2\u5355\u8FDE\u7EED\u624D\u52A0\u7EBF", above: false }
+  ];
+  const elements = [
+    ...furniture("\u65F6\u95F4\u7EBF", "\u6269\u4EA7\u6392\u5728\u5468\u8F6C\u56DE\u6765\u4E4B\u540E", "12", "12"),
+    deco("spine", 80, 268, 800, 4, "$accent")
+  ];
+  events.forEach((event, index) => {
+    const x = 48 + index * 228;
+    const y = event.above ? 112 : 304;
+    elements.push(panel(`${event.id}-card`, x, y, 208, 132, event.above ? "$surface" : "$ink"), text(`${event.id}-when`, event.when, x + 16, y + 16, 176, 20, 12, { bold: true, color: event.above ? "$accent" : "$inverse" }), text(`${event.id}-title`, event.title, x + 16, y + 44, 176, 30, 18, { bold: true, color: event.above ? "$ink" : "$inverse" }), text(`${event.id}-body`, event.body, x + 16, y + 82, 176, 28, 14, { color: event.above ? "$muted" : "$inverse" }), deco(`${event.id}-dot`, x + 96, 260, 16, 20, "$accent"));
+  });
+  return elements;
+}
+function closing() {
+  return [
+    ...furniture("\u6536\u675F", "\u4E0B\u4E00\u6B65\u53EA\u505A\u54EA\u4E00\u4EF6\uFF1F", "13", "13"),
+    panel("now-card", 40, 140, 424, 320, "$accent"),
+    text("now-kicker", "\u672C\u5468", 68, 172, 360, 22, 14, { bold: true, color: "$inverse" }),
+    text("now-title", "\u628A\u5468\u8F6C\u9501\u56DE 45 \u5929", 68, 214, 360, 80, 28, { bold: true, color: "$inverse", leading: 1.15 }),
+    text("now-body", "\u4E09\u4E2A\u4ED3\u5206\u5F00\u8865\uFF0C\u4E0D\u65B0\u5F00\u4EA7\u7EBF\u3002", 68, 320, 360, 64, 16, { color: "$inverse" }),
+    panel("later-card", 496, 140, 424, 320, "$surface"),
+    accentTick("later-tick", 496, 140, 56),
+    text("later-kicker", "\u4E0B\u6708\u518D\u8BAE", 524, 172, 360, 22, 14, { bold: true, color: "$accent" }),
+    text("later-title", "\u662F\u5426\u589E\u52A0\u4E00\u6761\u4EA7\u7EBF", 524, 214, 360, 80, 28, { bold: true, leading: 1.15 }),
+    text("later-body", "\u8BA2\u5355\u8981\u8FDE\u7EED\u4E24\u4E2A\u5B63\u5EA6\u3002", 524, 320, 360, 64, 16, { color: "$muted" })
+  ];
+}
+function decision() {
+  return [
+    ...furniture("\u53D6\u820D", "\u5148\u6536\u56DE\u5468\u8F6C\uFF0C\u4E0D\u6025\u7740\u6269\u4EA7", "14", "14"),
+    panel("yes-card", 40, 116, 520, 352, "$accent"),
+    text("yes-kicker", "\u5EFA\u8BAE", 68, 144, 200, 22, 14, { bold: true, color: "$inverse" }),
+    text("yes-title", "\u5148\u628A\u5468\u8F6C\u6253\u56DE\u53BB", 68, 180, 460, 44, 28, { bold: true, color: "$inverse" }),
+    text("yes-1", "\u7F3A\u8D27\u8FD8\u5728\u4E09\u4E2A\u4ED3", 68, 252, 440, 32, 16, { color: "$inverse" }),
+    text("yes-2", "\u73B0\u91D1\u5468\u671F\u8FD8\u6CA1\u7A33\u4F4F", 68, 292, 440, 32, 16, { color: "$inverse" }),
+    text("yes-3", "\u6269\u4EA7\u8981\u7B49\u5468\u8F6C\u56DE\u5230 45 \u5929", 68, 332, 440, 32, 16, { color: "$inverse" }),
+    panel("no-card", 584, 116, 336, 352, "$surface"),
+    accentTick("no-tick", 584, 116, 56),
+    text("no-kicker", "\u5148\u4E0D\u505A", 608, 144, 280, 22, 14, { bold: true, color: "$accent" }),
+    text("no-title", "\u7ACB\u523B\u52A0\u4EA7\u7EBF", 608, 180, 280, 44, 26, { bold: true }),
+    text("no-1", "\u8BA2\u5355\u8FD8\u6CA1\u8FDE\u7EED", 608, 252, 280, 32, 16, { color: "$muted" }),
+    text("no-2", "\u7B2C\u4E09\u4ED3\u8FD8\u6CA1\u6EE1", 608, 292, 280, 32, 16, { color: "$muted" }),
+    text("no-3", "\u4EBA\u6548\u6CA1\u6709\u4F59\u91CF", 608, 332, 280, 32, 16, { color: "$muted" })
+  ];
+}
+var SPECS = [
+  { id: "conclusion", name: "\u7ED3\u8BBA\u9875", relation: "\u7ED3\u8BBA\u5148\u884C", summary: "\u5224\u65AD\u5148\u5360\u5DE6\u534A\u9875\uFF0C\u53F3\u8FB9\u53EA\u7559\u4E09\u4E2A\u8BC1\u636E\u3002", notes: "\u66FF\u6362\u5DE6\u680F\u5224\u65AD\u548C\u53F3\u680F\u4E09\u4E2A\u6570\u5B57\u3002\u6570\u5B57\u8981\u80FD\u5BF9\u4E0A\u6765\u6E90\u3002", build: conclusion },
+  { id: "evidence-tree", name: "\u8BC1\u636E\u6811", relation: "\u5206\u53C9", summary: "\u4E00\u4E2A\u5224\u65AD\u8FDE\u5230\u4E09\u6761\u4E92\u76F8\u72EC\u7ACB\u7684\u8BC1\u636E\u3002", notes: "\u4E09\u6761\u8BC1\u636E\u4E0D\u80FD\u4E92\u76F8\u5305\u542B\u3002\u8FDE\u7EBF\u53EA\u8868\u793A\u652F\u6491\uFF0C\u4E0D\u8868\u793A\u987A\u5E8F\u3002", build: evidenceTree },
+  { id: "matrix-2x2", name: "\u77E9\u9635", relation: "\u77E9\u9635", summary: "\u4E24\u4E2A\u7EF4\u5EA6\uFF0C\u53EA\u628A\u5148\u505A\u7684\u90A3\u4E00\u683C\u505A\u6210\u5F3A\u8C03\u8272\u3002", notes: "\u9AD8\u5F71\u54CD\u4E14\u597D\u505A\u7684\u683C\u5B50\u4FDD\u6301\u5F3A\u8C03\u3002\u4E0D\u8981\u56DB\u683C\u540C\u7B49\u5F3A\u8C03\u3002", build: matrix },
+  { id: "waterfall", name: "\u7011\u5E03\u56FE", relation: "\u6865", summary: "\u8D77\u70B9\u52A0\u53D8\u5316\u7B49\u4E8E\u7EC8\u70B9\uFF0C\u53F3\u4FA7\u53EA\u89E3\u91CA\u8F67\u5E73\u540E\u7684\u8BFB\u6CD5\u3002", notes: "\u7011\u5E03\u56FE\u5FC5\u987B\u8F67\u5E73\u3002\u53F3\u4FA7\u53E5\u5B50\u89E3\u91CA\u6865\uFF0C\u4E0D\u53E6\u8D77\u4E00\u5957\u6570\u5B57\u3002", build: waterfall },
+  { id: "trend-annotated", name: "\u8D8B\u52BF\u52A0\u6807\u6CE8", relation: "\u5E8F\u5217", summary: "\u4E00\u6761\u5E8F\u5217\uFF0C\u65C1\u8FB9\u6807\u51FA\u56DE\u843D\u548C\u9AD8\u70B9\u3002", notes: "\u6807\u6CE8\u6307\u5411\u56FE\u4E0A\u7684\u6708\u4EFD\uFF0C\u4E0D\u5199\u56FE\u91CC\u6CA1\u6709\u7684\u62D0\u70B9\u3002", build: trend },
+  { id: "scorecard", name: "\u8BA1\u5206\u8868", relation: "\u6E05\u5355", summary: "\u6BCF\u884C\u4E00\u4E2A\u6307\u6807\u3001\u5F53\u524D\u503C\u3001\u6761\u5F62\u548C\u504F\u79BB\u3002", notes: "\u504F\u79BB\u7684\u884C\u7528\u5F3A\u8C03\u8272\u836F\u4E38\uFF0C\u7A33\u4F4F\u7684\u884C\u7528\u6DF1\u8272\u836F\u4E38\u3002", build: scorecard },
+  { id: "gantt-roadmap", name: "\u7518\u7279\u8DEF\u7EBF\u56FE", relation: "\u8DEF\u7EBF", summary: "\u56DB\u6761\u5DE5\u4F5C\u6309\u5B63\u5EA6\u94FA\u5F00\uFF0C\u73B0\u5728\u7EBF\u5207\u5728\u590D\u76D8\u4E4B\u524D\u3002", notes: "\u73B0\u5728\u7EBF\u4E0D\u8981\u538B\u5230\u8FD8\u6CA1\u5F00\u59CB\u7684\u6269\u4EA7\u6761\u4E0A\u3002", build: gantt },
+  { id: "architecture", name: "\u67B6\u6784", relation: "\u5206\u5C42", summary: "\u7528\u6237\u3001\u6E20\u9053\u3001\u4E2D\u53F0\u3001\u5E95\u5EA7\u56DB\u5C42\uFF0C\u4E2D\u53F0\u7528\u5F3A\u8C03\u8272\u3002", notes: "\u6BCF\u5C42\u7684\u836F\u4E38\u662F\u8FD9\u4E00\u5C42\u7684\u5BF9\u8C61\uFF0C\u4E0D\u8981\u628A\u6D41\u7A0B\u6B65\u9AA4\u585E\u8FDB\u67B6\u6784\u3002", build: architecture },
+  { id: "case-compare", name: "\u6848\u4F8B\u5BF9\u6BD4", relation: "\u5BF9\u7167", summary: "\u73B0\u72B6\u548C\u76EE\u6807\u7528\u540C\u4E00\u7EC4\u6307\u6807\uFF0C\u5DEE\u989D\u653E\u5728\u4E2D\u95F4\u3002", notes: "\u5DE6\u53F3\u884C\u540D\u5BF9\u9F50\u3002\u4E2D\u95F4\u7684\u5DEE\u989D\u8981\u80FD\u4ECE\u5DE6\u53F3\u4E24\u4E2A\u6570\u51CF\u51FA\u6765\u3002", build: caseCompare },
+  { id: "funnel", name: "\u6F0F\u6597", relation: "\u8F6C\u5316", summary: "\u56DB\u6BB5\u6536\u7A84\uFF0C\u53F3\u4FA7\u5199\u8F6C\u5316\uFF0C\u5E95\u90E8\u70B9\u51FA\u6700\u5927\u6D41\u5931\u3002", notes: "\u6761\u7684\u957F\u77ED\u8DDF\u7740\u6570\u91CF\u8D70\u3002\u5E95\u90E8\u7ED3\u8BBA\u53EA\u8BB2\u6389\u5F97\u6700\u591A\u7684\u90A3\u4E00\u6BB5\u3002", build: funnel },
+  { id: "process", name: "\u6D41\u7A0B", relation: "\u6D41\u7A0B", summary: "\u4E94\u6B65\u4ECE\u5DE6\u5230\u53F3\uFF0C\u5E95\u90E8\u5199\u6E05\u4EA4\u63A5\u3002", notes: "\u8FDE\u7EBF\u5FC5\u987B\u5BF9\u5F97\u4E0A\u53E5\u5B50\u91CC\u7684\u987A\u5E8F\u3002\u4E0D\u8981\u753B\u6CA1\u6709\u4EA4\u63A5\u7684\u7BAD\u5934\u3002", build: process2 },
+  { id: "timeline", name: "\u65F6\u95F4\u7EBF", relation: "\u65F6\u95F4", summary: "\u56DB\u4E2A\u65F6\u70B9\u4EA4\u9519\u6392\u5728\u810A\u67F1\u4E24\u4FA7\u3002", notes: "\u65F6\u95F4\u4ECE\u5DE6\u5230\u53F3\u3002\u4E0A\u4E0B\u4EA4\u9519\u53EA\u4E3A\u8BFB\u5F97\u5F00\uFF0C\u4E0D\u8868\u793A\u4E24\u7EC4\u5BF9\u8C61\u3002", build: timeline },
+  { id: "closing", name: "\u6536\u675F", relation: "\u6536\u675F", summary: "\u4E00\u4E2A\u95EE\u9898\uFF0C\u4E00\u9879\u672C\u5468\u884C\u52A8\uFF0C\u4E00\u9879\u4EE5\u540E\u518D\u8BAE\u3002", notes: "\u672C\u5468\u53EA\u6709\u4E00\u4EF6\u4E8B\u3002\u4EE5\u540E\u518D\u8BAE\u7684\u6761\u4EF6\u5199\u5728\u53F3\u5361\u3002", build: closing },
+  { id: "decision", name: "\u53D6\u820D", relation: "\u53D6\u820D", summary: "\u5DE6\u8FB9\u662F\u5EFA\u8BAE\uFF0C\u53F3\u8FB9\u662F\u8FD9\u6B21\u4E0D\u505A\u7684\u4E8B\u3002", notes: "\u5EFA\u8BAE\u548C\u5426\u51B3\u4F7F\u7528\u540C\u4E00\u7EC4\u4E8B\u5B9E\uFF0C\u4E0D\u5F15\u5165\u65B0\u6570\u5B57\u3002", build: decision }
+];
+var BUILT = SPECS.map((spec) => {
+  const page = finish(spec.id, spec.name, spec.relation, spec.summary, spec.notes, spec.build());
+  return {
+    id: spec.id,
+    name: spec.name,
+    relation: spec.relation,
+    summary: spec.summary,
+    slots: slotsOf(page),
+    build: () => finish(spec.id, spec.name, spec.relation, spec.summary, spec.notes, spec.build())
+  };
+});
+var BY_ID = new Map(BUILT.map((layout) => [layout.id, layout]));
+var argumentLayouts = BUILT.map(({ id, name, relation, summary, slots }) => ({ id, name, relation, summary, slots }));
+function argumentLayoutById(id) {
+  const layout = BY_ID.get(id);
+  if (!layout)
+    return;
+  return { id: layout.id, name: layout.name, relation: layout.relation, summary: layout.summary, slots: layout.slots };
+}
+function argumentLayoutCatalog() {
+  return argumentLayouts.map((layout) => ({ ...layout, slots: layout.slots.map((slot) => ({ ...slot, bounds: { ...slot.bounds }, textCapacity: slot.textCapacity ? { ...slot.textCapacity } : undefined })) }));
+}
+
+// apps/electron/resources/skills/ppt-design/engine/contrast.ts
+function channel(value) {
+  const c = value / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+function luminance(hex) {
+  const raw = hex.replace("#", "").slice(0, 6);
+  const n = Number.parseInt(raw, 16);
+  const r = n >> 16 & 255;
+  const g = n >> 8 & 255;
+  const b = n & 255;
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+function contrastRatio(foreground, background) {
+  const a = luminance(foreground);
+  const b = luminance(background);
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function contrastMinimum(fontSize, bold) {
+  if (fontSize >= 24 || bold && fontSize >= 18)
+    return 3;
+  return 4.5;
+}
+function splitColor(hex) {
+  const raw = hex.replace("#", "");
+  const rgb = `#${raw.slice(0, 6).toUpperCase()}`;
+  if (raw.length >= 8)
+    return { rgb, alpha: Number.parseInt(raw.slice(6, 8), 16) / 255 };
+  return { rgb, alpha: 1 };
+}
+function composite(over, under) {
+  const src = splitColor(over);
+  const dst = splitColor(under);
+  if (src.alpha >= 0.999)
+    return src.rgb;
+  if (src.alpha <= 0.001)
+    return dst.rgb;
+  const mix = (a, b) => Math.round(a * src.alpha + b * (1 - src.alpha));
+  const left = channels(src.rgb);
+  const right = channels(dst.rgb);
+  return "#" + [mix(left.r, right.r), mix(left.g, right.g), mix(left.b, right.b)].map((channelByte) => channelByte.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+function channels(hex) {
+  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
 }
 
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
@@ -12027,31 +12492,9 @@ var jsYaml = {
   safeDump
 };
 
-// apps/electron/resources/skills/ppt-design/engine/types.ts
-var DECK_FORMAT = "selection-deck";
-var DECK_VERSION = 1;
-var CANVAS_WIDTH = 960;
-var CANVAS_HEIGHT = 540;
-var CANVAS_PRESETS = [
-  { id: "ppt169", label: "16:9", width: 960, height: 540 },
-  { id: "ppt43", label: "4:3", width: 768, height: 576 },
-  { id: "moments", label: "1:1", width: 810, height: 810 },
-  { id: "story", label: "9:16", width: 810, height: 1440 },
-  { id: "xiaohongshu", label: "3:4", width: 931.5, height: 1245 }
-];
-function canvasBySize(width, height) {
-  return CANVAS_PRESETS.find((item) => Math.abs(item.width - width) < 0.2 && Math.abs(item.height - height) < 0.2) ?? null;
-}
-function canvasSupported(width, height) {
-  if (!Number.isFinite(width) || !Number.isFinite(height))
-    return false;
-  if (canvasBySize(width, height))
-    return true;
-  return width >= 200 && height >= 200 && width <= 2000 && height <= 2000;
-}
-
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
+var CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
 var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
 function issue(code, message, pageId, elementId) {
@@ -12206,7 +12649,7 @@ function parseChart(value, path, issues, pageId, elementId) {
     return;
   }
   rejectUnknown(value, ["kind", "categories", "series", "colors", "showValues", "showLegend", "valMin", "valMax", "holeSize", "lineWidth", "markerSize", "markerColor", "grid", "catLabelSize", "valLabelSize", "catLabelColor", "valLabelColor"], `${path}.chart`, issues, pageId, elementId);
-  const kinds = ["bar", "column", "line", "pie", "doughnut", "waterfall"];
+  const kinds = ["bar", "column", "line", "pie", "doughnut", "waterfall", "area", "scatter", "bubble", "radar", "combo", "stacked", "stackedPercent"];
   if (typeof value.kind !== "string" || !kinds.includes(value.kind)) {
     issues.push(issue("schema", `${path}.chart.kind \u4E0D\u652F\u6301`, pageId, elementId));
     return;
@@ -12220,25 +12663,82 @@ function parseChart(value, path, issues, pageId, elementId) {
     return;
   }
   const series = [];
+  const pointCount = value.categories.length;
+  const xy = value.kind === "scatter" || value.kind === "bubble";
   for (const entry of value.series) {
     if (!isObject2(entry)) {
       issues.push(issue("schema", `${path}.chart.series \u9879\u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
       return;
     }
-    rejectUnknown(entry, ["name", "values"], `${path}.chart.series`, issues, pageId, elementId);
+    rejectUnknown(entry, ["name", "values", "x", "sizes", "render"], `${path}.chart.series`, issues, pageId, elementId);
     if (typeof entry.name !== "string" || !entry.name.trim()) {
       issues.push(issue("schema", `${path}.chart.series.name \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`, pageId, elementId));
       return;
     }
-    if (!Array.isArray(entry.values) || entry.values.length !== value.categories.length || entry.values.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
+    if (!Array.isArray(entry.values) || entry.values.length !== pointCount || entry.values.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
       issues.push(issue("schema", `${path}.chart.series.values \u5FC5\u987B\u4E0E categories \u7B49\u957F\u4E14\u4E3A\u6709\u9650\u6570\u5B57`, pageId, elementId));
       return;
     }
-    series.push({ name: entry.name, values: entry.values });
+    const point = readPointField(entry.x, `${path}.chart.series.x`, pointCount, issues, pageId, elementId);
+    if (point === null)
+      return;
+    if (xy && !point) {
+      issues.push(issue("schema", `${path}.chart.series.x \u5FC5\u987B\u4E0E categories \u7B49\u957F`, pageId, elementId));
+      return;
+    }
+    if (!xy && point) {
+      issues.push(issue("schema", `${path}.chart.series.x \u53EA\u7528\u4E8E\u6563\u70B9\u56FE\u548C\u6C14\u6CE1\u56FE`, pageId, elementId));
+      return;
+    }
+    if (point && series[0]?.x && point.some((item, index) => item !== series[0].x[index])) {
+      issues.push(issue("schema", `${path}.chart \u7684\u6BCF\u6761\u5E8F\u5217\u5FC5\u987B\u5171\u7528\u540C\u4E00\u7EC4 x`, pageId, elementId));
+      return;
+    }
+    const sizes = readPointField(entry.sizes, `${path}.chart.series.sizes`, pointCount, issues, pageId, elementId);
+    if (sizes === null)
+      return;
+    if (value.kind === "bubble" && (!sizes || sizes.some((item) => item <= 0))) {
+      issues.push(issue("schema", `${path}.chart.series.sizes \u5FC5\u987B\u662F\u6B63\u6570\uFF0C\u5E76\u4E0E categories \u7B49\u957F`, pageId, elementId));
+      return;
+    }
+    if (value.kind !== "bubble" && sizes) {
+      issues.push(issue("schema", `${path}.chart.series.sizes \u53EA\u7528\u4E8E\u6C14\u6CE1\u56FE`, pageId, elementId));
+      return;
+    }
+    if (entry.render !== undefined && entry.render !== "column" && entry.render !== "line") {
+      issues.push(issue("schema", `${path}.chart.series.render \u53EA\u80FD\u662F column \u6216 line`, pageId, elementId));
+      return;
+    }
+    if (value.kind !== "combo" && entry.render !== undefined) {
+      issues.push(issue("schema", `${path}.chart.series.render \u53EA\u7528\u4E8E\u67F1\u7EBF\u7EC4\u5408`, pageId, elementId));
+      return;
+    }
+    series.push({
+      name: entry.name,
+      values: entry.values,
+      x: point,
+      sizes: sizes ?? undefined,
+      render: entry.render === "column" || entry.render === "line" ? entry.render : undefined
+    });
   }
   if (value.kind === "waterfall" && (series.length !== 1 || value.categories.length < 3)) {
     issues.push(issue("schema", `${path}.chart \u7011\u5E03\u56FE\u9700\u8981\u4E00\u6761\u5E8F\u5217\uFF0C\u4E14\u81F3\u5C11\u4E09\u4E2A\u7C7B\u522B\uFF08\u8D77\u70B9\u3001\u53D8\u5316\u3001\u7EC8\u70B9\uFF09`, pageId, elementId));
     return;
+  }
+  if (value.kind === "radar" && value.categories.length < 3) {
+    issues.push(issue("schema", `${path}.chart \u96F7\u8FBE\u56FE\u81F3\u5C11\u4E09\u4E2A\u7C7B\u522B`, pageId, elementId));
+    return;
+  }
+  if ((value.kind === "stacked" || value.kind === "stackedPercent") && series.length < 2) {
+    issues.push(issue("schema", `${path}.chart \u5806\u79EF\u56FE\u81F3\u5C11\u4E24\u6761\u5E8F\u5217`, pageId, elementId));
+    return;
+  }
+  if (value.kind === "combo") {
+    const roles = comboSeriesRoles(series);
+    if (series.length < 2 || !roles.includes("column") || !roles.includes("line")) {
+      issues.push(issue("schema", `${path}.chart \u67F1\u7EBF\u7EC4\u5408\u81F3\u5C11\u4E00\u6761\u67F1\u548C\u4E00\u6761\u7EBF`, pageId, elementId));
+      return;
+    }
   }
   let colors;
   if (value.colors !== undefined) {
@@ -12302,6 +12802,15 @@ function parseChart(value, path, issues, pageId, elementId) {
     valLabelColor: typeof value.valLabelColor === "string" ? value.valLabelColor : undefined
   };
 }
+function readPointField(value, path, count, issues, pageId, elementId) {
+  if (value === undefined)
+    return;
+  if (!Array.isArray(value) || value.length !== count || value.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
+    issues.push(issue("schema", `${path} \u5FC5\u987B\u4E0E categories \u7B49\u957F\u4E14\u4E3A\u6709\u9650\u6570\u5B57`, pageId, elementId));
+    return null;
+  }
+  return value;
+}
 function optionalNumber(value, path, issues, pageId, elementId) {
   if (value === undefined)
     return;
@@ -12311,6 +12820,25 @@ function optionalNumber(value, path, issues, pageId, elementId) {
   }
   return value;
 }
+function parseChartImage(value, id, issues, pageId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 chartImage \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, id));
+    return;
+  }
+  rejectUnknown(value, ["skill", "format", "data"], `${id}.chartImage`, issues, pageId, id);
+  const skill = value.skill;
+  const format = value.format;
+  const data = value.data;
+  if (typeof skill !== "string" || !CHART_SKILL_SLUG.test(skill))
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 skill \u5FC5\u987B\u662F\u5DF2\u5B89\u88C5\u6280\u80FD\u7684 slug`, pageId, id));
+  if (format !== "svg" && format !== "png")
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 format \u53EA\u652F\u6301 svg \u6216 png`, pageId, id));
+  if (typeof data !== "string" || !data.trim() || data.length > 8000)
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 data \u5FC5\u987B\u662F\u539F\u59CB\u6570\u636E\u8868`, pageId, id));
+  if (typeof skill !== "string" || format !== "svg" && format !== "png" || typeof data !== "string" || !data.trim())
+    return;
+  return { skill, format, data: data.trim() };
+}
 function parseElement(value, pageId, issues) {
   if (!isObject2(value)) {
     issues.push(issue("schema", "\u5143\u7D20\u5FC5\u987B\u662F\u5BF9\u8C61", pageId));
@@ -12318,7 +12846,7 @@ function parseElement(value, pageId, issues) {
   }
   const id = value.id;
   const elementId = typeof id === "string" ? id : undefined;
-  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
+  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
   if (typeof id !== "string" || !id.trim()) {
     issues.push(issue("schema", "\u5143\u7D20\u7F3A\u5C11 id", pageId));
     return null;
@@ -12362,7 +12890,14 @@ function parseElement(value, pageId, issues) {
       else
         element.fit = value.fit;
     }
+    if (value.chartImage !== undefined) {
+      const chartImage = parseChartImage(value.chartImage, id, issues, pageId);
+      if (chartImage)
+        element.chartImage = chartImage;
+    }
   }
+  if (value.type !== "image" && value.chartImage !== undefined)
+    issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 chartImage \u53EA\u7528\u4E8E\u56FE\u7247\u56FE\u8868`, pageId, id));
   if (value.type !== "image" && value.fit !== undefined)
     issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 fit \u53EA\u7528\u4E8E\u56FE\u7247`, pageId, id));
   if (value.type !== "shape" && (value.path !== undefined || value.gradient !== undefined || value.pattern !== undefined || value.pathRule !== undefined)) {
@@ -12970,8 +13505,57 @@ function checkDeck(deck) {
   });
   return issues;
 }
-function checkPage(deck, page) {
+function checkArgumentLayout(page) {
+  const layout = argumentLayoutById(page.layout);
+  if (!layout)
+    return [];
   const issues = [];
+  const byId = new Map(page.elements.map((element) => [element.id, element]));
+  for (const slot of layout.slots) {
+    const element = byId.get(slot.id);
+    if (!element) {
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7F3A\u5C11\u5143\u7D20 ${slot.id}`, page.id, slot.id));
+      continue;
+    }
+    if (!slotAccepts(slot.kind, element)) {
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u5E94\u4E3A ${slot.kind}`, page.id, slot.id));
+    }
+    const box = element.bounds;
+    const placed = Math.abs(box.x - slot.bounds.x) <= 0.51 && Math.abs(box.y - slot.bounds.y) <= 0.51 && Math.abs(box.w - slot.bounds.w) <= 0.51 && Math.abs(box.h - slot.bounds.h) <= 0.51;
+    if (!placed)
+      issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u4E0D\u5728\u76EE\u5F55\u51E0\u4F55\u4E0A`, page.id, slot.id));
+    if (slot.textCapacity && element.textCapacity) {
+      if (element.textCapacity.maxChars > slot.textCapacity.maxChars || element.textCapacity.maxLines > slot.textCapacity.maxLines) {
+        issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u628A textCapacity \u653E\u5230\u4E86\u76EE\u5F55\u5BB9\u91CF\u4E4B\u5916`, page.id, slot.id));
+      }
+    }
+  }
+  return issues;
+}
+function slotAccepts(kind, element) {
+  if (element.type === kind)
+    return true;
+  return kind === "chart" && element.type === "image" && !!element.chartImage;
+}
+function checkChartImage(deck, page, element) {
+  const issues = [];
+  const box = element.bounds;
+  const data = element.chartImage?.data.trim() ?? "";
+  if (box.w < 48 || box.h < 48) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${element.id} \u7684\u5C3A\u5BF8\u8FC7\u5C0F\uFF08${box.w}\xD7${box.h}\uFF09`, page.id, element.id));
+  }
+  const { width, height } = deck.canvas;
+  const bleed = deck.profile === "example" ? 36 : 0.5;
+  const off = box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed;
+  if (off)
+    issues.push(issue("out_of_bounds", `\u56FE\u7247\u56FE\u8868 ${element.id} \u8D85\u51FA ${width}\xD7${height} \u753B\u5E03`, page.id, element.id));
+  if (!data || !page.notes?.includes(data)) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${element.id} \u7684\u539F\u59CB\u6570\u636E\u8868\u8981\u5199\u8FDB\u9875\u9762\u5907\u6CE8`, page.id, element.id));
+  }
+  return issues;
+}
+function checkPage(deck, page) {
+  const issues = [...checkArgumentLayout(page)];
   const { width, height } = deck.canvas;
   let background = "#FFFFFF";
   try {
@@ -12983,9 +13567,12 @@ function checkPage(deck, page) {
     const box = element.bounds;
     const bleed = deck.profile === "example" ? 36 : 0.5;
     const off = deck.profile === "example" ? box.x + box.w < -bleed || box.y + box.h < -bleed || box.x > width + bleed || box.y > height + bleed : box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed;
-    if (off) {
+    const chartPicture = element.type === "image" && !!element.chartImage;
+    if (off && !chartPicture) {
       issues.push(issue("out_of_bounds", `\u5143\u7D20\u8D85\u51FA ${width}\xD7${height} \u753B\u5E03\uFF08x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}\uFF09`, page.id, element.id));
     }
+    if (chartPicture)
+      issues.push(...checkChartImage(deck, page, element));
     if (element.type === "text" && element.text && element.font && element.textCapacity) {
       issues.push(...checkText(deck, page, element, background));
     }
@@ -19571,17 +20158,40 @@ function addTable(pres, slide, deck, element, platform) {
     objectName: element.id
   });
 }
+function themeChartPalette(deck, chart, count) {
+  const tokens = chart.colors ?? ["accent", "ink", "signal", "muted"].filter((name) => deck.theme.colors[name]).map((name) => `$${name}`);
+  const resolved = (tokens.length ? tokens : ["$accent"]).map((color) => hex(colorRef(color, deck.theme, "$accent")));
+  const width = Math.max(count, resolved.length, 1);
+  return Array.from({ length: width }, (_, index) => resolved[index % resolved.length]);
+}
+var CHART_CATEGORY_PT = 13;
+var CHART_TICK_PT = 12;
+var CHART_LEGEND_PT = 12;
+var CHART_VALUE_PT = 12;
 function addChart(pres, slide, deck, element, platform, pageBackground) {
   const chart = element.chart;
+  const kind = chart.kind;
   const background = hex(pageBackground);
   const ink = hex(colorRef("$ink", deck.theme, "#111111"));
   const muted = hex(colorRef("$muted", deck.theme, "#5C5A55"));
-  const line = hex(colorRef("$line", deck.theme, "#D0D0D0"));
   const inverse = hex(colorRef("$inverse", deck.theme, "#FFFFFF"));
-  const dark = luminance(pageBackground) < 0.4;
-  const label = dark ? inverse : muted;
-  const grid = dark ? "4A4A4A" : line;
   const face = resolveFontFace(deck, "$cjk", platform);
+  const palette = themeChartPalette(deck, chart, Math.max(chart.series.length, chart.categories.length, 2));
+  const on = chart.showValues !== false;
+  const numericAxis = kind === "scatter" || kind === "bubble";
+  const legend = chart.showLegend ?? (chart.series.length > 1 && kind !== "pie" && kind !== "doughnut" && kind !== "waterfall");
+  const outside = readableOn(background, ink, inverse);
+  const ticks = contrastRatio(muted, background) >= 3 ? muted : outside;
+  const tickColor = chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, ticks)) : deeperTick(ticks, ink);
+  const categoryColor = chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, outside)) : numericAxis ? tickColor : outside;
+  const axis = quietColor(ink, background, 0.72);
+  const gridTint = quietColor(ink, background, 0.86);
+  const themedGrid = (fallback) => {
+    const style = chart.grid ?? fallback;
+    if (style === "none")
+      return { style: "none" };
+    return { color: gridTint, size: 0.75, style };
+  };
   const base = {
     x: inches2(element.bounds.x),
     y: inches2(element.bounds.y),
@@ -19589,63 +20199,261 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     h: inches2(element.bounds.h),
     objectName: element.id,
     showTitle: false,
-    showLegend: chart.showLegend ?? false,
-    showValue: chart.showValues ?? false,
+    showLegend: legend,
+    showValue: false,
     chartArea: { fill: { color: background }, border: { pt: 0, color: background }, roundedCorners: false },
     plotArea: { fill: { color: background }, border: { pt: 0, color: background } },
-    catAxisLabelColor: chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, label)) : label,
+    layout: chartLayout(kind, legend),
+    catAxisLabelColor: categoryColor,
     catAxisLabelFontFace: face,
-    catAxisLabelFontSize: chart.catLabelSize ?? 11,
-    valAxisLabelColor: chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, label)) : label,
+    catAxisLabelFontSize: chart.catLabelSize ?? (numericAxis ? CHART_TICK_PT : CHART_CATEGORY_PT),
+    valAxisLabelColor: tickColor,
     valAxisLabelFontFace: face,
-    valAxisLabelFontSize: chart.valLabelSize ?? 11,
-    catAxisLineColor: grid,
-    valAxisLineShow: false,
-    valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" },
+    valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+    valAxisLabelPos: "none",
+    catAxisLineShow: true,
+    catAxisLineColor: axis,
+    catAxisLineSize: 0.75,
+    catAxisMajorTickMark: "none",
+    valAxisLineShow: true,
+    valAxisLineColor: axis,
+    valAxisLineSize: 0.75,
+    valAxisMajorTickMark: "none",
+    valGridLine: themedGrid("none"),
     catGridLine: { style: "none" },
     dataBorder: { pt: 0, color: background },
-    chartColors: (chart.colors ?? ["$accent", "$ink"]).map((color) => hex(colorRef(color, deck.theme, "$accent"))),
+    chartColors: palette,
+    legendFontFace: face,
+    legendFontSize: CHART_LEGEND_PT,
+    legendColor: outside,
+    legendPos: "b",
+    dataLabelFontFace: face,
+    dataLabelFontSize: CHART_VALUE_PT,
+    dataLabelFontBold: true,
+    dataLabelColor: outside,
     valAxisMinVal: chart.valMin,
     valAxisMaxVal: chart.valMax
   };
-  if (chart.kind === "waterfall") {
-    const parts = waterfallParts(chart.series[0].values);
-    const colors = chart.colors ?? ["$paper", "$accent", "$ink"];
-    const waterfallColors = colors.map((color) => hex(colorRef(color, deck.theme, "$paper")));
-    waterfallColors[0] = background;
+  const rows = chart.series.map((series) => ({ name: series.name, labels: chart.categories, values: series.values }));
+  if (kind === "waterfall") {
+    const columns = waterfallColumns(chart.series[0].values);
+    const increase = hex(colorRef(chart.colors?.[1] ?? "$accent", deck.theme, "$accent"));
+    const decrease = hex(colorRef(chart.colors?.[2] ?? "$muted", deck.theme, "$muted"));
+    const peak = Math.max(...columns.base.map((value, index) => value + columns.total[index] + columns.up[index] + columns.down[index]), 0);
+    const scale = chartValueScale(chart, [peak], false);
     slide.addChart(pres.ChartType.bar, [
-      { name: "\u57FA\u5EA7", labels: chart.categories, values: parts.base },
-      { name: "\u589E\u52A0", labels: chart.categories, values: parts.up },
-      { name: "\u51CF\u5C11", labels: chart.categories, values: parts.down }
+      { name: "\u57FA\u5EA7", labels: chart.categories, values: columns.base },
+      { name: "\u5408\u8BA1", labels: chart.categories, values: columns.total },
+      { name: "\u589E\u52A0", labels: chart.categories, values: columns.up },
+      { name: "\u51CF\u5C11", labels: chart.categories, values: columns.down }
     ], {
       ...base,
       barDir: "col",
       barGrouping: "stacked",
-      barGapWidthPct: 50,
+      barGapWidthPct: 80,
       showValue: false,
       showLegend: false,
-      chartColors: waterfallColors,
-      valAxisMinVal: 0
+      layout: chartLayout(kind, false),
+      chartColors: [background, ink, increase, decrease],
+      valAxisMinVal: scale.min,
+      valAxisMaxVal: scale.max,
+      valAxisMajorUnit: scale.step
+    });
+    if (on)
+      addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale);
+    addValueTicks(pres, slide, element, plotBox("waterfall", false, element.bounds), scale, face, tickColor, background, "left");
+    return;
+  }
+  if (kind === "combo") {
+    const roles = comboSeriesRoles(chart.series);
+    const columns = chart.series.filter((_, index) => roles[index] === "column");
+    const lines = chart.series.filter((_, index) => roles[index] === "line");
+    let colorIndex = 0;
+    const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]);
+    const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]);
+    const columnScale = chartValueScale(chart, columns.flatMap((series) => series.values), true);
+    const lineScale = chartValueScale(chart, lines.flatMap((series) => series.values), true);
+    const legend = chart.showLegend ?? true;
+    const axisLabel = {
+      valAxisLabelColor: tickColor,
+      valAxisLabelFontFace: face,
+      valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+      valAxisLabelPos: "none",
+      valAxisLineShow: true,
+      valAxisLineColor: axis,
+      valAxisLineSize: 0.75,
+      valAxisMajorTickMark: "none"
+    };
+    slide.addChart([
+      {
+        type: pres.ChartType.bar,
+        data: columns.map((series) => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: {
+          barDir: "col",
+          barGrouping: "clustered",
+          barGapWidthPct: 100,
+          chartColors: columnColors,
+          showValue: on,
+          dataLabelPosition: "inEnd"
+        }
+      },
+      {
+        type: pres.ChartType.line,
+        data: lines.map((series) => ({ name: series.name, labels: chart.categories, values: series.values })),
+        options: {
+          secondaryValAxis: true,
+          chartColors: lineColors,
+          showValue: false,
+          lineSize: chart.lineWidth ?? 2.25,
+          lineDataSymbol: "circle",
+          lineDataSymbolSize: chart.markerSize ?? 10,
+          lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : lineColors[0],
+          lineDataSymbolLineSize: 0
+        }
+      }
+    ], {
+      ...base,
+      barDir: "col",
+      showLegend: false,
+      layout: chartLayout(kind, legend),
+      barGapWidthPct: 100,
+      valAxisMinVal: undefined,
+      valAxisMaxVal: undefined,
+      valAxes: [
+        {
+          ...axisLabel,
+          valAxisMinVal: columnScale.min,
+          valAxisMaxVal: columnScale.max,
+          valAxisMajorUnit: columnScale.step,
+          valGridLine: themedGrid("none")
+        },
+        {
+          ...axisLabel,
+          valAxisMinVal: lineScale.min,
+          valAxisMaxVal: lineScale.max,
+          valAxisMajorUnit: lineScale.step,
+          valGridLine: { style: "none" }
+        }
+      ]
+    });
+    addComboOverlay(pres, slide, element, chart, {
+      background,
+      ink,
+      inverse,
+      face,
+      axis,
+      tickColor,
+      columnColors,
+      lineColors,
+      columnScale,
+      lineScale,
+      legend,
+      labels: on
     });
     return;
   }
-  const type = chart.kind === "line" ? pres.ChartType.line : chart.kind === "pie" ? pres.ChartType.pie : chart.kind === "doughnut" ? pres.ChartType.doughnut : pres.ChartType.bar;
-  const data = chart.series.map((series) => ({ name: series.name, labels: chart.categories, values: series.values }));
-  slide.addChart(type, data, {
+  if (kind === "scatter" || kind === "bubble") {
+    const x = chart.series[0]?.x ?? [];
+    const xs = chart.series.flatMap((series) => series.x ?? []);
+    const ys = chart.series.flatMap((series) => series.values);
+    const labelScatter = kind === "scatter" && on;
+    const xScale = paddedScale(xs, kind === "bubble" ? 0.35 : 0.16);
+    const yScale = chart.valMax !== undefined || chart.valMin !== undefined ? chartValueScale(chart, ys, kind === "bubble") : paddedScale(ys, kind === "bubble" ? 0.45 : labelScatter ? 0.28 : 0.16);
+    slide.addChart(kind === "bubble" ? pres.ChartType.bubble : pres.ChartType.scatter, [
+      { name: "X", values: x },
+      ...chart.series.map((series) => ({
+        name: series.name,
+        labels: chart.categories,
+        values: series.values,
+        sizes: series.sizes
+      }))
+    ], {
+      ...base,
+      lineSize: kind === "scatter" ? 0 : chart.lineWidth ?? 0,
+      lineDataSymbol: "circle",
+      lineDataSymbolSize: chart.markerSize ?? (kind === "bubble" ? 12 : 14),
+      lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
+      lineDataSymbolLineSize: 1.25,
+      showLabel: labelScatter,
+      dataLabelFormatScatter: labelScatter ? "custom" : undefined,
+      dataLabelPosition: labelScatter ? "t" : undefined,
+      showLegend: kind === "bubble" ? false : chart.showLegend ?? chart.series.length > 1,
+      catAxisMinVal: xScale.min,
+      catAxisMaxVal: xScale.max,
+      catAxisMajorUnit: xScale.step,
+      valAxisMinVal: yScale.min,
+      valAxisMaxVal: yScale.max,
+      valAxisMajorUnit: yScale.step,
+      catGridLine: themedGrid("solid"),
+      valGridLine: themedGrid("solid")
+    });
+    if (kind === "scatter") {
+      addValueTicks(pres, slide, element, plotBox("scatter", false, element.bounds), yScale, face, tickColor, background, "left");
+      addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background);
+    }
+    if (kind === "bubble") {
+      addBubbleOverlay(pres, slide, element, chart, {
+        background,
+        ink,
+        face,
+        axis,
+        grid: gridTint,
+        tickColor,
+        colors: palette,
+        xScale,
+        yScale,
+        legend: chart.showLegend ?? chart.series.length > 1
+      });
+    }
+    return;
+  }
+  const pieLike = kind === "pie" || kind === "doughnut";
+  const grouped = kind === "stacked" || kind === "stackedPercent";
+  const bars = kind === "bar" || kind === "column" || grouped;
+  const type = kind === "line" ? pres.ChartType.line : kind === "area" ? pres.ChartType.area : kind === "pie" ? pres.ChartType.pie : kind === "doughnut" ? pres.ChartType.doughnut : kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
+  const flat = kind === "stacked" ? columnSums(chart.series) : chart.series.flatMap((series) => series.values);
+  const needsHeadroom = on && (kind === "bar" || kind === "column" || kind === "line" || kind === "area");
+  const scale = kind === "stackedPercent" ? { min: 0, max: 1, step: 0.2 } : kind === "radar" ? chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, flat, false) : pieLike ? undefined : chartValueScale(chart, flat, needsHeadroom);
+  slide.addChart(type, rows, {
     ...base,
-    barDir: chart.kind === "bar" ? "bar" : "col",
-    ...chart.kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
-    barGrouping: "clustered",
-    barGapWidthPct: 60,
+    barDir: kind === "bar" ? "bar" : "col",
+    ...kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
+    barGrouping: kind === "stackedPercent" ? "percentStacked" : grouped ? "stacked" : kind === "area" ? "standard" : "clustered",
+    barGapWidthPct: grouped ? 46 : 70,
+    chartColorsOpacity: kind === "area" || kind === "radar" ? 46 : undefined,
+    radarStyle: kind === "radar" ? "filled" : undefined,
     lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: "circle",
-    lineDataSymbolSize: chart.markerSize ?? (chart.kind === "line" ? 8 : 12),
+    lineDataSymbolSize: chart.markerSize ?? (kind === "line" || kind === "radar" ? 10 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMin ?? 0,
-    valAxisMaxVal: chart.kind === "pie" || chart.kind === "doughnut" ? undefined : chart.valMax,
-    holeSize: chart.kind === "doughnut" ? chart.holeSize ?? 62 : undefined
+    showLegend: kind === "radar" ? false : legend,
+    showValue: on && (bars || pieLike || kind === "line" || kind === "area"),
+    showLabel: on && pieLike,
+    ...kind === "bar" ? { catAxisLabelPos: "none" } : {},
+    showPercent: pieLike ? false : undefined,
+    showLeaderLines: on && pieLike,
+    dataLabelPosition: pieLike ? "outEnd" : grouped ? "ctr" : on && (kind === "line" || kind === "area") ? "t" : on && bars ? "inEnd" : undefined,
+    dataLabelColor: grouped ? insideLabel(palette, ink, inverse) : outside,
+    dataBorder: pieLike ? { pt: 2, color: background } : base.dataBorder,
+    valAxisLabelFormatCode: kind === "stackedPercent" ? "0%" : undefined,
+    valAxisMinVal: scale?.min,
+    valAxisMaxVal: scale?.max,
+    valAxisMajorUnit: scale?.step,
+    holeSize: kind === "doughnut" ? chart.holeSize ?? 62 : undefined,
+    ...kind === "radar" ? { valGridLine: themedGrid("solid"), catGridLine: themedGrid("solid") } : {}
   });
+  if (on && pieLike)
+    addPieLeaders(pres, slide, element, chart, muted);
+  if (on && (kind === "line" || kind === "area"))
+    addEdgeCallouts(slide, element, chart, kind, legend, face, outside);
+  if (kind === "radar")
+    addRadarValueLabels(pres, slide, element, chart, legend, face, tickColor, background, ink, palette);
+  if (scale && (kind === "column" || kind === "line" || kind === "area" || kind === "stacked" || kind === "stackedPercent")) {
+    addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, "left", kind === "stackedPercent" ? formatPercentTick : formatTick);
+  }
+  if (scale && kind === "bar")
+    addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, "bottom");
 }
 function shapeFill(deck, element) {
   if (element.pattern)
@@ -19716,9 +20524,29 @@ async function finishSlideXml(bytes, deck, platform) {
       changed = true;
     }
   }
+  if (await polishCharts(zip, deck, platform))
+    changed = true;
+  if (await shrinkBubbleScale(zip))
+    changed = true;
   if (!changed)
     return bytes;
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+async function shrinkBubbleScale(zip) {
+  let changed = false;
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    let xml = await file.async("string");
+    if (!xml.includes("<c:bubbleChart") || xml.includes("<c:bubbleScale"))
+      continue;
+    const start = xml.indexOf("<c:bubbleChart");
+    const axis = xml.indexOf("<c:axId", start);
+    if (axis < 0)
+      continue;
+    xml = `${xml.slice(0, axis)}<c:bubbleScale val="48"/>${xml.slice(axis)}`;
+    zip.file(file.name, xml);
+    changed = true;
+  }
+  return changed;
 }
 function rewriteShape(block, faces, fills, evenOdd) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
@@ -19792,6 +20620,783 @@ function patternXml(pattern) {
 function escapeXml(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
+function readableOn(background, preferred, alternate) {
+  return contrastRatio(preferred, background) >= contrastRatio(alternate, background) ? preferred : alternate;
+}
+function insideLabel(fills, ink, inverse) {
+  const colors = fills.length > 0 ? fills : [ink];
+  const score = (color) => colors.filter((fill) => contrastRatio(color, fill) >= 3).length;
+  return score(inverse) >= score(ink) ? inverse : ink;
+}
+function mixHex(from, to, toward) {
+  const bytes = (value) => [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const start = bytes(from);
+  const end = bytes(to);
+  return start.map((channel, index) => Math.round(channel * (1 - toward) + end[index] * toward).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+function quietColor(foreground, background, toward) {
+  return luminance(foreground) > luminance(background) ? mixHex(background, foreground, toward) : mixHex(foreground, background, toward);
+}
+function cleanNumber(value) {
+  const rounded = Math.round(value * 1e6) / 1e6;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+function niceStep(span) {
+  if (!(span > 0) || !Number.isFinite(span))
+    return 1;
+  const rough = span / 4;
+  const mag = 10 ** Math.floor(Math.log10(rough));
+  const residual = rough / mag;
+  const nice = residual <= 1.5 ? 1 : residual <= 3 ? 2 : residual <= 7 ? 5 : 10;
+  return cleanNumber(nice * mag);
+}
+function niceAxis(min, max, headroom) {
+  let lo = Number.isFinite(min) ? min : 0;
+  let hi = Number.isFinite(max) ? max : lo + 1;
+  if (hi < lo)
+    [lo, hi] = [hi, lo];
+  if (hi === lo)
+    hi = lo + Math.max(Math.abs(lo), 1);
+  const span = hi - lo;
+  const step = niceStep(headroom ? span * 1.18 : span);
+  const axisMin = lo === 0 ? 0 : cleanNumber(Math.floor(lo / step) * step);
+  let axisMax = cleanNumber(Math.ceil((hi - axisMin) / step) * step + axisMin);
+  if (axisMax < hi)
+    axisMax = cleanNumber(axisMax + step);
+  if (headroom && (axisMax - hi) / step < 0.6)
+    axisMax = cleanNumber(axisMax + step);
+  return { min: axisMin, max: axisMax, step };
+}
+function chartValueScale(chart, values, headroom) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  const dataMax = finite.length ? Math.max(...finite) : 0;
+  const dataMin = finite.length ? Math.min(...finite) : 0;
+  const min = chart.valMin ?? Math.min(0, dataMin);
+  if (chart.valMax !== undefined) {
+    const max = chart.valMax;
+    return { min, max, step: niceStep(Math.max(max - min, Math.abs(dataMax) || 1)) };
+  }
+  return niceAxis(min, Math.max(dataMax, min), headroom);
+}
+function paddedScale(values, ratio) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0)
+    return { min: 0, max: 1, step: 1 };
+  const dataMin = Math.min(...finite);
+  const dataMax = Math.max(...finite);
+  const span = Math.max(dataMax - dataMin, 1);
+  const lo = dataMin >= 0 ? Math.max(0, dataMin - span * ratio) : dataMin - span * ratio;
+  return niceAxis(lo, dataMax + span * ratio, false);
+}
+function columnSums(series) {
+  const count = Math.max(...series.map((item) => item.values.length), 0);
+  return Array.from({ length: count }, (_, index) => series.reduce((sum, item) => sum + (item.values[index] ?? 0), 0));
+}
+function deeperTick(color, ink) {
+  if (color.toUpperCase() === ink.toUpperCase())
+    return color.toUpperCase();
+  return mixHex(color, ink, 0.45);
+}
+function plotBox(kind, legend, bounds) {
+  const layout = chartLayout(kind, legend);
+  return {
+    x: bounds.x + layout.x * bounds.w,
+    y: bounds.y + layout.y * bounds.h,
+    w: layout.w * bounds.w,
+    h: layout.h * bounds.h
+  };
+}
+function polar(cx, cy, radius, clockwiseFromTop) {
+  return {
+    x: cx + radius * Math.sin(clockwiseFromTop),
+    y: cy - radius * Math.cos(clockwiseFromTop)
+  };
+}
+function addLeader(pres, slide, x1, y1, x2, y2, color, name, width = 1) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.max(Math.hypot(dx, dy), 0.01);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  slide.addShape(pres.ShapeType.line, {
+    x: inches2(cx - length / 2),
+    y: inches2(cy),
+    w: inches2(length),
+    h: 0,
+    rotate: Math.abs(angle) < 0.05 ? undefined : angle,
+    line: { color, width },
+    objectName: name
+  });
+}
+function addCallout(slide, text, x, y, w, h, face, color, name, bold = true, align = "center") {
+  slide.addText(text, {
+    x: inches2(x),
+    y: inches2(y),
+    w: inches2(w),
+    h: inches2(h),
+    fontFace: face,
+    fontSize: CHART_VALUE_PT,
+    bold,
+    color,
+    align,
+    valign: "middle",
+    margin: 0,
+    wrap: false,
+    fit: "none",
+    objectName: name
+  });
+}
+function magnitude(value) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+function addPieLeaders(pres, slide, element, chart, color) {
+  const values = chart.series[0]?.values ?? [];
+  const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+  if (total <= 0)
+    return;
+  const bounds = element.bounds;
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  const radius = Math.min(bounds.w, bounds.h) * 0.42;
+  let theta = 0;
+  values.forEach((value, index) => {
+    if (value <= 0)
+      return;
+    const sweep = value / total * Math.PI * 2;
+    const mid = theta + sweep / 2;
+    theta += sweep;
+    const start = polar(cx, cy, radius + 0.5, mid);
+    const end = polar(cx, cy, radius + 8, mid);
+    addLeader(pres, slide, start.x, start.y, end.x, end.y, color, `${element.id}-leader-${index}`);
+  });
+}
+function addEdgeCallouts(slide, element, chart, kind, legend, face, color) {
+  const categories = chart.categories.length;
+  if (categories < 2)
+    return;
+  const plot = plotBox(kind, legend, element.bounds);
+  const scale = chartValueScale(chart, chart.series.flatMap((series) => series.values), true);
+  if (scale.max <= scale.min)
+    return;
+  const yOf = (value) => plot.y + plot.h - (value - scale.min) / (scale.max - scale.min) * plot.h;
+  chart.series.forEach((series, seriesIndex) => {
+    for (const point of keyIndexes(series.values)) {
+      if (point !== 0 && point !== categories - 1)
+        continue;
+      const value = series.values[point];
+      if (value === undefined || !Number.isFinite(value))
+        continue;
+      const text = magnitude(value);
+      const boxW = Math.max(28, text.length * 8);
+      const py = yOf(value);
+      const steps = Math.round((value - scale.min) / scale.step);
+      const tickY = yOf(scale.min + steps * scale.step);
+      const tight = point === 0 && Math.abs(py - tickY) < 8;
+      const x = point === 0 ? plot.x + (tight ? 56 : 28) : plot.x + plot.w - 28 - boxW;
+      addCallout(slide, text, x, tight ? py - 28 : py - 20, boxW, 16, face, color, point === 0 ? `${element.id}-edge-${seriesIndex}` : `${element.id}-edge-${seriesIndex}-end`);
+    }
+  });
+}
+function addWaterfallCallouts(slide, element, chart, face, inverse, ink, scale) {
+  const values = chart.series[0]?.values ?? [];
+  if (values.length === 0)
+    return;
+  const columns = waterfallColumns(values);
+  const plot = plotBox("waterfall", false, element.bounds);
+  const slot = plot.w / values.length;
+  const valMin = scale.min;
+  const valMax = scale.max;
+  if (valMax <= valMin)
+    return;
+  const yOf = (value) => plot.y + plot.h - (value - valMin) / (valMax - valMin) * plot.h;
+  values.forEach((_, index) => {
+    const segments = [
+      { base: 0, value: columns.total[index] ?? 0, text: magnitude(columns.total[index] ?? 0) },
+      { base: columns.base[index] ?? 0, value: columns.up[index] ?? 0, text: `+${magnitude(columns.up[index] ?? 0)}` },
+      { base: columns.base[index] ?? 0, value: columns.down[index] ?? 0, text: `\u2212${magnitude(columns.down[index] ?? 0)}` }
+    ];
+    for (const segment of segments) {
+      if (segment.value === 0)
+        continue;
+      const top = yOf(segment.base + segment.value);
+      const bottom = yOf(segment.base);
+      const boxW = Math.max(36, segment.text.length * 9);
+      const boxH = 16;
+      const cx = plot.x + slot * (index + 0.5);
+      const tall = bottom - top >= boxH + 2;
+      addCallout(slide, segment.text, cx - boxW / 2, tall ? (top + bottom) / 2 - boxH / 2 : top - boxH - 1, boxW, boxH, face, tall ? inverse : ink, `${element.id}-wf-${index}`);
+    }
+  });
+}
+function formatTick(value) {
+  const rounded = cleanNumber(value);
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+function formatPercentTick(value) {
+  return `${formatTick(value * 100)}%`;
+}
+function addValueTicks(pres, slide, element, plot, scale, face, color, background, edge, format = formatTick) {
+  const span = scale.max - scale.min;
+  if (!(span > 0))
+    return;
+  const values = axisTicks(scale);
+  if (values.length === 0)
+    return;
+  if (edge === "left") {
+    const gutter = plot.x - element.bounds.x;
+    if (gutter > 4) {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(element.bounds.x),
+        y: inches2(plot.y - 12),
+        w: inches2(gutter - 1),
+        h: inches2(plot.h + 24),
+        fill: { color: background },
+        line: { color: background, pt: 0 },
+        objectName: `${element.id}-ltick-cover`
+      });
+    }
+    values.forEach((value, index) => {
+      const text = format(value);
+      const boxW = Math.max(24, text.length * 8);
+      const y = plot.y + plot.h - (value - scale.min) / span * plot.h;
+      addCallout(slide, text, plot.x - boxW - 6, y - 8, boxW, 16, face, color, `${element.id}-ltick-${index}`, false, "right");
+    });
+    return;
+  }
+  const below = element.bounds.y + element.bounds.h - plot.y - plot.h;
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 8),
+    y: inches2(plot.y + plot.h + 1),
+    w: inches2(plot.w + 16),
+    h: inches2(Math.max(16, below - 1)),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-btick-cover`
+  });
+  values.forEach((value, index) => {
+    const text = format(value);
+    const boxW = Math.max(18, text.length * 8);
+    const x = plot.x + (value - scale.min) / span * plot.w;
+    addCallout(slide, text, x - boxW / 2, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-btick-${index}`, false);
+  });
+}
+function addComboOverlay(pres, slide, element, chart, paint) {
+  const roles = comboSeriesRoles(chart.series);
+  const columns = chart.series.filter((_, index) => roles[index] === "column");
+  const lines = chart.series.filter((_, index) => roles[index] === "line");
+  const count = chart.categories.length;
+  if (count === 0 || columns.length === 0)
+    return;
+  const plot = plotBox("combo", paint.legend, element.bounds);
+  const slot = plot.w / count;
+  const yOf = (value, scale) => {
+    const span = scale.max - scale.min;
+    if (!(span > 0))
+      return plot.y + plot.h;
+    return plot.y + plot.h - (value - scale.min) / span * plot.h;
+  };
+  const columnTop = (index) => yOf(Math.max(...columns.map((series) => series.values[index] ?? 0), paint.columnScale.min), paint.columnScale);
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 3),
+    y: inches2(plot.y - 2),
+    w: inches2(plot.w + 8),
+    h: inches2(plot.h + 4),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-plot-cover`
+  });
+  const barWidth = slot / (columns.length + 1);
+  const cluster = barWidth * columns.length;
+  const clusterStart = (slot - cluster) / 2;
+  const taken = [];
+  const overlaps = (box, gap = 2) => taken.some((item) => box.x < item.x + item.w + gap && box.x + box.w + gap > item.x && box.y < item.y + item.h + gap && box.y + box.h + gap > item.y);
+  const columnBoxes = [];
+  columns.forEach((series, seriesIndex) => {
+    const color = paint.columnColors[seriesIndex] ?? paint.ink;
+    series.values.forEach((value, index) => {
+      if (!Number.isFinite(value))
+        return;
+      const top = yOf(value, paint.columnScale);
+      const bottom = yOf(paint.columnScale.min, paint.columnScale);
+      const x = plot.x + slot * index + clusterStart + seriesIndex * barWidth;
+      const height = Math.max(bottom - top, 0.4);
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(x),
+        y: inches2(Math.min(top, bottom)),
+        w: inches2(barWidth),
+        h: inches2(height),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-col-${seriesIndex}-${index}`
+      });
+      if (!paint.labels)
+        return;
+      const text = magnitude(value);
+      const boxW = Math.max(28, text.length * 8);
+      const lineNear = lines.some((line) => {
+        const sample = line.values[index];
+        return Number.isFinite(sample) && Math.abs(yOf(sample, paint.lineScale) - top) < 36;
+      });
+      const inside = lineNear && height > 24;
+      const box = {
+        x: x + barWidth / 2 - boxW / 2,
+        y: inside ? Math.min(top, bottom) + 3 : Math.min(top, bottom) - 16,
+        w: boxW,
+        h: 16
+      };
+      taken.push(box);
+      columnBoxes.push({ ...box, text, color: inside ? paint.inverse : paint.ink, name: `${element.id}-col-label-${seriesIndex}-${index}` });
+    });
+  });
+  const linePoints = [];
+  lines.forEach((series, seriesIndex) => {
+    const color = paint.lineColors[seriesIndex] ?? paint.ink;
+    const points = series.values.map((value, index) => ({ index, value, x: plot.x + slot * (index + 0.5), y: yOf(value, paint.lineScale) })).filter((point) => Number.isFinite(point.value));
+    for (let index = 1;index < points.length; index++) {
+      const previous = points[index - 1];
+      const point = points[index];
+      addLeader(pres, slide, previous.x, previous.y, point.x, point.y, color, `${element.id}-line-${seriesIndex}-${index}`, 2.25);
+    }
+    for (const point of points) {
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches2(point.x - 4),
+        y: inches2(point.y - 4),
+        w: inches2(8),
+        h: inches2(8),
+        fill: { color },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-marker-${seriesIndex}-${point.index}`
+      });
+      taken.push({ x: point.x - 4, y: point.y - 4, w: 8, h: 8 });
+      linePoints.push({ seriesIndex, index: point.index, x: point.x, y: point.y, value: point.value, color });
+    }
+  });
+  for (const box of columnBoxes)
+    addCallout(slide, box.text, box.x, box.y, box.w, box.h, paint.face, box.color, box.name);
+  const segments = linePoints.map((point) => {
+    const neighbors = linePoints.filter((other) => other.seriesIndex === point.seriesIndex && Math.abs(other.index - point.index) === 1);
+    return { point, neighbors };
+  });
+  for (const { point, neighbors } of segments) {
+    if (!paint.labels)
+      continue;
+    const text = magnitude(point.value);
+    const boxW = Math.max(22, text.length * 9);
+    const boxH = 16;
+    const barTop = columnTop(point.index);
+    const candidates = [
+      { x: point.x - boxW / 2, y: point.y - boxH - 6 },
+      { x: point.x - boxW / 2, y: point.y + 8 },
+      { x: point.x + 12, y: point.y - boxH / 2 },
+      { x: point.x - boxW - 12, y: point.y - boxH / 2 }
+    ];
+    const placed = candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).filter((candidate) => candidate.x >= plot.x + 1 && candidate.y >= plot.y + 1 && candidate.x + candidate.w <= plot.x + plot.w - 1 && candidate.y + candidate.h <= plot.y + plot.h - 1).filter((candidate) => !overlaps(candidate) && !lineHitsBox(candidate, point, neighbors));
+    const box = placed[0] ?? candidates.map((candidate) => ({ ...candidate, w: boxW, h: boxH })).find((candidate) => !overlaps(candidate)) ?? {
+      x: Math.max(plot.x + 1, Math.min(point.x - boxW / 2, plot.x + plot.w - boxW - 1)),
+      y: Math.max(plot.y + 1, point.y - boxH - 6),
+      w: boxW,
+      h: boxH
+    };
+    taken.push(box);
+    const onBar = box.y + box.h / 2 > barTop + 2;
+    addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`);
+  }
+  const leftGutter = plot.x - element.bounds.x;
+  if (leftGutter > 4) {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(element.bounds.x),
+      y: inches2(plot.y - 12),
+      w: inches2(leftGutter - 1),
+      h: inches2(plot.h + 24),
+      fill: { color: paint.background },
+      line: { color: paint.background, pt: 0 },
+      objectName: `${element.id}-ltick-cover`
+    });
+  }
+  const rightWidth = Math.max(28, element.bounds.x + element.bounds.w - plot.x - plot.w - 2);
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x + plot.w + 1),
+    y: inches2(plot.y - 12),
+    w: inches2(rightWidth),
+    h: inches2(plot.h + 24),
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 },
+    objectName: `${element.id}-rtick-cover`
+  });
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
+  addLeader(pres, slide, plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-y2`, 0.75);
+  const ticks = [];
+  for (let value = paint.lineScale.min;value <= paint.lineScale.max + paint.lineScale.step * 0.001; value += paint.lineScale.step)
+    ticks.push(cleanNumber(value));
+  ticks.forEach((value, index) => {
+    addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, "left");
+  });
+  axisTicks(paint.columnScale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(24, text.length * 8);
+    addCallout(slide, text, plot.x - boxW - 6, yOf(value, paint.columnScale) - 8, boxW, 16, paint.face, paint.tickColor, `${element.id}-ltick-${index}`, false, "right");
+  });
+  if (!paint.legend)
+    return;
+  const items = [
+    ...columns.map((series, index) => ({ name: series.name, color: paint.columnColors[index] ?? paint.ink, line: false })),
+    ...lines.map((series, index) => ({ name: series.name, color: paint.lineColors[index] ?? paint.ink, line: true }))
+  ];
+  const pieces = items.map((item) => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }));
+  const total = pieces.reduce((sum, item) => sum + 18 + item.textW, 0) + Math.max(0, pieces.length - 1) * 18;
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2;
+  const rowY = element.bounds.y + element.bounds.h - 22;
+  pieces.forEach((item, index) => {
+    if (item.line)
+      addLeader(pres, slide, cursor, rowY + 8, cursor + 14, rowY + 8, item.color, `${element.id}-legend-line-${index}`, 2.25);
+    else {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(cursor),
+        y: inches2(rowY + 2),
+        w: inches2(12),
+        h: inches2(12),
+        fill: { color: item.color },
+        line: { color: item.color, pt: 0 },
+        objectName: `${element.id}-legend-swatch-${index}`
+      });
+    }
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, paint.face, paint.ink, `${element.id}-legend-${index}`, false, "left");
+    cursor += 18 + item.textW + 18;
+  });
+}
+function lineHitsBox(box, point, neighbors) {
+  return neighbors.some((other) => {
+    for (let step = 1;step <= 16; step++) {
+      const t = step / 16;
+      const x = point.x + (other.x - point.x) * t;
+      const y = point.y + (other.y - point.y) * t;
+      if (x >= box.x - 1 && x <= box.x + box.w + 1 && y >= box.y - 1 && y <= box.y + box.h + 1)
+        return true;
+    }
+    return false;
+  });
+}
+function axisTicks(scale) {
+  if (!(scale.step > 0) || !Number.isFinite(scale.min) || !Number.isFinite(scale.max))
+    return [];
+  const ticks = [];
+  for (let value = scale.min;value <= scale.max + scale.step * 0.001; value += scale.step)
+    ticks.push(cleanNumber(value));
+  return ticks;
+}
+function addSwatchLegend(pres, slide, element, face, ink, items) {
+  const pieces = items.map((item) => ({ ...item, textW: Math.max(28, Array.from(item.name).length * 13) }));
+  const total = pieces.reduce((sum, item) => sum + 16 + item.textW, 0) + Math.max(0, pieces.length - 1) * 16;
+  let cursor = element.bounds.x + (element.bounds.w - total) / 2;
+  const rowY = element.bounds.y + element.bounds.h - 22;
+  pieces.forEach((item, index) => {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(cursor),
+      y: inches2(rowY + 2),
+      w: inches2(12),
+      h: inches2(12),
+      fill: { color: item.color },
+      line: { color: item.color, pt: 0 },
+      objectName: `${element.id}-legend-swatch-${index}`
+    });
+    addCallout(slide, item.name, cursor + 16, rowY, item.textW, 16, face, ink, `${element.id}-legend-${index}`, false, "left");
+    cursor += 16 + item.textW + 16;
+  });
+}
+function addScatterCategoryTicks(pres, slide, element, scale, face, color, background) {
+  const plot = plotBox("scatter", false, element.bounds);
+  if (!(scale.max > scale.min))
+    return;
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 8),
+    y: inches2(plot.y + plot.h + 2),
+    w: inches2(plot.w + 16),
+    h: inches2(18),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-xtick-cover`
+  });
+  axisTicks(scale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(22, text.length * 8);
+    const x = plot.x + (value - scale.min) / (scale.max - scale.min) * plot.w - boxW / 2;
+    addCallout(slide, text, x, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-xtick-${index}`, false);
+  });
+}
+function addBubbleOverlay(pres, slide, element, chart, paint) {
+  const plot = plotBox("bubble", paint.legend, element.bounds);
+  const xSpan = paint.xScale.max - paint.xScale.min;
+  const ySpan = paint.yScale.max - paint.yScale.min;
+  if (!(xSpan > 0) || !(ySpan > 0))
+    return;
+  const xOf = (value) => plot.x + (value - paint.xScale.min) / xSpan * plot.w;
+  const yOf = (value) => plot.y + plot.h - (value - paint.yScale.min) / ySpan * plot.h;
+  const paper = {
+    fill: { color: paint.background },
+    line: { color: paint.background, pt: 0 }
+  };
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches2(plot.x - 2),
+    y: inches2(plot.y - 10),
+    w: inches2(plot.w + 8),
+    h: inches2(plot.h + 28),
+    objectName: `${element.id}-plot-cover`
+  });
+  slide.addShape(pres.ShapeType.rect, {
+    ...paper,
+    x: inches2(element.bounds.x),
+    y: inches2(plot.y - 10),
+    w: inches2(Math.max(8, plot.x - element.bounds.x)),
+    h: inches2(plot.h + 20),
+    objectName: `${element.id}-ytick-cover`
+  });
+  for (const value of axisTicks(paint.yScale)) {
+    const y = yOf(value);
+    addLeader(pres, slide, plot.x, y, plot.x + plot.w, y, paint.grid, `${element.id}-grid-y-${formatTick(value)}`, 0.75);
+  }
+  for (const value of axisTicks(paint.xScale)) {
+    const x = xOf(value);
+    addLeader(pres, slide, x, plot.y, x, plot.y + plot.h, paint.grid, `${element.id}-grid-x-${formatTick(value)}`, 0.75);
+  }
+  addLeader(pres, slide, plot.x, plot.y, plot.x, plot.y + plot.h, paint.axis, `${element.id}-axis-y`, 0.75);
+  addLeader(pres, slide, plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, paint.axis, `${element.id}-axis-x`, 0.75);
+  chart.series.forEach((series, seriesIndex) => {
+    const color = paint.colors[seriesIndex] ?? paint.ink;
+    series.values.forEach((value, index) => {
+      const x = series.x?.[index];
+      const size = series.sizes?.[index];
+      if (!Number.isFinite(value) || x === undefined || !Number.isFinite(x) || !size || size <= 0)
+        return;
+      const radius = Math.max(5, (11.3 + 0.8 * size) * (plot.w / 878));
+      slide.addShape(pres.ShapeType.ellipse, {
+        x: inches2(xOf(x) - radius),
+        y: inches2(yOf(value) - radius),
+        w: inches2(radius * 2),
+        h: inches2(radius * 2),
+        fill: { color, transparency: 40 },
+        line: { color, pt: 0 },
+        objectName: `${element.id}-bubble-${seriesIndex}-${index}`
+      });
+    });
+  });
+  axisTicks(paint.yScale).forEach((value, index) => {
+    const text = formatTick(value);
+    addCallout(slide, text, plot.x - 36, yOf(value) - 8, 30, 16, paint.face, paint.tickColor, `${element.id}-ytick-${index}`, false, "right");
+  });
+  axisTicks(paint.xScale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(22, text.length * 8);
+    addCallout(slide, text, xOf(value) - boxW / 2, plot.y + plot.h + 4, boxW, 16, paint.face, paint.tickColor, `${element.id}-xtick-${index}`, false);
+  });
+  if (paint.legend)
+    addSwatchLegend(pres, slide, element, paint.face, paint.ink, chart.series.map((series, index) => ({ name: series.name, color: paint.colors[index] ?? paint.ink })));
+}
+function addRadarValueLabels(pres, slide, element, chart, legend, face, color, background, ink, colors) {
+  const plot = plotBox("radar", legend, element.bounds);
+  const scale = chartValueScale({ ...chart, valMin: chart.valMin ?? 0 }, chart.series.flatMap((series) => series.values), false);
+  const span = scale.max - scale.min;
+  if (!(span > 0))
+    return;
+  const cx = plot.x + plot.w / 2;
+  const cy = plot.y + plot.h * 0.611;
+  const radius = plot.h * 0.457;
+  for (const value of axisTicks(scale)) {
+    if (value <= scale.min)
+      continue;
+    const y = cy - (value - scale.min) / span * radius;
+    const text = formatTick(value);
+    const boxW = 16;
+    const boxH = 14;
+    const x = cx + 7;
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(x - 1),
+      y: inches2(y - boxH / 2),
+      w: inches2(boxW + 2),
+      h: inches2(boxH),
+      fill: { color: background },
+      line: { color: background, pt: 0 },
+      objectName: `${element.id}-valtick-chip-${text}`
+    });
+    addCallout(slide, text, x, y - boxH / 2, boxW, boxH, face, color, `${element.id}-valtick-${text}`, false, "left");
+  }
+  if (!legend)
+    return;
+  addSwatchLegend(pres, slide, element, face, ink, chart.series.map((series, index) => ({
+    name: series.name,
+    color: colors[index] ?? ink
+  })));
+}
+function chartLayout(kind, legend) {
+  const bottom = legend ? 0.18 : 0.12;
+  const frame = (x, y, w) => ({ x, y, w, h: Math.round((1 - y - bottom) * 1000) / 1000 });
+  if (kind === "bar")
+    return frame(0.2, 0.06, 0.72);
+  if (kind === "pie" || kind === "doughnut")
+    return { x: 0.14, y: 0.08, w: 0.72, h: legend ? 0.7 : 0.8 };
+  if (kind === "radar")
+    return { x: 0.14, y: 0.06, w: 0.72, h: legend ? 0.72 : 0.8 };
+  if (kind === "combo")
+    return frame(0.1, 0.08, 0.74);
+  if (kind === "scatter" || kind === "bubble")
+    return frame(0.11, 0.08, 0.8);
+  return frame(0.1, 0.08, 0.84);
+}
+function chartPart(target) {
+  if (target.startsWith("/"))
+    return target.slice(1);
+  if (target.startsWith("../"))
+    return `ppt/${target.slice(3)}`;
+  return `ppt/slides/${target}`;
+}
+async function polishCharts(zip, deck, platform) {
+  let changed = false;
+  for (let index = 0;index < deck.pages.length; index++) {
+    const page = deck.pages[index];
+    const charts = page.elements.filter((element) => element.type === "chart" && element.chart);
+    if (charts.length === 0)
+      continue;
+    const relsFile = zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`);
+    if (!relsFile)
+      continue;
+    const rels = await relsFile.async("string");
+    const targets = [...rels.matchAll(/relationships\/chart" Target="([^"]+)"/g)].map((match) => chartPart(match[1]));
+    const background = colorRef(page.background, deck.theme, "$paper");
+    for (let chartIndex = 0;chartIndex < charts.length; chartIndex++) {
+      const target = targets[chartIndex];
+      const element = charts[chartIndex];
+      if (!target)
+        continue;
+      const file = zip.file(target);
+      if (!file)
+        continue;
+      const xml = await file.async("string");
+      const next = polishChartXml(xml, deck, element, platform, background);
+      if (next !== xml) {
+        zip.file(target, next);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+function polishChartXml(xml, deck, element, platform, pageBackground) {
+  const chart = element.chart;
+  const face = resolveFontFace(deck, "$cjk", platform);
+  const ink = hex(colorRef("$ink", deck.theme, "#111111"));
+  const accent = hex(colorRef("$accent", deck.theme, ink));
+  const inverse = hex(colorRef("$inverse", deck.theme, "#FFFFFF"));
+  const background = hex(pageBackground);
+  const outside = readableOn(background, ink, inverse);
+  let next = xml;
+  if (chart.kind === "pie" || chart.kind === "doughnut")
+    next = polishPie(next, accent, background, outside);
+  if (chart.kind === "bar" || chart.kind === "column" || chart.kind === "combo") {
+    next = next.replace(/<c:dLblPos val="inEnd"\/>/g, '<c:dLblPos val="outEnd"/>');
+  }
+  if (chart.kind === "bar" && chart.showValues !== false)
+    next = polishBarLabels(next);
+  if (chart.kind === "combo") {
+    next = polishComboLines(next, chart);
+    next = polishComboAxes(next);
+  }
+  if ((chart.kind === "line" || chart.kind === "area") && chart.showValues !== false)
+    next = polishKeyLabels(next, chart);
+  if (chart.kind === "scatter" && chart.showValues !== false)
+    next = polishScatterLabels(next, face, ink);
+  next = next.replace(/typeface="Arial"/g, `typeface="${escapeXml(face)}"`);
+  return addEastAsiaFace(next, face);
+}
+function polishPie(xml, accent, background, label) {
+  let next = xml.replace(/<a:schemeClr val="accent1"\/>/g, `<a:srgbClr val="${accent}"/>`).replace(/<a:srgbClr val="F9F9F9"\/>/g, `<a:srgbClr val="${background}"/>`);
+  const series = /<a:defRPr sz="1800"([\s\S]*?)<\/c:txPr>\s*(?:<c:dLblPos val="ctr"\/>)?\s*<c:showLegendKey val="0"\/>\s*<c:showVal val="0"\/>\s*<c:showCatName val="1"\/>\s*<c:showSerName val="0"\/>\s*<c:showPercent val="1"\/>/;
+  next = next.replace(series, (_all, inner) => {
+    const body = inner.replace('val="000000"', `val="${label}"`);
+    return `<a:defRPr sz="1200"${body}</c:txPr><c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="1"/><c:showSerName val="0"/><c:showPercent val="0"/>`;
+  });
+  next = next.replace(/<c:dLblPos val="ctr"\/>/g, '<c:dLblPos val="outEnd"/>');
+  next = next.replace(/<c:dLbl>([\s\S]*?)<c:showLegendKey/g, (all, inner) => {
+    if (inner.includes("dLblPos"))
+      return all;
+    return `<c:dLbl>${inner}<c:dLblPos val="outEnd"/><c:showLegendKey`;
+  });
+  next = next.replace(/<c:showPercent val="1"\/>/g, '<c:showPercent val="0"/>');
+  if (!next.includes("<c:separator>"))
+    next = next.replace("<c:showLeaderLines", "<c:separator> </c:separator><c:showLeaderLines");
+  return next.replace(/<c:showLeaderLines val="0"\/>/g, '<c:showLeaderLines val="1"/>');
+}
+function polishBarLabels(xml) {
+  let next = xml.replace(/<c:showCatName val="0"\/>/g, '<c:showCatName val="1"/>');
+  if (!next.includes("<c:separator>"))
+    next = next.replace(/<c:showLeaderLines/g, "<c:separator> </c:separator><c:showLeaderLines");
+  return next;
+}
+function polishComboLines(xml, chart) {
+  const roles = comboSeriesRoles(chart.series);
+  const lineCounts = chart.series.filter((_, index) => roles[index] === "line").map((series) => series.values.length);
+  let index = 0;
+  return xml.replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/g, (block) => block.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (series) => {
+    const count = lineCounts[index] ?? 0;
+    index += 1;
+    const labels = Array.from({ length: count }, (_, point) => deletedLabel(point)).join("");
+    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`).replace(/<c:showVal val="[01]"\/>/g, '<c:showVal val="0"/>');
+  }));
+}
+function polishComboAxes(xml) {
+  const bar = xml.match(/<c:barChart>[\s\S]*?<\/c:barChart>/);
+  const cat = bar?.[0].match(/<c:axId val="(\d+)"\/>/);
+  if (!cat)
+    return xml;
+  const catId = cat[1];
+  return xml.replace(/<c:valAx>[\s\S]*?<\/c:valAx>/g, (block) => {
+    if (!block.includes('<c:axPos val="r"/>'))
+      return block;
+    const next = block.replace(/<c:crossAx val="\d+"\/>/, `<c:crossAx val="${catId}"/>`);
+    return next.includes("<c:crossBetween") ? next.replace(/<c:crossBetween val="[^"]+"\/>/, '<c:crossBetween val="between"/>') : next.replace("</c:valAx>", '<c:crossBetween val="between"/></c:valAx>');
+  });
+}
+function polishKeyLabels(xml, chart) {
+  let index = 0;
+  return xml.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (series) => {
+    const values = chart.series[index]?.values ?? [];
+    index += 1;
+    const keep = new Set(keyIndexes(values));
+    const last = values.length - 1;
+    const labels = values.map((_, point) => keep.has(point) && point !== 0 && point !== last ? "" : deletedLabel(point)).join("");
+    if (!labels)
+      return series;
+    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`);
+  });
+}
+function polishScatterLabels(xml, face, color) {
+  const typeface = escapeXml(face);
+  const run = `<a:rPr lang="zh-CN" b="1" sz="1200" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="${typeface}"/></a:rPr>`;
+  return xml.replace(/<a:rPr lang="[^"]*" dirty="0"\/>/g, run);
+}
+function deletedLabel(index) {
+  return `<c:dLbl><c:idx val="${index}"/><c:delete val="1"/></c:dLbl>`;
+}
+function keyIndexes(values) {
+  const finite = values.map((value, index) => ({ value, index })).filter((item) => Number.isFinite(item.value));
+  if (finite.length === 0)
+    return [];
+  let min = finite[0];
+  let max = finite[0];
+  for (const item of finite) {
+    if (item.value < min.value)
+      min = item;
+    if (item.value > max.value)
+      max = item;
+  }
+  return min.index === max.index ? [min.index] : [min.index, max.index];
+}
+function addEastAsiaFace(xml, face) {
+  const ea = `<a:ea typeface="${escapeXml(face)}"/>`;
+  return xml.replace(/<a:latin typeface="[^"]*"\/>(?!<a:ea\b)/g, (match) => `${match}${ea}`);
+}
 function waterfallParts(values) {
   const base = [];
   const up = [];
@@ -19819,12 +21424,21 @@ function waterfallParts(values) {
   down.push(0);
   return { base, up, down };
 }
+function waterfallColumns(values) {
+  const parts = waterfallParts(values);
+  return {
+    base: parts.base,
+    total: parts.up.map((value, index) => index === 0 || index === parts.up.length - 1 ? value : 0),
+    up: parts.up.map((value, index) => index === 0 || index === parts.up.length - 1 ? 0 : value),
+    down: parts.down
+  };
+}
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
 function usage() {
   console.log(JSON.stringify({
     status: "error",
-    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]"
+    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]"
   }));
   process.exit(1);
 }
@@ -19861,6 +21475,10 @@ function emit(status, body, code) {
   process.exit(code);
 }
 var flags = parseArgs(process.argv.slice(2));
+if (flags.command === "layouts") {
+  console.log(JSON.stringify({ status: "ok", layouts: argumentLayoutCatalog() }));
+  process.exit(0);
+}
 if (!flags.file)
   usage();
 var file = resolve(flags.file);

@@ -175,7 +175,7 @@ import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
-import { buildPptPrompt, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
+import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
 import { buildPptRevisionPrompt, clearStalePptGenerating, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -7268,7 +7268,8 @@ export class SessionManager implements ISessionManager {
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     const replayPpt = existingMessageId ? managed.messages.find(item => item.id === existingMessageId)?.turnContext?.ppt as PptRequest | undefined : undefined
-    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options)
+    const installedSkills = loadAllSkills(managed.workspace.rootPath, managed.workingDirectory)
+    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills, message)
     if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
     if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
       managed.ppt = options.ppt
@@ -8083,7 +8084,7 @@ export class SessionManager implements ISessionManager {
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
       if (options?.ppt || options?.pptRevision) markPptGenerating(chatSessionDir, true)
-      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir) : undefined
+      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills, message) : undefined
       const pptRevisionContext = options?.pptRevision ? buildPptRevisionPrompt(options.pptRevision, chatSessionDir) : undefined
       const currentInput = [pptContext, pptRevisionContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0

@@ -92,14 +92,32 @@ export type FontFace = {
   cjk: FontPair
 }
 
-export type ChartKind = 'bar' | 'column' | 'line' | 'pie' | 'doughnut' | 'waterfall'
+export type ChartKind = 'bar' | 'column' | 'line' | 'pie' | 'doughnut' | 'waterfall' | 'area' | 'scatter' | 'bubble' | 'radar' | 'combo' | 'stacked' | 'stackedPercent'
 export type GridStyle = 'solid' | 'dash' | 'dot' | 'none'
+export type ChartSeriesRender = 'column' | 'line'
+
+export type ChartSeries = {
+  name: string
+  values: number[]
+  /** Scatter and bubble X coordinates. Every series on the chart shares this list. */
+  x?: number[]
+  /** Bubble sizes. Positive, one per category. */
+  sizes?: number[]
+  /** Combo series drawn as columns or a line. Omit and the last series is the line. */
+  render?: ChartSeriesRender
+}
+
+/** Last series is the line when no series sets `render`. An explicit render wins. */
+export function comboSeriesRoles(series: ChartSeries[]): ChartSeriesRender[] {
+  const explicit = series.some(item => item.render)
+  return series.map((item, index) => item.render ?? (explicit || index < series.length - 1 ? 'column' : 'line'))
+}
 
 export type ChartSpec = {
   kind: ChartKind
   categories: string[]
-  series: { name: string; values: number[] }[]
-  /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, up, down. */
+  series: ChartSeries[]
+  /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, increase, decrease. The total is `$ink`. */
   colors?: string[]
   showValues?: boolean
   showLegend?: boolean
@@ -149,6 +167,14 @@ export type LineSpec = {
   points?: { x1: number; y1: number; x2: number; y2: number }
 }
 
+/** A chart drawn by an installed external skill and placed as a picture. */
+export type ChartImageSpec = {
+  skill: string
+  format: 'svg' | 'png'
+  /** Original data table. The same text belongs in the page notes. */
+  data: string
+}
+
 export type DeckElement = {
   id: string
   type: 'text' | 'shape' | 'image' | 'chart' | 'table'
@@ -194,6 +220,8 @@ export type DeckElement = {
   src?: string
   alt?: string
   chart?: ChartSpec
+  /** Present when this image is a chart from an external skill. */
+  chartImage?: ChartImageSpec
   table?: TableSpec
 }
 

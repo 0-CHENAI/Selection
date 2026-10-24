@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildPptRevisionPrompt, clearStalePptGenerating, markPptGenerating, readPptLive, readPptProgress, validatePptRevision } from './ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, markPptGenerating, readChartFallbacks, readPptLive, readPptProgress, validatePptRevision } from './ppt-live'
 
 function session(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), 'ppt-live-')))
@@ -77,6 +77,21 @@ test('generating progress follows the first missing slide and an explicit curren
     const cleared = clearStalePptGenerating(root, progress!)
     expect(cleared?.generating).toBe(false)
     expect(cleared?.current).toBeUndefined()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a chart skill timeout is shown to the live panel and a bad file is ignored', async () => {
+  const root = session()
+  try {
+    deck(root, 1)
+    writeFileSync(join(root, 'data', 'chart-fallback.json'), JSON.stringify({ fallbacks: [{ skill: 'sample-charts', reason: 'timeout', page: 1 }, { skill: '../other', reason: 'error' }] }))
+    const live = await readPptLive(root, { check: () => [] })
+    expect(live?.chartFallbacks).toEqual([{ skill: 'sample-charts', reason: 'timeout', page: 1 }])
+    expect(readChartFallbacks(root)).toEqual(live?.chartFallbacks ?? [])
+    writeFileSync(join(root, 'data', 'chart-fallback.json'), '{')
+    expect(readChartFallbacks(root)).toEqual([])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

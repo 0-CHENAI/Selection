@@ -1,3 +1,5 @@
+export { argumentLayoutById, argumentLayoutCatalog, argumentLayouts, argumentTheme, buildArgumentDeck, buildArgumentPage } from './argument-layouts.ts'
+export { buildChartGalleryDeck, CHART_GALLERY } from './chart-gallery.ts'
 export { checkDeck } from './check.ts'
 export { contrastMinimum, contrastRatio } from './contrast.ts'
 export { exportDeck, platformFromProcess, resolveFontFace, waterfallParts } from './export-pptx.ts'

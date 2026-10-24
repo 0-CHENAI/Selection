@@ -43,6 +43,14 @@ export interface PptRequest {
   aspectRatio?: 'template' | '16:9' | '4:3' | '1:1' | '9:16' | 'A4' | '3:4'
 }
 
+/** Shown in the live panel when an external chart skill falls back to a native chart. */
+export interface PptChartFallback {
+  skill: string
+  reason: 'missing' | 'timeout' | 'error'
+  /** 1-based page, when the failure belongs to one page. */
+  page?: number
+}
+
 /** deck_check outcome shown on each live thumbnail. */
 export type PptPageStatus = 'passed' | 'needs_revision' | 'fixing' | 'pending'
 
@@ -82,6 +90,7 @@ export interface PptLiveSnapshot extends PptProgress {
   pptxPath?: string
   pages: PptLivePage[]
   files: Array<{ path: string; name: string }>
+  chartFallbacks?: PptChartFallback[]
 }
 
 export interface PptRevisionTarget {
