@@ -97,6 +97,7 @@ import {
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
+import { PptResultCard } from "@/components/ppt/PptResultCard"
 import { cacheHitRateFromTokenUsage, resolveContextUsageTokens } from "./input/context-usage"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
@@ -2596,6 +2597,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
+          <>
+          <PptResultCard session={session} />
           <ChatInputZone
             toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
@@ -2682,6 +2685,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               compactInputMaxHeight,
             }}
           />
+          </>
           )}
           {pptEmpty && <PptHomeGallery composerKey={pptComposerKey ?? session.id} />}
           </div>

@@ -1,4 +1,7 @@
 import { useOfficePreview } from './hooks/useOfficePreview'
+import { usePptLive } from './hooks/usePptLive'
+import { PptRevisionContext } from '@/components/ppt/ppt-revision'
+import { getPptSelection, setPptSelection } from '@/components/ppt/ppt-selection'
 import { useOfficeFiles } from './hooks/useOfficeFiles'
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
@@ -12,7 +15,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
-import type { ManagedArtifact, PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { ManagedArtifact, PptRequest, PptRevision, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -779,6 +782,7 @@ export default function App() {
   // Session selection state
   const [sessionSelection, setSession] = useSession()
   const { open: openOfficePreview, close: closeOfficePreview, capture: captureOfficeSelection, context: officePreviewContext, panel: officePreviewPanel, picker: officeFilePicker, isOpen: officePreviewOpen, isPresent: officePreviewPresent, isChoosing: officePreviewChoosing } = useOfficePreview(sessionSelection.selected, windowWorkspaceId)
+  const { panel: pptLivePanel, present: pptLivePresent } = usePptLive(sessionSelection.selected, officePreviewOpen, closeOfficePreview)
   const officeFiles = useOfficeFiles(sessionSelection.selected, windowWorkspaceId)
   const toggleOfficeCollaboration = useCallback(() => {
     if (officePreviewOpen || officePreviewChoosing) closeOfficePreview()
@@ -1356,7 +1360,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest, pptRevision?: PptRevision) => {
     let locallyCommitted = false
     let optimisticMessageId: string | undefined
     try {
@@ -1371,7 +1375,9 @@ export default function App() {
         await openOfficePreview(sessionId, '', candidates)
         return true
       }
-      const officeSelection = await captureOfficeSelection(sessionId)
+      const selectedTargets = getPptSelection(sessionId)
+      const revision = pptRevision ?? (selectedTargets.length > 0 && !attachments?.length ? { action: 'revise' as const, targets: selectedTargets, comment: message } : undefined)
+      const officeSelection = revision ? undefined : await captureOfficeSelection(sessionId)
       const officeContext = officeSelection ? undefined : officePreviewContext(sessionId)
       // Capture live generation so composer submits stay in the queue
       // instead of looking like a new transcript turn (#22, #23).
@@ -1551,6 +1557,7 @@ export default function App() {
         optimisticMessageId: userMessage.id,
         annotationFollowUps,
         ppt,
+        ...(revision ? { pptRevision: revision } : {}),
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
@@ -1561,6 +1568,7 @@ export default function App() {
         } : undefined,
       })
       if (ppt) updateSessionById(sessionId, { ppt })
+      if (revision) setPptSelection(sessionId, [])
       // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
@@ -1580,6 +1588,13 @@ export default function App() {
       return false
     }
   }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext, t])
+
+  const sendPptRevision = useCallback(async (text: string, revision: PptRevision) => {
+    const sessionId = sessionSelection.selected
+    if (!sessionId) return false
+    const ppt = store.get(sessionAtomFamily(sessionId))?.ppt ?? {}
+    return await handleSendMessage(sessionId, text, undefined, ['ppt-design'], undefined, undefined, ppt, revision) === true
+  }, [sessionSelection.selected, store, handleSendMessage])
 
   /**
    * Unified handler for all session option changes.
@@ -2264,7 +2279,8 @@ export default function App() {
   const showSplash = !splashHidden
 
   // Ready state - main app with splash overlay during data loading
-  return (
+    return (
+    <PptRevisionContext.Provider value={sendPptRevision}>
     <PlatformProvider actions={platformActions}>
     <ShikiThemeProvider shikiTheme={shikiTheme}>
       <ActionRegistryProvider>
@@ -2319,12 +2335,13 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
-                  hasTrailingPanel={officePreviewPresent}
+                  hasTrailingPanel={officePreviewPresent || pptLivePresent}
                 />
               )}
               </div>
               <div className="contents">
                 {officePreviewPanel}
+                {pptLivePanel}
               </div>
               {officeFilePicker}
             </div>
@@ -2367,6 +2384,7 @@ export default function App() {
       </ActionRegistryProvider>
     </ShikiThemeProvider>
     </PlatformProvider>
+    </PptRevisionContext.Provider>
   )
 }
 

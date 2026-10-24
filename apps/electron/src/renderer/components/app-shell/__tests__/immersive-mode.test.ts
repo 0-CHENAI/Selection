@@ -129,7 +129,7 @@ describe('immersive mode layout', () => {
     expect(chat).not.toContain('immersiveLayoutActiveAtom')
     const app = read('../../../App.tsx')
     expect(app).not.toContain('immersiveLayout')
-    expect(app).toContain('hasTrailingPanel={officePreviewPresent}')
+    expect(app).toContain('hasTrailingPanel={officePreviewPresent || pptLivePresent}')
     expect(appShell).not.toContain('setIsSidebarVisible(v => !v)')
   })
 

@@ -102,6 +102,8 @@ test('PRO request enables skill without changing user transport options and adds
   expect(context).toContain(realpathSync(join(root, 'styles/previews/dsh-cartesian-1.webp')))
   expect(context).toContain('NOT a rigid form')
   expect(context).toContain('#123456')
+  expect(context).toContain(join(session, 'data', 'deck.json'))
+  expect(context).toContain('slide-01.png')
   const themeId = getPptCatalog(root).themes[0]!.id
   expect(validatePptRequest({ themeId }, root)).toEqual({ themeId })
   expect(readFileSync(join(session, 'attachments/ppt-brand/logo.png')).toString()).toBe('logo bytes')

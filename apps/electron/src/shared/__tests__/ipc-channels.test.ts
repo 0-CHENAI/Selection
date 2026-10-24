@@ -273,6 +273,7 @@ const EXPECTED_CHANNELS: string[] = [
   'skills:get',
   'skills:getFiles',
   'skills:getPptCatalog',
+  'skills:getPptLive',
   'skills:getPptTemplatePages',
   'skills:openEditor',
   'skills:openFinder',

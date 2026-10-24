@@ -155,6 +155,9 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
     writeFileSync(path, Buffer.from(request.logo.base64, 'base64'))
     parts.push(`Use the supplied brand logo (${JSON.stringify(request.logo.name)}): ${path}`)
   }
+  const deckPath = join(sessionPath, 'data', 'deck.json')
+  const slidesDir = join(sessionPath, 'data', 'slides')
+  parts.push(`Write the working deck to ${deckPath}. Render each finished page to ${slidesDir}/slide-01.png and onward (1-based, two digits) before continuing, so the live panel can show it. Run deck_check and deck_render into those paths.`)
   parts.push('</ppt_generation_context>')
   return parts.join('\n\n')
 }
