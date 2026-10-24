@@ -379,6 +379,8 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
     valAxisLabelColor: tickColor,
     valAxisLabelFontFace: face,
     valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+    // The HTML preview shrinks native value ticks. The redrawn text is what the page shows.
+    valAxisLabelPos: 'none' as const,
     catAxisLineShow: true,
     catAxisLineColor: axis,
     catAxisLineSize: 0.75,
@@ -428,6 +430,7 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       valAxisMajorUnit: scale.step,
     })
     if (on) addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale)
+    addValueTicks(pres, slide, element, plotBox('waterfall', false, element.bounds), scale, face, tickColor, background, 'left')
     return
   }
   if (kind === 'combo') {
@@ -444,6 +447,7 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
       valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+      valAxisLabelPos: 'none' as const,
       valAxisLineShow: true,
       valAxisLineColor: axis,
       valAxisLineSize: 0.75,
@@ -560,7 +564,10 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
       catGridLine: themedGrid('solid'),
       valGridLine: themedGrid('solid'),
     })
-    if (kind === 'scatter') addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background)
+    if (kind === 'scatter') {
+      addValueTicks(pres, slide, element, plotBox('scatter', false, element.bounds), yScale, face, tickColor, background, 'left')
+      addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background)
+    }
     if (kind === 'bubble') {
       addBubbleOverlay(pres, slide, element, chart, {
         background,
@@ -632,6 +639,10 @@ function addChart(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: 
   if (on && pieLike) addPieLeaders(pres, slide, element, chart, muted)
   if (on && (kind === 'line' || kind === 'area')) addEdgeCallouts(slide, element, chart, kind, legend, face, outside)
   if (kind === 'radar') addRadarValueLabels(pres, slide, element, chart, legend, face, tickColor, background, ink, palette)
+  if (scale && (kind === 'column' || kind === 'line' || kind === 'area' || kind === 'stacked' || kind === 'stackedPercent')) {
+    addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, 'left', kind === 'stackedPercent' ? formatPercentTick : formatTick)
+  }
+  if (scale && kind === 'bar') addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, 'bottom')
 }
 
 function shapeFill(deck: Deck, element: DeckElement): { color: string; transparency?: number } | undefined {
@@ -1029,6 +1040,66 @@ function formatTick(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded)
 }
 
+function formatPercentTick(value: number): string {
+  return `${formatTick(value * 100)}%`
+}
+
+/** Native value ticks render smaller and lighter in the HTML preview than a text box. Draw both sides as the same 12pt text. */
+function addValueTicks(
+  pres: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  element: DeckElement,
+  plot: { x: number; y: number; w: number; h: number },
+  scale: AxisScale,
+  face: string,
+  color: string,
+  background: string,
+  edge: 'left' | 'bottom',
+  format: (value: number) => string = formatTick,
+): void {
+  const span = scale.max - scale.min
+  if (!(span > 0)) return
+  const values = axisTicks(scale)
+  if (values.length === 0) return
+  if (edge === 'left') {
+    const gutter = plot.x - element.bounds.x
+    if (gutter > 4) {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches(element.bounds.x),
+        y: inches(plot.y - 12),
+        w: inches(gutter - 1),
+        h: inches(plot.h + 24),
+        fill: { color: background },
+        line: { color: background, pt: 0 },
+        objectName: `${element.id}-ltick-cover`,
+      })
+    }
+    values.forEach((value, index) => {
+      const text = format(value)
+      const boxW = Math.max(24, text.length * 8)
+      const y = plot.y + plot.h - ((value - scale.min) / span) * plot.h
+      addCallout(slide, text, plot.x - boxW - 6, y - 8, boxW, 16, face, color, `${element.id}-ltick-${index}`, false, 'right')
+    })
+    return
+  }
+  const below = element.bounds.y + element.bounds.h - plot.y - plot.h
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches(plot.x - 8),
+    y: inches(plot.y + plot.h + 1),
+    w: inches(plot.w + 16),
+    h: inches(Math.max(16, below - 1)),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-btick-cover`,
+  })
+  values.forEach((value, index) => {
+    const text = format(value)
+    const boxW = Math.max(18, text.length * 8)
+    const x = plot.x + ((value - scale.min) / span) * plot.w
+    addCallout(slide, text, x - boxW / 2, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-btick-${index}`, false)
+  })
+}
+
 function addComboOverlay(
   pres: PptxGenJS,
   slide: PptxGenJS.Slide,
@@ -1169,6 +1240,18 @@ function addComboOverlay(
     const onBar = box.y + box.h / 2 > barTop + 2
     addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`)
   }
+  const leftGutter = plot.x - element.bounds.x
+  if (leftGutter > 4) {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches(element.bounds.x),
+      y: inches(plot.y - 12),
+      w: inches(leftGutter - 1),
+      h: inches(plot.h + 24),
+      fill: { color: paint.background },
+      line: { color: paint.background, pt: 0 },
+      objectName: `${element.id}-ltick-cover`,
+    })
+  }
   const rightWidth = Math.max(28, element.bounds.x + element.bounds.w - plot.x - plot.w - 2)
   slide.addShape(pres.ShapeType.rect, {
     x: inches(plot.x + plot.w + 1),
@@ -1186,6 +1269,11 @@ function addComboOverlay(
   for (let value = paint.lineScale.min; value <= paint.lineScale.max + paint.lineScale.step * 0.001; value += paint.lineScale.step) ticks.push(cleanNumber(value))
   ticks.forEach((value, index) => {
     addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, 'left')
+  })
+  axisTicks(paint.columnScale).forEach((value, index) => {
+    const text = formatTick(value)
+    const boxW = Math.max(24, text.length * 8)
+    addCallout(slide, text, plot.x - boxW - 6, yOf(value, paint.columnScale) - 8, boxW, 16, paint.face, paint.tickColor, `${element.id}-ltick-${index}`, false, 'right')
   })
   if (!paint.legend) return
   const items = [

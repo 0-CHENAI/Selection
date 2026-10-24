@@ -20210,6 +20210,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     valAxisLabelColor: tickColor,
     valAxisLabelFontFace: face,
     valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+    valAxisLabelPos: "none",
     catAxisLineShow: true,
     catAxisLineColor: axis,
     catAxisLineSize: 0.75,
@@ -20260,6 +20261,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     });
     if (on)
       addWaterfallCallouts(slide, element, chart, face, inverse, outside, scale);
+    addValueTicks(pres, slide, element, plotBox("waterfall", false, element.bounds), scale, face, tickColor, background, "left");
     return;
   }
   if (kind === "combo") {
@@ -20276,6 +20278,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
       valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+      valAxisLabelPos: "none",
       valAxisLineShow: true,
       valAxisLineColor: axis,
       valAxisLineSize: 0.75,
@@ -20384,8 +20387,10 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       catGridLine: themedGrid("solid"),
       valGridLine: themedGrid("solid")
     });
-    if (kind === "scatter")
+    if (kind === "scatter") {
+      addValueTicks(pres, slide, element, plotBox("scatter", false, element.bounds), yScale, face, tickColor, background, "left");
       addScatterCategoryTicks(pres, slide, element, xScale, face, tickColor, background);
+    }
     if (kind === "bubble") {
       addBubbleOverlay(pres, slide, element, chart, {
         background,
@@ -20444,6 +20449,11 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     addEdgeCallouts(slide, element, chart, kind, legend, face, outside);
   if (kind === "radar")
     addRadarValueLabels(pres, slide, element, chart, legend, face, tickColor, background, ink, palette);
+  if (scale && (kind === "column" || kind === "line" || kind === "area" || kind === "stacked" || kind === "stackedPercent")) {
+    addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, "left", kind === "stackedPercent" ? formatPercentTick : formatTick);
+  }
+  if (scale && kind === "bar")
+    addValueTicks(pres, slide, element, plotBox(kind, legend, element.bounds), scale, face, tickColor, background, "bottom");
 }
 function shapeFill(deck, element) {
   if (element.pattern)
@@ -20824,6 +20834,54 @@ function formatTick(value) {
   const rounded = cleanNumber(value);
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
+function formatPercentTick(value) {
+  return `${formatTick(value * 100)}%`;
+}
+function addValueTicks(pres, slide, element, plot, scale, face, color, background, edge, format = formatTick) {
+  const span = scale.max - scale.min;
+  if (!(span > 0))
+    return;
+  const values = axisTicks(scale);
+  if (values.length === 0)
+    return;
+  if (edge === "left") {
+    const gutter = plot.x - element.bounds.x;
+    if (gutter > 4) {
+      slide.addShape(pres.ShapeType.rect, {
+        x: inches2(element.bounds.x),
+        y: inches2(plot.y - 12),
+        w: inches2(gutter - 1),
+        h: inches2(plot.h + 24),
+        fill: { color: background },
+        line: { color: background, pt: 0 },
+        objectName: `${element.id}-ltick-cover`
+      });
+    }
+    values.forEach((value, index) => {
+      const text = format(value);
+      const boxW = Math.max(24, text.length * 8);
+      const y = plot.y + plot.h - (value - scale.min) / span * plot.h;
+      addCallout(slide, text, plot.x - boxW - 6, y - 8, boxW, 16, face, color, `${element.id}-ltick-${index}`, false, "right");
+    });
+    return;
+  }
+  const below = element.bounds.y + element.bounds.h - plot.y - plot.h;
+  slide.addShape(pres.ShapeType.rect, {
+    x: inches2(plot.x - 8),
+    y: inches2(plot.y + plot.h + 1),
+    w: inches2(plot.w + 16),
+    h: inches2(Math.max(16, below - 1)),
+    fill: { color: background },
+    line: { color: background, pt: 0 },
+    objectName: `${element.id}-btick-cover`
+  });
+  values.forEach((value, index) => {
+    const text = format(value);
+    const boxW = Math.max(18, text.length * 8);
+    const x = plot.x + (value - scale.min) / span * plot.w;
+    addCallout(slide, text, x - boxW / 2, plot.y + plot.h + 3, boxW, 16, face, color, `${element.id}-btick-${index}`, false);
+  });
+}
 function addComboOverlay(pres, slide, element, chart, paint) {
   const roles = comboSeriesRoles(chart.series);
   const columns = chart.series.filter((_, index) => roles[index] === "column");
@@ -20945,6 +21003,18 @@ function addComboOverlay(pres, slide, element, chart, paint) {
     const onBar = box.y + box.h / 2 > barTop + 2;
     addCallout(slide, text, box.x, box.y, box.w, box.h, paint.face, onBar ? paint.inverse : paint.ink, `${element.id}-line-label-${point.seriesIndex}-${point.index}`);
   }
+  const leftGutter = plot.x - element.bounds.x;
+  if (leftGutter > 4) {
+    slide.addShape(pres.ShapeType.rect, {
+      x: inches2(element.bounds.x),
+      y: inches2(plot.y - 12),
+      w: inches2(leftGutter - 1),
+      h: inches2(plot.h + 24),
+      fill: { color: paint.background },
+      line: { color: paint.background, pt: 0 },
+      objectName: `${element.id}-ltick-cover`
+    });
+  }
   const rightWidth = Math.max(28, element.bounds.x + element.bounds.w - plot.x - plot.w - 2);
   slide.addShape(pres.ShapeType.rect, {
     x: inches2(plot.x + plot.w + 1),
@@ -20963,6 +21033,11 @@ function addComboOverlay(pres, slide, element, chart, paint) {
     ticks.push(cleanNumber(value));
   ticks.forEach((value, index) => {
     addCallout(slide, formatTick(value), plot.x + plot.w + 6, yOf(value, paint.lineScale) - 8, Math.max(24, rightWidth - 8), 16, paint.face, paint.tickColor, `${element.id}-rtick-${index}`, false, "left");
+  });
+  axisTicks(paint.columnScale).forEach((value, index) => {
+    const text = formatTick(value);
+    const boxW = Math.max(24, text.length * 8);
+    addCallout(slide, text, plot.x - boxW - 6, yOf(value, paint.columnScale) - 8, boxW, 16, paint.face, paint.tickColor, `${element.id}-ltick-${index}`, false, "right");
   });
   if (!paint.legend)
     return;
