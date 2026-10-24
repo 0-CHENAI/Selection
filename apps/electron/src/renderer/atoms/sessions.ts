@@ -12,7 +12,7 @@ import { atom } from 'jotai'
 import type { Getter, Setter } from 'jotai/vanilla'
 import { atomFamily } from 'jotai-family'
 import type { Session, Message } from '../../shared/types'
-import type { PptRequest } from '@craft-agent/shared/protocol'
+import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 
 /**
  * Session metadata for list display (lightweight, no messages)
@@ -21,6 +21,7 @@ import type { PptRequest } from '@craft-agent/shared/protocol'
 export interface SessionMeta {
   /** PPT requests classify history independently of the PRO execution mode. */
   ppt?: PptRequest
+  pptProgress?: PptProgress
   handover?: import('@craft-agent/shared/protocol').HandoverLink
 
   workMode?: 'NORM' | 'PRO'

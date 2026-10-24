@@ -1,4 +1,4 @@
-import type { PptRequest } from '../protocol/ppt'
+import type { PptProgress, PptRequest } from '../protocol/ppt'
 import type { HandoverLink } from '../protocol/handover'
 /**
  * Session Types
@@ -39,6 +39,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
   'workMode', 'workModeNeedsReview', 'executionRootSessionId', 'handover',
   'ppt',
+  'pptProgress',
   'sharedProjectMemoryEnabled',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
@@ -219,6 +220,7 @@ export type { StoredMessage } from '@craft-agent/core/types';
  */
 export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
@@ -367,6 +369,7 @@ export interface StoredSession extends SessionConfig {
  */
 export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;
   /** SDK session ID (captured after first message) */
@@ -487,6 +490,7 @@ export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
  */
 export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;
   workspaceRootPath: string;

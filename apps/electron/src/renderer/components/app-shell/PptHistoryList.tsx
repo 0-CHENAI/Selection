@@ -5,6 +5,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@craft-agent/shared/i18n'
 import type { SessionMeta } from '@/atoms/sessions'
 import { groupPptHistory } from '@/components/ppt/history'
+import { pptHistoryKind } from '@/components/ppt/ppt-live-model'
 import { usePptCatalog } from '@/components/ppt/usePptCatalog'
 import { Button } from '@/components/ui/button'
 import { useFocusContext } from '@/context/FocusContext'
@@ -109,11 +110,17 @@ export function PptHistoryList({ items, selectedSessionId, onSelect, onNew }: {
             }} onClick={() => { focusZone('navigator', { intent: 'click', moveFocus: false }); onSelect(item.id) }} aria-selected={selected} aria-current={selected ? 'page' : undefined} className={cn('flex w-full items-center gap-3 rounded-lg py-2.5 pl-2 pr-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring', selected ? 'bg-foreground/3' : 'hover:bg-foreground/2')}>
               <span title={template ? t('ppt.referenceTemplate', { title: template.title }) : undefined} className="relative flex h-[38px] w-[66px] shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-foreground/5 shadow-minimal">
                 {template ? <img src={template.cover} alt={t('ppt.referenceCover')} className="h-full w-full object-cover" /> : <Presentation className="size-5 text-muted-foreground" />}
-                {item.isProcessing && <span className="absolute inset-0 flex items-center justify-center bg-background/55 backdrop-blur-[1px]"><LoaderCircle className="size-3.5 animate-spin text-accent motion-reduce:animate-none" /></span>}
+                {(item.isProcessing || item.pptProgress?.generating) && <span className="absolute inset-0 flex items-center justify-center bg-background/55 backdrop-blur-[1px]"><LoaderCircle className="size-3.5 animate-spin text-accent motion-reduce:animate-none" /></span>}
               </span>
               <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-[13px]', item.isProcessing && 'animate-shimmer-text')}>{item.name || item.preview || t('ppt.new')}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{item.isProcessing ? t('ppt.generating') : template ? t('ppt.pages', { count: template.pages }) : 'PPTX'}</span>
+                <span className={cn('block truncate text-[13px]', (item.isProcessing || item.pptProgress?.generating) && 'animate-shimmer-text')}>{item.name || item.preview || t('ppt.new')}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{(() => {
+                  const kind = pptHistoryKind({ processing: item.isProcessing, progress: item.pptProgress, templatePages: template?.pages })
+                  if (kind.kind === 'progress') return t('ppt.generatingProgress', { current: kind.current, total: kind.total })
+                  if (kind.kind === 'generating') return t('ppt.generating')
+                  if (kind.kind === 'pages') return t('ppt.pages', { count: kind.count })
+                  return 'PPTX'
+                })()}</span>
               </span>
               {timestamp && <span className="self-start whitespace-nowrap pt-0.5 text-[11px] text-muted-foreground">{formatDistanceToNow(timestamp, { locale: getDateLocale(i18n.language), addSuffix: false })}</span>}
             </button>

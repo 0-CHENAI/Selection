@@ -47,6 +47,8 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 标准输出是一行 JSON。退出码 0 是通过，2 是 `needs_revision`，1 是文件或用法错误。`needs_revision` 时不写 PPTX。一次看完 `issues` 里的全部问题，按 `pageId` 和 `elementId` 修改后再查。溢出时整理换行或几何、换版式、拆页；不删除限定条件，不把整页栅格化。
 
+实时侧窗读取会话 `data/deck.json` 和 `data/slides/slide-01.png` 起的逐页截图（页码从 1 开始，两位数字）。每写完一页就渲染到这两个位置。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和 `deck_render`。
+
 截图失败但 PPTX 已写出时，`screenshots.available` 为 `false`。这时 G4 不能通过。
 
 ## 质量门：G1 → G5
