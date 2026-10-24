@@ -6,6 +6,7 @@
  * opened in Chrome the same way an <img> would paint it.
  *
  *   bun scripts/render-ppt-layout-samples.ts
+ *   bun scripts/render-ppt-layout-samples.ts charts
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -295,15 +296,18 @@ function sampleDecks(picture: string): Array<{ name: string; deck: Deck }> {
   ]
 }
 
+const chartsOnly = process.argv.includes('charts')
 const bin = officecliBin()
 mkdirSync(OUT, { recursive: true })
 const work = join(tmpdir(), 'ppt-layout-samples')
 mkdirSync(work, { recursive: true })
 
-const argument = buildArgumentDeck()
-const argumentFile = join(work, 'argument.pptx')
-await exportPages(argument, argumentFile)
-await shootDeck(bin, argumentFile, argumentLayouts.map(layout => layout.id))
+if (!chartsOnly) {
+  const argument = buildArgumentDeck()
+  const argumentFile = join(work, 'argument.pptx')
+  await exportPages(argument, argumentFile)
+  await shootDeck(bin, argumentFile, argumentLayouts.map(layout => layout.id))
+}
 
 const gallery = buildChartGalleryDeck()
 const galleryFile = join(work, 'charts.pptx')
@@ -311,8 +315,10 @@ await exportPages(gallery, galleryFile)
 const chartPages = await shootDeck(bin, galleryFile, CHART_GALLERY.map(item => `chart-${item.kind}`))
 await contactSheet(chartPages, CHART_GALLERY.map(item => item.title))
 
-const picture = join(work, 'swatch.png')
-await picturePng(picture)
-for (const sample of sampleDecks(picture)) await compare(bin, sample.deck, sample.name)
+if (!chartsOnly) {
+  const picture = join(work, 'swatch.png')
+  await picturePng(picture)
+  for (const sample of sampleDecks(picture)) await compare(bin, sample.deck, sample.name)
+}
 
 console.log(`wrote ${OUT}`)

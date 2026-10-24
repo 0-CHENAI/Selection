@@ -167,7 +167,7 @@ function link(id: string, x1: number, y1: number, x2: number, y2: number): DeckE
 }
 
 function chartEl(id: string, x: number, y: number, w: number, h: number, spec: ChartSpec): DeckElement {
-  return { id, type: 'chart', role: 'content', bounds: { x, y, w, h }, chart: { showLegend: false, catLabelSize: 11, valLabelSize: 11, ...spec } }
+  return { id, type: 'chart', role: 'content', bounds: { x, y, w, h }, chart: { showLegend: false, ...spec } }
 }
 
 function rail(): DeckElement {
@@ -296,7 +296,7 @@ function waterfall(): DeckElement[] {
       kind: 'waterfall',
       categories: ['期初', '涨价', '流失', '新品', '期末'],
       series: [{ name: '库存', values: [120, 18, -30, 9, 117] }],
-      colors: ['$paper', '$accent', '$ink'],
+      colors: ['$paper', '$accent', '$muted'],
     }),
   ]
   notes.forEach((item, index) => {
@@ -320,7 +320,6 @@ function trend(): DeckElement[] {
       categories: ['一月', '二月', '三月', '四月', '五月', '六月'],
       series: [{ name: '周转天数', values: [42, 48, 45, 61, 58, 74] }],
       colors: ['$accent'],
-      showValues: false,
       valMin: 0,
       valMax: 90,
     }),

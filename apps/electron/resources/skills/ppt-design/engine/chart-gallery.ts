@@ -56,7 +56,6 @@ export const CHART_GALLERY: Array<{ kind: ChartKind; title: string; chart: Chart
       categories: ['华东', '华南', '其他'],
       series: [{ name: '库存', values: [42, 28, 30] }],
       colors: ['$accent', '$ink', '$muted'],
-      showLegend: true,
     },
   },
   {
@@ -68,7 +67,6 @@ export const CHART_GALLERY: Array<{ kind: ChartKind; title: string; chart: Chart
       series: [{ name: '库存结构', values: [58, 27, 15] }],
       colors: ['$accent', '$ink', '$muted'],
       holeSize: 62,
-      showLegend: true,
     },
   },
   {
@@ -78,7 +76,7 @@ export const CHART_GALLERY: Array<{ kind: ChartKind; title: string; chart: Chart
       kind: 'waterfall',
       categories: ['期初', '涨价', '流失', '新品', '期末'],
       series: [{ name: '库存', values: [120, 18, -30, 9, 117] }],
-      colors: ['$paper', '$accent', '$ink'],
+      colors: ['$paper', '$accent', '$muted'],
     },
   },
   {
@@ -211,7 +209,7 @@ export function buildChartGalleryDeck(): Deck {
       label('exhibit', String(index + 1).padStart(2, '0'), 760, 18, 160, 18, 12, '$muted'),
       label('title', item.title, 40, 42, 760, 36, 26, '$ink', true),
       { id: 'top-rule', type: 'shape', shape: 'line', role: 'rule', bounds: { x: 40, y: 86, w: 880, h: 1 }, line: { color: '$line', width: 1 } },
-      { id: 'plot', type: 'chart', role: 'content', bounds: { x: 48, y: 108, w: 864, h: 360 }, chart: { catLabelSize: 12, valLabelSize: 12, ...item.chart } },
+      { id: 'plot', type: 'chart', role: 'content', bounds: { x: 48, y: 108, w: 864, h: 360 }, chart: item.chart },
       { id: 'footer-rule', type: 'shape', shape: 'line', role: 'rule', bounds: { x: 40, y: 498, w: 880, h: 1 }, line: { color: '$line', width: 1 } },
       label('source', '示例数字，正式稿换成用户材料。', 40, 508, 700, 20, 11, '$muted'),
     ],

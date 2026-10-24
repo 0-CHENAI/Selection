@@ -149,21 +149,62 @@ describe('native charts', () => {
     const result = await exportDeck(deck, out, { platform: 'linux' })
     expect(result.status).toBe('ok')
     const expectXml: Record<number, string[]> = {
-      1: ['barChart', 'maxMin', 'C8102E'],
-      7: ['areaChart', 'C8102E', 'alpha'],
-      8: ['scatterChart', 'C8102E'],
+      1: ['barChart', 'maxMin', 'C8102E', 'sz="1300"', 'sz="1100"', 'sz="1200"', 'outEnd', 'B7B7B6', 'tickLblPos val="none"', 'showCatName val="1"', 'a:ea typeface="Noto Sans CJK SC"'],
+      3: ['lineChart', 'dLblPos val="t"', 'sz="1300"', 'showVal val="1"', '<c:delete val="1"/>'],
+      4: ['pieChart', 'outEnd', 'showLeaderLines val="1"', 'C8102E', 'separator', 'showPercent val="0"', 'showVal val="1"', 'sz="1200"'],
+      5: ['doughnutChart', 'outEnd', 'showLeaderLines val="1"', 'showPercent val="0"', 'showVal val="1"', 'sz="1200"'],
+      6: ['barChart', '合计', '增加', '减少', 'C8102E', '5A5A5A', '141414'],
+      7: ['areaChart', 'C8102E', 'alpha', 'showVal val="1"', '<c:delete val="1"/>'],
+      8: ['scatterChart', 'C8102E', 'D7D7D6', '<a:t>甲</a:t>'],
       9: ['bubbleChart', 'bubbleSize', 'bubbleScale'],
-      10: ['radarChart', 'filled'],
-      11: ['barChart', 'lineChart', 'C8102E'],
-      12: ['grouping val="stacked"'],
-      13: ['grouping val="percentStacked"'],
+      10: ['radarChart', 'filled', 'sz="1300"'],
+      11: ['barChart', 'lineChart', 'C8102E', 'outEnd'],
+      12: ['grouping val="stacked"', 'dLblPos val="ctr"', 'FFFFFF'],
+      13: ['grouping val="percentStacked"', '0%'],
     }
     for (const [index, needles] of Object.entries(expectXml)) {
       const xml = await chartXmlForSlide(out, Number(index))
-      for (const needle of needles) expect(xml).toContain(needle)
+      for (const needle of needles) expect(xml, `slide ${index} missing ${needle}`).toContain(needle)
       expect(xml).not.toContain('C0504D')
       expect(xml).not.toContain('4F81BD')
+      expect(xml).not.toContain('accent1')
       expect(xml).toContain('Noto Sans CJK SC')
+      expect(xml).toContain('a:ea typeface="Noto Sans CJK SC"')
     }
+    const bar = await chartXmlForSlide(out, 1)
+    expect(bar).not.toContain('majorGridlines')
+    const line = await chartXmlForSlide(out, 3)
+    expect(line.match(/<c:dLbl>/g)?.length).toBe(5)
+    const area = await chartXmlForSlide(out, 7)
+    expect(area.match(/<c:dLbl>/g)?.length).toBe(9)
+    const doughnut = await chartXmlForSlide(out, 5)
+    expect(doughnut).toContain('<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/>')
+    const pieSlide = await unzipEntry(out, 'ppt/slides/slide4.xml')
+    expect(pieSlide).toContain('name="plot-leader-0"')
+    expect(pieSlide).toContain('name="plot-leader-2"')
+    const lineSlide = await unzipEntry(out, 'ppt/slides/slide3.xml')
+    expect(lineSlide).toContain('name="plot-edge-0"')
+    const waterfallSlide = await unzipEntry(out, 'ppt/slides/slide6.xml')
+    expect(waterfallSlide).toContain('+18')
+    expect(waterfallSlide).toContain('\u221230')
+    expect(waterfallSlide.match(/name="plot-wf-/g)?.length).toBe(5)
+    const radar = await chartXmlForSlide(out, 10)
+    expect(radar).not.toContain('<c:dLbl>')
+    const bubble = await chartXmlForSlide(out, 9)
+    expect(bubble).not.toContain('<c:dLbl>')
+    expect(bubble).toContain('majorGridlines')
+  })
+
+  it('omits value labels when showValues is false', async () => {
+    const deck = buildChartGalleryDeck()
+    const page = deck.pages.find(item => item.id === 'chart-column')!
+    page.elements.find(item => item.id === 'plot')!.chart!.showValues = false
+    const out = join(mkdtempSync(join(tmpdir(), 'chart-quiet-')), 'quiet.pptx')
+    const result = await exportDeck(deck, out, { platform: 'linux' })
+    expect(result.status).toBe('ok')
+    const xml = await chartXmlForSlide(out, 2)
+    expect(xml).not.toContain('<c:dLblPos val="outEnd"/>')
+    expect(xml).not.toContain('<c:showVal val="1"/>')
+    expect(xml).toContain('sz="1300"')
   })
 })

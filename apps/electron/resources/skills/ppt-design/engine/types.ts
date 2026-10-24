@@ -117,7 +117,7 @@ export type ChartSpec = {
   kind: ChartKind
   categories: string[]
   series: ChartSeries[]
-  /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, up, down. */
+  /** Token (`$accent`), `#RRGGBB`, or `#RRGGBBAA`. Waterfall uses background, increase, decrease. The total is `$ink`. */
   colors?: string[]
   showValues?: boolean
   showLegend?: boolean

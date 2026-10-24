@@ -9417,7 +9417,7 @@ function link(id, x1, y1, x2, y2) {
   };
 }
 function chartEl(id, x, y, w, h, spec) {
-  return { id, type: "chart", role: "content", bounds: { x, y, w, h }, chart: { showLegend: false, catLabelSize: 11, valLabelSize: 11, ...spec } };
+  return { id, type: "chart", role: "content", bounds: { x, y, w, h }, chart: { showLegend: false, ...spec } };
 }
 function rail() {
   return { id: "rail", type: "shape", shape: "rect", role: "decoration", bounds: { x: 0, y: 0, w: 8, h: 540 }, fill: "$accent" };
@@ -9518,7 +9518,7 @@ function waterfall() {
       kind: "waterfall",
       categories: ["\u671F\u521D", "\u6DA8\u4EF7", "\u6D41\u5931", "\u65B0\u54C1", "\u671F\u672B"],
       series: [{ name: "\u5E93\u5B58", values: [120, 18, -30, 9, 117] }],
-      colors: ["$paper", "$accent", "$ink"]
+      colors: ["$paper", "$accent", "$muted"]
     })
   ];
   notes.forEach((item, index) => {
@@ -9535,7 +9535,6 @@ function trend() {
       categories: ["\u4E00\u6708", "\u4E8C\u6708", "\u4E09\u6708", "\u56DB\u6708", "\u4E94\u6708", "\u516D\u6708"],
       series: [{ name: "\u5468\u8F6C\u5929\u6570", values: [42, 48, 45, 61, 58, 74] }],
       colors: ["$accent"],
-      showValues: false,
       valMin: 0,
       valMax: 90
     }),
@@ -20113,19 +20112,34 @@ function themeChartPalette(deck, chart, count) {
   const width = Math.max(count, resolved.length, 1);
   return Array.from({ length: width }, (_, index) => resolved[index % resolved.length]);
 }
+var CHART_CATEGORY_PT = 13;
+var CHART_TICK_PT = 11;
+var CHART_LEGEND_PT = 12;
+var CHART_VALUE_PT = 12;
 function addChart(pres, slide, deck, element, platform, pageBackground) {
   const chart = element.chart;
+  const kind = chart.kind;
   const background = hex(pageBackground);
   const ink = hex(colorRef("$ink", deck.theme, "#111111"));
   const muted = hex(colorRef("$muted", deck.theme, "#5C5A55"));
-  const line = hex(colorRef("$line", deck.theme, "#D0D0D0"));
   const inverse = hex(colorRef("$inverse", deck.theme, "#FFFFFF"));
-  const dark = luminance(pageBackground) < 0.4;
-  const label = dark ? inverse : muted;
-  const valueInk = dark ? inverse : ink;
-  const grid = dark ? "4A4A4A" : line;
   const face = resolveFontFace(deck, "$cjk", platform);
   const palette = themeChartPalette(deck, chart, Math.max(chart.series.length, chart.categories.length, 2));
+  const on = chart.showValues !== false;
+  const numericAxis = kind === "scatter" || kind === "bubble";
+  const legend = chart.showLegend ?? (chart.series.length > 1 && kind !== "pie" && kind !== "doughnut" && kind !== "waterfall");
+  const outside = readableOn(background, ink, inverse);
+  const ticks = contrastRatio(muted, background) >= 3 ? muted : outside;
+  const categoryColor = chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, outside)) : numericAxis ? ticks : outside;
+  const tickColor = chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, ticks)) : ticks;
+  const axis = quietColor(ink, background, 0.72);
+  const gridTint = quietColor(ink, background, 0.86);
+  const themedGrid = (fallback) => {
+    const style = chart.grid ?? fallback;
+    if (style === "none")
+      return { style: "none" };
+    return { color: gridTint, size: 0.75, style };
+  };
   const base = {
     x: inches2(element.bounds.x),
     y: inches2(element.bounds.y),
@@ -20133,55 +20147,68 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     h: inches2(element.bounds.h),
     objectName: element.id,
     showTitle: false,
-    showLegend: chart.showLegend ?? false,
-    showValue: chart.showValues ?? false,
+    showLegend: legend,
+    showValue: false,
     chartArea: { fill: { color: background }, border: { pt: 0, color: background }, roundedCorners: false },
     plotArea: { fill: { color: background }, border: { pt: 0, color: background } },
-    catAxisLabelColor: chart.catLabelColor ? hex(colorRef(chart.catLabelColor, deck.theme, label)) : label,
+    layout: chartLayout(kind, legend),
+    catAxisLabelColor: categoryColor,
     catAxisLabelFontFace: face,
-    catAxisLabelFontSize: chart.catLabelSize ?? 11,
-    valAxisLabelColor: chart.valLabelColor ? hex(colorRef(chart.valLabelColor, deck.theme, label)) : label,
+    catAxisLabelFontSize: chart.catLabelSize ?? (numericAxis ? CHART_TICK_PT : CHART_CATEGORY_PT),
+    valAxisLabelColor: tickColor,
     valAxisLabelFontFace: face,
-    valAxisLabelFontSize: chart.valLabelSize ?? 11,
-    catAxisLineColor: grid,
-    valAxisLineShow: false,
-    valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" },
+    valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+    catAxisLineShow: true,
+    catAxisLineColor: axis,
+    catAxisLineSize: 0.75,
+    catAxisMajorTickMark: "none",
+    valAxisLineShow: true,
+    valAxisLineColor: axis,
+    valAxisLineSize: 0.75,
+    valAxisMajorTickMark: "none",
+    valGridLine: themedGrid("none"),
     catGridLine: { style: "none" },
     dataBorder: { pt: 0, color: background },
     chartColors: palette,
     legendFontFace: face,
-    legendFontSize: 12,
-    legendColor: label,
+    legendFontSize: CHART_LEGEND_PT,
+    legendColor: outside,
     legendPos: "b",
     dataLabelFontFace: face,
-    dataLabelFontSize: 11,
-    dataLabelColor: valueInk,
+    dataLabelFontSize: CHART_VALUE_PT,
+    dataLabelFontBold: true,
+    dataLabelColor: outside,
     valAxisMinVal: chart.valMin,
     valAxisMaxVal: chart.valMax
   };
   const rows = chart.series.map((series) => ({ name: series.name, labels: chart.categories, values: series.values }));
-  if (chart.kind === "waterfall") {
-    const parts = waterfallParts(chart.series[0].values);
-    const colors = chart.colors ?? ["$paper", "$accent", "$ink"];
-    const waterfallColors = colors.map((color) => hex(colorRef(color, deck.theme, "$paper")));
-    waterfallColors[0] = background;
+  if (kind === "waterfall") {
+    const columns = waterfallColumns(chart.series[0].values);
+    const increase = hex(colorRef(chart.colors?.[1] ?? "$accent", deck.theme, "$accent"));
+    const decrease = hex(colorRef(chart.colors?.[2] ?? "$muted", deck.theme, "$muted"));
+    const peak = Math.max(...columns.base.map((value, index) => value + columns.total[index] + columns.up[index] + columns.down[index]), 0);
     slide.addChart(pres.ChartType.bar, [
-      { name: "\u57FA\u5EA7", labels: chart.categories, values: parts.base },
-      { name: "\u589E\u52A0", labels: chart.categories, values: parts.up },
-      { name: "\u51CF\u5C11", labels: chart.categories, values: parts.down }
+      { name: "\u57FA\u5EA7", labels: chart.categories, values: columns.base },
+      { name: "\u5408\u8BA1", labels: chart.categories, values: columns.total },
+      { name: "\u589E\u52A0", labels: chart.categories, values: columns.up },
+      { name: "\u51CF\u5C11", labels: chart.categories, values: columns.down }
     ], {
       ...base,
       barDir: "col",
       barGrouping: "stacked",
-      barGapWidthPct: 50,
+      barGapWidthPct: 80,
       showValue: false,
       showLegend: false,
-      chartColors: waterfallColors,
-      valAxisMinVal: 0
+      layout: chartLayout(kind, false),
+      chartColors: [background, ink, increase, decrease],
+      valAxisMinVal: chart.valMin ?? 0,
+      valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom([peak]) : undefined)
     });
+    if (on)
+      addWaterfallCallouts(slide, element, chart, face, inverse, outside, peak);
     return;
   }
-  if (chart.kind === "combo") {
+  if (kind === "combo") {
     const roles = comboSeriesRoles(chart.series);
     const columns = chart.series.filter((_, index) => roles[index] === "column");
     const lines = chart.series.filter((_, index) => roles[index] === "line");
@@ -20189,16 +20216,26 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
     const columnColors = columns.map(() => palette[colorIndex++] ?? palette[0]);
     const lineColors = lines.map(() => palette[colorIndex++] ?? palette[0]);
     const axisLabel = {
-      valAxisLabelColor: label,
+      valAxisLabelColor: tickColor,
       valAxisLabelFontFace: face,
-      valAxisLabelFontSize: chart.valLabelSize ?? 11,
-      valAxisLineShow: false
+      valAxisLabelFontSize: chart.valLabelSize ?? CHART_TICK_PT,
+      valAxisLineShow: true,
+      valAxisLineColor: axis,
+      valAxisLineSize: 0.75,
+      valAxisMajorTickMark: "none"
     };
     slide.addChart([
       {
         type: pres.ChartType.bar,
         data: columns.map((series) => ({ name: series.name, labels: chart.categories, values: series.values })),
-        options: { barDir: "col", barGrouping: "clustered", barGapWidthPct: 50, chartColors: columnColors }
+        options: {
+          barDir: "col",
+          barGrouping: "clustered",
+          barGapWidthPct: 60,
+          chartColors: columnColors,
+          showValue: on,
+          dataLabelPosition: "inEnd"
+        }
       },
       {
         type: pres.ChartType.line,
@@ -20206,6 +20243,7 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
         options: {
           secondaryValAxis: true,
           chartColors: lineColors,
+          showValue: false,
           lineSize: chart.lineWidth ?? 2.25,
           lineDataSymbol: "circle",
           lineDataSymbolSize: chart.markerSize ?? 10,
@@ -20219,19 +20257,30 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       valAxisMinVal: undefined,
       valAxisMaxVal: undefined,
       valAxes: [
-        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valAxisMaxVal: chart.valMax, valGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" } },
-        { ...axisLabel, valAxisMinVal: chart.valMin ?? 0, valGridLine: { style: "none" } }
+        {
+          ...axisLabel,
+          valAxisMinVal: chart.valMin ?? 0,
+          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(columns.flatMap((series) => series.values)) : undefined),
+          valGridLine: themedGrid("none")
+        },
+        {
+          ...axisLabel,
+          valAxisMinVal: chart.valMin ?? 0,
+          valAxisMaxVal: chart.valMax ?? (on ? labelHeadroom(lines.flatMap((series) => series.values)) : undefined),
+          valGridLine: { style: "none" }
+        }
       ]
     });
     return;
   }
-  if (chart.kind === "scatter" || chart.kind === "bubble") {
+  if (kind === "scatter" || kind === "bubble") {
     const x = chart.series[0]?.x ?? [];
     const xs = chart.series.flatMap((series) => series.x ?? []);
     const ys = chart.series.flatMap((series) => series.values);
-    const xExtent = markerExtent(xs, chart.kind === "bubble" ? 0.45 : 0.14);
-    const yExtent = markerExtent(ys, chart.kind === "bubble" ? 1.15 : 0.16);
-    slide.addChart(chart.kind === "bubble" ? pres.ChartType.bubble : pres.ChartType.scatter, [
+    const labelScatter = kind === "scatter" && on;
+    const xExtent = markerExtent(xs, kind === "bubble" ? 0.45 : 0.14);
+    const yExtent = markerExtent(ys, kind === "bubble" ? 1.15 : labelScatter ? 0.42 : 0.16);
+    slide.addChart(kind === "bubble" ? pres.ChartType.bubble : pres.ChartType.scatter, [
       { name: "X", values: x },
       ...chart.series.map((series) => ({
         name: series.name,
@@ -20241,40 +20290,62 @@ function addChart(pres, slide, deck, element, platform, pageBackground) {
       }))
     ], {
       ...base,
-      lineSize: chart.kind === "scatter" ? 0 : chart.lineWidth ?? 0,
+      lineSize: kind === "scatter" ? 0 : chart.lineWidth ?? 0,
       lineDataSymbol: "circle",
-      lineDataSymbolSize: chart.markerSize ?? (chart.kind === "bubble" ? 12 : 14),
+      lineDataSymbolSize: chart.markerSize ?? (kind === "bubble" ? 12 : 14),
       lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
       lineDataSymbolLineSize: 1.25,
+      showLabel: labelScatter,
+      dataLabelFormatScatter: labelScatter ? "custom" : undefined,
+      dataLabelPosition: labelScatter ? "t" : undefined,
       showLegend: chart.showLegend ?? chart.series.length > 1,
       catAxisMinVal: xExtent.min,
       catAxisMaxVal: xExtent.max,
       valAxisMinVal: chart.valMin ?? yExtent.min,
       valAxisMaxVal: chart.valMax ?? yExtent.max,
-      catGridLine: { color: grid, size: 0.5, style: chart.grid ?? "solid" }
+      catGridLine: themedGrid("solid"),
+      valGridLine: themedGrid("solid")
     });
     return;
   }
-  const type = chart.kind === "line" ? pres.ChartType.line : chart.kind === "area" ? pres.ChartType.area : chart.kind === "pie" ? pres.ChartType.pie : chart.kind === "doughnut" ? pres.ChartType.doughnut : chart.kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
-  const grouped = chart.kind === "stacked" || chart.kind === "stackedPercent";
+  const pieLike = kind === "pie" || kind === "doughnut";
+  const grouped = kind === "stacked" || kind === "stackedPercent";
+  const bars = kind === "bar" || kind === "column" || grouped;
+  const type = kind === "line" ? pres.ChartType.line : kind === "area" ? pres.ChartType.area : kind === "pie" ? pres.ChartType.pie : kind === "doughnut" ? pres.ChartType.doughnut : kind === "radar" ? pres.ChartType.radar : pres.ChartType.bar;
+  const flat = chart.series.flatMap((series) => series.values);
+  const needsHeadroom = on && (kind === "bar" || kind === "column" || kind === "line" || kind === "area");
   slide.addChart(type, rows, {
     ...base,
-    barDir: chart.kind === "bar" ? "bar" : "col",
-    ...chart.kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
-    barGrouping: chart.kind === "stackedPercent" ? "percentStacked" : grouped ? "stacked" : chart.kind === "area" ? "standard" : "clustered",
-    barGapWidthPct: grouped ? 40 : 60,
-    chartColorsOpacity: chart.kind === "area" || chart.kind === "radar" ? 46 : undefined,
-    radarStyle: chart.kind === "radar" ? "filled" : undefined,
+    barDir: kind === "bar" ? "bar" : "col",
+    ...kind === "bar" ? { catAxisOrientation: "maxMin" } : {},
+    barGrouping: kind === "stackedPercent" ? "percentStacked" : grouped ? "stacked" : kind === "area" ? "standard" : "clustered",
+    barGapWidthPct: grouped ? 46 : 70,
+    chartColorsOpacity: kind === "area" || kind === "radar" ? 46 : undefined,
+    radarStyle: kind === "radar" ? "filled" : undefined,
     lineSize: chart.lineWidth ?? 2.25,
     lineDataSymbol: "circle",
-    lineDataSymbolSize: chart.markerSize ?? (chart.kind === "line" || chart.kind === "radar" ? 8 : 12),
+    lineDataSymbolSize: chart.markerSize ?? (kind === "line" || kind === "radar" ? 10 : 12),
     lineDataSymbolLineColor: chart.markerColor ? hex(colorRef(chart.markerColor, deck.theme, ink)) : ink,
     lineDataSymbolLineSize: 0,
-    showLegend: chart.showLegend ?? (chart.series.length > 1 || chart.kind === "pie" || chart.kind === "doughnut"),
-    valAxisMinVal: chart.kind === "pie" || chart.kind === "doughnut" || chart.kind === "radar" ? undefined : chart.kind === "stackedPercent" ? 0 : chart.valMin ?? 0,
-    valAxisMaxVal: chart.kind === "pie" || chart.kind === "doughnut" || chart.kind === "radar" || chart.kind === "stackedPercent" ? undefined : chart.valMax,
-    holeSize: chart.kind === "doughnut" ? chart.holeSize ?? 62 : undefined
+    showLegend: legend,
+    showValue: on && (bars || pieLike || kind === "line" || kind === "area"),
+    showLabel: on && pieLike,
+    ...kind === "bar" ? { catAxisLabelPos: "none" } : {},
+    showPercent: pieLike ? false : undefined,
+    showLeaderLines: on && pieLike,
+    dataLabelPosition: pieLike ? "outEnd" : grouped ? "ctr" : on && (kind === "line" || kind === "area") ? "t" : on && bars ? "inEnd" : undefined,
+    dataLabelColor: grouped ? insideLabel(palette, ink, inverse) : outside,
+    dataBorder: pieLike ? { pt: 2, color: background } : base.dataBorder,
+    valAxisLabelFormatCode: kind === "stackedPercent" ? "0%" : undefined,
+    valAxisMinVal: pieLike || kind === "radar" ? undefined : kind === "stackedPercent" ? 0 : chart.valMin ?? (bars || kind === "line" || kind === "area" ? 0 : undefined),
+    valAxisMaxVal: pieLike || kind === "radar" || kind === "stackedPercent" ? undefined : chart.valMax ?? (needsHeadroom ? labelHeadroom(flat) : undefined),
+    holeSize: kind === "doughnut" ? chart.holeSize ?? 62 : undefined,
+    ...kind === "radar" ? { valGridLine: themedGrid("solid"), catGridLine: themedGrid("solid") } : {}
   });
+  if (on && pieLike)
+    addPieLeaders(pres, slide, element, chart, muted);
+  if (on && (kind === "line" || kind === "area"))
+    addEdgeCallouts(slide, element, chart, kind, legend, face, outside);
 }
 function shapeFill(deck, element) {
   if (element.pattern)
@@ -20345,6 +20416,8 @@ async function finishSlideXml(bytes, deck, platform) {
       changed = true;
     }
   }
+  if (await polishCharts(zip, deck, platform))
+    changed = true;
   if (await shrinkBubbleScale(zip))
     changed = true;
   if (!changed)
@@ -20439,6 +20512,311 @@ function patternXml(pattern) {
 function escapeXml(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
+function readableOn(background, preferred, alternate) {
+  return contrastRatio(preferred, background) >= contrastRatio(alternate, background) ? preferred : alternate;
+}
+function insideLabel(fills, ink, inverse) {
+  const colors = fills.length > 0 ? fills : [ink];
+  const score = (color) => colors.filter((fill) => contrastRatio(color, fill) >= 3).length;
+  return score(inverse) >= score(ink) ? inverse : ink;
+}
+function mixHex(from, to, toward) {
+  const bytes = (value) => [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const start = bytes(from);
+  const end = bytes(to);
+  return start.map((channel, index) => Math.round(channel * (1 - toward) + end[index] * toward).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+function quietColor(foreground, background, toward) {
+  return luminance(foreground) > luminance(background) ? mixHex(background, foreground, toward) : mixHex(foreground, background, toward);
+}
+function labelHeadroom(values) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0)
+    return;
+  const peak = Math.max(...finite);
+  if (peak <= 0)
+    return;
+  return Math.ceil(peak * 1.22);
+}
+function plotBox(kind, legend, bounds) {
+  const layout = chartLayout(kind, legend);
+  return {
+    x: bounds.x + layout.x * bounds.w,
+    y: bounds.y + layout.y * bounds.h,
+    w: layout.w * bounds.w,
+    h: layout.h * bounds.h
+  };
+}
+function polar(cx, cy, radius, clockwiseFromTop) {
+  return {
+    x: cx + radius * Math.sin(clockwiseFromTop),
+    y: cy - radius * Math.cos(clockwiseFromTop)
+  };
+}
+function addLeader(pres, slide, x1, y1, x2, y2, color, name) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.max(Math.hypot(dx, dy), 0.01);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  slide.addShape(pres.ShapeType.line, {
+    x: inches2(cx - length / 2),
+    y: inches2(cy),
+    w: inches2(length),
+    h: 0,
+    rotate: Math.abs(angle) < 0.05 ? undefined : angle,
+    line: { color, width: 1 },
+    objectName: name
+  });
+}
+function addCallout(slide, text, x, y, w, h, face, color, name) {
+  slide.addText(text, {
+    x: inches2(x),
+    y: inches2(y),
+    w: inches2(w),
+    h: inches2(h),
+    fontFace: face,
+    fontSize: CHART_VALUE_PT,
+    bold: true,
+    color,
+    align: "center",
+    valign: "middle",
+    margin: 0,
+    wrap: false,
+    fit: "none",
+    objectName: name
+  });
+}
+function magnitude(value) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+function addPieLeaders(pres, slide, element, chart, color) {
+  const values = chart.series[0]?.values ?? [];
+  const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+  if (total <= 0)
+    return;
+  const bounds = element.bounds;
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  const radius = Math.min(bounds.w, bounds.h) * 0.42;
+  let theta = 0;
+  values.forEach((value, index) => {
+    if (value <= 0)
+      return;
+    const sweep = value / total * Math.PI * 2;
+    const mid = theta + sweep / 2;
+    theta += sweep;
+    const start = polar(cx, cy, radius + 0.5, mid);
+    const end = polar(cx, cy, radius + 8, mid);
+    addLeader(pres, slide, start.x, start.y, end.x, end.y, color, `${element.id}-leader-${index}`);
+  });
+}
+function addEdgeCallouts(slide, element, chart, kind, legend, face, color) {
+  const categories = chart.categories.length;
+  if (categories < 2)
+    return;
+  const plot = plotBox(kind, legend, element.bounds);
+  const valMin = chart.valMin ?? 0;
+  const valMax = chart.valMax ?? labelHeadroom(chart.series.flatMap((series) => series.values));
+  if (valMax === undefined || valMax <= valMin)
+    return;
+  chart.series.forEach((series, seriesIndex) => {
+    for (const point of keyIndexes(series.values)) {
+      if (point !== 0)
+        continue;
+      const value = series.values[point];
+      if (value === undefined || !Number.isFinite(value))
+        continue;
+      const py = plot.y + plot.h - (value - valMin) / (valMax - valMin) * plot.h;
+      const text = magnitude(value);
+      addCallout(slide, text, plot.x + 16, py - 18, Math.max(28, text.length * 8), 16, face, color, `${element.id}-edge-${seriesIndex}`);
+    }
+  });
+}
+function addWaterfallCallouts(slide, element, chart, face, inverse, ink, peak) {
+  const values = chart.series[0]?.values ?? [];
+  if (values.length === 0)
+    return;
+  const columns = waterfallColumns(values);
+  const plot = plotBox("waterfall", false, element.bounds);
+  const slot = plot.w / values.length;
+  const valMin = chart.valMin ?? 0;
+  const valMax = chart.valMax ?? labelHeadroom([peak]) ?? peak;
+  if (valMax <= valMin)
+    return;
+  const yOf = (value) => plot.y + plot.h - (value - valMin) / (valMax - valMin) * plot.h;
+  values.forEach((_, index) => {
+    const segments = [
+      { base: 0, value: columns.total[index] ?? 0, text: magnitude(columns.total[index] ?? 0) },
+      { base: columns.base[index] ?? 0, value: columns.up[index] ?? 0, text: `+${magnitude(columns.up[index] ?? 0)}` },
+      { base: columns.base[index] ?? 0, value: columns.down[index] ?? 0, text: `\u2212${magnitude(columns.down[index] ?? 0)}` }
+    ];
+    for (const segment of segments) {
+      if (segment.value === 0)
+        continue;
+      const top = yOf(segment.base + segment.value);
+      const bottom = yOf(segment.base);
+      const boxW = Math.max(36, segment.text.length * 9);
+      const boxH = 16;
+      const cx = plot.x + slot * (index + 0.5);
+      const tall = bottom - top >= boxH + 2;
+      addCallout(slide, segment.text, cx - boxW / 2, tall ? (top + bottom) / 2 - boxH / 2 : top - boxH - 1, boxW, boxH, face, tall ? inverse : ink, `${element.id}-wf-${index}`);
+    }
+  });
+}
+function chartLayout(kind, legend) {
+  const bottom = legend ? 0.18 : 0.12;
+  const frame = (x, y, w) => ({ x, y, w, h: Math.round((1 - y - bottom) * 1000) / 1000 });
+  if (kind === "bar")
+    return frame(0.2, 0.06, 0.72);
+  if (kind === "pie" || kind === "doughnut")
+    return { x: 0.14, y: 0.08, w: 0.72, h: legend ? 0.7 : 0.8 };
+  if (kind === "radar")
+    return { x: 0.14, y: 0.06, w: 0.72, h: legend ? 0.72 : 0.8 };
+  if (kind === "combo")
+    return frame(0.1, 0.08, 0.74);
+  if (kind === "scatter" || kind === "bubble")
+    return frame(0.11, 0.08, 0.8);
+  return frame(0.1, 0.08, 0.84);
+}
+function chartPart(target) {
+  if (target.startsWith("/"))
+    return target.slice(1);
+  if (target.startsWith("../"))
+    return `ppt/${target.slice(3)}`;
+  return `ppt/slides/${target}`;
+}
+async function polishCharts(zip, deck, platform) {
+  let changed = false;
+  for (let index = 0;index < deck.pages.length; index++) {
+    const page = deck.pages[index];
+    const charts = page.elements.filter((element) => element.type === "chart" && element.chart);
+    if (charts.length === 0)
+      continue;
+    const relsFile = zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`);
+    if (!relsFile)
+      continue;
+    const rels = await relsFile.async("string");
+    const targets = [...rels.matchAll(/relationships\/chart" Target="([^"]+)"/g)].map((match) => chartPart(match[1]));
+    const background = colorRef(page.background, deck.theme, "$paper");
+    for (let chartIndex = 0;chartIndex < charts.length; chartIndex++) {
+      const target = targets[chartIndex];
+      const element = charts[chartIndex];
+      if (!target)
+        continue;
+      const file = zip.file(target);
+      if (!file)
+        continue;
+      const xml = await file.async("string");
+      const next = polishChartXml(xml, deck, element, platform, background);
+      if (next !== xml) {
+        zip.file(target, next);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+function polishChartXml(xml, deck, element, platform, pageBackground) {
+  const chart = element.chart;
+  const face = resolveFontFace(deck, "$cjk", platform);
+  const ink = hex(colorRef("$ink", deck.theme, "#111111"));
+  const accent = hex(colorRef("$accent", deck.theme, ink));
+  const inverse = hex(colorRef("$inverse", deck.theme, "#FFFFFF"));
+  const background = hex(pageBackground);
+  const outside = readableOn(background, ink, inverse);
+  let next = xml;
+  if (chart.kind === "pie" || chart.kind === "doughnut")
+    next = polishPie(next, accent, background, outside);
+  if (chart.kind === "bar" || chart.kind === "column" || chart.kind === "combo") {
+    next = next.replace(/<c:dLblPos val="inEnd"\/>/g, '<c:dLblPos val="outEnd"/>');
+  }
+  if (chart.kind === "bar" && chart.showValues !== false)
+    next = polishBarLabels(next);
+  if (chart.kind === "combo")
+    next = polishComboLines(next, chart);
+  if ((chart.kind === "line" || chart.kind === "area") && chart.showValues !== false)
+    next = polishKeyLabels(next, chart);
+  if (chart.kind === "scatter" && chart.showValues !== false)
+    next = polishScatterLabels(next, face, ink);
+  next = next.replace(/typeface="Arial"/g, `typeface="${escapeXml(face)}"`);
+  return addEastAsiaFace(next, face);
+}
+function polishPie(xml, accent, background, label) {
+  let next = xml.replace(/<a:schemeClr val="accent1"\/>/g, `<a:srgbClr val="${accent}"/>`).replace(/<a:srgbClr val="F9F9F9"\/>/g, `<a:srgbClr val="${background}"/>`);
+  const series = /<a:defRPr sz="1800"([\s\S]*?)<\/c:txPr>\s*(?:<c:dLblPos val="ctr"\/>)?\s*<c:showLegendKey val="0"\/>\s*<c:showVal val="0"\/>\s*<c:showCatName val="1"\/>\s*<c:showSerName val="0"\/>\s*<c:showPercent val="1"\/>/;
+  next = next.replace(series, (_all, inner) => {
+    const body = inner.replace('val="000000"', `val="${label}"`);
+    return `<a:defRPr sz="1200"${body}</c:txPr><c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="1"/><c:showSerName val="0"/><c:showPercent val="0"/>`;
+  });
+  next = next.replace(/<c:dLblPos val="ctr"\/>/g, '<c:dLblPos val="outEnd"/>');
+  next = next.replace(/<c:dLbl>([\s\S]*?)<c:showLegendKey/g, (all, inner) => {
+    if (inner.includes("dLblPos"))
+      return all;
+    return `<c:dLbl>${inner}<c:dLblPos val="outEnd"/><c:showLegendKey`;
+  });
+  next = next.replace(/<c:showPercent val="1"\/>/g, '<c:showPercent val="0"/>');
+  if (!next.includes("<c:separator>"))
+    next = next.replace("<c:showLeaderLines", "<c:separator> </c:separator><c:showLeaderLines");
+  return next.replace(/<c:showLeaderLines val="0"\/>/g, '<c:showLeaderLines val="1"/>');
+}
+function polishBarLabels(xml) {
+  let next = xml.replace(/<c:showCatName val="0"\/>/g, '<c:showCatName val="1"/>');
+  if (!next.includes("<c:separator>"))
+    next = next.replace(/<c:showLeaderLines/g, "<c:separator> </c:separator><c:showLeaderLines");
+  return next;
+}
+function polishComboLines(xml, chart) {
+  const roles = comboSeriesRoles(chart.series);
+  const lineCounts = chart.series.filter((_, index) => roles[index] === "line").map((series) => series.values.length);
+  let index = 0;
+  return xml.replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/g, (block) => block.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (series) => {
+    const count = lineCounts[index] ?? 0;
+    index += 1;
+    const labels = Array.from({ length: count }, (_, point) => deletedLabel(point)).join("");
+    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`).replace(/<c:showVal val="0"\/>/g, '<c:showVal val="1"/>');
+  }));
+}
+function polishKeyLabels(xml, chart) {
+  let index = 0;
+  return xml.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (series) => {
+    const values = chart.series[index]?.values ?? [];
+    index += 1;
+    const keep = new Set(keyIndexes(values));
+    const labels = values.map((_, point) => keep.has(point) && point !== 0 ? "" : deletedLabel(point)).join("");
+    if (!labels)
+      return series;
+    return series.replace("<c:dLbls>", `<c:dLbls>${labels}`);
+  });
+}
+function polishScatterLabels(xml, face, color) {
+  const typeface = escapeXml(face);
+  const run = `<a:rPr lang="zh-CN" b="1" sz="1200" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="${typeface}"/></a:rPr>`;
+  return xml.replace(/<a:rPr lang="[^"]*" dirty="0"\/>/g, run);
+}
+function deletedLabel(index) {
+  return `<c:dLbl><c:idx val="${index}"/><c:delete val="1"/></c:dLbl>`;
+}
+function keyIndexes(values) {
+  const finite = values.map((value, index) => ({ value, index })).filter((item) => Number.isFinite(item.value));
+  if (finite.length === 0)
+    return [];
+  let min = finite[0];
+  let max = finite[0];
+  for (const item of finite) {
+    if (item.value < min.value)
+      min = item;
+    if (item.value > max.value)
+      max = item;
+  }
+  return min.index === max.index ? [min.index] : [min.index, max.index];
+}
+function addEastAsiaFace(xml, face) {
+  const ea = `<a:ea typeface="${escapeXml(face)}"/>`;
+  return xml.replace(/<a:latin typeface="[^"]*"\/>(?!<a:ea\b)/g, (match) => `${match}${ea}`);
+}
 function markerExtent(values, ratio) {
   const finite = values.filter((value) => Number.isFinite(value));
   const min = Math.min(...finite);
@@ -20472,6 +20850,15 @@ function waterfallParts(values) {
   up.push(Math.max(0, values[values.length - 1] ?? 0));
   down.push(0);
   return { base, up, down };
+}
+function waterfallColumns(values) {
+  const parts = waterfallParts(values);
+  return {
+    base: parts.base,
+    total: parts.up.map((value, index) => index === 0 || index === parts.up.length - 1 ? value : 0),
+    up: parts.up.map((value, index) => index === 0 || index === parts.up.length - 1 ? 0 : value),
+    down: parts.down
+  };
 }
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
