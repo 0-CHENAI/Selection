@@ -2,6 +2,9 @@ import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } f
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
+import { useAtom, useAtomValue } from 'jotai'
+import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
+import { PptPickerButton } from '@/components/ppt/PptPickerButton'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
@@ -294,6 +297,7 @@ export interface FollowUpInputItem {
 }
 
 export interface FreeFormInputProps {
+  pptMode?: boolean
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
   /** Whether input is disabled */
@@ -431,6 +435,7 @@ const NO_SLASH_FOLDERS: string[] = []
 
 export function FreeFormInput({
   placeholder,
+  pptMode = false,
   disabled = false,
   isProcessing = false,
   onSubmit,
@@ -486,6 +491,9 @@ export function FreeFormInput({
   const usePromptAppearance = appearance === 'prompt' && !compactMode
   const typingEnergy = React.useRef(0)
   const { t } = useTranslation()
+  const pptComposerKey = sourceSelectionKey ?? sessionId ?? ''
+  const [, setPptRequest] = useAtom(pptComposerAtomFamily(pptComposerKey))
+  const pptOverride = useAtomValue(pptComposerOverrideAtomFamily(pptComposerKey))
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
@@ -1587,6 +1595,7 @@ export function FreeFormInput({
     }
     setInput('')
     setAttachments([])
+    setPptRequest(undefined)
     // Clear draft immediately (cancel any pending debounced sync)
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
     onInputChange?.('')
@@ -1606,7 +1615,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t, setPptRequest])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1986,6 +1995,8 @@ export function FreeFormInput({
 
         {/* Attachment Preview */}
         <AttachmentPreview
+          pptComposerKey={pptComposerKey}
+          hasPptTemplate={!!pptOverride?.templateId}
           attachments={attachments}
           onRemove={handleRemoveAttachment}
           disabled={disabled}
@@ -2124,7 +2135,6 @@ export function FreeFormInput({
             className="hidden"
             onChange={handleFileInputChange}
           />
-
           {/* Compact mode: permission mode drawer + standard icon badges for attach/sources/working dir.
               Wrapper absorbs all squeeze so the model label truncates first and the send button stays
               anchored to the right (craft-agents-oss#798). overflow-hidden is safe — Radix Drawer /
@@ -2168,7 +2178,8 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
-          {onSourcesChange && (
+          <PptPickerButton composerKey={pptComposerKey} disabled={disabled} pptMode={pptMode} />
+          {!pptMode && onSourcesChange && (
             <div className="relative shrink min-w-0">
               <FreeFormInputContextBadge
                 buttonRef={sourceButtonRef}
@@ -2239,7 +2250,7 @@ export function FreeFormInput({
               />
             </div>
           )}
-          {workingDirectoryLocked ? (
+          {!pptMode && (workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} />
           ) : onWorkingDirectoryChange && (
             <ChatWorkingDirectoryControl
@@ -2251,7 +2262,7 @@ export function FreeFormInput({
               isEmptySession={false}
               workspaceId={workspaceId}
             />
-          )}
+          ))}
           </div>
           )}
 
@@ -2272,9 +2283,10 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
+          <PptPickerButton composerKey={pptComposerKey} disabled={disabled} pptMode={pptMode} />
 
           {/* 2. Source Selector Badge - only show if onSourcesChange is provided */}
-          {onSourcesChange && (
+          {!pptMode && onSourcesChange && (
             <div className="relative shrink min-w-0 overflow-hidden">
               <FreeFormInputContextBadge
                 buttonRef={sourceButtonRef}
@@ -2351,7 +2363,7 @@ export function FreeFormInput({
           )}
 
           {/* 3. Working Directory Selector Badge */}
-          {workingDirectoryLocked ? (
+          {!pptMode && (workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} isEmptySession={isEmptySession} />
           ) : onWorkingDirectoryChange && (
             <ChatWorkingDirectoryControl
@@ -2363,7 +2375,7 @@ export function FreeFormInput({
               isEmptySession={isEmptySession}
               workspaceId={workspaceId}
             />
-          )}
+          ))}
           </div>
           )}
 

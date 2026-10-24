@@ -30,6 +30,25 @@ describe('ordinary session UI migration', () => {
     expect(links[0]).toMatchObject({ expandable: false, items: undefined })
   })
 
+  it('places PPT directly under projects', () => {
+    const links = prepareOrdinarySessionSidebarLinks([
+      { id: 'nav:skills' },
+      { id: 'nav:ppt' },
+      { id: 'nav:allSessions' },
+      { id: 'nav:projects' },
+      { id: 'separator:chats-sources' },
+      { id: 'nav:sources' },
+    ])
+    expect(links.map(link => link.id)).toEqual([
+      'nav:allSessions',
+      'nav:projects',
+      'nav:ppt',
+      'separator:chats-sources',
+      'nav:sources',
+      'nav:skills',
+    ])
+  })
+
   it('clears legacy status and label filters without losing a single project scope', () => {
     const saved: PersistedSessionViewFilters = {
       allSessions: {

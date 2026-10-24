@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { FadingText } from '@/components/ui/fading-text'
 import { cn } from '@/lib/utils'
 
-export interface FreeFormInputContextBadgeProps {
+export interface FreeFormInputContextBadgeProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
   /** Left area - fully customizable (icon, avatar stack, etc.) */
   icon: React.ReactNode
   /** Label text - shown in expanded state or collapsed with selection */
@@ -20,8 +20,6 @@ export interface FreeFormInputContextBadgeProps {
   selectionChrome?: boolean
   /** Show chevron indicator (for dropdowns) - only visible in expanded state */
   showChevron?: boolean
-  /** Click handler */
-  onClick?: () => void
   /** Tooltip content - can be string or ReactNode for rich content */
   tooltip?: React.ReactNode
   /** Whether the badge is currently "open" (e.g., dropdown is shown) */
@@ -34,6 +32,9 @@ export interface FreeFormInputContextBadgeProps {
   buttonRef?: React.RefObject<HTMLButtonElement>
   /** Data attribute for tutorials */
   'data-tutorial'?: string
+  /** Native tooltip. Prefer `tooltip` when the badge is not itself a popover trigger. */
+  title?: string
+  'data-testid'?: string
 }
 
 /**
@@ -61,6 +62,9 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
       className,
       buttonRef,
       'data-tutorial': dataTutorial,
+      title,
+      'data-testid': dataTestId,
+      ...rest
     },
     ref
   ) {
@@ -73,12 +77,15 @@ export const FreeFormInputContextBadge = React.forwardRef<HTMLButtonElement, Fre
 
     const button = (
       <button
+        {...rest}
         ref={mergedRef as React.Ref<HTMLButtonElement>}
         type="button"
         aria-label={label}
         onClick={onClick}
         disabled={disabled}
         data-tutorial={dataTutorial}
+        data-testid={dataTestId}
+        title={title}
         className={cn(
           // Base styles - shrink + min-w-0 allows badge to compress in tight layouts
           "input-toolbar-btn inline-flex items-center gap-1.5 h-7 rounded-[6px] text-[13px] text-foreground transition-colors select-none shrink min-w-0",
