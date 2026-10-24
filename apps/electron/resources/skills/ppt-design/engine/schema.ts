@@ -8,6 +8,7 @@ import {
   DECK_FORMAT,
   DECK_VERSION,
   type Bounds,
+  type ChartImageSpec,
   type ChartSeries,
   type ChartSpec,
   type ColorStop,
@@ -24,6 +25,7 @@ import {
 } from './types.ts'
 
 const HEX = /^#[0-9A-Fa-f]{6}$/
+const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const FONT_TOKEN = /^\$cjk$|^\$latin$/
 const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/
 
@@ -342,6 +344,22 @@ function optionalNumber(value: unknown, path: string, issues: DeckIssue[], pageI
   return value
 }
 
+function parseChartImage(value: unknown, id: string, issues: DeckIssue[], pageId: string): ChartImageSpec | undefined {
+  if (!isObject(value)) {
+    issues.push(issue('schema', `图片图表 ${id} 的 chartImage 必须是对象`, pageId, id))
+    return undefined
+  }
+  rejectUnknown(value, ['skill', 'format', 'data'], `${id}.chartImage`, issues, pageId, id)
+  const skill = value.skill
+  const format = value.format
+  const data = value.data
+  if (typeof skill !== 'string' || !CHART_SKILL_SLUG.test(skill)) issues.push(issue('schema', `图片图表 ${id} 的 skill 必须是已安装技能的 slug`, pageId, id))
+  if (format !== 'svg' && format !== 'png') issues.push(issue('schema', `图片图表 ${id} 的 format 只支持 svg 或 png`, pageId, id))
+  if (typeof data !== 'string' || !data.trim() || data.length > 8000) issues.push(issue('schema', `图片图表 ${id} 的 data 必须是原始数据表`, pageId, id))
+  if (typeof skill !== 'string' || (format !== 'svg' && format !== 'png') || typeof data !== 'string' || !data.trim()) return undefined
+  return { skill, format, data: data.trim() }
+}
+
 function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): DeckElement | null {
   if (!isObject(value)) {
     issues.push(issue('schema', '元素必须是对象', pageId))
@@ -349,7 +367,7 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): Deck
   }
   const id = value.id
   const elementId = typeof id === 'string' ? id : undefined
-  rejectUnknown(value, ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit'], `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
+  rejectUnknown(value, ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'chartImage', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit'], `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
   if (typeof id !== 'string' || !id.trim()) {
     issues.push(issue('schema', '元素缺少 id', pageId))
     return null
@@ -382,7 +400,12 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): Deck
       if (value.fit !== 'fill' && value.fit !== 'contain') issues.push(issue('schema', `图片 ${id} 的 fit 只支持 fill 或 contain`, pageId, id))
       else element.fit = value.fit
     }
+    if (value.chartImage !== undefined) {
+      const chartImage = parseChartImage(value.chartImage, id, issues, pageId)
+      if (chartImage) element.chartImage = chartImage
+    }
   }
+  if (value.type !== 'image' && value.chartImage !== undefined) issues.push(issue('schema', `元素 ${id} 的 chartImage 只用于图片图表`, pageId, id))
   if (value.type !== 'image' && value.fit !== undefined) issues.push(issue('schema', `元素 ${id} 的 fit 只用于图片`, pageId, id))
   if (value.type !== 'shape' && (value.path !== undefined || value.gradient !== undefined || value.pattern !== undefined || value.pathRule !== undefined)) {
     issues.push(issue('schema', `元素 ${id} 的 path、gradient、pattern 只用于形状`, pageId, id))

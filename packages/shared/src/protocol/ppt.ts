@@ -41,6 +41,16 @@ export interface PptRequest {
   brandColor?: string
   logo?: { name: string; base64: string; mimeType: string }
   aspectRatio?: 'template' | '16:9' | '4:3' | '1:1' | '9:16' | 'A4' | '3:4'
+  /** Installed chart-skill slug. Omitted means native editable charts. */
+  chartSkill?: string
+}
+
+/** Shown in the live panel when an external chart skill falls back to a native chart. */
+export interface PptChartFallback {
+  skill: string
+  reason: 'missing' | 'timeout' | 'error'
+  /** 1-based page, when the failure belongs to one page. */
+  page?: number
 }
 
 /** deck_check outcome shown on each live thumbnail. */
@@ -82,6 +92,7 @@ export interface PptLiveSnapshot extends PptProgress {
   pptxPath?: string
   pages: PptLivePage[]
   files: Array<{ path: string; name: string }>
+  chartFallbacks?: PptChartFallback[]
 }
 
 export interface PptRevisionTarget {

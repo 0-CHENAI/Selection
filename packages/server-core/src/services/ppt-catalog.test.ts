@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
+import type { ChartSkillCandidate } from '@craft-agent/shared/skills'
 import { buildPptPrompt, getPptCatalog, getPptTemplatePages, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
 
 const root = realpathSync(resolve(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design'))
@@ -108,4 +109,36 @@ test('PRO request enables skill without changing user transport options and adds
   expect(validatePptRequest({ themeId }, root)).toEqual({ themeId })
   expect(readFileSync(join(session, 'attachments/ppt-brand/logo.png')).toString()).toBe('logo bytes')
   expect(prepared.ppt).toEqual(ppt)
+})
+
+const sampleCharts: ChartSkillCandidate = {
+  slug: 'sample-charts',
+  source: 'workspace',
+  metadata: { name: 'Sample Charts', description: '把表格画成图表，支持自定义色板。' },
+  content: 'Return one SVG file. A custom palette may be supplied by the caller.',
+}
+
+test('an installed chart skill is named in the prompt and a missing one falls back to native charts', () => {
+  const session = temp()
+  const themeId = getPptCatalog(root).themes[0]!.id
+  const request = { templateId: 'dsh-cartesian', themeId, brandColor: '#123456', chartSkill: 'sample-charts' }
+  expect(validatePptRequest(request, root).chartSkill).toBe('sample-charts')
+  expect(() => validatePptRequest({ chartSkill: '../sample-charts' }, root)).toThrow('Invalid PPT chart skill')
+  const prepared = pptSendOptions('PRO', undefined, { skillSlugs: ['research'], ppt: request }, root, [sampleCharts])!
+  expect(prepared.skillSlugs).toEqual(['research', 'ppt-design', 'sample-charts'])
+  expect(prepared.ppt?.chartSkill).toBe('sample-charts')
+  const context = buildPptPrompt(request, session, root, [sampleCharts])
+  expect(context).toContain('[skill:sample-charts]')
+  expect(context).toContain('custom palette')
+  expect(context).toContain('#123456')
+  expect(context).toContain('chart-fallback.json')
+  expect(context).toContain('chartImage')
+  expect(context).not.toContain('templates/color')
+  expect(JSON.parse(readFileSync(join(session, 'data', 'chart-fallback.json'), 'utf8'))).toEqual({ fallbacks: [] })
+  const missing = buildPptPrompt({ chartSkill: 'sample-charts' }, session, root, [])
+  expect(missing).toContain('not installed')
+  expect(missing).toContain('native editable charts')
+  expect(missing).not.toContain('[skill:sample-charts]')
+  expect(pptSendOptions('PRO', { chartSkill: 'sample-charts' }, undefined, root, [])?.skillSlugs).toEqual(['ppt-design'])
+  expect(JSON.parse(readFileSync(join(session, 'data', 'chart-fallback.json'), 'utf8')).fallbacks).toEqual([{ skill: 'sample-charts', reason: 'missing' }])
 })

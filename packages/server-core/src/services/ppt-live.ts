@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { PptLiveElement, PptLivePage, PptLiveSnapshot, PptPageStatus, PptProgress, PptRevision, PptRevisionTarget } from '@craft-agent/shared/protocol'
+import type { PptChartFallback, PptLiveElement, PptLivePage, PptLiveSnapshot, PptPageStatus, PptProgress, PptRevision, PptRevisionTarget } from '@craft-agent/shared/protocol'
 import { getPptCatalog, getPptSkillRoot } from './ppt-catalog'
 import { customTemplateReference } from './ppt-library'
 
 const MARKER = '.ppt-generating'
 const PROGRESS_FILE = 'ppt-progress.json'
 const CHECK_FILE = 'deck-check.json'
+const FALLBACK_FILE = 'chart-fallback.json'
+const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const MAX_IMAGE_BYTES = 1_500_000
 const MAX_DEPTH = 3
 const MAX_TARGETS = 256
@@ -299,6 +301,25 @@ function dataUrl(image: SlideImage): string | undefined {
   return `data:${mime};base64,${readFileSync(image.path).toString('base64')}`
 }
 
+export function readChartFallbacks(sessionDir: string): PptChartFallback[] {
+  const path = join(sessionDir, 'data', FALLBACK_FILE)
+  if (!existsSync(path)) return []
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { fallbacks?: unknown }
+    if (!Array.isArray(parsed.fallbacks)) return []
+    return parsed.fallbacks.slice(0, 20).flatMap(entry => {
+      if (!entry || typeof entry !== 'object') return []
+      const item = entry as PptChartFallback
+      if (typeof item.skill !== 'string' || !CHART_SKILL_SLUG.test(item.skill)) return []
+      if (item.reason !== 'missing' && item.reason !== 'timeout' && item.reason !== 'error') return []
+      if (item.page !== undefined && (typeof item.page !== 'number' || !Number.isInteger(item.page) || item.page < 1 || item.page > 500)) return []
+      return [{ skill: item.skill, reason: item.reason, ...(item.page ? { page: item.page } : {}) }]
+    })
+  } catch {
+    return []
+  }
+}
+
 export async function readPptLive(sessionDir: string, options: PptLiveReadOptions = {}): Promise<PptLiveSnapshot | null> {
   const loaded = loadDeck(sessionDir)
   if (!loaded || loaded.pages.length === 0) return null
@@ -327,6 +348,7 @@ export async function readPptLive(sessionDir: string, options: PptLiveReadOption
     }
   })
   const { currentIndex: _currentIndex, ...head } = progress
+  const chartFallbacks = readChartFallbacks(sessionDir)
   return {
     ...head,
     sessionId: options.sessionId,
@@ -334,6 +356,7 @@ export async function readPptLive(sessionDir: string, options: PptLiveReadOption
     ...(loaded.files[0] ? { pptxPath: loaded.files[0].path } : {}),
     pages,
     files: loaded.files.map(file => ({ path: file.path, name: file.name })),
+    ...(chartFallbacks.length ? { chartFallbacks } : {}),
   }
 }
 

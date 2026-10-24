@@ -12494,6 +12494,7 @@ var jsYaml = {
 
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
+var CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
 var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
 function issue(code, message, pageId, elementId) {
@@ -12819,6 +12820,25 @@ function optionalNumber(value, path, issues, pageId, elementId) {
   }
   return value;
 }
+function parseChartImage(value, id, issues, pageId) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 chartImage \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, id));
+    return;
+  }
+  rejectUnknown(value, ["skill", "format", "data"], `${id}.chartImage`, issues, pageId, id);
+  const skill = value.skill;
+  const format = value.format;
+  const data = value.data;
+  if (typeof skill !== "string" || !CHART_SKILL_SLUG.test(skill))
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 skill \u5FC5\u987B\u662F\u5DF2\u5B89\u88C5\u6280\u80FD\u7684 slug`, pageId, id));
+  if (format !== "svg" && format !== "png")
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 format \u53EA\u652F\u6301 svg \u6216 png`, pageId, id));
+  if (typeof data !== "string" || !data.trim() || data.length > 8000)
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${id} \u7684 data \u5FC5\u987B\u662F\u539F\u59CB\u6570\u636E\u8868`, pageId, id));
+  if (typeof skill !== "string" || format !== "svg" && format !== "png" || typeof data !== "string" || !data.trim())
+    return;
+  return { skill, format, data: data.trim() };
+}
 function parseElement(value, pageId, issues) {
   if (!isObject2(value)) {
     issues.push(issue("schema", "\u5143\u7D20\u5FC5\u987B\u662F\u5BF9\u8C61", pageId));
@@ -12826,7 +12846,7 @@ function parseElement(value, pageId, issues) {
   }
   const id = value.id;
   const elementId = typeof id === "string" ? id : undefined;
-  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
+  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
   if (typeof id !== "string" || !id.trim()) {
     issues.push(issue("schema", "\u5143\u7D20\u7F3A\u5C11 id", pageId));
     return null;
@@ -12870,7 +12890,14 @@ function parseElement(value, pageId, issues) {
       else
         element.fit = value.fit;
     }
+    if (value.chartImage !== undefined) {
+      const chartImage = parseChartImage(value.chartImage, id, issues, pageId);
+      if (chartImage)
+        element.chartImage = chartImage;
+    }
   }
+  if (value.type !== "image" && value.chartImage !== undefined)
+    issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 chartImage \u53EA\u7528\u4E8E\u56FE\u7247\u56FE\u8868`, pageId, id));
   if (value.type !== "image" && value.fit !== undefined)
     issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 fit \u53EA\u7528\u4E8E\u56FE\u7247`, pageId, id));
   if (value.type !== "shape" && (value.path !== undefined || value.gradient !== undefined || value.pattern !== undefined || value.pathRule !== undefined)) {
@@ -13490,7 +13517,7 @@ function checkArgumentLayout(page) {
       issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7F3A\u5C11\u5143\u7D20 ${slot.id}`, page.id, slot.id));
       continue;
     }
-    if (element.type !== slot.kind) {
+    if (!slotAccepts(slot.kind, element)) {
       issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u5E94\u4E3A ${slot.kind}`, page.id, slot.id));
     }
     const box = element.bounds;
@@ -13502,6 +13529,28 @@ function checkArgumentLayout(page) {
         issues.push(issue("schema", `\u7248\u5F0F ${layout.id} \u7684 ${slot.id} \u628A textCapacity \u653E\u5230\u4E86\u76EE\u5F55\u5BB9\u91CF\u4E4B\u5916`, page.id, slot.id));
       }
     }
+  }
+  return issues;
+}
+function slotAccepts(kind, element) {
+  if (element.type === kind)
+    return true;
+  return kind === "chart" && element.type === "image" && !!element.chartImage;
+}
+function checkChartImage(deck, page, element) {
+  const issues = [];
+  const box = element.bounds;
+  const data = element.chartImage?.data.trim() ?? "";
+  if (box.w < 48 || box.h < 48) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${element.id} \u7684\u5C3A\u5BF8\u8FC7\u5C0F\uFF08${box.w}\xD7${box.h}\uFF09`, page.id, element.id));
+  }
+  const { width, height } = deck.canvas;
+  const bleed = deck.profile === "example" ? 36 : 0.5;
+  const off = box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed;
+  if (off)
+    issues.push(issue("out_of_bounds", `\u56FE\u7247\u56FE\u8868 ${element.id} \u8D85\u51FA ${width}\xD7${height} \u753B\u5E03`, page.id, element.id));
+  if (!data || !page.notes?.includes(data)) {
+    issues.push(issue("schema", `\u56FE\u7247\u56FE\u8868 ${element.id} \u7684\u539F\u59CB\u6570\u636E\u8868\u8981\u5199\u8FDB\u9875\u9762\u5907\u6CE8`, page.id, element.id));
   }
   return issues;
 }
@@ -13518,9 +13567,12 @@ function checkPage(deck, page) {
     const box = element.bounds;
     const bleed = deck.profile === "example" ? 36 : 0.5;
     const off = deck.profile === "example" ? box.x + box.w < -bleed || box.y + box.h < -bleed || box.x > width + bleed || box.y > height + bleed : box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed;
-    if (off) {
+    const chartPicture = element.type === "image" && !!element.chartImage;
+    if (off && !chartPicture) {
       issues.push(issue("out_of_bounds", `\u5143\u7D20\u8D85\u51FA ${width}\xD7${height} \u753B\u5E03\uFF08x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}\uFF09`, page.id, element.id));
     }
+    if (chartPicture)
+      issues.push(...checkChartImage(deck, page, element));
     if (element.type === "text" && element.text && element.font && element.textCapacity) {
       issues.push(...checkText(deck, page, element, background));
     }

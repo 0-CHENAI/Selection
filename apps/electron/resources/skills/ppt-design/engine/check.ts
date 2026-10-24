@@ -116,7 +116,7 @@ function checkArgumentLayout(page: DeckPage): DeckIssue[] {
       issues.push(issue('schema', `版式 ${layout.id} 缺少元素 ${slot.id}`, page.id, slot.id))
       continue
     }
-    if (element.type !== slot.kind) {
+    if (!slotAccepts(slot.kind, element)) {
       issues.push(issue('schema', `版式 ${layout.id} 的 ${slot.id} 应为 ${slot.kind}`, page.id, slot.id))
     }
     const box = element.bounds
@@ -130,6 +130,28 @@ function checkArgumentLayout(page: DeckPage): DeckIssue[] {
         issues.push(issue('schema', `版式 ${layout.id} 的 ${slot.id} 把 textCapacity 放到了目录容量之外`, page.id, slot.id))
       }
     }
+  }
+  return issues
+}
+
+function slotAccepts(kind: DeckElement['type'], element: DeckElement): boolean {
+  if (element.type === kind) return true
+  return kind === 'chart' && element.type === 'image' && !!element.chartImage
+}
+
+function checkChartImage(deck: Deck, page: DeckPage, element: DeckElement): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  const box = element.bounds
+  const data = element.chartImage?.data.trim() ?? ''
+  if (box.w < 48 || box.h < 48) {
+    issues.push(issue('schema', `图片图表 ${element.id} 的尺寸过小（${box.w}×${box.h}）`, page.id, element.id))
+  }
+  const { width, height } = deck.canvas
+  const bleed = deck.profile === 'example' ? 36 : 0.5
+  const off = box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed
+  if (off) issues.push(issue('out_of_bounds', `图片图表 ${element.id} 超出 ${width}×${height} 画布`, page.id, element.id))
+  if (!data || !page.notes?.includes(data)) {
+    issues.push(issue('schema', `图片图表 ${element.id} 的原始数据表要写进页面备注`, page.id, element.id))
   }
   return issues
 }
@@ -149,9 +171,11 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
     const off = deck.profile === 'example'
       ? box.x + box.w < -bleed || box.y + box.h < -bleed || box.x > width + bleed || box.y > height + bleed
       : box.x < -bleed || box.y < -bleed || box.x + box.w > width + bleed || box.y + box.h > height + bleed
-    if (off) {
+    const chartPicture = element.type === 'image' && !!element.chartImage
+    if (off && !chartPicture) {
       issues.push(issue('out_of_bounds', `元素超出 ${width}×${height} 画布（x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}）`, page.id, element.id))
     }
+    if (chartPicture) issues.push(...checkChartImage(deck, page, element))
     if (element.type === 'text' && element.text && element.font && element.textCapacity) {
       issues.push(...checkText(deck, page, element, background))
     }

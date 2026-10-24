@@ -1,17 +1,20 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronRight, ImagePlus, Palette, RectangleHorizontal, X } from 'lucide-react'
+import { ChartColumn, Check, ChevronRight, ImagePlus, Palette, RectangleHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { PptRequest, PptTheme } from '@craft-agent/shared/protocol'
+import type { ChartSkillChoice } from '@craft-agent/shared/skills'
 
-export function TemplateOptions({ request, themes, onChange }: {
+export function TemplateOptions({ request, themes, chartSkills = [], onChange }: {
   request: PptRequest | undefined
   themes: PptTheme[]
+  chartSkills?: ChartSkillChoice[]
   onChange: (value: Partial<PptRequest>) => void
 }) {
   const { t } = useTranslation()
   const [brandOpen, setBrandOpen] = React.useState(false)
   const logoInput = React.useRef<HTMLInputElement>(null)
+  const selectedChart = chartSkills.some(skill => skill.slug === request?.chartSkill) ? request?.chartSkill : undefined
   return <>
     <p className="px-2 pb-2 pt-1.5 text-xs text-muted-foreground">{t('ppt.optionalSettings')}</p>
     <div className="px-2 py-2">
@@ -41,5 +44,18 @@ export function TemplateOptions({ request, themes, onChange }: {
     </div>}
     <div className="my-1 border-t border-border/70" />
     <div className="px-2 py-2"><div className="flex items-center gap-2 text-sm"><RectangleHorizontal className="size-3.5 text-muted-foreground" />{t('ppt.aspect')}</div><div className="ml-[22px] mt-2 flex flex-wrap gap-0.5 rounded-lg border border-border/60 bg-foreground/2 p-0.5">{(['template', '16:9', '4:3', '1:1', '9:16', '3:4', 'A4'] as const).map(value => <button key={value} type="button" aria-pressed={(request?.aspectRatio ?? 'template') === value} onClick={() => onChange({ aspectRatio: value })} className={`h-6 rounded-md px-1.5 text-xs tabular-nums ${(request?.aspectRatio ?? 'template') === value ? 'bg-background font-medium shadow-minimal' : 'text-muted-foreground hover:bg-background/70'}`}>{value === 'template' ? t('ppt.templateAspect') : value}</button>)}</div></div>
+    {chartSkills.length > 0 && <>
+      <div className="my-1 border-t border-border/70" />
+      <div className="px-2 py-2" data-testid="ppt-chart-style">
+        <div className="flex items-center gap-2 text-sm"><ChartColumn className="size-3.5 text-muted-foreground" /><span className="flex-1">{t('ppt.chartStyle')}</span></div>
+        <div className="ml-[22px] mt-2 space-y-1" role="radiogroup" aria-label={t('ppt.chartStyle')}>
+          <button type="button" role="radio" aria-checked={!selectedChart} data-testid="ppt-chart-native" onClick={() => onChange({ chartSkill: undefined })} className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs ${!selectedChart ? 'bg-background font-medium shadow-minimal' : 'text-muted-foreground hover:bg-background/70'}`}><span className="min-w-0 flex-1">{t('ppt.chartNative')}</span>{!selectedChart && <Check className="mt-0.5 size-3 shrink-0" />}</button>
+          {chartSkills.map(skill => {
+            const selected = selectedChart === skill.slug
+            return <button key={skill.slug} type="button" role="radio" aria-checked={selected} data-testid={`ppt-chart-skill-${skill.slug}`} onClick={() => onChange({ chartSkill: skill.slug })} className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-snug ${selected ? 'bg-background font-medium shadow-minimal' : 'text-muted-foreground hover:bg-background/70'}`}><span className="min-w-0 flex-1">{t('ppt.chartSkillOption', { name: skill.slug })}</span>{selected && <Check className="mt-0.5 size-3 shrink-0" />}</button>
+          })}
+        </div>
+      </div>
+    </>}
   </>
 }

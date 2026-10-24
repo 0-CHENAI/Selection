@@ -1,6 +1,8 @@
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { listChartSkills } from '@craft-agent/shared/skills'
+import { skillsAtom } from '@/atoms/skills'
 import { motion, useReducedMotion } from 'motion/react'
 import { MoreHorizontal, X } from 'lucide-react'
 import type { PptRequest, PptTemplate } from '@craft-agent/shared/protocol'
@@ -25,6 +27,7 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
   const reduced = useReducedMotion()
   const [request, setRequest] = useAtom(pptComposerAtomFamily(composerKey))
   const { catalog } = usePptCatalog()
+  const chartSkills = listChartSkills(useAtomValue(skillsAtom))
   const [open, setOpen] = React.useState(false)
   const [hover, setHover] = React.useState(false)
   const ref = React.useRef<HTMLDivElement>(null)
@@ -53,7 +56,7 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
       <button type="button" data-testid="ppt-remove-template" disabled={disabled} onClick={onRemove} aria-label={t('ppt.removeTemplate')} className="ppt-template-remove absolute z-10 grid place-items-center rounded-full border border-white/30 bg-black/90 text-white transition-opacity motion-reduce:transition-none" style={{ top: -CTRL.xOff, right: -CTRL.xOff, width: CTRL.size, height: CTRL.size, opacity: hover || open ? 1 : 0, transform: `rotate(${-tilt}deg)` }}><X className="size-3" /></button>
       <Popover open={open} onOpenChange={setOpen}><PopoverTrigger asChild><button type="button" disabled={disabled} data-testid="ppt-template-options" aria-label={t('ppt.options')} className="absolute z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-foreground shadow-minimal" style={{ right: -CTRL.menuOff, bottom: -CTRL.menuOff, transform: `rotate(${-tilt}deg)` }}><MoreHorizontal className="size-3.5" /></button></PopoverTrigger>
         <PopoverContent side="bottom" align="start" className="w-[300px] p-1.5" data-testid="ppt-options-panel">
-          <TemplateOptions request={request ?? undefined} themes={catalog?.themes ?? []} onChange={patch} />
+          <TemplateOptions request={request ?? undefined} themes={catalog?.themes ?? []} chartSkills={chartSkills} onChange={patch} />
         </PopoverContent>
       </Popover>
     </motion.div>

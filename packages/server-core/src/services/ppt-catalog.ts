@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { getBundledSkillsDir } from '@craft-agent/shared/skills'
+import { CHART_SKILL_SLUG, chartBackend, chartSkillInstructions, getBundledSkillsDir, type ChartSkillCandidate } from '@craft-agent/shared/skills'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
-import type { PptCatalog, PptCategory, PptRequest, PptTheme, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { PptCatalog, PptCategory, PptChartFallback, PptRequest, PptTheme, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { customTemplateReference, listCustomCatalogTemplates } from './ppt-library'
 
 type CatalogEntry = { name: string; design: string; deck: string; canvas?: string }
@@ -123,19 +123,37 @@ export function validatePptRequest(value: PptRequest, root = getPptSkillRoot()):
       || typeof logo.base64 !== 'string' || logo.base64.length > 4 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(logo.base64)) throw new Error('Invalid PPT logo')
     request.logo = { name: logo.name, base64: logo.base64, mimeType: logo.mimeType }
   }
+  if (value.chartSkill !== undefined && value.chartSkill !== '') {
+    if (typeof value.chartSkill !== 'string' || !CHART_SKILL_SLUG.test(value.chartSkill)) throw new Error('Invalid PPT chart skill')
+    request.chartSkill = value.chartSkill
+  }
   return request
 }
 
 /** The host never silently upgrades an established ordinary conversation; use the existing handover. */
-export function pptSendOptions(workMode: string | undefined, defaults: PptRequest | undefined, options?: SendMessageOptions, root?: string): SendMessageOptions | undefined {
+export function pptSendOptions(workMode: string | undefined, defaults: PptRequest | undefined, options?: SendMessageOptions, root?: string, skills: ChartSkillCandidate[] = []): SendMessageOptions | undefined {
   const requested = options?.ppt ?? defaults
   if (requested === undefined) return options
   if (workMode !== 'PRO') throw new Error('PPT generation requires a PRO conversation; hand over this conversation to PRO first')
-  return { ...options, ppt: validatePptRequest(requested, root ?? getPptSkillRoot()), skillSlugs: [...new Set([...(options?.skillSlugs ?? []), 'ppt-design'])] }
+  const ppt = validatePptRequest(requested, root ?? getPptSkillRoot())
+  const backend = chartBackend(ppt, skills)
+  const skillSlugs = [...new Set([...(options?.skillSlugs ?? []), 'ppt-design', ...(backend.mode === 'external' && backend.skill ? [backend.skill.slug] : [])])]
+  return { ...options, ppt, skillSlugs }
 }
 
 /** Only model input gets this context. User messages and uploaded attachments stay untouched. */
-export function buildPptPrompt(request: PptRequest, sessionPath: string, root = getPptSkillRoot()): string {
+function themeColors(request: PptRequest, root: string): Record<string, string> | undefined {
+  if (!request.themeId) return undefined
+  return json<{ colors: Record<string, string> }>(root, `styles/themes/${request.themeId}.json`).colors
+}
+
+export function writeChartFallbacks(sessionPath: string, fallbacks: PptChartFallback[]): void {
+  const dir = join(sessionPath, 'data')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'chart-fallback.json'), JSON.stringify({ fallbacks }))
+}
+
+export function buildPptPrompt(request: PptRequest, sessionPath: string, root = getPptSkillRoot(), skills: ChartSkillCandidate[] = []): string {
   request = validatePptRequest(request, root)
   const parts = ['[skill:ppt-design]', '<ppt_generation_context>', 'Create an editable PPT using ppt-design and its selection-deck engine. Follow the user’s natural-language requirements and attached source files.']
   if (request.templateId) {
@@ -175,6 +193,16 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
   }
   const deckPath = join(sessionPath, 'data', 'deck.json')
   const slidesDir = join(sessionPath, 'data', 'slides')
+  const backend = chartBackend(request, skills)
+  const fallbackFile = join(sessionPath, 'data', 'chart-fallback.json')
+  if (backend.mode === 'external' && backend.skill) {
+    parts.push(chartSkillInstructions(backend.skill, themeColors(request, root), request.brandColor))
+    parts.push(`Chart fallback file: ${fallbackFile}. Rewrite it as {"fallbacks":[]} when every external chart succeeds.`)
+    parts.push(`[skill:${backend.skill.slug}]`)
+  } else if (backend.fallback) {
+    parts.push(`The selected chart skill ${backend.fallback.skill} is not installed. Use native editable charts. The live panel already records this fallback.`)
+  }
+  writeChartFallbacks(sessionPath, backend.fallback ? [backend.fallback] : [])
   parts.push(`Write the working deck to ${deckPath}. Render each finished page to ${slidesDir}/slide-01.png and onward (1-based, two digits) before continuing, so the live panel can show it. Run deck_check and deck_render into those paths.`)
   parts.push('</ppt_generation_context>')
   return parts.join('\n\n')

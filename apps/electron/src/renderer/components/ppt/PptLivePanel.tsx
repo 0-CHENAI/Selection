@@ -67,6 +67,9 @@ export function PptLivePanel({ sessionId, snapshot, busy = false, fileIndex, onF
       </button>
       <div className="ml-auto shrink-0"><HeaderIconButton icon={<X className="size-4" />} tooltip={t('ppt.live.close')} onClick={onClose} /></div>
     </div>
+    {snapshot?.chartFallbacks && snapshot.chartFallbacks.length > 0 && <div data-testid="ppt-chart-fallback" className="mx-3 mb-2 rounded-lg bg-[#F4F1EA] px-3 py-2 text-[12px] leading-snug text-foreground">
+      {snapshot.chartFallbacks.map((item, index) => <p key={`${item.skill}-${item.page ?? 'deck'}-${index}`}>{t('ppt.live.chartFallback', { where: item.page ? t('ppt.live.chartFallback.page', { page: item.page }) : '', skill: item.skill, reason: t(`ppt.live.chartFallback.${item.reason}`) })}</p>)}
+    </div>}
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div data-testid="ppt-live-stage" className="relative min-h-0 w-full flex-1 overflow-hidden bg-[#e9e9eb]">
         {generating ? <div className="absolute inset-0 overflow-auto px-6 pb-6 pt-20">

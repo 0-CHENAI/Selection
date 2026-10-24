@@ -51,6 +51,8 @@
 
 颜色、图例和数据标签跟随主题的 `$accent`、`$ink`、`$muted` 和中文字体，不使用 Office 默认蓝和 Arial。省略 `colors` 时按主题循环取色。
 
+用户选了已安装的图表技能时，对应的图可以写成 `image`，并带 `chartImage`：`skill` 是技能 slug，`format` 是 `svg` 或 `png`，`data` 是原始数据表。图片按槽位 `bounds` 放置，`fit` 用 `fill`。`deck_check` 会检查这张图的尺寸和是否越出画布，并要求同一张数据表出现在页面 `notes` 里。备注会导出为 speaker notes。宽或高小于 48 pt 算过小。论证版式里原来的 `chart` 槽可以改放这种图片图表，几何仍要落在目录上。技能失败时改回原生 `chart`，不要留一张坏图。
+
 ### 渐变、图案、路径和阴影
 
 `gradient` 写在形状上：`kind` 为 `linear` 或 `radial`，`stops` 至少两个 `{offset, color}`，`offset` 从 0 到 1。线性渐变的 `angle` 从向右起、顺时针、y 向下，与 SVG 用户空间一致。`absolute: true` 时角度不跟形状框走。径向渐变用 `cx`、`cy`（0–1，相对形状框）。

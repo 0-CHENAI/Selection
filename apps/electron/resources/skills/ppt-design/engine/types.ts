@@ -167,6 +167,14 @@ export type LineSpec = {
   points?: { x1: number; y1: number; x2: number; y2: number }
 }
 
+/** A chart drawn by an installed external skill and placed as a picture. */
+export type ChartImageSpec = {
+  skill: string
+  format: 'svg' | 'png'
+  /** Original data table. The same text belongs in the page notes. */
+  data: string
+}
+
 export type DeckElement = {
   id: string
   type: 'text' | 'shape' | 'image' | 'chart' | 'table'
@@ -212,6 +220,8 @@ export type DeckElement = {
   src?: string
   alt?: string
   chart?: ChartSpec
+  /** Present when this image is a chart from an external skill. */
+  chartImage?: ChartImageSpec
   table?: TableSpec
 }
 
