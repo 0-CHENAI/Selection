@@ -29,6 +29,19 @@ export function pptHistoryStamp(item: PptHistoryStamp): number {
   return item.lastMessageAt ?? item.createdAt ?? 0
 }
 
+/**
+ * Session that should open after the focused PPT history row is deleted.
+ * Prefers the row that slides into the deleted slot, then the previous row.
+ * An unknown id falls back to the first remaining row.
+ */
+export function nextPptHistoryId<T extends { id: string }>(items: readonly T[], deletedId: string): string | null {
+  const remaining = items.filter(item => item.id !== deletedId)
+  if (remaining.length === 0) return null
+  const index = items.findIndex(item => item.id === deletedId)
+  if (index < 0) return remaining[0]!.id
+  return remaining[Math.min(index, remaining.length - 1)]!.id
+}
+
 /** Today / this week (Monday) / earlier, matching the signed-off PPT history. */
 export function groupPptHistory<T extends PptHistoryStamp>(items: T[], now = Date.now()) {
   const start = new Date(now)

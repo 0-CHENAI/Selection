@@ -146,8 +146,9 @@ export function useSessionMenuActions({
   }, [sessionId, t])
 
   const openInNewPanel = React.useCallback(() => {
-    navigate(routes.view.allSessions(sessionId), { newPanel: true })
-  }, [sessionId])
+    // PPT sessions stay on the PPT route. Ordinary sessions stay on All Sessions.
+    navigate(item.ppt !== undefined ? routes.view.ppt(sessionId) : routes.view.allSessions(sessionId), { newPanel: true })
+  }, [item.ppt, sessionId])
 
   const viewHandover = () => {
     navigate(routes.view.allSessions(sessionId))

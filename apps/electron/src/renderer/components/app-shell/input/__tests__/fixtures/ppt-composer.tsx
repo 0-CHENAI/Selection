@@ -15,13 +15,15 @@ import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { EscapeInterruptProvider } from '@/context/EscapeInterruptContext'
 import { ActionRegistryProvider } from '@/actions/registry'
 import { NavigationProvider } from '@/contexts/NavigationContext'
-import { loadedSessionsAtom, sessionAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
+import { loadedSessionsAtom, removeSessionAtom, sessionAtomFamily, sessionMetaMapAtom } from '@/atoms/sessions'
 import { projectsAtom } from '@/atoms/projects'
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { createDraftDisplaySession } from '@/lib/draft-session'
 import { mockSources } from '@/playground/mock-utils'
 import ChatPage from '@/pages/ChatPage'
 import { AppShell } from '@/components/app-shell/AppShell'
+import { ConfirmationHost } from '@/components/ConfirmationHost'
+import { confirmClientDialog } from '@/lib/confirmation'
 import { navigate, routes } from '@/lib/navigate'
 import type { CreateSessionOptions, Session } from '../../../../../../shared/types'
 import '@/index.css'
@@ -57,6 +59,7 @@ Object.assign(window.electronAPI, {
   ], themes: [] }),
   getPptTemplatePreview: async () => cover,
   getWorkspaceSettings: async () => ({}),
+  getSessionMessages: async (id: string) => store.get(sessionAtomFamily(id)) ?? null,
   sessionCommand: async (id: string, command: { type: string; dir?: string }) => {
     calls.commands.push([id, command])
     if (command.type === 'updateWorkingDirectory') {
@@ -98,6 +101,38 @@ function Fixture() {
       })) })
       return session
     },
+    seedPptHistory: () => {
+      const now = Date.now()
+      const workspaceId = parent.activeWorkspaceId!
+      const rows = [
+        { id: 'ppt-generating', name: '为我按照word中的内容生成演示', lastMessageAt: now - 30_000, isProcessing: true, pptProgress: { total: 0, completed: 0, generating: true } },
+        { id: 'ppt-ready', name: '为我按照word中的内容整理方案', lastMessageAt: now - 19 * 60_000, isProcessing: false, pptProgress: { total: 18, completed: 18, generating: false } },
+        { id: 'ppt-plan', name: '制作PPT彩票计划', lastMessageAt: now - 3 * 60 * 60_000, isProcessing: false, pptProgress: { total: 12, completed: 12, generating: false } },
+      ]
+      const meta = new Map(store.get(sessionMetaMapAtom))
+      const loaded = new Set(store.get(loadedSessionsAtom))
+      for (const row of rows) {
+        const session = {
+          ...createDraftDisplaySession({ id: row.id, workspaceId, workMode: 'PRO', model: 'gpt-4o', llmConnection: 'fixture' }),
+          name: row.name,
+          preview: row.name,
+          lastMessageAt: row.lastMessageAt,
+          createdAt: row.lastMessageAt,
+          isProcessing: row.isProcessing,
+          lastFinalMessageId: `${row.id}-final`,
+          ppt: { templateId: 'fixture-template' },
+          pptProgress: row.pptProgress,
+          messages: [{ id: `${row.id}-user`, role: 'user' as const, content: row.name, timestamp: row.lastMessageAt }],
+        } satisfies Session
+        store.set(sessionAtomFamily(session.id), session)
+        meta.set(session.id, session)
+        loaded.add(session.id)
+      }
+      store.set(sessionMetaMapAtom, meta)
+      store.set(loadedSessionsAtom, loaded)
+      if (fullShell) navigate(routes.view.ppt('ppt-ready'))
+      return rows.map(row => row.id)
+    },
   } })
   const value: typeof parent = { ...parent,
     isFocusedPanel: true, isCompactMode: compact, orchestrationProjectId: project,
@@ -117,6 +152,23 @@ function Fixture() {
     onSessionSourcesChange: (sessionId: string, slugs: string[]) => {
       store.set(sessionAtomFamily(sessionId), session => session && ({ ...session, enabledSourceSlugs: slugs }))
     },
+    onDeleteSession: async (sessionId: string) => {
+      const meta = store.get(sessionMetaMapAtom).get(sessionId)
+      const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
+      if (!isEmpty) {
+        const confirmed = (await confirmClientDialog({
+          kind: 'deleteSession',
+          name: meta?.name || 'Untitled',
+          title: '',
+          message: '',
+          buttons: ['Cancel', 'Delete'],
+          cancelId: 0,
+        })).response === 1
+        if (!confirmed) return false
+      }
+      store.set(removeSessionAtom, sessionId)
+      return true
+    },
   }
   return <AppShellProvider value={value}>
     <NavigationProvider workspaceId={parent.activeWorkspaceId} workspaceSlug="playground" onCreateSession={onCreateSession} isReady isSessionsReady>
@@ -127,6 +179,7 @@ function Fixture() {
 store.set(projectsAtom, [{ config: { id: 'project', name: 'Project', workingDirectory: '/project/fixed' } }] as never)
 createRoot(document.getElementById('root')!).render(<Provider store={store}><ThemeProvider><TooltipProvider><ActionRegistryProvider>
   <DismissibleLayerProvider><ModalProvider><EscapeInterruptProvider><FocusProvider><PlaygroundAppShellProvider>
+    <ConfirmationHost />
     <Fixture />
   </PlaygroundAppShellProvider></FocusProvider></EscapeInterruptProvider></ModalProvider></DismissibleLayerProvider>
 </ActionRegistryProvider></TooltipProvider></ThemeProvider></Provider>)

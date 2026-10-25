@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { AbortReason } from '@craft-agent/shared/agent'
 import { createSession, getSessionPath, loadSession, saveSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager'
 
@@ -98,6 +99,32 @@ it('preserves the directory when runtime shutdown fails', async () => {
   expect(existsSync(getSessionPath(root, source.id))).toBe(true)
   expect(managed.deleting).toBe(false)
   expect((manager as any).sessions.get(source.id)).toBe(managed)
+})
+
+it('stops a generating session before deleting its directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'generating-delete-'))
+  roots.push(root)
+  const source = await createSession(root)
+  const manager = new SessionManager()
+  const sourceDir = getSessionPath(root, source.id)
+  const managed = createManagedSession(source, { id: 'workspace', slug: 'workspace', name: 'Workspace', rootPath: root, createdAt: Date.now() })
+  managed.isProcessing = true
+  managed.ppt = { templateId: 'deck' }
+  managed.pptProgress = { total: 9, completed: 8, current: 9, generating: true }
+  const order: string[] = []
+  managed.agent = {
+    forceAbort: (reason: AbortReason) => {
+      order.push(reason)
+      expect(existsSync(sourceDir)).toBe(true)
+    },
+    disposeForRestart: async () => { order.push('dispose') },
+  } as never
+  ;(manager as any).sessions.set(source.id, managed)
+  await manager.deleteSession(source.id)
+  expect(order[0]).toBe(AbortReason.UserStop)
+  expect(order).toContain('dispose')
+  expect(existsSync(sourceDir)).toBe(false)
+  expect(managed.isProcessing).toBe(false)
 })
 
 it('archives without removing the session directory', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { pptHistoryKind } from './history'
+import { nextPptHistoryId, pptHistoryKind } from './history'
 
 describe('PPT history progress', () => {
   it('describes history progress from the persisted deck counts', () => {
@@ -9,5 +9,14 @@ describe('PPT history progress', () => {
     expect(pptHistoryKind({ progress: { total: 17, completed: 17, generating: false }, templatePages: 12 })).toEqual({ kind: 'pages', count: 17 })
     expect(pptHistoryKind({ templatePages: 12 })).toEqual({ kind: 'pages', count: 12 })
     expect(pptHistoryKind({})).toEqual({ kind: 'file' })
+  })
+
+  it('opens the neighboring PPT session after the current one is deleted', () => {
+    const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    expect(nextPptHistoryId(items, 'b')).toBe('c')
+    expect(nextPptHistoryId(items, 'c')).toBe('b')
+    expect(nextPptHistoryId(items, 'a')).toBe('b')
+    expect(nextPptHistoryId([{ id: 'only' }], 'only')).toBeNull()
+    expect(nextPptHistoryId(items, 'missing')).toBe('a')
   })
 })

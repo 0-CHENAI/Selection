@@ -71,6 +71,7 @@ import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/ato
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
 import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
+import { nextPptHistoryId } from '@/components/ppt/history'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -1737,10 +1738,20 @@ function AppShellContent({
     if (selectedProjectSlug && !selectedProjectId) return
     return recoverMissingSession(
       () => window.electronAPI.getSessionMessages(focusedSessionId),
-      () => navigate(routes.view.allSessions()),
+      () => {
+        if (!isPptView) {
+          navigate(routes.view.allSessions())
+          return
+        }
+        const nextId = nextPptHistoryId(
+          [...pptSessionMetas].sort((a, b) => (b.lastMessageAt ?? b.createdAt ?? 0) - (a.lastMessageAt ?? a.createdAt ?? 0)),
+          focusedSessionId,
+        )
+        navigate(nextId ? routes.view.ppt(nextId) : routes.view.ppt(), nextId ? undefined : draftSessionNavigateOptions())
+      },
       error => console.error('[Chat] Failed to verify missing session:', error),
     )
-  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId])
+  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId, isPptView, pptSessionMetas])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {
@@ -2417,7 +2428,17 @@ function AppShellContent({
               />
             )}
             {isPptView && (
-              <PptHistoryList items={pptSessionMetas} selectedSessionId={focusedSessionId} onSelect={id => navigate(routes.view.ppt(id))} onNew={() => handleNewChat()} />
+              <PptHistoryList
+                items={pptSessionMetas}
+                selectedSessionId={focusedSessionId}
+                onSelect={id => navigate(routes.view.ppt(id))}
+                onNew={() => handleNewChat()}
+                projects={projectMenuOptions}
+                onSetProjectId={handleSessionProjectChange}
+                onOpenInNewWindow={sessionId => {
+                  if (activeWorkspaceId) window.electronAPI.openSessionInNewWindow(activeWorkspaceId, sessionId)
+                }}
+              />
             )}
             {isSessionsNavigation(navState) && !isPptView && (
               /* Sessions List */
