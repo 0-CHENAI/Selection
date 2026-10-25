@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **开发启动与加载布局** — 修复 Vite 冷启动把共享 debug 工具中的主进程日志 transport 扫进 renderer、导致 `https` 预构建报错的问题；主进程继续接收文件日志。启动 HTML 在业务脚本和 CSS 加载前约束根容器，消除初始 loading 页的意外页面滚动条，消息与模板详情仍保留内部滚动。增加真实冷预构建和完整 NORM/PPT 导航回归。
+
 - **PPT 输入栏** — 独立 PPT 模式隐藏重复的 PPT 和 PRO 标签，恢复数据源与工作目录入口。选择会用于实际生成，目录可清除；独立会话发送后的新草稿不再沿用上一会话的数据源和目录，项目会话仍使用原绑定目录。
 
 - **PPT 外部图表技能** — 图表默认是原生可编辑图表。只有用户在需求里明确点名已安装的图表技能（例如「用 lieflat-charts 画图」）时，才会调用该技能：套用模板主题色，插入 SVG 或高清 PNG，并把原始数据写入备注。技能缺失、失败或超时时改回原生图表，并在侧窗提示。没有点名时不会调用，也不会询问。应用只检测本机已安装的图表技能，不打包这些技能。Part of #628.
