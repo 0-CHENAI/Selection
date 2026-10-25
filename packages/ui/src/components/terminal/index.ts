@@ -6,6 +6,8 @@ export { TerminalOutput, type TerminalOutputProps, type ToolType } from './Termi
 export {
   parseAnsi,
   stripAnsi,
+  readableAnsiForeground,
+  isUnreadableTerminalText,
   isGrepContentOutput,
   parseGrepOutput,
   ANSI_COLORS,

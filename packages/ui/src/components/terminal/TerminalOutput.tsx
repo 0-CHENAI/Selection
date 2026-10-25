@@ -13,7 +13,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Terminal, Copy, Check } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { parseAnsi, stripAnsi, isGrepContentOutput, parseGrepOutput } from './ansi-parser'
+import { parseAnsi, stripAnsi, isGrepContentOutput, parseGrepOutput, readableAnsiForeground, isUnreadableTerminalText } from './ansi-parser'
 
 export type ToolType = 'bash' | 'grep' | 'glob'
 
@@ -71,10 +71,11 @@ export function TerminalOutput({
   }, [])
 
   // Memoize ANSI-parsed output for performance
+  const unreadable = useMemo(() => isUnreadableTerminalText(output), [output])
   const parsedOutput = useMemo(() => {
-    if (!output) return []
-    return parseAnsi(output)
-  }, [output])
+    if (!output || unreadable) return []
+    return parseAnsi(output).map(span => ({ ...span, fg: readableAnsiForeground(span.fg, span.bg, theme) }))
+  }, [output, theme, unreadable])
 
   // Check if this looks like grep content output
   const isGrepOutput = useMemo(() => {
@@ -158,7 +159,9 @@ export function TerminalOutput({
           style={{ color: textColor }}
         >
           {/* Grep output with line number highlighting */}
-          {isGrepOutput && grepLines.length > 0 ? (
+          {unreadable ? (
+            <span>{t('terminal.unreadable')}</span>
+          ) : isGrepOutput && grepLines.length > 0 ? (
             <div className="space-y-0">
               {grepLines.map((line, i) => (
                 <div

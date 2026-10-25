@@ -1,7 +1,8 @@
 import katexSource from 'katex/dist/katex.min.js?raw'
+import { officePreviewPageBridge } from './office-preview-page'
 
 /** The sandbox has no application origin, network, file access, or write API. */
-export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number }; restorePaths?: string[] } = {}): string {
+export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number }; restorePaths?: string[]; page?: number } = {}): string {
   // OfficeCLI's CDN script onerror fallback overwrites formulas even when local KaTeX exists.
   html = html.replace(/<script\b[^>]*\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)[^>]*>[\s\S]*?<\/script\s*>/gi, '')
   const id = JSON.stringify(previewId).replace(/</g, '\\u003c')
@@ -22,9 +23,11 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
   const anchor = ${JSON.stringify(options.anchor ?? null).replace(/</g, '\\u003c')};
   const restorePaths = ${restorePaths};
   let restored = false;
+  ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
     const element = anchor && [...document.querySelectorAll('[data-path]')].find(el => el.getAttribute('data-path') === anchor.path);
     window.scrollTo(${Number.isFinite(options.scrollX) ? options.scrollX : 0}, element ? window.scrollY + element.getBoundingClientRect().top - anchor.offset : ${Number.isFinite(options.scrollY) ? options.scrollY : 0});
+    if (queuedPage) revealPage(queuedPage);
     restored = true;
     // The sandbox hides contentDocument from the parent. Paint the selection
     // here, after OfficeCLI has registered its click handlers.
