@@ -27,9 +27,10 @@ export function resolveDraftSources(state: DraftComposerState, projectId: string
   return state.sourcesChosen || !projectId ? state.sourceSlugs : defaults ?? state.sourceSlugs
 }
 
-/** Consume only this draft's source choice; existing sessions own their copy. */
+/** Consume this draft's context choices; existing sessions own their copy. */
 export function prepareNextDraft(state: DraftComposerState, projectId?: string): DraftComposerState {
   return { ...state, ...(projectId ? { initialized: false, hydrated: false } : {}),
+    workingDirectory: projectId ? state.workingDirectory : undefined,
     sourceSlugs: projectId ? state.sourceSlugs : [],
     sourcesChosen: projectId ? state.sourcesChosen : false,
   }

@@ -2178,8 +2178,8 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
-          <PptPickerButton composerKey={pptComposerKey} disabled={disabled} pptMode={pptMode} />
-          {!pptMode && onSourcesChange && (
+          {!pptMode && <PptPickerButton composerKey={pptComposerKey} disabled={disabled} />}
+          {onSourcesChange && (
             <div className="relative shrink min-w-0">
               <FreeFormInputContextBadge
                 buttonRef={sourceButtonRef}
@@ -2250,7 +2250,7 @@ export function FreeFormInput({
               />
             </div>
           )}
-          {!pptMode && (workingDirectoryLocked ? (
+          {workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} />
           ) : onWorkingDirectoryChange && (
             <ChatWorkingDirectoryControl
@@ -2262,7 +2262,7 @@ export function FreeFormInput({
               isEmptySession={false}
               workspaceId={workspaceId}
             />
-          ))}
+          )}
           </div>
           )}
 
@@ -2283,10 +2283,10 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
-          <PptPickerButton composerKey={pptComposerKey} disabled={disabled} pptMode={pptMode} />
+          {!pptMode && <PptPickerButton composerKey={pptComposerKey} disabled={disabled} />}
 
           {/* 2. Source Selector Badge - only show if onSourcesChange is provided */}
-          {!pptMode && onSourcesChange && (
+          {onSourcesChange && (
             <div className="relative shrink min-w-0 overflow-hidden">
               <FreeFormInputContextBadge
                 buttonRef={sourceButtonRef}
@@ -2363,7 +2363,7 @@ export function FreeFormInput({
           )}
 
           {/* 3. Working Directory Selector Badge */}
-          {!pptMode && (workingDirectoryLocked ? (
+          {workingDirectoryLocked ? (
             <ProjectWorkingDirectoryMark workingDirectory={workingDirectory} isEmptySession={isEmptySession} />
           ) : onWorkingDirectoryChange && (
             <ChatWorkingDirectoryControl
@@ -2375,11 +2375,11 @@ export function FreeFormInput({
               isEmptySession={isEmptySession}
               workspaceId={workspaceId}
             />
-          ))}
+          )}
           </div>
           )}
 
-          <SessionModeBadge mode={workMode} />
+          {!pptMode && <SessionModeBadge mode={workMode} />}
 
           {/* Spacer — doubles as a tap / hover target while the input is
               collapsed during processing in compact mode, so the user can
