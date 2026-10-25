@@ -1,6 +1,6 @@
 /** Generate bundled picker pages from complete real selection-deck exports.
  * bun scripts/render-ppt-picker-previews.ts [--force]
- * Pipeline: selection-deck export → LibreOffice PDF → pdftoppm (480px) → WebP quality 74.
+ * Pipeline: selection-deck export → LibreOffice vector PDF (detail) → 480px WebP (catalog).
  * Full ordered pages live in styles/previews/pages; the original first-three catalog
  * references are retained unchanged. Shared preview IDs render once across aliases.
  * Requires LibreOffice, pdftoppm and ffmpeg on PATH. No mockup assets are used.
@@ -18,6 +18,8 @@ const output = join(root, 'styles/previews')
 mkdirSync(output, { recursive: true })
 const pagesOutput = join(output, 'pages')
 mkdirSync(pagesOutput, { recursive: true })
+const documentsOutput = join(output, 'documents')
+mkdirSync(documentsOutput, { recursive: true })
 const work = mkdtempSync(join(tmpdir(), 'selection-picker-'))
 async function run(args: string[]) {
   const child = Bun.spawn(args, { stdout: 'ignore', stderr: 'pipe' })
@@ -31,10 +33,16 @@ try {
     if (rendered.has(previewId)) continue
     rendered.add(previewId)
     const deck = JSON.parse(readFileSync(join(root, entry.deck), 'utf8')) as Deck
-    if (!process.argv.includes('--force') && deck.pages.every((_, index) => existsSync(join(pagesOutput, `${previewId}-${index + 1}.webp`)))) continue
+    if (!process.argv.includes('--force') && existsSync(join(documentsOutput, `${previewId}.pdf`)) && deck.pages.every((_, index) => existsSync(join(pagesOutput, `${previewId}-${index + 1}.webp`)))) continue
     const pptx = join(work, `${previewId}.pptx`)
     await exportDeck(deck, pptx, { enforceCheck: false, platform: 'linux' })
     await run(['soffice', '--headless', '--norestore', '--nolockcheck', `-env:UserInstallation=file://${join(work, 'office-profile')}`, '--convert-to', 'pdf', '--outdir', work, pptx])
+    const pdf = Bun.file(join(work, `${previewId}.pdf`))
+    // A document travels in one RPC message. Do not ship an asset that the WebUI cannot open.
+    if (pdf.size * 4 / 3 + 1024 >= 16 * 1024 * 1024) throw new Error(`Preview PDF exceeds transport limit: ${previewId}`)
+    await Bun.write(join(documentsOutput, `${previewId}.pdf`), pdf)
+    // Adding vector details must not rewrite existing lightweight gallery references.
+    if (!process.argv.includes('--force') && deck.pages.every((_, index) => existsSync(join(pagesOutput, `${previewId}-${index + 1}.webp`)))) { console.log(previewId); continue }
     const prefix = join(work, previewId)
     await run(['pdftoppm', '-f', '1', '-l', String(deck.pages.length), '-scale-to', '480', '-png', join(dirname(pptx), `${previewId}.pdf`), prefix])
     for (let page = 1; page <= deck.pages.length; page++) {

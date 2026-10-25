@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { chartBackend, chartSkillInstructions, getBundledSkillsDir, nativeChartNotice, type ChartSkillCandidate } from '@craft-agent/shared/skills'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { PptCatalog, PptCategory, PptChartFallback, PptRequest, PptTheme, SendMessageOptions } from '@craft-agent/shared/protocol'
-import { customTemplateReference, listCustomCatalogTemplates } from './ppt-library'
+import { customTemplateReference, listCustomCatalogTemplates, thumbnailPptTemplateCard } from './ppt-library'
 
 type CatalogEntry = { name: string; design: string; deck: string; canvas?: string }
 type Picker = { homeOrder: string[]; templates: Record<string, { title: string; category: PptCategory; previewId: string }> }
@@ -70,11 +70,25 @@ export function getPptCatalog(root = getPptSkillRoot()): PptCatalog {
 }
 
 /** Custom templates stay out of the bundled cache and are read from the user library on each request. */
-export function getPptCatalogWithLibrary(root = getPptSkillRoot()): PptCatalog {
+export async function getPptCatalogWithLibrary(root = getPptSkillRoot()): Promise<PptCatalog> {
   const bundled = getPptCatalog(root)
   let custom: PptCatalog['templates'] = []
-  try { custom = listCustomCatalogTemplates() } catch { custom = [] }
+  try {
+    const cards = await Promise.allSettled(listCustomCatalogTemplates().map(thumbnailPptTemplateCard))
+    custom = cards.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+  } catch { custom = [] }
   return { templates: [...bundled.templates, ...custom], themes: bundled.themes }
+}
+
+/** The PDF retains text, paths and embedded fonts; the browser rasterizes only visible pages at its DPR. */
+export function getPptTemplatePreview(templateId: string, root = getPptSkillRoot()): string {
+  const catalog = entries(root)
+  if (typeof templateId !== 'string' || !Object.hasOwn(catalog, templateId)) throw new Error('Unknown PPT template')
+  const label = picker(root).templates[templateId]
+  if (!label || !/^[a-zA-Z0-9_-]+$/.test(label.previewId)) throw new Error('Invalid PPT preview ID')
+  const pdf = readPptAsset(root, `styles/previews/documents/${label.previewId}.pdf`)
+  if (pdf.subarray(0, 5).toString() !== '%PDF-' || pdf.byteLength * 4 / 3 + 1024 >= DEFAULT_MAX_MESSAGE_BYTES) throw new Error('Invalid PPT preview PDF')
+  return `data:application/pdf;base64,${pdf.toString('base64')}`
 }
 
 /** Full pages are deliberately excluded from the compact catalog and loaded per template. */

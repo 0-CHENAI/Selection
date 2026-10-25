@@ -281,6 +281,7 @@ export const CHANNEL_MAP = {
   getSkills: invoke(RPC_CHANNELS.skills.GET),
   getPptCatalog: invoke(RPC_CHANNELS.skills.GET_PPT_CATALOG),
   getPptTemplatePages: invoke(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES),
+  getPptTemplatePreview: invoke(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW),
   getPptLive: invoke(RPC_CHANNELS.skills.GET_PPT_LIVE),
   importPptTemplate: invoke(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE),
   renamePptTemplate: invoke(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE),

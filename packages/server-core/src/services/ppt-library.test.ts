@@ -1,15 +1,83 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
 import PptxGenJS from 'pptxgenjs'
+import sharp from 'sharp'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 import { buildPptPrompt } from './ppt-catalog'
 import { buildPptRevisionPrompt, validatePptRevision } from './ppt-live'
-import { deletePptTemplate, exportPptTemplate, importPptTemplate, listCustomCatalogTemplates, listPptCustomTemplates, renamePptTemplate, setPptPreviewRasterForTests } from './ppt-library'
+import { customTemplateCard, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, listCustomCatalogTemplates, listPptCustomTemplates, renamePptTemplate, setPptPreviewHtmlForTests, setPptPreviewRasterForTests, thumbnailPptTemplateCard } from './ppt-library'
 
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+
+test('custom details render source HTML once, preserve text and keep cards lightweight', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ppt-detail-'))
+  const high = await sharp({ create: { width: 2880, height: 1620, channels: 3, background: '#fff' } }).png().toBuffer()
+  let renders = 0
+  setPptPreviewRasterForTests((_source, _page, output) => { writeFileSync(output, high); return true })
+  setPptPreviewHtmlForTests(async (source, page) => {
+    expect(source.endsWith('source.pptx')).toBe(true)
+    expect(page).toBe(1)
+    renders++
+    return '<html><head></head><body><p>中文小字与 Retina</p><script>if(location.hash.indexOf(\'screenshot\')>=0){}</script></body></html>'
+  })
+  try {
+    const source = await sample('中文小字与 Retina', 1)
+    const { record } = importPptTemplate(source, '模板.pptx', root)
+    const card = await thumbnailPptTemplateCard(customTemplateCard(record, root))
+    const thumb = await sharp(Buffer.from(card.cover.split(',')[1]!, 'base64')).metadata()
+    expect(thumb.width).toBe(480)
+    const requests = [customTemplatePreview(record.id, 1, root), customTemplatePreview(record.id, 1, root)]
+    const [first, second] = await Promise.all(requests)
+    expect(first).toBe(second)
+    expect(first.startsWith('data:text/html;base64,')).toBe(true)
+    const html = Buffer.from(first.split(',')[1]!, 'base64').toString()
+    expect(html).toContain('中文小字与 Retina')
+    expect(html).toContain('Content-Security-Policy')
+    expect(html).toContain('if(true)')
+    expect(await customTemplatePreview(record.id, 1, root)).toBe(first)
+    expect(renders).toBe(1)
+    expect(readFileSync(join(root, record.id, 'source.pptx'))).toEqual(Buffer.from(source))
+    for (const page of [undefined, 0, -1, 2, 1.5, NaN]) await expect(customTemplatePreview(record.id, page, root)).rejects.toThrow('Unknown PPT template page')
+    await expect(customTemplatePreview('../escape', 1, root)).rejects.toThrow('Unknown PPT template')
+  } finally { setPptPreviewRasterForTests(null); setPptPreviewHtmlForTests(undefined); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('custom detail rejects invalid output instead of enlarging the stored raster', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ppt-detail-small-'))
+  setPptPreviewRasterForTests((_source, _page, output) => { writeFileSync(output, TINY_PNG); return true })
+  setPptPreviewHtmlForTests(async () => 'data:image/png;base64,small-thumbnail')
+  try {
+    const { record } = importPptTemplate(await sample('小图', 1), '模板.pptx', root)
+    await expect(customTemplatePreview(record.id, 1, root)).rejects.toThrow('Invalid PPT preview HTML')
+  } finally { setPptPreviewRasterForTests(null); setPptPreviewHtmlForTests(undefined); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('custom cache evicts old generated details without removing user sources', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ppt-detail-budget-'))
+  setPptPreviewRasterForTests((_source, _page, output) => { writeFileSync(output, TINY_PNG); return true })
+  setPptPreviewHtmlForTests(async () => '<html><head></head><body>中文小字</body></html>')
+  try {
+    const { record } = importPptTemplate(await sample('保留原稿', 1), '模板.pptx', root)
+    const caches: string[] = []
+    for (const [index, id] of ['custom-0000000000000000', 'custom-1111111111111111'].entries()) {
+      const dir = join(root, id, 'previews')
+      mkdirSync(dir, { recursive: true })
+      const cache = join(dir, '01.detail-v1.html')
+      writeFileSync(cache, '')
+      truncateSync(cache, 80 * 1024 * 1024) // sparse: exercise the byte budget without allocating 160 MiB
+      utimesSync(cache, index + 1, index + 1)
+      caches.push(cache)
+    }
+    await customTemplatePreview(record.id, 1, root)
+    expect(existsSync(caches[0]!)).toBe(false)
+    expect(existsSync(caches[1]!)).toBe(true)
+    expect(existsSync(join(root, record.id, 'source.pptx'))).toBe(true)
+    expect(existsSync(join(root, record.id, 'previews/01.png'))).toBe(true)
+  } finally { setPptPreviewRasterForTests(null); setPptPreviewHtmlForTests(undefined); rmSync(root, { recursive: true, force: true }) }
+})
 
 async function sample(title: string, pages = 2): Promise<Uint8Array> {
   const deck = new PptxGenJS()

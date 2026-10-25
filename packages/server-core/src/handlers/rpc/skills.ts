@@ -5,9 +5,9 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { getPptCatalogWithLibrary, getPptTemplatePages } from '../../services/ppt-catalog'
+import { getPptCatalogWithLibrary, getPptTemplatePages, getPptTemplatePreview } from '../../services/ppt-catalog'
 import { isPptGenerating, readPptLive } from '../../services/ppt-live'
-import { customTemplateCard, customTemplatePages, deletePptTemplate, exportPptTemplate, importPptTemplate, renamePptTemplate } from '../../services/ppt-library'
+import { customTemplateCard, customTemplatePages, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, renamePptTemplate, thumbnailPptTemplateCard } from '../../services/ppt-library'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
@@ -16,6 +16,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET_PPT_CATALOG,
   RPC_CHANNELS.skills.GET_PPT_LIVE,
   RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW,
   RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE,
   RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE,
   RPC_CHANNELS.skills.GET_FILES,
@@ -27,17 +28,21 @@ export const HANDLED_CHANNELS = [
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, () => getPptCatalogWithLibrary())
+  server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW, (_ctx, templateId: string, page?: number) => {
+    if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
+    return templateId.startsWith('custom-') ? customTemplatePreview(templateId, page) : getPptTemplatePreview(templateId)
+  })
   server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES, (_ctx, templateId: string) => {
     if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
     return templateId.startsWith('custom-') ? customTemplatePages(templateId) : getPptTemplatePages(templateId)
   })
-  server.handle(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE, (_ctx, input: { name?: string; base64?: string }) => {
+  server.handle(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE, async (_ctx, input: { name?: string; base64?: string }) => {
     if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPTX')
     if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPTX')
     const { record, duplicate } = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
-    return { template: customTemplateCard(record), duplicate }
+    return { template: await thumbnailPptTemplateCard(customTemplateCard(record)), duplicate }
   })
-  server.handle(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE, (_ctx, id: string, title: string) => customTemplateCard(renamePptTemplate(id, title)))
+  server.handle(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE, (_ctx, id: string, title: string) => thumbnailPptTemplateCard(customTemplateCard(renamePptTemplate(id, title))))
   server.handle(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE, (_ctx, id: string) => { deletePptTemplate(id) })
   server.handle(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE, (_ctx, id: string) => {
     const file = exportPptTemplate(id)
