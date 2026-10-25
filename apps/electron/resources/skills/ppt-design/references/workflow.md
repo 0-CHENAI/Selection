@@ -4,11 +4,11 @@
 2. 只锁定一个风格。读它的 `design.md`，再按 `styles/catalog.json` 的 `deck` 字段读参考页。需要结论、证据树、矩阵、瀑布、趋势、计分、路线、架构、对照、漏斗、流程、时间线、收束或取舍时，用 `deck-cli.mjs layouts` 里的论证版式，保留槽位几何。DSH 五套另有英文 `deck.en.json`。十四套 ppt-master 风格的参考页都是 `styles/examples/` 里的官方成稿，画布以该文件的 `canvas` 为准。事故复盘、经营复盘和产品发布的成稿带有第三方标识，只对照版式，换成用户自己的内容。按参考页的坐标改文字和数据；需要挪动时改 `bounds`，不要另起一套网格。图示标签沿用参考页的字号。主题可以整套替换颜色和字体，见 [风格索引](styles.md)。用户给出主色和辅色时，生成对比度安全的品牌主题，不要手写一组未检查的色值。新稿不要写 `profile: example`。
 3. 把完整 deck 写到会话 `dataFolderPath` 的新文件，例如 `deck.json`。参考页的虚构店名和数字不要留在正式稿里。图表默认是原生可编辑图表。只有用户在这条需求里明确点名某个已安装的图表技能时，才调用该技能：套用模板主题色，优先 SVG，否则长边至少 1600 px 的 PNG，按槽位 `bounds` 放成带 `chartImage` 的图片，并把原始数据表写入该页备注。技能失败、超时或没有安装时改回原生图表，并写入 `data/chart-fallback.json`。用户没点名时不要调用，也不要询问。
 4. 运行 `deck-cli.mjs check`。一次看完全部问题，按页和元素改完再查。不要为了通过而把字号降到风格下限以下。
-5. `render` 到 `dataFolderPath` 里的新 `.pptx`。需要截图时加 `--screenshot`。
-6. 用 OfficeCLI `validate`，并用 `view text` 或 `view outline` 读回标题、数字、单位、备注和页序。
+5. 不要把 PPTX 写进 `dataFolderPath`。应用会按已保存的 `deck.json` 导出唯一可见的 PPTX：没有工作目录时写在会话文件夹，有工作目录时写在该目录。文件名来自 deck 标题，路径在 `data/ppt-output.json` 的 `path`。需要截图时对这个文件运行 `deck-cli.mjs screenshot --out <dataFolderPath>/slides --pages <页数>`。
+6. 用 OfficeCLI `validate` 这个 path，并用 `view text` 或 `view outline` 读回标题、数字、单位、备注和页序。
 7. 打开每一页截图做视觉检查。预检通过不等于画面成立。
 8. 用户点名要改已有 PPTX 的某一处时，停止本流程，改用 OfficeCLI 编辑原文件。
 
 故事、选定的风格、字体平台、预检结果、视觉检查次数和最终路径记在 `dataFolderPath` 的 `design-plan.md`。那是会话材料，不是交付物。只有用户明确要求先看方案时才停在方案；否则规划完成后继续生成。恢复会话时读取磁盘上的计划和 deck，不重新选风格，也不把视觉检查次数清零。
 
-交付物是最终 `.pptx` 和一段事实说明。计划、deck JSON 和截图留在 `dataFolderPath`，除非用户要这些文件。
+交付物是这一份 `.pptx` 和一段事实说明。计划、deck JSON 和截图留在 `dataFolderPath`，除非用户要这些文件。不要再复制第二份 PPTX。

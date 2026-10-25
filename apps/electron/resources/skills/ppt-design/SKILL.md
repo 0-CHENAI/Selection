@@ -42,14 +42,14 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 ```text
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" layouts
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" check "<dataFolderPath>/deck.json"
-"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" render "<dataFolderPath>/deck.json" --out "<dataFolderPath>/deck.pptx" --screenshot "<dataFolderPath>/slides" --platform mac|win|linux
+"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" screenshot "<ppt-output.json 的 path>" --out "<dataFolderPath>/slides" --pages <页数>
 ```
 
 从 `CRAFT_BUN` 取得应用附带 Bun 的绝对路径，用参数数组调用。`<skill>` 是本技能的绝对路径。`--platform` 按用户机器选择 `mac`、`win` 或 `linux`。
 
 标准输出是一行 JSON。退出码 0 是通过，2 是 `needs_revision`，1 是文件或用法错误。`needs_revision` 时不写 PPTX。一次看完 `issues` 里的全部问题，按 `pageId` 和 `elementId` 修改后再查。溢出时整理换行或几何、换版式、拆页；不删除限定条件，不把整页栅格化。
 
-每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出 `data/deck.pptx`，并用平时的 Office 协同预览打开这份真实文件。第一页写出之前预览保持加载，不要另造文件名。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字）。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和 `deck_render`。预览里点选后的修改走 OfficeCLI。
+每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图。预览里点选后的修改走 OfficeCLI。
 
 用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。生成时以那里的 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准，不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败时才是几何 SVG。
 
@@ -86,5 +86,5 @@ G4 **整项任务最多 3 次：首次 + 至多 2 次修复复查**。更换渲�
 ## 交付
 
 - 用户要求 Morph 或 3D 时，只增加对象配对和运动检查，不另做一套静态设计。静态截图不能证明播放效果。
-- 中间文件放在 `dataFolderPath`。G1–G4 通过后，把已检查的 PPTX 复制到用户指定的路径；未指定则用有效工作目录。不默默覆盖已有文件。
-- 只交付 `.pptx` 和一段事实说明。许可与适配来源见 [ATTRIBUTION](ATTRIBUTION.md)。
+- 中间文件放在 `dataFolderPath`（`deck.json`、截图、检查结果）。可见的 PPTX 只有 `ppt-output.json` 里的那一份：没有工作目录时在会话文件夹，有工作目录时在该目录。不要复制第二份，也不要覆盖同目录里无关的已有文件。
+- 只交付这一份 `.pptx` 和一段事实说明。许可与适配来源见 [ATTRIBUTION](ATTRIBUTION.md)。

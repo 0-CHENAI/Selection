@@ -210,11 +210,11 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
     parts.push(`Chart fallback file: ${fallbackFile}. Rewrite it as {"fallbacks":[]} when every external chart succeeds.`)
     parts.push(`[skill:${backend.skill.slug}]`)
   } else {
-    if (backend.fallback) parts.push(`The user named chart skill ${backend.fallback.skill}, which is not installed. Use native editable charts. Do not call another chart skill, and do not ask which one to use. The live panel already records this fallback.`)
+    if (backend.fallback) parts.push(`The user named chart skill ${backend.fallback.skill}, which is not installed. Use native editable charts. Do not call another chart skill, and do not ask which one to use. The result card already records this fallback.`)
     parts.push(nativeChartNotice(skills))
   }
   writeChartFallbacks(sessionPath, backend.fallback ? [backend.fallback] : [])
-  parts.push(`Write the working deck to ${deckPath}. Render each finished page to ${slidesDir}/slide-01.png and onward (1-based, two digits) before continuing, so the live panel can show it. Run deck_check and deck_render into those paths.`)
+  parts.push(`Write the working deck to ${deckPath}. That JSON is session scratch, not the delivered file. Render each finished page to ${slidesDir}/slide-01.png and onward (1-based, two digits) before continuing. Those PNGs are the page images for the visual check. Run deck_check, then \`deck-cli.mjs screenshot <delivered.pptx> --out ${slidesDir} --pages <page count>\`. Pass --pages; without it OfficeCLI is not used. Do not write or copy a second pptx. The app exports the only user-visible file from the saved deck while this turn runs: the session folder when no working directory is selected, otherwise the working directory. The file name comes from the deck title. Read ${join(sessionPath, 'data', 'ppt-output.json')} for its absolute path, and validate that file.`)
   parts.push('</ppt_generation_context>')
   return parts.join('\n\n')
 }

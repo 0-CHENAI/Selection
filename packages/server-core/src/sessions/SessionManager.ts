@@ -1726,10 +1726,8 @@ export class SessionManager implements ISessionManager {
   private async syncPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
     if (!managed.ppt && !generating) return
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-    if (generating) {
-      try { await exportIncrementalPptx(dir) } catch (error) {
-        sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
-      }
+    try { await exportIncrementalPptx(dir, { workingDirectory: managed.workingDirectory }) } catch (error) {
+      sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
     }
     try { await ensurePptChecks(dir) } catch { /* page status stays passed until deck_check can run */ }
     let next: PptProgress | null = null

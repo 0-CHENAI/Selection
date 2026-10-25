@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync } from 'fflate'
+import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, readChartFallbacks, readPptProgress, validatePptRevision } from './ppt-live'
 
 function session(): string {
@@ -25,7 +26,7 @@ function deck(root: string, pages: number) {
       ],
     })),
   }))
-  writeFileSync(join(root, 'data', '2025宏观经济简报.pptx'), 'pptx-bytes')
+  writeFileSync(join(root, '2025宏观经济简报.pptx'), 'pptx-bytes')
 }
 
 test('progress reads the session deck and check status without inventing a filename', () => {
@@ -36,12 +37,14 @@ test('progress reads the session deck and check status without inventing a filen
     writeFileSync(join(root, 'data', 'slides', 'slide-02.png'), Buffer.from('png-2'))
     const first = readPptProgress(root, false, { check: () => [{ pageId: 'p2' }, { pageId: 'p2' }] })
     expect(first?.fileName).toBe('2025宏观经济简报.pptx')
-    expect(first?.pptxPath).toBe(join(root, 'data', '2025宏观经济简报.pptx'))
+    expect(first?.pptxPath).toBe(join(root, '2025宏观经济简报.pptx'))
+    writeFileSync(join(root, 'data', 'deck.pptx'), 'scratch')
+    expect(readPptProgress(root, false)?.pptxPath).toBe(join(root, '2025宏观经济简报.pptx'))
     expect(first?.pages?.map(page => page.status)).toEqual(['passed', 'needs_revision', 'passed'])
     expect(first?.pages?.[1]?.issueCount).toBe(2)
     expect(first?.generating).toBe(false)
     expect(readPptProgress(root, false)?.total).toBe(3)
-    rmSync(join(root, 'data', '2025宏观经济简报.pptx'))
+    rmSync(join(root, '2025宏观经济简报.pptx'))
     const unnamed = readPptProgress(root, true, { check: () => [] })
     expect(unnamed?.fileName).toBeUndefined()
     expect(unnamed?.pptxPath).toBeUndefined()
@@ -107,6 +110,9 @@ test('a partial deck write is ignored and revision prompts name only the selecte
     expect(prompt).toContain('把标题改短')
     expect(prompt).toContain('Keep every other page identical')
     expect(prompt).toContain('/slide[n]/shape[@name=<element id>]')
+    expect(prompt).toContain('ppt-output.json')
+    expect(prompt).not.toContain('data/deck.pptx')
+    expect(prompt).not.toContain('live panel')
     expect(() => validatePptRevision({ action: 'revise', targets: [] })).toThrow()
     expect(() => validatePptRevision({ targets: [{ page: 0 }] })).toThrow()
     expect(() => validatePptRevision({ targets: Array.from({ length: 257 }, (_, index) => ({ page: 1, elementId: `e${index}` })) })).toThrow()
@@ -136,12 +142,17 @@ test('incremental export adds slides as pages are saved and does not rewrite an 
     const write = (count: number) => writeFileSync(join(root, 'data', 'deck.json'), JSON.stringify(kit.makeDeck('往返', kit.fixtureTheme, Array.from({ length: count }, (_, index) => page(index + 1)))))
     const slideNames = (file: string) => Object.keys(unzipSync(readFileSync(file))).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     write(1)
+    writeFileSync(join(root, 'data', 'deck.pptx'), Buffer.from('SCRATCH'))
+    expect(readPptProgress(root, true)?.fileName).toBeUndefined()
     const first = await exportIncrementalPptx(root)
-    expect(first).toBe(join(root, 'data', 'deck.pptx'))
+    expect(first).toBe(join(root, '往返.pptx'))
+    expect(existsSync(join(root, 'data', 'deck.pptx'))).toBe(false)
     expect(slideNames(first!)).toEqual(['ppt/slides/slide1.xml'])
     expect(Buffer.from(unzipSync(readFileSync(first!))['ppt/slides/slide1.xml']!).toString('utf8')).toContain('name="title-el"')
+    expect(readPptProgress(root, true)?.pptxPath).toBe(first)
     write(3)
     const grown = await exportIncrementalPptx(root)
+    expect(grown).toBe(first)
     expect(slideNames(grown!).sort()).toEqual(['ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/slide3.xml'])
     writeFileSync(grown!, Buffer.from('KEEP'))
     expect(await exportIncrementalPptx(root)).toBe(grown)
@@ -156,5 +167,54 @@ test('incremental export adds slides as pages are saved and does not rewrite an 
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a titled pptx is the only visible file, in the session folder or the working directory', async () => {
+  const workspace = session()
+  const root = join(workspace, 'sessions', 'demo')
+  const wd = session()
+  try {
+    const { getPptSkillRoot } = await import('./ppt-catalog')
+    const kit = await import(pathToFileURL(join(getPptSkillRoot(), 'styles/kit.ts')).href) as {
+      fixtureTheme: unknown
+      makeDeck: (title: string, theme: unknown, pages: unknown[]) => unknown
+      makePage: (id: string, layout: string, name: string, background: string, elements: unknown[], notes: string) => unknown
+      text: (id: string, value: string, x: number, y: number, w: number, h: number, size: number, opts?: { bold?: boolean }) => unknown
+    }
+    const page = kit.makePage('p1', 'free', '封面', '$paper', [kit.text('title-el', '封面', 48, 40, 400, 48, 24, { bold: true })], '')
+    const write = (dir: string, title: string) => {
+      mkdirSync(join(dir, 'data'), { recursive: true })
+      writeFileSync(join(dir, 'data', 'deck.json'), JSON.stringify(kit.makeDeck(title, kit.fixtureTheme, [page])))
+    }
+    write(root, '报告: 2025/Q1?')
+    writeFileSync(join(root, '报告 2025 Q1.pptx'), Buffer.from('OTHER'))
+    const named = await exportIncrementalPptx(root)
+    expect(named).toBe(join(root, '报告 2025 Q1-2.pptx'))
+    expect(readFileSync(join(root, '报告 2025 Q1.pptx')).toString()).toBe('OTHER')
+    expect(isArtifactCardPath(named!)).toBe(true)
+    expect(isSessionScratchPath(join(root, 'data', 'deck.pptx'))).toBe(true)
+    expect(existsSync(join(root, 'data', 'deck.pptx'))).toBe(false)
+    writeFileSync(named!, Buffer.from('KEEP'))
+    const moved = await exportIncrementalPptx(root, { workingDirectory: wd })
+    expect(moved).toBe(join(wd, '报告 2025 Q1.pptx'))
+    expect(readFileSync(moved!).toString()).toBe('KEEP')
+    expect(existsSync(named!)).toBe(false)
+    expect(isArtifactCardPath(moved!)).toBe(true)
+    const boxed = join(workspace, 'sessions', 'boxed')
+    write(boxed, '往返')
+    expect(await exportIncrementalPptx(boxed, { workingDirectory: join(boxed, 'data') })).toBe(join(boxed, '往返.pptx'))
+    const outside = session()
+    const victim = join(outside, '重要.pptx')
+    writeFileSync(victim, 'KEEP')
+    write(root, '报告: 2025/Q1?')
+    writeFileSync(join(root, 'data', 'ppt-output.json'), JSON.stringify({ path: victim, stamp: 'nope' }))
+    const safe = await exportIncrementalPptx(root)
+    expect(safe?.startsWith(root)).toBe(true)
+    expect(readFileSync(victim).toString()).toBe('KEEP')
+    rmSync(outside, { recursive: true, force: true })
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
+    rmSync(wd, { recursive: true, force: true })
   }
 })

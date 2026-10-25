@@ -119,6 +119,9 @@ test('PRO request enables skill without changing user transport options and adds
   expect(context).toContain('#123456')
   expect(context).toContain(join(session, 'data', 'deck.json'))
   expect(context).toContain('slide-01.png')
+  expect(context).toContain('ppt-output.json')
+  expect(context).not.toContain('live panel')
+  expect(context).not.toContain('data/deck.pptx')
   const themeId = getPptCatalog(root).themes[0]!.id
   expect(validatePptRequest({ themeId }, root)).toEqual({ themeId })
   expect(readFileSync(join(session, 'attachments/ppt-brand/logo.png')).toString()).toBe('logo bytes')

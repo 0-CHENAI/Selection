@@ -42,6 +42,17 @@ it('hides historical source-cache and TXT cards on every platform while keeping 
     .toEqual(paths.slice(7))
 })
 
+it('shows a session-root pptx and a working-directory pptx, and skips the scratch export', () => {
+  expect(extractDeliveredResponseArtifacts([
+    { path: '/work/sessions/current/data/deck.pptx', change: 'created' },
+    { path: '/work/sessions/current/季度经营会.pptx', change: 'created' },
+    { path: '/projects/brief/季度经营会.pptx', change: 'created' },
+  ]).map(file => file.path)).toEqual([
+    '/work/sessions/current/季度经营会.pptx',
+    '/projects/brief/季度经营会.pptx',
+  ])
+})
+
 it('keeps distinct paths, deduplicates aliases and preserves restored versions', () => {
   expect(extractDeliveredResponseArtifacts([
     { path: 'C:/Reports/Final.DOCX', change: 'restored' },
