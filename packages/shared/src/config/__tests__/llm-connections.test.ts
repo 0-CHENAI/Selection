@@ -124,6 +124,11 @@ describe('getDefaultModelForConnection', () => {
     expect(defaultModel).toBe('pi/gpt-6.1-sol')
     expect(modelIds[0]).toBe('pi/gpt-6.1-sol')
     expect(modelIds).toContain('pi/gpt-6-sol')
+    expect(modelIds).toContain('pi/gpt-5.6-sol')
+    // Pi 1.4.0 removed these from the Codex catalog. They stay available on
+    // the OpenAI API-key provider.
+    expect(modelIds).not.toContain('pi/gpt-5.5')
+    expect(modelIds).not.toContain('pi/gpt-5.3-codex-spark')
     expect(modelIds).not.toContain('pi/gpt-5.2')
     expect(modelIds).not.toContain('pi/gpt-4o')
   })

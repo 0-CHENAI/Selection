@@ -20,7 +20,10 @@ describe('unified-network-interceptor validators (#613)', () => {
   });
 
   describe('Anthropic auth headers', () => {
-    it('drops x-api-key when a non-official host already has Authorization Bearer', () => {
+    it('drops x-api-key when a non-official Messages host already has Authorization Bearer', () => {
+      // Official Kimi Code is Chat Completions and never reaches this helper.
+      // A custom Anthropic host, including a Messages URL on api.kimi.com, still
+      // drops x-api-key when Bearer is already present.
       const headers = preferAnthropicBearerAuth('https://api.kimi.com/coding/v1/messages', {
         'x-api-key': 'secret-key',
         Authorization: 'Bearer secret-key',
@@ -63,6 +66,15 @@ describe('unified-network-interceptor validators (#613)', () => {
         'x-api-key': 'secret-key',
         Authorization: 'Bearer secret-key',
       });
+    });
+
+    it('leaves Chat Completions headers unchanged, including official Kimi Code', () => {
+      const headers = {
+        'x-api-key': 'secret-key',
+        Authorization: 'Bearer kimi-access-token',
+      };
+      expect(preferAnthropicBearerAuth('https://api.kimi.com/coding/v1/chat/completions', headers)).toBe(headers);
+      expect(preferAnthropicBearerAuth('http://127.0.0.1:9/v1/chat/completions', headers)).toBe(headers);
     });
   });
 

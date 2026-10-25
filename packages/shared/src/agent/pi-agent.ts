@@ -884,11 +884,14 @@ export class PiAgent extends BaseAgent {
               },
             };
           }
-          // Kimi Code: the API expects `Authorization: Bearer`, which Pi only
-          // sends for OAuth credentials (api_key would become `x-api-key`).
-          // Refresh stays main-side (refreshAndPushTokens) because Kimi rotates
-          // refresh tokens — so withhold the refresh token and pin expiry far
-          // in the future to stop the subprocess from refreshing on its own.
+          // Kimi Code (Pi 1.3.0+): Chat Completions at
+          // https://api.kimi.com/coding/v1. OAuth `toAuth` sets
+          // `Authorization: Bearer`. Keep the oauth credential (empty refresh,
+          // far-future expiry) so the subprocess does not refresh — Kimi
+          // rotates refresh tokens, and refresh stays main-side
+          // (refreshAndPushTokens). An api_key credential would also be sent
+          // as Bearer by the Chat Completions client, but it would not go
+          // through `toAuth` and adapt-credential does not upgrade it.
           if (piAuthProvider === 'kimi-coding') {
             this.debug(`Retrieved Kimi Code OAuth credential for Pi provider: ${piAuthProvider}`);
             return {

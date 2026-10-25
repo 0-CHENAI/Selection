@@ -189,7 +189,7 @@ describe('pi-agent-server bundle', () => {
       {
         type: 'init',
         apiKey: '',
-        model: 'pi/gpt-5.5',
+        model: 'pi/gpt-6.1-sol',
         cwd: scratchDir,
         thinkingLevel: 'off',
         workspaceRootPath: scratchDir,
