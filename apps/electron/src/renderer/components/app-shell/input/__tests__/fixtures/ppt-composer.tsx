@@ -21,14 +21,33 @@ import { workModeViewAtom } from '@/atoms/work-mode'
 import { createDraftDisplaySession } from '@/lib/draft-session'
 import { mockSources } from '@/playground/mock-utils'
 import ChatPage from '@/pages/ChatPage'
+import { AppShell } from '@/components/app-shell/AppShell'
+import { navigate, routes } from '@/lib/navigate'
 import type { CreateSessionOptions, Session } from '../../../../../../shared/types'
 import '@/index.css'
 
 const store = createStore()
+const fullShell = new URLSearchParams(location.search).has('shell')
 const calls = { creates: [] as CreateSessionOptions[], sends: [] as unknown[][], commands: [] as unknown[][] }
 let pickedDirectory: string | null = '/work/ppt-input'
 const cover = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><rect width="960" height="540" fill="#1d3152"/><text x="80" y="240" fill="white" font-size="60">Strategy review</text><path d="M80 300H650" stroke="#ffb35c" stroke-width="8"/></svg>')}`
 Object.assign(window.electronAPI, {
+  getSources: async () => mockSources,
+  onSourcesChanged: () => () => {},
+  getSkills: async () => [],
+  onSkillsChanged: () => () => {},
+  getProjects: async () => [{ config: { id: 'project', slug: 'redundant', name: 'Redundant', workingDirectory: '/project/fixed', createdAt: 0, updatedAt: 0 }, folderPath: '/project' }],
+  onProjectsChanged: () => () => {},
+  listStatuses: async () => [],
+  onStatusesChanged: () => () => {},
+  listLabels: async () => [],
+  onLabelsChanged: () => () => {},
+  listViews: async () => [],
+  getAutomations: async () => '{}',
+  getAutomationLastExecuted: async () => ({}),
+  onAutomationsChanged: () => () => {},
+  getUnreadSummary: async () => ({ hasUnreadByWorkspace: {} }),
+  onUnreadSummaryChanged: () => () => {},
   openFolderDialog: async () => pickedDirectory,
   getTransportConnectionState: async () => ({ mode: 'local', status: 'connected' }),
   getPptCatalog: async () => ({ templates: [{ id: 'fixture-template', title: 'Strategy review', category: '商务', canvas: '16:9', pages: 12, cover, referencePages: [cover] }], themes: [] }),
@@ -46,7 +65,7 @@ setupI18n([initReactI18next]).changeLanguage('zh-CN')
 function Fixture() {
   const parent = useAppShellContext()
   const [id, setId] = React.useState<string | null>(null)
-  const [ppt, setPpt] = React.useState(true)
+  const [ppt, setPpt] = React.useState(!fullShell)
   const [compact, setCompact] = React.useState(false)
   const [project, setProject] = React.useState<string>()
   const onCreateSession = React.useCallback(async (workspaceId: string, options: CreateSessionOptions = {}) => {
@@ -63,9 +82,11 @@ function Fixture() {
     configure: (options: { id?: string; ppt?: boolean; compact?: boolean; directory?: string | null; project?: string; mode?: 'NORM' | 'PRO' }) => {
       setId(options.id ?? null); setPpt(options.ppt ?? true); setCompact(options.compact ?? false); setProject(options.project)
       store.set(workModeViewAtom, options.mode ?? 'NORM')
+      if (fullShell) navigate(options.ppt ? routes.view.ppt() : routes.view.allSessions(options.id), { skipAutoSelect: !options.id })
       if ('directory' in options) pickedDirectory = options.directory ?? null
     },
     openCreated: () => setId(`created-${calls.creates.length}`),
+    seedSession: (mode: 'NORM' | 'PRO') => onCreateSession(parent.activeWorkspaceId!, { workMode: mode, model: 'gpt-4o', llmConnection: 'fixture' }),
   } })
   const value: typeof parent = { ...parent,
     isFocusedPanel: true, isCompactMode: compact, orchestrationProjectId: project,
@@ -88,7 +109,7 @@ function Fixture() {
   }
   return <AppShellProvider value={value}>
     <NavigationProvider workspaceId={parent.activeWorkspaceId} workspaceSlug="playground" onCreateSession={onCreateSession} isReady isSessionsReady>
-      <div className="h-screen bg-background text-foreground"><ChatPage sessionId={id} pptMode={ppt} /></div>
+      <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground" style={fullShell ? { paddingTop: 'var(--topbar-height)' } : undefined}>{fullShell ? <AppShell contextValue={value} /> : <ChatPage sessionId={id} pptMode={ppt} />}</div>
     </NavigationProvider>
   </AppShellProvider>
 }
