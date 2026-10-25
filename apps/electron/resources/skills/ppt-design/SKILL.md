@@ -49,7 +49,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 标准输出是一行 JSON。退出码 0 是通过，2 是 `needs_revision`，1 是文件或用法错误。`needs_revision` 时不写 PPTX。一次看完 `issues` 里的全部问题，按 `pageId` 和 `elementId` 修改后再查。溢出时整理换行或几何、换版式、拆页；不删除限定条件，不把整页栅格化。
 
-实时侧窗读取会话 `data/deck.json` 和 `data/slides/slide-01.png` 起的逐页截图（页码从 1 开始，两位数字）。每写完一页就渲染到这两个位置。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和 `deck_render`。
+每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出 `data/deck.pptx`，并用平时的 Office 协同预览打开这份真实文件。第一页写出之前预览保持加载，不要另造文件名。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字）。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和 `deck_render`。预览里点选后的修改走 OfficeCLI。
 
 用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。生成时以那里的 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准，不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败时才是几何 SVG。
 
@@ -67,7 +67,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 - 套用当前模板的主题色。技能支持 custom 色板时，把纸色、墨色、辅助色、强调色和品牌色交给它自己的色板字段。
 - 优先要独立 SVG。技能给不出 SVG 时，再要长边至少 1600 px 的 PNG。
 - 按版式槽位的 `bounds` 放成 `image`，`fit` 为 `fill`，并写 `chartImage`：`skill`、`format`（`svg` 或 `png`）、`data`（原始数据表）。同一张表写进该页 `notes`，导出后成为 speaker notes。
-- 技能报错或这次生成里没有完成时，这张图改回原生图表，并在会话 `data/chart-fallback.json` 记下 `{"fallbacks":[{"skill":"<slug>","reason":"error"|"timeout","page":页码}]}`。侧窗会提示已退回原生图表。
+- 技能报错或这次生成里没有完成时，这张图改回原生图表，并在会话 `data/chart-fallback.json` 记下 `{"fallbacks":[{"skill":"<slug>","reason":"error"|"timeout","page":页码}]}`。结果卡片会提示已退回原生图表。
 
 点名的技能没有安装时，同样改回原生图表，并在 `chart-fallback.json` 记下 `reason` 为 `missing`。不要改叫另一个图表技能，也不要询问。
 

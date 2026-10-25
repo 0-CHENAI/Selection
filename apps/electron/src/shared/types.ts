@@ -1,7 +1,7 @@
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
-import type { PptCatalog, PptLiveSnapshot, PptTemplate, PptTemplateExport, PptTemplateImportResult } from '@craft-agent/shared/protocol'
+import type { PptCatalog, PptTemplate, PptTemplateExport, PptTemplateImportResult } from '@craft-agent/shared/protocol'
 export * from '@craft-agent/shared/protocol'
 
 // =============================================================================
@@ -550,7 +550,6 @@ export interface ElectronAPI {
   getPptTemplatePages(templateId: string): Promise<string[]>
   /** Vector PDF for bundled templates; isolated source HTML for one custom page (1-based). */
   getPptTemplatePreview(templateId: string, page?: number): Promise<string>
-  getPptLive(sessionId: string, known?: Record<string, string>): Promise<PptLiveSnapshot | null>
   importPptTemplate(input: { name: string; base64: string }): Promise<PptTemplateImportResult>
   renamePptTemplate(id: string, title: string): Promise<PptTemplate>
   deletePptTemplate(id: string): Promise<void>

@@ -46,7 +46,7 @@ export type ExportOptions = {
   platform?: PlatformName
   screenshotDir?: string
   officecli?: string
-  /** When false, a failing check still returns issues and writes nothing. */
+  /** Default runs deck_check and writes nothing on needs_revision. False skips the check and still writes, for an in-progress preview. */
   enforceCheck?: boolean
 }
 
@@ -89,6 +89,7 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
   return finishSlideXml(Buffer.from(raw as Uint8Array), deck, platform)
 }
 
+/** Shape name is the deck element id. OfficeCLI addresses it as `/slide[n]/shape[@name=<id>]`. Chart decorations use `${id}-…`. */
 function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
   const x = inches(element.bounds.x)
   const y = inches(element.bounds.y)

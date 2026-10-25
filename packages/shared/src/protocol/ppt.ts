@@ -43,7 +43,7 @@ export interface PptRequest {
   aspectRatio?: 'template' | '16:9' | '4:3' | '1:1' | '9:16' | 'A4' | '3:4'
 }
 
-/** Shown in the live panel when an external chart skill falls back to a native chart. */
+/** Shown on the PPT result card when an external chart skill falls back to a native chart. */
 export interface PptChartFallback {
   skill: string
   reason: 'missing' | 'timeout' | 'error'
@@ -51,45 +51,30 @@ export interface PptChartFallback {
   page?: number
 }
 
-/** deck_check outcome shown on each live thumbnail. */
+/** deck_check outcome shown for one page on the PPT result card. */
 export type PptPageStatus = 'passed' | 'needs_revision' | 'fixing' | 'pending'
 
-/** Counts the history row can show without loading slide images. */
-export interface PptProgress {
-  fileName?: string
-  total: number
-  completed: number
-  /** 1-based page currently being written. */
-  current?: number
-  currentTitle?: string
-  generating: boolean
-}
-
-export interface PptLiveElement {
-  id: string
-  type: string
-  bounds: { x: number; y: number; w: number; h: number }
-  text?: string
-}
-
-export interface PptLivePage {
+export interface PptPageProgress {
   /** 1-based page number. */
   index: number
   id: string
   name: string
   status: PptPageStatus
   issueCount: number
-  image?: string
-  imageHash?: string
-  elements: PptLiveElement[]
 }
 
-export interface PptLiveSnapshot extends PptProgress {
-  sessionId?: string
-  canvas: { width: number; height: number; label: string }
+/** Counts and per-page check status. fileName is set only when a real pptx exists. */
+export interface PptProgress {
+  fileName?: string
+  /** Absolute path of that pptx. Absent until the file is on disk. */
   pptxPath?: string
-  pages: PptLivePage[]
-  files: Array<{ path: string; name: string }>
+  total: number
+  completed: number
+  /** 1-based page currently being written. */
+  current?: number
+  currentTitle?: string
+  generating: boolean
+  pages?: PptPageProgress[]
   chartFallbacks?: PptChartFallback[]
 }
 

@@ -1,6 +1,7 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createHash, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
@@ -17,6 +18,19 @@ function binary() {
   if (!path || /\.(cmd|bat)$/i.test(path)) throw new Error('OfficeCLI executable is unavailable on this host')
   return path
 }
+/** Live package bytes when the file changed and is still a complete Office zip; otherwise the snapshot. */
+export function officePreviewBytes(snapshot: Buffer, filePath: string): Buffer {
+  try {
+    const live = readFileSync(filePath)
+    if (live.equals(snapshot)) return snapshot
+    const parts = unzipSync(live, { filter: file => file.name === '[Content_Types].xml' })
+    if (!parts['[Content_Types].xml']?.length) return snapshot
+    return live
+  } catch {
+    return snapshot
+  }
+}
+
 export async function officeNodes(file: string, path: string): Promise<Array<Record<string, unknown>>> {
   const { stdout } = await exec(binary(), ['get', file, path, '--json'], { env: env(), timeout: 30_000, maxBuffer: 2 * 1024 * 1024 })
   const result = JSON.parse(stdout)

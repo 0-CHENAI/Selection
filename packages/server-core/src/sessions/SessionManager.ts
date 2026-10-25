@@ -1,4 +1,4 @@
-import { OfficePreviewService, verifyOfficeSelection } from '../reliability/office-preview'
+import { OfficePreviewService, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
 import { projectHistory } from './project-history'
 import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
 import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
@@ -176,7 +176,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
-import { buildPptRevisionPrompt, clearStalePptGenerating, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision } from '../services/ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -1722,14 +1722,26 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  /** Publish deck page counts for the history row, and drop the generating marker when the turn ends. */
-  private syncPptProgress(managed: ManagedSession, generating: boolean): void {
+  /** Publish deck page counts for the history row and the chat result card. */
+  private async syncPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
     if (!managed.ppt && !generating) return
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (generating) {
+      try { await exportIncrementalPptx(dir) } catch (error) {
+        sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
+      }
+    }
+    try { await ensurePptChecks(dir) } catch { /* page status stays passed until deck_check can run */ }
     let next: PptProgress | null = null
-    try { next = readPptProgress(dir, generating) } catch { return }
+    try { next = readPptProgress(dir, generating, { workingDirectory: managed.workingDirectory }) } catch { return }
     if (!next && generating && managed.ppt) {
-      next = { total: managed.pptProgress?.total ?? 0, completed: managed.pptProgress?.completed ?? 0, generating: true, fileName: managed.pptProgress?.fileName }
+      const previous = managed.pptProgress
+      next = {
+        total: previous?.pptxPath ? previous.total : 0,
+        completed: previous?.pptxPath ? previous.completed : 0,
+        generating: true,
+        ...(previous?.pptxPath ? { fileName: previous.fileName, pptxPath: previous.pptxPath, pages: previous.pages, chartFallbacks: previous.chartFallbacks } : {}),
+      }
     }
     if (!next && !generating && managed.pptProgress?.generating) next = { ...managed.pptProgress, generating: false }
     if (!next) return
@@ -1743,8 +1755,7 @@ export class SessionManager implements ISessionManager {
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     if (!isPptGenerating(dir) && !managed.pptProgress?.generating) return
     markPptGenerating(dir, false)
-    this.syncPptProgress(managed, false)
-    this.persistSession(managed)
+    void this.syncPptProgress(managed, false).finally(() => this.persistSession(managed))
   }
 
   /** Wait until initialize() has completed (sessions loaded from disk).
@@ -2532,6 +2543,7 @@ export class SessionManager implements ISessionManager {
               managed.pptProgress = settled
               this.persistSession(managed)
             }
+            if (managed.ppt) void this.syncPptProgress(managed, false)
           }
           const feedbackOriginPath = join(getSessionStoragePath(workspaceRootPath, meta.id), 'data', 'feedback-origin.json')
           if (existsSync(feedbackOriginPath)) {
@@ -8143,7 +8155,7 @@ export class SessionManager implements ISessionManager {
         }
         if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
           || (event.type === 'info' && event.message.startsWith('Compacted'))) {
-          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) this.syncPptProgress(managed, true)
+          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) await this.syncPptProgress(managed, true)
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
@@ -8844,6 +8856,20 @@ export class SessionManager implements ISessionManager {
       referenced, path => this.authorizeOfficeDocumentPath(parent, path))
   }
 
+  /** Follow a pptx as it grows. Capture a version so a later element edit matches the bytes on screen. */
+  private pptxPreviewSource(versions: ArtifactVersions, artifact: { id: string; path: string; currentVersion: string }, snapshot: Buffer): { bytes: Buffer; baseVersion: string } {
+    if (!/\.pptx$/i.test(artifact.path)) return { bytes: snapshot, baseVersion: artifact.currentVersion }
+    const live = officePreviewBytes(snapshot, artifact.path)
+    if (live === snapshot) return { bytes: snapshot, baseVersion: artifact.currentVersion }
+    try {
+      const captured = versions.capture(artifact.id)
+      return { bytes: versions.versionBytes(captured.id, captured.currentVersion), baseVersion: captured.currentVersion }
+    } catch (error) {
+      sessionLog.warn('PPTX preview kept the latest readable package without a new version', { path: artifact.path, error })
+      return { bytes: live, baseVersion: artifact.currentVersion }
+    }
+  }
+
   async officePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, ownerId = 'legacy'): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void> {
     const parent = this.sessions.get(operation.sessionId)
     if (!parent || parent.isolatedWorkspace) throw new Error('Office preview requires an active parent chat')
@@ -8854,8 +8880,9 @@ export class SessionManager implements ISessionManager {
       const artifact = versions.register(resolvedPath)
       const candidate = this.officeRevisionCandidates.get(parent.id)
       const isDraft = candidate?.artifactId === artifact.id
-      const bytes = isDraft ? loadIsolationFile(candidate.path) : versions.versionBytes(artifact.id, artifact.currentVersion)
-      return this.officePreviews.open(parent.id, artifact.id, artifact.currentVersion, artifact.path, bytes, isDraft, true, ownerId, operation.previewId)
+      const snapshot = isDraft ? loadIsolationFile(candidate.path) : versions.versionBytes(artifact.id, artifact.currentVersion)
+      const source = isDraft ? { bytes: snapshot, baseVersion: artifact.currentVersion } : this.pptxPreviewSource(versions, artifact, snapshot)
+      return this.officePreviews.open(parent.id, artifact.id, source.baseVersion, artifact.path, source.bytes, isDraft, true, ownerId, operation.previewId)
     }
     if (operation.type === 'select') return this.officePreviews.select(parent.id, operation.previewId, operation.paths, ownerId)
     if (operation.type === 'suspend') return this.officePreviews.suspend(parent.id, operation.previewId, ownerId)
@@ -8865,8 +8892,9 @@ export class SessionManager implements ISessionManager {
       const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
       const artifact = versions.read(preview.artifactId)
       const isDraft = candidate?.artifactId === preview.artifactId
-      const bytes = isDraft ? loadIsolationFile(candidate.path) : versions.versionBytes(artifact.id, artifact.currentVersion)
-      return this.officePreviews.refresh(parent.id, operation.previewId, bytes, artifact.currentVersion, isDraft, ownerId)
+      const snapshot = isDraft ? loadIsolationFile(candidate.path) : versions.versionBytes(artifact.id, artifact.currentVersion)
+      const source = isDraft ? { bytes: snapshot, baseVersion: artifact.currentVersion } : this.pptxPreviewSource(versions, artifact, snapshot)
+      return this.officePreviews.refresh(parent.id, operation.previewId, source.bytes, source.baseVersion, isDraft, ownerId)
     }
     if (operation.type === 'capture') return this.officePreviews.capture(parent.id, operation.previewId, ownerId)
     if (operation.type === 'heartbeat') return this.officePreviews.heartbeat(parent.id, operation.previewId, ownerId)

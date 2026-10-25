@@ -6,7 +6,6 @@ import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { getPptCatalogWithLibrary, getPptTemplatePages, getPptTemplatePreview } from '../../services/ppt-catalog'
-import { isPptGenerating, readPptLive } from '../../services/ppt-live'
 import { customTemplateCard, customTemplatePages, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, renamePptTemplate, thumbnailPptTemplateCard } from '../../services/ppt-library'
 
 export const HANDLED_CHANNELS = [
@@ -14,7 +13,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE,
   RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE,
   RPC_CHANNELS.skills.GET_PPT_CATALOG,
-  RPC_CHANNELS.skills.GET_PPT_LIVE,
   RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
   RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW,
   RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE,
@@ -47,12 +45,6 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE, (_ctx, id: string) => {
     const file = exportPptTemplate(id)
     return { name: file.name, base64: Buffer.from(file.bytes).toString('base64') }
-  })
-  server.handle(RPC_CHANNELS.skills.GET_PPT_LIVE, async (_ctx, sessionId: string, known?: Record<string, string>) => {
-    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Session not found')
-    const dir = deps.sessionManager.getSessionPath(sessionId)
-    if (!dir) throw new Error('Session not found')
-    return readPptLive(dir, { generating: isPptGenerating(dir), known, sessionId })
   })
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
