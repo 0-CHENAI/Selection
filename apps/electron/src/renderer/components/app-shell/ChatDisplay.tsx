@@ -7,6 +7,9 @@ import * as React from "react"
 import { useSetAtom } from "jotai"
 import { useTranslation } from "react-i18next"
 import { useEffect, useState, useMemo, useCallback } from "react"
+import { PptHomeGallery } from '@/components/ppt/PptHomeGallery'
+import { SentTemplateReference } from '@/components/ppt/SentTemplateReference'
+import type { SendMessageOptions } from '@craft-agent/shared/protocol'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -94,6 +97,7 @@ import {
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
+import { PptResultCard } from "@/components/ppt/PptResultCard"
 import { cacheHitRateFromTokenUsage, resolveContextUsageTokens } from "./input/context-usage"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
@@ -177,8 +181,10 @@ function getTurnKey(turn: Turn, index: number): string {
 }
 
 interface ChatDisplayProps {
+  pptMode?: boolean
+  pptComposerKey?: string
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: SendMessageOptions['annotationFollowUps']) => boolean | void | Promise<boolean | void>
   onOpenFile: (path: string) => void
   onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions', versionId?: string, artifactId?: string) => void
   onOpenUrl: (url: string) => void
@@ -619,6 +625,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   compactInputMaxHeight,
   showRecordNavigation = true,
   placeholder,
+  pptMode = false,
+  pptComposerKey,
   emptyStateLabel,
   onExplicitStop,
   onBeforeExplicitStop,
@@ -1489,7 +1497,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
+  const handleSubmit = async (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1505,13 +1513,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs(reduceMotion ? 'instant' : 'smooth'),
     })
-    onSendMessage(normalizedMessage, attachments, skillSlugs, pendingFollowUpAnnotations.map(item => ({
+    const accepted = await onSendMessage(normalizedMessage, attachments, skillSlugs, pendingFollowUpAnnotations.map(item => ({
       messageId: item.messageId, annotationId: item.annotationId, text: item.note, updatedAt: item.createdAt,
     })))
+    if (accepted === false) return false
 
     requestAnimationFrame(() => {
       scrollToLatest('smooth')
     })
+    return true
   }
 
   const handleSaveAndSendFollowUp = useCallback((_target: {
@@ -1848,8 +1858,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     messageCount: session?.messages.length ?? 0,
     sessionBusy,
   })
+  const pptEmpty = pptMode && !compactMode && !sessionBusy && !messagesLoading && (session?.messages.length ?? 0) === 0
   const showNavigationRail = shouldShowConversationNavigation(showRecordNavigation, navigationItems.length)
-  const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
+  const reserveNavigationColumn = !pptEmpty && shouldReserveConversationNavigationColumn(showRecordNavigation)
   // Keep the live status above the current reply as its body grows. Before
   // the first assistant turn exists, it follows the latest user message.
   const retryUserId = !sessionBusy && !disableSend
@@ -1927,8 +1938,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailGrid : "flex flex-1 min-h-0 min-w-0 flex-col"}>
           <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailContent : "flex min-h-0 min-w-0 flex-col"}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
-          <div className="relative flex-1 min-h-0">
-            {showNewSessionBrand && <NewSessionBrand />}
+          <div className={cn('relative min-h-0', pptEmpty ? 'shrink-0' : 'flex-1')} style={pptEmpty ? { height: 126 } : undefined}>
+            {pptEmpty ? <div data-testid="ppt-home-hero" className="px-5 pt-10 text-center"><h1 className="text-[23px] font-semibold">{t('ppt.heroTitle')}</h1><p className="mt-2 text-[13px] text-muted-foreground">{t('ppt.heroDescription')}</p></div> : showNewSessionBrand && <NewSessionBrand />}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
             <div
               className="h-full"
@@ -2586,6 +2597,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
+          <>
+          <PptResultCard session={session} />
           <ChatInputZone
             toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
@@ -2603,7 +2616,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 onScrollToBottom={() => scrollToLatest('smooth')}
               />
             ) : undefined}
-            className={compactMode ? "px-3" : "px-5 @xs/panel:px-5"}
+            className={pptEmpty ? 'max-w-[1000px] px-8 @xs/panel:px-8 pb-0' : compactMode ? 'px-3' : 'px-5 @xs/panel:px-5'}
+            showOptionBadges={pptEmpty ? false : undefined}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
@@ -2623,8 +2637,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
             inputProps={{
+              pptMode,
               workMode: session.workMode,
-              placeholder,
+              placeholder: pptMode ? t('ppt.placeholder') : placeholder,
               disabled: isInputDisabled,
               isProcessing: sessionBusy,
               onAnimatedHeightChange: handleAnimatedHeightChange,
@@ -2645,7 +2660,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onAttachmentsChange,
               sources,
               enabledSourceSlugs: session.enabledSourceSlugs,
-              sourceSelectionKey: session.id,
+              sourceSelectionKey: pptComposerKey ?? session.id,
               onSourcesChange,
               skills,
               workspaceId,
@@ -2670,7 +2685,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               compactInputMaxHeight,
             }}
           />
+          </>
           )}
+          {pptEmpty && <PptHomeGallery composerKey={pptComposerKey ?? session.id} />}
           </div>
           </div>
           </div>
@@ -2871,6 +2888,7 @@ function MessageBubble({
       <UserMessageBubble
         content={message.content}
         attachments={message.attachments}
+        leadingAttachment={message.turnContext?.ppt ? <SentTemplateReference request={message.turnContext.ppt} /> : undefined}
         badges={message.badges}
         isPending={message.isPending}
         isQueued={message.isQueued}
@@ -2993,6 +3011,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
+    prev.message.turnContext?.ppt === next.message.turnContext?.ppt &&
     prev.contextRecovery === next.contextRecovery &&
     prev.executionRecovery === next.executionRecovery &&
     prev.sessionId === next.sessionId &&

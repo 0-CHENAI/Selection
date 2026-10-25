@@ -1,4 +1,7 @@
 import { useOfficePreview } from './hooks/useOfficePreview'
+import { usePptLive } from './hooks/usePptLive'
+import { PptRevisionContext } from '@/components/ppt/ppt-revision'
+import { getPptSelection, setPptSelection } from '@/components/ppt/ppt-selection'
 import { useOfficeFiles } from './hooks/useOfficeFiles'
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
@@ -12,7 +15,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
-import type { ManagedArtifact } from '@craft-agent/shared/protocol'
+import type { ManagedArtifact, PptRequest, PptRevision, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -779,6 +782,7 @@ export default function App() {
   // Session selection state
   const [sessionSelection, setSession] = useSession()
   const { open: openOfficePreview, close: closeOfficePreview, capture: captureOfficeSelection, context: officePreviewContext, panel: officePreviewPanel, picker: officeFilePicker, isOpen: officePreviewOpen, isPresent: officePreviewPresent, isChoosing: officePreviewChoosing } = useOfficePreview(sessionSelection.selected, windowWorkspaceId)
+  const { panel: pptLivePanel, present: pptLivePresent } = usePptLive(sessionSelection.selected, officePreviewOpen, closeOfficePreview)
   const officeFiles = useOfficeFiles(sessionSelection.selected, windowWorkspaceId)
   const toggleOfficeCollaboration = useCallback(() => {
     if (officePreviewOpen || officePreviewChoosing) closeOfficePreview()
@@ -1356,8 +1360,9 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest, pptRevision?: PptRevision) => {
     let locallyCommitted = false
+    let optimisticMessageId: string | undefined
     try {
       const officeCommand = message.trim().match(/^\/office-edit(?:\s+([\s\S]+))?$/i)
       const naturalOfficeOpen = /^(?:请)?打开(?:这个|这份)?(?:Excel|Word|PPT|PowerPoint|文档|表格|演示文稿)(?:让我|供我|以便我)?选(?:择)?(?:区域|元素|内容)[。！!]?$/i.test(message.replace(/\s+/g, ''))
@@ -1370,7 +1375,9 @@ export default function App() {
         await openOfficePreview(sessionId, '', candidates)
         return true
       }
-      const officeSelection = await captureOfficeSelection(sessionId)
+      const selectedTargets = getPptSelection(sessionId)
+      const revision = pptRevision ?? (selectedTargets.length > 0 && !attachments?.length ? { action: 'revise' as const, targets: selectedTargets, comment: message } : undefined)
+      const officeSelection = revision ? undefined : await captureOfficeSelection(sessionId)
       const officeContext = officeSelection ? undefined : officePreviewContext(sessionId)
       // Capture live generation so composer submits stay in the queue
       // instead of looking like a new transcript turn (#22, #23).
@@ -1415,6 +1422,10 @@ export default function App() {
         const failedCount = storeResults.filter(r => r.status === 'rejected').length
         if (failedCount > 0) {
           console.warn(`${failedCount} attachment(s) failed to store`)
+          if (ppt) {
+            toast.error(t('ppt.attachmentStoreFailed'))
+            return false
+          }
           // Add warning message to session so user knows some attachments weren't included
           const failedNames = attachments
             .filter((_, i) => storeResults[i].status === 'rejected')
@@ -1433,7 +1444,7 @@ export default function App() {
             && (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
           )
           if (failedImages.length > 0) {
-            return
+            return false
           }
         }
 
@@ -1524,6 +1535,7 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         isPending: true,  // Optimistic - will be confirmed by backend
         isQueued: sendingMidStream,
+        ...(ppt ? { turnContext: { ppt } } : {}),
       }
 
       // Optimistic UI update - add user message and set processing state
@@ -1534,6 +1546,7 @@ export default function App() {
         lastMessageAt: sendingMidStream ? s.lastMessageAt : Date.now()
       }))
       locallyCommitted = true
+      optimisticMessageId = userMessage.id
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, outgoingMessage, processedAttachments, storedAttachments, {
@@ -1543,6 +1556,8 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
         annotationFollowUps,
+        ppt,
+        ...(revision ? { pptRevision: revision } : {}),
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
@@ -1552,6 +1567,8 @@ export default function App() {
           permissionMode: optionSnapshot?.permissionMode ?? 'ask',
         } : undefined,
       })
+      if (ppt) updateSessionById(sessionId, { ppt })
+      if (revision) setPptSelection(sessionId, [])
       // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
@@ -1559,7 +1576,7 @@ export default function App() {
       updateSessionById(sessionId, (s) => ({
         isProcessing: locallyCommitted ? false : s.isProcessing,
         messages: [
-          ...s.messages,
+          ...s.messages.filter(item => item.id !== optimisticMessageId),
           {
             id: generateMessageId(),
             role: 'error' as const,
@@ -1568,9 +1585,16 @@ export default function App() {
           }
         ]
       }))
-      return locallyCommitted
+      return false
     }
   }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug, openOfficePreview, captureOfficeSelection, officePreviewContext, t])
+
+  const sendPptRevision = useCallback(async (text: string, revision: PptRevision) => {
+    const sessionId = sessionSelection.selected
+    if (!sessionId) return false
+    const ppt = store.get(sessionAtomFamily(sessionId))?.ppt ?? {}
+    return await handleSendMessage(sessionId, text, undefined, ['ppt-design'], undefined, undefined, ppt, revision) === true
+  }, [sessionSelection.selected, store, handleSendMessage])
 
   /**
    * Unified handler for all session option changes.
@@ -2255,7 +2279,8 @@ export default function App() {
   const showSplash = !splashHidden
 
   // Ready state - main app with splash overlay during data loading
-  return (
+    return (
+    <PptRevisionContext.Provider value={sendPptRevision}>
     <PlatformProvider actions={platformActions}>
     <ShikiThemeProvider shikiTheme={shikiTheme}>
       <ActionRegistryProvider>
@@ -2310,12 +2335,13 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
-                  hasTrailingPanel={officePreviewPresent}
+                  hasTrailingPanel={officePreviewPresent || pptLivePresent}
                 />
               )}
               </div>
               <div className="contents">
                 {officePreviewPanel}
+                {pptLivePanel}
               </div>
               {officeFilePicker}
             </div>
@@ -2358,6 +2384,7 @@ export default function App() {
       </ActionRegistryProvider>
     </ShikiThemeProvider>
     </PlatformProvider>
+    </PptRevisionContext.Provider>
   )
 }
 

@@ -66,6 +66,8 @@ export interface TurnContext {
   projectId?: string | null;
   sourceSlugs?: string[];
   skillSlugs?: string[];
+  /** Host-defined serializable PPT options; validated by the PPT service on replay. */
+  ppt?: unknown;
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   Radio,
   Info,
   FolderKanban,
+  Presentation,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -47,6 +48,7 @@ import {
   springTransition as collapsibleSpring,
 } from "@/components/ui/collapsible"
 import { SessionList } from "./SessionList"
+import { PptHistoryList } from './PptHistoryList'
 import { MainContentPanel } from "./MainContentPanel"
 import { BoardListToggle } from "./kanban/BoardListToggle"
 import { PanelStackContainer } from "./PanelStackContainer"
@@ -69,7 +71,7 @@ import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/ato
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
 import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
-import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView } from '@/lib/work-mode-navigation'
+import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
@@ -325,10 +327,12 @@ function AppShellContent({
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
   const workModeView = useAtomValue(workModeViewAtom)
   const setWorkModeView = useSetAtom(workModeViewAtom)
-  const focusedWorkMode = sessionWorkModeView(focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined, sessionMetaMap)
+  const focusedSession = focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined
+  const focusedWorkMode = sessionWorkModeView(focusedSession, sessionMetaMap)
   useEffect(() => {
+    if (!shouldAdoptFocusedWorkMode(focusedSession)) return
     if (focusedWorkMode) setWorkModeView(focusedWorkMode)
-  }, [focusedSessionId, focusedWorkMode, setWorkModeView])
+  }, [focusedSession, focusedWorkMode, setWorkModeView])
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -358,6 +362,11 @@ function AppShellContent({
   }, [navState])
 
   const sessionFilter = sessionsContext?.filter ?? null
+  const isPptView = sessionFilter?.kind === 'ppt'
+  const focusedPptSession = focusedSessionId ? sessionMetaMap.get(focusedSessionId)?.ppt !== undefined : false
+  useEffect(() => {
+    if (focusedPptSession && !isPptView && isSessionsNavigation(navState) && navState.details) navigate(routes.view.ppt(navState.details.sessionId))
+  }, [focusedPptSession, isPptView, navState])
 
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
@@ -376,6 +385,7 @@ function AppShellContent({
     if (!sessionFilter) return null
     switch (sessionFilter.kind) {
       case 'allSessions': return 'allSessions'
+      case 'ppt': return 'ppt'
       case 'flagged': return 'flagged'
       case 'archived': return 'archived'
       case 'state': return `state:${sessionFilter.stateId}`
@@ -1118,11 +1128,16 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(s => isWorkModeRoot(s, workModeView))
+    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && isWorkModeRoot(s, workModeView))
     return metas.filter(s =>
-      isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      s.ppt === undefined && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
+
+  const pptSessionMetas = useMemo(() => Array.from(sessionMetaMap.values()).filter(s =>
+    s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
+    && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
+  ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
 
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
@@ -1243,6 +1258,9 @@ function AppShellContent({
     let result: SessionMeta[]
 
     switch (sessionFilter.kind) {
+      case 'ppt':
+        result = pptSessionMetas
+        break
       case 'allSessions':
         // Ordinary sessions include legacy archived/classified conversations.
         result = workspaceSessionMetas
@@ -1280,7 +1298,7 @@ function AppShellContent({
     result = filterSessionsBySidebarProjectScope(result, projectFilter)
 
     return result
-  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, projectFilter])
+  }, [workspaceSessionMetas, activeSessionMetas, pptSessionMetas, sessionFilter, projectFilter])
 
   // Ensure session messages are loaded when selected
   React.useEffect(() => {
@@ -1314,7 +1332,7 @@ function AppShellContent({
     onSessionSourcesChange: handleSessionSourcesChange,
     onJumpToTaskSessions: handleJumpToTaskSessions,
     onJumpToProjectSessions: handleJumpToProjectSessions,
-    orchestrationProjectId: resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
+    orchestrationProjectId: isPptView ? null : resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
     rightSidebarButton: null,
     isCompactMode: isAutoCompact,
     // Search state for ChatDisplay highlighting
@@ -1330,7 +1348,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isPptView, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1400,6 +1418,12 @@ function AppShellContent({
     })
     navigate(routes.view.allSessions())
   }, [setHistoryScope])
+
+  const handlePptClick = useCallback(() => {
+    setSearchActive(false)
+    setSearchQuery('')
+    navigate(routes.view.ppt(), draftSessionNavigateOptions())
+  }, [])
 
   // Handler for sources view (all sources)
   const handleSourcesClick = useCallback(() => {
@@ -1696,15 +1720,15 @@ function AppShellContent({
       return
     }
 
-    // Exit search mode and switch to All Sessions
+    // Exit search mode. PPT keeps its own draft; ordinary chats return to All Sessions.
     setSearchActive(false)
     setSearchQuery('')
 
-    navigate(routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
+    navigate(isPptView ? routes.view.ppt() : routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, t])
+  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, isPptView, t])
 
   React.useEffect(() => {
     // Only recover an actual focused chat, never a stale selection behind a
@@ -1765,13 +1789,14 @@ function AppShellContent({
     // the same order as the visible #181 sidebar.
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
+    result.push({ id: 'nav:ppt', type: 'nav', action: handlePptClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handlePptClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1912,6 +1937,7 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
+      case 'ppt': return 'PPT'
       case 'allSessions':
         return getIncludedProjectName(projectFilter, projects) ?? t("sidebar.allSessions")
       case 'flagged':
@@ -1957,7 +1983,7 @@ function AppShellContent({
           onToggleSidebar={handleToggleImmersiveMode}
           onToggleFocusMode={handleToggleImmersiveMode}
           immersive={immersivePressed}
-          afterWorkspace={isSessionsNavigation(navState) ? (
+          afterWorkspace={isSessionsNavigation(navState) && !isPptView ? (
             <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
           isCompact={isAutoCompact}
@@ -2001,8 +2027,8 @@ function AppShellContent({
                               className="w-full justify-start gap-2 py-[7px] px-2 text-[13px] font-normal rounded-[6px] shadow-minimal bg-background"
                               data-tutorial="new-chat-button"
                             >
-                              <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
-                              {t("session.newSession")}
+                              {isPptView ? <Plus className="h-3.5 w-3.5 shrink-0" /> : <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />}
+                              {isPptView ? t('ppt.new') : t("session.newSession")}
                             </Button>
                       </div>
                     </TooltipTrigger>
@@ -2144,6 +2170,14 @@ function AppShellContent({
                       })),
                     },
                     {
+                      id: 'nav:ppt',
+                      title: 'PPT',
+                      label: String(pptSessionMetas.length),
+                      icon: Presentation,
+                      variant: isPptView ? 'default' : 'ghost',
+                      onClick: handlePptClick,
+                    },
+                    {
                       id: "nav:automations",
                       title: t("sidebar.automations"),
                       label: String(automations.length),
@@ -2222,7 +2256,9 @@ function AppShellContent({
                 </Tooltip>
               ) : undefined}
               actions={
-                isSessionsNavigation(navState) ? (
+                isPptView ? (
+                  <HeaderIconButton icon={<Plus className="h-4 w-4" />} tooltip={t('ppt.new')} onClick={() => handleNewChat()} />
+                ) : isSessionsNavigation(navState) ? (
                   <HeaderIconButton
                     icon={<Search className="h-4 w-4" />}
                     tooltip={t("sidebar.search")}
@@ -2380,7 +2416,10 @@ function AppShellContent({
                 onSelectSubpage={(subpage) => handleSettingsClick(subpage)}
               />
             )}
-            {isSessionsNavigation(navState) && (
+            {isPptView && (
+              <PptHistoryList items={pptSessionMetas} selectedSessionId={focusedSessionId} onSelect={id => navigate(routes.view.ppt(id))} onNew={() => handleNewChat()} />
+            )}
+            {isSessionsNavigation(navState) && !isPptView && (
               /* Sessions List */
               <>
                 {/* SessionList: Scrollable list of session cards */}

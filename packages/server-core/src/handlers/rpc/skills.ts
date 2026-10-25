@@ -5,9 +5,19 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { getPptCatalogWithLibrary, getPptTemplatePages } from '../../services/ppt-catalog'
+import { isPptGenerating, readPptLive } from '../../services/ppt-live'
+import { customTemplateCard, customTemplatePages, deletePptTemplate, exportPptTemplate, importPptTemplate, renamePptTemplate } from '../../services/ppt-library'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
+  RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.GET_PPT_CATALOG,
+  RPC_CHANNELS.skills.GET_PPT_LIVE,
+  RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES,
+  RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE,
+  RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE,
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
@@ -16,6 +26,29 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, () => getPptCatalogWithLibrary())
+  server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES, (_ctx, templateId: string) => {
+    if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
+    return templateId.startsWith('custom-') ? customTemplatePages(templateId) : getPptTemplatePages(templateId)
+  })
+  server.handle(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE, (_ctx, input: { name?: string; base64?: string }) => {
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPTX')
+    if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPTX')
+    const { record, duplicate } = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
+    return { template: customTemplateCard(record), duplicate }
+  })
+  server.handle(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE, (_ctx, id: string, title: string) => customTemplateCard(renamePptTemplate(id, title)))
+  server.handle(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE, (_ctx, id: string) => { deletePptTemplate(id) })
+  server.handle(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE, (_ctx, id: string) => {
+    const file = exportPptTemplate(id)
+    return { name: file.name, base64: Buffer.from(file.bytes).toString('base64') }
+  })
+  server.handle(RPC_CHANNELS.skills.GET_PPT_LIVE, async (_ctx, sessionId: string, known?: Record<string, string>) => {
+    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Session not found')
+    const dir = deps.sessionManager.getSessionPath(sessionId)
+    if (!dir) throw new Error('Session not found')
+    return readPptLive(dir, { generating: isPptGenerating(dir), known, sessionId })
+  })
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)

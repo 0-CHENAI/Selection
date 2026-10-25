@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { createStore } from 'jotai'
 import { draftComposerAtomFamily, workModeViewAtom } from '../atoms/work-mode'
 import { draftSessionOptionsId } from './draft-session'
-import { executionChildrenByRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView } from './work-mode-navigation'
+import { executionChildrenByRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from './work-mode-navigation'
 import type { SessionMeta } from '../atoms/sessions'
 
 test('only roots appear as peers; hidden execution children keep their real root', () => {
@@ -20,6 +20,13 @@ test('only roots appear as peers; hidden execution children keep their real root
   const byId = new Map(sessions.map(session => [session.id, session]))
   expect(sessions.filter(session => isUnownedExecution(session, byId)).map(s => s.id)).toEqual(['unowned-node', 'orphan'])
   expect(sessionWorkModeView(byId.get('reviewer'), byId)).toBe('PRO')
+})
+
+test('a focused PPT session does not retarget the ordinary NORM/PRO list', () => {
+  expect(shouldAdoptFocusedWorkMode(undefined)).toBe(false)
+  expect(shouldAdoptFocusedWorkMode({ id: 'deck', workspaceId: 'w', workMode: 'PRO', ppt: { templateId: 'briefing' } })).toBe(false)
+  expect(shouldAdoptFocusedWorkMode({ id: 'norm', workspaceId: 'w', workMode: 'NORM' })).toBe(true)
+  expect(shouldAdoptFocusedWorkMode({ id: 'pro', workspaceId: 'w', workMode: 'PRO' })).toBe(true)
 })
 
 test('switching the view preserves independent composer choices and never changes actors', () => {

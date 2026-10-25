@@ -279,6 +279,13 @@ export const CHANNEL_MAP = {
 
   // Skills
   getSkills: invoke(RPC_CHANNELS.skills.GET),
+  getPptCatalog: invoke(RPC_CHANNELS.skills.GET_PPT_CATALOG),
+  getPptTemplatePages: invoke(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PAGES),
+  getPptLive: invoke(RPC_CHANNELS.skills.GET_PPT_LIVE),
+  importPptTemplate: invoke(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE),
+  renamePptTemplate: invoke(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE),
+  deletePptTemplate: invoke(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE),
+  exportPptTemplate: invoke(RPC_CHANNELS.skills.EXPORT_PPT_TEMPLATE),
   getSkillFiles: invoke(RPC_CHANNELS.skills.GET_FILES),
   deleteSkill: invoke(RPC_CHANNELS.skills.DELETE),
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),

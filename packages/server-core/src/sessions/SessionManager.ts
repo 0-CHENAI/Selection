@@ -174,6 +174,9 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
+import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
+import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
+import { buildPptRevisionPrompt, clearStalePptGenerating, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -346,6 +349,7 @@ function snapshotTurnContext(managed: ManagedSession, options?: SendMessageOptio
     projectId: managed.projectId ?? null,
     sourceSlugs: [...(managed.enabledSourceSlugs ?? [])],
     skillSlugs: options?.skillSlugs ? [...options.skillSlugs] : undefined,
+    ppt: options?.ppt,
   }
 }
 
@@ -934,6 +938,8 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession extends WorkModeMetadata {
+  ppt?: PptRequest
+  pptProgress?: PptProgress
   handover?: HandoverLink
   conversationArtifactVersions?: ConversationArtifactVersions
   artifactCandidateInventory?: ArtifactCandidateInventory
@@ -1375,6 +1381,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
   return {
     id: managed.id,
     workMode: managed.workMode,
+    ppt: managed.ppt,
     workModeNeedsReview: managed.workModeNeedsReview,
     executionRootSessionId: managed.executionRootSessionId,
     parentSessionId: managed.parentSessionId,
@@ -1711,7 +1718,33 @@ export class SessionManager implements ISessionManager {
       this.spawnQualificationCredentials.delete(managed.id)
       this.flushSpawnFanOutBatch(managed.id)
       sessionRuntimeHooks.onSessionStopped()
+      this.finishPptGeneration(managed)
     }
+  }
+
+  /** Publish deck page counts for the history row, and drop the generating marker when the turn ends. */
+  private syncPptProgress(managed: ManagedSession, generating: boolean): void {
+    if (!managed.ppt && !generating) return
+    const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    let next: PptProgress | null = null
+    try { next = readPptProgress(dir, generating) } catch { return }
+    if (!next && generating && managed.ppt) {
+      next = { total: managed.pptProgress?.total ?? 0, completed: managed.pptProgress?.completed ?? 0, generating: true, fileName: managed.pptProgress?.fileName }
+    }
+    if (!next && !generating && managed.pptProgress?.generating) next = { ...managed.pptProgress, generating: false }
+    if (!next) return
+    next = { ...next, generating }
+    if (isDeepStrictEqual(next, managed.pptProgress)) return
+    managed.pptProgress = next
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { pptProgress: next } }, managed.workspace.id)
+  }
+
+  private finishPptGeneration(managed: ManagedSession): void {
+    const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (!isPptGenerating(dir) && !managed.pptProgress?.generating) return
+    markPptGenerating(dir, false)
+    this.syncPptProgress(managed, false)
+    this.persistSession(managed)
   }
 
   /** Wait until initialize() has completed (sessions loaded from disk).
@@ -2492,6 +2525,14 @@ export class SessionManager implements ISessionManager {
             }
           }
           this.sessions.set(meta.id, managed)
+          if (managed.pptProgress?.generating || managed.ppt) {
+            const sessionDir = getSessionStoragePath(workspaceRootPath, meta.id)
+            const settled = clearStalePptGenerating(sessionDir, managed.pptProgress)
+            if (settled !== managed.pptProgress) {
+              managed.pptProgress = settled
+              this.persistSession(managed)
+            }
+          }
           const feedbackOriginPath = join(getSessionStoragePath(workspaceRootPath, meta.id), 'data', 'feedback-origin.json')
           if (existsSync(feedbackOriginPath)) {
             try {
@@ -2713,6 +2754,7 @@ export class SessionManager implements ISessionManager {
             options: {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
+              ppt: msg.turnContext?.ppt as PptRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3319,6 +3361,7 @@ export class SessionManager implements ISessionManager {
             options: {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
+              ppt: msg.turnContext?.ppt as PptRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3357,6 +3400,7 @@ export class SessionManager implements ISessionManager {
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
+    if (options?.ppt !== undefined) options = { ...options, ppt: validatePptRequest(options.ppt), workMode: 'PRO' }
 
     if (internal?.reservedSessionId) {
       validateSessionId(internal.reservedSessionId)
@@ -3697,6 +3741,7 @@ export class SessionManager implements ISessionManager {
       handover: internal?.handover,
       name: options?.name,
       workMode,
+      ppt: options?.ppt,
       executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -7222,6 +7267,15 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
+    const replayPpt = existingMessageId ? managed.messages.find(item => item.id === existingMessageId)?.turnContext?.ppt as PptRequest | undefined : undefined
+    const installedSkills = loadAllSkills(managed.workspace.rootPath, managed.workingDirectory)
+    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills, message)
+    if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
+    if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
+      managed.ppt = options.ppt
+      this.persistSession(managed)
+      this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { ppt: managed.ppt } }, managed.workspace.id)
+    }
     if (options?.officeSelection) {
       if (options.officeContext) throw new Error('Office 选区修改不能同时携带普通预览上下文')
       if (attachments?.length || storedAttachments?.length || options.annotationFollowUps?.length) throw new Error('定向 Office 修改暂不支持同时发送附件或其他反馈')
@@ -7310,6 +7364,7 @@ export class SessionManager implements ISessionManager {
         isQueued: true,
         queuedSkillSlugs: options?.skillSlugs,
         queuedContext: options?.queueContext,
+        turnContext: snapshotTurnContext(managed, options),
         ...(options?.taskContext ? { taskContext: options.taskContext } : {}),
         hidden: true,
       }
@@ -8028,7 +8083,10 @@ export class SessionManager implements ISessionManager {
         : message
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
-      const currentInput = handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage
+      if (options?.ppt || options?.pptRevision) markPptGenerating(chatSessionDir, true)
+      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills, message) : undefined
+      const pptRevisionContext = options?.pptRevision ? buildPptRevisionPrompt(options.pptRevision, chatSessionDir) : undefined
+      const currentInput = [pptContext, pptRevisionContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
       if (preparedImages.ok && skippedImageCount > 0) {
         const modelName = messageBackendContext.resolvedModel || 'model'
@@ -8085,6 +8143,7 @@ export class SessionManager implements ISessionManager {
         }
         if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
           || (event.type === 'info' && event.message.startsWith('Compacted'))) {
+          if (managed.ppt && isPptGenerating(getSessionStoragePath(managed.workspace.rootPath, managed.id))) this.syncPptProgress(managed, true)
           this.persistSession(managed)
           await this.flushSession(managed.id)
           if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
@@ -10087,6 +10146,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       if (context.skillSlugs) {
         managed.lastSentOptions = { ...managed.lastSentOptions, skillSlugs: [...context.skillSlugs] }
       }
+      if (context.ppt !== undefined) managed.lastSentOptions = { ...managed.lastSentOptions, ppt: context.ppt as PptRequest }
     }
 
     managed.progressDisabled = false
@@ -11954,6 +12014,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (workMode !== 'NORM' && workMode !== 'PRO') throw new Error('Invalid work mode')
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error('Session not found')
+    if (managed.ppt !== undefined && workMode !== 'PRO') throw new Error('PPT conversations require PRO')
     await this.ensureMessagesLoaded(managed)
     if (managed.messages.length || managed.isProcessing || managed.parentSessionId || managed.taskSlug || managed.taskDraft || managed.taskRunId || managed.orchestrationId || managed.workModeNeedsReview) throw new Error('Work mode is fixed after work starts; create a new conversation')
     if (managed.workMode === workMode) return

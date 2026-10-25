@@ -23,6 +23,11 @@ export function executionChildrenByRoot(sessions: readonly SessionMeta[]): Map<s
 }
 
 
+/** PPT sessions own a separate list, so focusing one must not retarget the ordinary NORM/PRO filter. */
+export function shouldAdoptFocusedWorkMode(session: SessionMeta | undefined): boolean {
+  return !!session && session.ppt === undefined
+}
+
 export function sessionWorkModeView(session: SessionMeta | undefined, byId: ReadonlyMap<string, SessionMeta>): WorkMode | undefined {
   if (!session) return undefined
   const rootId = session.executionRootSessionId ?? session.orchestrationRootSessionId ?? session.parentSessionId

@@ -644,10 +644,11 @@ export function NavigationProvider({
   // Helper: Filter sessions by SessionFilter
   // Always excludes hidden sessions - they should never appear in navigation
   const filterSessionsByFilter = useCallback(
-    (_filter: SessionFilter): SessionMeta[] => {
-      // First filter out hidden sessions - they should never appear in any view
-      const visibleSessions = sessionMetas.filter(
-        s => isWorkModeRoot(s, workModeView) && (!workspaceId || s.workspaceId === workspaceId)
+    (filter: SessionFilter): SessionMeta[] => {
+      const visibleSessions = sessionMetas.filter(s =>
+        isWorkModeRoot(s, filter.kind === 'ppt' ? 'PRO' : workModeView)
+        && (filter.kind === 'ppt' ? s.ppt !== undefined : s.ppt === undefined)
+        && (!workspaceId || s.workspaceId === workspaceId)
       )
 
       return visibleSessions
@@ -726,6 +727,7 @@ export function NavigationProvider({
       // navigating to the board would immediately resolve into a chat route.
       if (
         isSessionsNavigation(nextState) &&
+        nextState.filter.kind !== 'ppt' &&
         nextState.viewMode !== 'board' &&
         !nextState.details &&
         !options?.skipAutoSelect
@@ -1366,6 +1368,10 @@ export function NavigationProvider({
   }, [navigationState, navigate])
 
   const navigateToSession = useCallback((sessionId: string) => {
+    if (store.get(sessionMetaMapAtom).get(sessionId)?.ppt !== undefined) {
+      navigate(routes.view.ppt(sessionId))
+      return
+    }
     if (!isSessionsNavigation(navigationState)) {
       navigate(routes.view.allSessions(sessionId))
       return
@@ -1373,6 +1379,9 @@ export function NavigationProvider({
 
     const filter = navigationState.filter
     switch (filter.kind) {
+      case 'ppt':
+        navigate(routes.view.ppt(sessionId))
+        break
       case 'allSessions':
       case 'flagged':
       case 'archived':
@@ -1386,7 +1395,7 @@ export function NavigationProvider({
       default:
         navigate(routes.view.allSessions(sessionId))
     }
-  }, [navigationState, navigate])
+  }, [navigationState, navigate, store])
 
   // =========================================================================
   // AUTO-SELECT ON SESSION LOAD

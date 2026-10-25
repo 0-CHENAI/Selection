@@ -167,12 +167,15 @@ describe('pptx export', () => {
     expect(result.status).toBe('ok')
     expect(result.pptx).toBe(realpathSync(out))
     const listing = await unzipList(out)
-    expect(listing).toContain('ppt/charts/chart1.xml')
+    expect(listing).toContain('ppt/charts/chart')
     expect(listing).toMatch(/ppt\/media\//)
     const slide = await unzipEntry(out, 'ppt/slides/slide1.xml')
     expect(slide).toContain('可编辑标题')
     expect(slide).toContain('typeface="Noto Sans CJK SC"')
-    const chartXml = await unzipEntry(out, 'ppt/charts/chart1.xml')
+    const rels = await unzipEntry(out, 'ppt/slides/_rels/slide1.xml.rels')
+    const chartTarget = rels.match(/relationships\/chart" Target="([^"]+)"/)?.[1]?.replace(/^\//, '')
+    expect(chartTarget).toBeTruthy()
+    const chartXml = await unzipEntry(out, chartTarget!)
     expect(chartXml).toContain('barChart')
     const presentation = await unzipEntry(out, 'ppt/presentation.xml')
     expect(presentation).toContain('cx="12192000" cy="6858000"')
@@ -198,7 +201,7 @@ describe('pptx export', () => {
     const throughLink = join(link, 'out.pptx')
     const throughRaw = join(raw, 'out.pptx')
     const deck = makeDeck('路径', fixtureTheme, [
-      makePage('only', 'closing', '路径', '$paper', [
+      makePage('only', 'path-check', '路径', '$paper', [
         text('title', '路径', 48, 48, 200, 40, 24, { bold: true }),
       ], ''),
     ])
@@ -506,5 +509,24 @@ describe('skill instructions', () => {
     const code = await proc.exited
     if (code !== 0) throw new Error(await new Response(proc.stderr).text() || stdout)
     expect(JSON.parse(stdout).status).toBe('ok')
+  })
+
+  it('prints the argument layout catalog through the bundled cli', async () => {
+    const cli = fileURLToPath(new URL('./deck-cli.mjs', import.meta.url))
+    const proc = Bun.spawn([process.execPath, cli, 'layouts'], { stdout: 'pipe', stderr: 'pipe' })
+    const stdout = await new Response(proc.stdout).text()
+    const code = await proc.exited
+    if (code !== 0) throw new Error(await new Response(proc.stderr).text() || stdout)
+    const body = JSON.parse(stdout) as { status: string; layouts: Array<{ id: string; slots: Array<{ bounds: { w: number }; textCapacity?: { maxChars: number } }> }> }
+    expect(body.status).toBe('ok')
+    expect(body.layouts.length).toBeGreaterThanOrEqual(12)
+    expect(body.layouts.map(item => item.id)).toContain('conclusion')
+    expect(body.layouts.map(item => item.id)).toContain('funnel')
+    for (const layout of body.layouts) {
+      expect(layout.slots.length).toBeGreaterThan(0)
+      const text = layout.slots.filter(slot => slot.textCapacity)
+      expect(text.length).toBeGreaterThan(0)
+      expect(text.every(slot => (slot.bounds?.w ?? 0) > 0 && (slot.textCapacity?.maxChars ?? 0) > 0)).toBe(true)
+    }
   })
 })
