@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { checkSummary, segmentState, slidePreviewPath, thumbBarClass, thumbDimmed } from './ppt-result-model'
+import { attentionCount, checkSummary, pptLiveFrame, segmentState, slidePreviewPath, thumbBarClass, thumbDimmed } from './ppt-result-model'
 import type { PptPageProgress } from '@craft-agent/shared/protocol'
 
 function page(partial: Partial<PptPageProgress> & Pick<PptPageProgress, 'index' | 'status'>): PptPageProgress {
@@ -32,4 +32,13 @@ test('thumb bars and the check summary follow page state', () => {
   expect(segmentState(1, 2)).toBe('done')
   expect(segmentState(2, 2)).toBe('current')
   expect(segmentState(3, 2)).toBe('wait')
+  expect(attentionCount(pages)).toBe(2)
+})
+
+test('a live frame keeps the veil and the completed count on one page', () => {
+  expect(pptLiveFrame({ generating: true, total: 11, completed: 11 })).toEqual({ completed: 0 })
+  expect(pptLiveFrame({ generating: true, total: 11, completed: 11, current: 1 })).toEqual({ completed: 0, current: 1 })
+  expect(pptLiveFrame({ generating: true, total: 11, completed: 11, current: 4 })).toEqual({ completed: 3, current: 4 })
+  expect(pptLiveFrame({ generating: false, total: 11, completed: 11, current: 4 })).toEqual({ completed: 11 })
+  expect(pptLiveFrame({ generating: true, total: 11, completed: 3, current: 0 })).toEqual({ completed: 0 })
 })

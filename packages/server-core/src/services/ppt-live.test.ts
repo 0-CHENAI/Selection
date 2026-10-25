@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -74,6 +74,50 @@ test('generating progress follows the first missing slide and an explicit curren
     const cleared = clearStalePptGenerating(root, progress!)
     expect(cleared?.generating).toBe(false)
     expect(cleared?.current).toBeUndefined()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a recolor or restyle starts at 0 and the cover follows only a redrawn page', () => {
+  const root = session()
+  try {
+    deck(root, 11)
+    for (let page = 1; page <= 11; page++) writeFileSync(join(root, 'data', 'slides', `slide-${String(page).padStart(2, '0')}.png`), Buffer.from(`p${page}`))
+    writeFileSync(join(root, 'data', 'ppt-progress.json'), JSON.stringify({ current: 1 }))
+    writePptRun(root, { action: 'recolor', themeId: 'keynote-stage' })
+    markPptGenerating(root, true)
+    const started = readPptProgress(root, true, { check: () => [] })
+    expect(started?.completed).toBe(0)
+    expect(started?.current).toBeUndefined()
+    expect(started?.pages?.every(page => page.status === 'pending')).toBe(true)
+    const redraw = (page: number, at: number) => {
+      const file = join(root, 'data', 'slides', `slide-${String(page).padStart(2, '0')}.png`)
+      writeFileSync(file, Buffer.from(`redraw-${page}-${'x'.repeat(page)}`))
+      const when = new Date(Date.now() + at)
+      utimesSync(file, when, when)
+    }
+    redraw(1, 1000)
+    const first = readPptProgress(root, true, { check: () => [] })
+    expect(first).toMatchObject({ current: 1, completed: 0, generating: true })
+    redraw(4, 2000)
+    const fourth = readPptProgress(root, true, { check: () => [] })
+    expect(fourth).toMatchObject({ current: 4, completed: 3 })
+    expect(fourth?.pages?.[3]?.status).toBe('fixing')
+    expect(fourth?.pages?.[4]?.status).toBe('pending')
+    writeFileSync(join(root, 'data', 'ppt-progress.json'), JSON.stringify({ current: 6 }))
+    expect(readPptProgress(root, true)?.current).toBe(6)
+    expect(readPptProgress(root, true)?.completed).toBe(5)
+    markPptGenerating(root, false)
+    const done = readPptProgress(root, false, { check: () => [] })
+    expect(done?.current).toBeUndefined()
+    expect(done?.completed).toBe(11)
+    writePptRun(root, { action: 'restyle', templateId: 'paper' })
+    markPptGenerating(root, true)
+    const restyle = readPptProgress(root, true, { check: () => [] })
+    expect(restyle?.completed).toBe(0)
+    expect(restyle?.current).toBeUndefined()
+    expect(restyle?.run?.action).toBe('restyle')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

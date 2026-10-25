@@ -7,6 +7,7 @@ import { customTemplateReference } from './ppt-library'
 
 const MARKER = '.ppt-generating'
 const PROGRESS_FILE = 'ppt-progress.json'
+const REDRAW_FILE = 'ppt-redraw.json'
 const CHECK_FILE = 'deck-check.json'
 const FALLBACK_FILE = 'chart-fallback.json'
 const OUTPUT_FILE = 'ppt-output.json'
@@ -66,10 +67,12 @@ export function markPptGenerating(sessionDir: string, active: boolean): void {
   if (active) {
     mkdirSync(dirname(path), { recursive: true })
     if (!existsSync(path)) writeFileSync(path, '')
+    captureRedrawBaseline(sessionDir)
     return
   }
   removeFile(path)
   removeFile(join(sessionDir, 'data', RUN_FILE))
+  removeFile(join(sessionDir, 'data', REDRAW_FILE))
 }
 
 /** Startup recovery: a crashed turn must not stay in generating mode. */
@@ -538,27 +541,80 @@ export async function ensurePptChecks(sessionDir: string): Promise<void> {
   await engineIssues(deckPath, deck)
 }
 
-function pageStatus(index: number, issueCount: number, hasImage: boolean, generating: boolean, current: number): PptPageStatus {
+function pageStatus(index: number, issueCount: number, hasImage: boolean, generating: boolean, current: number | undefined): PptPageStatus {
+  if (generating && current == null) return 'pending'
   if (generating && index === current) return 'fixing'
-  if (generating && index > current) return 'pending'
+  if (generating && current != null && index > current) return 'pending'
   if (issueCount > 0) return 'needs_revision'
   if (hasImage || !generating) return 'passed'
   return 'pending'
 }
 
-function progressFrom(loaded: LoadedDeck, generating: boolean, file: PptxFile | undefined, check: Checker | undefined, chartFallbacks: PptChartFallback[]): PptProgress {
+/** Pages whose picture changed after a recolor or restyle started. Existing pictures are not progress. */
+function readRedrawBaseline(sessionDir: string, images: Map<number, SlideImage>): Map<number, string> | undefined {
+  const run = readPptRun(sessionDir)
+  if (!run || run.action === 'generate') return undefined
+  const parsed = readJsonFile(join(sessionDir, 'data', REDRAW_FILE)) as { stamps?: unknown } | undefined
+  const stamps = new Map<number, string>()
+  const raw = parsed && typeof parsed === 'object' ? parsed.stamps : undefined
+  if (!raw || typeof raw !== 'object') {
+    for (const [index, image] of images) stamps.set(index, image.stamp)
+    return stamps
+  }
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const index = Number(key)
+    if (!Number.isInteger(index) || index < 1 || index > 500 || typeof value !== 'string' || !value) continue
+    stamps.set(index, value)
+  }
+  return stamps
+}
+
+function captureRedrawBaseline(sessionDir: string): void {
+  const run = readPptRun(sessionDir)
+  if (!run || run.action === 'generate') return
+  if (existsSync(join(sessionDir, 'data', REDRAW_FILE))) return
+  const deckPath = discoverDeck(sessionDir)
+  const images = loadSlideImages(sessionDir, deckPath ? join(dirname(deckPath), 'slides') : join(sessionDir, 'data', 'slides'))
+  const stamps: Record<string, string> = {}
+  for (const [index, image] of images) stamps[String(index)] = image.stamp
+  writeJsonFile(sessionDir, REDRAW_FILE, { stamps })
+  removeFile(join(sessionDir, 'data', PROGRESS_FILE))
+}
+
+function newestRedrawn(indexes: number[], images: Map<number, SlideImage>): number | undefined {
+  if (indexes.length === 0) return undefined
+  return indexes.reduce((best, index) => {
+    const bestMs = Number(images.get(best)?.stamp.split(':')[0] ?? 0)
+    const ms = Number(images.get(index)?.stamp.split(':')[0] ?? 0)
+    if (ms !== bestMs) return ms > bestMs ? index : best
+    return Math.max(best, index)
+  })
+}
+
+function progressFrom(loaded: LoadedDeck, generating: boolean, file: PptxFile | undefined, check: Checker | undefined, chartFallbacks: PptChartFallback[], redraw?: Map<number, string>): PptProgress {
   const total = loaded.pages.length
   const hasAnyImage = [...loaded.images].some(index => index >= 1 && index <= total)
-  let current = hasAnyImage ? 1 : total
-  if (hasAnyImage) {
+  let current: number | undefined
+  if (redraw && generating) {
+    const changed: number[] = []
     for (let index = 1; index <= total; index++) {
-      if (!loaded.images.has(index)) { current = index; break }
-      current = index
+      const stamp = loaded.imageByIndex.get(index)?.stamp
+      if (stamp && redraw.get(index) !== stamp) changed.push(index)
     }
+    if (loaded.currentOverride && loaded.currentOverride <= total) current = loaded.currentOverride
+    else current = newestRedrawn(changed, loaded.imageByIndex)
+  } else {
+    current = hasAnyImage ? 1 : total
+    if (hasAnyImage) {
+      for (let index = 1; index <= total; index++) {
+        if (!loaded.images.has(index)) { current = index; break }
+        current = index
+      }
+    }
+    if (generating && loaded.currentOverride && loaded.currentOverride <= total) current = loaded.currentOverride
   }
-  if (generating && loaded.currentOverride && loaded.currentOverride <= total) current = loaded.currentOverride
   const completed = generating
-    ? Math.max(0, current - 1)
+    ? (current ? Math.max(0, current - 1) : 0)
     : hasAnyImage ? [...loaded.images].filter(index => index >= 1 && index <= total).length : total
   const details = pageIssues(loaded.deckPath, check)
   const pages: PptPageProgress[] = loaded.pages.map((page, offset) => {
@@ -578,12 +634,12 @@ function progressFrom(loaded: LoadedDeck, generating: boolean, file: PptxFile | 
       ...(image ? { imageStamp: image.stamp, imageName: image.name } : {}),
     }
   })
-  const name = pages[current - 1]?.name ?? String(current)
+  const name = current ? pages[current - 1]?.name ?? String(current) : ''
   return {
     ...(file ? { fileName: file.name, pptxPath: file.path } : {}),
     total,
     completed,
-    ...(generating && total > 0 ? { current, currentTitle: name } : {}),
+    ...(generating && current ? { current, currentTitle: name } : {}),
     generating,
     pages,
     ...(chartFallbacks.length ? { chartFallbacks } : {}),
@@ -627,7 +683,8 @@ export function readPptProgress(sessionDir: string, generating: boolean, options
       ...(chartFallbacks.length ? { chartFallbacks } : {}),
     })
   }
-  return withChoice(sessionDir, generating, progressFrom(loaded, generating, file, options.check, readChartFallbacks(sessionDir)))
+  const redraw = generating ? readRedrawBaseline(sessionDir, loaded.imageByIndex) : undefined
+  return withChoice(sessionDir, generating, progressFrom(loaded, generating, file, options.check, readChartFallbacks(sessionDir), redraw))
 }
 
 /**

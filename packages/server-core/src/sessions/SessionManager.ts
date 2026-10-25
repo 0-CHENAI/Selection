@@ -1769,11 +1769,18 @@ export class SessionManager implements ISessionManager {
     try { next = readPptProgress(dir, generating, { workingDirectory: managed.workingDirectory }) } catch { return }
     if (!next && generating && managed.ppt) {
       const previous = managed.pptProgress
+      const carry = !!previous?.generating && !!previous.pptxPath
       next = {
         total: previous?.pptxPath ? previous.total : 0,
-        completed: previous?.pptxPath ? previous.completed : 0,
+        completed: carry ? previous.completed : 0,
         generating: true,
-        ...(previous?.pptxPath ? { fileName: previous.fileName, pptxPath: previous.pptxPath, pages: previous.pages, chartFallbacks: previous.chartFallbacks } : {}),
+        ...(carry && previous?.current ? { current: previous.current, currentTitle: previous.currentTitle } : {}),
+        ...(previous?.pptxPath ? {
+          fileName: previous.fileName,
+          pptxPath: previous.pptxPath,
+          ...(carry ? { pages: previous.pages } : {}),
+          chartFallbacks: previous.chartFallbacks,
+        } : {}),
       }
     }
     if (!next && !generating && managed.pptProgress?.generating) next = { ...managed.pptProgress, generating: false }

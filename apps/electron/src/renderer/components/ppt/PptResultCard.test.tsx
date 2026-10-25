@@ -40,15 +40,16 @@ const templates: PptTemplate[] = [
   { id: 'grid', title: '瑞士网格', category: '咨询', canvas: '16:9', pages: 11, cover, referencePages: [] },
 ]
 
-function view(state: 'done' | 'recolor', panel?: 'color') {
+function view(state: 'done' | 'recolor', options: { panel?: 'color'; expanded?: boolean; completed?: number; current?: number | null } = {}) {
+  const current = options.current === null ? undefined : options.current ?? (state === 'recolor' ? 4 : undefined)
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <PptResultView
         fileName="2025年中国经济数据简报.pptx"
         pptxPath="/sessions/one/2025年中国经济数据简报.pptx"
         total={11}
-        completed={state === 'done' ? 11 : 3}
-        current={state === 'recolor' ? 4 : undefined}
+        completed={options.completed ?? (state === 'done' ? 11 : 3)}
+        current={current}
         generating={state === 'recolor'}
         canStop={state === 'recolor'}
         pages={state === 'recolor' ? pages.map(item => ({ ...item, status: item.index < 4 ? 'passed' : item.index === 4 ? 'fixing' : 'pending' })) : pages}
@@ -63,7 +64,8 @@ function view(state: 'done' | 'recolor', panel?: 'color') {
         currentThemeId="academic-ink"
         run={state === 'recolor' ? { action: 'recolor', themeId: 'keynote-stage' } : undefined}
         fileManagerName="访达"
-        initialPanel={panel ?? null}
+        initialPanel={options.panel ?? null}
+        expanded={options.expanded ?? false}
         onPick={() => {}}
         onOpenRight={() => {}}
         onStop={() => {}}
@@ -75,8 +77,29 @@ function view(state: 'done' | 'recolor', panel?: 'color') {
   )
 }
 
-test('the finished card shows the cover, check summary and page thumbs', () => {
+test('the card starts collapsed on one row', () => {
   const html = view('done')
+  expect(html).toContain('data-expanded="false"')
+  expect(html).toContain('data-testid="ppt-result-fold"')
+  expect(html).toContain('aria-expanded="false"')
+  expect(html).toContain('aria-controls=')
+  expect(html).toContain('aria-label="展开"')
+  expect(html).toContain('type="button"')
+  expect(html).toContain('2025年中国经济数据简报.pptx')
+  expect(html).toContain('data-file-kind="powerpoint"')
+  expect(html).toContain('11 页 · 1 页需留意')
+  expect(html).toContain('在右侧打开')
+  expect(html).not.toContain('data-testid="ppt-result-cover"')
+  expect(html).not.toContain('data-testid="ppt-result-thumb"')
+  expect(html).not.toContain('换风格重排')
+  expect(html).not.toContain('10 页通过检查')
+})
+
+test('the finished card shows the cover, check summary and page thumbs', () => {
+  const html = view('done', { expanded: true })
+  expect(html).toContain('aria-expanded="true"')
+  expect(html).toContain('aria-label="折叠"')
+  expect(html).toContain('data-motion="off"')
   expect(html).toContain('data-testid="ppt-result-card"')
   expect(html).toContain('2025年中国经济数据简报.pptx')
   expect(html).toContain('PPTX')
@@ -100,8 +123,34 @@ test('the finished card shows the cover, check summary and page thumbs', () => {
   expect(html.match(/data-testid="ppt-result-thumb"/g)?.length).toBe(11)
 })
 
+test('a collapsed redraw keeps a thin bar and does not invent page 1', () => {
+  const html = view('recolor', { completed: 11, current: null })
+  expect(html).toContain('data-testid="ppt-result-fold-bar"')
+  expect(html).toContain('h-1 ')
+  expect(html).not.toContain('h-1.5')
+  expect(html).toContain('11 页 · 0/11')
+  expect(html).not.toContain('第 1 页')
+  expect(html).not.toContain('已完成 11 / 11 页')
+  expect(html).not.toContain('data-testid="ppt-result-cover"')
+  expect(html.match(/data-state="wait"/g)?.length).toBe(11)
+})
+
+test('the veil and the completed count come from the page being redrawn', () => {
+  const veiled = view('recolor', { expanded: true, completed: 11, current: null })
+  expect(veiled).not.toContain('第 1 页')
+  expect(veiled).toContain('已完成 0 / 11 页')
+  expect(veiled).not.toContain('已完成 11 / 11 页')
+  expect(veiled.match(/data-state="wait"/g)?.length).toBe(11)
+  const html = view('recolor', { expanded: true, completed: 11, current: 4 })
+  expect(html.match(/第 4 页/g)).toEqual(['第 4 页'])
+  expect(html).toContain('已完成 3 / 11 页')
+  expect(html).not.toContain('已完成 11 / 11 页')
+  expect(html.match(/data-state="done"/g)?.length).toBe(3)
+  expect(html.match(/data-state="current"/g)?.length).toBe(1)
+})
+
 test('a recolor in progress keeps one status line and updates page bars', () => {
-  const html = view('recolor')
+  const html = view('recolor', { expanded: true })
   expect(html).toContain('正在换配色')
   expect(html).toContain('暗场讲台')
   expect(html).toContain('版式不变')

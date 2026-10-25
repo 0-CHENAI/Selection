@@ -46,3 +46,27 @@ export function segmentState(index: number, current: number | undefined): 'done'
   if (current && index === current) return 'current'
   return 'wait'
 }
+
+export function attentionCount(pages: PptPageProgress[]): number {
+  return pages.filter(page => page.failed || page.status === 'needs_revision').length
+}
+
+/**
+ * Veil page and completed count are one snapshot.
+ * A redraw with no current page is 0/N and has no veil. A known current page has finished every page before it.
+ */
+export function pptLiveFrame(input: {
+  generating: boolean
+  total: number
+  completed: number
+  current?: number
+}): { completed: number; current?: number } {
+  const total = Number.isInteger(input.total) && input.total > 0 ? input.total : 0
+  const completed = Number.isFinite(input.completed) ? Math.max(0, input.completed) : 0
+  if (!input.generating) return { completed: total > 0 ? Math.min(completed, total) : completed }
+  const current = input.current
+  if (typeof current !== 'number' || !Number.isInteger(current) || current < 1 || (total > 0 && current > total)) {
+    return { completed: 0 }
+  }
+  return { completed: current - 1, current }
+}
