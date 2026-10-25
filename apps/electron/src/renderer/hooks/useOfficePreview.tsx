@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useAtomValue } from 'jotai'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
+import { sessionAtomFamily } from '@/atoms/sessions'
 import { officePreviewDocument } from '../lib/office-preview-document'
 import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
@@ -18,11 +20,25 @@ import { RADIUS_EDGE, RADIUS_INNER } from '../components/app-shell/panel-constan
 
 type PreviewView = OfficePreviewScope & { path: string; pendingDocument?: boolean; pickerInPanel?: boolean; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
 
+const OFFICE_PREVIEW_POLL_MS = 2000
+const OFFICE_PREVIEW_LIVE_POLL_MS = 500
+
+function samePathList(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false
+  const seen = new Set(right)
+  return left.every(path => seen.has(path))
+}
+
 type CachedPreview = { view: PreviewView; position: OfficePreviewState; usedAt: number; pending: Promise<unknown> }
 const previewKey = (scope: OfficePreviewScope) => JSON.stringify([scope.workspaceId, scope.sessionId])
 
 export function useOfficePreview(activeSessionId: string | null | undefined, workspaceId?: string | null) {
   const { t } = useTranslation()
+  const watchedSession = useAtomValue(sessionAtomFamily(activeSessionId || 'office-preview-none'))
+  const pptLive = useRef(false)
+  pptLive.current = !!activeSessionId && watchedSession?.id === activeSessionId && !!watchedSession.ppt
+    && (!!watchedSession.isProcessing || !!watchedSession.pptProgress?.generating)
+  const pptPageCount = !!pptLive.current ? (watchedSession?.pptProgress?.pages?.length ?? 0) : 0
   const [view, setView] = useState<PreviewView>()
   const [panelPresent, setPanelPresent] = useState(false)
   const [selectionOverflow, setSelectionOverflow] = useState<{ previewId: string; count: number }>()
@@ -40,6 +56,9 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
   const scrollX = useRef(0)
   const scrollAnchor = useRef<OfficePreviewState['anchor']>()
   const refreshing = useRef<string>()
+  const refreshSoon = useRef<(() => void) | undefined>(undefined)
+  /** Selection the server already reapplied. Ignore the iframe echo of those paths. */
+  const restoreEcho = useRef<{ previewId: string; paths: string[] } | undefined>(undefined)
   const pickerTrigger = useRef<HTMLElement | null>(null)
   const dismissListeners = useRef(new Set<() => void>())
   const composerAnchor = useRef({ getBoundingClientRect: () =>
@@ -226,8 +245,32 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     let disposed = false
     let failures = 0
     let legacyHost = false
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'hidden' || current.current?.resuming || refreshing.current === previewId) return
+    let stopped = false
+    let followAgain = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const delay = () => pptLive.current ? OFFICE_PREVIEW_LIVE_POLL_MS : OFFICE_PREVIEW_POLL_MS
+    const paintRefresh = (result: OfficePreviewResult, previousId: string) => {
+      const paths = result.previewId === previousId ? result.selection?.elements.map(element => element.path) : undefined
+      const restorePaths = paths?.length ? paths : undefined
+      if (restorePaths) {
+        const token = { previewId: result.previewId, paths: restorePaths }
+        restoreEcho.current = token
+        window.setTimeout(() => { if (restoreEcho.current === token) restoreEcho.current = undefined }, 500)
+      }
+      else if (restoreEcho.current && (restoreEcho.current.previewId === previousId || restoreEcho.current.previewId === result.previewId)) restoreEcho.current = undefined
+      selectionTickets.current.set(result.previewId, ++selectionSequence.current)
+      return { restorePaths, count: restorePaths?.length ?? 0 }
+    }
+    const arm = (wait: number) => {
+      clearTimeout(timer)
+      timer = setTimeout(run, wait)
+    }
+    const run = () => {
+      if (stopped) return
+      if (document.visibilityState === 'hidden' || current.current?.resuming || refreshing.current === previewId) {
+        arm(delay())
+        return
+      }
       refreshing.current = previewId
       void window.electronAPI.officePreview({ type: legacyHost ? 'heartbeat' : 'refresh', sessionId, previewId }).then(result => {
         failures = 0
@@ -239,17 +282,19 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
           if (current.current?.preview?.previewId === result.previewId) return
           const entry = cached.current.get(key)
           if (entry?.view.preview?.previewId === previewId) {
-            selectionTickets.current.delete(previewId)
-            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft }), count: 0, busy: false }
+            if (result.previewId !== previewId) selectionTickets.current.delete(previewId)
+            const painted = paintRefresh(result, previewId)
+            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft, restorePaths: painted.restorePaths }), count: painted.count, busy: false }
             entry.pending = Promise.resolve()
             releasePreview(entry.view, 'suspend'); syncCached()
           } else releasePreview({ sessionId, preview: result }, 'close')
           return
         }
+        const painted = paintRefresh(result, previewId)
         const next = { ...current.current, preview: { ...result, html: undefined },
-          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft }),
-          count: 0, busy: false, error: undefined, refreshError: false }
-        pending.current = Promise.resolve()
+          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft, restorePaths: painted.restorePaths }),
+          count: painted.count, busy: false, error: undefined, refreshError: false }
+        if (result.previewId !== previewId) pending.current = Promise.resolve()
         setSelectionOverflow(undefined)
         updateView(next)
       }).catch(error => {
@@ -267,8 +312,20 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
         }
         // A candidate may be mid-write. Preserve the last rendered snapshot and retry.
         if (++failures >= 3 && !disposed) updateView(old => old?.preview?.previewId === previewId ? { ...old, refreshError: true } : old)
-      }).finally(() => { if (refreshing.current === previewId) refreshing.current = undefined })
-    }, 2000)
+      }).finally(() => {
+        if (refreshing.current === previewId) refreshing.current = undefined
+        const wait = followAgain ? 0 : delay()
+        followAgain = false
+        if (!stopped) arm(wait)
+      })
+    }
+    const kick = () => {
+      if (stopped) return
+      if (refreshing.current === previewId) { followAgain = true; return }
+      arm(0)
+    }
+    refreshSoon.current = kick
+    arm(delay())
     const receive = (event: MessageEvent) => {
       if (event.source === frames.current.get(key)?.contentWindow && event.data?.previewId === previewId && event.data.type === 'selection-office-scroll' && current.current?.preview?.previewId === previewId) {
         if (Number.isFinite(event.data.scrollY)) scrollY.current = Math.max(0, event.data.scrollY)
@@ -278,9 +335,13 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
         return
       }
       if (event.source !== frames.current.get(key)?.contentWindow || event.data?.type !== 'selection-office-selection' || event.data.previewId !== previewId) return
-      if (view.preview?.isDraft || current.current?.resuming || refreshing.current === previewId || current.current?.preview?.previewId !== previewId) return
       const paths: unknown = event.data.paths
       if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string')) return
+      if (restoreEcho.current?.previewId === previewId && samePathList(restoreEcho.current.paths, paths as string[])) {
+        restoreEcho.current = undefined
+        return
+      }
+      if (view.preview?.isDraft || current.current?.resuming || refreshing.current === previewId || current.current?.preview?.previewId !== previewId) return
       const selectionTicket = ++selectionSequence.current
       selectionTickets.current.set(previewId, selectionTicket)
       // Keep the actual visible count. Never capture the host's previous valid
@@ -301,8 +362,20 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       void pending.current.catch(() => {})
     }
     window.addEventListener('message', receive)
-    return () => { disposed = true; clearInterval(timer); window.removeEventListener('message', receive) }
+    return () => {
+      stopped = true
+      disposed = true
+      if (refreshSoon.current === kick) refreshSoon.current = undefined
+      clearTimeout(timer)
+      window.removeEventListener('message', receive)
+    }
   }, [view?.preview, view?.sessionId, view?.workspaceId, open, updateView, updatePreview, releasePreview, syncCached])
+  useEffect(() => {
+    // A new page is already on disk when this count changes. Refresh now;
+    // the interval below only covers a missed event.
+    if (!pptLive.current) return
+    refreshSoon.current?.()
+  }, [pptPageCount, activeSessionId, watchedSession?.isProcessing, watchedSession?.pptProgress?.generating])
   const capture = useCallback(async (sessionId: string): Promise<OfficeSelection | undefined> => {
     const target = current.current
     // Opening the panel is context, not a request to edit selected elements.

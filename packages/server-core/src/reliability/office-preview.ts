@@ -18,13 +18,21 @@ function binary() {
   if (!path || /\.(cmd|bat)$/i.test(path)) throw new Error('OfficeCLI executable is unavailable on this host')
   return path
 }
+function completeOfficePackage(bytes: Buffer): boolean {
+  try {
+    const parts = unzipSync(bytes, { filter: file => file.name === '[Content_Types].xml' })
+    return !!parts['[Content_Types].xml']?.length
+  } catch {
+    return false
+  }
+}
+
 /** Live package bytes when the file changed and is still a complete Office zip; otherwise the snapshot. */
 export function officePreviewBytes(snapshot: Buffer, filePath: string): Buffer {
   try {
     const live = readFileSync(filePath)
     if (live.equals(snapshot)) return snapshot
-    const parts = unzipSync(live, { filter: file => file.name === '[Content_Types].xml' })
-    if (!parts['[Content_Types].xml']?.length) return snapshot
+    if (!completeOfficePackage(live)) return snapshot
     return live
   } catch {
     return snapshot
@@ -55,6 +63,8 @@ interface Preview {
   isDraft: boolean
   html: string; owners: Map<string, number>; stopping?: Promise<void>
   selectedElements?: OfficeSelection['elements']
+  /** data-path values the preview painted, kept so a file swap can restore them. */
+  selectedPaths?: string[]
 }
 /** Each preview owns a private copy and a process. No watch HTTP endpoint is exposed to the client. */
 export class OfficePreviewService {
@@ -84,8 +94,7 @@ export class OfficePreviewService {
         return { ...this.result(previous), ...(knownPreviewId === previous.id ? {} : { html: previous.html }) }
       }
       if (previous) {
-        const parts = unzipSync(bytes, { filter: file => file.name === '[Content_Types].xml' })
-        if (!parts['[Content_Types].xml']?.length) throw new Error('Office 候选文件尚未写入完成')
+      if (!completeOfficePackage(bytes)) throw new Error('Office 候选文件尚未写入完成')
       }
       await this.makeRoom(previous)
       if (!valid()) throw new Error('Office 预览请求已被替换或取消')
@@ -193,17 +202,56 @@ export class OfficePreviewService {
   }
   async refresh(sessionId: string, id: string, bytes: Buffer, baseVersion: string, isDraft: boolean, ownerId = 'legacy') {
     const p = this.get(sessionId, id, ownerId)
-    if (p.hash !== digest(bytes) || p.isDraft !== isDraft || p.baseVersion !== baseVersion) {
-      // Watch can return a successful error page for a partially written package.
-      // Check the ZIP directory before replacing the last usable preview.
-      const parts = unzipSync(bytes, { filter: file => file.name === '[Content_Types].xml' })
-      if (!parts['[Content_Types].xml']?.length) throw new Error('Office 候选文件尚未写入完成')
-      // Keep the displayed snapshot usable if a candidate is only partly written.
+    if (p.hash === digest(bytes) && p.isDraft === isDraft && p.baseVersion === baseVersion) return this.heartbeat(sessionId, id, ownerId)
+    // Watch can return a successful error page for a partially written package.
+    // Check the ZIP directory before replacing the last usable preview.
+    if (!completeOfficePackage(bytes)) throw new Error('Office 候选文件尚未写入完成')
+    try {
+      return await this.replaceWatched(p, bytes, baseVersion, isDraft, ownerId)
+    } catch (error) {
+      // Same-path switch is a no-op in OfficeCLI, and a dead watch cannot swap.
+      // Fall back to a new process only then. makeRoom stops the old one first.
+      if (error instanceof Error && error.message === 'Office 候选文件尚未写入完成') throw error
       const next = await this.open(sessionId, p.artifactId, baseVersion, p.path, bytes, isDraft, false, ownerId)
       await this.close(sessionId, id)
       return next
     }
-    return this.heartbeat(sessionId, id, ownerId)
+  }
+
+  /** Point the running watch at a new copy. Restarting it flashes the iframe and drops the scroll position. */
+  private async replaceWatched(p: Preview, bytes: Buffer, baseVersion: string, isDraft: boolean, ownerId: string): Promise<OfficePreviewResult> {
+    const ext = extname(p.copy) || extname(p.path) || '.pptx'
+    const nextCopy = join(p.directory, `document-${Date.now()}-${randomUUID().slice(0, 8)}${ext}`)
+    await writeFile(nextCopy, bytes, { mode: 0o600 })
+    const switched = await fetch(`http://127.0.0.1:${p.port}/api/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: nextCopy }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!switched.ok) {
+      await rm(nextCopy, { force: true }).catch(() => {})
+      throw new Error('Office 预览未能换入新文档')
+    }
+    const previous = p.copy
+    const paths = p.selectedPaths
+    p.copy = nextCopy
+    p.hash = digest(bytes)
+    p.baseVersion = baseVersion
+    p.isDraft = isDraft
+    p.selectedElements = undefined
+    p.selectedPaths = undefined
+    if (paths?.length && !isDraft) {
+      try { await this.select(p.sessionId, p.id, paths, ownerId) }
+      catch { p.selectedElements = undefined; p.selectedPaths = undefined }
+    }
+    const response = await fetch(`http://127.0.0.1:${p.port}/`, { signal: AbortSignal.timeout(15_000) })
+    if (!response.ok) throw new Error('Office 预览无法加载')
+    const html = await response.text()
+    if (html.length > 16 * 1024 * 1024) throw new Error('Office 预览过大，请缩小文档后重试')
+    if (previous !== nextCopy) await rm(previous, { force: true }).catch(() => {})
+    const selection = p.selectedElements ? { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, hash: p.hash, elements: p.selectedElements } : undefined
+    return { ...this.result(p), html, ...(selection ? { selection } : {}) }
   }
   async heartbeat(sessionId: string, id: string, ownerId = 'legacy') {
     const p = this.get(sessionId, id, ownerId)
@@ -218,10 +266,12 @@ export class OfficePreviewService {
       throw new Error(`最多选择 ${OFFICE_PREVIEW_MAX_SELECTION} 个元素；大表格请分批选择`)
     }
     p.selectedElements = undefined
+    p.selectedPaths = undefined
     const response = await fetch(`http://127.0.0.1:${p.port}/api/selection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }), signal: AbortSignal.timeout(5000) })
     if (!response.ok) throw new Error('无法更新 Office 选择')
     const elements = (await officeNodes(p.copy, 'selected')).map(officeElement)
     p.selectedElements = elements
+    p.selectedPaths = paths
     return { ...this.result(p), selection: { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, hash: p.hash, elements } }
   }
   async capture(sessionId: string, id: string, ownerId = 'legacy') {
