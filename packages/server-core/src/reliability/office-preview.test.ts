@@ -5,13 +5,29 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
-import { OfficePreviewService, officeElement, verifyOfficeSelection } from './office-preview'
+import { zipSync, strToU8 } from 'fflate'
+import { writeFileSync } from 'node:fs'
+import { OfficePreviewService, officeElement, officePreviewBytes, verifyOfficeSelection } from './office-preview'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION } from '@craft-agent/shared/protocol'
 
 const exec = promisify(execFile)
 const runtime = resolveOfficecliBinary({ env: { ...process.env, CRAFT_OFFICECLI: undefined } })
 const resources: Array<{ service: OfficePreviewService; root: string }> = []
 afterEach(async () => { for (const { service, root } of resources.splice(0)) { service.dispose(); await rm(root, { recursive: true, force: true }) } })
+
+test('preview bytes follow a complete pptx and ignore a torn write', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'office-preview-bytes-'))
+  try {
+    const file = join(root, 'deck.pptx')
+    const snapshot = Buffer.from('snapshot')
+    writeFileSync(file, Buffer.from('torn'))
+    expect(officePreviewBytes(snapshot, file)).toBe(snapshot)
+    const live = Buffer.from(zipSync({ '[Content_Types].xml': strToU8('<Types></Types>') }))
+    writeFileSync(file, live)
+    expect(officePreviewBytes(snapshot, file).equals(live)).toBe(true)
+    expect(officePreviewBytes(live, file)).toBe(live)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 test('Office element snapshots bound summaries and reject invalid paths', () => {
   expect(officeElement({ path: '/body/p[1]', type: 'paragraph', text: 'x'.repeat(5000) }).summary).toHaveLength(500)

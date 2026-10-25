@@ -56,7 +56,6 @@ Object.assign(window.electronAPI, {
     ...(scrollFixture ? [{ id: 'scroll-template', title: 'Scrollable template', category: '自定义', canvas: '16:9', pages: 12, cover, referencePages: [cover] }] : []),
   ], themes: [] }),
   getPptTemplatePreview: async () => cover,
-  getPptLive: async () => null,
   getWorkspaceSettings: async () => ({}),
   sessionCommand: async (id: string, command: { type: string; dir?: string }) => {
     calls.commands.push([id, command])

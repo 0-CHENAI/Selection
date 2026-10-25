@@ -1,7 +1,6 @@
 import { useOfficePreview } from './hooks/useOfficePreview'
-import { usePptLive } from './hooks/usePptLive'
+import { usePptOfficeAutoOpen } from './hooks/usePptOfficeAutoOpen'
 import { PptRevisionContext } from '@/components/ppt/ppt-revision'
-import { getPptSelection, setPptSelection } from '@/components/ppt/ppt-selection'
 import { useOfficeFiles } from './hooks/useOfficeFiles'
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
@@ -781,9 +780,12 @@ export default function App() {
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
-  const { open: openOfficePreview, close: closeOfficePreview, capture: captureOfficeSelection, context: officePreviewContext, panel: officePreviewPanel, picker: officeFilePicker, isOpen: officePreviewOpen, isPresent: officePreviewPresent, isChoosing: officePreviewChoosing } = useOfficePreview(sessionSelection.selected, windowWorkspaceId)
-  const { panel: pptLivePanel, present: pptLivePresent } = usePptLive(sessionSelection.selected, officePreviewOpen, closeOfficePreview)
+  const { open: openOfficePreview, close: closeOfficePreview, capture: captureOfficeSelection, context: officePreviewContext, panel: officePreviewPanel, picker: officeFilePicker, awaitDocument: awaitOfficeDocument, subscribeDismiss: subscribeOfficeDismiss, path: officePreviewPath, pending: officePreviewPending, isOpen: officePreviewOpen, isPresent: officePreviewPresent, isChoosing: officePreviewChoosing } = useOfficePreview(sessionSelection.selected, windowWorkspaceId)
   const officeFiles = useOfficeFiles(sessionSelection.selected, windowWorkspaceId)
+  usePptOfficeAutoOpen(sessionSelection.selected, {
+    isOpen: officePreviewOpen, path: officePreviewPath, pending: officePreviewPending,
+    open: openOfficePreview, awaitDocument: awaitOfficeDocument, subscribeDismiss: subscribeOfficeDismiss,
+  }, officeFiles)
   const toggleOfficeCollaboration = useCallback(() => {
     if (officePreviewOpen || officePreviewChoosing) closeOfficePreview()
     else if (sessionSelection.selected && officeFiles.length) {
@@ -1375,8 +1377,7 @@ export default function App() {
         await openOfficePreview(sessionId, '', candidates)
         return true
       }
-      const selectedTargets = getPptSelection(sessionId)
-      const revision = pptRevision ?? (selectedTargets.length > 0 && !attachments?.length ? { action: 'revise' as const, targets: selectedTargets, comment: message } : undefined)
+      const revision = pptRevision
       const officeSelection = revision ? undefined : await captureOfficeSelection(sessionId)
       const officeContext = officeSelection ? undefined : officePreviewContext(sessionId)
       // Capture live generation so composer submits stay in the queue
@@ -1568,7 +1569,6 @@ export default function App() {
         } : undefined,
       })
       if (ppt) updateSessionById(sessionId, { ppt })
-      if (revision) setPptSelection(sessionId, [])
       // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
@@ -2335,13 +2335,12 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
-                  hasTrailingPanel={officePreviewPresent || pptLivePresent}
+                  hasTrailingPanel={officePreviewPresent}
                 />
               )}
               </div>
               <div className="contents">
                 {officePreviewPanel}
-                {pptLivePanel}
               </div>
               {officeFilePicker}
             </div>

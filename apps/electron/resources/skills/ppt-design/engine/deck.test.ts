@@ -483,6 +483,8 @@ describe('skill instructions', () => {
   it('points at the deck engine and keeps the OfficeCLI morph override', () => {
     const skill = read('SKILL.md')
     expect(skill).toContain('deck-cli.mjs')
+    expect(skill).toContain('/slide[n]/shape[@name=元素id]')
+    expect(skill).not.toContain('实时侧窗')
     expect(skill).toContain('dsh-cartesian')
     expect(skill).toContain('dsh-engineering-blueprint')
     expect(skill).not.toContain('compose.ts')

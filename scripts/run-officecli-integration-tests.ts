@@ -11,6 +11,7 @@ const child = Bun.spawn([
   'packages/shared/src/agent/__tests__/base-agent.test.ts',
   'packages/shared/src/skills/__tests__/storage.test.ts',
   'packages/session-tools-core/src/tool-defs-filtering.test.ts',
+  'apps/electron/resources/skills/ppt-design/engine/deck-officecli-roundtrip.test.ts',
 ], {
   cwd: repoRoot,
   env: {

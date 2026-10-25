@@ -312,7 +312,6 @@ export const RPC_CHANNELS = {
     DELETE_PPT_TEMPLATE: 'skills:deletePptTemplate',
     EXPORT_PPT_TEMPLATE: 'skills:exportPptTemplate',
     GET_PPT_CATALOG: 'skills:getPptCatalog',
-    GET_PPT_LIVE: 'skills:getPptLive',
     GET_PPT_TEMPLATE_PAGES: 'skills:getPptTemplatePages',
     GET_PPT_TEMPLATE_PREVIEW: 'skills:getPptTemplatePreview',
     IMPORT_PPT_TEMPLATE: 'skills:importPptTemplate',

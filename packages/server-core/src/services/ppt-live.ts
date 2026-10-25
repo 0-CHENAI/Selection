@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { PptChartFallback, PptLiveElement, PptLivePage, PptLiveSnapshot, PptPageStatus, PptProgress, PptRevision, PptRevisionTarget } from '@craft-agent/shared/protocol'
+import type { PptChartFallback, PptPageProgress, PptPageStatus, PptProgress, PptRevision, PptRevisionTarget } from '@craft-agent/shared/protocol'
 import { getPptCatalog, getPptSkillRoot } from './ppt-catalog'
 import { customTemplateReference } from './ppt-library'
 
@@ -11,40 +10,33 @@ const PROGRESS_FILE = 'ppt-progress.json'
 const CHECK_FILE = 'deck-check.json'
 const FALLBACK_FILE = 'chart-fallback.json'
 const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
-const MAX_IMAGE_BYTES = 1_500_000
 const MAX_DEPTH = 3
 const MAX_TARGETS = 256
 const SKIP_DIRS = new Set(['node_modules', 'attachments'])
+const deckExportStamp = new Map<string, string>()
 
-type Bounds = { x: number; y: number; w: number; h: number }
-type RawElement = { id?: unknown; type?: unknown; role?: unknown; bounds?: Partial<Bounds>; text?: unknown }
-type RawPage = { id?: unknown; name?: unknown; elements?: unknown }
+type RawPage = { id?: unknown; name?: unknown }
 type RawDeck = { title?: unknown; canvas?: { width?: unknown; height?: unknown }; pages?: unknown }
 type CheckIssue = { pageId?: string }
 type Checker = (deck: unknown) => CheckIssue[]
 
-export interface PptLiveReadOptions {
-  generating?: boolean
-  known?: unknown
-  sessionId?: string
-  /** Test seam. Production runs deck_check, then a sibling deck-check.json. */
+export interface PptProgressOptions {
+  /** Test seam. Production uses deck-check.json, then a warmed deck_check cache. */
   check?: Checker
-}
-
-interface SlideImage {
-  path: string
-  hash: string
-  size: number
+  workingDirectory?: string
 }
 
 interface LoadedDeck {
-  title: string
-  canvas: { width: number; height: number }
   pages: RawPage[]
-  images: Map<number, SlideImage>
-  files: Array<{ path: string; name: string }>
+  images: Set<number>
   currentOverride?: number
   deckPath: string
+}
+
+interface PptxFile {
+  path: string
+  name: string
+  mtimeMs: number
 }
 
 export function pptGeneratingPath(sessionDir: string): string {
@@ -65,19 +57,12 @@ export function markPptGenerating(sessionDir: string, active: boolean): void {
   if (existsSync(path)) unlinkSync(path)
 }
 
-/** Startup recovery: a crashed turn must not keep the live panel in generating mode. */
+/** Startup recovery: a crashed turn must not stay in generating mode. */
 export function clearStalePptGenerating(sessionDir: string, progress?: PptProgress): PptProgress | undefined {
   markPptGenerating(sessionDir, false)
   if (!progress?.generating) return progress
   const fresh = readPptProgress(sessionDir, false)
   return fresh ? { ...fresh, generating: false } : { ...progress, generating: false }
-}
-
-export function canvasLabel(width: number, height: number): string {
-  if (!(width > 0) || !(height > 0)) return ''
-  const ratio = width / height
-  const known: Array<[number, string]> = [[16 / 9, '16:9'], [4 / 3, '4:3'], [1, '1:1'], [9 / 16, '9:16'], [3 / 4, '3:4']]
-  return known.find(([value]) => Math.abs(ratio - value) < 0.02)?.[1] ?? `${Math.round(width)}×${Math.round(height)}`
 }
 
 function within(root: string, target: string): boolean {
@@ -106,8 +91,8 @@ function discoverDeck(sessionDir: string): string | null {
   return found[0] ?? null
 }
 
-function slideImages(dir: string): Map<number, SlideImage> {
-  const images = new Map<number, SlideImage>()
+function slideImages(dir: string): Set<number> {
+  const images = new Set<number>()
   if (!existsSync(dir)) return images
   let names: string[]
   try { names = readdirSync(dir) } catch { return images }
@@ -119,32 +104,39 @@ function slideImages(dir: string): Map<number, SlideImage> {
     const path = join(dir, name)
     try {
       const stat = statSync(path)
-      if (!stat.isFile() || stat.size <= 0) continue
-      const hash = createHash('sha1').update(`${stat.mtimeMs}:${stat.size}`).digest('hex')
-      const previous = images.get(index)
-      if (!previous || stat.mtimeMs >= statSync(previous.path).mtimeMs) images.set(index, { path, hash, size: stat.size })
+      if (stat.isFile() && stat.size > 0) images.add(index)
     } catch { /* a slide still being written is skipped until the next poll */ }
   }
   return images
 }
 
-function pptxFiles(sessionDir: string, deckPath: string): Array<{ path: string; name: string }> {
-  const dirs = [join(sessionDir, 'data'), dirname(deckPath)]
-  const files: Array<{ path: string; name: string }> = []
-  const seen = new Set<string>()
-  for (const dir of dirs) {
-    if (!existsSync(dir) || !within(sessionDir, dir)) continue
-    let names: string[]
-    try { names = readdirSync(dir) } catch { continue }
-    for (const name of names) {
-      if (!name.toLowerCase().endsWith('.pptx') || name.startsWith('.')) continue
-      const path = join(dir, name)
-      if (seen.has(path) || !within(sessionDir, path)) continue
-      seen.add(path)
-      files.push({ path, name })
-    }
+function listPptx(dir: string): PptxFile[] {
+  if (!existsSync(dir)) return []
+  let names: string[]
+  try { names = readdirSync(dir) } catch { return [] }
+  const files: PptxFile[] = []
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith('.pptx') || name.startsWith('.')) continue
+    const path = join(dir, name)
+    try {
+      const stat = statSync(path)
+      if (!stat.isFile() || stat.size <= 0) continue
+      files.push({ path, name, mtimeMs: stat.mtimeMs })
+    } catch { /* skip a file that disappears mid-scan */ }
   }
-  return files.sort((a, b) => a.name.localeCompare(b.name))
+  return files
+}
+
+/** Session exports win. A working-directory pptx is used only when the session has none. */
+function choosePptx(sessionDir: string, deckPath: string | null, workingDirectory?: string): PptxFile | undefined {
+  const dirs = [join(sessionDir, 'data')]
+  if (deckPath) dirs.push(dirname(deckPath))
+  const sessionFiles = new Map<string, PptxFile>()
+  for (const file of dirs.flatMap(listPptx)) {
+    if (within(sessionDir, file.path)) sessionFiles.set(file.path, file)
+  }
+  const pool = sessionFiles.size ? [...sessionFiles.values()] : workingDirectory ? listPptx(workingDirectory) : []
+  return pool.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))[0]
 }
 
 function readProgressOverride(sessionDir: string): number | undefined {
@@ -169,11 +161,8 @@ function loadDeck(sessionDir: string): LoadedDeck | null {
   if (!(width > 0) || !(height > 0)) return null
   return {
     deckPath,
-    title: typeof parsed.title === 'string' ? parsed.title : 'deck',
-    canvas: { width, height },
     pages: parsed.pages as RawPage[],
     images: slideImages(join(dirname(deckPath), 'slides')),
-    files: pptxFiles(sessionDir, deckPath),
     currentOverride: readProgressOverride(sessionDir),
   }
 }
@@ -182,26 +171,6 @@ function pageName(page: RawPage, index: number): string {
   if (typeof page.name === 'string' && page.name.trim()) return page.name.trim()
   if (typeof page.id === 'string' && page.id.trim()) return page.id.trim()
   return String(index)
-}
-
-function selectableElements(page: RawPage): PptLiveElement[] {
-  if (!Array.isArray(page.elements)) return []
-  const elements: PptLiveElement[] = []
-  for (const raw of page.elements as RawElement[]) {
-    if (!raw || (raw.type !== 'text' && raw.type !== 'chart' && raw.type !== 'table')) continue
-    if (raw.role === 'decoration') continue
-    if (typeof raw.id !== 'string' || !raw.id || raw.id.length > 200) continue
-    const bounds = raw.bounds
-    const x = bounds?.x, y = bounds?.y, w = bounds?.w, h = bounds?.h
-    if (typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number' || typeof h !== 'number' || ![x, y, w, h].every(Number.isFinite)) continue
-    elements.push({
-      id: raw.id,
-      type: raw.type,
-      bounds: { x, y, w, h },
-      ...(typeof raw.text === 'string' && raw.text ? { text: raw.text.slice(0, 200) } : {}),
-    })
-  }
-  return elements
 }
 
 function readSidecarIssues(deckPath: string): CheckIssue[] | null {
@@ -232,13 +201,16 @@ async function engineIssues(deckPath: string, deck: unknown): Promise<CheckIssue
   return issues
 }
 
-async function issueCounts(deckPath: string, check?: Checker): Promise<Map<string, number>> {
+function issueCounts(deckPath: string, check?: Checker): Map<string, number> {
   let issues: CheckIssue[] | null = null
   if (check) {
     try { issues = check(JSON.parse(readFileSync(deckPath, 'utf8'))) } catch { issues = [] }
   } else {
     issues = readSidecarIssues(deckPath)
-    if (!issues) issues = await engineIssues(deckPath, JSON.parse(readFileSync(deckPath, 'utf8')))
+    if (!issues) {
+      const stat = statSync(deckPath)
+      issues = checkCache.get(deckPath)?.stamp === `${stat.mtimeMs}:${stat.size}` ? checkCache.get(deckPath)!.issues : []
+    }
   }
   const counts = new Map<string, number>()
   for (const issue of issues ?? []) {
@@ -248,14 +220,13 @@ async function issueCounts(deckPath: string, check?: Checker): Promise<Map<strin
   return counts
 }
 
-function cleanKnown(known: unknown): Record<string, string> {
-  if (!known || typeof known !== 'object' || Array.isArray(known)) return {}
-  const entries = Object.entries(known as Record<string, unknown>).slice(0, 500)
-  const result: Record<string, string> = {}
-  for (const [key, value] of entries) {
-    if (/^\d{1,3}$/.test(key) && typeof value === 'string' && /^[a-f0-9]{16,64}$/i.test(value)) result[key] = value
-  }
-  return result
+/** Fill the check cache before reading progress so page status is not a turn late. */
+export async function ensurePptChecks(sessionDir: string): Promise<void> {
+  const deckPath = discoverDeck(sessionDir)
+  if (!deckPath || !within(sessionDir, deckPath)) return
+  let deck: unknown
+  try { deck = JSON.parse(readFileSync(deckPath, 'utf8')) } catch { return }
+  await engineIssues(deckPath, deck)
 }
 
 function pageStatus(index: number, issueCount: number, hasImage: boolean, generating: boolean, current: number): PptPageStatus {
@@ -266,39 +237,43 @@ function pageStatus(index: number, issueCount: number, hasImage: boolean, genera
   return 'pending'
 }
 
-function progressFrom(loaded: LoadedDeck, generating: boolean): PptProgress & { currentIndex: number } {
+function progressFrom(loaded: LoadedDeck, generating: boolean, file: PptxFile | undefined, check: Checker | undefined, chartFallbacks: PptChartFallback[]): PptProgress {
   const total = loaded.pages.length
-  const hasImage = (index: number) => loaded.images.has(index)
-  let current = 1
-  for (let index = 1; index <= total; index++) {
-    if (!hasImage(index)) { current = index; break }
-    current = index
+  const hasAnyImage = [...loaded.images].some(index => index >= 1 && index <= total)
+  let current = hasAnyImage ? 1 : total
+  if (hasAnyImage) {
+    for (let index = 1; index <= total; index++) {
+      if (!loaded.images.has(index)) { current = index; break }
+      current = index
+    }
   }
   if (generating && loaded.currentOverride && loaded.currentOverride <= total) current = loaded.currentOverride
-  const completed = generating ? Math.max(0, current - 1) : [...loaded.images.keys()].filter(index => index >= 1 && index <= total).length
-  const name = pageName(loaded.pages[current - 1] ?? {}, current)
+  const completed = generating
+    ? Math.max(0, current - 1)
+    : hasAnyImage ? [...loaded.images].filter(index => index >= 1 && index <= total).length : total
+  const counts = issueCounts(loaded.deckPath, check)
+  const pages: PptPageProgress[] = loaded.pages.map((page, offset) => {
+    const index = offset + 1
+    const id = typeof page.id === 'string' && page.id ? page.id : `page-${index}`
+    const issueCount = counts.get(id) ?? 0
+    return {
+      index,
+      id,
+      name: pageName(page, index).slice(0, 80),
+      status: pageStatus(index, issueCount, loaded.images.has(index), generating, current),
+      issueCount,
+    }
+  })
+  const name = pages[current - 1]?.name ?? String(current)
   return {
-    fileName: loaded.files[0]?.name ?? `${loaded.title}.pptx`,
+    ...(file ? { fileName: file.name, pptxPath: file.path } : {}),
     total,
     completed,
-    ...(generating ? { current, currentTitle: name } : {}),
+    ...(generating && total > 0 ? { current, currentTitle: name } : {}),
     generating,
-    currentIndex: current,
+    pages,
+    ...(chartFallbacks.length ? { chartFallbacks } : {}),
   }
-}
-
-export function readPptProgress(sessionDir: string, generating: boolean): PptProgress | null {
-  const loaded = loadDeck(sessionDir)
-  if (!loaded || loaded.pages.length === 0) return null
-  const { currentIndex: _currentIndex, ...progress } = progressFrom(loaded, generating)
-  return progress
-}
-
-function dataUrl(image: SlideImage): string | undefined {
-  if (image.size > MAX_IMAGE_BYTES) return undefined
-  const ext = image.path.split('.').pop()?.toLowerCase()
-  const mime = ext === 'webp' ? 'image/webp' : ext === 'png' ? 'image/png' : 'image/jpeg'
-  return `data:${mime};base64,${readFileSync(image.path).toString('base64')}`
 }
 
 export function readChartFallbacks(sessionDir: string): PptChartFallback[] {
@@ -320,43 +295,56 @@ export function readChartFallbacks(sessionDir: string): PptChartFallback[] {
   }
 }
 
-export async function readPptLive(sessionDir: string, options: PptLiveReadOptions = {}): Promise<PptLiveSnapshot | null> {
+export function readPptProgress(sessionDir: string, generating: boolean, options: PptProgressOptions = {}): PptProgress | null {
   const loaded = loadDeck(sessionDir)
-  if (!loaded || loaded.pages.length === 0) return null
-  const generating = options.generating === true
-  const progress = progressFrom(loaded, generating)
-  const counts = await issueCounts(loaded.deckPath, options.check)
-  const known = cleanKnown(options.known)
-  const pages: PptLivePage[] = loaded.pages.map((page, offset) => {
-    const index = offset + 1
-    const id = typeof page.id === 'string' && page.id ? page.id : `page-${index}`
-    const issueCount = counts.get(id) ?? 0
-    const imageInfo = loaded.images.get(index)
-    const hidden = generating && index > progress.currentIndex
-    const hasImage = !!imageInfo && !hidden
-    const imageHash = hasImage ? imageInfo.hash : undefined
-    const image = hasImage && imageHash && known[String(index)] !== imageHash ? dataUrl(imageInfo) : undefined
+  const file = choosePptx(sessionDir, loaded?.deckPath ?? null, options.workingDirectory)
+  if (!loaded || loaded.pages.length === 0) {
+    if (!file) return null
+    const chartFallbacks = readChartFallbacks(sessionDir)
     return {
-      index,
-      id,
-      name: pageName(page, index),
-      status: pageStatus(index, issueCount, hasImage, generating, progress.currentIndex),
-      issueCount,
-      ...(imageHash ? { imageHash } : {}),
-      ...(image ? { image } : {}),
-      elements: selectableElements(page),
+      fileName: file.name,
+      pptxPath: file.path,
+      total: 0,
+      completed: 0,
+      generating,
+      pages: [],
+      ...(chartFallbacks.length ? { chartFallbacks } : {}),
     }
-  })
-  const { currentIndex: _currentIndex, ...head } = progress
-  const chartFallbacks = readChartFallbacks(sessionDir)
-  return {
-    ...head,
-    sessionId: options.sessionId,
-    canvas: { ...loaded.canvas, label: canvasLabel(loaded.canvas.width, loaded.canvas.height) },
-    ...(loaded.files[0] ? { pptxPath: loaded.files[0].path } : {}),
-    pages,
-    files: loaded.files.map(file => ({ path: file.path, name: file.name })),
-    ...(chartFallbacks.length ? { chartFallbacks } : {}),
+  }
+  return progressFrom(loaded, generating, file, options.check, readChartFallbacks(sessionDir))
+}
+
+/** Write data/deck.pptx from the pages already stored in deck.json. A newer valid pptx is left alone. */
+export async function exportIncrementalPptx(sessionDir: string): Promise<string | undefined> {
+  const deckPath = discoverDeck(sessionDir)
+  if (!deckPath || !within(sessionDir, deckPath)) return choosePptx(sessionDir, null)?.path
+  const stat = statSync(deckPath)
+  const stamp = `${stat.mtimeMs}:${stat.size}`
+  const out = join(dirname(deckPath), 'deck.pptx')
+  if (deckExportStamp.get(deckPath) === stamp && existsSync(out)) return out
+  const root = getPptSkillRoot()
+  const schema = await import(pathToFileURL(join(root, 'engine/schema.ts')).href) as {
+    loadDeckFile: (file: string) => { deck: { pages: unknown[] } | null }
+  }
+  const loaded = schema.loadDeckFile(deckPath)
+  if (!loaded.deck || loaded.deck.pages.length === 0) return existsSync(out) ? out : choosePptx(sessionDir, deckPath)?.path
+  const exporter = await import(pathToFileURL(join(root, 'engine/export-pptx.ts')).href) as {
+    exportDeck: (deck: unknown, file: string, options?: { enforceCheck?: boolean }) => Promise<{ pptx?: string }>
+  }
+  const tmp = join(dirname(out), `.deck-preview-${process.pid}-${Date.now()}.pptx`)
+  try {
+    await exporter.exportDeck(loaded.deck, tmp, { enforceCheck: false })
+    try {
+      renameSync(tmp, out)
+    } catch {
+      rmSync(out, { force: true })
+      renameSync(tmp, out)
+    }
+    deckExportStamp.set(deckPath, stamp)
+    return out
+  } catch (error) {
+    rmSync(tmp, { force: true })
+    throw error
   }
 }
 
@@ -410,8 +398,9 @@ export function buildPptRevisionPrompt(revision: PptRevision, sessionPath: strin
   }
   lines.push(
     `Write ${deck}.`,
+    'Element ids are exported as PPTX shape names. OfficeCLI addresses one as /slide[n]/shape[@name=<element id>].',
     `Render screenshots to ${slides}/slide-01.png and onward (1-based, two digits) as each changed page is saved.`,
-    'Run deck_check, then deck_render, into those paths.',
+    'Run deck_check, then deck_render, into those paths. The app also exports data/deck.pptx from the saved deck while this turn runs.',
     '</ppt_revision>',
   )
   return lines.join('\n')

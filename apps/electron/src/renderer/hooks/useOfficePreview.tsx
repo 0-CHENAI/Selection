@@ -16,7 +16,7 @@ import { OfficePreviewFrame } from '../components/app-shell/OfficePreviewFrame'
 import { OfficePreviewLoading } from '../components/app-shell/OfficePreviewLoading'
 import { RADIUS_EDGE, RADIUS_INNER } from '../components/app-shell/panel-constants'
 
-type PreviewView = OfficePreviewScope & { path: string; pickerInPanel?: boolean; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
+type PreviewView = OfficePreviewScope & { path: string; pendingDocument?: boolean; pickerInPanel?: boolean; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
 
 type CachedPreview = { view: PreviewView; position: OfficePreviewState; usedAt: number; pending: Promise<unknown> }
 const previewKey = (scope: OfficePreviewScope) => JSON.stringify([scope.workspaceId, scope.sessionId])
@@ -41,6 +41,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
   const scrollAnchor = useRef<OfficePreviewState['anchor']>()
   const refreshing = useRef<string>()
   const pickerTrigger = useRef<HTMLElement | null>(null)
+  const dismissListeners = useRef(new Set<() => void>())
   const composerAnchor = useRef({ getBoundingClientRect: () =>
     (pickerTrigger.current?.isConnected ? pickerTrigger.current.getBoundingClientRect() : undefined)
       ?? document.querySelector('[data-tutorial="chat-input"]')?.getBoundingClientRect()
@@ -117,7 +118,16 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       const saved = readOfficePreviewState(old)
       if (saved) writeOfficePreviewState(old, { ...saved, open: false })
     }
+    for (const listener of dismissListeners.current) listener()
   }, [detach])
+  const subscribeDismiss = useCallback((listener: () => void) => {
+    dismissListeners.current.add(listener)
+    return () => { dismissListeners.current.delete(listener) }
+  }, [])
+  const awaitDocument = useCallback((sessionId: string) => {
+    if (sessionId !== scope.current.sessionId || current.current) return
+    updateView({ ...scope.current, path: '', pendingDocument: true, busy: true, count: 0, error: undefined })
+  }, [updateView])
   const open = useCallback(async (sessionId: string, path = '', candidates?: string[], pickerInPanel = false) => {
     if (sessionId !== scope.current.sessionId) return
     const targetScope = { ...scope.current }, key = previewKey(targetScope)
@@ -141,7 +151,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     const ticket = sequence.current
     latestOpen.current.set(key, ticket)
     pending.current = reusable?.pending ?? Promise.resolve()
-    updateView({ ...reusable?.view, ...targetScope, path, pickerInPanel, candidates: candidates ? files : reusable?.view.candidates ?? files, count: reusable?.view.count ?? 0, busy: !!path, resuming: !!path, error: undefined })
+    updateView({ ...reusable?.view, ...targetScope, path, pendingDocument: false, pickerInPanel, candidates: candidates ? files : reusable?.view.candidates ?? files, count: reusable?.view.count ?? 0, busy: !!path, resuming: !!path, error: undefined })
     if (!path) {
       // Choosing is not consent to reopen the previously selected document.
       if (pickerInPanel && saved) writeOfficePreviewState(targetScope, { ...saved, open: false })
@@ -317,7 +327,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     if (target?.sessionId !== sessionId || !target.preview) return
     return { path: target.preview.path }
   }, [])
-  const picker = view && !view.path && !view.pickerInPanel ? <Popover open onOpenChange={isOpen => { if (!isOpen) close() }}>
+  const picker = view && !view.path && !view.pickerInPanel && !view.pendingDocument ? <Popover open onOpenChange={isOpen => { if (!isOpen) close() }}>
     <PopoverAnchor virtualRef={composerAnchor} />
     <PopoverContent side="top" align={pickerTrigger.current ? 'end' : 'start'} sideOffset={12}
       className="w-[480px] max-w-[calc(100vw-40px)] bg-background text-foreground opacity-100 shadow-modal-small ring-1 ring-border p-3" aria-label={t('chat.officePreview.choose')}>
@@ -406,9 +416,22 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       </ul>
     </div>
   </aside> : null
-  const panelOpen = !!view?.path || !!chooser
+  const pendingDocument = view?.pendingDocument && !view.path ? <aside data-testid="office-preview-pending"
+    style={{ borderRadius: RADIUS_INNER, borderBottomRightRadius: RADIUS_EDGE }}
+    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}
+    aria-label={t('chat.officePreview.title')} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-foreground-2 shadow-middle">
+    <div className="flex h-[50px] shrink-0 items-center gap-2 px-3 text-sm">
+      <strong className="min-w-0 truncate">{t('chat.officePreview.loading')}</strong>
+      <button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => void open(view.sessionId, '', view.candidates, true)}>
+        <ArrowLeftRight aria-hidden="true" className="size-3.5" />{t('chat.officePreview.switchFile')}
+      </button>
+      <div className="ml-auto shrink-0"><HeaderIconButton onClick={close} aria-label={t('chat.officePreview.closeLabel')} tooltip={t('chat.officePreview.closeLabel')} icon={<X className="size-4" />} /></div>
+    </div>
+    <div className="relative flex min-h-0 flex-1 flex-col"><OfficePreviewLoading /></div>
+  </aside> : null
+  const panelOpen = !!view?.path || !!chooser || !!pendingDocument
   const panel = <>
-    <OfficePreviewPanel open={panelOpen} onPresenceChange={setPanelPresent}>{chooser}{pages}</OfficePreviewPanel>
+    <OfficePreviewPanel open={panelOpen} onPresenceChange={setPanelPresent}>{chooser}{pendingDocument}{pages}</OfficePreviewPanel>
     <AlertDialog open={!!selectionOverflow && selectionOverflow.previewId === view?.preview?.previewId} onOpenChange={isOpen => { if (!isOpen) setSelectionOverflow(undefined) }}>
       <AlertDialogContent>
         <AlertDialogHeader><AlertDialogTitle>{t('chat.officePreview.selectionOverflowTitle')}</AlertDialogTitle><AlertDialogDescription>{t('chat.officePreview.selectionOverflow', { count: selectionOverflow?.count ?? 0, max: OFFICE_PREVIEW_MAX_SELECTION })}</AlertDialogDescription></AlertDialogHeader>
@@ -416,5 +439,5 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       </AlertDialogContent>
     </AlertDialog>
   </>
-  return { open, close, capture, context, panel, picker, isOpen: panelOpen, isPresent: panelOpen || panelPresent, isChoosing: !!view && !view.path }
+  return { open, close, capture, context, panel, picker, awaitDocument, subscribeDismiss, path: view?.path ?? '', pending: !!pendingDocument, isOpen: panelOpen, isPresent: panelOpen || panelPresent, isChoosing: !!view && !view.path && !view.pendingDocument }
 }
