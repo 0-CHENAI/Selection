@@ -39,6 +39,29 @@ test('includes every allowed draft and modified document while excluding interna
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('a session-folder pptx is a deliverable and the scratch deck is not', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'artifact-inventory-ppt-'))
+  const session = join(workspace, 'sessions', 'current')
+  const workingDirectory = mkdtempSync(join(tmpdir(), 'artifact-inventory-wd-'))
+  try {
+    mkdirSync(join(session, 'data'), { recursive: true })
+    writeFileSync(join(session, 'data', 'deck.pptx'), 'scratch')
+    const sessionInventory = new ArtifactCandidateInventory([workspace, session], workspace)
+    const sessionFile = join(session, '季度经营会.pptx')
+    writeFileSync(sessionFile, 'pptx')
+    writeFileSync(join(session, 'data', 'again.pptx'), 'still scratch')
+    expect(sessionInventory.changed()).toEqual([sessionFile])
+
+    const directoryInventory = new ArtifactCandidateInventory([workingDirectory, session])
+    const delivered = join(workingDirectory, '季度经营会.pptx')
+    writeFileSync(delivered, 'pptx')
+    expect(directoryInventory.changed()).toEqual([delivered])
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
+    rmSync(workingDirectory, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable subtree does not suppress changes in readable folders', () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-inventory-access-'))
   const blocked = join(root, 'blocked')

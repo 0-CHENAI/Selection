@@ -73,7 +73,7 @@ ppt-master 的示例成稿还有图表、表格、路径、渐变、图案和图
 
 ## 预检与导出
 
-路径里的 `<skill>` 是本技能目录，`<deck.json>` 和 `<pptx>` 使用会话 `dataFolderPath` 下的绝对路径。Bun 用环境变量 `CRAFT_BUN` 的绝对路径。设置 `OFFICECLI_SKIP_UPDATE=1`。
+路径里的 `<skill>` 是本技能目录，`<deck.json>` 使用会话 `dataFolderPath` 下的绝对路径。Bun 用环境变量 `CRAFT_BUN` 的绝对路径。设置 `OFFICECLI_SKIP_UPDATE=1`。在本应用里，可见的 PPTX 不写在 `dataFolderPath`：保存 deck 后读取 `data/ppt-output.json` 的 `path`，截图打到 `data/slides`。不要再 `render --out` 出第二份。
 
 ```text
 "$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" layouts
