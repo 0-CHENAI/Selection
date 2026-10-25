@@ -18,10 +18,18 @@ Neither CSS image smoothing nor sharpening could recover the missing text.
   4,605,144 bytes). This increases bundled resources by about 95.8 MiB without
   adding a rendering runtime. The gallery does not fetch these documents.
   Each document, including base64 overhead, fits the 16 MiB WebUI RPC limit.
+  Tracked bundled resources increase from 152,360,356 to 252,840,084 bytes
+  (65.95%; includes the release note). Existing aliases already save
+  13,919,676 bytes by sharing PDFs; SHA-256 comparison found no duplicate PDF
+  files among the remaining 75. Self-contained font subsets can repeat across
+  documents, but eliminating those would require a different resource format.
 - Only pages within 400 CSS pixels of the dialog viewport mount a canvas.
   Their backing resolution follows display DPR, container size, and changes
   between displays; each canvas has an 8 MP ceiling. Distant canvases unmount
   and closing the dialog destroys its PDF document/worker.
+  Pending page-size queries ignore close/retry generations. Late RPC results
+  cannot update an unmounted preview; the bounded shared cache may finish an
+  already-started request for reuse rather than issuing a duplicate on reopen.
 - Encoded previews have a 24 MiB LRU budget, counting two bytes per JS character.
   Requests coalesce, failures can retry, and library refresh invalidates cache.
 - Custom detail pages use OfficeCLI's existing HTML scene directly from the
@@ -47,6 +55,10 @@ Neither CSS image smoothing nor sharpening could recover the missing text.
 - Scroll-to-end removed page 1's canvas, at most five nearby canvases remained,
   closing removed all canvases, and reopening reused the document request.
   4:3, A4, 9:16 and a second standard template were also rendered and inspected.
+  An additional 24 rapid close/reopen cycles at different loading stages
+  produced no page errors or retained canvases/iframes. Only two document RPCs
+  were issued while alternating between two templates, and the final reopen
+  rendered successfully after cancellation.
 - A real imported China Telecom PPTX was exercised through the registered
   skills handlers and WebSocket transport. Only pages 1–3 were requested
   initially; scrolling to page 4 mounted four nearby frames. The rendered
@@ -54,7 +66,8 @@ Neither CSS image smoothing nor sharpening could recover the missing text.
 - Electron 39.2.7 rendered the same component through those RPC handlers in a
   real offscreen BrowserWindow at DPR 2: 851 CSS px used a 1706px canvas, with
   only three canvases mounted. Its captured PNG was opened and inspected.
-- `bun run typecheck:all`, the relevant 21 tests, lint and the WebUI production
+- `bun run typecheck:all`, the relevant 29 tests (including exhaustive local/
+  remote RPC routing), lint and the WebUI production
   build were run. The local tracked suite hit an existing CJS bundling test's
   five-second timeout; that unchanged test passed alone in 3.62 seconds.
   Required remote CI must pass before merging.
