@@ -144,3 +144,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Live answer stays on the card** — Unclassified streaming tokens grow on the main reply instead of being marked as commentary and replayed after `submit_answer`. Finished text is classified only by protocol fields, and a whitespace-only thought keeps the live header identity until the first tool joins. Fixes #404.
 
 - **Ordinary chat folder controls** — Open the system folder picker directly and clear a selected working folder with a borderless close button. Hover and keyboard focus fade only the folder name; touch keeps the action visible. Project folder bindings remain fixed.
+
+- **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.

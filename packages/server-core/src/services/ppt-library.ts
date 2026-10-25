@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import sharp from 'sharp'
 import { homedir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { strFromU8, unzipSync } from 'fflate'
-import type { PptTemplate } from '@craft-agent/shared/protocol'
+import { DEFAULT_MAX_MESSAGE_BYTES, type PptTemplate } from '@craft-agent/shared/protocol'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 
 const ID_PATTERN = /^custom-[a-f0-9]{16}$/
@@ -440,6 +441,130 @@ export function customTemplatePages(id: string, root = pptTemplateLibraryRoot())
   const pages: string[] = []
   for (let page = 1; page <= record.pageCount; page++) pages.push(previewDataUrl(previewFile(templateDir(root, id), page)))
   return pages
+}
+
+/** Do not send the original 1600px custom rasters in the lightweight gallery. */
+export async function thumbnailPptTemplateCard(card: PptTemplate): Promise<PptTemplate> {
+  const thumbnail = async (data: string) => {
+    if (data.startsWith('data:image/svg+xml;')) return data
+    const bytes = Buffer.from(data.slice(data.indexOf(',') + 1), 'base64')
+    const image = await sharp(bytes).resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true }).webp({ quality: 74 }).toBuffer()
+    return `data:image/webp;base64,${image.toString('base64')}`
+  }
+  return { ...card, cover: await thumbnail(card.cover), referencePages: await Promise.all(card.referencePages.map(thumbnail)) }
+}
+
+const detailPending = new Map<string, Promise<string>>()
+let previewHtml: ((source: string, page: number) => Promise<string>) | undefined
+
+export function setPptPreviewHtmlForTests(renderer: typeof previewHtml): void { previewHtml = renderer }
+
+async function renderPreviewHtml(source: string, page: number): Promise<string> {
+  if (previewHtml) return previewHtml(source, page)
+  const bin = resolveOfficecliBinary({ env: { ...process.env, CRAFT_OFFICECLI: undefined } })
+  if (!bin || /\.(cmd|bat)$/i.test(bin)) throw new Error('PPT preview renderer unavailable')
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ['view', source, 'html', '--page', String(page)], {
+      detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
+    })
+    const chunks: Buffer[] = []
+    let bytes = 0
+    const timer = setTimeout(() => { killProcess(child); reject(new Error('PPT preview render timed out')) }, 20_000)
+    child.stdout!.on('data', (chunk: Buffer) => {
+      bytes += chunk.byteLength
+      if (bytes * 4 / 3 + 4096 >= DEFAULT_MAX_MESSAGE_BYTES) { killProcess(child); reject(new Error('PPT preview exceeds transport size limit')); return }
+      chunks.push(chunk)
+    })
+    child.on('error', () => { clearTimeout(timer); reject(new Error('PPT preview render failed')) })
+    child.on('close', code => {
+      clearTimeout(timer)
+      if (code !== 0) reject(new Error('PPT preview render failed'))
+      else resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+  })
+}
+let detailRenders = 0
+const detailWaiters: Array<() => void> = []
+
+async function acquireDetailRenderer(): Promise<() => void> {
+  if (detailRenders >= 2) await new Promise<void>(resolve => detailWaiters.push(resolve))
+  else detailRenders++
+  return () => {
+    const next = detailWaiters.shift()
+    if (next) next()
+    else detailRenders--
+  }
+}
+
+/** Generated details are disposable; source files, import previews and metadata are never evicted. */
+function trimDetailCache(root: string, keep: string): void {
+  const files: Array<{ path: string; size: number; accessed: number }> = []
+  try {
+    for (const id of readdirSync(root).filter(id => ID_PATTERN.test(id))) {
+      const dir = join(root, id, 'previews')
+      for (const name of readdirSync(dir).filter(name => /^\d+\.detail-v1\.html$/.test(name))) {
+        const path = join(dir, name)
+        const stat = statSync(path)
+        files.push({ path, size: stat.size, accessed: stat.atimeMs })
+      }
+    }
+    let bytes = files.reduce((sum, file) => sum + file.size, 0)
+    for (const file of files.sort((a, b) => a.accessed - b.accessed)) {
+      if (bytes <= 128 * 1024 * 1024) break
+      if (file.path === keep || detailPending.has(file.path)) continue
+      unlinkSync(file.path)
+      bytes -= file.size
+    }
+  } catch { /* Another request may delete a custom template while the cache is being trimmed. */ }
+}
+
+/** Upgrade existing imported previews from the original PPTX, never from its small PNG. */
+export async function customTemplatePreview(id: string, page: number | undefined, root = pptTemplateLibraryRoot()): Promise<string> {
+  const dir = templateDir(root, id)
+  const record = readRecord(dir)
+  if (!record || record.id !== id || !Number.isInteger(page) || page! < 1 || page! > record.pageCount) throw new Error('Unknown PPT template page')
+  const legacy = previewFile(dir, page!)
+  const stem = String(page).padStart(2, '0')
+  const target = join(dir, 'previews', `${stem}.detail-v1.html`)
+  const encode = () => {
+    const bytes = readFileSync(target)
+    if (bytes.byteLength * 4 / 3 + 1024 >= DEFAULT_MAX_MESSAGE_BYTES) throw new Error('PPT preview exceeds transport size limit')
+    return `data:text/html;base64,${bytes.toString('base64')}`
+  }
+  if (existsSync(target)) return encode()
+  const existing = detailPending.get(target)
+  if (existing) return existing
+  const promise = (async () => {
+    const release = await acquireDetailRenderer()
+    let temp: string | undefined
+    try {
+      // The template may have been removed while this render waited for a slot.
+      temp = mkdtempSync(join(dir, 'previews', '.detail-'))
+      let html = await renderPreviewHtml(join(dir, 'source.pptx'), page!)
+      if (!/<html\b/i.test(html) || !/<head\b/i.test(html)) throw new Error('Invalid PPT preview HTML')
+      // Use the same HTML scene as import screenshots, without rasterizing it. Its existing
+      // screenshot mode removes viewer chrome and fits the actual slide to the iframe.
+      html = html.replaceAll("location.hash.indexOf('screenshot')>=0", 'true')
+      const csp = "default-src 'none'; script-src 'unsafe-inline' https://d.officecli.ai https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://d.officecli.ai https://cdn.jsdelivr.net; img-src data: blob:; font-src data: https://d.officecli.ai https://cdn.jsdelivr.net; connect-src https://d.officecli.ai https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'"
+      html = html.replace(/<head\b[^>]*>/i, `$&<meta http-equiv="Content-Security-Policy" content="${csp}">`)
+      const output = join(temp, 'page.html')
+      writeFileSync(output, html)
+      renameSync(output, target)
+      const encoded = encode()
+      trimDetailCache(root, target)
+      return encoded
+    } catch (error) {
+      // Keep the existing geometric fallback if this installation has no HTML renderer.
+      if (legacy.endsWith('.svg')) return previewDataUrl(legacy)
+      throw error
+    } finally {
+      if (temp) rmSync(temp, { recursive: true, force: true })
+      release()
+    }
+  })().finally(() => { detailPending.delete(target) })
+  detailPending.set(target, promise)
+  return promise
 }
 
 export function customTemplateReference(id: string, root = pptTemplateLibraryRoot()): string | null {

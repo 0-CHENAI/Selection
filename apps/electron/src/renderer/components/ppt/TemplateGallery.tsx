@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Check, Download, Eye, Pencil, Search, Trash2, Upload, X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PptCategory, PptTemplate } from '@craft-agent/shared/protocol'
-import { refreshPptCatalog, usePptCatalog, usePptTemplatePages } from './usePptCatalog'
+import { refreshPptCatalog, usePptCatalog } from './usePptCatalog'
+import { PptTemplatePreview } from './PptTemplatePreview'
 
 const categories: [PptCategory, string][] = [['商务', 'business'], ['咨询', 'consulting'], ['学术', 'academic'], ['教学', 'teaching'], ['技术', 'technology'], ['创意', 'creative'], ['社媒', 'social']]
 
@@ -63,7 +64,6 @@ export function TemplateGallery({ onSelect, compact = false, selectedId }: { onS
   const [notice, setNotice] = React.useState('')
   const [importing, setImporting] = React.useState(false)
   const fileRef = React.useRef<HTMLInputElement>(null)
-  const previewPages = usePptTemplatePages(preview?.id)
   const refresh = () => { refreshPptCatalog(); setRevision(value => value + 1) }
   const templates = catalog?.templates.filter(template => {
     const inCategory = category === 'all' || (category === 'custom' ? template.category === '自定义' : template.category === category)
@@ -121,8 +121,8 @@ export function TemplateGallery({ onSelect, compact = false, selectedId }: { onS
     <Dialog.Root open={!!preview} onOpenChange={open => { if (!open) setPreview(undefined) }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-modal bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-modal flex max-h-[90vh] w-[min(900px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-background p-5 shadow-modal-small" data-testid="ppt-page-preview">
         <div className="mb-4 flex items-center justify-between gap-3"><Dialog.Title className="truncate text-base font-semibold">{preview?.title}</Dialog.Title><Dialog.Close aria-label={t('ppt.close')}><X className="size-4" /></Dialog.Close></div>
-        <Dialog.Description className="mb-3 text-xs text-muted-foreground">{t('ppt.preview')} · {t('ppt.pages', { count: previewPages.pages?.length ?? preview?.pages ?? 0 })}</Dialog.Description>
-        <div className="min-h-0 space-y-4 overflow-y-auto">{previewPages.error ? <p role="alert" className="py-8 text-center text-sm">{t('ppt.loadError')} <button type="button" onClick={previewPages.retry} className="underline">{t('ppt.retry')}</button></p> : !previewPages.pages ? <p role="status" className="py-8 text-center text-sm text-muted-foreground">{t('ppt.loading')}</p> : previewPages.pages.map((page, index, pages) => <figure key={`${preview?.id}-${index}`}><img src={page} alt={`${preview?.title} — ${index + 1}`} className="max-h-[70vh] w-full rounded border border-border/50 object-contain" /><figcaption className="mt-1 text-center text-xs text-muted-foreground">{index + 1} / {pages.length}</figcaption></figure>)}</div>
+        <Dialog.Description className="mb-3 text-xs text-muted-foreground">{t('ppt.preview')} · {t('ppt.pages', { count: preview?.pages ?? 0 })}</Dialog.Description>
+        <div data-ppt-preview-scroll className="min-h-0 space-y-4 overflow-y-auto">{preview && <PptTemplatePreview key={preview.id} template={preview} />}</div>
         <button type="button" className="mt-4 self-end rounded-lg bg-accent px-4 py-2 text-sm text-accent-foreground" onClick={event => { if (preview) { onSelect(preview, event.currentTarget.getBoundingClientRect()); setPreview(undefined) } }}>{t('ppt.selectTemplate')}</button>
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>

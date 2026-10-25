@@ -548,6 +548,8 @@ export interface ElectronAPI {
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getPptCatalog(): Promise<PptCatalog>
   getPptTemplatePages(templateId: string): Promise<string[]>
+  /** Vector PDF for bundled templates; isolated source HTML for one custom page (1-based). */
+  getPptTemplatePreview(templateId: string, page?: number): Promise<string>
   getPptLive(sessionId: string, known?: Record<string, string>): Promise<PptLiveSnapshot | null>
   importPptTemplate(input: { name: string; base64: string }): Promise<PptTemplateImportResult>
   renamePptTemplate(id: string, title: string): Promise<PptTemplate>

@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { ChartSkillCandidate } from '@craft-agent/shared/skills'
-import { buildPptPrompt, getPptCatalog, getPptTemplatePages, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
+import { buildPptPrompt, getPptCatalog, getPptTemplatePages, getPptTemplatePreview, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
 
 const root = realpathSync(resolve(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design'))
 const dirs: string[] = []
@@ -53,6 +53,20 @@ test('lazy full previews match every real deck in numeric order within the RPC l
 test('lazy full preview rejects unknown, traversal and inherited IDs', () => {
   for (const id of ['missing', '../dsh-cartesian', '/tmp/deck', '__proto__', 'constructor']) {
     expect(() => getPptTemplatePages(id, root)).toThrow('Unknown PPT template')
+    expect(() => getPptTemplatePreview(id, root)).toThrow('Unknown PPT template')
+  }
+})
+
+test('every detail document is a real vector PDF within the WebUI transport limit', () => {
+  const catalog = getPptCatalog(root)
+  for (const template of catalog.templates) {
+    const document = getPptTemplatePreview(template.id, root)
+    expect(document.startsWith('data:application/pdf;base64,')).toBe(true)
+    const pdf = Buffer.from(document.split(',')[1]!, 'base64')
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
+    // A text/font PDF, not one full-slide thumbnail embedded in a PDF wrapper.
+    expect(pdf.includes(Buffer.from('/Font'))).toBe(true)
+    expect(Buffer.byteLength(JSON.stringify({ type: 'response', result: document }))).toBeLessThan(DEFAULT_MAX_MESSAGE_BYTES)
   }
 })
 
