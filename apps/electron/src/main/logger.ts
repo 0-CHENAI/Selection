@@ -8,6 +8,10 @@ import type {
   MessagingLogger,
 } from '@craft-agent/messaging-gateway'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { setElectronMainLogSink } from '@craft-agent/shared/utils/debug'
+
+// Shared utilities stay browser-safe; only this process owns Node log transports.
+setElectronMainLogSink(message => log.info(message))
 
 /**
  * Resolve debug mode deterministically across runtimes.

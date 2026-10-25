@@ -50,6 +50,7 @@
     "./skills": "./src/skills/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
+    "./utils/debug": "./src/utils/debug.ts",
     "./source-snapshot": "./src/utils/source-snapshot.ts",
     "./utils/artifact-links": "./src/utils/artifact-links.ts",
     "./utils/image-attachment": "./src/utils/image-attachment.ts",

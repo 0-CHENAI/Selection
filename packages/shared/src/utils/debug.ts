@@ -28,23 +28,13 @@ function detectEnvironment(): Environment {
   return 'cli';
 }
 
-let electronLog: unknown | null = null;
-let electronLogChecked = false;
+// This module is also used by renderer-side view evaluation. Even a guarded
+// require of a Node logger is followed by Vite's dependency scanner on cold
+// startup. The main process supplies its sink instead of importing it here.
+let electronMainLogSink: ((message: string) => void) | undefined;
 
-function getElectronLog(): { info?: (message: string) => void } | null {
-  if (electronLogChecked) {
-    return (electronLog as { info?: (message: string) => void } | null) ?? null;
-  }
-  electronLogChecked = true;
-  try {
-    // Optional dependency - only available in Electron main process.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const loaded = require('electron-log/main');
-    electronLog = loaded?.default ?? loaded ?? null;
-  } catch {
-    electronLog = null;
-  }
-  return (electronLog as { info?: (message: string) => void } | null) ?? null;
+export function setElectronMainLogSink(sink: ((message: string) => void) | undefined): void {
+  electronMainLogSink = sink;
 }
 
 /**
@@ -106,8 +96,7 @@ function output(formatted: string): void {
 
   // Mirror debug logs into electron-log when available so they appear in main.log.
   if (env === 'electron-main') {
-    const log = getElectronLog();
-    log?.info?.(formatted.trim());
+    electronMainLogSink?.(formatted.trim());
   }
 
   if (env === 'electron-renderer') {
