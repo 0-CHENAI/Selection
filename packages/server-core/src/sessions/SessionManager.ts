@@ -176,7 +176,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
-import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision } from '../services/ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -1722,14 +1722,49 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /** One export at a time per session. The deck watcher and tool boundaries share it. */
+  private pptSyncTail = new Map<string, Promise<void>>()
+  /** Polls deck.json while a PPT turn is running so pages export before the tool returns. */
+  private pptExportWatches = new Map<string, { stop: () => void }>()
+
   /** Publish deck page counts for the history row and the chat result card. */
-  private async syncPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
+  private syncPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
+    const previous = this.pptSyncTail.get(managed.id) ?? Promise.resolve()
+    const run = previous.catch(() => {}).then(() => this.publishPptProgress(managed, generating))
+    this.pptSyncTail.set(managed.id, run.catch(() => {}))
+    return run
+  }
+
+  private ensurePptExportWatch(managed: ManagedSession): void {
+    if (this.pptExportWatches.has(managed.id)) return
+    const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const watch = watchPptDeck(dir, () => {
+      if (!this.sessions.get(managed.id) || !isPptGenerating(dir)) return
+      void this.syncPptProgress(managed, true)
+    })
+    this.pptExportWatches.set(managed.id, watch)
+  }
+
+  private stopPptExportWatch(sessionId: string): void {
+    this.pptExportWatches.get(sessionId)?.stop()
+    this.pptExportWatches.delete(sessionId)
+  }
+
+  private async publishPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
+    if (!this.sessions.get(managed.id)) return
     if (!managed.ppt && !generating) return
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     try { await exportIncrementalPptx(dir, { workingDirectory: managed.workingDirectory }) } catch (error) {
       sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
     }
+    // The preview follows the file. Page-check status can land a moment later.
+    this.emitPptProgress(managed, dir, generating)
     try { await ensurePptChecks(dir) } catch { /* page status stays passed until deck_check can run */ }
+    this.emitPptProgress(managed, dir, generating)
+  }
+
+  private emitPptProgress(managed: ManagedSession, dir: string, generating: boolean): void {
+    if (!this.sessions.get(managed.id)) return
     let next: PptProgress | null = null
     try { next = readPptProgress(dir, generating, { workingDirectory: managed.workingDirectory }) } catch { return }
     if (!next && generating && managed.ppt) {
@@ -1751,6 +1786,7 @@ export class SessionManager implements ISessionManager {
 
   private finishPptGeneration(managed: ManagedSession): void {
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    this.stopPptExportWatch(managed.id)
     if (!isPptGenerating(dir) && !managed.pptProgress?.generating) return
     markPptGenerating(dir, false)
     void this.syncPptProgress(managed, false).finally(() => this.persistSession(managed))
@@ -7156,6 +7192,7 @@ export class SessionManager implements ISessionManager {
       managed.deleting = false
       throw new Error(`Could not delete session directory: ${sessionId}`)
     }
+    this.stopPptExportWatch(sessionId)
     this.sessions.delete(sessionId)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
@@ -8093,7 +8130,10 @@ export class SessionManager implements ISessionManager {
         : message
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
-      if (options?.ppt || options?.pptRevision) markPptGenerating(chatSessionDir, true)
+      if (options?.ppt || options?.pptRevision) {
+        markPptGenerating(chatSessionDir, true)
+        this.ensurePptExportWatch(managed)
+      }
       const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills, message) : undefined
       const pptRevisionContext = options?.pptRevision ? buildPptRevisionPrompt(options.pptRevision, chatSessionDir) : undefined
       const currentInput = [pptContext, pptRevisionContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')

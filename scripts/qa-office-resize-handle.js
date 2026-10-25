@@ -29,8 +29,11 @@ await page.evaluate(async () => {
   }))
   const presence = () => {}
   function Fixture({ open }) {
+    // The real app wraps the panel in display:contents. That box is empty in
+    // Chrome, so the drag must measure the layout container behind it.
     return h('div', { 'data-sash-layout': '', style: { display: 'flex', width: 1200, height: 600, containerType: 'inline-size' } },
-      h('div', { style: { flex: 1, minWidth: 0 } }, '聊天区'), h(OfficePreviewPanel, { open, onPresenceChange: presence }, content))
+      h('div', { style: { flex: 1, minWidth: 0 } }, '聊天区'),
+      h('div', { style: { display: 'contents' } }, h(OfficePreviewPanel, { open, onPresenceChange: presence }, content)))
   }
   window.__sashQA.render = open => root.render(h(Fixture, { open }))
   window.__sashQA.cleanup = () => { root.unmount(); host.remove() }

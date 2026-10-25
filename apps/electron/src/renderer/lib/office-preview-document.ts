@@ -1,10 +1,11 @@
 import katexSource from 'katex/dist/katex.min.js?raw'
 
 /** The sandbox has no application origin, network, file access, or write API. */
-export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number } } = {}): string {
+export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number }; restorePaths?: string[] } = {}): string {
   // OfficeCLI's CDN script onerror fallback overwrites formulas even when local KaTeX exists.
   html = html.replace(/<script\b[^>]*\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)[^>]*>[\s\S]*?<\/script\s*>/gi, '')
   const id = JSON.stringify(previewId).replace(/</g, '\\u003c')
+  const restorePaths = JSON.stringify(options.restorePaths ?? []).replace(/</g, '\\u003c')
   // Native MathML avoids CDN requests and external font dependencies inside the sandbox.
   const math = `<script>${katexSource.replace(/<\/script/gi, '<\\/script')}</script><script>const renderMath = katex.render; katex.render = (formula, element, options) => renderMath(formula, element, {...options, output:'mathml'});document.addEventListener('DOMContentLoaded', () => document.querySelectorAll('.katex-formula').forEach(el => { katex.render(el.dataset.formula, el, {throwOnError:false, displayMode:!!el.dataset.display}); el.classList.add('katex-rendered'); }));</script>`
   const bridge = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -19,11 +20,18 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
   const previewId = ${id};
   const readOnly = ${!!options.readOnly};
   const anchor = ${JSON.stringify(options.anchor ?? null).replace(/</g, '\\u003c')};
+  const restorePaths = ${restorePaths};
   let restored = false;
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
     const element = anchor && [...document.querySelectorAll('[data-path]')].find(el => el.getAttribute('data-path') === anchor.path);
     window.scrollTo(${Number.isFinite(options.scrollX) ? options.scrollX : 0}, element ? window.scrollY + element.getBoundingClientRect().top - anchor.offset : ${Number.isFinite(options.scrollY) ? options.scrollY : 0});
     restored = true;
+    // The sandbox hides contentDocument from the parent. Paint the selection
+    // here, after OfficeCLI has registered its click handlers.
+    if (!readOnly && restorePaths.length) {
+      const targets = restorePaths.map(path => { try { return document.querySelector('[data-path="' + CSS.escape(path) + '"]') } catch { return null } });
+      if (targets.every(Boolean)) for (const target of targets) target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true, metaKey: true }));
+    }
   }));
   let scrollPending = false;
   window.addEventListener('scroll', () => {

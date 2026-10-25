@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync } from 'fflate'
 import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
-import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, readChartFallbacks, readPptProgress, validatePptRevision } from './ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, readChartFallbacks, readPptProgress, validatePptRevision, watchPptDeck } from './ppt-live'
 
 function session(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), 'ppt-live-')))
@@ -216,5 +216,66 @@ test('a titled pptx is the only visible file, in the session folder or the worki
   } finally {
     rmSync(workspace, { recursive: true, force: true })
     rmSync(wd, { recursive: true, force: true })
+  }
+})
+
+test('watchPptDeck notices a page write and exports it without a tool event', async () => {
+  const root = session()
+  try {
+    const { getPptSkillRoot } = await import('./ppt-catalog')
+    const kit = await import(pathToFileURL(join(getPptSkillRoot(), 'styles/kit.ts')).href) as {
+      fixtureTheme: unknown
+      makeDeck: (title: string, theme: unknown, pages: unknown[]) => unknown
+      makePage: (id: string, layout: string, name: string, background: string, elements: unknown[], notes: string) => unknown
+      text: (id: string, value: string, x: number, y: number, w: number, h: number, size: number, opts?: { bold?: boolean }) => unknown
+    }
+    const page = (index: number) => kit.makePage(`p${index}`, 'free', `第${index}页`, '$paper', [
+      kit.text('title-el', `第${index}页`, 48, 40, 400, 48, 24, { bold: true }),
+    ], '')
+    mkdirSync(join(root, 'data'), { recursive: true })
+    const write = (count: number) => writeFileSync(join(root, 'data', 'deck.json'), JSON.stringify(kit.makeDeck('往返', kit.fixtureTheme, Array.from({ length: count }, (_, index) => page(index + 1)))))
+    const slides = (file: string) => Object.keys(unzipSync(readFileSync(file))).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    let chain = Promise.resolve()
+    let runs = 0
+    const watch = watchPptDeck(root, () => {
+      runs++
+      chain = chain.catch(() => {}).then(() => exportIncrementalPptx(root)).then(() => undefined)
+    }, 50)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 80))
+      expect(runs).toBe(0)
+      write(1)
+      const started = Date.now()
+      let file = ''
+      while (Date.now() - started < 4000) {
+        await chain
+        const found = readPptProgress(root, true)?.pptxPath
+        if (found && existsSync(found) && slides(found).length === 1) { file = found; break }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(file).not.toBe('')
+      const firstLatency = Date.now() - started
+      const again = Date.now()
+      write(2)
+      let grew = false
+      while (Date.now() - again < 4000) {
+        await chain
+        if (slides(file).length === 2) { grew = true; break }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const nextLatency = Date.now() - again
+      console.log(`PPT_DECK_EXPORT_MS first=${firstLatency} next=${nextLatency}`)
+      expect(grew).toBe(true)
+      expect(nextLatency).toBeLessThan(2000)
+      expect(runs).toBeGreaterThanOrEqual(2)
+      watch.stop()
+      const stopped = runs
+      write(3)
+      await new Promise(resolve => setTimeout(resolve, 120))
+      expect(runs).toBe(stopped)
+      expect(slides(file).length).toBe(2)
+    } finally { watch.stop() }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

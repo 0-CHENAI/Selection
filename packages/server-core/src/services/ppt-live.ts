@@ -472,6 +472,31 @@ export function readPptProgress(sessionDir: string, generating: boolean, options
  * A selected working directory: that folder, and nowhere else.
  * An unchanged deck keeps the bytes already on disk, including OfficeCLI edits.
  */
+/** mtime and size of the working deck, or empty when no deck is on disk yet. */
+export function pptDeckStamp(sessionDir: string): string {
+  const deck = discoverDeck(sessionDir)
+  if (!deck) return ''
+  try { return fileStamp(deck) } catch { return '' }
+}
+
+/**
+ * Fire after deck.json appears or changes. Tool boundaries are too late: a page
+ * can sit on disk for the rest of a long tool call. The caller exports.
+ */
+export function watchPptDeck(sessionDir: string, onChange: () => void, intervalMs = 400): { stop: () => void } {
+  let last = pptDeckStamp(sessionDir)
+  let stopped = false
+  const timer = setInterval(() => {
+    if (stopped) return
+    const next = pptDeckStamp(sessionDir)
+    if (next === last) return
+    last = next
+    onChange()
+  }, intervalMs)
+  if (typeof timer.unref === 'function') timer.unref()
+  return { stop() { stopped = true; clearInterval(timer) } }
+}
+
 export async function exportIncrementalPptx(sessionDir: string, options: { workingDirectory?: string } = {}): Promise<string | undefined> {
   const deckPath = discoverDeck(sessionDir)
   if (!deckPath || !within(sessionDir, deckPath)) return choosePptx(sessionDir, options.workingDirectory)?.path

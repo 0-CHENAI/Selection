@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 import { zipSync, strToU8 } from 'fflate'
-import { writeFileSync } from 'node:fs'
-import { OfficePreviewService, officeElement, officePreviewBytes, verifyOfficeSelection } from './office-preview'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { OfficePreviewService, officeElement, officeNodes, officePreviewBytes, verifyOfficeSelection } from './office-preview'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION } from '@craft-agent/shared/protocol'
 
 const exec = promisify(execFile)
@@ -143,13 +143,17 @@ test.skipIf(!runtime)('real preview pool bounds startup/replacement processes, r
     expect(second.process.exitCode !== null || second.process.signalCode !== null).toBe(true)
     expect(internal.previews.has(first.id)).toBe(true)
     expect(internal.previews.has(sixth.previewId)).toBe(true)
-    // All five foreground leases are pinned again. Updating one must stop its
-    // old process before starting the replacement, never temporarily create six.
+    // All five foreground leases are pinned. A new file must reuse this watch
+    // process. Starting a sixth, even briefly, would pass the admission cap.
     await run('set', file, '/body/p[1]', '--prop', 'text=Pool changed'); await run('close', file)
     const old = internal.previews.get(previews[2]!.previewId)
+    const oldPid = old.process.pid
     const updated = await service.refresh('s2', old.id, await readFile(file), 'v2', true, 'window-2')
     expect(updated.html).toContain('Pool changed')
-    expect(old.process.exitCode !== null || old.process.signalCode !== null).toBe(true)
+    expect(updated.previewId).toBe(old.id)
+    expect(old.process.pid).toBe(oldPid)
+    expect(old.process.exitCode).toBe(null)
+    expect(old.process.signalCode).toBe(null)
     sample()
     expect(peak).toBeLessThanOrEqual(5)
     expect(internal.previews.size).toBe(5)
@@ -189,3 +193,85 @@ test.skipIf(!runtime)('preview deletion and disposal cancel startup reservations
   service.dispose()
   await expect(service.open('after-exit', 'artifact', 'v1', file, await readFile(file))).rejects.toThrow('取消')
 }, 60_000)
+
+test.skipIf(!runtime)('a slide written during generation is in the same preview within a few seconds', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'office-preview-live-'))
+  const service = new OfficePreviewService(); resources.push({ service, root })
+  const { watchPptDeck, exportIncrementalPptx, readPptProgress } = await import('../services/ppt-live')
+  const { getPptSkillRoot } = await import('../services/ppt-catalog')
+  const { pathToFileURL } = await import('node:url')
+  const kit = await import(pathToFileURL(join(getPptSkillRoot(), 'styles/kit.ts')).href) as {
+    fixtureTheme: unknown
+    makeDeck: (title: string, theme: unknown, pages: unknown[]) => unknown
+    makePage: (id: string, layout: string, name: string, background: string, elements: unknown[], notes: string) => unknown
+    text: (id: string, value: string, x: number, y: number, w: number, h: number, size: number, opts?: { bold?: boolean }) => unknown
+  }
+  const page = (index: number) => kit.makePage(`p${index}`, 'free', `第${index}页`, '$paper', [
+    kit.text('title-el', `第${index}页正文`, 48, 40, 400, 48, 24, { bold: true }),
+  ], '')
+  mkdirSync(join(root, 'data'), { recursive: true })
+  const write = (count: number) => writeFileSync(join(root, 'data', 'deck.json'), JSON.stringify(kit.makeDeck('实时', kit.fixtureTheme, Array.from({ length: count }, (_, index) => page(index + 1)))))
+  let chain = Promise.resolve()
+  const watch = watchPptDeck(root, () => {
+    chain = chain.catch(() => {}).then(() => exportIncrementalPptx(root)).then(() => undefined)
+  }, 400)
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+  const waitForSlides = async (file: string, count: number, started: number) => {
+    const deadline = started + 12_000
+    let latest = Buffer.alloc(0)
+    while (Date.now() < deadline) {
+      await chain
+      try { latest = await readFile(file) } catch { /* export has not renamed the package yet */ }
+      if (latest.length > 100 && officePreviewBytes(Buffer.alloc(0), file).length > 100) {
+        try {
+          const { unzipSync } = await import('fflate')
+          const names = Object.keys(unzipSync(latest)).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+          if (names.length >= count) return latest
+        } catch { /* a renamed package can still be caught mid-write */ }
+      }
+      await sleep(50)
+    }
+    throw new Error(`slide ${count} was not exported`)
+  }
+  try {
+    const firstMark = Date.now()
+    write(1)
+    let file = ''
+    while (Date.now() - firstMark < 12_000) {
+      await chain
+      file = readPptProgress(root, true)?.pptxPath ?? ''
+      if (file) break
+      await sleep(50)
+    }
+    expect(file).not.toBe('')
+    const firstBytes = await waitForSlides(file, 1, firstMark)
+    const preview = await service.open('session', 'artifact', 'v1', file, firstBytes)
+    const firstLatency = Date.now() - firstMark
+    expect(preview.html).toContain('第1页正文')
+    const watched = (service as any).previews.get(preview.previewId)
+    const pid = watched.process.pid
+    let selected: string | undefined
+    try {
+      const nodes = await officeNodes(file, '/slide[1]/shape[1]')
+      selected = typeof nodes[0]?.path === 'string' ? nodes[0].path : undefined
+      if (selected) await service.select('session', preview.previewId, [selected])
+    } catch (error) { console.log('PPT_PREVIEW_SELECTION_SETUP', String(error)) }
+    const nextMark = Date.now()
+    write(2)
+    const nextBytes = await waitForSlides(file, 2, nextMark)
+    const visible = await service.refresh('session', preview.previewId, nextBytes, 'v2', false)
+    const nextLatency = Date.now() - nextMark
+    console.log(`PPT_PREVIEW_LATENCY_MS first=${firstLatency} next=${nextLatency} selected=${selected ?? 'none'}`)
+    expect(visible.previewId).toBe(preview.previewId)
+    expect(visible.html).toContain('第2页正文')
+    expect(watched.process.pid).toBe(pid)
+    expect(watched.process.exitCode).toBe(null)
+    expect(watched.process.signalCode).toBe(null)
+    if (selected) expect(visible.selection?.elements.length).toBeGreaterThan(0)
+    expect(nextLatency).toBeLessThan(8_000)
+    expect(firstLatency).toBeLessThan(12_000)
+    await expect(service.refresh('session', preview.previewId, Buffer.from('torn-zip'), 'v3', false)).rejects.toThrow('尚未写入完成')
+    expect(watched.process.pid).toBe(pid)
+    expect(watched.process.exitCode).toBe(null)
+  } finally { watch.stop() }
+}, 90_000)
