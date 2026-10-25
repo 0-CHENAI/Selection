@@ -25,6 +25,14 @@ function Swatches({ colors }: { colors: string[] }) {
   </span>
 }
 
+/** Known deck ratios. Anything else stays 16:9, and the bitmap is never cropped. */
+function frameRatio(aspect?: string): string | undefined {
+  if (!aspect || aspect === '16:9') return undefined
+  if (aspect === 'A4') return '210 / 297'
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(aspect)
+  return match ? `${match[1]} / ${match[2]}` : undefined
+}
+
 export interface PptResultViewProps {
   fileName?: string
   pptxPath?: string
@@ -111,6 +119,7 @@ export function PptResultView({
       : attention.issue
         ? t('ppt.result.needsAttention', { page: attention.index, reason: attention.issue })
         : t('ppt.result.needsAttentionBare', { page: attention.index })
+  const ratio = frameRatio(aspect)
   const apply = (id: string) => {
     if (!panel || !onApply) return
     const revision: PptRevision = panel === 'style'
@@ -121,8 +130,8 @@ export function PptResultView({
   }
   return <div data-testid="ppt-result-card" className="mx-auto mb-2 w-full max-w-[840px] px-5">
     <div className="rounded-xl bg-foreground/[0.04] p-3">
-      <div data-testid="ppt-result-cover" data-page={coverIndex} className="relative h-[196px] overflow-hidden rounded-lg bg-foreground/5">
-        {coverUrl && <img alt="" src={coverUrl} className="h-full w-full object-cover" />}
+      <div data-testid="ppt-result-cover" data-page={coverIndex} className={cn('relative w-full overflow-hidden rounded-lg bg-foreground/5', !ratio && 'aspect-video')} style={ratio ? { aspectRatio: ratio } : undefined}>
+        {coverUrl && <img alt="" src={coverUrl} className="h-full w-full object-contain" />}
         {generating && <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/45 text-sm text-foreground">
           <LoaderCircle aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
           <span>{t('ppt.result.pageVeil', { page: coverIndex })}</span>
@@ -170,8 +179,8 @@ export function PptResultView({
         {pages.map(page => {
           const selected = page.index === coverIndex
           return <button key={`${page.index}-${page.id}`} type="button" data-testid="ppt-result-thumb" data-page={page.index} data-status={page.status} title={page.name} aria-label={page.name} aria-current={selected || undefined} className={cn('min-w-11 flex-1 basis-0 rounded-sm border-2 border-transparent', selected && 'border-accent')} onClick={() => { setPicked(page.index); onPick(page.index) }}>
-            <span className={cn('block aspect-video overflow-hidden rounded-sm bg-foreground/5', thumbDimmed(page, generating, current) && 'opacity-40')}>
-              {thumbs[page.index] && <img alt="" src={thumbs[page.index]} className="h-full w-full object-cover" />}
+            <span className={cn('block w-full overflow-hidden rounded-sm bg-foreground/5', !ratio && 'aspect-video', thumbDimmed(page, generating, current) && 'opacity-40')} style={ratio ? { aspectRatio: ratio } : undefined}>
+              {thumbs[page.index] && <img alt="" src={thumbs[page.index]} className="h-full w-full object-contain" />}
             </span>
             <span data-testid="ppt-result-bar" className={cn('mt-1 block h-[2.5px] rounded-full', thumbBarClass(page, generating, current))} />
           </button>

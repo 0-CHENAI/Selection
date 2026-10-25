@@ -13,7 +13,7 @@ function Swatches({ colors }: { colors: string[] }) {
 
 function Frame({ src, wash }: { src?: string; wash?: string }) {
   return <div className="relative aspect-video overflow-hidden rounded-md bg-foreground/5">
-    {src && <img alt="" src={src} className="h-full w-full object-cover" />}
+    {src && <img alt="" src={src} className="h-full w-full object-contain" />}
     {wash && <div className="absolute inset-0 opacity-70 mix-blend-multiply" style={{ background: wash }} />}
   </div>
 }
@@ -79,7 +79,7 @@ export function PptRevisionPanel({
         const colors = 'paper' in item ? [item.paper, item.ink, item.accent, item.signal] : []
         return <button key={item.id} type="button" data-testid="ppt-revision-option" aria-pressed={active} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-foreground/5" onClick={() => setSelectedId(item.id)}>
           {tab === 'style' && 'cover' in item && item.cover
-            ? <img alt="" src={item.cover} className="h-6 w-10 shrink-0 rounded-sm object-cover" />
+            ? <img alt="" src={item.cover} className="h-6 w-10 shrink-0 rounded-sm object-contain" />
             : <Swatches colors={colors} />}
           <span className="min-w-0 flex-1 truncate">{name}</span>
           {item.id === currentId && <span className="shrink-0 text-[11px] text-muted-foreground">{t('ppt.result.current')}</span>}

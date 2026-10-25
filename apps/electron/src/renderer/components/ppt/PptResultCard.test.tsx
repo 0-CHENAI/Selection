@@ -26,9 +26,14 @@ function page(index: number, status: PptPageProgress['status'], extra: Partial<P
 
 const pages = Array.from({ length: 11 }, (_, index) => page(index + 1, index + 1 === 5 ? 'needs_revision' : 'passed', index + 1 === 5 ? { issue: '图例离页边仅 6px' } : {}))
 const themes: PptTheme[] = [
-  { id: 'ink', name: '论文墨色', paper: '#F7F4EC', ink: '#1A1A1A', accent: '#1D4ED8', signal: '#B45309' },
-  { id: 'stage', name: '暗场讲台', paper: '#12141A', ink: '#F5F5F5', accent: '#7C3AED', signal: '#F59E0B' },
-  ...Array.from({ length: 6 }, (_, index) => ({ id: `more-${index}`, name: `配色${index}`, paper: '#fff', ink: '#111', accent: '#333', signal: '#900' })),
+  { id: 'academic-ink', name: '论文墨色', paper: '#F7F4EE', ink: '#1B2430', accent: '#1D4ED8', signal: '#1D4ED8' },
+  { id: 'keynote-stage', name: '暗场讲台', paper: '#0E0E10', ink: '#F5F5F7', accent: '#FF6B3D', signal: '#FF6B3D' },
+  { id: 'sugar-rush', name: '糖彩', paper: '#FFF8EE', ink: '#1A1A2E', accent: '#EB3898', signal: '#A34710' },
+  { id: 'glass-saas', name: '玻璃界面', paper: '#F4F6FB', ink: '#1E1B4B', accent: '#4F46E5', signal: '#4F46E5' },
+  { id: 'paper-cut', name: '剪纸月色', paper: '#F2ECE0', ink: '#131A33', accent: '#1E3A5F', signal: '#8A6A1E' },
+  { id: 'pixel-breakfast', name: '像素早餐', paper: '#F4F0E6', ink: '#1A1C2C', accent: '#A34710', signal: '#A34710' },
+  { id: 'tea-tasting', name: '点茶', paper: '#F5EFE2', ink: '#2B2A28', accent: '#9E2E26', signal: '#9E2E26' },
+  { id: 'brutal-stone', name: '粗石', paper: '#F2F0EA', ink: '#14110F', accent: '#C8331E', signal: '#C8331E' },
 ]
 const templates: PptTemplate[] = [
   { id: 'paper', title: '学术报告', category: '学术', canvas: '16:9', pages: 11, cover, referencePages: [] },
@@ -55,8 +60,8 @@ function view(state: 'done' | 'recolor', panel?: 'color') {
         templates={templates}
         themes={themes}
         currentTemplateId="paper"
-        currentThemeId="ink"
-        run={state === 'recolor' ? { action: 'recolor', themeId: 'stage' } : undefined}
+        currentThemeId="academic-ink"
+        run={state === 'recolor' ? { action: 'recolor', themeId: 'keynote-stage' } : undefined}
         fileManagerName="访达"
         initialPanel={panel ?? null}
         onPick={() => {}}
@@ -86,6 +91,10 @@ test('the finished card shows the cover, check summary and page thumbs', () => {
   expect(html).toContain('换配色')
   expect(html).toContain('消费：社零总额与结构')
   expect(html).toContain('data-file-kind="powerpoint"')
+  expect(html).toContain('aspect-video')
+  expect(html).toContain('object-contain')
+  expect(html).not.toContain('object-cover')
+  expect(html).not.toContain('h-[196px]')
   expect(html).not.toContain('<pre')
   expect(html).not.toContain('font-mono')
   expect(html.match(/data-testid="ppt-result-thumb"/g)?.length).toBe(11)
@@ -98,7 +107,7 @@ test('a recolor in progress keeps one status line and updates page bars', () => 
   expect(html).toContain('版式不变')
   expect(html).toContain('已完成 3 / 11 页')
   expect(html).toContain('右侧实时刷新')
-  expect(html).toContain('第 4 页')
+  expect(html.match(/第 4 页/g)).toEqual(['第 4 页'])
   expect(html).toContain('data-testid="ppt-result-stop"')
   expect(html).toContain('停止')
   expect(html).not.toContain('页通过检查')
@@ -111,7 +120,7 @@ test('a recolor in progress keeps one status line and updates page bars', () => 
 test('the revision panel compares covers and applies to every page', () => {
   const html = renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <PptRevisionPanel tab="color" onTab={() => {}} templates={templates} themes={themes} currentThemeId="ink" coverUrl={cover} total={11} onApply={() => {}} onCancel={() => {}} />
+      <PptRevisionPanel tab="color" onTab={() => {}} templates={templates} themes={themes} currentThemeId="academic-ink" coverUrl={cover} total={11} onApply={() => {}} onCancel={() => {}} />
     </I18nextProvider>,
   )
   expect(html).toContain('data-testid="ppt-revision-panel"')
@@ -120,6 +129,10 @@ test('the revision panel compares covers and applies to every page', () => {
   expect(html).toContain('现在')
   expect(html).toContain('当前')
   expect(html).toContain('更多配色（3）')
+  expect(html).toContain('糖彩')
+  expect(html).toContain('剪纸月色')
+  expect(html).not.toContain('更多配色 1')
+  expect(html).not.toContain('配色0')
   expect(html).toContain('应用到全部 11 页')
   expect(html).toContain('取消')
   expect(html).not.toContain('<pre')
