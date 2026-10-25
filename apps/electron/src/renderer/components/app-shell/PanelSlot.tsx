@@ -97,7 +97,7 @@ export function PanelSlot({
   const contextOverride = useMemo(() => ({
     ...parentContext,
     rightSidebarButton: closeButton,
-    leadingAction: backButton,
+    leadingAction: backButton ?? parentContext.leadingAction,
     isFocusedPanel,
   }), [parentContext, closeButton, backButton, isFocusedPanel])
 

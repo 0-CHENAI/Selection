@@ -2126,7 +2126,7 @@ export function FreeFormInput({
             sessionId={sessionId}
           />
 
-          <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && !usePromptAppearance && "border-t border-border/50")}>
+          <div className={cn("flex flex-wrap items-center gap-1 px-2 py-2", !compactMode && !usePromptAppearance && "border-t border-border/50")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
           <input
             ref={fileInputRef}
@@ -2268,7 +2268,7 @@ export function FreeFormInput({
 
           {/* Desktop: full badges row with labels and working directory */}
           {!compactMode && (
-          <div className={cn("flex items-center gap-1 shrink overflow-hidden", workMode === 'PRO' ? "min-w-0" : "min-w-32")}>
+          <div className="flex w-max max-w-full flex-wrap items-center gap-1">
           {/* 1. Attach Files Badge */}
           <FreeFormInputContextBadge
             icon={<Paperclip className="h-4 w-4" />}
@@ -2394,12 +2394,10 @@ export function FreeFormInput({
             >
               <ChevronUp className="h-4 w-4" />
             </button>
-          ) : (
-            <div className="flex-1" />
-          )}
+          ) : null}
 
-          {/* Right side: Model + Send - never shrink so they're always visible */}
-          <div className={cn('flex items-center', usePromptAppearance ? 'min-w-0 shrink' : 'shrink-0')}>
+          {/* Right side: Model + Send. ml-auto keeps them at the end, and the row wraps instead of overlapping. */}
+          <div className={cn('ml-auto flex max-w-full min-w-0 items-center', usePromptAppearance ? 'shrink' : 'shrink-0')}>
           {/* 5. Model/Connection Selector - Hidden in compact mode (EditPopover embedding) */}
           {!compactMode && (
           <DropdownMenu open={modelDropdownOpen} onOpenChange={handleModelDropdownOpenChange}>
@@ -2410,8 +2408,8 @@ export function FreeFormInput({
                     type="button"
                     disabled={disabled}
                     className={cn(
-                      "input-toolbar-btn inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
-                      usePromptAppearance ? 'min-w-0 shrink' : 'shrink-0',
+                      "input-toolbar-btn inline-flex min-w-0 max-w-[12rem] items-center h-7 px-1.5 gap-0.5 text-[13px] rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
+                      usePromptAppearance ? 'shrink' : 'shrink-0',
                       modelDropdownOpen && "bg-foreground/5",
                       connectionUnavailable && "text-destructive",
                     )}

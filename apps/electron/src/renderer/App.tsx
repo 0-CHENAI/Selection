@@ -24,6 +24,7 @@ import { applyThinkingProbe, noteThinkingEffortError } from '@craft-agent/shared
 import { ensureModelsDevThinkingIndex } from '@craft-agent/shared/config/models-dev-thinking'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
+import { OfficeLayoutFrame } from '@/components/app-shell/OfficePreviewPanel'
 import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
@@ -2322,7 +2323,7 @@ export default function App() {
                 onRetry={handleReconnectTransport}
               />
             )}
-            <div className="flex flex-1 min-h-0 @container/office-layout">
+            <OfficeLayoutFrame>
               <div className="min-w-0 flex-1">
               {sessionLoadError ? (
                 <SessionLoadErrorScreen
@@ -2343,7 +2344,7 @@ export default function App() {
                 {officePreviewPanel}
               </div>
               {officeFilePicker}
-            </div>
+            </OfficeLayoutFrame>
             <ResetConfirmationDialog
               open={showResetDialog}
               onConfirm={executeReset}

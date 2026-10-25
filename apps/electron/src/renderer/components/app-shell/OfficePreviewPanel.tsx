@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { panelPushTransition } from '@craft-agent/ui'
-import { PANEL_EDGE_INSET, PANEL_GAP, PANEL_MIN_WIDTH } from './panel-constants'
+import { bindOfficeLeadingWidth, officePanelWidthCss } from '@/lib/office-panel-width'
+import { PANEL_EDGE_INSET, PANEL_GAP } from './panel-constants'
 import { OfficePreviewResizeHandle } from './OfficePreviewResizeHandle'
 
 const subscribeReducedMotion = (notify: () => void) => {
@@ -13,7 +14,20 @@ const getReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduc
 
 // The parent is an inline-size query container. Both layers use its width so
 // opening/closing only clips the document; it does not reflow the iframe.
-const panelWidth = `min(max(50cqw, calc(100cqw - ${PANEL_MIN_WIDTH}px)), max(320px, var(--office-panel-preferred-width, 45cqw)))`
+// The width is taken from the space after the sidebar and list, and it cannot
+// push the conversation column under its minimum.
+const panelWidth = officePanelWidthCss()
+
+/** Measures the sidebar and list so the office panel can leave the chat its minimum. */
+export function OfficeLayoutFrame({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const layout = ref.current
+    if (!layout) return
+    return bindOfficeLeadingWidth(layout)
+  }, [])
+  return <div ref={ref} className="flex flex-1 min-h-0 @container/office-layout">{children}</div>
+}
 
 /** Keep cached iframe nodes mounted until the close animation finishes. */
 export function OfficePreviewPanel({ open, children, onPresenceChange }: { open: boolean; children: ReactNode; onPresenceChange: (present: boolean) => void }) {

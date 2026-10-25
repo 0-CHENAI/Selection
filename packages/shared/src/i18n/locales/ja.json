@@ -1253,6 +1253,8 @@
   "ppt.generatingProgress": "Generating · slide {{current}}/{{total}}",
   "ppt.heroDescription": "Describe your goal, attach materials, and choose a template. AI uses its cover and layouts as references to create an editable PPTX.",
   "ppt.heroTitle": "What presentation would you like to create?",
+  "ppt.history.collapse": "PPT 一覧を折りたたむ",
+  "ppt.history.expand": "PPT 一覧を表示",
   "ppt.loadError": "Could not load templates",
   "ppt.loading": "Loading templates…",
   "ppt.logoError": "Could not read the logo. Choose an image file.",

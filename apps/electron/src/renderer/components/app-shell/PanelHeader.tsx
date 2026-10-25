@@ -127,7 +127,9 @@ export function PanelHeader({
   // page having to forward the prop manually. ChatPage explicitly passes its own
   // value, which overrides the context.
   const { leadingAction: contextLeadingAction, isCompactMode } = useAppShellContext()
-  const leadingAction = explicitLeadingAction ?? contextLeadingAction
+  // `null` opts out of the shell's leading action. Content panels inherit it;
+  // the navigator passes null so a collapsed-list button is not drawn twice.
+  const leadingAction = explicitLeadingAction !== undefined ? explicitLeadingAction : contextLeadingAction
 
   // Use context as fallback when prop is not explicitly set.
   // Skip stoplight compensation when leadingAction is present — the back button

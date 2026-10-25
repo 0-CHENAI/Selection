@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { OFFICE_PANEL_RESIZE_EVENT, officePanelWidthBasis } from '@/lib/office-panel-resize'
+import { officeLeadingWidthPx, officePanelLimits } from '@/lib/office-panel-width'
 import { PanelResizeHandle } from './PanelResizeHandle'
-import { PANEL_GAP, PANEL_MIN_WIDTH, PANEL_SASH_HALF_HIT_WIDTH, PANEL_SASH_HIT_WIDTH } from './panel-constants'
+import { PANEL_GAP, PANEL_SASH_HALF_HIT_WIDTH, PANEL_SASH_HIT_WIDTH } from './panel-constants'
 
 /** Resize only the panel's CSS width; the document stays frozen until release. */
 export function OfficePreviewResizeHandle() {
@@ -20,10 +21,7 @@ export function OfficePreviewResizeHandle() {
     let animationFrame = 0
     let previousCursor = ''
     let previousSelection = ''
-    const limits = (total: number) => {
-      const max = Math.max(total / 2, total - PANEL_MIN_WIDTH)
-      return { min: Math.min(320, max), max }
-    }
+    const limits = (total: number) => officePanelLimits(total, officeLeadingWidthPx(panel))
     const announce = (width: number, total: number) => {
       const { min, max } = limits(total)
       handle.setAttribute('aria-valuemin', String(Math.round(min)))

@@ -162,7 +162,7 @@ export function PptResultView({
       return <span key={offset + 1} data-testid="ppt-result-segment" data-state={state} className={cn(thin ? 'h-1' : 'h-1.5', 'flex-1 rounded-sm', state === 'done' ? 'bg-accent' : state === 'current' ? 'bg-accent/45' : 'bg-foreground/10')} />
     })}
   </div>
-  const openRight = <button type="button" data-testid="ppt-result-open-right" disabled={!pptxPath} className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[13px] text-foreground/80 hover:bg-foreground/5 disabled:opacity-40" onClick={() => onOpenRight(coverIndex)}>
+  const openRight = <button type="button" data-testid="ppt-result-open-right" disabled={!pptxPath} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[13px] text-foreground/80 hover:bg-foreground/5 disabled:opacity-40" onClick={() => onOpenRight(coverIndex)}>
     <PanelRight aria-hidden="true" className="size-3.5" />{t('ppt.result.openRight')}
   </button>
   const body = <>
@@ -249,11 +249,11 @@ export function PptResultView({
     <div className="rounded-xl bg-foreground/[0.04] p-3">
       <div className="flex items-center gap-2">
         <FileTypeIcon fileName={fileName || 'slides.pptx'} className="size-6 shrink-0" />
-        <div className="min-w-0 flex-1 basis-0">
+        <div className={cn('min-w-0', expanded ? 'flex-1' : 'shrink')}>
           <div className="truncate text-sm font-medium text-foreground">{title}</div>
           {expanded && <div className="truncate text-xs text-muted-foreground">{meta}</div>}
         </div>
-        {!expanded && foldStatus && <span data-testid="ppt-result-fold-status" className="min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground">{foldStatus}</span>}
+        {!expanded && foldStatus && <span data-testid="ppt-result-fold-status" className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{foldStatus}</span>}
         {!expanded && openRight}
         <button
           type="button"
@@ -262,7 +262,7 @@ export function PptResultView({
           aria-controls={bodyId}
           aria-label={expanded ? t('ppt.result.collapse') : t('ppt.result.expand')}
           title={expanded ? t('ppt.result.collapse') : t('ppt.result.expand')}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-foreground/70 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-foreground/70 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           onClick={toggleExpanded}
         >
           {expanded ? <ChevronUp aria-hidden="true" className="size-4" /> : <ChevronDown aria-hidden="true" className="size-4" />}
