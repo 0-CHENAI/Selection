@@ -1,208 +1,229 @@
 <p align="center">
-  <img src="apps/electron/resources/icon.svg" width="88" alt="Selection 图标：圆角白底上的线描天鹅" />
+  <img src="apps/electron/resources/icon.svg" width="88" alt="Selection" />
 </p>
 
 <h1 align="center">Selection</h1>
 
 <p align="center">
-  桌面上的多智能体会话。<br />
-  很多会话、项目、数据源和技能放在同一处。
+  在桌面上组织 AI 会话，让多个智能体协作完成复杂工作。
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache%202.0-111111" /></a>
-  <a href="apps/electron"><img alt="Electron 桌面应用" src="https://img.shields.io/badge/app-Electron%20desktop-2f6feb" /></a>
-  <a href="https://bun.sh"><img alt="使用 Bun" src="https://img.shields.io/badge/runtime-Bun-f472b6" /></a>
-  <a href="packages/pi-agent-server"><img alt="运行时 Pi" src="https://img.shields.io/badge/runtime-Pi-111111" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="Apache 2.0" /></a>
+  <a href="https://github.com/0-CHENAI/Selection/releases"><img src="https://img.shields.io/badge/download-macOS%20%7C%20Windows-111111" alt="下载 macOS 与 Windows 版本" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/0-CHENAI/Selection">github.com/0-CHENAI/Selection</a>
-  · 当前仓库版本 3.1
+  <a href="#pro-模式让复杂工作有计划地推进">PRO 模式</a> ·
+  <a href="#安装">下载安装</a> ·
+  <a href="#快速上手">快速上手</a> ·
+  <a href="#功能一览">功能一览</a> ·
+  <a href="#从源码运行">从源码运行</a>
 </p>
 
-> [!TIP]
-> 第一次来，先看 [打开就是这样](#打开就是这样)：侧栏第一项是普通会话。要在本机跑，按 [从源码跑起来](#从源码跑起来) 克隆。
+Selection 是基于 [Craft Agents](https://github.com/craft-ai-agents/craft-agents-oss) 开发的开源 AI 桌面应用。你可以同时推进多个会话，把相关资料和文件归入项目，接上自己的模型与数据源，让智能体直接参与手头的工作。
 
-## 打开就是这样
+Selection 提供 **NORM / PRO 两种工作模式**：日常任务在会话中直接完成；复杂工作可以通过 **Swarm 多智能体协作**和 **DAG 任务编排**组织分工、依赖、验证与交付。同时，你也可以在应用内预览和修改 Word、Excel、PowerPoint，或从资料生成可编辑的 PPTX。
 
-打开后停在 **普通会话**。左边是导航，从上到下：**普通会话**、**项目**、**PPT**、**数据源**、**技能**、**自动化**、**设置**。点名字会换主区域。普通会话的中间是按日期分组的会话列表，右边是对话。
+## 为什么做 Selection
 
-下面这张浅色整窗停在普通会话，导航选中的就是默认那一项。列表里同时放着几件事：销售复盘、合同条款、竞品定价、招聘、脚本排错。右边这段对话在整理一份 Excel。输入栏的 **PPT** 被点开了，模板选择器盖住下半屏；收起之后，中间还是这段对话。PPT 是侧栏和输入栏上的一项。
+一项工作往往需要反复查资料、调用工具、修改文件，再检查结果。会话多了，还要分清每件事的上下文、工作目录和进度。
 
-<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：左侧按日期分组的会话列表，右边正在整理一份 Excel；输入栏的 PPT 模板选择器处于打开状态" />
+Selection 把这些环节放在同一个桌面工作空间里：日常问题在一段会话中完成，复杂任务可以拆分协作，按依赖推进，并在交付前检查结果。你能看到任务怎样执行、哪里遇到问题，以及接下来需要做什么。
 
-> 选中的导航是普通会话。列表按日期分组。右边的标题是「Q3 华东区销售复盘」，附件是 Excel。顶栏的 **NORM / PRO** 只在这一页出现。选择器标题是「用这段对话做 PPT」，从这里发出去会建成一段 PRO 会话。选择器挡住了输入区；收起后可以附文件、选数据源，也可以选工作目录。这张图里因为附了表格，输入区旁边有 **Office 协同**，Word、Excel 和 PowerPoint 都从这里进右侧预览。
+## PRO 模式：让复杂工作有计划地推进
 
-## Selection 是什么
-
-Selection 是桌面上的多智能体会话：Electron 负责窗口，Bun 跑本地进程，Pi 接模型。同时开很多会话，接上自己的工具和文件，把结果留在工作区里。
-
-适合这些场景：
-
-- 同时盯几件任务，每件留在自己的会话里：NORM 在这一段对话里做完，PRO 再去委派和拆分
-- 把同一件事的会话、工作文件夹和资料收进一个项目
-- 接上 MCP、REST API 或本地目录，让模型读到自己的系统
-- 模型要换来换去：私有化网关、各家 API、本机 Ollama
-- 改一份 Word、Excel 或已有的 PowerPoint；也可以从资料做成一套新的幻灯片
-- 想先装一份 beta 安装包，或从源码改技能和界面
-
-上面有深色和浅色两套中文界面。仓库里还有英、德、西、日、波、匈等语言包。
-
-## 从哪来
-
-Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents-oss) 上继续开发，许可证仍是 Apache-2.0。GitHub 仓库简介里的 “secondary development of Craft Agent” 指的就是这段来源。
-
-桌面产品名是 Selection，配置放在 `~/.selection/`。这条线上继续做的，包括 Office 协同（Word、Excel、PowerPoint）和其中的演示文稿。安装和文档以本仓库为准。
-
-## 现在能做什么
-
-| 你要做的事 | Selection 里怎么做 |
+| 工作模式 | 适合的任务 |
 | --- | --- |
-| 同时推进多件事 | 工作区里的会话列表，带状态、旗标和搜索 |
-| 把同一件事归到一处 | 项目：会话、工作文件夹和资料，在 `projects/<slug>/` |
-| 接上外部系统 | 来源：MCP、REST API、本地目录 |
-| 把做法存下来 | 工作区技能，对话里用 `@` 提到 |
-| 到点自己跑 | 自动化，写在工作区的 `automations.json`，也可以直接对智能体说 |
-| 换模型 | 首次启动选 ORDER、其他提供商或本地模型；运行时是 Pi |
-| 改已有 Office 文件 | 右侧 **Office 协同**，Word、Excel、PowerPoint 都能预览和点选 |
-| 做一套新幻灯片 | 侧栏或输入栏的 **PPT**：模板、`ppt-design`、一份可编辑 PPTX。结果卡默认一行摘要，展开后是封面、缩略图、换风格、换配色 |
+| **NORM** | 问答、阅读资料、修改文件，以及在当前会话中直接完成的工作 |
+| **PRO** | 需要多个智能体分工、任务依赖、独立审查或持续推进的复杂工作 |
 
-内置技能：
+在 PRO 中，可以从一个目标开始，由协调会话组织工作，再根据任务需要采用 Swarm 协作或建立 DAG 计划。
 
-| 技能 | 用在 |
+### Swarm：按需要组织多智能体分工
+
+当任务包含可以独立推进的工作时，协调会话可以把它们委派给多个智能体。例如，分别查阅不同来源、分析不同方案，或检查不同模块，再汇总成一份结果。
+
+每项分工都有明确的输入、预期产出和证据要求。子智能体使用独立会话执行，协调会话负责汇总结果、处理冲突并说明未完成的部分。遇到阻塞时，子任务可以向协调会话求助，在得到答复后继续原任务。只有符合拆分条件、并行有实际收益时才会创建分工。
+
+### DAG：把任务依赖变成可执行的计划
+
+DAG（有向无环图）用任务节点和依赖关系描述一项工作：哪些步骤可以并行，哪些必须等待前面的结果，以及哪些输出需要审查后才能继续。节点可以使用不同的模型与连接，并明确各自的输入、输出和验收要求。
+
+例如，一项方案对比任务可以组织成这样的依赖图：
+
+```mermaid
+flowchart LR
+  prepare["整理问题与资料"] --> a["分析方案 A"]
+  prepare --> b["分析方案 B"]
+  a --> compare["对照与综合"]
+  b --> compare
+  compare --> review["独立审查"]
+  review --> deliver["报告与交付文件"]
+```
+
+两条分析分支可以并行推进，综合节点等待双方输出，审查通过后再进入交付。你可以在工作台中查看任务图，编辑节点、模型与依赖，也可以让 AI 协助生成或调整计划。
+
+Swarm 负责按需委派与协作，DAG 负责显式的步骤和依赖。PRO 将它们与执行状态、成果和审查记录放在一起，方便从整体目标追踪到具体任务。
+
+### 从执行到交付，保留检查与修正的过程
+
+| 能力 | 对实际工作的帮助 |
 | --- | --- |
-| [`officecli`](apps/electron/resources/skills/officecli/SKILL.md) | 检查、改写、截图已有的 Word、Excel、PowerPoint |
-| `natural-writing` | 中文成稿 |
-| `humanizer` | 英文成稿 |
-| `academic-humanizer` | 英文学术文本 |
-| `deep-research` | 带研究角色的 PRO 任务节点 |
-| [`ppt-design`](apps/electron/resources/skills/ppt-design/SKILL.md) | 新建整套演示文稿，或整套重设计 |
+| 动态调整计划 | 发现资料缺口时，可以补充尚未执行的任务或调整依赖，保留已经完成的记录 |
+| 验证与修正 | 可配置验证节点和验收条件；审查指出具体问题时，重新执行相关任务及受影响的后续步骤，保留无关分支的有效成果 |
+| 深度研究 | 记录原文、结论与来源版本，让研究者和独立审查者分别核对依据；报告呈现已支持的结论、资料缺口与未解决问题 |
+| 执行过程回看 | 查看计划修订、任务状态和执行记录，了解当前结果来自哪些步骤 |
+| 暂停与恢复 | 保存运行检查点，中断后核对状态再继续，保留已确认的成果和历史 |
+| 预算与权限 | 在配置的并发、预算和权限范围内执行，需要审批或补充预算时等待处理 |
+| 会话交接 | 将当前成果、背景和未解决问题交给新的 NORM 或 PRO 会话，继续下一阶段工作 |
 
-工作区里还可以放你自己的技能。改已有的 Word、Excel、PowerPoint 走 OfficeCLI。新建整套幻灯片或整套重设计走 `ppt-design`。
+项目还可以显式开启 **PRO 历史检索**，让后续任务按需查阅相关会话原文。新会话不会自动加载项目里的全部历史。
 
-## 侧栏、会话和项目
+任务定义、运行控制与配置说明见[编排使用指南](packages/shared/src/tasks/USER-GUIDE.md)。
 
-普通会话就是一段对话，列表按日期分组。点侧栏里的名字会换主区域：数据源、技能、自动化、设置各自是一页；PPT 换成模板入口。会话里已经有 Word、Excel 或 PowerPoint 时，输入区旁边会出现 **Office 协同**，和 **会话文件** 放在一起，从这里打开右侧预览。
+## 你可以直接这样用
 
-顶栏的 **NORM / PRO** 切换两种根会话列表，界面上的名字就是工作模式。这个开关只出现在普通会话里；打开 PPT 视图时不显示。第一次发送之后，这段会话的模式就固定了。想换模式，用「交接到 PRO」或「基于成果继续聊」另开一段根会话，原来的运行归属留在源会话。
+### 「帮我看这份文件，再按要求修改」
 
-| | NORM | PRO |
-| --- | --- | --- |
-| 适合 | 事情在这一段对话里做完 | 要委派、工作流，或把一件事拆成任务 |
-| 默认 | 新建普通会话从这里开始 | 自己切过去，或从 NORM 交接过来 |
-| PPT | 从这里做 PPT 时，会先交到一段 PRO 会话 | 从 PPT 入口起草，工作模式直接写成 PRO。普通会话里打开模板选择器，说明是「将以 PRO 会话运行」 |
+附上文件或选择工作目录，让智能体阅读资料、整理表格、修改文稿。Word、Excel 和 PowerPoint 可以在右侧的 **Office 协同**中预览，也可以点选段落、单元格或形状，提出具体修改要求。文件的修改结果和版本历史保留在会话中。
 
-**项目**把同一件事的会话、工作文件夹和资料放在一起，存在工作区的 `projects/<slug>/`（`config.json` 和 `assets/`）。侧栏点开某个项目，列表里是它名下的会话。这些会话固定使用项目的工作文件夹。会话菜单里的「归入项目」就是把一段普通会话放进来。多步任务和编排在 PRO 会话里进行，项目把这些会话和资料归到一处。
+### 「把这些资料做成一套演示文稿」
 
-## 演示文稿
+从侧栏或输入栏的 **PPT** 入口选择模板，说明主题、受众和页数，也可以附上参考资料或导入自己的 PPTX 模板。生成过程会打开右侧预览，完成后得到可编辑的 PPTX；还可以继续调整内容、风格和配色。
 
-幻灯片是侧栏里的 **PPT**，也是普通会话输入栏上的 **PPT**。生成会进一段 PRO 会话，并打开平时那一块 **Office 协同**。同一块右侧面板预览并点选 **Word（.docx）**、**Excel（.xlsx）** 和 **PowerPoint（.pptx）**：Word 的段落和表格，Excel 的单元格，PPT 的形状。
+<p align="center">
+  <img src="docs/readme-assets/ppt-office-split.png" width="960" alt="Selection：左侧查看演示文稿生成结果，右侧通过 Office 协同预览同一份 PPTX" />
+</p>
 
-| 步骤 | 界面上 |
-| --- | --- |
-| 进入 | 左侧 **PPT**，或普通会话输入栏的 **PPT** |
-| 选模板 | 画廊按商务、咨询、学术、教学、技术、创意、社媒分类；**自定义**里可以上传 PPTX，重启后还在，目录是 `~/.selection/ppt-templates/custom-…/` |
-| 写要求 | 主题、受众、页数、风格；可以附文件，也可以选数据源和工作目录 |
-| 生成 | 自动打开 **Office 协同**。真实文件出现之前，面板停在「正在加载预览」；页写进去之后，预览跟着刷新 |
-| 看结果 | 结果卡默认收成一行：文件名、页数和检查结果、「在右侧打开」。展开后才是封面、缩略图、换风格重排、换配色 |
-| 拿文件 | 只留一份可编辑 PPTX。文件名来自标题。没选工作目录时写在会话文件夹，选了就写在该目录。绝对路径记在会话 `data/ppt-output.json` |
+<p align="center"><sub>从对话生成演示文稿，在右侧预览和继续修改同一份 PPTX。</sub></p>
 
-历史按今天、本周、更早分组，可以搜索。每一行沿用普通会话的菜单：重命名、标为未读、在新窗口打开、发送到其他工作区、归入项目、删除。Office 协同打开时，中间这列会先让出宽度；你手动展开或收起之后，这次选择会保持到你再改。
+### 「把我已有的工具和数据接进来」
 
-生成结束时，左边是展开的结果卡，右边是同一份 PPTX。Word 和 Excel 走同一块面板，仓库里还没有对应的整窗实拍。
+数据源支持远程与本地 MCP、REST API 和本地目录。你可以提供 MCP 配置、API 文档或文件夹位置，由智能体协助配置，并在需要时完成授权。对话中用 `@` 引用数据源或技能。
 
-<img src="docs/readme-assets/ppt-office-split.png" width="920" alt="深色主题：左侧展开的结果卡，右侧 Office 协同预览同一份 PPTX" />
+### 「以后都按这个方法做，到时间自动执行」
 
-> 结果卡上有封面、检查摘要和缩略图。右侧顶栏是文件名和「切换文件」。点缩略图或「在右侧打开」，预览跟到那一页。
-
-风格、配色和版式的说明在技能目录里：
-
-- [`ppt-design`](apps/electron/resources/skills/ppt-design/SKILL.md)：新建整套文稿，或整套重设计
-- [风格索引](apps/electron/resources/skills/ppt-design/references/styles.md)：5 套 DSH 风格，另有 14 套由 ppt-master 转入
-- [12 套自有配色](apps/electron/resources/skills/ppt-design/styles/themes/catalog.json)：只换颜色和字体，不改页面结构
-- [结构版式和论证版式](apps/electron/resources/skills/ppt-design/references/layouts.md)
-
-换配色、生成中的预览、侧栏停在 PPT 时的模板画廊，以及版式页的实拍，还在 `docs/readme-assets/` 和 `docs/design/ppt-picker/actual/`。
-
-导出用技能自带的 PptxGenJS（`engine/deck-cli.mjs`），不要求另外安装 Python。导出后的检查、读回、截图和定点修改交给随应用打包的 OfficeCLI。
-
-## 权限、快捷键、来源、模型
-
-权限有三档，默认是 **智能审批**。在输入区按 `Shift+Tab` 循环。
-
-| 模式 id | 界面名称 | 行为 |
-| --- | --- | --- |
-| `safe` | 只读探索 | 阻止写入，不再逐项询问 |
-| `ask` | 智能审批 | 低风险操作自动执行，高风险操作等你点头 |
-| `allow-all` | 完全接管 | 自动执行，不再确认 |
-
-macOS 用 `⌘`，Windows 和 Linux 用 `Ctrl`。下表按 macOS 书写。
-
-| 快捷键 | 作用 |
-| --- | --- |
-| `⌘N` | 新建聊天 |
-| `⌘T` | 在新面板新建聊天 |
-| `⌘,` | 设置 |
-| `⌘F` | 搜索 |
-| `⌘/` | 快捷键列表 |
-| `⌘1` / `⌘2` / `⌘3` | 焦点到侧栏 / 列表 / 聊天 |
-| `⌘B` | 沉浸模式：藏起左侧导航和列表 |
-| `Shift+Tab` | 切换权限模式 |
-| `Enter` | 发送 |
-| `Shift+Enter` | 换行 |
-| `Esc` `Esc` | 停止当前任务（连按两次） |
-
-来源只有三种，定义在 `packages/shared`：
-
-| 类型 | 例子 |
-| --- | --- |
-| `mcp` | 远程 MCP，或本机 stdio（`npx`、Python、本地二进制） |
-| `api` | REST。Google、Slack、Microsoft 走各自的 OAuth；也可以贴 OpenAPI |
-| `local` | 文件夹、笔记库、Git 仓库 |
-
-模型连接都进 Pi 运行时。第一次打开会先问你怎么接：
-
-| 入口 | 说明 |
-| --- | --- |
-| ORDER | 私有化网关，地址是 `https://order.ai.jxepdi.top` |
-| 使用其他提供商 | OpenRouter、Google AI Studio，以及其他 OpenAI 兼容 API |
-| 本地模型 | Ollama 等。有服务地址就可以，不必填 Key |
-| 稍后设置 | 先进入工作区，连接以后再补 |
-
-设置里还可以加 ChatGPT（Codex OAuth）、GitHub Copilot、Kimi，以及 OpenAI 兼容或 Anthropic Messages 自定义端点。官方 API Key 可以把 Anthropic Messages 端点指到 `https://api.anthropic.com`。官方 Anthropic 登录和 Claude Max OAuth 不在这条运行时里。Amazon Bedrock、Google Vertex 也走同一套 Pi 连接。
+把常用流程写成技能，在后续会话中复用。需要定期执行时，可以配置自动化，例如「每个工作日早上 9 点整理一份简报」。目前支持定时和应用事件触发，配置说明见[自动化文档](apps/electron/resources/docs/automations.md)。
 
 ## 安装
 
-先到 [GitHub Releases](https://github.com/0-CHENAI/Selection/releases) 下载预发布包。目前页面上的版本标的是 **beta / prerelease**。最新一版例如 [v3.1.0-beta82](https://github.com/0-CHENAI/Selection/releases/tag/v3.1.0-beta82)：
+前往 [GitHub Releases](https://github.com/0-CHENAI/Selection/releases) 下载本仓库发布的安装包：
 
-| 系统 | 文件 |
+| 系统 | 安装包 |
 | --- | --- |
-| macOS（Apple 芯片） | `Selection-arm64.dmg`、`Selection-arm64.zip` |
-| Windows | `Selection-x64.exe` |
+| macOS · Apple 芯片 | `Selection-arm64.dmg`，也提供 `.zip` |
+| Windows · x64 | `Selection-x64.exe` |
 
-这一版的附件就是上面三个安装包，外加校验和与构建摘要。更早的 beta 以 Releases 页面上的文件名为准。
+`test` 分支的构建以 **beta / prerelease** 发布。请根据发布说明选择版本，安装包、校验和与构建信息以对应 Release 的附件为准。
 
-## 从源码跑起来
+其他平台可参考[从源码运行](#从源码运行)。当前桌面安装包 CI 覆盖 macOS ARM64 和 Windows x64。
 
-需要 [Bun](https://bun.sh/)（`packages/server` 声明 `bun >= 1.0.0`）和 Node.js 18+。系统可以是 macOS、Linux 或 Windows。要改界面或自己构建时，从本仓库克隆。
+## 快速上手
+
+1. **打开应用，配置模型。** 首次启动可选择 ORDER、其他提供商或本地模型，也可以先跳过，稍后在设置中添加连接。
+2. **选择工作模式。** 用 NORM 处理日常任务；需要 Swarm 分工、DAG 编排或研究审查时，切换到 PRO。
+3. **提供资料与工作目录。** 附上文件，或选择智能体需要使用的文件夹。同一项工作的多个会话可以归入项目。
+4. **按需连接数据源和技能。** 添加 MCP、API 或本地目录，再通过 `@` 引用。
+5. **查看执行过程和结果。** 在对话中查看工具调用与文件结果；处理 Office 文件时，可打开右侧预览继续修改。
+
+例如，可以从这样一个任务开始：
+
+> 阅读我上传的销售表格，核对各区域的汇总数据，整理主要变化，并生成一份复盘文档。缺少的信息请明确标出。
+
+## 功能一览
+
+| 能力 | 用途 |
+| --- | --- |
+| 多会话管理 | 同时推进不同任务，用状态、旗标和搜索管理会话 |
+| NORM / PRO | 在日常对话与任务编排之间选择合适的工作方式 |
+| Swarm 协作 | 按任务需要组织多个智能体分工，由协调会话汇总和处理阻塞 |
+| DAG 编排 | 定义步骤与依赖，执行并行分支、验证和受影响任务的修正 |
+| 深度研究 | 追踪来源与结论版本，独立审查，并披露依据和资料缺口 |
+| 项目 | 集中管理相关会话、工作目录和参考资料 |
+| Office 协同 | 预览并修改 Word、Excel、PowerPoint，支持选中内容后提出修改要求 |
+| 演示文稿 | 从资料与模板生成可编辑 PPTX，预览各页并调整风格和配色 |
+| 数据源 | 连接远程 MCP、本地 stdio MCP、REST API 和文件目录 |
+| 技能 | 保存专用指令和工作方法，支持工作区自定义技能 |
+| 自动化 | 根据时间或应用事件触发任务 |
+| 文件与版本 | 查看会话文件、修改结果和版本历史 |
+| 多模型连接 | 配置多个提供商、私有网关或本地模型 |
+| 界面定制 | 中英文等多语言界面，以及应用和工作区主题 |
+
+### 模型连接
+
+Selection 使用 **Pi** 作为智能体运行时。你可以在设置中添加多个连接，按任务选择模型。
+
+| 连接方式 | 示例 |
+| --- | --- |
+| 私有网关 | 首次启动中的 ORDER 入口，或自定义服务地址 |
+| API Key | OpenAI、Google AI Studio、OpenRouter、Kimi 等 |
+| 订阅授权 | ChatGPT（Codex OAuth）、GitHub Copilot |
+| 自定义端点 | OpenAI Compatible 或 Anthropic Messages |
+| 本地模型 | Ollama 等本机服务 |
+
+可用模型和授权方式以应用中的连接选项及提供商权限为准。Anthropic Messages 自定义端点与官方 API Key 可用；官方 Anthropic 登录和 Claude Max OAuth 不在当前支持范围内。
+
+### 权限控制
+
+默认使用 **智能审批**。在输入区按 `Shift+Tab` 可以切换权限模式。
+
+| 模式 | 行为 |
+| --- | --- |
+| 只读探索 | 阅读、检索与分析，阻止写入操作 |
+| 智能审批 | 低风险操作自动执行，高风险或无法判断的操作请求确认 |
+| 完全接管 | 自动执行操作；首次在工作区启用时需要确认风险提示 |
+
+工作区和数据源可以配置更细的规则，详见[权限文档](apps/electron/resources/docs/permissions.md)。
+
+### 本地数据
+
+配置与会话默认保存在用户目录下的 `~/.selection/`，包括模型连接、加密凭据、工作区、项目、会话、数据源和技能。Windows 对应 `%USERPROFILE%\.selection\`。
+
+凭据使用 AES-256-GCM 加密存储。模型请求和数据源调用会按你的配置发送到对应服务；本地保存会话不代表所有处理都在本机完成。
+
+开发时可通过 `CRAFT_CONFIG_DIR` 指定独立的数据目录。
+
+## 从源码运行
+
+需要 **Git、Bun 和 Node.js 18+**。当前 CI 使用 Bun **1.3.10**。Windows 执行 shell 工具还需要 Git Bash，可随 [Git for Windows](https://git-scm.com/downloads/win) 安装。
 
 ```bash
-git clone https://github.com/0-CHENAI/Selection.git
+git clone --branch test https://github.com/0-CHENAI/Selection.git
 cd Selection
-bun install
+bun install --frozen-lockfile
 bun run electron:dev
 ```
 
-`electron:dev` 会编译主进程并起界面的热更新。当前平台还没有 uv 或 OfficeCLI 时，同一次启动会下载它们；已经在且校验通过就跳过。第一次因此需要能访问下载地址。排障见下一节。
+`electron:dev` 启动桌面应用并启用界面热更新。首次运行会按需下载当前平台的 uv 和 OfficeCLI，因此需要能够访问相关下载服务。
 
-只想构建一次再打开：
+构建后启动：
 
 ```bash
 bun run electron:start
 ```
 
-本地安装包（产物在 `apps/electron/release/`，文件名形如 `Selection-arm64.dmg`）：
+模型与数据源凭据在应用内配置。开发构建中的 Slack、Microsoft 等可选 OAuth 参数可参考 [`.env.example`](.env.example)，无需为了启动桌面应用填写其中所有变量。
+
+### 开发与检查
+
+在仓库根目录执行：
+
+| 命令 | 作用 |
+| --- | --- |
+| `bun run electron:dev` | 启动热更新开发环境 |
+| `bun run electron:build` | 构建桌面应用 |
+| `bun run typecheck:all` | 全仓库类型检查 |
+| `bun run lint` | 代码与仓库规则检查 |
+| `bun run test` | 运行仓库测试脚本 |
+| `bun run validate:dev` | 类型、界面启动、共享模块与文档工具检查 |
+| `bun run officecli:check` | 检查内置 OfficeCLI 运行时与资源 |
+
+完整验证还需要可用的 Bash 和 uv；Windows 可使用 Git Bash 执行依赖 Bash 的脚本。
+
+### 构建安装包
+
+按目标平台选择命令，产物输出到 `apps/electron/release/`：
 
 ```bash
 bun run electron:dist:mac
@@ -210,107 +231,40 @@ bun run electron:dist:win
 bun run electron:dist:linux
 ```
 
-桌面能启动，不依赖仓库根目录的 `.env`。要在开发构建里写入 Slack 或 Microsoft 的 OAuth Client ID，可以参考 [`.env.example`](.env.example) 里对应的字段。`.env.example` 开头的 Anthropic 和 Craft MCP 变量是上游留下的，跑 Selection 桌面不必填。Google 类来源的凭据在添加来源时由使用者自己填写。
+仓库另有 `scripts/package-desktop.ts`，用于 CI 的 macOS ARM64 / Windows x64 打包流程，汇总产物输出到 `dist-packages/`。
 
-## 第一次打开
-
-1. 还没有任何工作区时，应用会创建 **My Workspace**，目录是 `~/.selection/workspaces/my-workspace`。
-2. 还没有可用的模型连接时，进入欢迎向导：选择 ORDER、其他提供商或本地模型，也可以稍后设置。
-3. 进入会话后直接聊天。侧栏可以去项目、数据源、技能、自动化或设置。做幻灯片时再打开左侧 **PPT**，或在普通会话里点 **PPT**。改 Word、Excel 或已有的 PowerPoint，用右侧 **Office 协同**。
-4. 权限默认是智能审批。需要完全只读或完全自动时，用 `Shift+Tab` 换。
-
-卡在启动时，先对这几条：
-
-| 现象 | 怎么办 |
-| --- | --- |
-| 第一次 `electron:dev` 停在下载 | 脚本在补当前平台的 uv 和 OfficeCLI。已存在且校验通过会跳过。需要网络 |
-| Windows 提示需要 Git Bash | 向导文案是：Selection 需要 Git Bash 才能在 Windows 上运行 shell 命令。安装 [Git for Windows](https://git-scm.com/downloads/win)，或在向导里指定 `bash.exe`。这一步在首次启动的产品向导里 |
-| 还没接上模型 | 欢迎向导四条：ORDER、使用其他提供商、本地模型、稍后设置 |
-| 要看日志 | 开发模式，或给可执行文件加 `--debug`，主进程才写 electron-log。应用名是 Selection。正式包不加 `--debug` 时这份文件日志是关的。另外两份一直在配置目录：`~/.selection/logs/messaging-gateway.log`、`~/.selection/logs/auto-update.log` |
-
-## 数据放在哪
-
-默认目录是 `~/.selection/`。多开开发时可以用环境变量 `CRAFT_CONFIG_DIR` 指到别处，例如 `~/.selection-1`。旧数据如果还在 `~/.craft-agent`，把 `CRAFT_CONFIG_DIR` 指过去即可继续用，不必先搬家。
+### 代码结构
 
 ```text
-~/.selection/
-├── config.json                 # 工作区列表、模型连接
-├── credentials.enc             # AES-256-GCM 加密的凭据
-├── preferences.json
-├── theme.json
-├── ppt-templates/              # 自定义 PPT 模板，目录名 custom-<16位hex>/
-├── logs/
-│   ├── messaging-gateway.log
-│   └── auto-update.log
-└── workspaces/
-    └── my-workspace/
-        ├── config.json
-        ├── automations.json    # 有自动化时才会出现
-        ├── projects/           # 每个项目一份 config.json 和 assets/
-        ├── sessions/
-        ├── sources/
-        ├── skills/
-        └── statuses/
+apps/
+├── electron/             # 桌面应用：Electron + React
+├── cli/                  # 终端客户端
+├── viewer/               # 会话分享查看器
+└── webui/                # 无头服务的 Web 界面
+packages/
+├── core/                 # 共享类型
+├── shared/               # 模型、权限、配置、数据源等公共逻辑
+├── ui/                   # 公共界面组件
+├── server-core/          # 会话管理与 RPC 处理
+├── server/               # 独立无头服务
+├── pi-agent-server/      # Pi 智能体子进程
+└── session-tools-core/   # 会话工具实现
 ```
 
-自动化写在工作区的 `automations.json` 里，也可以直接对智能体说「每个工作日早上 9 点做一份简报」。日志以 `~/.selection/logs/` 为准；开发模式或 `--debug` 另有一份 electron-log，应用名是 Selection。
+部分 npm 包和环境变量沿用上游的 `@craft-agent/*`、`CRAFT_*` 命名。
 
-## 开发
+## 文档与参与
 
-常用命令都在仓库根目录的 `package.json` 里：
+- 使用指南：[数据源](apps/electron/resources/docs/sources.md) · [技能](apps/electron/resources/docs/skills.md) · [自动化](apps/electron/resources/docs/automations.md) · [权限](apps/electron/resources/docs/permissions.md) · [主题](apps/electron/resources/docs/themes.md)
+- 文档能力：[OfficeCLI](apps/electron/resources/skills/officecli/SKILL.md) · [演示文稿](apps/electron/resources/skills/ppt-design/SKILL.md)
+- 问题反馈：[GitHub Issues](https://github.com/0-CHENAI/Selection/issues)
+- 参与开发：[贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md)
+- 安全问题：[安全政策](SECURITY.md)，请勿在公开 Issue 中披露凭据或漏洞细节。
 
-| 命令 | 作用 |
-| --- | --- |
-| `bun run electron:dev` | 热更新开发 |
-| `bun run electron:start` | 构建并启动 |
-| `bun run typecheck:all` | 全仓库类型检查 |
-| `bun run lint` | ESLint 与仓库脚本检查 |
-| `bun run test` | `scripts/run-tracked-tests.sh` |
-| `bun run validate:dev` | 类型检查、启动检查和一组共享测试 |
-| `bun run electron:dist:mac` | 打 macOS 包（另有 `:win`、`:linux`） |
+本分支的开发环境、克隆地址和启动命令以本文为准。提交改动时请使用中文说明，并优先向 `test` 分支发起 Pull Request。
 
-```mermaid
-flowchart LR
-  desktop["apps/electron 桌面"]
-  sessions["会话与项目"]
-  sources["来源 / 技能 / 自动化"]
-  office["Office 协同"]
-  ui["packages/ui"]
-  shared["packages/shared"]
-  pi["Pi 运行时"]
-  server["packages/server"]
-  cli["apps/cli"]
+## 许可与致谢
 
-  desktop --> sessions
-  desktop --> sources
-  desktop --> office
-  desktop --> ui
-  desktop --> shared
-  shared --> pi
-  cli --> server
-  server --> shared
-```
+Selection 基于 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents-oss) 继续开发，代码采用 [Apache License 2.0](LICENSE)。感谢上游项目及开源贡献者。
 
-产品名是 Selection。npm 包仍使用分叉时的作用域 `@craft-agent/*`，根包名是 `craft-agent`。克隆和运行按上面的地址即可。
-
-<details>
-<summary>同仓库里的终端客户端和无头服务</summary>
-
-桌面是主要入口。需要脚本或无头进程时：
-
-```bash
-bun run server:start
-bun run apps/cli/src/index.ts --help
-```
-
-服务默认听 `9100`（`CRAFT_RPC_PORT`）。终端客户端的二进制名仍是 `craft-cli`，用 `--url` / `--token`，或环境变量 `CRAFT_SERVER_URL`、`CRAFT_SERVER_TOKEN` 连接。把 `CRAFT_SERVER_URL` 设上之后，Electron 会作为连接到该服务的窗口启动。
-
-</details>
-
-## 许可与参与
-
-代码以 [Apache License 2.0](LICENSE) 授权。第三方声明见 [NOTICE](NOTICE)。
-
-参与方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。那份文档里的克隆地址还写着上游仓库，请以本文的 `https://github.com/0-CHENAI/Selection.git` 为准。行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。安全问题见 [SECURITY.md](SECURITY.md)，不要开公开 issue。
-
-Craft、Craft Agents 的名称和标志仍属于上游项目，使用边界写在 [TRADEMARK.md](TRADEMARK.md)。Selection 是本仓库的产品名。
+第三方声明见 [NOTICE](NOTICE)，上游名称与标志的使用规则见 [TRADEMARK.md](TRADEMARK.md)。PPT 模板与参考素材保留各自的许可和署名，详见[模板来源说明](apps/electron/resources/skills/ppt-design/ATTRIBUTION.md)。
