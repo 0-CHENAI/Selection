@@ -6,14 +6,14 @@
 
 <p align="center">
   桌面上的多智能体会话。<br />
-  资料、工具和成稿放在同一处，演示文稿可以一边生成一边看。
+  很多会话、项目、数据源和技能放在同一处。
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache%202.0-111111" /></a>
   <a href="apps/electron"><img alt="Electron 桌面应用" src="https://img.shields.io/badge/app-Electron%20desktop-2f6feb" /></a>
   <a href="https://bun.sh"><img alt="使用 Bun" src="https://img.shields.io/badge/runtime-Bun-f472b6" /></a>
-  <a href="apps/electron/resources/skills/ppt-design/SKILL.md"><img alt="内置 PPT 模式" src="https://img.shields.io/badge/PPT-template%20%2B%20Office-c2410c" /></a>
+  <a href="packages/pi-agent-server"><img alt="运行时 Pi" src="https://img.shields.io/badge/runtime-Pi-111111" /></a>
 </p>
 
 <p align="center">
@@ -22,37 +22,29 @@
 </p>
 
 > [!TIP]
-> 第一次来，先看下面的深色分栏，再按 [从源码跑起来](#从源码跑起来) 克隆。想直接做幻灯片，跳到 [演示文稿](#演示文稿)。
+> 第一次来，先看 [打开就是这样](#打开就是这样)：侧栏第一项是普通会话。要在本机跑，按 [从源码跑起来](#从源码跑起来) 克隆。
 
 ## 打开就是这样
 
-深色主题下，生成结束的一屏是这样：左边展开结果卡，右边是同一份 PPTX 的 Office 协同预览。
+打开后停在 **普通会话**。左边是导航，从上到下：**普通会话**、**项目**、**PPT**、**数据源**、**技能**、**自动化**、**设置**。点名字会换主区域。普通会话的中间是按日期分组的会话列表，右边是对话。
 
-<img src="docs/readme-assets/ppt-office-split.png" width="920" alt="深色主题：左侧展开的 PPT 结果卡，右侧 Office 协同预览同一份幻灯片" />
+下面这张浅色整窗停在普通会话，导航选中的就是默认那一项。列表里同时放着几件事：销售复盘、合同条款、竞品定价、招聘、脚本排错。右边这段对话在整理一份 Excel。输入栏的 **PPT** 被点开了，模板选择器盖住下半屏；收起之后，中间还是这段对话。PPT 是侧栏和输入栏上的一项。
 
-> 结果卡上有封面、检查摘要和缩略图。右侧顶栏是文件名和「切换文件」。点缩略图或「在右侧打开」，预览跟到那一页。
+<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：左侧按日期分组的会话列表，右边正在整理一份 Excel；输入栏的 PPT 模板选择器处于打开状态" />
 
-左侧导航从上到下是 **普通会话**、**项目**、**PPT**、**数据源**、**技能**、**自动化**、**设置**。普通会话是默认工作方式。PPT 只是另一个入口：自己的历史在中间，模板画廊在右边；生成一开始，平时的 Office 协同会自动打开。
-
-<img src="docs/readme-assets/ppt-home-sidebar.png" width="920" alt="浅色整窗：左侧导航含普通会话、项目、PPT、数据源、技能、自动化和设置，右侧是打开的 PPT 模板画廊" />
-
-> 这一屏停在 PPT，右边是打开的模板画廊。回到「普通会话」，中间就是会话列表和对话。画廊标题是现在的文案：「今天想做一份什么样的 PPT？」。输入栏上的 **PRO** 是这份文稿的工作模式：从这里发出去会建成 PRO 会话。这张图的输入区还没拍到后来补上的数据源和工作目录，那两项现在可以一起选。
-
-在普通会话里，输入栏的 **PPT** 也会弹出模板选择器。下图里选择器是打开的；收起之后，中间就是原来的对话区，会话仍按今天、昨天分组。
-
-<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：中间是会话列表，输入栏的 PPT 模板选择器处于打开状态" />
-
-> 选择器里能搜模板，也可以去「查看全部模板」。选中后带着这段对话去做幻灯片。
+> 选中的导航是普通会话。列表按日期分组。右边的标题是「Q3 华东区销售复盘」，附件是 Excel。顶栏的 **NORM / PRO** 只在这一页出现。选择器标题是「用这段对话做 PPT」，从这里发出去会建成一段 PRO 会话。选择器挡住了输入区；收起后可以附文件、选数据源，也可以选工作目录。这张图里因为附了表格，输入区旁边有 **Office 协同**，Word、Excel 和 PowerPoint 都从这里进右侧预览。
 
 ## Selection 是什么
 
-Selection 给想在桌面里跟智能体一起干活的人用：同时开很多会话，接上自己的工具和文件，最后把结果留在工作区里。它特别照顾一条经常被聊天工具丢掉的路径：从一份资料做成一套可以打开、可以改的演示文稿。
+Selection 是桌面上的多智能体会话：Electron 负责窗口，Bun 跑本地进程，Pi 接模型。同时开很多会话，接上自己的工具和文件，把结果留在工作区里。
 
 适合这些场景：
 
-- 手上有纪要、表格或旧 PPT，想整理成一套新的幻灯片
-- 要同时盯几件任务，每件留在自己的会话里
+- 同时盯几件任务，每件留在自己的会话里：NORM 在这一段对话里做完，PRO 再去委派和拆分
+- 把同一件事的会话、工作文件夹和资料收进一个项目
+- 接上 MCP、REST API 或本地目录，让模型读到自己的系统
 - 模型要换来换去：私有化网关、各家 API、本机 Ollama
+- 改一份 Word、Excel 或已有的 PowerPoint；也可以从资料做成一套新的幻灯片
 - 想先装一份 beta 安装包，或从源码改技能和界面
 
 上面有深色和浅色两套中文界面。仓库里还有英、德、西、日、波、匈等语言包。
@@ -61,36 +53,37 @@ Selection 给想在桌面里跟智能体一起干活的人用：同时开很多�
 
 Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents-oss) 上继续开发，许可证仍是 Apache-2.0。GitHub 仓库简介里的 “secondary development of Craft Agent” 指的就是这段来源。
 
-桌面产品名是 Selection，配置放在 `~/.selection/`。演示文稿、Office 协同和结果卡是这条线上继续做出来的工作流。安装和文档以本仓库为准。
+桌面产品名是 Selection，配置放在 `~/.selection/`。这条线上继续做的，包括 Office 协同（Word、Excel、PowerPoint）和其中的演示文稿。安装和文档以本仓库为准。
 
 ## 现在能做什么
 
 | 你要做的事 | Selection 里怎么做 |
 | --- | --- |
 | 同时推进多件事 | 工作区里的会话列表，带状态、旗标和搜索 |
+| 把同一件事归到一处 | 项目：会话、工作文件夹和资料，在 `projects/<slug>/` |
 | 接上外部系统 | 来源：MCP、REST API、本地目录 |
 | 把做法存下来 | 工作区技能，对话里用 `@` 提到 |
+| 到点自己跑 | 自动化，写在工作区的 `automations.json`，也可以直接对智能体说 |
 | 换模型 | 首次启动选 ORDER、其他提供商或本地模型；运行时是 Pi |
-| 做一套新幻灯片 | PPT 模式：模板、`ppt-design`、增量导出的 PPTX |
 | 改已有 Office 文件 | 右侧 **Office 协同**，Word、Excel、PowerPoint 都能预览和点选 |
-| 看生成结果 | `PptResultCard`：默认一行摘要，展开后是封面、缩略图、换风格、换配色 |
+| 做一套新幻灯片 | 侧栏或输入栏的 **PPT**：模板、`ppt-design`、一份可编辑 PPTX。结果卡默认一行摘要，展开后是封面、缩略图、换风格、换配色 |
 
 内置技能：
 
 | 技能 | 用在 |
 | --- | --- |
-| [`ppt-design`](apps/electron/resources/skills/ppt-design/SKILL.md) | 新建整套演示文稿，或整套重设计 |
 | [`officecli`](apps/electron/resources/skills/officecli/SKILL.md) | 检查、改写、截图已有的 Word、Excel、PowerPoint |
 | `natural-writing` | 中文成稿 |
 | `humanizer` | 英文成稿 |
 | `academic-humanizer` | 英文学术文本 |
 | `deep-research` | 带研究角色的 PRO 任务节点 |
+| [`ppt-design`](apps/electron/resources/skills/ppt-design/SKILL.md) | 新建整套演示文稿，或整套重设计 |
 
-工作区里还可以放你自己的技能。局部修改旧 PPT 走 OfficeCLI，整套新稿走 `ppt-design`。
+工作区里还可以放你自己的技能。改已有的 Word、Excel、PowerPoint 走 OfficeCLI。新建整套幻灯片或整套重设计走 `ppt-design`。
 
 ## 侧栏、会话和项目
 
-普通会话就是一段对话，列表按日期分组。点侧栏里的名字会换主区域：数据源、技能、自动化、设置各自是一页；PPT 换成模板入口。
+普通会话就是一段对话，列表按日期分组。点侧栏里的名字会换主区域：数据源、技能、自动化、设置各自是一页；PPT 换成模板入口。会话里已经有 Word、Excel 或 PowerPoint 时，输入区旁边会出现 **Office 协同**，和 **会话文件** 放在一起，从这里打开右侧预览。
 
 顶栏的 **NORM / PRO** 切换两种根会话列表，界面上的名字就是工作模式。这个开关只出现在普通会话里；打开 PPT 视图时不显示。第一次发送之后，这段会话的模式就固定了。想换模式，用「交接到 PRO」或「基于成果继续聊」另开一段根会话，原来的运行归属留在源会话。
 
@@ -104,63 +97,33 @@ Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents
 
 ## 演示文稿
 
-一条新文稿大致是这样走的：
+幻灯片是侧栏里的 **PPT**，也是普通会话输入栏上的 **PPT**。生成会进一段 PRO 会话，并打开平时那一块 **Office 协同**。同一块右侧面板预览并点选 **Word（.docx）**、**Excel（.xlsx）** 和 **PowerPoint（.pptx）**：Word 的段落和表格，Excel 的单元格，PPT 的形状。
 
 | 步骤 | 界面上 |
 | --- | --- |
 | 进入 | 左侧 **PPT**，或普通会话输入栏的 **PPT** |
-| 选模板 | 画廊按商务、咨询、学术、教学、技术、创意、社媒分类；**自定义**里可以上传 PPTX |
+| 选模板 | 画廊按商务、咨询、学术、教学、技术、创意、社媒分类；**自定义**里可以上传 PPTX，重启后还在，目录是 `~/.selection/ppt-templates/custom-…/` |
 | 写要求 | 主题、受众、页数、风格；可以附文件，也可以选数据源和工作目录 |
-| 生成 | 自动打开平时的 **Office 协同**。真实文件出现之前，面板停在「正在加载预览」；页写进去之后，预览跟着刷新 |
+| 生成 | 自动打开 **Office 协同**。真实文件出现之前，面板停在「正在加载预览」；页写进去之后，预览跟着刷新 |
 | 看结果 | 结果卡默认收成一行：文件名、页数和检查结果、「在右侧打开」。展开后才是封面、缩略图、换风格重排、换配色 |
 | 拿文件 | 只留一份可编辑 PPTX。文件名来自标题。没选工作目录时写在会话文件夹，选了就写在该目录。绝对路径记在会话 `data/ppt-output.json` |
 
-Office 协同不只有幻灯片。同一块右侧面板预览并点选 **Word（.docx）**、**Excel（.xlsx）** 和 **PowerPoint（.pptx）**。点选范围是：Word 的段落和表格，Excel 的单元格，PPT 的形状。下面这张是幻灯片生成到一半的样子；Word 和 Excel 走同一块面板，只是仓库里还没有对应的整窗实拍。
+历史按今天、本周、更早分组，可以搜索。每一行沿用普通会话的菜单：重命名、标为未读、在新窗口打开、发送到其他工作区、归入项目、删除。Office 协同打开时，中间这列会先让出宽度；你手动展开或收起之后，这次选择会保持到你再改。
 
-<img src="docs/readme-assets/ppt-office-generating.png" width="920" alt="生成中：左侧是当前页的步骤，右侧 Office 协同实时预览同一份 PPTX" />
+生成结束时，左边是展开的结果卡，右边是同一份 PPTX。Word 和 Excel 走同一块面板，仓库里还没有对应的整窗实拍。
 
-> 左边正在写第 9 页，右边已经能看写完的页面，顶上写着「正在生成第 9 页」。文件名旁边是「切换文件」。全部完成后可以点选修改。
+<img src="docs/readme-assets/ppt-office-split.png" width="920" alt="深色主题：左侧展开的结果卡，右侧 Office 协同预览同一份 PPTX" />
 
-展开后的结果卡把封面放大，检查结果写在文件名下面，缩略图一条排开。通过的页是绿条，需要留意的页会标出来。
+> 结果卡上有封面、检查摘要和缩略图。右侧顶栏是文件名和「切换文件」。点缩略图或「在右侧打开」，预览跟到那一页。
 
-<img src="docs/readme-assets/ppt-result-card.png" width="760" alt="PPT 结果卡片展开特写：封面大图、检查摘要和缩略图条" />
+风格、配色和版式的说明在技能目录里：
 
-> 这一份示例文稿是 11 页。摘要写着 10 页通过，第 5 页需要留意。
-
-换配色时先看「现在」和「预览」，再从列表里选一套颜色，应用到全部页面。
-
-<img src="docs/readme-assets/ppt-recolor-popover.png" width="640" alt="换配色弹出层：当前封面与预览对比，下面是配色列表" />
-
-> 配色只换颜色。版式和文字留在原来的位置。列表里还能展开更多配色。
-
-换配色进行中，封面上标着正在重画的那一页，下面是进度条和「已完成 n/N 页 · 右侧实时刷新」。
-
-<img src="docs/readme-assets/ppt-recolor-progress.png" width="760" alt="换配色进行中：进度条显示已完成 3/11 页，封面标着第 4 页" />
-
-> 正在重画的那一页盖着页码。缩略图随每一页的新画面更新。
-
-选中模板之后，`⋯` 里可以改主题色、品牌色与标志、画幅。再选一个模板会换成当前这一张。
-
-<img src="docs/design/ppt-picker/actual/02-template-selected.png" width="920" alt="已选模板卡片，弹出主题色、品牌色与画幅菜单" />
-
-> 主题色只换颜色和字体。画幅可以是 16:9、4:3、1:1、9:16、3:4 或 A4。
-
-自己的 PPTX 会进模板库，重启后还在，可以预览、重命名、删除或导出。文件在 `~/.selection/ppt-templates/custom-…/`。
-
-<img src="docs/design/ppt-picker/actual/custom/01-library.png" width="920" alt="自定义模板库：三份已上传的 PPTX 卡片，带上传按钮" />
-
-历史列表按今天、本周、更早分组，可以搜索。每一行沿用普通会话的菜单：重命名、标为未读、在新窗口打开、发送到其他工作区、归入项目、删除。Office 协同打开时，中间这列会先让出宽度；你手动展开或收起之后，这次选择会保持到你再改。
-
-风格和版式是内置的，说明在技能目录里：
-
-- [风格索引](apps/electron/resources/skills/ppt-design/references/styles.md)：5 套 DSH 风格，每套有中文和英文各 12 页参考（画布 960×540 pt）；另有 14 套由 ppt-master 转入的风格
+- [`ppt-design`](apps/electron/resources/skills/ppt-design/SKILL.md)：新建整套文稿，或整套重设计
+- [风格索引](apps/electron/resources/skills/ppt-design/references/styles.md)：5 套 DSH 风格，另有 14 套由 ppt-master 转入
 - [12 套自有配色](apps/electron/resources/skills/ppt-design/styles/themes/catalog.json)：只换颜色和字体，不改页面结构
-- [7 套结构版式](apps/electron/resources/skills/ppt-design/references/layouts.md)：16:9、4:3、方形、9:16、3:4
-- 14 个论证版式（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍），仍是 960×540
+- [结构版式和论证版式](apps/electron/resources/skills/ppt-design/references/layouts.md)
 
-下面是论证版式里的结论页。页脚写着「示例数字」，正式稿会换成你的材料。
-
-<img src="docs/design/ppt-picker/actual/layouts/conclusion.png" width="720" alt="论证版式结论页：左侧红色主张，右侧三张证据卡" />
+换配色、生成中的预览、侧栏停在 PPT 时的模板画廊，以及版式页的实拍，还在 `docs/readme-assets/` 和 `docs/design/ppt-picker/actual/`。
 
 导出用技能自带的 PptxGenJS（`engine/deck-cli.mjs`），不要求另外安装 Python。导出后的检查、读回、截图和定点修改交给随应用打包的 OfficeCLI。
 
@@ -253,7 +216,7 @@ bun run electron:dist:linux
 
 1. 还没有任何工作区时，应用会创建 **My Workspace**，目录是 `~/.selection/workspaces/my-workspace`。
 2. 还没有可用的模型连接时，进入欢迎向导：选择 ORDER、其他提供商或本地模型，也可以稍后设置。
-3. 进入会话后直接聊天。做幻灯片时打开左侧 **PPT**，或在普通会话里点 **PPT**。
+3. 进入会话后直接聊天。侧栏可以去项目、数据源、技能、自动化或设置。做幻灯片时再打开左侧 **PPT**，或在普通会话里点 **PPT**。改 Word、Excel 或已有的 PowerPoint，用右侧 **Office 协同**。
 4. 权限默认是智能审批。需要完全只读或完全自动时，用 `Shift+Tab` 换。
 
 卡在启动时，先对这几条：
@@ -309,19 +272,21 @@ bun run electron:dist:linux
 ```mermaid
 flowchart LR
   desktop["apps/electron 桌面"]
+  sessions["会话与项目"]
+  sources["来源 / 技能 / 自动化"]
+  office["Office 协同"]
   ui["packages/ui"]
   shared["packages/shared"]
   pi["Pi 运行时"]
-  skills["ppt-design / officecli"]
-  pptx["可编辑 PPTX"]
   server["packages/server"]
   cli["apps/cli"]
 
+  desktop --> sessions
+  desktop --> sources
+  desktop --> office
   desktop --> ui
   desktop --> shared
-  desktop --> skills
   shared --> pi
-  skills --> pptx
   cli --> server
   server --> shared
 ```
