@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync } from 'fflate'
 import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
-import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, readChartFallbacks, readPptProgress, validatePptRevision, watchPptDeck } from './ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, pptDeckStamp, readChartFallbacks, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from './ppt-live'
 
 function session(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), 'ppt-live-')))
@@ -74,6 +74,50 @@ test('generating progress follows the first missing slide and an explicit curren
     const cleared = clearStalePptGenerating(root, progress!)
     expect(cleared?.generating).toBe(false)
     expect(cleared?.current).toBeUndefined()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a recolor or restyle starts at 0 and the cover follows only a redrawn page', () => {
+  const root = session()
+  try {
+    deck(root, 11)
+    for (let page = 1; page <= 11; page++) writeFileSync(join(root, 'data', 'slides', `slide-${String(page).padStart(2, '0')}.png`), Buffer.from(`p${page}`))
+    writeFileSync(join(root, 'data', 'ppt-progress.json'), JSON.stringify({ current: 1 }))
+    writePptRun(root, { action: 'recolor', themeId: 'keynote-stage' })
+    markPptGenerating(root, true)
+    const started = readPptProgress(root, true, { check: () => [] })
+    expect(started?.completed).toBe(0)
+    expect(started?.current).toBeUndefined()
+    expect(started?.pages?.every(page => page.status === 'pending')).toBe(true)
+    const redraw = (page: number, at: number) => {
+      const file = join(root, 'data', 'slides', `slide-${String(page).padStart(2, '0')}.png`)
+      writeFileSync(file, Buffer.from(`redraw-${page}-${'x'.repeat(page)}`))
+      const when = new Date(Date.now() + at)
+      utimesSync(file, when, when)
+    }
+    redraw(1, 1000)
+    const first = readPptProgress(root, true, { check: () => [] })
+    expect(first).toMatchObject({ current: 1, completed: 0, generating: true })
+    redraw(4, 2000)
+    const fourth = readPptProgress(root, true, { check: () => [] })
+    expect(fourth).toMatchObject({ current: 4, completed: 3 })
+    expect(fourth?.pages?.[3]?.status).toBe('fixing')
+    expect(fourth?.pages?.[4]?.status).toBe('pending')
+    writeFileSync(join(root, 'data', 'ppt-progress.json'), JSON.stringify({ current: 6 }))
+    expect(readPptProgress(root, true)?.current).toBe(6)
+    expect(readPptProgress(root, true)?.completed).toBe(5)
+    markPptGenerating(root, false)
+    const done = readPptProgress(root, false, { check: () => [] })
+    expect(done?.current).toBeUndefined()
+    expect(done?.completed).toBe(11)
+    writePptRun(root, { action: 'restyle', templateId: 'paper' })
+    markPptGenerating(root, true)
+    const restyle = readPptProgress(root, true, { check: () => [] })
+    expect(restyle?.completed).toBe(0)
+    expect(restyle?.current).toBeUndefined()
+    expect(restyle?.run?.action).toBe('restyle')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -216,6 +260,81 @@ test('a titled pptx is the only visible file, in the session folder or the worki
   } finally {
     rmSync(workspace, { recursive: true, force: true })
     rmSync(wd, { recursive: true, force: true })
+  }
+})
+
+test('slide images advance the watcher stamp and publish check text', async () => {
+  const root = session()
+  try {
+    deck(root, 2)
+    writeFileSync(join(root, 'data', 'deck.json'), JSON.stringify({
+      title: '简报',
+      canvas: { width: 960, height: 540 },
+      theme: { colors: { paper: '#F4F1EA', ink: '#1A1A1A', accent: '#1D4ED8', signal: '#B45309' } },
+      pages: [
+        { id: 'p1', name: '封面' },
+        { id: 'p2', name: '图例离页边仅 6px' },
+      ],
+    }))
+    const deckStat = statSync(join(root, 'data', 'deck.json'))
+    const deckOnly = `${deckStat.mtimeMs}:${deckStat.size}`
+    const before = pptDeckStamp(root)
+    writeFileSync(join(root, 'data', 'slides', 'slide-01.png'), Buffer.from('png-a'))
+    const withImage = pptDeckStamp(root)
+    expect(withImage).not.toBe(before)
+    expect(withImage.startsWith(`${deckOnly}#`)).toBe(true)
+    const first = readPptProgress(root, true, {
+      check: () => [{ pageId: 'p2', code: 'out_of_bounds', message: `图例离页边仅 6px\n请留白\u0000，${'原因'.repeat(40)}` }],
+    })
+    expect(first?.aspect).toBe('16:9')
+    expect(first?.palette).toEqual({ paper: '#F4F1EA', ink: '#1A1A1A', accent: '#1D4ED8', signal: '#B45309' })
+    expect(first?.pages?.[0]?.imageName).toBe('data/slides/slide-01.png')
+    expect(first?.pages?.[0]?.imageStamp).toContain(':')
+    expect(first?.pages?.[1]?.imageName).toBeUndefined()
+    expect(first?.pages?.[1]?.status).toBe('fixing')
+    expect(first?.pages?.[1]?.failed).toBe(true)
+    expect(first?.pages?.[1]?.issue?.includes('\n')).toBe(false)
+    expect(first?.pages?.[1]?.issue?.includes('\u0000')).toBe(false)
+    expect(first?.pages?.[1]?.issue?.startsWith('图例离页边仅 6px 请留白')).toBe(true)
+    expect(first?.pages?.[1]?.issue?.endsWith('…')).toBe(true)
+    expect(first?.pages?.[1]?.issue?.length).toBe(80)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    writeFileSync(join(root, 'data', 'slides', 'slide-01.png'), Buffer.from('png-ab'))
+    const rewritten = readPptProgress(root, true, { check: () => [] })
+    expect(rewritten?.pages?.[0]?.imageStamp).not.toBe(first?.pages?.[0]?.imageStamp)
+    expect(pptDeckStamp(root)).not.toBe(withImage)
+    let runs = 0
+    const watch = watchPptDeck(root, () => { runs += 1 }, 30)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 70))
+      expect(runs).toBe(0)
+      writeFileSync(join(root, 'data', 'slides', 'slide-02.png'), Buffer.from('png-b'))
+      const started = Date.now()
+      while (runs < 1 && Date.now() - started < 1000) await new Promise(resolve => setTimeout(resolve, 20))
+      expect(runs).toBeGreaterThanOrEqual(1)
+    } finally { watch.stop() }
+    writePptRun(root, { action: 'recolor', themeId: 'ink' })
+    markPptGenerating(root, true)
+    expect(readPptRun(root)?.action).toBe('recolor')
+    expect(readPptProgress(root, true, { check: () => [] })?.run).toEqual({ action: 'recolor', themeId: 'ink' })
+    expect(readPptProgress(root, true)?.themeId).toBe('ink')
+    writePptRun(root, { action: 'generate', templateId: 'paper' })
+    expect(readPptProgress(root, true)?.templateId).toBe('paper')
+    expect(readPptProgress(root, true)?.themeId).toBe('ink')
+    markPptGenerating(root, false)
+    expect(readPptRun(root)).toBeUndefined()
+    const finished = readPptProgress(root, false, {
+      check: () => [{ pageId: 'p2', code: 'contrast', message: '图例离页边仅 6px' }],
+    })
+    expect(finished?.run).toBeUndefined()
+    expect(finished?.generating).toBe(false)
+    expect(finished?.templateId).toBe('paper')
+    expect(finished?.themeId).toBe('ink')
+    expect(finished?.pages?.[1]?.status).toBe('needs_revision')
+    expect(finished?.pages?.[1]?.failed).toBeUndefined()
+    expect(finished?.pages?.[1]?.issue).toBe('图例离页边仅 6px')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 

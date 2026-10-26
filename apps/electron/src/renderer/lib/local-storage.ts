@@ -47,6 +47,7 @@ export const KEYS = {
 
   // Only user-selected folds. Legacy entries could contain automatic expansions.
   turnCardExpansion: 'turncard-expansion-manual-v2',
+  pptResultFold: 'ppt-result-fold-v1',
   artifactFeedbackDrafts: 'artifact-feedback-drafts',
   annotationFeedbackDrafts: 'annotation-feedback-drafts',
 

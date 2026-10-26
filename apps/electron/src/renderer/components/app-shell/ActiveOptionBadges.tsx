@@ -312,10 +312,19 @@ export function ActiveOptionBadges({
       data-toolbar-row=""
       data-toolbar-icons={iconsOnly ? 'true' : 'false'}
       style={{ minHeight: TOOLBAR_CONTROL_HEIGHT }}
-      className={cn("relative flex min-w-0 flex-nowrap items-center gap-2 px-px", className)}
+      className={cn(
+        "relative flex min-w-0 items-center gap-2 px-px",
+        center ? "flex-nowrap" : "flex-wrap",
+        className,
+      )}
     >
-      {/* Left side: permission → Swarm → labels stack */}
-      <div ref={leftRef} className="flex min-w-0 flex-1 items-center gap-2 basis-auto">
+      {/* Left side: permission → Swarm → labels stack.
+          Without a centered task capsule the row wraps, so a full-width
+          permission label cannot paint over Office collaboration. */}
+      <div ref={leftRef} className={cn(
+        "flex items-center gap-2",
+        center ? "min-w-0 flex-1 basis-auto" : "w-max max-w-full flex-wrap",
+      )}>
         {/* Permission Mode Badge */}
         {permissionMode && (
           <div className="shrink-0">
@@ -389,7 +398,10 @@ export function ActiveOptionBadges({
       </div>
 
       {/* Right side: document collaboration and session files. */}
-      <div ref={rightRef} className="ml-auto flex max-w-full shrink-0 flex-nowrap items-center justify-end gap-2">
+      <div ref={rightRef} className={cn(
+        "ml-auto flex max-w-full items-center justify-end gap-2",
+        center ? "shrink-0 flex-nowrap" : "w-max flex-wrap",
+      )}>
         <OfficeCollaborationButton sessionId={sessionId} />
         <FilesPopoverButton sessionId={sessionId} sessionFolderPath={sessionFolderPath} iconsOnly={iconsOnly} />
       </div>

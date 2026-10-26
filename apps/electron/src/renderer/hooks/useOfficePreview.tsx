@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { officePreviewDocument } from '../lib/office-preview-document'
+import { OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
 import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
 import { officeScrollAnchor, readOfficePreviewState, writeOfficePreviewState, type OfficePreviewScope, type OfficePreviewState } from '../lib/office-preview-state'
@@ -55,6 +56,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
   const scrollY = useRef(0)
   const scrollX = useRef(0)
   const scrollAnchor = useRef<OfficePreviewState['anchor']>()
+  const pinnedPage = useRef<PinnedOfficePage | undefined>(undefined)
   const refreshing = useRef<string>()
   const refreshSoon = useRef<(() => void) | undefined>(undefined)
   /** Selection the server already reapplied. Ignore the iframe echo of those paths. */
@@ -149,6 +151,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
   }, [updateView])
   const open = useCallback(async (sessionId: string, path = '', candidates?: string[], pickerInPanel = false) => {
     if (sessionId !== scope.current.sessionId) return
+    if (pinnedPage.current && pinnedPage.current.path !== path) pinnedPage.current = undefined
     const targetScope = { ...scope.current }, key = previewKey(targetScope)
     const files = [...new Set([...(candidates ?? []), ...(path ? [path] : [])])]
     const saved = readOfficePreviewState(targetScope)
@@ -185,7 +188,8 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       const preview = await window.electronAPI.officePreview({ type: 'open', sessionId, path, ...(reusable?.view.preview ? { previewId: reusable.view.preview.previewId } : {}) })
       if (!preview) throw new Error('预览未返回内容')
       const same = reusable?.view.preview?.previewId === preview.previewId
-      const document = same ? reusable.view.document : officePreviewDocument(preview.html ?? '', preview.previewId, { ...position, readOnly: preview.isDraft })
+      const page = previewDocumentPage(pinnedPage.current, preview.path || path)
+      const document = same && page == null ? reusable!.view.document : officePreviewDocument(preview.html ?? '', preview.previewId, { ...position, readOnly: preview.isDraft, ...(page ? { page } : {}) })
       const next: PreviewView = { ...targetScope, path: preview.path, candidates: files, preview: { ...preview, html: undefined }, document,
         count: same ? reusable.view.count : 0 }
       if (ticket !== sequence.current) {
@@ -206,8 +210,25 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     } catch (error) { if (ticket === sequence.current) updateView(old => old ? { ...old, busy: false, resuming: false, error: String(error) } : old) }
     finally { if (latestOpen.current.get(key) === ticket) latestOpen.current.delete(key) }
   }, [detach, releasePreview, syncCached, updateView])
+  useEffect(() => {
+    const onShow = (event: Event) => {
+      const detail = (event as CustomEvent<OfficePreviewPageRequest>).detail
+      if (!detail || detail.sessionId !== scope.current.sessionId) return
+      if (!Number.isInteger(detail.page) || detail.page < 1 || detail.page > 500 || typeof detail.path !== 'string' || !detail.path) return
+      pinnedPage.current = { path: detail.path, page: detail.page }
+      const active = current.current
+      if (active?.path === detail.path && active.sessionId === detail.sessionId && active.preview) {
+        frames.current.get(previewKey(active))?.contentWindow?.postMessage({ type: OFFICE_PREVIEW_SHOW_PAGE, page: detail.page }, '*')
+        return
+      }
+      void open(detail.sessionId, detail.path)
+    }
+    window.addEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
+    return () => window.removeEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
+  }, [open])
   useLayoutEffect(() => {
     detach()
+    pinnedPage.current = undefined
     scope.current = { sessionId: activeSessionId ?? '', workspaceId: workspaceId ?? '' }
     const saved = readOfficePreviewState(scope.current)
     if (saved?.open) void open(scope.current.sessionId, saved.path)
@@ -284,15 +305,17 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
           if (entry?.view.preview?.previewId === previewId) {
             if (result.previewId !== previewId) selectionTickets.current.delete(previewId)
             const painted = paintRefresh(result, previewId)
-            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft, restorePaths: painted.restorePaths }), count: painted.count, busy: false }
+            const cachedPage = previewDocumentPage(pinnedPage.current, entry.view.path)
+            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft, restorePaths: painted.restorePaths, ...(cachedPage ? { page: cachedPage } : {}) }), count: painted.count, busy: false }
             entry.pending = Promise.resolve()
             releasePreview(entry.view, 'suspend'); syncCached()
           } else releasePreview({ sessionId, preview: result }, 'close')
           return
         }
         const painted = paintRefresh(result, previewId)
+        const livePage = previewDocumentPage(pinnedPage.current, current.current.path)
         const next = { ...current.current, preview: { ...result, html: undefined },
-          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft, restorePaths: painted.restorePaths }),
+          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft, restorePaths: painted.restorePaths, ...(livePage ? { page: livePage } : {}) }),
           count: painted.count, busy: false, error: undefined, refreshError: false }
         if (result.previewId !== previewId) pending.current = Promise.resolve()
         setSelectionOverflow(undefined)
@@ -331,6 +354,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
         if (Number.isFinite(event.data.scrollY)) scrollY.current = Math.max(0, event.data.scrollY)
         if (Number.isFinite(event.data.scrollX)) scrollX.current = Math.max(0, event.data.scrollX)
         scrollAnchor.current = officeScrollAnchor(event.data.anchor)
+        pinnedPage.current = pinnedPageAfterScroll(pinnedPage.current, scrollAnchor.current?.path)
         writeOfficePreviewState(current.current, { open: true, path: current.current.path, scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current })
         return
       }

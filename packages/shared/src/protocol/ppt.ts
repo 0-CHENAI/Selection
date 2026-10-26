@@ -61,6 +61,31 @@ export interface PptPageProgress {
   name: string
   status: PptPageStatus
   issueCount: number
+  /** First cleaned check message for this page. */
+  issue?: string
+  /** A hard check failed: schema, bounds, capacity, or a literal newline. */
+  failed?: boolean
+  /** `${mtimeMs}:${size}` of the page image. Changes when that image is rewritten. */
+  imageStamp?: string
+  /** Session-relative path such as `data/slides/slide-01.png`. Never contains `..`. */
+  imageName?: string
+}
+
+/** Deck colors safe to draw as swatches. */
+export interface PptPalette {
+  paper: string
+  ink: string
+  accent: string
+  signal?: string
+}
+
+export type PptRunAction = 'generate' | 'revise' | 'restyle' | 'recolor'
+
+/** The PPT turn in flight. Absent once generation has finished. */
+export interface PptRun {
+  action: PptRunAction
+  templateId?: string
+  themeId?: string
 }
 
 /** Counts and per-page check status. fileName is set only when a real pptx exists. */
@@ -76,6 +101,15 @@ export interface PptProgress {
   generating: boolean
   pages?: PptPageProgress[]
   chartFallbacks?: PptChartFallback[]
+  /** `16:9`, `4:3`, `1:1`, `9:16`, `3:4`, or `A4` when the canvas matches. */
+  aspect?: string
+  palette?: PptPalette
+  /** Last chosen template. Kept after the turn finishes so the card can name the style. */
+  templateId?: string
+  /** Last chosen theme. Kept after the turn finishes. */
+  themeId?: string
+  /** Set only while a PPT turn is generating. */
+  run?: PptRun
 }
 
 export interface PptRevisionTarget {

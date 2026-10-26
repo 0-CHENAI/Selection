@@ -31,6 +31,7 @@ import { SourceAvatar } from "@/components/ui/source-avatar"
 import { TopBar } from "./TopBar"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
+import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsHost } from "./CreationJobsButton"
@@ -72,6 +73,7 @@ import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
 import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
 import { nextPptHistoryId } from '@/components/ppt/history'
+import { initialPptHistoryListChrome, pptHistoryListVisible, reducePptHistoryList, type PptHistoryListChrome } from '@/lib/ppt-history-list-chrome'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -273,6 +275,7 @@ function AppShellContent({
       legacyFocus: storage.get(storage.KEYS.focusModeEnabled, false),
     })
   })
+  const [pptHistoryChrome, setPptHistoryChrome] = React.useState<PptHistoryListChrome>(initialPptHistoryListChrome)
   const immersivePressed = immersiveTogglePressed({
     immersive: isImmersiveMode,
     launchHidden: isSidebarAndNavigatorHidden,
@@ -320,7 +323,6 @@ function AppShellContent({
     immersiveLayout || isSidebarAndNavigatorHidden,
   )
   const displayedSidebarWidth = isAutoCompact ? 0 : collapsedWidths.sidebar
-  const displayedNavigatorWidth = isAutoCompact ? sessionListWidth : collapsedWidths.navigator
   const store = useStore()
   const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
@@ -364,6 +366,30 @@ function AppShellContent({
 
   const sessionFilter = sessionsContext?.filter ?? null
   const isPptView = sessionFilter?.kind === 'ppt'
+  const officeOpensPptList = isPptView && hasTrailingPanel && !isAutoCompact
+  useLayoutEffect(() => {
+    setPptHistoryChrome(current => {
+      const next = reducePptHistoryList(current, { type: 'office', open: officeOpensPptList })
+      return next === current ? current : next
+    })
+  }, [officeOpensPptList])
+  const pptHistoryOpen = pptHistoryListVisible(pptHistoryChrome)
+  const pptHistoryToggleShown = isPptView && !isAutoCompact && !immersiveLayout && !isSidebarAndNavigatorHidden
+  const hidePptHistoryList = pptHistoryToggleShown && !pptHistoryOpen
+  const displayedNavigatorWidth = isAutoCompact ? sessionListWidth : (hidePptHistoryList ? 0 : collapsedWidths.navigator)
+  const togglePptHistoryList = useCallback(() => {
+    setPptHistoryChrome(current => reducePptHistoryList(current, { type: 'toggle' }))
+  }, [])
+  const pptHistoryToggle = useMemo(() => pptHistoryToggleShown ? (
+    <HeaderIconButton
+      data-testid="ppt-history-toggle"
+      aria-pressed={pptHistoryOpen}
+      aria-label={pptHistoryOpen ? t('ppt.history.collapse') : t('ppt.history.expand')}
+      tooltip={pptHistoryOpen ? t('ppt.history.collapse') : t('ppt.history.expand')}
+      icon={<PanelLeftRounded className="h-4 w-4" />}
+      onClick={togglePptHistoryList}
+    />
+  ) : null, [pptHistoryOpen, pptHistoryToggleShown, t, togglePptHistoryList])
   const focusedPptSession = focusedSessionId ? sessionMetaMap.get(focusedSessionId)?.ppt !== undefined : false
   useEffect(() => {
     if (focusedPptSession && !isPptView && isSessionsNavigation(navState) && navState.details) navigate(routes.view.ppt(navState.details.sessionId))
@@ -1335,6 +1361,7 @@ function AppShellContent({
     onJumpToProjectSessions: handleJumpToProjectSessions,
     orchestrationProjectId: isPptView ? null : resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
     rightSidebarButton: null,
+    leadingAction: hidePptHistoryList ? pptHistoryToggle ?? undefined : undefined,
     isCompactMode: isAutoCompact,
     // Search state for ChatDisplay highlighting
     sessionListSearchQuery: searchActive ? searchQuery : undefined,
@@ -1349,7 +1376,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isPptView, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isPptView, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation, hidePptHistoryList, pptHistoryToggle])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -2006,6 +2033,7 @@ function AppShellContent({
         className="flex items-stretch relative"
         data-immersive={isImmersiveMode ? 'on' : 'off'}
         data-immersive-layout={immersiveLayout ? 'on' : 'off'}
+        data-ppt-history-list={isPptView ? (pptHistoryOpen ? 'open' : 'closed') : undefined}
         style={{
           height: '100%',
           paddingRight: isAutoCompact || hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
@@ -2253,6 +2281,7 @@ function AppShellContent({
             <PanelHeader
               title={isSidebarVisible ? listTitle : undefined}
               titleAlign="start"
+              leadingAction={null}
               compensateForStoplight={!isSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
@@ -2268,7 +2297,10 @@ function AppShellContent({
               ) : undefined}
               actions={
                 isPptView ? (
-                  <HeaderIconButton icon={<Plus className="h-4 w-4" />} tooltip={t('ppt.new')} onClick={() => handleNewChat()} />
+                  <>
+                    {!hidePptHistoryList && pptHistoryToggle}
+                    <HeaderIconButton icon={<Plus className="h-4 w-4" />} tooltip={t('ppt.new')} onClick={() => handleNewChat()} />
+                  </>
                 ) : isSessionsNavigation(navState) ? (
                   <HeaderIconButton
                     icon={<Search className="h-4 w-4" />}
@@ -2546,8 +2578,8 @@ function AppShellContent({
         </div>
         )}
 
-        {/* Session List Resize Handle (absolute, hidden in focused mode) */}
-        {!chromeHidden && (
+        {/* Session List Resize Handle (absolute, hidden in focused mode and while the PPT list is collapsed) */}
+        {!chromeHidden && displayedNavigatorWidth > 0 && (
         <div
           ref={sessionListHandleRef}
           onMouseDown={(e) => { e.preventDefault(); setIsResizing('session-list') }}

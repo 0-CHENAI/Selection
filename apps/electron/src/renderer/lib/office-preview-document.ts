@@ -1,7 +1,8 @@
 import katexSource from 'katex/dist/katex.min.js?raw'
+import { officePreviewPageBridge } from './office-preview-page'
 
 /** The sandbox has no application origin, network, file access, or write API. */
-export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number }; restorePaths?: string[] } = {}): string {
+export function officePreviewDocument(html: string, previewId: string, options: { scrollY?: number; scrollX?: number; readOnly?: boolean; anchor?: { path: string; offset: number }; restorePaths?: string[]; page?: number } = {}): string {
   // OfficeCLI's CDN script onerror fallback overwrites formulas even when local KaTeX exists.
   html = html.replace(/<script\b[^>]*\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)[^>]*>[\s\S]*?<\/script\s*>/gi, '')
   const id = JSON.stringify(previewId).replace(/</g, '\\u003c')
@@ -22,10 +23,43 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
   const anchor = ${JSON.stringify(options.anchor ?? null).replace(/</g, '\\u003c')};
   const restorePaths = ${restorePaths};
   let restored = false;
+  let fittedWidth = -1;
+  // OfficeCLI measures slides at the end of parsing, before the iframe has its
+  // final box. That pass sees a zero-width slide, clears the scale, and the
+  // resize listener never runs again when the column has already settled.
+  const refitSlides = () => { if (typeof window.scaleSlides === 'function') window.scaleSlides(); };
+  const fitSlidesToViewport = () => {
+    const width = document.documentElement.clientWidth;
+    if (width <= 0) return false;
+    refitSlides();
+    fittedWidth = width;
+    return true;
+  };
+  ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
+    fitSlidesToViewport();
     const element = anchor && [...document.querySelectorAll('[data-path]')].find(el => el.getAttribute('data-path') === anchor.path);
     window.scrollTo(${Number.isFinite(options.scrollX) ? options.scrollX : 0}, element ? window.scrollY + element.getBoundingClientRect().top - anchor.offset : ${Number.isFinite(options.scrollY) ? options.scrollY : 0});
+    if (queuedPage) revealPage(queuedPage);
     restored = true;
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => {
+        const next = document.documentElement.clientWidth;
+        if (next <= 0 || Math.abs(next - fittedWidth) < 1) return;
+        fittedWidth = next;
+        refitSlides();
+      }).observe(document.documentElement);
+    }
+    // Parsing can finish after this frame has already recorded a width while the
+    // slide box was still zero. One later pass corrects that without moving the
+    // scroll offset the reader already has.
+    window.addEventListener('load', () => {
+      const main = document.querySelector('.main');
+      const slide = document.querySelector('.main > .slide-container .slide');
+      if (!main || !slide || slide.getBoundingClientRect().width <= main.clientWidth + 1) return;
+      refitSlides();
+      fittedWidth = document.documentElement.clientWidth;
+    }, { once: true });
     // The sandbox hides contentDocument from the parent. Paint the selection
     // here, after OfficeCLI has registered its click handlers.
     if (!readOnly && restorePaths.length) {

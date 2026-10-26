@@ -176,7 +176,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
-import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck } from '../services/ppt-live'
+import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -1769,11 +1769,18 @@ export class SessionManager implements ISessionManager {
     try { next = readPptProgress(dir, generating, { workingDirectory: managed.workingDirectory }) } catch { return }
     if (!next && generating && managed.ppt) {
       const previous = managed.pptProgress
+      const carry = !!previous?.generating && !!previous.pptxPath
       next = {
         total: previous?.pptxPath ? previous.total : 0,
-        completed: previous?.pptxPath ? previous.completed : 0,
+        completed: carry ? previous.completed : 0,
         generating: true,
-        ...(previous?.pptxPath ? { fileName: previous.fileName, pptxPath: previous.pptxPath, pages: previous.pages, chartFallbacks: previous.chartFallbacks } : {}),
+        ...(carry && previous?.current ? { current: previous.current, currentTitle: previous.currentTitle } : {}),
+        ...(previous?.pptxPath ? {
+          fileName: previous.fileName,
+          pptxPath: previous.pptxPath,
+          ...(carry ? { pages: previous.pages } : {}),
+          chartFallbacks: previous.chartFallbacks,
+        } : {}),
       }
     }
     if (!next && !generating && managed.pptProgress?.generating) next = { ...managed.pptProgress, generating: false }
@@ -8131,6 +8138,10 @@ export class SessionManager implements ISessionManager {
       const priorTaskList = taskListAllowed(managed) ? latestTaskList(managed.messages) : undefined
       const handoverContext = managed.handover ? this.handoverInput(managed) : undefined
       if (options?.ppt || options?.pptRevision) {
+        const revision = options.pptRevision
+        writePptRun(chatSessionDir, revision
+          ? { action: revision.action ?? 'revise', ...(revision.templateId ? { templateId: revision.templateId } : {}), ...(revision.themeId ? { themeId: revision.themeId } : {}) }
+          : { action: 'generate', ...(options.ppt?.templateId ? { templateId: options.ppt.templateId } : {}), ...(options.ppt?.themeId ? { themeId: options.ppt.themeId } : {}) })
         markPptGenerating(chatSessionDir, true)
         this.ensurePptExportWatch(managed)
       }
