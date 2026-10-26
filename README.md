@@ -22,21 +22,27 @@
 </p>
 
 > [!TIP]
-> 第一次来，先看下面两张界面，再按 [从源码跑起来](#从源码跑起来) 克隆。想直接做幻灯片，跳到 [演示文稿](#演示文稿)。
+> 第一次来，先看下面的深色分栏，再按 [从源码跑起来](#从源码跑起来) 克隆。想直接做幻灯片，跳到 [演示文稿](#演示文稿)。
 
 ## 打开就是这样
 
-普通会话：中间列是会话列表，右边聊天。输入栏的 **PPT** 会弹出模板选择器，选中后带着这段对话去做幻灯片。
+深色主题下，生成结束的一屏是这样：左边展开结果卡，右边是同一份 PPTX 的 Office 协同预览。
 
-<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="普通会话：左侧导航、中间会话列表，输入栏打开了 PPT 模板选择器" />
+<img src="docs/readme-assets/ppt-office-split.png" width="920" alt="深色主题：左侧展开的 PPT 结果卡，右侧 Office 协同预览同一份幻灯片" />
+
+> 结果卡上有封面、检查摘要和缩略图。右侧顶栏是文件名和「切换文件」。点缩略图或「在右侧打开」，预览跟到那一页。
+
+浅色主题里，普通会话的中间列是会话列表。输入栏的 **PPT** 会弹出模板选择器，选中后带着这段对话去做幻灯片。
+
+<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：中间是会话列表，输入栏打开了 PPT 模板选择器" />
 
 > 会话按今天、昨天分组。选择器里能搜模板，也可以去「查看全部模板」。
 
-PPT 有自己的入口。左侧点 **PPT**，历史在中间，模板画廊在右边。空列表会显示「暂无 PPT」。
+PPT 还有自己的入口。左侧点 **PPT**，历史在中间，模板画廊在右边。
 
-<img src="docs/design/ppt-picker/actual/01-ppt-home.png" width="920" alt="PPT 首页：历史列表按今天、本周、更早分组，右侧是模板画廊" />
+<img src="docs/design/ppt-picker/actual/01-ppt-home.png" width="920" alt="浅色 PPT 首页：历史列表按今天、本周、更早分组，右侧是模板画廊" />
 
-> 标题就是现在的文案：「今天想做一份什么样的 PPT？」。画廊封面来自内置风格。这张整窗图拍摄时，输入区还没有后来补上的数据源和工作目录，那两项现在可以一起选。
+> 标题就是现在的文案：「今天想做一份什么样的 PPT？」。这张浅色整窗图拍摄时，输入区还没有后来补上的数据源和工作目录，那两项现在可以一起选。
 
 ## Selection 是什么
 
@@ -49,7 +55,7 @@ Selection 给想在桌面里跟智能体一起干活的人用：同时开很多�
 - 模型要换来换去：私有化网关、各家 API、本机 Ollama
 - 愿意从源码构建，自己改技能和界面
 
-界面截图是中文。仓库里还有英、德、西、日、波、匈等语言包。
+上面有深色和浅色两套中文界面。仓库里还有英、德、西、日、波、匈等语言包。
 
 ## 从哪来
 
@@ -95,6 +101,24 @@ Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents
 | 看结果 | 结果卡默认收成一行：文件名、页数和检查结果、「在右侧打开」。展开后才是封面、缩略图、换风格重排、换配色 |
 | 拿文件 | 只留一份可编辑 PPTX。文件名来自标题。没选工作目录时写在会话文件夹，选了就写在该目录。绝对路径记在会话 `data/ppt-output.json` |
 
+展开后的结果卡把封面放大，检查结果写在文件名下面，缩略图一条排开。通过的页是绿条，需要留意的页会标出来。
+
+<img src="docs/readme-assets/ppt-result-card.png" width="760" alt="PPT 结果卡片展开特写：封面大图、检查摘要和缩略图条" />
+
+> 这一份示例文稿是 11 页。摘要写着 10 页通过，第 5 页需要留意。
+
+换配色时先看「现在」和「预览」，再从列表里选一套颜色，应用到全部页面。
+
+<img src="docs/readme-assets/ppt-recolor-popover.png" width="640" alt="换配色弹出层：当前封面与预览对比，下面是配色列表" />
+
+> 配色只换颜色。版式和文字留在原来的位置。列表里还能展开更多配色。
+
+换配色进行中，封面上标着正在重画的那一页，下面是进度条和「已完成 n/N 页 · 右侧实时刷新」。
+
+<img src="docs/readme-assets/ppt-recolor-progress.png" width="760" alt="换配色进行中：进度条显示已完成 3/11 页，封面标着第 4 页" />
+
+> 正在重画的那一页盖着页码。缩略图随每一页的新画面更新。
+
 选中模板之后，`⋯` 里可以改主题色、品牌色与标志、画幅。再选一个模板会换成当前这一张。
 
 <img src="docs/design/ppt-picker/actual/02-template-selected.png" width="920" alt="已选模板卡片，弹出主题色、品牌色与画幅菜单" />
@@ -119,13 +143,6 @@ Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents
 <img src="docs/design/ppt-picker/actual/layouts/conclusion.png" width="720" alt="论证版式结论页：左侧红色主张，右侧三张证据卡" />
 
 导出用技能自带的 PptxGenJS（`engine/deck-cli.mjs`），不要求另外安装 Python。导出后的检查、读回、截图和定点修改交给随应用打包的 OfficeCLI。
-
-> [!NOTE]
-> 仓库里还没有「当前结果卡 + 当前 Office 协同」的同代整窗截图。结果卡现在默认是一行；展开后才是封面大图、检查摘要和每页缩略图。生成时打开的是普通会话那块 Office 协同，不再是以前单独的实时侧窗。
->
-> 下面这张是改版前的整窗记录：聊天底部已经有换风格和换配色，右侧当时还是独立侧窗。请把它当成历史画面。建议在本地补拍折叠的结果卡、展开后的封面，以及生成中的 Office 协同。
-
-<img src="docs/design/ppt-picker/actual/05-select-edit.png" width="920" alt="改版前的生成界面：聊天底部有换风格和换配色，右侧是当时的实时侧窗" />
 
 ## 权限、快捷键、来源、模型
 
