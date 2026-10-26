@@ -32,17 +32,17 @@
 
 > 结果卡上有封面、检查摘要和缩略图。右侧顶栏是文件名和「切换文件」。点缩略图或「在右侧打开」，预览跟到那一页。
 
-浅色主题里，普通会话的中间列是会话列表。输入栏的 **PPT** 会弹出模板选择器，选中后带着这段对话去做幻灯片。
+左侧导航从上到下是 **普通会话**、**项目**、**PPT**、**数据源**、**技能**、**自动化**、**设置**。普通会话是默认工作方式。PPT 只是另一个入口：自己的历史在中间，模板画廊在右边；生成一开始，平时的 Office 协同会自动打开。
 
-<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：中间是会话列表，输入栏打开了 PPT 模板选择器" />
+<img src="docs/readme-assets/ppt-home-sidebar.png" width="920" alt="浅色整窗：左侧导航含普通会话、项目、PPT、数据源、技能、自动化和设置，右侧是打开的 PPT 模板画廊" />
 
-> 会话按今天、昨天分组。选择器里能搜模板，也可以去「查看全部模板」。
+> 这一屏停在 PPT，右边是打开的模板画廊。回到「普通会话」，中间就是会话列表和对话。画廊标题是现在的文案：「今天想做一份什么样的 PPT？」。输入栏上的 **PRO** 是这份文稿的工作模式：从这里发出去会建成 PRO 会话。这张图的输入区还没拍到后来补上的数据源和工作目录，那两项现在可以一起选。
 
-PPT 还有自己的入口。左侧点 **PPT**，历史在中间，模板画廊在右边。
+在普通会话里，输入栏的 **PPT** 也会弹出模板选择器。下图里选择器是打开的；收起之后，中间就是原来的对话区，会话仍按今天、昨天分组。
 
-<img src="docs/design/ppt-picker/actual/01-ppt-home.png" width="920" alt="浅色 PPT 首页：历史列表按今天、本周、更早分组，右侧是模板画廊" />
+<img src="docs/design/ppt-picker/actual/04-chat-ppt-button.png" width="920" alt="浅色普通会话：中间是会话列表，输入栏的 PPT 模板选择器处于打开状态" />
 
-> 标题就是现在的文案：「今天想做一份什么样的 PPT？」。这张浅色整窗图拍摄时，输入区还没有后来补上的数据源和工作目录，那两项现在可以一起选。
+> 选择器里能搜模板，也可以去「查看全部模板」。选中后带着这段对话去做幻灯片。
 
 ## Selection 是什么
 
@@ -53,7 +53,7 @@ Selection 给想在桌面里跟智能体一起干活的人用：同时开很多�
 - 手上有纪要、表格或旧 PPT，想整理成一套新的幻灯片
 - 要同时盯几件任务，每件留在自己的会话里
 - 模型要换来换去：私有化网关、各家 API、本机 Ollama
-- 愿意从源码构建，自己改技能和界面
+- 想先装一份 beta 安装包，或从源码改技能和界面
 
 上面有深色和浅色两套中文界面。仓库里还有英、德、西、日、波、匈等语言包。
 
@@ -88,6 +88,20 @@ Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents
 
 工作区里还可以放你自己的技能。局部修改旧 PPT 走 OfficeCLI，整套新稿走 `ppt-design`。
 
+## 侧栏、会话和项目
+
+普通会话就是一段对话，列表按日期分组。点侧栏里的名字会换主区域：数据源、技能、自动化、设置各自是一页；PPT 换成模板入口。
+
+顶栏的 **NORM / PRO** 切换两种根会话列表，界面上的名字就是工作模式。这个开关只出现在普通会话里；打开 PPT 视图时不显示。第一次发送之后，这段会话的模式就固定了。想换模式，用「交接到 PRO」或「基于成果继续聊」另开一段根会话，原来的运行归属留在源会话。
+
+| | NORM | PRO |
+| --- | --- | --- |
+| 适合 | 事情在这一段对话里做完 | 要委派、工作流，或把一件事拆成任务 |
+| 默认 | 新建普通会话从这里开始 | 自己切过去，或从 NORM 交接过来 |
+| PPT | 从这里做 PPT 时，会先交到一段 PRO 会话 | 从 PPT 入口起草，工作模式直接写成 PRO。普通会话里打开模板选择器，说明是「将以 PRO 会话运行」 |
+
+**项目**把同一件事的会话、工作文件夹和资料放在一起，存在工作区的 `projects/<slug>/`（`config.json` 和 `assets/`）。侧栏点开某个项目，列表里是它名下的会话。这些会话固定使用项目的工作文件夹。会话菜单里的「归入项目」就是把一段普通会话放进来。多步任务和编排在 PRO 会话里进行，项目把这些会话和资料归到一处。
+
 ## 演示文稿
 
 一条新文稿大致是这样走的：
@@ -97,9 +111,15 @@ Selection 在 [Craft Agents OSS](https://github.com/craft-ai-agents/craft-agents
 | 进入 | 左侧 **PPT**，或普通会话输入栏的 **PPT** |
 | 选模板 | 画廊按商务、咨询、学术、教学、技术、创意、社媒分类；**自定义**里可以上传 PPTX |
 | 写要求 | 主题、受众、页数、风格；可以附文件，也可以选数据源和工作目录 |
-| 生成 | 自动打开平时的 **Office 协同**。真实 PPTX 出现之前，面板停在「正在加载预览」；页写进 deck 后，预览跟着这份文件刷新 |
+| 生成 | 自动打开平时的 **Office 协同**。真实文件出现之前，面板停在「正在加载预览」；页写进去之后，预览跟着刷新 |
 | 看结果 | 结果卡默认收成一行：文件名、页数和检查结果、「在右侧打开」。展开后才是封面、缩略图、换风格重排、换配色 |
 | 拿文件 | 只留一份可编辑 PPTX。文件名来自标题。没选工作目录时写在会话文件夹，选了就写在该目录。绝对路径记在会话 `data/ppt-output.json` |
+
+Office 协同不只有幻灯片。同一块右侧面板预览并点选 **Word（.docx）**、**Excel（.xlsx）** 和 **PowerPoint（.pptx）**。点选范围是：Word 的段落和表格，Excel 的单元格，PPT 的形状。下面这张是幻灯片生成到一半的样子；Word 和 Excel 走同一块面板，只是仓库里还没有对应的整窗实拍。
+
+<img src="docs/readme-assets/ppt-office-generating.png" width="920" alt="生成中：左侧是当前页的步骤，右侧 Office 协同实时预览同一份 PPTX" />
+
+> 左边正在写第 9 页，右边已经能看写完的页面，顶上写着「正在生成第 9 页」。文件名旁边是「切换文件」。全部完成后可以点选修改。
 
 展开后的结果卡把封面放大，检查结果写在文件名下面，缩略图一条排开。通过的页是绿条，需要留意的页会标出来。
 
@@ -189,9 +209,20 @@ macOS 用 `⌘`，Windows 和 Linux 用 `Ctrl`。下表按 macOS 书写。
 
 设置里还可以加 ChatGPT（Codex OAuth）、GitHub Copilot、Kimi，以及 OpenAI 兼容或 Anthropic Messages 自定义端点。官方 API Key 可以把 Anthropic Messages 端点指到 `https://api.anthropic.com`。官方 Anthropic 登录和 Claude Max OAuth 不在这条运行时里。Amazon Bedrock、Google Vertex 也走同一套 Pi 连接。
 
+## 安装
+
+先到 [GitHub Releases](https://github.com/0-CHENAI/Selection/releases) 下载预发布包。目前页面上的版本标的是 **beta / prerelease**。最新一版例如 [v3.1.0-beta82](https://github.com/0-CHENAI/Selection/releases/tag/v3.1.0-beta82)：
+
+| 系统 | 文件 |
+| --- | --- |
+| macOS（Apple 芯片） | `Selection-arm64.dmg`、`Selection-arm64.zip` |
+| Windows | `Selection-x64.exe` |
+
+这一版的附件就是上面三个安装包，外加校验和与构建摘要。更早的 beta 以 Releases 页面上的文件名为准。
+
 ## 从源码跑起来
 
-需要 [Bun](https://bun.sh/)（`packages/server` 声明 `bun >= 1.0.0`）和 Node.js 18+。系统可以是 macOS、Linux 或 Windows。请从本仓库克隆后构建。
+需要 [Bun](https://bun.sh/)（`packages/server` 声明 `bun >= 1.0.0`）和 Node.js 18+。系统可以是 macOS、Linux 或 Windows。要改界面或自己构建时，从本仓库克隆。
 
 ```bash
 git clone https://github.com/0-CHENAI/Selection.git
@@ -200,7 +231,7 @@ bun install
 bun run electron:dev
 ```
 
-`electron:dev` 会编译主进程、起界面的热更新，并按当前平台准备随应用打包的 uv 和 OfficeCLI，所以第一次启动需要能下载这些运行时。
+`electron:dev` 会编译主进程并起界面的热更新。当前平台还没有 uv 或 OfficeCLI 时，同一次启动会下载它们；已经在且校验通过就跳过。第一次因此需要能访问下载地址。排障见下一节。
 
 只想构建一次再打开：
 
@@ -221,9 +252,18 @@ bun run electron:dist:linux
 ## 第一次打开
 
 1. 还没有任何工作区时，应用会创建 **My Workspace**，目录是 `~/.selection/workspaces/my-workspace`。
-2. 还没有可用的模型连接时，进入欢迎向导：选择 ORDER、其他提供商或本地模型，也可以稍后设置。Windows 上如果缺少 Git Bash，向导会先提示。
+2. 还没有可用的模型连接时，进入欢迎向导：选择 ORDER、其他提供商或本地模型，也可以稍后设置。
 3. 进入会话后直接聊天。做幻灯片时打开左侧 **PPT**，或在普通会话里点 **PPT**。
 4. 权限默认是智能审批。需要完全只读或完全自动时，用 `Shift+Tab` 换。
+
+卡在启动时，先对这几条：
+
+| 现象 | 怎么办 |
+| --- | --- |
+| 第一次 `electron:dev` 停在下载 | 脚本在补当前平台的 uv 和 OfficeCLI。已存在且校验通过会跳过。需要网络 |
+| Windows 提示需要 Git Bash | 向导文案是：Selection 需要 Git Bash 才能在 Windows 上运行 shell 命令。安装 [Git for Windows](https://git-scm.com/downloads/win)，或在向导里指定 `bash.exe`。这一步在首次启动的产品向导里 |
+| 还没接上模型 | 欢迎向导四条：ORDER、使用其他提供商、本地模型、稍后设置 |
+| 要看日志 | 开发模式，或给可执行文件加 `--debug`，主进程才写 electron-log。应用名是 Selection。正式包不加 `--debug` 时这份文件日志是关的。另外两份一直在配置目录：`~/.selection/logs/messaging-gateway.log`、`~/.selection/logs/auto-update.log` |
 
 ## 数据放在哪
 
@@ -243,13 +283,14 @@ bun run electron:dist:linux
     └── my-workspace/
         ├── config.json
         ├── automations.json    # 有自动化时才会出现
+        ├── projects/           # 每个项目一份 config.json 和 assets/
         ├── sessions/
         ├── sources/
         ├── skills/
         └── statuses/
 ```
 
-自动化写在工作区的 `automations.json` 里，也可以直接对智能体说「每个工作日早上 9 点做一份简报」。开发模式下主进程会写调试日志；打包后的程序名是 Selection，需要详细日志时给可执行文件加上 `--debug`。
+自动化写在工作区的 `automations.json` 里，也可以直接对智能体说「每个工作日早上 9 点做一份简报」。日志以 `~/.selection/logs/` 为准；开发模式或 `--debug` 另有一份 electron-log，应用名是 Selection。
 
 ## 开发
 
