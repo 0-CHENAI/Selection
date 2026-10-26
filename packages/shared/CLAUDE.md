@@ -177,6 +177,9 @@ Every `AgentBackend.queryLlm(request: LLMQueryRequest)` implementation MUST:
   unresolvable/unsupported; always report the *effective* model in
   `LLMQueryResult.model`)
 - honor `request.systemPrompt`
+- honor `request.images` when present: pass them to the model as image input.
+  `buildCallLlmRequest` only attaches images after the resolved model supports
+  vision. Do not drop them because the transport is the Selection Backend.
 
 SHOULD:
 - honor `request.outputSchema` (at minimum via prompt injection — see

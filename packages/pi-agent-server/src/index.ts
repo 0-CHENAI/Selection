@@ -108,7 +108,7 @@ import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts'
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokensDensityAware, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
 import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/storage.ts';
-import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
+import { buildCallLlmRequest, callLlmPromptImages, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { constrainThinkingLevel, modelThinkingCapability, resolveSessionThinkingLevel, type ThinkingModelRef } from '../../shared/src/agent/thinking-capabilities.ts';
@@ -1384,6 +1384,8 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
     }
   }
 
+  const promptImages = callLlmPromptImages(request.images);
+
   const runQueryWithModel = async (modelId: string): Promise<string> => {
     debugLog(`[queryLlm] Using model: ${modelId}`);
 
@@ -1451,6 +1453,15 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
 
     debugLog(`[queryLlm] Created ephemeral session: ${ephemeralSession.sessionId}`);
 
+    // Pi drops image blocks when the model `input` list has no `image`.
+    // call_llm only attaches images after the resolved model supports vision,
+    // so this ephemeral model must accept them even if its catalog entry lagged.
+    if (promptImages) {
+      const current = ephemeralSession.model as { input?: string[] };
+      const aligned = alignModelImageInput(current, true);
+      if (aligned.input && aligned.input !== current.input) current.input = [...aligned.input];
+    }
+
     // Force the system prompt — see system-prompt-override.ts for why direct
     // assignment to `state.systemPrompt` doesn't survive `session.prompt()`.
     const promptForSession =
@@ -1503,8 +1514,11 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
 
     try {
       signal?.throwIfAborted();
+      const prompted = promptImages
+        ? ephemeralSession.prompt(request.prompt, { images: promptImages })
+        : ephemeralSession.prompt(request.prompt);
       await withTimeout(
-        ephemeralSession.prompt(request.prompt).then(() => completionPromise),
+        prompted.then(() => completionPromise),
         request.timeoutMs ?? LLM_QUERY_TIMEOUT_MS,
         `queryLlm timed out after ${LLM_QUERY_TIMEOUT_MS / 1000}s`
       );
@@ -1593,6 +1607,10 @@ async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQue
     backendName: 'Pi',
     sessionPath,
     defaultModel: initConfig?.model,
+    imageSupport: {
+      models: initConfig?.customModels,
+      endpointSupportsImages: initConfig?.customEndpoint?.supportsImages,
+    },
   });
   return queryLlm(request);
 }

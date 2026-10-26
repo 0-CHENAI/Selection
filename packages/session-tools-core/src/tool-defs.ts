@@ -139,7 +139,7 @@ export const CallLlmSchema = z.object({
       startLine: z.number().optional().describe('First line (1-indexed)'),
       endLine: z.number().optional().describe('Last line (1-indexed)'),
     }),
-  ])).optional().describe('File paths on disk to attach (max 20). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.'),
+  ])).optional().describe('File paths on disk to attach (max 20). Text is inlined. png/jpg/gif/webp are sent as images only when the model running this call has vision enabled; otherwise the call fails. NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.'),
   model: z.string().optional().describe('Model ID or short name. Omit to inherit the current session model.'),
   systemPrompt: z.string().optional().describe('Optional system prompt'),
   maxTokens: z.number().optional().describe('Max output tokens (1-64000). Defaults to 4096'),
@@ -623,6 +623,7 @@ Omit \`model\` to inherit the current session model. Pass a different model only
 
 Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
 Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
+png, jpg, jpeg, gif, and webp files are sent as visual input when the model running this call has vision enabled (for example ORDER Laufry with vision on). Models without vision reject those attachments.
 For large files (>2000 lines), use {path, startLine, endLine} to select a portion.`,
 
   spawn_session: `Create a first-class child session that runs independently with its own prompt, connection, model, and sources.
