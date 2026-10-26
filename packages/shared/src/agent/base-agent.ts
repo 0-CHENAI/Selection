@@ -28,6 +28,7 @@ import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
 import type { LoadedSkill } from '../skills/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
+import { getBackendRuntime } from './backend/internal/driver-types.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
 import { resolveSourceTitle } from '../display-titles.ts';
@@ -1333,11 +1334,16 @@ ${formattedMessages}
    */
   protected async preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
     const sessionPath = getSessionPath(this.config.workspace.rootPath, this._sessionId);
+    const runtime = getBackendRuntime(this.config);
     const request = await buildCallLlmRequest(input, {
       backendName: this.backendName,
       sessionPath,
       validateModel: this.validateCallLlmModel?.bind(this),
       defaultModel: this.getModel(),
+      imageSupport: {
+        models: runtime.customModels,
+        endpointSupportsImages: runtime.customEndpoint?.supportsImages,
+      },
     });
     return this.queryLlm(request);
   }

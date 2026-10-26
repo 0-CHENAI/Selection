@@ -131,6 +131,20 @@ describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
     // propagate it, this fails — prompting them to revisit queryLlm.
     expect(JSON.stringify(outbound.request)).toBe(JSON.stringify(request));
 
+    const withImages: LLMQueryRequest = {
+      ...request,
+      images: [{ type: 'image', data: 'abc', mimeType: 'image/png' }],
+    };
+    const imageQuery = agent.queryLlm(withImages);
+    await flushMicrotasks();
+    expect(JSON.stringify(sent[1]!.request)).toBe(JSON.stringify(withImages));
+    (agent as any).handleLine(JSON.stringify({
+      type: 'llm_query_result',
+      id: sent[1]!.id,
+      result: { text: 'seen', model: 'pi/gpt-5-mini' },
+    }));
+    await imageQuery;
+
     // Resolve the pending query so the test doesn't hang.
     (agent as any).handleLine(JSON.stringify({
       type: 'llm_query_result',
