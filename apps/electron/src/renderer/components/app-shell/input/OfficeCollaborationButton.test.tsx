@@ -4,10 +4,8 @@ import { createStore, Provider } from 'jotai'
 import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
-import { TooltipProvider } from '@craft-agent/ui'
 import type { PptProgress } from '@craft-agent/shared/protocol'
-import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
-import { sessionAtomFamily } from '@/atoms/sessions'
+import type { AppShellContextType } from '@/context/AppShellContext'
 import type { Session } from '../../../../shared/types'
 
 mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
@@ -15,12 +13,18 @@ mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDo
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let OfficeCollaborationButton: typeof import('./OfficeCollaborationButton').OfficeCollaborationButton
+let TooltipProvider: typeof import('@craft-agent/ui').TooltipProvider
+let AppShellProvider: typeof import('@/context/AppShellContext').AppShellProvider
+let sessionAtomFamily: typeof import('@/atoms/sessions').sessionAtomFamily
 
 const i18n = i18next.createInstance()
 
 beforeAll(async () => {
   await i18n.init({ lng: 'zh-Hans', resources: { 'zh-Hans': { translation: LOCALE_REGISTRY['zh-Hans'].messages } } })
   ;({ OfficeCollaborationButton } = await import('./OfficeCollaborationButton'))
+  ;({ TooltipProvider } = await import('@craft-agent/ui'))
+  ;({ AppShellProvider } = await import('@/context/AppShellContext'))
+  ;({ sessionAtomFamily } = await import('@/atoms/sessions'))
 })
 
 function progress(extra: Partial<PptProgress> = {}): PptProgress {
@@ -37,7 +41,6 @@ function progress(extra: Partial<PptProgress> = {}): PptProgress {
 function renderButton(session: Partial<Session> | null, active = true) {
   const store = createStore()
   if (session) store.set(sessionAtomFamily('s1'), { id: 's1', ppt: {}, ...session } as Session)
-  const toggles: boolean[] = []
   const html = renderToStaticMarkup(
     <Provider store={store}>
       <I18nextProvider i18n={i18n}>
@@ -48,7 +51,7 @@ function renderButton(session: Partial<Session> | null, active = true) {
               available: false,
               active,
               choosing: false,
-              onToggle: () => { toggles.push(true) },
+              onToggle: () => {},
             },
           } as AppShellContextType}>
             <OfficeCollaborationButton sessionId="s1" />
@@ -57,11 +60,11 @@ function renderButton(session: Partial<Session> | null, active = true) {
       </I18nextProvider>
     </Provider>,
   )
-  return { html, toggles }
+  return html
 }
 
 test('generation fills the Office button and keeps stop off it', () => {
-  const { html } = renderButton({ isProcessing: true, pptProgress: progress() }, true)
+  const html = renderButton({ isProcessing: true, pptProgress: progress() }, true)
   expect(html).toContain('Office 协同 · 6/15')
   expect(html).toContain('data-testid="office-collaboration-progress"')
   expect(html).toContain('data-progress="0.4"')
@@ -76,7 +79,7 @@ test('generation fills the Office button and keeps stop off it', () => {
 })
 
 test('a settled deck restores the checked Office button', () => {
-  const { html } = renderButton({
+  const html = renderButton({
     isProcessing: false,
     pptProgress: progress({ generating: false, completed: 15, current: undefined, currentTitle: undefined }),
   }, true)
@@ -90,11 +93,11 @@ test('a settled deck restores the checked Office button', () => {
 
 test('the button stays available before a page count exists and stays hidden for other chats', () => {
   const early = renderButton({ isProcessing: true, pptProgress: progress({ total: 0, completed: 0, current: undefined, currentTitle: undefined }) }, false)
-  expect(early.html).toContain('data-generating="true"')
-  expect(early.html).toContain('>Office 协同<')
-  expect(early.html).not.toContain('data-testid="office-collaboration-progress"')
-  expect(early.html).not.toContain('0/0')
+  expect(early).toContain('data-generating="true"')
+  expect(early).toContain('>Office 协同<')
+  expect(early).not.toContain('data-testid="office-collaboration-progress"')
+  expect(early).not.toContain('0/0')
 
   const other = renderButton({ id: 's1', ppt: undefined, isProcessing: true } as Partial<Session>, false)
-  expect(other.html).not.toContain('data-office-collaboration')
+  expect(other).not.toContain('data-office-collaboration')
 })
