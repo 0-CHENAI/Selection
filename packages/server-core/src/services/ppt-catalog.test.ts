@@ -116,6 +116,7 @@ test('PRO request enables skill without changing user transport options and adds
   expect(context).toContain(realpathSync(join(root, 'styles/dsh-cartesian/deck.json')))
   expect(context).toContain(realpathSync(join(root, 'styles/previews/dsh-cartesian-1.webp')))
   expect(context).toContain('NOT a rigid form')
+  expect(context).toContain('deck already exists')
   expect(context).toContain('#123456')
   expect(context).toContain(join(session, 'data', 'deck.json'))
   expect(context).toContain('slide-01.png')

@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { clipboardHasFiles } from '@/lib/clipboard-files'
 import { coerceInputText } from '@/lib/input-text'
 import { cn } from '@/lib/utils'
 import { findMentionMatches, parseMentions, type MentionMatch } from '@/lib/mentions'
@@ -799,7 +800,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Handle paste - delegate files to parent, manually insert plain text
     const handlePasteInternal = React.useCallback((e: React.ClipboardEvent) => {
       // Check if we have files - let parent handle that
-      const hasFiles = e.clipboardData?.files && e.clipboardData.files.length > 0
+      const hasFiles = clipboardHasFiles(e.clipboardData)
       if (hasFiles && onPaste) {
         e.preventDefault()
         onPaste(e)

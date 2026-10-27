@@ -165,7 +165,7 @@ export function writeChartFallbacks(sessionPath: string, fallbacks: PptChartFall
 
 export function buildPptPrompt(request: PptRequest, sessionPath: string, root = getPptSkillRoot(), skills: ChartSkillCandidate[] = [], message?: string): string {
   request = validatePptRequest(request, root)
-  const parts = ['[skill:ppt-design]', '<ppt_generation_context>', 'Create an editable PPT using ppt-design and its selection-deck engine. Follow the user’s natural-language requirements and attached source files.']
+  const parts = ['[skill:ppt-design]', '<ppt_generation_context>', 'Create an editable PPT using ppt-design and its selection-deck engine. Follow the user’s natural-language requirements and attached source files. Images and files attached on this turn are source material: read their stored paths even when a deck already exists. Do not ignore a new attachment because the conversation is already in progress.']
   if (request.templateId) {
     const custom = customTemplateReference(request.templateId)
     if (custom) {

@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **PPT 中途附件** — PPT 会话生成之后仍可从输入栏附加图片和文件，也可以粘贴截图，或把文件拖到已打开的 Office 预览上。没有选中元素时，附件按普通对话保存进会话并交给模型。已经选中元素时会说明定向修改不能同时带附件，而不是静默禁用。Fixes #669.
+
 - **开发启动与加载布局** — 修复 Vite 冷启动把共享 debug 工具中的主进程日志 transport 扫进 renderer、导致 `https` 预构建报错的问题；主进程继续接收文件日志。启动 HTML 在业务脚本和 CSS 加载前约束根容器，消除初始 loading 页的意外页面滚动条，消息与模板详情仍保留内部滚动。增加真实冷预构建和完整 NORM/PPT 导航回归。
 
 - **PPT 输入栏** — 独立 PPT 模式隐藏重复的 PPT 和 PRO 标签，恢复数据源与工作目录入口。选择会用于实际生成，目录可清除；独立会话发送后的新草稿不再沿用上一会话的数据源和目录，项目会话仍使用原绑定目录。

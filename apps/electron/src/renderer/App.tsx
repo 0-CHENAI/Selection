@@ -15,7 +15,7 @@ import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clari
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
 import type { ManagedArtifact, PptRequest, PptRevision, SendMessageOptions } from '@craft-agent/shared/protocol'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -1379,14 +1379,21 @@ export default function App() {
         return true
       }
       const revision = pptRevision
-      const officeSelection = revision ? undefined : await captureOfficeSelection(sessionId)
+      const capturedSelection = revision ? undefined : await captureOfficeSelection(sessionId)
+      const officeSelection = directedOfficeElements(capturedSelection) > 0 ? capturedSelection : undefined
       const officeContext = officeSelection ? undefined : officePreviewContext(sessionId)
       // Capture live generation so composer submits stay in the queue
       // instead of looking like a new transcript turn (#22, #23).
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
-      if (officeSelection && sendingMidStream) throw new Error('请等待当前任务完成后再提交 Office 修改')
-      if (officeSelection && (attachments?.length || annotationFollowUps?.length)) throw new Error('定向 Office 修改暂不支持同时发送附件或其他反馈')
+      if (officeSelection && sendingMidStream) {
+        toast.error(t('chat.officePreview.revisionWait'))
+        return false
+      }
+      if (officeSelectionAttachmentConflict(officeSelection, attachments?.length ?? 0, annotationFollowUps?.length ?? 0)) {
+        toast.error(t('chat.officePreview.attachmentConflict'))
+        return false
+      }
       const optionSnapshot = sessionOptions.get(sessionId)
       const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream, swarmAgentsEnabled)
       if (!delegateSubmission.allowed) return false

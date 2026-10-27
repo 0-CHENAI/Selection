@@ -8,6 +8,7 @@ import { PptPickerButton } from '@/components/ppt/PptPickerButton'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
+import { clipboardFiles } from '@/lib/clipboard-files'
 import {
   Paperclip,
   ArrowUp,
@@ -1340,14 +1341,10 @@ export function FreeFormInput({
     setLoadingCount(prev => prev - 1)
   }
 
-  // File attachment handlers
+  // File attachment handlers. Click the input before any blur: an open Office
+  // preview iframe otherwise takes focus and Chromium drops the file dialog.
   const handleAttachClick = () => {
     if (disabled) return
-    // The native file dialog does not manage focus like a Radix overlay. Blur
-    // the toolbar trigger now so its focus-triggered tooltip cannot linger.
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur()
-    }
     fileInputRef.current?.click()
   }
 
@@ -1477,13 +1474,11 @@ export function FreeFormInput({
   const handlePaste = async (e: React.ClipboardEvent) => {
     if (disabled) return
 
-    const clipboardItems = e.clipboardData?.files
-    if (!clipboardItems || clipboardItems.length === 0) return
+    const files = clipboardFiles(e.clipboardData)
+    if (files.length === 0) return
 
     // We have files to process - prevent default text paste behavior
     e.preventDefault()
-
-    const files = Array.from(clipboardItems)
     setLoadingCount(prev => prev + files.length)
 
     // Pre-assign sequential names using ref to avoid race conditions
@@ -2132,7 +2127,9 @@ export function FreeFormInput({
             ref={fileInputRef}
             type="file"
             multiple
-            className="hidden"
+            data-testid="composer-file-input"
+            tabIndex={-1}
+            className="sr-only"
             onChange={handleFileInputChange}
           />
           {/* Compact mode: permission mode drawer + standard icon badges for attach/sources/working dir.
@@ -2174,6 +2171,8 @@ export function FreeFormInput({
             isExpanded={false}
             hasSelection={attachments.length > 0}
             showChevron={false}
+            data-testid="composer-attach"
+            onMouseDown={event => event.preventDefault()}
             onClick={handleAttachClick}
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
@@ -2279,6 +2278,8 @@ export function FreeFormInput({
             isExpanded={isEmptySession}
             hasSelection={attachments.length > 0}
             showChevron={false}
+            data-testid="composer-attach"
+            onMouseDown={event => event.preventDefault()}
             onClick={handleAttachClick}
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
