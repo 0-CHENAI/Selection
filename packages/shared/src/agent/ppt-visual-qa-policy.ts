@@ -6,11 +6,14 @@
  * screenshots. That is not a substitute for the Read tool or `call_llm`
  * image attachments. If the model cannot see images, keep the existing
  * image_capability_mismatch notice and do not fall through to OCR.
+ *
+ * This module reads local scripts with node:fs. Renderer code must import
+ * PPT_VISUAL_QA_NO_OCR_NOTE from ./ppt-visual-qa-note.ts instead.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from './ppt-visual-qa-note.ts';
 
-export const PPT_VISUAL_QA_NO_OCR_NOTE =
-  'Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.';
+export { PPT_VISUAL_QA_NO_OCR_NOTE };
 
 const VISUAL_QA_WORD =
   /\b(?:slides?|screenshots?|pptx|deck|cover|layout|visual|g4)\b|版式|视觉|截图|逐页|幻灯片/i;

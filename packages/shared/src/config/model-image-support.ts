@@ -5,7 +5,9 @@
  * must compare as the same model, or vision flags never apply at send time.
  */
 
-import { PPT_VISUAL_QA_NO_OCR_NOTE } from '../agent/ppt-visual-qa-policy.ts'
+// The policy module reads scripts with node:fs. Importing it here pulls that
+// into the Vite renderer and fails on existsSync / __vite-browser-external.
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from '../agent/ppt-visual-qa-note.ts'
 
 const PROVIDER_PREFIXES = ['pi/', 'custom-endpoint/']
 
