@@ -47,7 +47,9 @@ it('A8 production interceptor shares its slot hook with the runtime and excludes
   try {
     const model: Model<'openai-completions'> = { id: 'local-test', name: 'Local test', api: 'openai-completions', provider: 'openai', baseUrl: `http://127.0.0.1:${server.port}/v1`,
       reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 128 };
-    const { response, acquired, released } = await requestThroughInterceptor(model, 80, 150);
+    // Slot wait stays longer than the idle limit, so counting queue time still fails the test.
+    // The local SSE response needs more than 80ms once CI is busy.
+    const { response, acquired, released } = await requestThroughInterceptor(model, 2_000, 3_500);
     expect(response.stopReason, JSON.stringify({ response, acquired, released })).toBe('stop'); expect(requests).toBe(1);
     expect(acquired).toBe(1); expect(released).toEqual([{ status: 200 }]);
   } finally { server.stop(true); }
