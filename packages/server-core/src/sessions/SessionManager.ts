@@ -5064,7 +5064,7 @@ export class SessionManager implements ISessionManager {
         const capability = complexToolCapability(toolName)
         if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
-        assertPptVisualQaTool(toolName, input, undefined, managed.agent.currentModelSupportsImages?.())
+        assertPptVisualQaTool(toolName, input, undefined, managed.agent?.currentModelSupportsImages?.())
         if (managed.isolatedWorkspace?.denyExternalBrowsers) assertOfficeRevisionTool(toolName, input)
         if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
         const checkpoint = managed.executionCheckpoint
