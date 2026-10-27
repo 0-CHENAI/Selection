@@ -86,6 +86,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Office 协同点击幻灯片不再清空该页** — 在右侧预览里点中一整页时，页面和缩略图保持原样。选中只画描边，不再把铺底的形状抬到文字上面。点击也不会改写磁盘上的 pptx。Fixes #662.
+
 - **OAuth callback pages use the Selection swan** — After ChatGPT, Google, Slack, Microsoft, MCP, and WebUI authorization, the local success and error pages still showed the Craft pixel logo. Those pages now use the Selection swan for the logo and favicon. The label under the swan reads Selection in the bundled CATHALIE face, and the browser tab title says Selection.
 
 - **Faster mode switching** — Switching between NORM and PRO opens the selected mode's new-conversation composer instead of restoring its last conversation. Each mode keeps its own draft and input settings. Content cross-fades in 150 ms without large-area blur; navigation cancellation, reduced-motion support and older-runtime fallback remain available.

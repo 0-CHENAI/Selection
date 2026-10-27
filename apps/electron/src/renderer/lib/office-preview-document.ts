@@ -15,6 +15,15 @@ body, body * { -webkit-user-select: none !important; user-select: none !importan
 input, textarea, [contenteditable="true"], [contenteditable="true"] * {
   -webkit-user-select: text !important; user-select: text !important;
 }
+/* OfficeCLI watch paints :not(td):not(th).officecli-selected at z-index 1000.
+   Slide shapes are position:absolute, so a full-bleed background that was
+   behind the text jumps over every later sibling. The page looks empty, and
+   the thumbnail clone shares the data-path so it goes blank too. Keep the
+   outline; leave paint order alone. Word and Excel marks sit outside .slide. */
+.slide .officecli-selected,
+.thumb-slide .officecli-selected {
+  z-index: auto !important;
+}
 </style>
 <script>
 (() => {
