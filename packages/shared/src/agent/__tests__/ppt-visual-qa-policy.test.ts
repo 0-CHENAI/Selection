@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSkippedImagesNote } from '../../config/model-image-support.ts';
 import { imageAttachmentUnsupportedMessage } from '../llm-tool.ts';
 import { runPreToolUseChecks } from '../core/pre-tool-use.ts';
+import { PPT_VISUAL_QA_NO_OCR_NOTE as NOTE_FROM_RENDERER_MODULE } from '../ppt-visual-qa-note.ts';
 import {
   PPT_VISUAL_QA_NO_OCR_NOTE,
   assertPptVisualQaTool,
@@ -239,5 +240,23 @@ describe('PPT visual QA cannot use OCR', () => {
       expect(body.toLowerCase()).toContain('call_llm');
     }
     expect(readRepo('apps/electron/resources/docs/llm-tool.md')).not.toContain('images + OAuth');
+  });
+
+  it('keeps node:fs out of the renderer image-support import', () => {
+    expect(NOTE_FROM_RENDERER_MODULE).toBe(PPT_VISUAL_QA_NO_OCR_NOTE);
+
+    const helper = readRepo('packages/shared/src/config/model-image-support.ts');
+    expect(helper).toContain("from '../agent/ppt-visual-qa-note.ts'");
+    expect(helper).not.toContain('ppt-visual-qa-policy');
+    expect(helper).not.toMatch(/from ['"](?:node:)?fs(?:\/promises)?['"]/);
+
+    const note = readRepo('packages/shared/src/agent/ppt-visual-qa-note.ts');
+    expect(note).toContain(PPT_VISUAL_QA_NO_OCR_NOTE);
+    expect(note).not.toMatch(/from ['"](?:node:)?fs(?:\/promises)?['"]|require\(\s*['"](?:node:)?fs/);
+    expect(note).not.toMatch(/from ['"][^'"]*ppt-visual-qa-policy/);
+
+    const policy = readRepo('packages/shared/src/agent/ppt-visual-qa-policy.ts');
+    expect(policy).toContain("from 'node:fs'");
+    expect(policy).toContain("from './ppt-visual-qa-note.ts'");
   });
 });
