@@ -69,6 +69,11 @@ export function isPptOcrStepLabel(text: string): boolean {
   return /\bocr\b/i.test(actionable) && VISUAL_QA_WORD.test(actionable);
 }
 
+function asToolInput(input: unknown): Record<string, unknown> {
+  if (input && typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
+  return {};
+}
+
 function stringValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -81,18 +86,20 @@ function stringValue(value: unknown): string {
   return '';
 }
 
-function commandText(input: Record<string, unknown>): string {
-  return [input.command, input.cmd, input.script].map(stringValue).filter(Boolean).join('\n');
+function commandText(input: unknown): string {
+  const record = asToolInput(input);
+  return [record.command, record.cmd, record.script].map(stringValue).filter(Boolean).join('\n');
 }
 
 function labelTexts(
-  input: Record<string, unknown>,
+  input: unknown,
   metadata?: { intent?: string; displayName?: string },
 ): string[] {
+  const record = asToolInput(input);
   const labels = [
-    input._displayName,
-    input._intent,
-    input.description,
+    record._displayName,
+    record._intent,
+    record.description,
     metadata?.displayName,
     metadata?.intent,
   ].map(stringValue).filter(text => text.length > 0 && text.length <= 400);
@@ -170,11 +177,12 @@ function readLocalScript(token: string): string {
   }
 }
 
-function executableSources(input: Record<string, unknown>, command: string): string {
+function executableSources(input: unknown, command: string): string {
+  const record = asToolInput(input);
   const inline = OCR_CODE.test(command) ? command : '';
   const scripts = commandTokens(command).flatMap(tokens => withoutWrappers(tokens).slice(1).map(readLocalScript));
-  const dest = [input.path, input.file_path, input.filePath, input.target_file].map(stringValue).find(Boolean) ?? '';
-  const written = [input.contents, input.content, input.new_string, input.newString].map(stringValue).filter(Boolean).join('\n');
+  const dest = [record.path, record.file_path, record.filePath, record.target_file].map(stringValue).find(Boolean) ?? '';
+  const written = [record.contents, record.content, record.new_string, record.newString].map(stringValue).filter(Boolean).join('\n');
   const writtenCounts = written.length > 0
     && OCR_CODE.test(written)
     && SLIDE_VISUAL_TARGET.test(`${written}\n${dest}`)
@@ -182,17 +190,18 @@ function executableSources(input: Record<string, unknown>, command: string): str
   return [inline, ...scripts, writtenCounts ? written : ''].filter(Boolean).join('\n');
 }
 
-function skillTargetsSlides(toolName: string, input: Record<string, unknown>, labels: string[]): boolean {
+function skillTargetsSlides(toolName: string, input: unknown, labels: string[]): boolean {
   if (toolName !== 'Skill' && !/skill$/i.test(toolName)) return false;
-  const name = stringValue(input.skill ?? input.skillName ?? input.name);
-  const args = stringValue(input.args);
+  const record = asToolInput(input);
+  const name = stringValue(record.skill ?? record.skillName ?? record.name);
+  const args = stringValue(record.args);
   if (!/ocr/i.test(name)) return false;
   return isPptOcrStepLabel(name) || labels.some(isPptOcrStepLabel) || SLIDE_VISUAL_TARGET.test(`${name}\n${args}`);
 }
 
 export function pptVisualQaViolation(
   toolName: string,
-  input: Record<string, unknown>,
+  input: unknown,
   metadata?: { intent?: string; displayName?: string },
   supportsImages?: boolean,
 ): string | null {
@@ -211,7 +220,7 @@ export function pptVisualQaViolation(
 
 export function assertPptVisualQaTool(
   toolName: string,
-  input: Record<string, unknown>,
+  input: unknown,
   metadata?: { intent?: string; displayName?: string },
   supportsImages?: boolean,
 ): void {
@@ -219,8 +228,8 @@ export function assertPptVisualQaTool(
   if (violation) throw new Error(violation);
 }
 
-function attachmentPaths(input: Record<string, unknown>): string[] {
-  const raw = input.attachments;
+function attachmentPaths(input: unknown): string[] {
+  const raw = asToolInput(input).attachments;
   if (!Array.isArray(raw)) return [];
   return raw.map(item => {
     if (typeof item === 'string') return item;
@@ -232,9 +241,10 @@ function attachmentPaths(input: Record<string, unknown>): string[] {
   }).filter(Boolean);
 }
 
-export function isNativeSlideVisionCall(toolName: string, input: Record<string, unknown>): boolean {
+export function isNativeSlideVisionCall(toolName: string, input: unknown): boolean {
   if (pptVisualQaViolation(toolName, input, undefined, true)) return false;
-  const readPath = stringValue(input.path ?? input.file_path ?? input.filePath);
+  const record = asToolInput(input);
+  const readPath = stringValue(record.path ?? record.file_path ?? record.filePath);
   if (toolName === 'Read' || toolName === 'read' || /(?:^|__)read$/i.test(toolName)) {
     return IMAGE_EXTENSION.test(readPath);
   }
@@ -246,7 +256,7 @@ export function isNativeSlideVisionCall(toolName: string, input: Record<string, 
 
 export interface PptVisualQaStep {
   toolName: string;
-  input: Record<string, unknown>;
+  input: unknown;
 }
 
 function isVisualQaWork(step: PptVisualQaStep): boolean {

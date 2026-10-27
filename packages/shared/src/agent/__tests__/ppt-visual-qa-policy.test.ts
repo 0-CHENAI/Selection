@@ -28,6 +28,14 @@ const screenshot = {
 };
 
 describe('PPT visual QA cannot use OCR', () => {
+  it('treats a missing tool input as empty instead of throwing', () => {
+    expect(pptVisualQaViolation('spawn_session', undefined)).toBeNull();
+    expect(pptVisualQaViolation('Task', null)).toBeNull();
+    expect(() => assertPptVisualQaTool('run_task', undefined)).not.toThrow();
+    expect(isNativeSlideVisionCall('Read', undefined)).toBe(false);
+    expect(pptVisualQaMissingNativeVision([{ toolName: 'Bash', input: undefined }])).toBe(false);
+  });
+
   it('blocks the recurring Swift OCR New Pages steps', () => {
     for (const displayName of [
       'Swift: OCR New Pages 1-4',
