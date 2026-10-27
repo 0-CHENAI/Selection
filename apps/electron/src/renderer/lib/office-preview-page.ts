@@ -1,4 +1,5 @@
 export const OFFICE_PREVIEW_SHOW_PAGE = 'selection-office-show-page'
+export const OFFICE_PREVIEW_REVEAL = 'selection-office-reveal'
 
 export interface OfficePreviewPageRequest {
   sessionId: string
@@ -14,6 +15,21 @@ export interface PinnedOfficePage {
 export function requestOfficePreviewPage(request: OfficePreviewPageRequest): void {
   if (!Number.isInteger(request.page) || request.page < 1 || request.page > 500 || !request.path) return
   window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_SHOW_PAGE, { detail: request }))
+}
+
+/** Open the right panel on a slide, or show the waiting panel when the pptx is not on disk yet. */
+export function requestOfficePreviewReveal(request: { sessionId: string; path?: string; page?: number }): void {
+  if (!request.sessionId) return
+  if (request.path) {
+    const page = request.page
+    requestOfficePreviewPage({
+      sessionId: request.sessionId,
+      path: request.path,
+      page: typeof page === 'number' && Number.isInteger(page) && page >= 1 && page <= 500 ? page : 1,
+    })
+    return
+  }
+  window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_REVEAL, { detail: { sessionId: request.sessionId } }))
 }
 
 export function slideNumberFromOfficePath(path: string | undefined): number | undefined {
