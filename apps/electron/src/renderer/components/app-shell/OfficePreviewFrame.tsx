@@ -158,7 +158,9 @@ export const OfficePreviewFrame = forwardRef<HTMLIFrameElement, OfficePreviewFra
     })
   }
 
-  return <div ref={viewportRef} data-office-preview-viewport className="peer/office-viewport group/office-viewport relative min-h-0 w-full flex-1 overflow-hidden bg-background">
+  // z-0 + isolate keep the document iframe (z-[1]) inside this frame. Without
+  // that, the iframe paints over the sibling 「已选 N / 256」 capsule (#667).
+  return <div ref={viewportRef} data-office-preview-viewport className="peer/office-viewport group/office-viewport isolate relative z-0 min-h-0 w-full flex-1 overflow-hidden bg-background">
     {layers.map(layer => {
       const front = layer.id === visibleId
       return <iframe {...frameProps} key={layer.id} ref={front ? assignFront : undefined} srcDoc={layer.doc}

@@ -7,9 +7,10 @@ import { officePreviewDocument } from '../lib/office-preview-document'
 import { OFFICE_PREVIEW_REVEAL, OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
 import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
+import { decideOfficeSelection } from '../lib/office-selection'
 import { officeScrollAnchor, readOfficePreviewState, writeOfficePreviewState, type OfficePreviewScope, type OfficePreviewState } from '../lib/office-preview-state'
 import { Popover, PopoverAnchor, PopoverContent } from '../components/ui/popover'
-import { ArrowLeftRight, Copy, LoaderCircle, MousePointer2, X } from 'lucide-react'
+import { ArrowLeftRight, Copy, LoaderCircle, X } from 'lucide-react'
 import { FileTypeIcon } from '@craft-agent/ui'
 import { toast } from 'sonner'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '../components/ui/alert-dialog'
@@ -17,18 +18,13 @@ import { HeaderIconButton } from '../components/ui/HeaderIconButton'
 import { OfficePreviewPanel } from '../components/app-shell/OfficePreviewPanel'
 import { OfficePreviewFrame } from '../components/app-shell/OfficePreviewFrame'
 import { OfficePreviewLoading } from '../components/app-shell/OfficePreviewLoading'
+import { OfficeSelectionCapsule } from '../components/app-shell/OfficeSelectionCapsule'
 import { RADIUS_EDGE, RADIUS_INNER } from '../components/app-shell/panel-constants'
 
 type PreviewView = OfficePreviewScope & { path: string; pendingDocument?: boolean; pickerInPanel?: boolean; preview?: OfficePreviewResult; document?: string; count: number; candidates?: string[]; error?: string; refreshError?: boolean; requiresRestart?: boolean; busy?: boolean; resuming?: boolean }
 
 const OFFICE_PREVIEW_POLL_MS = 2000
 const OFFICE_PREVIEW_LIVE_POLL_MS = 500
-
-function samePathList(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false
-  const seen = new Set(right)
-  return left.every(path => seen.has(path))
-}
 
 type CachedPreview = { view: PreviewView; position: OfficePreviewState; usedAt: number; pending: Promise<unknown> }
 const previewKey = (scope: OfficePreviewScope) => JSON.stringify([scope.workspaceId, scope.sessionId])
@@ -368,26 +364,33 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
         return
       }
       if (event.source !== frames.current.get(key)?.contentWindow || event.data?.type !== 'selection-office-selection' || event.data.previewId !== previewId) return
-      const paths: unknown = event.data.paths
-      if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string')) return
-      if (restoreEcho.current?.previewId === previewId && samePathList(restoreEcho.current.paths, paths as string[])) {
+      const decision = decideOfficeSelection({
+        paths: event.data.paths,
+        previewId,
+        isDraft: !!current.current?.preview?.isDraft,
+        resuming: !!current.current?.resuming,
+        refreshing: refreshing.current === previewId,
+        activePreviewId: current.current?.preview?.previewId,
+        echo: restoreEcho.current,
+      })
+      if (decision.type === 'echo') {
         restoreEcho.current = undefined
         return
       }
-      if (view.preview?.isDraft || current.current?.resuming || refreshing.current === previewId || current.current?.preview?.previewId !== previewId) return
+      if (decision.type === 'ignore') return
       const selectionTicket = ++selectionSequence.current
       selectionTickets.current.set(previewId, selectionTicket)
       // Keep the actual visible count. Never capture the host's previous valid
       // selection after an oversized gesture, or silently truncate its targets.
-      if (paths.length > OFFICE_PREVIEW_MAX_SELECTION) {
-        updateView(old => old?.preview?.previewId === previewId ? { ...old, count: paths.length, busy: false, error: undefined } : old)
-        setSelectionOverflow({ previewId, count: paths.length })
+      if (decision.type === 'overflow') {
+        updateView(old => old?.preview?.previewId === previewId ? { ...old, count: decision.count, busy: false, error: undefined } : old)
+        setSelectionOverflow({ previewId, count: decision.count })
         return
       }
       setSelectionOverflow(undefined)
-      updateView(old => old?.preview?.previewId === previewId ? { ...old, count: paths.length, busy: true, error: undefined } : old)
+      updateView(old => old?.preview?.previewId === previewId ? { ...old, count: decision.count, busy: true, error: undefined } : old)
       // Serialize updates so a slower earlier click cannot overwrite a later selection.
-      pending.current = pending.current.catch(() => {}).then(() => window.electronAPI.officePreview({ type: 'select', sessionId, previewId, paths }))
+      pending.current = pending.current.catch(() => {}).then(() => window.electronAPI.officePreview({ type: 'select', sessionId, previewId, paths: decision.paths }))
         .then(() => { if (selectionTicket === selectionTickets.current.get(previewId)) updatePreview(key, previewId, old => ({ ...old, busy: false, error: undefined })) })
         .catch(error => { if (selectionTicket === selectionTickets.current.get(previewId)) updatePreview(key, previewId, old => ({ ...old, busy: false, error: String(error) })); throw error })
       const entry = cached.current.get(key)
@@ -471,18 +474,13 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       {target.busy && !target.document && !target.error && <OfficePreviewLoading />}
       {target.document && <OfficePreviewFrame ref={element => { if (element) frames.current.set(key, element); else frames.current.delete(key) }} title={t('chat.officePreview.title')} sandbox="allow-scripts" srcDoc={target.document} style={{ pointerEvents: target.resuming ? 'none' : undefined }} aria-busy={target.resuming || undefined} />}
       {target.resuming && target.document && <OfficePreviewLoading compact />}
-      {target.preview?.isDraft && !target.resuming && <div role="status" className="pointer-events-none absolute inset-x-3 top-4 flex justify-center">
+      {target.preview?.isDraft && !target.resuming && <div role="status" className="pointer-events-none absolute inset-x-3 top-4 z-[3] flex justify-center">
         <div className="flex max-w-full items-center gap-2.5 rounded-full bg-background/95 px-4 py-2.5 text-accent shadow-minimal ring-1 ring-border/50 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200">
           <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
           <div className="min-w-0"><p className="text-xs font-medium">{t('chat.officePreview.draft')}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{t('chat.officePreview.draftHint')}</p></div>
         </div>
       </div>}
-      {target.preview && <div role="status" aria-atomic="true" aria-label={t('chat.officePreview.selectionCountLabel', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION })} className="pointer-events-none absolute inset-x-3 bottom-8 flex justify-center peer-data-[office-resizing=true]/office-viewport:hidden">
-        <div className={`inline-flex items-center gap-2 rounded-full bg-background px-5 py-2.5 text-sm font-medium shadow-middle ring-1 ${target.count > OFFICE_PREVIEW_MAX_SELECTION ? 'text-destructive ring-destructive/30' : target.count > 0 ? 'text-accent ring-accent/25' : 'text-foreground ring-border'}`}>
-          {target.busy ? <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" /> : <MousePointer2 aria-hidden="true" className="size-4" />}
-          <span className="tabular-nums">{t('chat.officePreview.selectionCount', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION })}</span>
-        </div>
-      </div>}
+      {target.preview && <OfficeSelectionCapsule count={target.count} busy={!!target.busy} />}
     </div>
   </aside>
   })
