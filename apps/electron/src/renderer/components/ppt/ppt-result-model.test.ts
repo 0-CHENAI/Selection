@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { attentionCount, attentionPageNumbers, checkSummary, formatAttentionPages, pptLiveFrame, pptRowFraction, slidePreviewPath } from './ppt-result-model'
+import { attentionCount, attentionPageNumbers, checkSummary, formatAttentionPages, pagesNeedingAttention, pptLiveFrame, pptRowFraction, slidePreviewPath } from './ppt-result-model'
 import type { PptPageProgress } from '@craft-agent/shared/protocol'
 
 function page(partial: Partial<PptPageProgress> & Pick<PptPageProgress, 'index' | 'status'>): PptPageProgress {
@@ -21,6 +21,7 @@ test('the check summary and row progress follow page state', () => {
     page({ index: 4, status: 'pending' }),
   ]
   expect(checkSummary(pages)).toEqual({ passed: 1, attention: { index: 3, issue: '超出画布', failed: true } })
+  expect(pagesNeedingAttention(pages).map(item => item.index)).toEqual([2, 3])
   expect(attentionPageNumbers(pages)).toEqual([2, 3])
   expect(attentionCount(pages)).toBe(2)
   expect(formatAttentionPages([5, 9], 'zh-Hans')).toBe('5、9')

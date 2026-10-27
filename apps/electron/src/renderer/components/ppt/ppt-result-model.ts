@@ -28,8 +28,13 @@ export function attentionCount(pages: PptPageProgress[]): number {
   return attentionPageNumbers(pages).length
 }
 
+/** Pages the row menu should list. Passed slides stay in the Office panel. */
+export function pagesNeedingAttention(pages: readonly PptPageProgress[]): PptPageProgress[] {
+  return pages.filter(page => page.failed || page.status === 'needs_revision')
+}
+
 export function attentionPageNumbers(pages: readonly PptPageProgress[]): number[] {
-  return pages.filter(page => page.failed || page.status === 'needs_revision').map(page => page.index)
+  return pagesNeedingAttention(pages).map(page => page.index)
 }
 
 /** Page list inside the subtitle. zh/ja use an ideographic comma, so "5、9" stays stable across Intl builds. */

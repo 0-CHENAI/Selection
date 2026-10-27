@@ -23,6 +23,7 @@ import {
   attentionPageNumbers,
   checkSummary,
   formatAttentionPages,
+  pagesNeedingAttention,
   pptLiveFrame,
   pptRowFraction,
 } from './ppt-result-model'
@@ -140,7 +141,7 @@ export function PptArtifactMenuItems({
 }) {
   const { t } = useTranslation()
   const summary = checkSummary(pages)
-  const noticed = attentionPageNumbers(pages).length
+  const flagged = pagesNeedingAttention(pages)
   const openPanel = (panel: 'style' | 'color') => {
     const show = () => panel === 'style' ? onRestyle() : onRecolor()
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(show)
@@ -149,15 +150,15 @@ export function PptArtifactMenuItems({
   return <>
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-restyle" onSelect={() => openPanel('style')}><Layers3 />{t('ppt.result.restyleMenu')}</StyledDropdownMenuItem>}
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-recolor" onSelect={() => openPanel('color')}><Palette />{t('ppt.result.recolorMenu')}</StyledDropdownMenuItem>}
-    {pages.length > 0 && <DropdownMenuSub>
-      <StyledDropdownMenuSubTrigger data-testid="ppt-artifact-checks" className="[&>svg]:!ml-2">
+    {flagged.length > 0 && <DropdownMenuSub>
+      <StyledDropdownMenuSubTrigger data-testid="ppt-artifact-checks" data-attention-pages={flagged.map(page => page.index).join(',')} className="[&>svg]:!ml-2">
         <span>{t('ppt.result.pageCheck')}</span>
-        <span className="ml-auto pl-3 text-muted-foreground">{t('ppt.result.checkCounts', { passed: summary.passed, attention: noticed })}</span>
+        <span className="ml-auto pl-3 text-muted-foreground">{t('ppt.result.checkCounts', { passed: summary.passed, attention: flagged.length })}</span>
       </StyledDropdownMenuSubTrigger>
       <StyledDropdownMenuSubContent>
-        {pages.map(page => <StyledDropdownMenuItem key={`${page.index}-${page.id}`} data-testid="ppt-artifact-page" data-page={page.index} title={page.issue} onSelect={() => onOpen(page.index)}>
+        {flagged.map(page => <StyledDropdownMenuItem key={`${page.index}-${page.id}`} data-testid="ppt-artifact-page" data-page={page.index} title={page.issue} onSelect={() => onOpen(page.index)}>
           <span className="min-w-0 max-w-64 truncate">{t('ppt.result.pageLabel', { page: page.index })}{page.name ? ` ${page.name}` : ''}</span>
-          <span className={cn('ml-auto pl-3', page.failed ? 'text-[var(--destructive-text)]' : page.status === 'needs_revision' ? 'text-[var(--info-text)]' : 'text-muted-foreground')}>{t(pageStatusKey(page))}</span>
+          <span className={cn('ml-auto pl-3', page.failed ? 'text-[var(--destructive-text)]' : 'text-[var(--info-text)]')}>{t(pageStatusKey(page))}</span>
         </StyledDropdownMenuItem>)}
       </StyledDropdownMenuSubContent>
     </DropdownMenuSub>}

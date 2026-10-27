@@ -141,8 +141,25 @@ test('restyle, recolor, page checks and open-with live in the row menu', () => {
   expect(html).toContain('逐页检查')
   expect(html).toContain('13 通过 · 2 留意')
   expect(html).toContain('data-testid="ppt-artifact-checks"')
+  expect(html).toContain('data-attention-pages="5,9"')
   expect(html).not.toContain('<pre')
   expect(html).not.toContain('font-mono')
+})
+
+test('a deck that passed every page does not repeat the check in the menu', () => {
+  const pages = Array.from({ length: 15 }, (_, index) => page(index + 1, 'passed'))
+  const html = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <MenuRoot open>
+        <MenuContent>
+          <PptArtifactMenuItems pages={pages} canRevise onRestyle={() => {}} onRecolor={() => {}} onOpen={() => {}} />
+        </MenuContent>
+      </MenuRoot>
+    </I18nextProvider>,
+  )
+  expect(html).toContain('换风格重排...')
+  expect(html).not.toContain('逐页检查')
+  expect(html).not.toContain('data-testid="ppt-artifact-checks"')
 })
 
 test('the revision panel compares covers and applies to every page', () => {
