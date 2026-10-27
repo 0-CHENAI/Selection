@@ -20,6 +20,8 @@ export interface ArtifactSupplement {
    * A function receives the standard open-with items so they can move into another menu.
    */
   trailing?: ReactNode | ((standardItems: ReactNode) => ReactNode)
+  /** Drop this file from the shelf. No synthetic row is added. */
+  hidden?: boolean
 }
 
 export interface MergedArtifactRow {
@@ -52,9 +54,11 @@ export function mergeArtifactSupplements(
     byKey.set(artifactPathKey(supplement.path), supplement)
   }
   const used = new Set<string>()
-  const source = mode === 'pending'
+  const visible = (artifact: ResponseArtifact) => !byKey.get(artifactPathKey(artifact.path))?.hidden
+  const source = (mode === 'pending'
     ? artifacts.filter(artifact => byKey.has(artifactPathKey(artifact.path)))
     : artifacts
+  ).filter(visible)
   const rows: MergedArtifactRow[] = source.map(artifact => {
     const supplement = byKey.get(artifactPathKey(artifact.path))
     if (supplement) used.add(artifactPathKey(supplement.path))
@@ -62,7 +66,7 @@ export function mergeArtifactSupplements(
   })
   for (const supplement of supplements) {
     const key = artifactPathKey(supplement.path)
-    if (used.has(key) || byKey.get(key) !== supplement) continue
+    if (used.has(key) || byKey.get(key) !== supplement || supplement.hidden) continue
     if (!intersects(supplement.pendingAnchors, anchorSet)) continue
     used.add(key)
     rows.unshift({

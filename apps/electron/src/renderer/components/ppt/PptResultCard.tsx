@@ -242,7 +242,18 @@ function usePptArtifactSupplements(session: Session | null): readonly ArtifactSu
     if (!session?.ppt || !session) return null
     const total = progress?.total ?? 0
     const fileName = progress?.fileName
-    if (!generating && total <= 0 && !fileName) return null
+    // Page progress lives on the Office button. The deliverable row waits until the turn settles.
+    if (generating) {
+      const path = progress?.pptxPath
+      if (!path) return null
+      return {
+        path,
+        name: fileName || 'slides.pptx',
+        extension: 'pptx',
+        hidden: true,
+      } satisfies ArtifactSupplement
+    }
+    if (total <= 0 && !fileName) return null
     const pages = progress?.pages ?? []
     const target = pptShelfTarget(session.id, session.messages, progress?.pptxPath)
     const anchors = target.anchors.length ? target.anchors : [pptSessionAnchor(session.id)]

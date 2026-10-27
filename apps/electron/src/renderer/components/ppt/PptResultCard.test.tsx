@@ -82,24 +82,89 @@ function view(state: 'generating' | 'passed' | 'attention') {
   )
 }
 
-test('a generating deck is one artifact row with a live subtitle, stop control and 2px bar', () => {
+test('a generating deck does not render a deliverable card or a stop control', () => {
   const html = view('generating')
-  expect(html.match(/成果文件/g)?.length).toBe(2)
-  expect(html).toContain('data-testid="ppt-artifact-row"')
-  expect(html).toContain('项目介绍.pptx')
-  expect(html).toContain('data-file-kind="powerpoint"')
-  expect(html).toContain('生成中 · 第 6/15 页 · 市场概览')
-  expect(html).toContain('data-testid="artifact-row-progress"')
-  expect(html).toContain('data-progress="0.4"')
-  expect(html).toContain('h-[2px]')
-  expect(html).toContain('data-testid="ppt-artifact-stop"')
-  expect(html).toContain('停止')
-  expect(html).not.toContain('data-testid="ppt-artifact-menu"')
+  expect(html).not.toContain('成果文件')
+  expect(html).not.toContain('data-testid="ppt-artifact-row"')
+  expect(html).not.toContain('项目介绍.pptx')
+  expect(html).not.toContain('data-testid="artifact-row-progress"')
+  expect(html).not.toContain('data-testid="ppt-artifact-stop"')
+  expect(html).not.toContain('停止')
   expect(html).not.toContain('data-testid="ppt-result-card"')
   expect(html).not.toContain('data-testid="ppt-result-cover"')
-  expect(html).not.toContain('data-testid="ppt-result-thumb"')
   expect(html).not.toContain('<pre')
-  expect(html).not.toContain('font-mono')
+})
+
+test('a listed pptx stays out of the card while generation is in flight, then returns', () => {
+  const listed = session('generating', {
+    pptProgress: {
+      fileName: '项目介绍.pptx',
+      pptxPath: '/sessions/one/项目介绍.pptx',
+      total: 15,
+      completed: 5,
+      current: 6,
+      currentTitle: '市场机会',
+      generating: true,
+      pages: [],
+    },
+    messages: [{
+      id: 'a1', role: 'assistant', turnId: 't1', content: '', timestamp: 1,
+      artifactVersions: [
+        { path: '/sessions/one/项目介绍.pptx', versionId: 'v-pptx', ordinal: 1 },
+        { path: '/sessions/one/附录.docx', versionId: 'v-docx', ordinal: 1 },
+      ],
+    }],
+  })
+  const html = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <PptArtifactScope session={listed}>
+        <ResponseArtifacts
+          artifacts={[
+            { path: '/sessions/one/项目介绍.pptx', name: '项目介绍.pptx', extension: 'pptx' },
+            { path: '/sessions/one/附录.docx', name: '附录.docx', extension: 'docx' },
+          ]}
+          anchors={['a1']}
+          mode="settled"
+        />
+      </PptArtifactScope>
+    </I18nextProvider>,
+  )
+  expect(html).toContain('成果文件')
+  expect(html).toContain('附录.docx')
+  expect(html).not.toContain('项目介绍.pptx')
+  expect(html).not.toContain('data-testid="ppt-artifact-row"')
+  expect(html).not.toContain('data-testid="ppt-artifact-stop"')
+  expect(html).not.toContain('停止')
+
+  const stopped = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <PptArtifactScope session={session('passed', { isProcessing: false })}>
+        <ShelfProbe />
+      </PptArtifactScope>
+    </I18nextProvider>,
+  )
+  expect(stopped).toContain('项目介绍.pptx')
+  expect(stopped).toContain('PPTX · 15 页')
+  expect(stopped).toContain('全部通过检查')
+  expect(stopped).not.toContain('data-testid="ppt-artifact-stop"')
+  expect(stopped).not.toContain('data-testid="artifact-row-progress"')
+})
+
+test('processing hides an existing pptx before the first page count arrives', () => {
+  const html = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <PptArtifactScope session={session('passed', { isProcessing: true })}>
+        <ResponseArtifacts
+          artifacts={[{ path: '/sessions/one/项目介绍.pptx', name: '项目介绍.pptx', extension: 'pptx' }]}
+          anchors={['a1']}
+          mode="settled"
+        />
+      </PptArtifactScope>
+    </I18nextProvider>,
+  )
+  expect(html).not.toContain('项目介绍.pptx')
+  expect(html).not.toContain('成果文件')
+  expect(html).not.toContain('停止')
 })
 
 test('a finished deck reports that every page passed', () => {
