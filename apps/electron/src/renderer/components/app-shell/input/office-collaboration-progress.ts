@@ -47,3 +47,26 @@ export function officeCollaborationLiveProgress(progress: PptProgress | undefine
 export function officeProgressAttribute(fraction: number): string {
   return String(Math.round(Math.max(0, Math.min(1, fraction)) * 1000) / 1000)
 }
+
+type OfficeButtonTranslate = (key: string, options?: Record<string, string | number>) => string
+
+/** Visible label and hover text. The page tooltip replaces the open/close hint while a page is in progress. */
+export function officeButtonCopy(
+  t: OfficeButtonTranslate,
+  input: { active: boolean; live: OfficeCollaborationLiveProgress | null },
+): { label: string; tooltip: string; pageTooltip?: string } {
+  const name = t('chat.officePreview.collaborate')
+  const label = input.live
+    ? t('chat.officePreview.generatingLabel', { name, current: input.live.current, total: input.live.total })
+    : name
+  const pageTooltip = input.live
+    ? input.live.title
+      ? t('chat.officePreview.generatingTooltipTitle', { current: input.live.current, total: input.live.total, title: input.live.title })
+      : t('chat.officePreview.generatingTooltip', { current: input.live.current, total: input.live.total })
+    : undefined
+  return {
+    label,
+    tooltip: pageTooltip ?? t(input.active ? 'chat.officePreview.closeLabel' : 'chat.officePreview.collaborateHint'),
+    ...(pageTooltip ? { pageTooltip } : {}),
+  }
+}
