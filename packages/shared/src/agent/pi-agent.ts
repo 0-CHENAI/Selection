@@ -1687,6 +1687,8 @@ export class PiAgent extends BaseAgent {
       hasSourceActivation: !!this.onSourceActivationRequest,
       permissionManager: this.permissionManager,
       prerequisiteManager: this.prerequisiteManager,
+      backendMetadata: { intent: preIntent, displayName: preDisplayName },
+      supportsImages: this.resolveCurrentModelSupportsImages(),
       assistantGeneration,
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
@@ -1913,6 +1915,8 @@ export class PiAgent extends BaseAgent {
           hasSourceActivation: !!this.onSourceActivationRequest,
           permissionManager: this.permissionManager,
           prerequisiteManager: this.prerequisiteManager,
+          backendMetadata: { intent: preIntent, displayName: preDisplayName },
+          supportsImages: this.resolveCurrentModelSupportsImages(),
           assistantGeneration,
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
         });
@@ -2140,6 +2144,10 @@ export class PiAgent extends BaseAgent {
     if (this._sessionToolContext) {
       this._sessionToolContext.supportsImages = false;
     }
+  }
+
+  currentModelSupportsImages(): boolean {
+    return this.resolveCurrentModelSupportsImages();
   }
 
   private resolveCurrentModelSupportsImages(): boolean {
@@ -2842,7 +2850,11 @@ export class PiAgent extends BaseAgent {
       const stableParts = this.promptBuilder.buildStableContextParts();
       stableParts.push(buildPiExecutionScope(this.config.session, this._sessionId));
       const volatileParts = this.promptBuilder.buildVolatileContextParts(
-        { plansFolderPath, dataFolderPath },
+        {
+          plansFolderPath,
+          dataFolderPath,
+          imageInput: this.resolveCurrentModelSupportsImages(),
+        },
         sourceContext
       );
 

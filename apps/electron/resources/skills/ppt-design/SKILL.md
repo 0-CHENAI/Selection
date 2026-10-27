@@ -78,10 +78,14 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 | G1 故事/页序 | 用户材料、逐页主张、实际页数和顺序一致。 |
 | G2 设计/排版 | 只锁定一个风格；`deck_check` 没有问题；字号不低于该风格的下限。预检不是视觉检查。 |
 | G3 保存/读回 | OfficeCLI `validate` 没有未解决的错误或警告。文字、图表数据、单位、备注、来源和页序读回正确。 |
-| G4 逐页视觉 | 每一页的截图都打开看过。接触表不能代替逐页。 |
+| G4 逐页视觉 | 跟随 `<session_state>` 的 `imageInput`。`enabled`：每一页用 Read 或 `call_llm` 的 `attachments` 看截图。`unavailable`：写明 `image_capability_mismatch`，G4 不算通过。不要改用 OCR。接触表不能代替逐页。 |
 | G5 关闭/重开 | 最终绝对路径上的文件重新读过，页数和内容正确。 |
 
 G4 **整项任务最多 3 次：首次 + 至多 2 次修复复查**。更换渲染器、审查者、会话或 pitch/Morph 都不重置次数。任何检查之后的修改，都必须还有剩余的一次视觉检查盖住。第三次仍有缺陷，或没有可用截图：写明页码、问题和阻塞，不能声称可交付。
+
+G4 跟随当前模型的读图能力，而不是固定改走 OCR。`imageInput: enabled` 时用 Read 或 `call_llm` 的 `attachments` 看每一页；`imageInput: unavailable` 或返回 `image_capability_mismatch` 时停下来说明 G4 未通过。两种结果都不要用 Swift/Vision（`VNRecognizeTextRequest`）、tesseract，或名为 `Swift: OCR` / `OCR New Pages` 的步骤代替看图。
+
+Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 
 ## 交付
 

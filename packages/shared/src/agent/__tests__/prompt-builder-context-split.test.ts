@@ -66,6 +66,18 @@ describe('PromptBuilder volatile/stable context split (issue #862)', () => {
     expect(stableText).not.toContain('/tmp/data')
   })
 
+  it('puts the current image capability on the volatile session state', () => {
+    cleanupModeState(SESSION_ID)
+    const builder = makeBuilder()
+    const enabled = builder.buildVolatileContextParts({ ...OPTS, imageInput: true }, SOURCE_BLOCK).join('\n')
+    const unavailable = builder.buildVolatileContextParts({ ...OPTS, imageInput: false }, SOURCE_BLOCK).join('\n')
+    expect(enabled).toContain('imageInput: enabled')
+    expect(enabled).toContain('call_llm attachments')
+    expect(unavailable).toContain('imageInput: unavailable')
+    expect(unavailable).toContain('image_capability_mismatch')
+    expect(builder.buildVolatileContextParts(OPTS, SOURCE_BLOCK).join('\n')).not.toContain('imageInput:')
+  })
+
   it('does not inject the skill catalog for mini agents', () => {
     cleanupModeState(SESSION_ID)
     const builder = new TestAgent(createMockBackendConfig({

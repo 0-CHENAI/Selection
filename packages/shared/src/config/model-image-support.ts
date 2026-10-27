@@ -5,6 +5,8 @@
  * must compare as the same model, or vision flags never apply at send time.
  */
 
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from '../agent/ppt-visual-qa-policy.ts'
+
 const PROVIDER_PREFIXES = ['pi/', 'custom-endpoint/']
 
 export function normalizeConnectionModelId(id: string): string {
@@ -172,7 +174,7 @@ export function resolveModelImageSupportFromCatalog(input: {
 export function buildSkippedImagesNote(imageCount: number): string {
   const count = Math.max(0, Math.floor(imageCount))
   const noun = count === 1 ? 'image' : 'images'
-  return `[Image input unavailable: the user attached ${count} ${noun} that this model cannot view. Answer from the text only.]`
+  return `[Image input unavailable: the user attached ${count} ${noun} that this model cannot view. Answer from the text only. ${PPT_VISUAL_QA_NO_OCR_NOTE}]`
 }
 
 /**

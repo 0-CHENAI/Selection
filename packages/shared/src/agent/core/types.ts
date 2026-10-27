@@ -114,6 +114,8 @@ export interface ContextBlockOptions {
   inactiveSources?: LoadedSource[];
   /** Whether local MCP is enabled */
   localMcpEnabled?: boolean;
+  /** Current model can accept images. Omitted when unresolved. */
+  imageInput?: boolean;
 }
 
 /**

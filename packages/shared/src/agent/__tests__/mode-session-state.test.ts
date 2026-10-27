@@ -116,4 +116,18 @@ describe('mode transition session_state context', () => {
 
     cleanupModeState(sessionId);
   });
+
+  it('records the current model image capability when the caller knows it', () => {
+    const sessionId = `image-input-${Date.now()}`;
+    const enabled = formatSessionState(sessionId, { imageInput: true });
+    const unavailable = formatSessionState(sessionId, { imageInput: false });
+    expect(enabled).toContain('imageInput: enabled');
+    expect(enabled).toContain('call_llm attachments');
+    expect(enabled).not.toContain('image_capability_mismatch');
+    expect(unavailable).toContain('imageInput: unavailable');
+    expect(unavailable).toContain('image_capability_mismatch');
+    expect(unavailable).toContain('Do not OCR');
+    expect(formatSessionState(sessionId)).not.toContain('imageInput:');
+    cleanupModeState(sessionId);
+  });
 });

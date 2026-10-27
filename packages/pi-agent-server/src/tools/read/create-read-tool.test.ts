@@ -138,7 +138,10 @@ describe('Selection Pi read tool', () => {
     const text = result.content.find(content => content.type === 'text')
 
     expect(result.content.some(content => content.type === 'image')).toBe(false)
-    expect(text?.type === 'text' ? text.text : '').toContain('image_capability_mismatch')
+    const mismatch = text?.type === 'text' ? text.text : ''
+    expect(mismatch).toContain('image_capability_mismatch')
+    expect(mismatch).toContain('Do not OCR')
+    expect(mismatch).toContain('leave G4 blocked')
   })
 
   it('uses the same pixel budget for a full original attachment and a crop', async () => {

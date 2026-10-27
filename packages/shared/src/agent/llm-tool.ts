@@ -27,6 +27,7 @@ import path from 'node:path';
 import { resolveModelImageSupportFromCatalog } from '../config/model-image-support.ts';
 import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../config/models.ts';
 import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from './ppt-visual-qa-policy.ts';
 
 // ============================================================================
 // QUERY INTERFACES (used by agent backends to implement queryFn)
@@ -221,10 +222,10 @@ export function callLlmModelSupportsImages(
 
 export function imageAttachmentUnsupportedMessage(index: number, modelId: string | undefined): string {
   const model = modelId?.trim();
-  if (model) {
-    return `Attachment ${index + 1}: Image attachments are not supported by "${model}" because vision is not enabled for this model. Use a vision-capable model, or text files only.`;
-  }
-  return `Attachment ${index + 1}: Image attachments are not supported because vision is not enabled for the active model. Use a vision-capable model, or text files only.`;
+  const reason = model
+    ? `Attachment ${index + 1}: Image attachments are not supported by "${model}" because vision is not enabled for this model. Use a vision-capable model, or text files only.`
+    : `Attachment ${index + 1}: Image attachments are not supported because vision is not enabled for the active model. Use a vision-capable model, or text files only.`;
+  return `${reason}\n${PPT_VISUAL_QA_NO_OCR_NOTE}`;
 }
 
 /** Images ready for session.prompt. Empty or invalid input stays omitted. */
