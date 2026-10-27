@@ -36,3 +36,11 @@ it('ignores a supplement aimed at another reply', () => {
   expect(mergeArtifactSupplements([pptx], [supplement()], ['other'], 'settled').map(row => row.supplement)).toEqual([undefined])
   expect(mergeArtifactSupplements([], [supplement()], ['other'], 'pending')).toEqual([])
 })
+
+it('drops a hidden file from the shelf and does not inject it', () => {
+  const hidden = supplement({ hidden: true, pendingAnchors: ['msg-1'], progress: 0.4 })
+  expect(mergeArtifactSupplements([docx, pptx], [hidden], ['msg-1'], 'settled').map(row => row.artifact.name)).toEqual(['附录.docx'])
+  expect(mergeArtifactSupplements([docx, pptx], [hidden], ['msg-1'], 'pending')).toEqual([])
+  expect(mergeArtifactSupplements([], [hidden], ['msg-1'], 'pending')).toEqual([])
+  expect(mergeArtifactSupplements([pptx], [supplement({ hidden: true, applyAnchors: ['other'] })], ['msg-1'], 'settled')).toHaveLength(1)
+})
