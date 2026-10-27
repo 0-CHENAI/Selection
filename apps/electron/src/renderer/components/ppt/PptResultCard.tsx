@@ -3,12 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle2, Layers3, MoreHorizontal, Palette, PanelRight, Square } from 'lucide-react'
 import {
   DropdownMenu,
-  DropdownMenuSub,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
-  StyledDropdownMenuSubContent,
-  StyledDropdownMenuSubTrigger,
 } from '@craft-agent/ui'
 import { ArtifactSupplementShelf, ArtifactSupplementsProvider, type ArtifactSupplement } from '@craft-agent/ui/chat'
 import type { PptChartFallback, PptPageProgress, PptRevision, PptRun } from '@craft-agent/shared/protocol'
@@ -21,9 +18,7 @@ import { usePptRevisionSend } from './ppt-revision'
 import { PptRevisionPanel } from './PptRevisionPanel'
 import {
   attentionPageNumbers,
-  checkSummary,
   formatAttentionPages,
-  pagesNeedingAttention,
   pptLiveFrame,
   pptRowFraction,
 } from './ppt-result-model'
@@ -67,14 +62,6 @@ function messageAnchorKey(messages: Session['messages'] | undefined): string {
   return key
 }
 
-function pageStatusKey(page: PptPageProgress): 'ppt.result.failedShort' | 'ppt.result.attentionShort' | 'ppt.result.passed' | 'ppt.result.fixing' | 'ppt.result.pending' {
-  if (page.failed) return 'ppt.result.failedShort'
-  if (page.status === 'needs_revision') return 'ppt.result.attentionShort'
-  if (page.status === 'passed') return 'ppt.result.passed'
-  if (page.status === 'fixing') return 'ppt.result.fixing'
-  return 'ppt.result.pending'
-}
-
 export function PptArtifactMeta({
   generating,
   total,
@@ -82,7 +69,6 @@ export function PptArtifactMeta({
   currentTitle,
   pages,
   run,
-  onOpen,
 }: {
   generating: boolean
   total: number
@@ -90,7 +76,6 @@ export function PptArtifactMeta({
   currentTitle?: string
   pages: PptPageProgress[]
   run?: PptRun
-  onOpen: (page: number) => void
 }) {
   const { t, i18n } = useTranslation()
   const action = run?.action === 'recolor'
@@ -116,7 +101,7 @@ export function PptArtifactMeta({
       ? t('ppt.result.attentionCount', { count: flagged.length })
       : t('ppt.result.attentionPages', { pages: formatAttentionPages(flagged.map(page => page.index), i18n.language) })
     const failed = flagged.some(page => page.failed)
-    return <span data-testid="ppt-artifact-meta">{head}{' · '}<button type="button" data-testid="ppt-artifact-attention" className={cn('rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', failed ? 'text-[var(--destructive-text)]' : 'text-[var(--info-text)]')} onClick={event => { event.stopPropagation(); onOpen(flagged[0]!.index) }}>{label}</button></span>
+    return <span data-testid="ppt-artifact-meta">{head}{' · '}<span data-testid="ppt-artifact-attention" className={failed ? 'text-[var(--destructive-text)]' : 'text-[var(--info-text)]'}>{label}</span></span>
   }
   if (pages.length > 0 && pages.every(page => page.status === 'passed' && !page.failed)) {
     return <span data-testid="ppt-artifact-meta" className="inline-flex max-w-full min-w-0 items-center gap-1"><span className="truncate">{head}</span><CheckCircle2 aria-hidden="true" className="size-3 shrink-0 text-[var(--success-text)]" /><span className="truncate text-[var(--success-text)]">{t('ppt.result.allPassed')}</span></span>
@@ -125,23 +110,17 @@ export function PptArtifactMeta({
 }
 
 export function PptArtifactMenuItems({
-  pages,
   chartFallbacks,
   canRevise,
   onRestyle,
   onRecolor,
-  onOpen,
 }: {
-  pages: PptPageProgress[]
   chartFallbacks?: PptChartFallback[]
   canRevise: boolean
   onRestyle: () => void
   onRecolor: () => void
-  onOpen: (page: number) => void
 }) {
   const { t } = useTranslation()
-  const summary = checkSummary(pages)
-  const flagged = pagesNeedingAttention(pages)
   const openPanel = (panel: 'style' | 'color') => {
     const show = () => panel === 'style' ? onRestyle() : onRecolor()
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(show)
@@ -150,18 +129,6 @@ export function PptArtifactMenuItems({
   return <>
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-restyle" onSelect={() => openPanel('style')}><Layers3 />{t('ppt.result.restyleMenu')}</StyledDropdownMenuItem>}
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-recolor" onSelect={() => openPanel('color')}><Palette />{t('ppt.result.recolorMenu')}</StyledDropdownMenuItem>}
-    {flagged.length > 0 && <DropdownMenuSub>
-      <StyledDropdownMenuSubTrigger data-testid="ppt-artifact-checks" data-attention-pages={flagged.map(page => page.index).join(',')} className="[&>svg]:!ml-2">
-        <span>{t('ppt.result.pageCheck')}</span>
-        <span className="ml-auto pl-3 text-muted-foreground">{t('ppt.result.checkCounts', { passed: summary.passed, attention: flagged.length })}</span>
-      </StyledDropdownMenuSubTrigger>
-      <StyledDropdownMenuSubContent>
-        {flagged.map(page => <StyledDropdownMenuItem key={`${page.index}-${page.id}`} data-testid="ppt-artifact-page" data-page={page.index} title={page.issue} onSelect={() => onOpen(page.index)}>
-          <span className="min-w-0 max-w-64 truncate">{t('ppt.result.pageLabel', { page: page.index })}{page.name ? ` ${page.name}` : ''}</span>
-          <span className={cn('ml-auto pl-3', page.failed ? 'text-[var(--destructive-text)]' : 'text-[var(--info-text)]')}>{t(pageStatusKey(page))}</span>
-        </StyledDropdownMenuItem>)}
-      </StyledDropdownMenuSubContent>
-    </DropdownMenuSub>}
     {chartFallbacks?.map((item, index) => <StyledDropdownMenuItem key={`${item.skill}-${item.page ?? 'deck'}-${index}`} disabled className="whitespace-normal text-xs text-muted-foreground">
       {t('ppt.result.chartFallback', { where: item.page ? t('ppt.result.chartFallback.page', { page: item.page }) : '', skill: item.skill, reason: t(REASON_KEY[item.reason]) })}
     </StyledDropdownMenuItem>)}
@@ -234,7 +201,7 @@ function PptArtifactTrailing({
             </button>
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end">
-            <PptArtifactMenuItems pages={pages} chartFallbacks={chartFallbacks} canRevise={!!onApply} onRestyle={() => setPanel('style')} onRecolor={() => setPanel('color')} onOpen={onOpen} />
+            <PptArtifactMenuItems chartFallbacks={chartFallbacks} canRevise={!!onApply} onRestyle={() => setPanel('style')} onRecolor={() => setPanel('color')} />
             {standardItems}
           </StyledDropdownMenuContent>
         </DropdownMenu>
@@ -294,7 +261,7 @@ function usePptArtifactSupplements(session: Session | null): readonly ArtifactSu
       progress: pptRowFraction({ generating, total, completed: progress?.completed ?? 0, current: progress?.current }),
       testId: 'ppt-artifact-row',
       onActivate: () => reveal(openAt),
-      meta: <PptArtifactMeta generating={generating} total={total} current={frame.current} currentTitle={progress?.currentTitle} pages={pages} run={run} onOpen={reveal} />,
+      meta: <PptArtifactMeta generating={generating} total={total} current={frame.current} currentTitle={progress?.currentTitle} pages={pages} run={run} />,
       trailing: (standardItems: ReactNode) => <PptArtifactTrailing
         standardItems={standardItems}
         generating={generating}

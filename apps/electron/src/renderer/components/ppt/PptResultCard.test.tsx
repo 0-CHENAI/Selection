@@ -116,50 +116,33 @@ test('a finished deck reports that every page passed', () => {
   expect(html.match(/成果文件/g)?.length).toBe(2)
 })
 
-test('flagged pages stay in the subtitle and can jump to the first one', () => {
+test('flagged pages stay in the subtitle as a status notice', () => {
   const html = view('attention')
   expect(html).toContain('PPTX · 15 页')
-  expect(html).toContain('data-testid="ppt-artifact-attention"')
+  expect(html).toContain('<span data-testid="ppt-artifact-attention"')
   expect(html).toContain('第 5、9 页需留意')
+  expect(html).not.toContain('underline')
   expect(html).not.toContain('全部通过检查')
+  expect(html).not.toContain('data-testid="ppt-artifact-page"')
   expect(html).not.toContain('<pre')
 })
 
-test('restyle, recolor, page checks and open-with live in the row menu', () => {
-  const pages = Array.from({ length: 15 }, (_, index) => page(index + 1, index + 1 === 5 || index + 1 === 9 ? 'needs_revision' : 'passed'))
+test('the row menu keeps restyle and recolor and does not list pages', () => {
   const html = renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <MenuRoot open>
         <MenuContent>
-          <PptArtifactMenuItems pages={pages} canRevise onRestyle={() => {}} onRecolor={() => {}} onOpen={() => {}} />
+          <PptArtifactMenuItems canRevise onRestyle={() => {}} onRecolor={() => {}} />
         </MenuContent>
       </MenuRoot>
     </I18nextProvider>,
   )
   expect(html).toContain('换风格重排...')
   expect(html).toContain('换配色...')
-  expect(html).toContain('逐页检查')
-  expect(html).toContain('13 通过 · 2 留意')
-  expect(html).toContain('data-testid="ppt-artifact-checks"')
-  expect(html).toContain('data-attention-pages="5,9"')
+  expect(html).not.toContain('逐页检查')
+  expect(html).not.toContain('data-testid="ppt-artifact-page"')
   expect(html).not.toContain('<pre')
   expect(html).not.toContain('font-mono')
-})
-
-test('a deck that passed every page does not repeat the check in the menu', () => {
-  const pages = Array.from({ length: 15 }, (_, index) => page(index + 1, 'passed'))
-  const html = renderToStaticMarkup(
-    <I18nextProvider i18n={i18n}>
-      <MenuRoot open>
-        <MenuContent>
-          <PptArtifactMenuItems pages={pages} canRevise onRestyle={() => {}} onRecolor={() => {}} onOpen={() => {}} />
-        </MenuContent>
-      </MenuRoot>
-    </I18nextProvider>,
-  )
-  expect(html).toContain('换风格重排...')
-  expect(html).not.toContain('逐页检查')
-  expect(html).not.toContain('data-testid="ppt-artifact-checks"')
 })
 
 test('the revision panel compares covers and applies to every page', () => {
