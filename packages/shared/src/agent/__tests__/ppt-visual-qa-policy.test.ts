@@ -252,7 +252,7 @@ describe('PPT visual QA cannot use OCR', () => {
 
     const note = readRepo('packages/shared/src/agent/ppt-visual-qa-note.ts');
     expect(note).toContain(PPT_VISUAL_QA_NO_OCR_NOTE);
-    expect(note).not.toMatch(/node:fs|from ['"]fs['"]/);
+    expect(note).not.toMatch(/from ['"](?:node:)?fs(?:\/promises)?['"]|require\(\s*['"](?:node:)?fs/);
     expect(note).not.toMatch(/from ['"][^'"]*ppt-visual-qa-policy/);
 
     const policy = readRepo('packages/shared/src/agent/ppt-visual-qa-policy.ts');
