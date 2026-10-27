@@ -83,6 +83,7 @@ function chromeBinary(): string | undefined {
 
 test('preview document keeps a selected slide shape from covering later siblings', () => {
   const html = officePreviewDocument('<div class="slide"></div>', 'preview')
+  expect(html).toContain('selection-office-paste')
   expect(html).toContain('.slide .officecli-selected')
   expect(html).toContain('.thumb-slide .officecli-selected')
   expect(html).toContain('z-index: auto !important')
@@ -128,6 +129,86 @@ test.skipIf(!chromeBinary())('clicking a full-bleed slide shape leaves that page
     await new Promise(resolve => server.close(resolve))
   }
 }, 30_000)
+
+test.skipIf(!chromeBinary())('dropping or pasting a file on the Office preview forwards it to the parent', async () => {
+  const html = officePreviewDocument('<div class="slide"></div>', 'preview-paste')
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.end(html)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as { port: number }).port
+  const debugPort = 9800 + Math.floor(Math.random() * 500)
+  const chrome = spawn(chromeBinary()!, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=/tmp/selection-ppt-paste-${debugPort}`,
+    '--window-size=800,600', 'about:blank',
+  ], { stdio: 'ignore' })
+  try {
+    await waitForChrome(debugPort)
+    const targets = await fetch(`http://127.0.0.1:${debugPort}/json`).then(response => response.json()) as Array<{ type: string; webSocketDebuggerUrl: string }>
+    const page = targets.find(target => target.type === 'page')
+    expect(page?.webSocketDebuggerUrl).toBeTruthy()
+    const forwarded = await forwardPreviewFile(page!.webSocketDebuggerUrl, `http://127.0.0.1:${port}/`)
+    expect(forwarded).toEqual({ name: 'extra.png', type: 'image/png', bytes: 4 })
+  } finally {
+    chrome.kill('SIGKILL')
+    await new Promise(resolve => server.close(resolve))
+  }
+}, 30_000)
+
+async function forwardPreviewFile(webSocketUrl: string, url: string): Promise<{ name: string; type: string; bytes: number }> {
+  const socket = new WebSocket(webSocketUrl)
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve())
+    socket.addEventListener('error', () => reject(new Error('Chrome debugging socket failed')))
+  })
+  let id = 0
+  const pending = new Map<number, (message: CdpMessage) => void>()
+  let onLoad: (() => void) | undefined
+  socket.addEventListener('message', event => {
+    const message = JSON.parse(String(event.data)) as CdpMessage
+    if (message.id && pending.has(message.id)) pending.get(message.id)!(message)
+    if (message.method === 'Page.loadEventFired') onLoad?.()
+  })
+  const send = (method: string, params: Record<string, unknown> = {}) => new Promise<CdpMessage>((resolve, reject) => {
+    const msgId = ++id
+    pending.set(msgId, resolve)
+    socket.send(JSON.stringify({ id: msgId, method, params }))
+    setTimeout(() => { if (pending.delete(msgId)) reject(new Error(`${method} timed out`)) }, 8_000)
+  })
+  try {
+    await send('Page.enable')
+    const loaded = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('preview page did not load')), 8_000)
+      onLoad = () => { clearTimeout(timer); resolve() }
+    })
+    await send('Page.navigate', { url })
+    await loaded
+    const message = await send('Runtime.evaluate', {
+      expression: `new Promise((resolve) => {
+        const timer = setTimeout(() => resolve({ name: '', type: '', bytes: -1 }), 3000)
+        window.addEventListener('message', (event) => {
+          if (!event.data || event.data.type !== 'selection-office-paste') return
+          clearTimeout(timer)
+          const file = (event.data.files || [])[0] || {}
+          resolve({ name: file.name || '', type: file.type || '', bytes: file.buffer ? file.buffer.byteLength : 0 })
+        })
+        const file = new File([new Uint8Array([1, 2, 3, 4])], 'extra.png', { type: 'image/png' })
+        const data = new DataTransfer()
+        data.items.add(file)
+        document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }))
+      })`,
+      returnByValue: true,
+      awaitPromise: true,
+    })
+    if (message.result?.exceptionDetails) throw new Error(JSON.stringify(message.result.exceptionDetails))
+    return message.result?.result?.value as { name: string; type: string; bytes: number }
+  } finally {
+    socket.close()
+  }
+}
 
 interface Hit {
   title: string | null

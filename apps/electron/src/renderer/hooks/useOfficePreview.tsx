@@ -1,7 +1,8 @@
+import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
+import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, formatAttachmentBytes, maxAttachmentBytes, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { officePreviewDocument } from '../lib/office-preview-document'
 import { OFFICE_PREVIEW_REVEAL, OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
@@ -9,6 +10,8 @@ import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
 import { decideOfficeSelection } from '../lib/office-selection'
 import { officeScrollAnchor, readOfficePreviewState, writeOfficePreviewState, type OfficePreviewScope, type OfficePreviewState } from '../lib/office-preview-state'
+import { currentMaxMessageBytes } from '../lib/attachment-size'
+import { filesFromOfficePreviewPaste, OFFICE_PREVIEW_PASTE } from '../lib/office-preview-transfer'
 import { Popover, PopoverAnchor, PopoverContent } from '../components/ui/popover'
 import { ArrowLeftRight, Copy, LoaderCircle, X } from 'lucide-react'
 import { FileTypeIcon } from '@craft-agent/ui'
@@ -355,6 +358,22 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     refreshSoon.current = kick
     arm(delay())
     const receive = (event: MessageEvent) => {
+      if (event.source === frames.current.get(key)?.contentWindow && event.data?.previewId === previewId && event.data.type === OFFICE_PREVIEW_PASTE) {
+        const transferred = filesFromOfficePreviewPaste(event.data)
+        if (transferred.files.length) {
+          window.dispatchEvent(new CustomEvent('craft:paste-files', { detail: { files: transferred.files, sessionId } }))
+        }
+        const limit = maxAttachmentBytes(currentMaxMessageBytes())
+        for (const rejected of transferred.rejected) {
+          toast.warning(String(i18n.t('chat.attachmentFileTooLarge', {
+            name: rejected.name,
+            size: formatAttachmentBytes(rejected.size),
+            limit: formatAttachmentBytes(limit),
+            defaultValue: '{{name}} is {{size}}, over the {{limit}} limit for one message. Send a smaller file.',
+          })))
+        }
+        return
+      }
       if (event.source === frames.current.get(key)?.contentWindow && event.data?.previewId === previewId && event.data.type === 'selection-office-scroll' && current.current?.preview?.previewId === previewId) {
         if (Number.isFinite(event.data.scrollY)) scrollY.current = Math.max(0, event.data.scrollY)
         if (Number.isFinite(event.data.scrollX)) scrollX.current = Math.max(0, event.data.scrollX)

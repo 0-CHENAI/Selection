@@ -177,7 +177,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
 import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath, resolveImageSendPolicy } from '@craft-agent/shared/utils'
@@ -7330,9 +7330,14 @@ export class SessionManager implements ISessionManager {
       this.persistSession(managed)
       this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { ppt: managed.ppt } }, managed.workspace.id)
     }
+    if (options?.officeSelection && directedOfficeElements(options.officeSelection) === 0) {
+      options = { ...options, officeSelection: undefined }
+    }
     if (options?.officeSelection) {
       if (options.officeContext) throw new Error('Office 选区修改不能同时携带普通预览上下文')
-      if (attachments?.length || storedAttachments?.length || options.annotationFollowUps?.length) throw new Error('定向 Office 修改暂不支持同时发送附件或其他反馈')
+      if (officeSelectionAttachmentConflict(options.officeSelection, (attachments?.length ?? 0) + (storedAttachments?.length ?? 0), options.annotationFollowUps?.length ?? 0)) {
+        throw new Error(OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT)
+      }
       return this.sendOfficeRevision(managed, message, options, onAck)
     }
     if (this.officeRevisionRuns.has(sessionId)) throw new Error('请等待 Office 修改结束后再发送消息')

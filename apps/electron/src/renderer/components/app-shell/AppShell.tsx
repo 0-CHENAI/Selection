@@ -1,4 +1,5 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
+import { clipboardFiles } from '@/lib/clipboard-files'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react"
@@ -976,9 +977,9 @@ function AppShellContent({
         return
       }
 
-      // Skip if there are no files in the clipboard
-      const files = e.clipboardData?.files
-      if (!files || files.length === 0) return
+      // Skip if there are no files in the clipboard. Screenshots are often items, not files.
+      const files = clipboardFiles(e.clipboardData)
+      if (files.length === 0) return
 
       // Skip if the active element is an input/textarea/contenteditable (let it handle paste directly)
       const activeElement = document.activeElement as HTMLElement | null

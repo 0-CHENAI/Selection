@@ -117,6 +117,50 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
   };
   document.addEventListener('click', e => { if (e.target.closest?.('a')) e.preventDefault(); }, true);
   document.addEventListener('submit', e => e.preventDefault(), true);
+  // The preview iframe keeps focus while a deck is open. Paste and drop would
+  // otherwise never reach the chat composer. Forward the user's own files.
+  const externalFileLimit = 32 * 1024 * 1024;
+  const filesFromEvent = (event) => {
+    const data = event.clipboardData || event.dataTransfer;
+    if (!data) return [];
+    const direct = [...(data.files || [])].filter(file => file && file.size > 0);
+    if (direct.length || !data.items) return direct;
+    const out = [];
+    for (const item of data.items) {
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile && item.getAsFile();
+      if (file && file.size > 0) out.push(file);
+    }
+    return out;
+  };
+  const publishExternalFiles = async (fileList) => {
+    const accepted = [];
+    const rejected = [];
+    for (const file of [...fileList].slice(0, 20)) {
+      const name = (String(file.name || 'file').replace(/[\\u0000-\\u001f]/g, '').split(/[/\\\\]/).pop() || '').slice(0, 255);
+      if (!name || name === '.' || name === '..') continue;
+      if (file.size > externalFileLimit) { rejected.push({ name, size: file.size }); continue; }
+      accepted.push({ name, type: String(file.type || ''), buffer: await file.arrayBuffer() });
+    }
+    if (!accepted.length && !rejected.length) return;
+    parent.postMessage({ type: 'selection-office-paste', previewId, files: accepted, rejected }, '*', accepted.map(item => item.buffer));
+  };
+  document.addEventListener('paste', (event) => {
+    const files = filesFromEvent(event);
+    if (!files.length) return;
+    event.preventDefault();
+    void publishExternalFiles(files);
+  });
+  document.addEventListener('dragover', (event) => {
+    const types = event.dataTransfer ? [...event.dataTransfer.types] : [];
+    if (filesFromEvent(event).length || types.includes('Files')) event.preventDefault();
+  });
+  document.addEventListener('drop', (event) => {
+    const files = filesFromEvent(event);
+    if (!files.length) return;
+    event.preventDefault();
+    void publishExternalFiles(files);
+  });
 })();
 </script>${math}`
   // Prepend policy and bridge before any scripts supplied by OfficeCLI.
