@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 /** Retained documents stay visible while their preview is being resumed. */
 export function OfficePreviewLoading({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
-  if (compact) return <div role="status" className="pointer-events-none absolute inset-x-3 top-4 flex justify-center">
+  if (compact) return <div role="status" className="pointer-events-none absolute inset-x-3 top-4 z-[3] flex justify-center">
     <div className="inline-flex max-w-full items-center gap-2 rounded-full bg-background/95 px-4 py-2.5 text-xs font-medium text-accent shadow-middle ring-1 ring-border/50 backdrop-blur-sm">
       <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
       <span>{t('chat.officePreview.loading')}</span>

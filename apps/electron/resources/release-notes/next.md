@@ -88,6 +88,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Office 选区胶囊重新可见** — 在右侧预览里选中 Word、Excel 或 PowerPoint 元素后，底部再次显示「已选 N / 256」。实时预览把文档画在更高的层上，把这颗胶囊盖住了；现在胶囊浮在文档之上。取消选择后数量回到 0，超过 256 个仍标红并警告。点击幻灯片仍只描边，不会把铺底形状抬到文字上面。Fixes #667.
+
 - **Office 协同点击幻灯片不再清空该页** — 在右侧预览里点中一整页时，页面和缩略图保持原样。选中只画描边，不再把铺底的形状抬到文字上面。点击也不会改写磁盘上的 pptx。Fixes #662.
 
 - **OAuth callback pages use the Selection swan** — After ChatGPT, Google, Slack, Microsoft, MCP, and WebUI authorization, the local success and error pages still showed the Craft pixel logo. Those pages now use the Selection swan for the logo and favicon. The label under the swan reads Selection in the bundled CATHALIE face, and the browser tab title says Selection.
