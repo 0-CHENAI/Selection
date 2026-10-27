@@ -14,7 +14,8 @@ import {
   clarificationSummaryLabel,
   clarificationSummaryStatus,
 } from './ClarificationCard'
-import { ResponseArtifacts } from './ResponseArtifacts'
+import { ArtifactSupplementShelf, ResponseArtifacts } from './ResponseArtifacts'
+import { mergeArtifactSupplements, useArtifactSupplements } from './artifact-supplements'
 import { extractDeliveredResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
@@ -2256,11 +2257,18 @@ export function ResponseCard({
   // Keep the model's answer verbatim. Source-section detection may enrich the
   // source panel, but it must never erase text from the visible reply.
   const responseText = parsedSkillUsage.content
-  const artifacts = useMemo(
-    () => showArtifacts ? extractDeliveredResponseArtifacts(artifactVersions) : [],
-    [showArtifacts, artifactVersions],
+  const deliveredArtifacts = useMemo(
+    () => extractDeliveredResponseArtifacts(artifactVersions),
+    [artifactVersions],
   )
+  const artifactSupplements = useArtifactSupplements()
+  const artifactAnchors = [messageId, revealIdentity].filter((value): value is string => !!value)
   const presentationStreaming = isStreaming
+  const artifactShelfSettled = showArtifacts && !presentationStreaming
+  const artifactRows = canCollectSources
+    ? mergeArtifactSupplements(deliveredArtifacts, artifactSupplements, artifactAnchors, artifactShelfSettled ? 'settled' : 'pending')
+    : []
+  const showArtifactShelf = artifactRows.length > 0 && (artifactShelfSettled || artifactRows.some(row => row.supplement))
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Pending text selection waiting for explicit follow-up action
@@ -3135,10 +3143,18 @@ export function ResponseCard({
           </ResponseBodyGrowth>
 
           <AnimatePresence mode="wait" initial={false}>
-            {showArtifacts && !presentationStreaming && artifacts.length > 0 ? (
+            {showArtifactShelf ? (
               <motion.div key="changed-artifacts" initial={reduceArtifactMotion ? false : { opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceArtifactMotion ? 0 : 0.18, ease: 'easeOut' }}>
-                <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} versions={artifactVersions} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
+                <ResponseArtifacts
+                  key={messageId ?? revealIdentity}
+                  artifacts={deliveredArtifacts}
+                  versions={artifactVersions}
+                  onOpenFile={onOpenFile}
+                  onOpenArtifact={onOpenArtifact}
+                  anchors={artifactAnchors}
+                  mode={artifactShelfSettled ? 'settled' : 'pending'}
+                />
               </motion.div>
             ) : null}
           </AnimatePresence>
@@ -3274,6 +3290,16 @@ export function ResponseCard({
  * Memoized to prevent re-renders of completed turns during session switches.
  * Only complete, non-streaming turns are memoized - active turns always re-render.
  */
+function turnSupplementAnchors(sessionId: string | undefined, turnId: string, response: ResponseContent | undefined): string[] {
+  return [
+    response?.messageId,
+    turnId,
+    sessionId && turnId ? `${sessionId}:${turnId}` : undefined,
+    sessionId && turnId ? `${sessionId}:${turnId}:${response?.streamKey ?? 'response'}` : undefined,
+    sessionId && turnId ? `${sessionId}:${turnId}:response` : undefined,
+  ].filter((value): value is string => !!value)
+}
+
 function TurnCardContent({
   sessionId,
   turnId,
@@ -3527,6 +3553,20 @@ function TurnCardContent({
   const hasVisibleResponse = !!response && (
     hasRenderableAssistantText(response.text)
   )
+  const supplementAnchors = turnSupplementAnchors(sessionId, turnId, response)
+  // Commentary, plans and progress notes never mount the deliverable shelf.
+  // A live file row still has to land somewhere on this turn.
+  const responseHostsArtifactShelf = !!(
+    response && hasVisibleResponse && !showCommentary && !isTaskProgress && !response.isPlan && !response.isAnswerPreview
+  )
+  const supplementShelf = responseHostsArtifactShelf ? null : (
+    <ArtifactSupplementShelf
+      anchors={supplementAnchors}
+      versions={response?.artifactVersions}
+      onOpenFile={onOpenFile}
+      onOpenArtifact={onOpenArtifact}
+    />
+  )
 
   // Interrupted turns with nothing to show still keep retry under the status line,
   // in the same action row regenerate uses under a completed reply.
@@ -3542,7 +3582,7 @@ function TurnCardContent({
 
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !hasVisibleResponse && isComplete && !hasClarifications) {
-    return standaloneRetryRow
+    return <>{supplementShelf}{standaloneRetryRow}</>
   }
 
   // Don't render turns that were interrupted before any meaningful work happened.
@@ -3571,7 +3611,7 @@ function TurnCardContent({
     && !hasVisibleResponse
     && !hasClarifications
   if (hasNoMeaningfulWork) {
-    return standaloneRetryRow
+    return <>{supplementShelf}{standaloneRetryRow}</>
   }
 
   // Only count rows the user will actually see in the collapsible section
@@ -3970,12 +4010,15 @@ function TurnCardContent({
       </AnimatePresence>
       )}
       </GrowingResponse>
+      {supplementShelf}
       {retryAlreadyInCard ? null : standaloneRetryRow}
     </div>
   )
 }
 
 export const TurnCard = React.memo(function TurnCard(props: TurnCardProps) {
+  // Context updates skip memo, so a later restyle of a finished pptx still reaches this card.
+  useArtifactSupplements()
   // A reused component must not carry local folds into another message/session.
   return <TurnCardContent key={JSON.stringify([props.sessionId, props.turnId])} {...props} />
 }, (prev, next) => {

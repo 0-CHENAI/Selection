@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { attentionCount, checkSummary, pptLiveFrame, segmentState, slidePreviewPath, thumbBarClass, thumbDimmed } from './ppt-result-model'
+import { attentionCount, attentionPageNumbers, checkSummary, formatAttentionPages, pptLiveFrame, pptRowFraction, slidePreviewPath } from './ppt-result-model'
 import type { PptPageProgress } from '@craft-agent/shared/protocol'
 
 function page(partial: Partial<PptPageProgress> & Pick<PptPageProgress, 'index' | 'status'>): PptPageProgress {
@@ -13,26 +13,20 @@ test('slide preview paths stay inside the session', () => {
   expect(slidePreviewPath('/sessions/one', '/etc/passwd')).toBeNull()
 })
 
-test('thumb bars and the check summary follow page state', () => {
+test('the check summary and row progress follow page state', () => {
   const pages = [
     page({ index: 1, status: 'passed' }),
     page({ index: 2, status: 'needs_revision', issue: '图例离页边仅 6px', issueCount: 1 }),
     page({ index: 3, status: 'needs_revision', failed: true, issue: '超出画布', issueCount: 1 }),
     page({ index: 4, status: 'pending' }),
   ]
-  expect(thumbBarClass(pages[0]!, false, undefined)).toBe('bg-success')
-  expect(thumbBarClass(pages[1]!, false, undefined)).toBe('bg-info')
-  expect(thumbBarClass(pages[2]!, false, undefined)).toBe('bg-destructive')
-  expect(thumbBarClass(pages[0]!, true, 2)).toBe('bg-accent')
-  expect(thumbBarClass(pages[1]!, true, 2)).toBe('bg-accent/50')
-  expect(thumbBarClass(pages[3]!, true, 2)).toBe('bg-foreground/10')
-  expect(thumbDimmed(pages[3]!, true, 2)).toBe(true)
-  expect(thumbDimmed(pages[1]!, true, 2)).toBe(false)
   expect(checkSummary(pages)).toEqual({ passed: 1, attention: { index: 3, issue: '超出画布', failed: true } })
-  expect(segmentState(1, 2)).toBe('done')
-  expect(segmentState(2, 2)).toBe('current')
-  expect(segmentState(3, 2)).toBe('wait')
+  expect(attentionPageNumbers(pages)).toEqual([2, 3])
   expect(attentionCount(pages)).toBe(2)
+  expect(formatAttentionPages([5, 9], 'zh-Hans')).toBe('5、9')
+  expect(pptRowFraction({ generating: true, total: 15, completed: 5, current: 6 })).toBe(0.4)
+  expect(pptRowFraction({ generating: true, total: 15, completed: 5 })).toBe(0)
+  expect(pptRowFraction({ generating: false, total: 15, completed: 15, current: 6 })).toBeUndefined()
 })
 
 test('a live frame keeps the veil and the completed count on one page', () => {

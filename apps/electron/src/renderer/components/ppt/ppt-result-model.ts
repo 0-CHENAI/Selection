@@ -10,23 +10,6 @@ export function slidePreviewPath(root: string, imageName: string): string | null
   return `${root.replace(/[/\\]+$/, '')}${sep}${imageName.split('/').join(sep)}`
 }
 
-export function thumbBarClass(page: PptPageProgress, generating: boolean, current: number | undefined): string {
-  if (generating) {
-    if (current && page.index === current) return 'bg-accent/50'
-    if (!current || page.index > current || page.status === 'pending') return 'bg-foreground/10'
-    return 'bg-accent'
-  }
-  if (page.failed) return 'bg-destructive'
-  if (page.status === 'needs_revision') return 'bg-info'
-  if (page.status === 'pending' || page.status === 'fixing') return 'bg-foreground/10'
-  return 'bg-success'
-}
-
-export function thumbDimmed(page: PptPageProgress, generating: boolean, current: number | undefined): boolean {
-  if (!generating) return false
-  return !current || page.index > current || page.status === 'pending'
-}
-
 export interface PptCheckSummary {
   passed: number
   attention?: { index: number; issue?: string; failed: boolean }
@@ -41,14 +24,32 @@ export function checkSummary(pages: PptPageProgress[]): PptCheckSummary {
   }
 }
 
-export function segmentState(index: number, current: number | undefined): 'done' | 'current' | 'wait' {
-  if (current && index < current) return 'done'
-  if (current && index === current) return 'current'
-  return 'wait'
+export function attentionCount(pages: PptPageProgress[]): number {
+  return attentionPageNumbers(pages).length
 }
 
-export function attentionCount(pages: PptPageProgress[]): number {
-  return pages.filter(page => page.failed || page.status === 'needs_revision').length
+export function attentionPageNumbers(pages: readonly PptPageProgress[]): number[] {
+  return pages.filter(page => page.failed || page.status === 'needs_revision').map(page => page.index)
+}
+
+/** Page list inside the subtitle. zh/ja use an ideographic comma, so "5、9" stays stable across Intl builds. */
+export function formatAttentionPages(pages: readonly number[], language: string): string {
+  const labels = pages.map(page => String(page))
+  return labels.join(/^(zh|ja|yue)/i.test(language) ? '、' : ', ')
+}
+
+/** Generating bar uses the page being written, so page 6 of 15 is 0.4. Idle rows have no bar. */
+export function pptRowFraction(input: {
+  generating: boolean
+  total: number
+  completed: number
+  current?: number
+}): number | undefined {
+  if (!input.generating) return undefined
+  const total = Number.isInteger(input.total) && input.total > 0 ? input.total : 0
+  if (total <= 0) return 0
+  const page = pptLiveFrame(input).current ?? 0
+  return Math.max(0, Math.min(1, page / total))
 }
 
 /**

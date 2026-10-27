@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { officePreviewPageBridge, pinnedPageAfterScroll, previewDocumentPage, slideNumberFromOfficePath } from './office-preview-page'
+import { officePreviewPageBridge, pinnedPageAfterScroll, previewDocumentPage, requestOfficePreviewReveal, slideNumberFromOfficePath } from './office-preview-page'
 
 test('a pinned office page follows the open file and clears when the person scrolls away', () => {
   const pin = { path: '/deck.pptx', page: 4 }
@@ -11,6 +11,23 @@ test('a pinned office page follows the open file and clears when the person scro
   expect(pinnedPageAfterScroll(pin, undefined)).toEqual(pin)
   expect(previewDocumentPage(pin, '/deck.pptx')).toBe(4)
   expect(previewDocumentPage(pin, '/other.pptx')).toBeUndefined()
+})
+
+test('a row click opens a slide, or asks the panel to wait when the file is not ready', () => {
+  const events: Event[] = []
+  const previous = globalThis.window
+  globalThis.window = { dispatchEvent(event: Event) { events.push(event); return true } } as Window & typeof globalThis
+  try {
+    requestOfficePreviewReveal({ sessionId: 's1', path: '/deck.pptx', page: 6 })
+    requestOfficePreviewReveal({ sessionId: 's1' })
+    requestOfficePreviewReveal({ sessionId: '' })
+  } finally {
+    if (previous === undefined) delete (globalThis as { window?: Window }).window
+    else globalThis.window = previous
+  }
+  expect(events.map(event => event.type)).toEqual(['selection-office-show-page', 'selection-office-reveal'])
+  expect((events[0] as CustomEvent).detail).toEqual({ sessionId: 's1', path: '/deck.pptx', page: 6 })
+  expect((events[1] as CustomEvent).detail).toEqual({ sessionId: 's1' })
 })
 
 test('the preview document reveals a slide after restoring scroll', () => {

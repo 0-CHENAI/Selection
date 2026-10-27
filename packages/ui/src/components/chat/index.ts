@@ -64,5 +64,10 @@ export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attach
 export { AcceptPlanDropdown } from './AcceptPlanDropdown'
 
 export { ResponseSourcesLayout } from './ResponseSourcesLayout'
+export { ArtifactSupplementsProvider, mergeArtifactSupplements, useArtifactSupplements } from './artifact-supplements'
+export { ArtifactSupplementShelf, ResponseArtifacts } from './ResponseArtifacts'
+export type { ArtifactSupplement, MergedArtifactRow } from './artifact-supplements'
+export { artifactPathKey, extractDeliveredResponseArtifacts } from './response-artifacts'
+export type { ArtifactChange, ResponseArtifact } from './response-artifacts'
 export { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
 export type { ResponseSource } from './response-sources'

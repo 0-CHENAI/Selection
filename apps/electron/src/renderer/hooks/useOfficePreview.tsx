@@ -4,7 +4,7 @@ import { useAtomValue } from 'jotai'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { officePreviewDocument } from '../lib/office-preview-document'
-import { OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
+import { OFFICE_PREVIEW_REVEAL, OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
 import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
 import { officeScrollAnchor, readOfficePreviewState, writeOfficePreviewState, type OfficePreviewScope, type OfficePreviewState } from '../lib/office-preview-state'
@@ -223,9 +223,18 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       }
       void open(detail.sessionId, detail.path)
     }
+    const onReveal = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail
+      if (!detail?.sessionId || detail.sessionId !== scope.current.sessionId) return
+      awaitDocument(detail.sessionId)
+    }
     window.addEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
-    return () => window.removeEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
-  }, [open])
+    window.addEventListener(OFFICE_PREVIEW_REVEAL, onReveal)
+    return () => {
+      window.removeEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
+      window.removeEventListener(OFFICE_PREVIEW_REVEAL, onReveal)
+    }
+  }, [open, awaitDocument])
   useLayoutEffect(() => {
     detach()
     pinnedPage.current = undefined

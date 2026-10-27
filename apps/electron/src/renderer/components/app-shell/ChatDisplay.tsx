@@ -97,7 +97,7 @@ import {
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
-import { PptResultCard } from "@/components/ppt/PptResultCard"
+import { PptArtifactScope, PptSessionArtifactShelf } from "@/components/ppt/PptResultCard"
 import { cacheHitRateFromTokenUsage, resolveContextUsageTokens } from "./input/context-usage"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
@@ -1920,6 +1920,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   )
 
   return (
+    <PptArtifactScope session={session}>
     <div ref={zoneRef} className="flex h-full min-h-0 min-w-0 flex-col" data-focus-zone="chat"
       data-chat-window-start={startIndex} data-chat-window-end={endIndex} data-chat-total-turns={allTurns.length}>
       <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
@@ -2598,7 +2599,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
           <>
-          <PptResultCard session={session} />
+          <PptSessionArtifactShelf sessionId={session.id} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
           <ChatInputZone
             toolbarCenter={scrollInToolbar ? (slot) => (
               <TaskProgressCard
@@ -2829,6 +2830,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         )
       )}
     </div>
+    </PptArtifactScope>
   )
 })
 
