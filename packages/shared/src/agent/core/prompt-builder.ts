@@ -130,6 +130,7 @@ export class PromptBuilder {
       plansFolderPath,
       dataFolderPath,
       consumeModeChangeUserSignal: true,
+      imageInput: options.imageInput,
     }));
 
     // Source state if provided

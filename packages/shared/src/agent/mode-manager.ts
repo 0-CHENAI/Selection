@@ -2160,7 +2160,13 @@ export function getSessionState(sessionId: string): { permissionMode: Permission
  */
 export function formatSessionState(
   sessionId: string,
-  options?: { plansFolderPath?: string; dataFolderPath?: string; consumeModeChangeUserSignal?: boolean }
+  options?: {
+    plansFolderPath?: string
+    dataFolderPath?: string
+    consumeModeChangeUserSignal?: boolean
+    /** Current model image capability. Omitted when the caller has not resolved it. */
+    imageInput?: boolean
+  }
 ): string {
   const diagnostics = getPermissionModeDiagnostics(sessionId);
 
@@ -2194,6 +2200,15 @@ export function formatSessionState(
   // Include data folder path so agent knows where transform_data output goes
   if (options?.dataFolderPath) {
     result += `\ndataFolderPath: ${options.dataFolderPath}`;
+  }
+
+  // This turn's model. Slide visual QA follows the line instead of assuming vision or OCR.
+  if (options?.imageInput === true) {
+    result += '\nimageInput: enabled';
+    result += '\nslideVisualQa: Read each slide image, or pass it in call_llm attachments. Do not OCR.';
+  } else if (options?.imageInput === false) {
+    result += '\nimageInput: unavailable';
+    result += '\nslideVisualQa: report image_capability_mismatch and leave G4 blocked. Do not OCR.';
   }
 
   result += '\n</session_state>';

@@ -395,6 +395,8 @@ export type SdkMcpServerConfig =
  */
 export interface AgentBackend {
   queryLlm?(request: import('../llm-tool').LLMQueryRequest, signal?: AbortSignal): Promise<import('../llm-tool').LLMQueryResult>;
+  /** Current model image capability, when this backend can resolve it. */
+  currentModelSupportsImages?(): boolean;
   /** Interrupt only the current model request; resolves after SDK abort drains. */
   interruptForProgress?(): Promise<void>;
   // ============================================================

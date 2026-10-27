@@ -9,6 +9,7 @@
  * so they inherit this pipeline transparently.
  *
  * Pipeline steps:
+ * 0. PPT visual QA: block OCR of slide screenshots before any other step
  * 1. Permission mode check: Block tools disallowed by current mode
  * 2. Source blocking: Block tools from inactive MCP sources
  * 3. Prerequisite check: Prepare meaningful source guides; enforce Skill/browser reads
@@ -37,6 +38,7 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { pptVisualQaViolation } from '../ppt-visual-qa-policy.ts';
 import { complexToolCapability, complexCapabilityError, type WorkModeSession } from '../../sessions/work-mode.ts';
 import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
@@ -674,6 +676,8 @@ export interface PreToolUseInput {
   prerequisiteManager?: PrerequisiteManagerLike;
   /** Backend metadata (e.g. Pi forwards intent / displayName via input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
+  /** Resolved image capability. Slide visual QA matches enabled vs unavailable. */
+  supportsImages?: boolean;
   /** Assistant message generation, used to defer source-call siblings until replanning. */
   assistantGeneration?: number;
   /** Debug callback */
@@ -716,6 +720,7 @@ const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
  * user prompting) is handled by the calling agent based on the result type.
  *
  * Pipeline:
+ * 0. PPT visual QA: reject OCR of slide screenshots (native Read / call_llm images only)
  * 1. Permission mode check (shouldAllowToolInMode)
  * 2. Source blocking (inactive MCP sources)
  * 3. Prerequisite check (on-demand source guides and Skill/browser requirements)
@@ -739,6 +744,14 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 }
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
+  const visualQaBlock = pptVisualQaViolation(
+    ctx.toolName,
+    ctx.input,
+    ctx.backendMetadata,
+    ctx.supportsImages,
+  );
+  if (visualQaBlock) return { type: 'block', reason: visualQaBlock };
+
   const capability = complexToolCapability(ctx.toolName);
   if (capability) {
     const reason = complexCapabilityError(ctx.executionSession, capability);

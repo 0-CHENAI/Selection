@@ -65,7 +65,9 @@ Prose quality is a different skill. This router formats and delivers Office file
 
 ## Delivery gate
 
-For **PowerPoint**, use only canonical **G1 story/slide order → G2 locked design, typography and content fit → G3 saved OOXML/schema and content readback → G4 rendered every-slide visual inspection → G5 delivery close/reopen and artifact existence**, as defined in [`ppt-selection-override.md`](ppt-selection-override.md). Do not also execute a competing legacy Gate sequence. No HTML-source-only visual PASS, automatic warning whitelist, or unresolved blocker may be presented as ready.
+For **PowerPoint**, use only canonical **G1 story/slide order → G2 locked design, typography and content fit → G3 saved OOXML/schema and content readback → G4 rendered every-slide visual inspection → G5 delivery close/reopen and artifact existence**, as defined in [`ppt-selection-override.md`](ppt-selection-override.md). Do not also execute a competing legacy Gate sequence. No HTML-source-only visual PASS, automatic warning whitelist, or unresolved blocker may be presented as ready. G4 follows `imageInput` in `<session_state>`: `enabled` uses `Read` or `call_llm` `attachments`; `unavailable` reports `image_capability_mismatch` and does not switch to OCR or a step named `OCR New Pages`.
+
+Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 
 For **Word and Excel**, follow every validation and visual check required by the loaded official guide. At minimum:
 

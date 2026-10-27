@@ -185,6 +185,37 @@ describe('runPreToolUseChecks', () => {
     mockCraftAgentsCliFlag = false;
   });
 
+  describe('step 0: PPT visual QA rejects OCR before permission checks', () => {
+    it('blocks a Swift OCR pass over new slides', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: {
+          command: 'swift /tmp/ocr-pages.swift',
+          _displayName: 'Swift: OCR New Pages 1-4',
+          _intent: 'Check text coverage and wrapping after the layout change',
+        },
+      }));
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('imageInput');
+        expect(result.reason).toContain('image_capability_mismatch');
+        expect(result.reason).toContain('call_llm');
+      }
+    });
+
+    it('still intercepts call_llm when the attachments are slide images', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__session__call_llm',
+        input: {
+          prompt: 'Check layout, overlap, and contrast on this slide',
+          attachments: ['/tmp/slides/slide-01.png'],
+          _displayName: 'Read slide 1',
+        },
+      }));
+      expect(result.type).toBe('call_llm_intercept');
+    });
+  });
+
   // ============================================================
   // Step 1: Permission mode check
   // ============================================================

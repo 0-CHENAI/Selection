@@ -6,7 +6,9 @@
 4. 运行 `deck-cli.mjs check`。一次看完全部问题，按页和元素改完再查。不要为了通过而把字号降到风格下限以下。
 5. 不要把 PPTX 写进 `dataFolderPath`。应用会按已保存的 `deck.json` 导出唯一可见的 PPTX：没有工作目录时写在会话文件夹，有工作目录时写在该目录。文件名来自 deck 标题，路径在 `data/ppt-output.json` 的 `path`。需要截图时对这个文件运行 `deck-cli.mjs screenshot --out <dataFolderPath>/slides --pages <页数>`。
 6. 用 OfficeCLI `validate` 这个 path，并用 `view text` 或 `view outline` 读回标题、数字、单位、备注和页序。
-7. 打开每一页截图做视觉检查。预检通过不等于画面成立。
+7. 打开每一页截图做视觉检查，并先看 `<session_state>` 的 `imageInput`。`enabled` 时用 Read 把该页图片交给当前模型，或用 `call_llm` 把图片放进 `attachments`。`unavailable` 或返回 `image_capability_mismatch` 时，写明 G4 未通过，不要改用 OCR 或名为 `OCR New Pages` 的步骤。预检通过不等于画面成立。
+
+Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 8. 用户点名要改已有 PPTX 的某一处时，停止本流程，改用 OfficeCLI 编辑原文件。
 
 故事、选定的风格、字体平台、预检结果、视觉检查次数和最终路径记在 `dataFolderPath` 的 `design-plan.md`。那是会话材料，不是交付物。只有用户明确要求先看方案时才停在方案；否则规划完成后继续生成。恢复会话时读取磁盘上的计划和 deck，不重新选风格，也不把视觉检查次数清零。

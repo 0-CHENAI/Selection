@@ -3,6 +3,7 @@ import { access, readFile, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createReadToolDefinition, truncateHead } from '@earendil-works/pi-coding-agent'
 import type { ReadOperations, ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { PPT_VISUAL_QA_NO_OCR_NOTE } from '../../../../shared/src/agent/ppt-visual-qa-policy.ts'
 import { detectReadImageMimeType } from './image-mime.ts'
 import {
   processReadImage,
@@ -124,7 +125,7 @@ export function createSelectionReadToolDefinition(
               processed.message,
               visionSupported
                 ? undefined
-                : 'image_capability_mismatch: Current model does not accept image input. The image was not included in this request.',
+                : `image_capability_mismatch: Current model does not accept image input. The image was not included in this request.\n${PPT_VISUAL_QA_NO_OCR_NOTE}`,
             ].filter(Boolean).join('\n'),
           }],
           details: undefined,
@@ -137,7 +138,7 @@ export function createSelectionReadToolDefinition(
             type: 'text',
             text: [
               `Read image file [${processed.mimeType}]`,
-              'image_capability_mismatch: Current model does not accept image input. The image was not included in this request.',
+              `image_capability_mismatch: Current model does not accept image input. The image was not included in this request.\n${PPT_VISUAL_QA_NO_OCR_NOTE}`,
               ...processed.hints,
             ].join('\n'),
           }],
