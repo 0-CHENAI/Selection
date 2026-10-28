@@ -4131,7 +4131,11 @@ class ActiveRun {
       const attempt = entry.kind === 'node-finished'
         ? attempts?.findLast(item => item.sessionId === entry.sessionId)
         : attempts?.at(-1);
-      if (attempt) attempt.state = entry.kind === 'node-retry' ? 'failed' : entry.state;
+      // A retry schedules new work; it does not undo a completed execution.
+      // Preserve terminal attempt outcomes for live previews and log replay.
+      if (attempt && (entry.kind === 'node-finished' || attempt.state === 'running')) {
+        attempt.state = entry.kind === 'node-retry' ? 'failed' : entry.state;
+      }
     }
   }
 

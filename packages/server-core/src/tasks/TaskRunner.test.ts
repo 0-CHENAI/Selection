@@ -1075,10 +1075,18 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('done'); // upstream untouched
     expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('running'); // re-dispatched
     expect(snap.nodes.find((n) => n.id === 'c')!.state).toBe('pending'); // waits on b
+    // Repairing a successful output must not relabel its historical worker as failed.
+    expect(snap.nodes.find((n) => n.id === 'b')!.attempts?.[0]?.state).toBe('done');
+    expect(snap.nodes.find((n) => n.id === 'c')!.attempts?.[0]?.state).toBe('done');
     // a ran once; b re-dispatched (2); c not yet re-dispatched.
     expect(host.created.filter((c) => c.options.name === 'a')).toHaveLength(1);
     expect(host.created.filter((c) => c.options.name === 'b')).toHaveLength(2);
     expect(host.created.filter((c) => c.options.name === 'c')).toHaveLength(1);
+    const reader = new TaskRunner({ host: new MockHost(), workspaceId: 'ws', workspaceRoot: root });
+    const restored = reader.getRunHistory('scope', 'orch')[0]!;
+    expect(restored.nodes.find(n => n.id === 'b')!.attempts?.[0]?.state).toBe('done');
+    expect(restored.nodes.find(n => n.id === 'c')!.attempts?.[0]?.state).toBe('done');
+    await runner.stop('scope', 'r1');
   });
 
   it('an unparsed re-ask does not consume the repair budget', async () => {
