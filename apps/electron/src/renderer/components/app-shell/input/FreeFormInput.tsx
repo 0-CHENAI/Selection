@@ -1303,6 +1303,9 @@ export function FreeFormInput({
   React.useLayoutEffect(() => {
     if (!onHeightChange || !containerRef.current) return
 
+    // Initialize before paint; ResizeObserver delivers its first entry later.
+    onHeightChange(containerRef.current.getBoundingClientRect().height)
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         onHeightChange(entry.contentRect.height)
