@@ -1,3 +1,4 @@
+import { createPendingDraftSync } from './pending-draft-sync'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
@@ -701,33 +702,16 @@ export function FreeFormInput({
     }
   }, [inputValue])
 
-  // Debounced sync to parent (saves draft without blocking typing)
-  const syncTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
-  const syncToParent = React.useCallback((value: string) => {
-    if (!onInputChange) return
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-    syncTimeoutRef.current = setTimeout(() => {
-      onInputChange(value)
-      prevInputValueRef.current = value
-    }, 300) // Debounce 300ms
-  }, [onInputChange])
-
-  // Sync immediately on unmount to preserve input across mode switches
-  // Also cleanup any pending debounced sync
+  // Flush only pending edits on unmount. Comparing rendered state to props can
+  // resurrect a sent prompt after the parent clears the draft and navigates.
+  const draftSync = React.useMemo(() => createPendingDraftSync(value => {
+    prevInputValueRef.current = value
+    onInputChange?.(value)
+  }), [onInputChange])
+  const syncToParent = draftSync.schedule
   const inputRef = React.useRef(input)
-  inputRef.current = input // Keep ref in sync with state
-
-  React.useEffect(() => {
-    return () => {
-      // Cancel pending debounced sync
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
-      // Immediately sync current value to parent on unmount
-      // This preserves input when switching to structured input (e.g., permission request)
-      if (onInputChange && inputRef.current !== prevInputValueRef.current) {
-        onInputChange(inputRef.current)
-      }
-    }
-  }, [onInputChange])
+  inputRef.current = input
+  React.useEffect(() => () => draftSync.flush(), [draftSync])
 
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
@@ -919,10 +903,10 @@ export function FreeFormInput({
 
   const clearInputDraft = React.useCallback(() => {
     setInput('')
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    draftSync.cancel()
     onInputChange?.('')
     prevInputValueRef.current = ''
-  }, [onInputChange])
+  }, [onInputChange, draftSync])
 
   const consumeInputDraftSnapshot = React.useCallback((): string => {
     const snapshot = input.trim()
@@ -1575,6 +1559,9 @@ export function FreeFormInput({
     }
 
     const attachmentSnapshot = attachments
+    // Sending can navigate/unmount before onSubmit resolves. Persist the edit
+    // now so cleanup cannot overwrite the parent's accepted-send clear.
+    draftSync.flush()
 
     try {
       const admitted = await onSubmit(
@@ -1594,7 +1581,7 @@ export function FreeFormInput({
     setAttachments([])
     setPptRequest(undefined)
     // Clear draft immediately (cancel any pending debounced sync)
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    draftSync.cancel()
     onInputChange?.('')
     onAttachmentsChange?.([])
     prevInputValueRef.current = ''
@@ -1612,7 +1599,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t, setPptRequest])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, setOptimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t, setPptRequest, draftSync])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
