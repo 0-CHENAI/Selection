@@ -3,10 +3,11 @@ import { useStore } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { TooltipProvider } from '@craft-agent/ui'
 import { ResponseArtifacts, UserMessageBubble } from '@craft-agent/ui/chat'
-import type { PptPageProgress } from '@craft-agent/shared/protocol'
+import type { PptCatalog, PptPageProgress } from '@craft-agent/shared/protocol'
 import { AppShellProvider, useAppShellContext } from '@/context/AppShellContext'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { ChatInputZone } from '@/components/app-shell/input/ChatInputZone'
+import { PptRevisionContext } from '@/components/ppt/ppt-revision'
 import { PptArtifactScope } from '@/components/ppt/PptResultCard'
 import type { Session } from '../../../shared/types'
 import type { ComponentEntry } from './types'
@@ -16,8 +17,11 @@ const PPTX = '/sessions/ppt-office-progress/项目介绍.pptx'
 const SHOWN_AT = new Date(2026, 9, 27, 11, 54).getTime()
 
 if (typeof window !== 'undefined') {
-  const api = window.electronAPI as { getPptCatalog?: () => Promise<unknown> } | undefined
-  if (api && !api.getPptCatalog) api.getPptCatalog = async () => ({ templates: [], themes: [] })
+  const api = window.electronAPI as { getPptCatalog?: () => Promise<PptCatalog> } | undefined
+  if (api && !api.getPptCatalog) api.getPptCatalog = async () => ({
+    templates: [{ id: 'paper', title: '简洁纸张', category: '商务', canvas: '16:9', pages: 15, cover: '', referencePages: [] }],
+    themes: [{ id: 'ink', name: '墨蓝', paper: '#ffffff', ink: '#172334', accent: '#205377', signal: '#cc4433' }],
+  })
 }
 
 function pages(done: boolean): PptPageProgress[] {
@@ -63,6 +67,8 @@ export function PptOfficeProgressPreview({ phase = 'generating' }: { phase?: 'ge
   const [open, setOpen] = React.useState(true)
   const [toggles, setToggles] = React.useState(0)
   const [stops, setStops] = React.useState(0)
+  const [revision, setRevision] = React.useState('')
+  const [revisionCount, setRevisionCount] = React.useState(0)
   const session = React.useMemo(() => previewSession(phase), [phase])
   React.useLayoutEffect(() => {
     const previous = instance.language
@@ -96,9 +102,12 @@ export function PptOfficeProgressPreview({ phase = 'generating' }: { phase?: 'ge
         content="使用这个模板来介绍下我这个项目。你被允许使用外部绘图skills来进行图表的绘制"
         timestamp={SHOWN_AT}
       />
+      <PptRevisionContext.Provider value={async (_text, value) => { setRevision(JSON.stringify(value)); setRevisionCount(count => count + 1); return true }}>
       <PptArtifactScope session={session}>
         <ResponseArtifacts artifacts={[artifact]} anchors={['a1']} mode="settled" />
       </PptArtifactScope>
+      </PptRevisionContext.Provider>
+      <output data-testid="ppt-revision-result" data-count={revisionCount}>{revision}</output>
       <ChatInputZone
         sessionId={SESSION_ID}
         permissionMode="allow-all"
