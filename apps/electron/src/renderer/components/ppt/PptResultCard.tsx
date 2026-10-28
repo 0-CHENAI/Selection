@@ -121,14 +121,9 @@ export function PptArtifactMenuItems({
   onRecolor: () => void
 }) {
   const { t } = useTranslation()
-  const openPanel = (panel: 'style' | 'color') => {
-    const show = () => panel === 'style' ? onRestyle() : onRecolor()
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(show)
-    else show()
-  }
   return <>
-    {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-restyle" onSelect={() => openPanel('style')}><Layers3 />{t('ppt.result.restyleMenu')}</StyledDropdownMenuItem>}
-    {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-recolor" onSelect={() => openPanel('color')}><Palette />{t('ppt.result.recolorMenu')}</StyledDropdownMenuItem>}
+    {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-restyle" onSelect={onRestyle}><Layers3 />{t('ppt.result.restyleMenu')}</StyledDropdownMenuItem>}
+    {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-recolor" onSelect={onRecolor}><Palette />{t('ppt.result.recolorMenu')}</StyledDropdownMenuItem>}
     {chartFallbacks?.map((item, index) => <StyledDropdownMenuItem key={`${item.skill}-${item.page ?? 'deck'}-${index}`} disabled className="whitespace-normal text-xs text-muted-foreground">
       {t('ppt.result.chartFallback', { where: item.page ? t('ppt.result.chartFallback.page', { page: item.page }) : '', skill: item.skill, reason: t(REASON_KEY[item.reason]) })}
     </StyledDropdownMenuItem>)}
@@ -170,7 +165,9 @@ function PptArtifactTrailing({
   const { catalog } = usePptCatalog()
   const thumbs = usePptSlideThumbs(sessionFolder, pages)
   const [panel, setPanel] = useState<'style' | 'color' | null>(null)
-  useEffect(() => { if (generating) setPanel(null) }, [generating])
+  const pendingPanel = useRef<'style' | 'color' | null>(null)
+  const menuTrigger = useRef<HTMLButtonElement>(null)
+  useEffect(() => { if (generating) { pendingPanel.current = null; setPanel(null) } }, [generating])
   const frame = pptLiveFrame({ generating, total, completed, current })
   const coverIndex = frame.current ?? attentionPageNumbers(pages)[0] ?? 1
   const coverUrl = thumbs[coverIndex] || (frame.current && frame.current > 1 ? thumbs[frame.current - 1] : undefined) || thumbs[1]
@@ -196,18 +193,25 @@ function PptArtifactTrailing({
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" data-testid="ppt-artifact-menu" aria-label={t('ppt.result.moreActions')} className="mr-1.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <button ref={menuTrigger} type="button" data-testid="ppt-artifact-menu" aria-label={t('ppt.result.moreActions')} className="mr-1.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <MoreHorizontal aria-hidden="true" className="size-4" />
             </button>
           </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end">
-            <PptArtifactMenuItems chartFallbacks={chartFallbacks} canRevise={!!onApply} onRestyle={() => setPanel('style')} onRecolor={() => setPanel('color')} />
+          <StyledDropdownMenuContent align="end" onCloseAutoFocus={event => {
+            if (!pendingPanel.current) return
+            // Hand focus to the revision panel only after the menu's focus scope closes.
+            // Opening on the next animation frame races with menu focus restoration.
+            event.preventDefault()
+            setPanel(pendingPanel.current)
+            pendingPanel.current = null
+          }}>
+            <PptArtifactMenuItems chartFallbacks={chartFallbacks} canRevise={!!onApply} onRestyle={() => { pendingPanel.current = 'style' }} onRecolor={() => { pendingPanel.current = 'color' }} />
             {standardItems}
           </StyledDropdownMenuContent>
         </DropdownMenu>
       </div>
     </PopoverAnchor>
-    <PopoverContent align="end" className="w-[24rem] max-w-[calc(100vw-2rem)] p-3">
+    <PopoverContent align="end" onEscapeKeyDown={() => menuTrigger.current?.focus()} className="w-[24rem] max-w-[calc(100vw-2rem)] p-3">
       {panel && <PptRevisionPanel key={`${panel}:${templateId ?? ''}:${themeId ?? ''}`} tab={panel} onTab={setPanel} templates={catalog?.templates ?? []} themes={catalog?.themes ?? []} currentTemplateId={templateId} currentThemeId={themeId} coverUrl={coverUrl} total={total} onApply={apply} onCancel={() => setPanel(null)} />}
     </PopoverContent>
   </Popover>
