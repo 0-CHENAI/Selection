@@ -28,6 +28,9 @@ import { navigate, routes } from '@/lib/navigate'
 import type { CreateSessionOptions, Session } from '../../../../../../shared/types'
 import '@/index.css'
 
+const drafts = new Map<string, string>()
+const getDraft = (id: string) => drafts.get(id) ?? ''
+const onInputChange = (id: string, text: string) => { drafts.set(id, text) }
 const store = createStore()
 const fullShell = new URLSearchParams(location.search).has('shell')
 const scrollFixture = new URLSearchParams(location.search).has('scroll')
@@ -85,7 +88,7 @@ function Fixture() {
     return session
   }, [])
   Object.assign(window, { pptFixture: {
-    calls,
+    calls, drafts,
     configure: (options: { id?: string; ppt?: boolean; compact?: boolean; directory?: string | null; project?: string; mode?: 'NORM' | 'PRO' }) => {
       setId(options.id ?? null); setPpt(options.ppt ?? true); setCompact(options.compact ?? false); setProject(options.project)
       store.set(workModeViewAtom, options.mode ?? 'NORM')
@@ -135,6 +138,7 @@ function Fixture() {
     },
   } })
   const value: typeof parent = { ...parent,
+    getDraft, onInputChange,
     isFocusedPanel: true, isCompactMode: compact, orchestrationProjectId: project,
     enabledSources: mockSources, skills: [], onCreateSession,
     llmConnections: [{ slug: 'fixture', name: 'Fixture', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
