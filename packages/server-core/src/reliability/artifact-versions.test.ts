@@ -542,3 +542,34 @@ test('recovery rejects invalid version ordering before publishing a journal', ()
     expect(readFileSync(file, 'utf8')).toBe('after')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+
+test('a preview registration during atomic replacement does not make the completed artifact ambiguous', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-preview-replacement-'))
+  try {
+    const file = join(root, 'deck.pptx'), replacement = join(root, 'replacement.pptx')
+    const storage = join(root, 'store')
+    const store = new ArtifactVersions(storage, 'host', 'workspace')
+    writeFileSync(file, 'original deck')
+    const tracked = store.register(file, 'initial-turn')
+    writeFileSync(replacement, 'restyled deck')
+    renameSync(replacement, file)
+    // Office preview opens while the agent is still rewriting the deck.
+    const preview = store.register(file)
+    expect(preview.id).not.toBe(tracked.id)
+    const completed = store.capture(tracked.id, 'restyle-turn')
+    const reloaded = new ArtifactVersions(storage, 'host', 'workspace')
+    expect(reloaded.findByPath(file)?.id).toBe(completed.id)
+    expect(reloaded.register(file).id).toBe(completed.id)
+    expect(reloaded.versionBytes(completed.id, completed.currentVersion).toString()).toBe('restyled deck')
+    expect(reloaded.versionBytes(tracked.id, tracked.currentVersion).toString()).toBe('original deck')
+    expect(reloaded.findByVersionId(preview.currentVersion)?.id).toBe(preview.id)
+    expect(reloaded.read(preview.id)).toEqual(preview)
+    writeFileSync(join(storage, `${preview.id}.json.pending`), '{}')
+    expect(() => reloaded.findByPath(file)).toThrow('requires recovery')
+    rmSync(join(storage, `${preview.id}.json.pending`))
+    // Without a live file identity there is no evidence to collapse histories.
+    rmSync(file)
+    expect(() => reloaded.findByPath(file)).toThrow('ambiguous')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
