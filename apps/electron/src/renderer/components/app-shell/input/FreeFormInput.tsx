@@ -4,7 +4,6 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { useAtom, useAtomValue } from 'jotai'
 import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
-import { PptPickerButton } from '@/components/ppt/PptPickerButton'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
@@ -1303,6 +1302,9 @@ export function FreeFormInput({
   React.useLayoutEffect(() => {
     if (!onHeightChange || !containerRef.current) return
 
+    // Initialize before paint; ResizeObserver delivers its first entry later.
+    onHeightChange(containerRef.current.getBoundingClientRect().height)
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         onHeightChange(entry.contentRect.height)
@@ -2177,7 +2179,6 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
-          {!pptMode && <PptPickerButton composerKey={pptComposerKey} disabled={disabled} />}
           {onSourcesChange && (
             <div className="relative shrink min-w-0">
               <FreeFormInputContextBadge
@@ -2284,7 +2285,6 @@ export function FreeFormInput({
             tooltip={t("chat.attachFilesTooltip")}
             disabled={disabled}
           />
-          {!pptMode && <PptPickerButton composerKey={pptComposerKey} disabled={disabled} />}
 
           {/* 2. Source Selector Badge - only show if onSourcesChange is provided */}
           {onSourcesChange && (

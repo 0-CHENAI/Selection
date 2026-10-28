@@ -87,9 +87,7 @@ export function InputContainer({
   const measureRef = React.useRef<HTMLDivElement>(null)
   // Separate height states: freeform uses callback, structured uses measuring div
   // Use smaller fallback height for compact mode
-  const [freeformHeight, setFreeformHeight] = React.useState<number>(
-    compactMode ? FALLBACK_HEIGHTS['freeform-compact'] : FALLBACK_HEIGHTS.freeform
-  )
+  const [freeformHeight, setFreeformHeight] = React.useState<number | null>(null)
   const [structuredHeight, setStructuredHeight] = React.useState<number | null>(null)
   const [viewportHeight, setViewportHeight] = React.useState<number>(() =>
     typeof window === 'undefined' ? 0 : window.innerHeight
@@ -170,7 +168,7 @@ export function InputContainer({
   // Use appropriate height source based on mode. Structured prompts are clamped
   // to viewport-aware bounds; their internals scroll so action buttons stay reachable.
   const rawTargetHeight = mode === 'freeform'
-    ? freeformHeight
+    ? (freeformHeight ?? FALLBACK_HEIGHTS[compactMode ? 'freeform-compact' : 'freeform'])
     : (structuredHeight ?? FALLBACK_HEIGHTS[structuredInput?.type ?? 'freeform'] ?? FALLBACK_HEIGHTS.freeform)
   const structuredMaxHeight = getStructuredInputMaxHeight(viewportHeight)
   const targetHeight = mode === 'freeform'
@@ -191,9 +189,12 @@ export function InputContainer({
     }
   })
 
-  // The first measurement lands immediately. Later changes, including the
-  // composer shrinking after send, spring so the transcript does not jump.
-  React.useEffect(() => {
+  // A fallback is not a measurement. Settle the first measured height before
+  // paint, including when switching between isolated NORM / PRO drafts.
+  // Later changes (typing, sending, structured prompts) retain their spring.
+  const hasMeasuredHeight = mode === 'freeform' ? freeformHeight !== null : structuredHeight !== null
+  React.useLayoutEffect(() => {
+    if (!hasMeasuredHeight) return
     if (!heightSettledRef.current || reduceMotion) {
       heightMotionValue.set(targetHeight)
       prevAnimatedHeightRef.current = targetHeight
@@ -206,7 +207,7 @@ export function InputContainer({
       duration: 0.25,
     })
     return () => controls.stop()
-  }, [targetHeight, heightMotionValue, reduceMotion])
+  }, [targetHeight, heightMotionValue, reduceMotion, hasMeasuredHeight])
 
   const handleStructuredResponse = (response: StructuredResponse) => {
     onStructuredResponse?.(response)
