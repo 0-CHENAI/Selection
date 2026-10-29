@@ -59,6 +59,8 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "3.14.15",
+    "@tsparticles/react": "4.5.0",
+    "@tsparticles/slim": "4.5.0",
     "chrono-node": "^2.9.0",
     "cmdk": "^1.1.1",
     "electron-log": "^5.4.3",
