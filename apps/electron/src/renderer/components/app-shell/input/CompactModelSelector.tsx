@@ -1,3 +1,4 @@
+import { FastModeButton } from './FastModeButton'
 import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
@@ -295,16 +296,18 @@ export function CompactModelSelector({
     [onModelChange, onConnectionChange, effectiveConnection],
   )
 
+  const fastControl = onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode)
+    ? <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} onChange={onFastModeChange} /> : undefined
   const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
     ? null
     : (
       <div className="pt-2">
         {thinkingUnavailable === 'always-on' ? (
-          <div className="px-3 py-2 text-xs text-foreground/60">{t('thinking.alwaysOn')}</div>
+          <div className="flex items-center justify-between px-3 py-2 text-xs text-foreground/60"><span>{t('thinking.alwaysOn')}</span>{fastControl}</div>
         ) : (
           <>
-            <div className="px-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
-              {t('chat.modelPicker.thinkingSection')}
+            <div className="flex items-center justify-between px-3 pb-1 text-xs font-medium text-foreground/60 select-none">
+              <span>{t('chat.modelPicker.thinkingSection')}</span>{fastControl}
             </div>
             {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
               const isSelected = thinkingLevel === id
@@ -531,18 +534,7 @@ export function CompactModelSelector({
             </>
           )}
         </div>
-        {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
-          <button type="button" role="switch" aria-checked={fastMode && fastSupported}
-            data-testid="gpt-oauth-fast" disabled={isProcessing || !fastSupported}
-            onClick={() => onFastModeChange(!fastMode)}
-            className="flex w-full items-center justify-between px-3 py-2 text-left disabled:opacity-50">
-            <div>
-              <div className="text-sm font-medium">Fast</div>
-              <div className="text-xs text-muted-foreground">{t(!fastSupported ? 'chat.fastMode.unsupported' : isProcessing ? 'chat.fastMode.busy' : 'chat.fastMode.description')}</div>
-            </div>
-            {fastMode && fastSupported && <Check className="ml-3 h-3 w-3 shrink-0" />}
-          </button>
-        )}
+        {!thinkingControl && fastControl && <div className="flex items-center justify-between px-3 py-2 text-xs text-muted-foreground"><span>Fast</span>{fastControl}</div>}
       </DrawerContent>
     </Drawer>
   )

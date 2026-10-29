@@ -14,6 +14,33 @@ try {
   assert.equal(await checked(), 'false')
   await page.click(fast)
   assert.equal(await checked(), 'true')
+  assert.equal(await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="gpt-oauth-fast"]')
+    return !!button.closest('.prompt-effort-heading') && getComputedStyle(button.querySelector('svg')).animationName === 'prompt-fast-charge'
+  }), true, 'Fast must animate in the effort heading')
+  const slider = '[role="slider"][aria-label="思考强度"]'
+  const bounds = await page.evaluate(() => {
+    const rect = document.querySelector('[role="slider"]').getBoundingClientRect()
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })
+  await page.mouse.move(bounds.x + 11, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + 11 + (bounds.width - 22) * 0.63, bounds.y + bounds.height / 2)
+  assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').hasAttribute('data-dragging')), true)
+  const draggingPosition = await page.evaluate(() => document.querySelector('[role="slider"]').style.getPropertyValue('--prompt-effort-x'))
+  await page.mouse.up()
+  assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '3')
+  assert.notEqual(await page.evaluate(() => document.querySelector('[role="slider"]').style.getPropertyValue('--prompt-effort-x')), draggingPosition, 'Release must snap to the nearest stop')
+  assert.equal(await checked(), 'true', 'Dragging effort must not change Fast')
+  await page.press(slider, 'End')
+  assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '4')
+  await page.press(slider, 'Home')
+  await page.press(slider, 'ArrowRight')
+  assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '1')
+  await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="gpt-oauth-fast"] svg')).animationName), 'none')
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.prompt-effort-energy i')).display), 'none')
+  await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await page.press(fast, 'Escape')
   await page.fill('[contenteditable="true"]', 'Fast verification')
   await page.click('button[aria-label="发送消息"]')
@@ -40,8 +67,8 @@ try {
   assert.equal(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.disabled), true)
   await page.evaluate(() => { window.pptFixture.setProcessing('created-1', false); window.pptFixture.setModel('created-1', 'gpt-4o') })
   assert.equal(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.disabled), true)
-  assert.match(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.textContent), /不支持 Fast/)
-  console.log('PASS: default off, toggle, draft creation, session isolation, compact picker, busy and unsupported states')
+  assert.match(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.getAttribute('aria-description')), /不支持 Fast/)
+  console.log('PASS: header lightning, continuous drag and snapping, keyboard, reduced motion, default off, toggle, draft creation, session isolation, compact picker, busy and unsupported states')
 } finally {
   await task.finish({ keep: [] })
 }

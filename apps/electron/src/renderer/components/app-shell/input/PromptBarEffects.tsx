@@ -15,9 +15,10 @@ const EFFORT_EDGE = 11
 const EFFORT_THUMB = 26
 
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange, unavailable, binary,
+  value, levels, workMode, disabled, onChange, unavailable, binary, headingAction,
 }: {
   value: ThinkingLevel
+  headingAction?: React.ReactNode
   levels: readonly ThinkingLevelDefinition[]
   workMode?: WorkMode
   disabled?: boolean
@@ -28,25 +29,28 @@ export function PromptThinkingSettings({
   binary?: boolean
 }) {
   const { t } = useTranslation()
-  const [dragging, setDragging] = React.useState(false)
+  const [dragPosition, setDragPosition] = React.useState<number | null>(null)
+  const dragging = dragPosition !== null
   if (unavailable) {
     const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
     return (
       <div className="prompt-effort-settings" data-thinking-mode={unavailable} data-work-mode={workMode}>
         <div className="prompt-effort-heading">
-          <span className="text-muted-foreground">{t('thinking.effort')}</span>
+          <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
           <span className="prompt-effort-value font-medium">{t(unavailable === 'always-on' ? 'thinking.alwaysOnShort' : 'thinking.notSupported')}</span>
+          {headingAction}
         </div>
         <p className="prompt-effort-note text-muted-foreground">{t(note)}</p>
       </div>
     )
   }
-  const index = Math.max(0, levels.findIndex(level => level.id === value))
-  const maxed = levels.length > 1 && value === levels.at(-1)?.id
-  const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
+  const index = dragPosition === null ? Math.max(0, levels.findIndex(level => level.id === value)) : Math.round(dragPosition * (levels.length - 1))
+  const visualValue = levels[index]?.id ?? value
+  const maxed = levels.length > 1 && visualValue === levels.at(-1)?.id
+  const valueKey = binary ? (visualValue === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(visualValue)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
-  const stopDragging = () => setDragging(false)
+  const stopDragging = () => setDragPosition(null)
   const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / Math.max(1, levels.length - 1)})`
   const setIndex = (next: number) => {
     if (inactive) return
@@ -57,7 +61,7 @@ export function PromptThinkingSettings({
     if (inactive) return
     const rect = event.currentTarget.getBoundingClientRect()
     const fraction = (event.clientX - rect.left - EFFORT_EDGE) / Math.max(1, rect.width - EFFORT_EDGE * 2)
-    setIndex(Math.round(fraction * (levels.length - 1)))
+    setDragPosition(Math.max(0, Math.min(1, fraction)))
   }
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (inactive) return
@@ -72,9 +76,9 @@ export function PromptThinkingSettings({
   return (
     <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
       <div className="prompt-effort-heading">
-        <span className="text-muted-foreground">{t('thinking.effort')}</span>
+        <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
         <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
-        <Tooltip>
+        {headingAction ?? <Tooltip>
           <TooltipTrigger asChild>
             <MenuItem asChild onSelect={event => event.preventDefault()}>
               <button type="button" className="prompt-effort-help" aria-label={t('thinking.effortHelp')}>
@@ -83,7 +87,7 @@ export function PromptThinkingSettings({
             </MenuItem>
           </TooltipTrigger>
           <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
-        </Tooltip>
+        </Tooltip>}
       </div>
       <div className="prompt-effort-endpoints text-muted-foreground">
         <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
@@ -102,24 +106,27 @@ export function PromptThinkingSettings({
           aria-disabled={inactive}
           data-dragging={dragging || undefined}
           style={{
-            '--prompt-effort-x': stepAt(index),
+            '--prompt-effort-x': stepAt(dragPosition === null ? index : dragPosition * (levels.length - 1)),
             '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
-            '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + ${EFFORT_THUMB / 2}px)`,
+            '--prompt-effort-fill': (dragPosition ?? index / Math.max(1, levels.length - 1)) === 1 ? '100%' : `calc(${stepAt(dragPosition === null ? index : dragPosition * (levels.length - 1))} + ${EFFORT_THUMB / 2}px)`,
           } as React.CSSProperties}
           onPointerDown={event => {
             if (event.button !== 0 || inactive) return
             event.currentTarget.setPointerCapture(event.pointerId)
             event.currentTarget.focus({ preventScroll: true })
-            setDragging(true)
             fromPointer(event)
           }}
-          onPointerMove={event => { if (event.buttons & 1) fromPointer(event) }}
-          onPointerUp={stopDragging}
+          onPointerMove={event => { if (dragging && event.buttons & 1) fromPointer(event) }}
+          onPointerUp={() => { if (dragPosition !== null) setIndex(Math.round(dragPosition * (levels.length - 1))); stopDragging() }}
           onPointerCancel={stopDragging}
           onLostPointerCapture={stopDragging}
           onKeyDown={onKeyDown}
         >
           <span className="prompt-effort-fill" aria-hidden="true" />
+          <span className="prompt-effort-energy" aria-hidden="true">
+            <span className="prompt-effort-flare" />
+            {[0, 1, 2, 3, 4, 5].map(i => <i key={i} style={{ top: `${18 + (i * 13) % 70}%`, animationDelay: `${-i * 0.37}s` }} />)}
+          </span>
           {levels.map((level, i) => <i key={level.id} className="prompt-effort-dot" style={{ left: stepAt(i) }} aria-hidden="true" />)}
           <span className="prompt-effort-thumb" aria-hidden="true" />
         </div>
