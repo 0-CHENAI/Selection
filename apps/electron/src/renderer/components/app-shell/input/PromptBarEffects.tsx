@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
-import { EffortParticles } from './EffortParticles'
+import { EffortPixelField } from './EffortPixelField'
 import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
@@ -142,7 +142,11 @@ export function PromptThinkingSettings({
       onKeyDown={onKeyDown}
     >
       <span className="prompt-effort-fill" aria-hidden="true" />
-      {field && <EffortParticles mode={field} />}
+      {field === 'max' && (
+        <span className="prompt-effort-pixel-clip" aria-hidden="true">
+          <EffortPixelField />
+        </span>
+      )}
       {!inactive && (
         <span className="prompt-effort-shimmer" aria-hidden="true">
           <span className="prompt-effort-shimmer-wave" />

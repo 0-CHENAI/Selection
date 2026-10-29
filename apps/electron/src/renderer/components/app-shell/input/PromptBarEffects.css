@@ -181,27 +181,18 @@
 .prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb,
 .prompt-effort-track[aria-disabled='true'][data-dragging] .prompt-effort-thumb { transform: none; }
 
-.prompt-effort-settings[data-max] .prompt-effort-track {
-  background: color-mix(in srgb, var(--prompt-spark) 28%, #1c1726);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--prompt-spark) 42%, transparent);
+.prompt-effort-settings[data-max] .prompt-effort-track,
+.dark .prompt-effort-settings[data-max] .prompt-effort-track {
+  background: linear-gradient(90deg, #2c2a31 0%, #2c2a31 52%, #353044 100%);
 }
+.prompt-effort-settings[data-max] .prompt-effort-dot { opacity: 0; }
 .prompt-effort-settings[data-max] .prompt-effort-fill { opacity: 0; }
 .prompt-effort-settings[data-max] .prompt-effort-thumb {
   background: #fff;
   border-color: color-mix(in srgb, var(--prompt-spark) 30%, white);
 }
 .prompt-effort-settings[data-max] .prompt-effort-value.is-max {
-  background-image: linear-gradient(90deg,
-    var(--prompt-particle-1),
-    var(--prompt-particle-4),
-    var(--prompt-particle-3),
-    var(--prompt-particle-2),
-    var(--prompt-particle-1));
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: prompt-effort-max-flow 3.4s linear infinite;
+  color: color-mix(in oklch, var(--prompt-spark) 72%, white);
 }
 
 .prompt-effort-track[data-dragging] .prompt-effort-fill { transition: none; }
@@ -209,32 +200,31 @@
   transition: background-color 300ms ease, transform 180ms cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
-/* Max uses tsParticles. The fallback stays if motion is reduced or the engine is still loading. */
-.prompt-effort-particles {
+.prompt-effort-pixel-clip {
   position: absolute;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  z-index: 1;
+  inset: 0;
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  color: var(--prompt-spark);
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 38%, #000 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, #000 38%, #000 100%);
+}
+.prompt-effort-pixel-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 .prompt-effort-shimmer {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   left: 0;
-  bottom: 0;
+  bottom: 1px;
   width: var(--prompt-effort-fill);
-  height: 9px;
+  height: 2px;
   overflow: hidden;
-  border-radius: inherit;
   pointer-events: none;
-  opacity: calc(0.16 + var(--prompt-shimmer, 0) * 0.84);
+  opacity: calc(0.05 + var(--prompt-shimmer, 0) * 0.16);
 }
 .prompt-effort-shimmer-wave,
 .prompt-effort-shimmer-glints {
@@ -242,48 +232,18 @@
   left: 0;
   bottom: 0;
   width: 200%;
-  height: 100%;
+  height: 2px;
   pointer-events: none;
-  animation: prompt-effort-shimmer 3.6s linear infinite;
 }
 .prompt-effort-shimmer-wave {
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, white 70%, var(--prompt-spark)) 18%, transparent 36%, color-mix(in srgb, white 55%, var(--prompt-spark)) 62%, transparent 80%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prompt-spark) 55%, transparent) 28%, transparent 52%, color-mix(in srgb, var(--prompt-spark) 35%, transparent) 76%, transparent 92%);
+  animation: prompt-effort-shimmer 3.6s linear infinite;
 }
-.prompt-effort-shimmer-glints {
-  animation-duration: 2.4s;
-  animation-direction: reverse;
-  background-image:
-    radial-gradient(ellipse 10px 3px at 12% 70%, white, transparent 70%),
-    radial-gradient(ellipse 10px 3px at 62% 70%, white, transparent 70%),
-    radial-gradient(ellipse 14px 3px at 38% 80%, color-mix(in srgb, white 70%, var(--prompt-spark)), transparent 72%),
-    radial-gradient(ellipse 14px 3px at 88% 80%, color-mix(in srgb, white 70%, var(--prompt-spark)), transparent 72%);
-}
+.prompt-effort-shimmer-glints { display: none; }
 @keyframes prompt-effort-shimmer {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
 }
-.prompt-effort-particle-fallback {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background: linear-gradient(90deg, var(--prompt-particle-1), var(--prompt-particle-2) 55%, var(--prompt-particle-3));
-}
-.prompt-effort-particles[data-mode='prelude'] .prompt-effort-particle-fallback { opacity: 0.28; }
-.prompt-effort-particle-host,
-.prompt-effort-particles canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-@keyframes prompt-effort-max-flow {
-  to { background-position: 220% center; }
-}
-
 .prompt-fast-seat {
   display: inline-flex;
   flex-shrink: 0;
@@ -340,11 +300,8 @@
   .prompt-effort-track:hover .prompt-effort-thumb,
   .prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }
   .prompt-sparks { display: none; }
-  .prompt-effort-particle-host,
-  .prompt-effort-particles canvas { display: none; }
   .prompt-effort-shimmer-wave,
   .prompt-effort-shimmer-glints { animation: none; }
   .prompt-fast-button,
-  .prompt-fast-button[data-active] svg,
-  .prompt-effort-settings[data-max] .prompt-effort-value.is-max { animation: none; transition: none; }
+  .prompt-fast-button[data-active] svg { animation: none; transition: none; }
 }

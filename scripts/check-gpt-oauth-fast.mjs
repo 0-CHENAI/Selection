@@ -21,6 +21,7 @@ try {
       && button.textContent.includes('Fast')
       && !!document.querySelector('.prompt-effort-shimmer')
       && !document.querySelector('.prompt-effort-particles')
+      && !document.querySelector('.prompt-effort-pixel-grid')
       && getComputedStyle(button.querySelector('svg')).animationName === 'prompt-fast-charge'
   }), true, 'Fast sits in the effort heading and medium effort has no particle field')
   const slider = '[role="slider"][aria-label="思考强度"]'
@@ -40,17 +41,14 @@ try {
   await page.press(slider, 'End')
   assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '4')
   assert.equal(await page.evaluate(() => {
-    const field = document.querySelector('.prompt-effort-particles')
-    return field?.getAttribute('data-mode') === 'max'
-      && !!field.querySelector('.prompt-effort-particle-fallback')
+    const grid = document.querySelector('canvas.prompt-effort-pixel-grid')
+    return grid?.getAttribute('data-pixel-engine') === 'claude-range-slider'
       && document.querySelector('.prompt-effort-value')?.classList.contains('is-max')
-  }), true, 'Max shows the particle field')
+      && !document.querySelector('.prompt-effort-particles')
+  }), true, 'Max shows the Ultracode pixel field')
   await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="gpt-oauth-fast"] svg')).animationName), 'none')
-  assert.equal(await page.evaluate(() => {
-    const canvas = document.querySelector('.prompt-effort-particles canvas')
-    return !canvas || getComputedStyle(canvas).display === 'none'
-  }), true)
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.prompt-effort-shimmer-wave')).animationName), 'none')
   await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await page.press(slider, 'Home')
   await page.press(slider, 'ArrowRight')
