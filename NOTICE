@@ -13,12 +13,3 @@ Commercial Terms of Service: https://www.anthropic.com/legal/commercial-terms
 
 Third-party dependencies are listed in package.json files and are subject
 to their respective licenses.
-
----
-
-Ultracode effort-track pixel field
-Adapted from https://github.com/254558/claude-range-slider
-Copyright (c) 2026 张帅
-The upstream repository does not publish a LICENSE file. The WebGL2
-simulation, blur, and composite passes in the Electron renderer are adapted
-from that project and retuned for Selection's effort slider.

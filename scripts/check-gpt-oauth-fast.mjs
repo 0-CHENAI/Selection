@@ -16,14 +16,28 @@ try {
   assert.equal(await checked(), 'true')
   assert.equal(await page.evaluate(() => {
     const button = document.querySelector('[data-testid="gpt-oauth-fast"]')
-    return !!button
-      && !!button.closest('.prompt-effort-heading')
+    const shimmer = document.querySelector('.prompt-effort-shimmer')
+    const wave = document.querySelector('.prompt-effort-shimmer-wave')
+    const track = document.querySelector('[role="slider"]')
+    const thumb = document.querySelector('.prompt-effort-thumb')
+    if (!button || !shimmer || !wave || !track || !thumb) return false
+    const shimmerBox = shimmer.getBoundingClientRect()
+    const trackBox = track.getBoundingClientRect()
+    const thumbBox = thumb.getBoundingClientRect()
+    const waveBox = wave.getBoundingClientRect()
+    const style = getComputedStyle(shimmer)
+    const thumbCenter = thumbBox.left + thumbBox.width / 2
+    return !!button.closest('.prompt-effort-heading')
       && button.textContent.includes('Fast')
-      && !!document.querySelector('.prompt-effort-shimmer')
-      && !document.querySelector('.prompt-effort-particles')
-      && !document.querySelector('.prompt-effort-pixel-grid')
       && getComputedStyle(button.querySelector('svg')).animationName === 'prompt-fast-charge'
-  }), true, 'Fast sits in the effort heading and medium effort has no particle field')
+      && style.overflow === 'hidden'
+      && style.pointerEvents === 'none'
+      && Math.abs(shimmerBox.right - thumbCenter) < 2
+      && shimmerBox.right < trackBox.right - 8
+      && waveBox.top > trackBox.top + 2
+      && waveBox.bottom <= trackBox.bottom + 1
+      && getComputedStyle(wave).animationName.includes('prompt-effort-shimmer')
+  }), true, 'Fast sits in the effort heading and the shimmer stays left of the thumb')
   const slider = '[role="slider"][aria-label="思考强度"]'
   const bounds = await page.evaluate(() => {
     const rect = document.querySelector('[role="slider"]').getBoundingClientRect()
@@ -40,19 +54,13 @@ try {
   assert.equal(await checked(), 'true', 'Dragging effort must not change Fast')
   await page.press(slider, 'End')
   assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '4')
-  assert.equal(await page.evaluate(() => {
-    const grid = document.querySelector('canvas.prompt-effort-pixel-grid')
-    return grid?.getAttribute('data-pixel-engine') === 'claude-range-slider'
-      && document.querySelector('.prompt-effort-value')?.classList.contains('is-max')
-      && !document.querySelector('.prompt-effort-particles')
-  }), true, 'Max shows the Ultracode pixel field')
-  await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="gpt-oauth-fast"] svg')).animationName), 'none')
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.prompt-effort-shimmer-wave')).animationName), 'none')
-  await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await page.press(slider, 'Home')
   await page.press(slider, 'ArrowRight')
   assert.equal(await page.evaluate(() => document.querySelector('[role="slider"]').getAttribute('aria-valuenow')), '1')
+  await page.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="gpt-oauth-fast"] svg')).animationName), 'none')
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.prompt-effort-shimmer')).display), 'none')
+  await page.cdp('Emulation.setEmulatedMedia', { features: [] })
   await page.press(fast, 'Escape')
   await page.fill('[contenteditable="true"]', 'Fast verification')
   await page.click('button[aria-label="发送消息"]')

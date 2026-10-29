@@ -2,25 +2,24 @@
 .prompt-field,
 .prompt-effort-settings {
   --prompt-spark: oklch(0.49 0.16 293);
-  --prompt-particle-1: color-mix(in oklch, var(--prompt-spark) 32%, white);
-  --prompt-particle-2: color-mix(in oklch, var(--prompt-spark) 58%, white);
-  --prompt-particle-3: color-mix(in oklch, var(--prompt-spark) 82%, white);
-  --prompt-particle-4: color-mix(in oklch, var(--prompt-spark) 40%, oklch(0.78 0.1 265));
+  /* Calm water light. PRO recolors it from the work-mode accent below. */
+  --prompt-shimmer: oklch(0.52 0.16 236);
+  --prompt-shimmer-core: oklch(0.99 0.015 230);
 }
 
 .dark .prompt-field,
 .dark .prompt-effort-settings {
   --prompt-spark: oklch(0.78 0.11 293);
-  --prompt-particle-1: color-mix(in oklch, var(--prompt-spark) 45%, white);
-  --prompt-particle-2: color-mix(in oklch, var(--prompt-spark) 68%, white);
-  --prompt-particle-3: color-mix(in oklch, var(--prompt-spark) 88%, white);
-  --prompt-particle-4: color-mix(in oklch, var(--prompt-spark) 50%, oklch(0.84 0.08 255));
+  --prompt-shimmer: oklch(0.86 0.1 228);
+  --prompt-shimmer-core: oklch(0.98 0.02 220);
 }
 
 /* Follow the conversation mode in the model menu and the composer. */
 .prompt-field[data-work-mode='PRO'],
 .prompt-effort-settings[data-work-mode='PRO'] {
   --prompt-spark: var(--pro-accent);
+  --prompt-shimmer: color-mix(in oklch, var(--pro-accent) 90%, white);
+  --prompt-shimmer-core: white;
 }
 
 .prompt-effort-settings[data-work-mode='PRO'] .prompt-effort-value {
@@ -145,25 +144,25 @@
   background: color-mix(in srgb, var(--foreground) 30%, transparent);
 }
 .prompt-effort-dot.is-current {
-  background: var(--prompt-spark);
-  transform: scale(1.35);
+  background: var(--prompt-shimmer);
+  transform: scale(1.4);
 }
 
-/* White vertical pill, matching the Max reference thumb. */
+/* 26px circle on the 22px track. Crisp edge and a single short shadow, like a shadcn thumb. */
 .prompt-effort-thumb {
   position: absolute;
-  z-index: 3;
+  z-index: 1;
   top: 50%;
   left: var(--prompt-effort-x);
   box-sizing: border-box;
-  width: var(--prompt-effort-thumb-w);
-  height: var(--prompt-effort-thumb-h);
-  margin-top: calc(var(--prompt-effort-thumb-h) / -2);
-  margin-left: calc(var(--prompt-effort-thumb-w) / -2);
-  border: 1px solid color-mix(in srgb, var(--prompt-spark) 28%, white);
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+  width: var(--prompt-effort-thumb);
+  height: var(--prompt-effort-thumb);
+  margin-top: calc(var(--prompt-effort-thumb) / -2);
+  margin-left: calc(var(--prompt-effort-thumb) / -2);
+  border: 1px solid color-mix(in srgb, var(--foreground) 32%, transparent);
+  border-radius: 50%;
+  background: var(--foreground);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
   transform: scale(1);
   transition:
     left 220ms cubic-bezier(0.23, 1, 0.32, 1),
@@ -181,72 +180,114 @@
 .prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb,
 .prompt-effort-track[aria-disabled='true'][data-dragging] .prompt-effort-thumb { transform: none; }
 
-.prompt-effort-settings[data-max] .prompt-effort-track,
-.dark .prompt-effort-settings[data-max] .prompt-effort-track {
-  background: #2a2830;
-}
-.prompt-effort-settings[data-max] .prompt-effort-dot { opacity: 0; }
-.prompt-effort-settings[data-max] .prompt-effort-fill { opacity: 0; }
-.prompt-effort-settings[data-max] .prompt-effort-thumb {
-  height: 20px;
-  margin-top: -10px;
-  background: #e4dced;
-  border-color: transparent;
-  box-shadow: none;
-}
-.prompt-effort-settings[data-max] .prompt-effort-value.is-max {
-  color: color-mix(in oklch, var(--prompt-spark) 72%, white);
+.prompt-effort-settings[data-max] .prompt-effort-fill { background: color-mix(in srgb, var(--prompt-spark) 35%, transparent); }
+.prompt-effort-settings[data-max] .prompt-effort-thumb { background: var(--prompt-spark); }
+.prompt-effort-settings[data-max] .prompt-effort-shimmer {
+  animation: prompt-effort-peak 2.4s ease-in-out infinite;
 }
 
-.prompt-effort-track[data-dragging] .prompt-effort-fill { transition: none; }
+.prompt-effort-track[data-dragging] .prompt-effort-fill,
+.prompt-effort-track[data-dragging] .prompt-effort-shimmer { transition: none; }
 .prompt-effort-track[data-dragging] .prompt-effort-thumb {
   transition: background-color 300ms ease, transform 180ms cubic-bezier(0.34, 1.45, 0.64, 1);
 }
+.prompt-effort-track[data-dragging] .prompt-effort-shimmer-wave { animation-duration: 1.7s; }
+.prompt-effort-track[data-dragging] .prompt-effort-shimmer-glints { animation-duration: 1.15s; }
+.prompt-effort-track[data-dragging] .prompt-effort-shimmer-glints.is-fine { animation-duration: 0.85s; }
 
-.prompt-effort-pixel-clip {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-}
-.prompt-effort-pixel-grid {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
+/* Bottom shimmer (波光): a water line and specular glints along the filled side only.
+   The box ends at the thumb, so nothing paints on the empty side of the track. */
 .prompt-effort-shimmer {
   position: absolute;
-  z-index: 2;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
   left: 0;
-  bottom: 1px;
-  width: var(--prompt-effort-fill);
-  height: 2px;
+  width: var(--prompt-effort-x);
   overflow: hidden;
+  border-radius: inherit;
+  color: var(--prompt-shimmer);
   pointer-events: none;
-  opacity: calc(0.05 + var(--prompt-shimmer, 0) * 0.16);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 58%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 0%, #000 58%, transparent 100%);
+  transition: width 220ms cubic-bezier(0.23, 1, 0.32, 1);
 }
+.prompt-effort-shimmer-wash {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 72%;
+  background: linear-gradient(to top, color-mix(in srgb, currentColor 70%, transparent), transparent);
+}
+/* Separate bright patches, not a continuous sine, so the motion reads as light on water. */
 .prompt-effort-shimmer-wave,
-.prompt-effort-shimmer-glints {
+.prompt-effort-shimmer-glints,
+.prompt-effort-shimmer-glints.is-fine {
   position: absolute;
   left: 0;
-  bottom: 0;
   width: 200%;
-  height: 2px;
   pointer-events: none;
+  background-repeat: no-repeat;
+  animation: prompt-effort-shimmer 4.6s linear infinite;
 }
 .prompt-effort-shimmer-wave {
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prompt-spark) 55%, transparent) 28%, transparent 52%, color-mix(in srgb, var(--prompt-spark) 35%, transparent) 76%, transparent 92%);
-  animation: prompt-effort-shimmer 3.6s linear infinite;
+  bottom: 0;
+  height: 15px;
+  filter: blur(0.2px);
+  background-image:
+    radial-gradient(ellipse 18px 4px at 7% 78%, white 0 18%, transparent 70%),
+    radial-gradient(ellipse 18px 4px at 57% 78%, white 0 18%, transparent 70%),
+    radial-gradient(ellipse 10px 3px at 19% 46%, white 0 22%, transparent 72%),
+    radial-gradient(ellipse 10px 3px at 69% 46%, white 0 22%, transparent 72%),
+    radial-gradient(ellipse 22px 5px at 34% 88%, white 0 16%, transparent 72%),
+    radial-gradient(ellipse 22px 5px at 84% 88%, white 0 16%, transparent 72%),
+    radial-gradient(ellipse 8px 3px at 46% 58%, white 0 28%, transparent 70%),
+    radial-gradient(ellipse 8px 3px at 96% 58%, white 0 28%, transparent 70%);
 }
-.prompt-effort-shimmer-glints { display: none; }
+.prompt-effort-shimmer-glints {
+  bottom: 1px;
+  height: 13px;
+  animation-duration: 3.1s;
+  background-image:
+    radial-gradient(ellipse 14px 3.5px at 12% 70%, white 0 24%, transparent 70%),
+    radial-gradient(ellipse 14px 3.5px at 62% 70%, white 0 24%, transparent 70%),
+    radial-gradient(ellipse 26px 7px at 12% 70%, color-mix(in srgb, white 55%, currentColor), transparent 74%),
+    radial-gradient(ellipse 26px 7px at 62% 70%, color-mix(in srgb, white 55%, currentColor), transparent 74%),
+    radial-gradient(ellipse 9px 3px at 28% 40%, white 0 30%, transparent 72%),
+    radial-gradient(ellipse 9px 3px at 78% 40%, white 0 30%, transparent 72%),
+    radial-gradient(ellipse 16px 4px at 43% 92%, white 0 20%, transparent 72%),
+    radial-gradient(ellipse 16px 4px at 93% 92%, white 0 20%, transparent 72%);
+}
+.prompt-effort-shimmer-glints.is-fine {
+  bottom: 3px;
+  height: 9px;
+  animation-duration: 2.2s;
+  animation-direction: reverse;
+  animation-name: prompt-effort-shimmer, prompt-effort-twinkle;
+  background-image:
+    radial-gradient(ellipse 6px 2.5px at 16% 62%, white 0 35%, transparent 72%),
+    radial-gradient(ellipse 6px 2.5px at 66% 62%, white 0 35%, transparent 72%),
+    radial-gradient(ellipse 11px 3px at 33% 84%, white 0 28%, transparent 72%),
+    radial-gradient(ellipse 11px 3px at 83% 84%, white 0 28%, transparent 72%),
+    radial-gradient(ellipse 5px 2px at 48% 36%, white 0 40%, transparent 74%),
+    radial-gradient(ellipse 5px 2px at 98% 36%, white 0 40%, transparent 74%);
+}
+.prompt-effort-settings[data-max] .prompt-effort-shimmer-wave { animation-duration: 3.1s; }
+
 @keyframes prompt-effort-shimmer {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
 }
+@keyframes prompt-effort-twinkle {
+  0%, 100% { opacity: 0.35; }
+  45% { opacity: 1; }
+}
+@keyframes prompt-effort-peak {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
 .prompt-fast-seat {
   display: inline-flex;
   flex-shrink: 0;
@@ -303,8 +344,12 @@
   .prompt-effort-track:hover .prompt-effort-thumb,
   .prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }
   .prompt-sparks { display: none; }
+  .prompt-effort-shimmer { display: none; }
   .prompt-effort-shimmer-wave,
-  .prompt-effort-shimmer-glints { animation: none; }
+  .prompt-effort-shimmer-glints,
+  .prompt-effort-shimmer-glints.is-fine,
   .prompt-fast-button,
-  .prompt-fast-button[data-active] svg { animation: none; transition: none; }
+  .prompt-fast-button[data-active] svg,
+  .prompt-effort-settings[data-max] .prompt-effort-shimmer,
+  .prompt-effort-settings[data-max] .prompt-effort-thumb { animation: none; transition: none; }
 }
