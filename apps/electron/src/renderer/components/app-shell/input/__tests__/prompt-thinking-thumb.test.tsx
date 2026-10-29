@@ -31,7 +31,7 @@ function thumbRule(): string {
   return css.slice(blockStart, end)
 }
 
-function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false) {
+function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false, headingAction?: ReactNode) {
   const i18n = i18next.createInstance()
   void i18n.init({
     lng: 'zh-Hans',
@@ -48,6 +48,7 @@ function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false) {
         levels={THINKING_LEVELS}
         workMode="NORM"
         disabled={disabled}
+        headingAction={headingAction}
         onChange={() => {}}
       />
     </I18nextProvider>,
@@ -109,5 +110,30 @@ describe('thinking effort thumb', () => {
 
     const disabled = renderSettings('medium', true)
     expect(disabled).toContain('aria-disabled="true"')
+    expect(disabled).not.toContain('prompt-effort-shimmer')
+  })
+
+  it('clips a bottom shimmer to the filled side and removes it when motion is reduced', () => {
+    const html = renderSettings('medium')
+    expect(html).toContain('class="prompt-effort-shimmer"')
+    expect(html).toContain('prompt-effort-shimmer-wave')
+    expect(html).toContain('prompt-effort-shimmer-glints is-fine')
+    expect(html).toContain('prompt-effort-dot is-current')
+    expect(css).toContain('width: var(--prompt-effort-x);')
+    expect(css).toContain('animation: prompt-effort-shimmer 4.6s linear infinite;')
+    expect(css).toContain('@keyframes prompt-effort-shimmer')
+    expect(css).not.toContain('re-chibi')
+    expect(css).not.toContain('prompt-effort-energy')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('.prompt-effort-shimmer { display: none; }')
+    expect(reduced).toContain('.prompt-effort-shimmer-wave,')
+    expect(reduced).toContain('animation: none;')
+  })
+
+  it('keeps a heading action beside the effort name', () => {
+    const html = renderSettings('medium', false, createElement('span', { 'data-testid': 'effort-heading-action' }, 'Fast'))
+    const heading = html.slice(html.indexOf('prompt-effort-heading'), html.indexOf('prompt-effort-endpoints'))
+    expect(heading).toContain('data-testid="effort-heading-action"')
+    expect(heading).toContain('Fast')
   })
 })
