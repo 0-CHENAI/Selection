@@ -89,7 +89,7 @@ describe('thinking effort thumb', () => {
   it('keeps focus, disabled, and max-effort treatments', () => {
     expect(css).toContain('.prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb')
     expect(css).toContain(".prompt-effort-track[aria-disabled='true'] { cursor: default; }")
-    expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb { background: var(--prompt-spark); }')
+    expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb {\n  background: #fff;')
     expect(css).toContain('.dark .prompt-effort-settings')
   })
 
@@ -110,24 +110,26 @@ describe('thinking effort thumb', () => {
 
     const disabled = renderSettings('medium', true)
     expect(disabled).toContain('aria-disabled="true"')
-    expect(disabled).not.toContain('prompt-effort-shimmer')
+    expect(disabled).not.toContain('prompt-effort-particles')
   })
 
-  it('clips a bottom shimmer to the filled side and removes it when motion is reduced', () => {
-    const html = renderSettings('medium')
-    expect(html).toContain('class="prompt-effort-shimmer"')
-    expect(html).toContain('prompt-effort-shimmer-wave')
-    expect(html).toContain('prompt-effort-shimmer-glints is-fine')
-    expect(html).toContain('prompt-effort-dot is-current')
-    expect(css).toContain('width: var(--prompt-effort-x);')
-    expect(css).toContain('animation: prompt-effort-shimmer 4.6s linear infinite;')
-    expect(css).toContain('@keyframes prompt-effort-shimmer')
+  it('shows tsParticles only at Max and keeps a static fallback when motion is reduced', () => {
+    const medium = renderSettings('medium')
+    expect(medium).not.toContain('prompt-effort-particles')
+    expect(medium).not.toContain('prompt-effort-shimmer')
+    const maxed = renderSettings('max')
+    expect(maxed).toContain('class="prompt-effort-particles"')
+    expect(maxed).toContain('data-mode="max"')
+    expect(maxed).toContain('prompt-effort-particle-fallback')
+    expect(maxed).toContain('prompt-effort-value is-max')
+    expect(css).not.toContain('prompt-effort-shimmer')
     expect(css).not.toContain('re-chibi')
-    expect(css).not.toContain('prompt-effort-energy')
+    const source = readFileSync(join(import.meta.dir, '../EffortParticles.tsx'), 'utf8')
+    expect(source).toContain("from '@tsparticles/react'")
+    expect(source).toContain("from '@tsparticles/slim'")
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
-    expect(reduced).toContain('.prompt-effort-shimmer { display: none; }')
-    expect(reduced).toContain('.prompt-effort-shimmer-wave,')
-    expect(reduced).toContain('animation: none;')
+    expect(reduced).toContain('.prompt-effort-particles canvas { display: none; }')
+    expect(reduced).toContain('.prompt-effort-settings[data-max] .prompt-effort-value.is-max { animation: none; transition: none; }')
   })
 
   it('keeps a heading action beside the effort name', () => {

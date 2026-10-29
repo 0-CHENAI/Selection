@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
+import { EffortParticles } from './EffortParticles'
 import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
@@ -14,16 +15,10 @@ const EFFORT_EDGE = 11
 // Slightly larger than the 22px track so the knob reads as floating above it.
 const EFFORT_THUMB = 26
 
-/** Specular glints along the bottom of the fill. The parent clips them at the thumb. */
-function EffortShimmer() {
-  return (
-    <span className="prompt-effort-shimmer" aria-hidden="true">
-      <span className="prompt-effort-shimmer-wash" />
-      <span className="prompt-effort-shimmer-wave" />
-      <span className="prompt-effort-shimmer-glints" />
-      <span className="prompt-effort-shimmer-glints is-fine" />
-    </span>
-  )
+function effortField(level: ThinkingLevel | undefined): 'max' | 'prelude' | undefined {
+  if (level === 'max') return 'max'
+  if (level === 'high' || level === 'xhigh') return 'prelude'
+  return undefined
 }
 
 export function PromptThinkingSettings({
@@ -64,10 +59,11 @@ export function PromptThinkingSettings({
   const fraction = preview === null ? resting / span : preview
   const nearest = preview === null ? resting : Math.max(0, Math.min(levels.length - 1, Math.round(preview * span)))
   const visualLevel = levels[nearest]?.id ?? value
-  const maxed = levels.length > 1 && visualLevel === levels.at(-1)?.id
+  const atMax = visualLevel === 'max'
   const valueKey = binary ? (visualLevel === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(visualLevel)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
+  const field = inactive ? undefined : effortField(visualLevel)
   const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / span})`
   const visualIndex = fraction * span
   const setIndex = (next: number) => {
@@ -144,7 +140,7 @@ export function PromptThinkingSettings({
       onKeyDown={onKeyDown}
     >
       <span className="prompt-effort-fill" aria-hidden="true" />
-      {!inactive && <EffortShimmer />}
+      {field && <EffortParticles mode={field} />}
       {levels.map((level, i) => (
         <i key={level.id} className={i === nearest ? 'prompt-effort-dot is-current' : 'prompt-effort-dot'} style={{ left: stepAt(i) }} aria-hidden="true" />
       ))}
@@ -153,10 +149,10 @@ export function PromptThinkingSettings({
   )
 
   return (
-    <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
+    <div className="prompt-effort-settings" data-max={atMax || undefined} data-field={field} data-work-mode={workMode}>
       <div className="prompt-effort-heading">
         <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
-        <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
+        <span className={atMax ? 'prompt-effort-value is-max font-medium' : 'prompt-effort-value font-medium'}>{t(valueKey)}</span>
         {headingAction ?? help}
       </div>
       <div className="prompt-effort-endpoints text-muted-foreground">
