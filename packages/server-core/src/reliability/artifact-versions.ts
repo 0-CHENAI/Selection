@@ -148,7 +148,23 @@ export class ArtifactVersions {
         && (!existsSync(canonical) || !existing.fileIdentity || fileIdentity(canonical) === existing.fileIdentity))
         || (!existsSync(canonical) && existing.previousPaths?.includes(canonical)))) matches.push(existing)
     }
-    if (matches.length > 1) throw new Error('Artifact path is ambiguous; choose its exact original location')
+    if (matches.length > 1) {
+      // A live preview can register an atomic replacement before the tracked turn
+      // captures it into its original history. Both records then own the same
+      // live file. Keep both histories addressable by ID, but resolve this exact
+      // location to the most recently recorded history instead of rejecting it.
+      const first = matches[0]!
+      const identity = fileIdentity(first.path)
+      const sameLiveFile = identity && matches.every(record =>
+        record.fileIdentity === identity && fileIdentity(record.path) === identity
+        && canonicalLocation(record.path) === canonicalLocation(first.path))
+      if (!sameLiveFile) throw new Error('Artifact path is ambiguous; choose its exact original location')
+      if (matches.some(record => existsSync(`${this.recordPath(record.id)}.pending`))) {
+        throw new Error('Artifact update requires recovery before opening')
+      }
+      matches.sort((a, b) => b.versions.at(-1)!.createdAt - a.versions.at(-1)!.createdAt
+        || b.versions.length - a.versions.length || a.id.localeCompare(b.id))
+    }
     return matches[0]
   }
   private validateRecord(record: ArtifactRecord, id: string): void {
