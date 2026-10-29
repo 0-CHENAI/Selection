@@ -183,13 +183,16 @@
 
 .prompt-effort-settings[data-max] .prompt-effort-track,
 .dark .prompt-effort-settings[data-max] .prompt-effort-track {
-  background: linear-gradient(90deg, #2c2a31 0%, #2c2a31 52%, #353044 100%);
+  background: #2a2830;
 }
 .prompt-effort-settings[data-max] .prompt-effort-dot { opacity: 0; }
 .prompt-effort-settings[data-max] .prompt-effort-fill { opacity: 0; }
 .prompt-effort-settings[data-max] .prompt-effort-thumb {
-  background: #fff;
-  border-color: color-mix(in srgb, var(--prompt-spark) 30%, white);
+  height: 20px;
+  margin-top: -10px;
+  background: #e4dced;
+  border-color: transparent;
+  box-shadow: none;
 }
 .prompt-effort-settings[data-max] .prompt-effort-value.is-max {
   color: color-mix(in oklch, var(--prompt-spark) 72%, white);

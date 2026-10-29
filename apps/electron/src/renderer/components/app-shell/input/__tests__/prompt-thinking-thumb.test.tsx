@@ -85,7 +85,7 @@ describe('thinking effort thumb', () => {
   it('keeps focus, disabled, and max-effort treatments', () => {
     expect(css).toContain('.prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb')
     expect(css).toContain(".prompt-effort-track[aria-disabled='true'] { cursor: default; }")
-    expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb {\n  background: #fff;')
+    expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb {\n  height: 20px;')
     expect(css).toContain('.dark .prompt-effort-settings')
   })
 
@@ -129,7 +129,8 @@ describe('thinking effort thumb', () => {
     expect(source).toContain('254558/claude-range-slider')
     expect(source).not.toContain('tsparticles')
     expect(shaders).toContain('uniform float u_time, u_slider')
-    expect(shaders).toContain('vec2(64.0,5.0)')
+    expect(shaders).toContain('max(delta.x, delta.y)')
+    expect(shaders).toContain('gapRatio = 0.8')
     expect(maxed).toContain('data-pixel-engine="claude-range-slider"')
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(reduced).toContain('.prompt-effort-shimmer-wave,')
