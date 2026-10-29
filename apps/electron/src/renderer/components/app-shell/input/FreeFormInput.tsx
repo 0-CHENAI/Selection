@@ -1884,8 +1884,6 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-  const fastControl = onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode)
-    ? <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu /> : undefined
   const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && thinkingUnavailable !== 'unsupported' && (thinkingUnavailable === 'always-on' || availableThinkingLevels.length > 0) ? (
     <PromptThinkingSettings
       value={thinkingLevel}
@@ -1894,7 +1892,6 @@ export function FreeFormInput({
       disabled={disabled || thinkingDisabled}
       unavailable={thinkingUnavailable}
       binary={thinkingCapability.binary}
-      headingAction={fastControl}
       onChange={onThinkingLevelChange}
     />
   ) : null
@@ -2610,10 +2607,13 @@ export function FreeFormInput({
                 )}
 
                 </div>
-                {!promptThinkingSettings && fastControl && (
-                  <div className="flex items-center justify-between gap-3 px-3 py-2">
-                    <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
-                    {fastControl}
+                {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
+                  <div className="shrink-0">
+                    <StyledDropdownMenuSeparator className="my-1" />
+                    <div className="flex items-center justify-between gap-3 px-3 py-2">
+                      <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
+                      <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu />
+                    </div>
                   </div>
                 )}
                 {pickerMode === 'flat' && promptThinkingSettings && (

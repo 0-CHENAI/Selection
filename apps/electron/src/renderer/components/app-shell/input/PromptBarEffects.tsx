@@ -14,20 +14,8 @@ const EFFORT_EDGE = 11
 // Slightly larger than the 22px track so the knob reads as floating above it.
 const EFFORT_THUMB = 26
 
-/** Specular glints along the bottom of the fill. The parent clips them at the thumb. */
-function EffortShimmer() {
-  return (
-    <span className="prompt-effort-shimmer" aria-hidden="true">
-      <span className="prompt-effort-shimmer-wash" />
-      <span className="prompt-effort-shimmer-wave" />
-      <span className="prompt-effort-shimmer-glints" />
-      <span className="prompt-effort-shimmer-glints is-fine" />
-    </span>
-  )
-}
-
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange, unavailable, binary, headingAction, inMenu = true,
+  value, levels, workMode, disabled, onChange, unavailable, binary,
 }: {
   value: ThinkingLevel
   levels: readonly ThinkingLevelDefinition[]
@@ -38,136 +26,104 @@ export function PromptThinkingSettings({
   unavailable?: 'unsupported' | 'always-on'
   /** Two stops that only turn thinking on or off. */
   binary?: boolean
-  /** Sits at the right of the effort heading. Used for the Fast switch; effort stays independent. */
-  headingAction?: React.ReactNode
-  /** Desktop menu wraps the track in a menu item. The compact drawer does not. */
-  inMenu?: boolean
 }) {
   const { t } = useTranslation()
-  const dragFraction = React.useRef<number | null>(null)
-  const [preview, setPreview] = React.useState<number | null>(null)
+  const [dragging, setDragging] = React.useState(false)
   if (unavailable) {
     const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
     return (
       <div className="prompt-effort-settings" data-thinking-mode={unavailable} data-work-mode={workMode}>
         <div className="prompt-effort-heading">
-          <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
+          <span className="text-muted-foreground">{t('thinking.effort')}</span>
           <span className="prompt-effort-value font-medium">{t(unavailable === 'always-on' ? 'thinking.alwaysOnShort' : 'thinking.notSupported')}</span>
-          {headingAction}
         </div>
         <p className="prompt-effort-note text-muted-foreground">{t(note)}</p>
       </div>
     )
   }
-  const span = Math.max(1, levels.length - 1)
-  const resting = Math.max(0, levels.findIndex(level => level.id === value))
-  const fraction = preview === null ? resting / span : preview
-  const nearest = preview === null ? resting : Math.max(0, Math.min(levels.length - 1, Math.round(preview * span)))
-  const visualLevel = levels[nearest]?.id ?? value
-  const maxed = levels.length > 1 && visualLevel === levels.at(-1)?.id
-  const valueKey = binary ? (visualLevel === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(visualLevel)
+  const index = Math.max(0, levels.findIndex(level => level.id === value))
+  const maxed = levels.length > 1 && value === levels.at(-1)?.id
+  const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
-  const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / span})`
-  const visualIndex = fraction * span
+  const stopDragging = () => setDragging(false)
+  const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / Math.max(1, levels.length - 1)})`
   const setIndex = (next: number) => {
     if (inactive) return
     const level = levels[Math.max(0, Math.min(levels.length - 1, next))]!
     if (level.id !== value) onChange(level.id)
   }
-  const pointerFraction = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const raw = (event.clientX - rect.left - EFFORT_EDGE) / Math.max(1, rect.width - EFFORT_EDGE * 2)
-    return Math.max(0, Math.min(1, raw))
-  }
-  const followPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+  const fromPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     if (inactive) return
-    const next = pointerFraction(event)
-    dragFraction.current = next
-    setPreview(next)
-  }
-  const finishDrag = (commit: boolean) => {
-    const held = dragFraction.current
-    dragFraction.current = null
-    setPreview(null)
-    if (commit && held !== null) setIndex(Math.round(held * span))
+    const rect = event.currentTarget.getBoundingClientRect()
+    const fraction = (event.clientX - rect.left - EFFORT_EDGE) / Math.max(1, rect.width - EFFORT_EDGE * 2)
+    setIndex(Math.round(fraction * (levels.length - 1)))
   }
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (inactive || dragFraction.current !== null) return
+    if (inactive) return
     const step = event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 1
       : event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 0
     if (!step && event.key !== 'Home' && event.key !== 'End') return
     event.preventDefault()
     event.stopPropagation()
-    setIndex(step ? nearest + step : event.key === 'Home' ? 0 : levels.length - 1)
+    setIndex(step ? index + step : event.key === 'Home' ? 0 : levels.length - 1)
   }
-  const help = inMenu && !headingAction ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <MenuItem asChild onSelect={event => event.preventDefault()}>
-          <button type="button" className="prompt-effort-help" aria-label={t('thinking.effortHelp')}>
-            <HugeiconsIcon icon={HelpCircleIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
-          </button>
-        </MenuItem>
-      </TooltipTrigger>
-      <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
-    </Tooltip>
-  ) : null
-  const track = (
-    <div
-      className="prompt-effort-track"
-      role="slider"
-      tabIndex={inactive ? -1 : 0}
-      aria-label={t('thinking.effort')}
-      aria-orientation="horizontal"
-      aria-valuemin={0}
-      aria-valuemax={levels.length - 1}
-      aria-valuenow={nearest}
-      aria-valuetext={t(valueKey)}
-      aria-disabled={inactive}
-      data-dragging={preview !== null || undefined}
-      style={{
-        '--prompt-effort-x': stepAt(visualIndex),
-        '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
-        '--prompt-effort-fill': fraction >= 0.999 ? '100%' : `calc(${stepAt(visualIndex)} + ${EFFORT_THUMB / 2}px)`,
-      } as React.CSSProperties}
-      onPointerDown={event => {
-        if (event.button !== 0 || inactive) return
-        event.currentTarget.setPointerCapture(event.pointerId)
-        event.currentTarget.focus({ preventScroll: true })
-        followPointer(event)
-      }}
-      onPointerMove={event => { if (dragFraction.current !== null && event.buttons & 1) followPointer(event) }}
-      onPointerUp={() => finishDrag(true)}
-      onPointerCancel={() => finishDrag(false)}
-      onLostPointerCapture={event => { if (event.buttons === 0) finishDrag(true) }}
-      onKeyDown={onKeyDown}
-    >
-      <span className="prompt-effort-fill" aria-hidden="true" />
-      {!inactive && <EffortShimmer />}
-      {levels.map((level, i) => (
-        <i key={level.id} className={i === nearest ? 'prompt-effort-dot is-current' : 'prompt-effort-dot'} style={{ left: stepAt(i) }} aria-hidden="true" />
-      ))}
-      <span className="prompt-effort-thumb" aria-hidden="true" />
-    </div>
-  )
 
   return (
     <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
       <div className="prompt-effort-heading">
-        <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
+        <span className="text-muted-foreground">{t('thinking.effort')}</span>
         <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
-        {headingAction ?? help}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <MenuItem asChild onSelect={event => event.preventDefault()}>
+              <button type="button" className="prompt-effort-help" aria-label={t('thinking.effortHelp')}>
+                <HugeiconsIcon icon={HelpCircleIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            </MenuItem>
+          </TooltipTrigger>
+          <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
+        </Tooltip>
       </div>
       <div className="prompt-effort-endpoints text-muted-foreground">
         <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
         <span>{t(binary ? 'thinking.on' : 'thinking.smarter')}</span>
       </div>
-      {inMenu ? (
-        <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>
-          {track}
-        </MenuItem>
-      ) : track}
+      <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>
+        <div
+          className="prompt-effort-track"
+          role="slider"
+          aria-label={t('thinking.effort')}
+          aria-orientation="horizontal"
+          aria-valuemin={0}
+          aria-valuemax={levels.length - 1}
+          aria-valuenow={index}
+          aria-valuetext={t(valueKey)}
+          aria-disabled={inactive}
+          data-dragging={dragging || undefined}
+          style={{
+            '--prompt-effort-x': stepAt(index),
+            '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
+            '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + ${EFFORT_THUMB / 2}px)`,
+          } as React.CSSProperties}
+          onPointerDown={event => {
+            if (event.button !== 0 || inactive) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            event.currentTarget.focus({ preventScroll: true })
+            setDragging(true)
+            fromPointer(event)
+          }}
+          onPointerMove={event => { if (event.buttons & 1) fromPointer(event) }}
+          onPointerUp={stopDragging}
+          onPointerCancel={stopDragging}
+          onLostPointerCapture={stopDragging}
+          onKeyDown={onKeyDown}
+        >
+          <span className="prompt-effort-fill" aria-hidden="true" />
+          {levels.map((level, i) => <i key={level.id} className="prompt-effort-dot" style={{ left: stepAt(i) }} aria-hidden="true" />)}
+          <span className="prompt-effort-thumb" aria-hidden="true" />
+        </div>
+      </MenuItem>
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { Item as MenuItem } from '@radix-ui/react-dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
-import './PromptBarEffects.css'
+import './FastModeButton.css'
 
 export function fastModeDetailKey(supported: boolean, busy?: boolean) {
   if (!supported) return 'chat.fastMode.unsupported' as const

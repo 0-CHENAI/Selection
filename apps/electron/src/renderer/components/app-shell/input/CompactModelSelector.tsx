@@ -1,7 +1,6 @@
 import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { FastModeButton, fastModeDetailKey } from './FastModeButton'
-import { PromptThinkingSettings } from './PromptBarEffects'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
@@ -300,23 +299,44 @@ export function CompactModelSelector({
     [onModelChange, onConnectionChange, effectiveConnection],
   )
 
-  const fastControl = onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode)
-    ? <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} /> : undefined
   const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
     ? null
     : (
-      <div className="border-t border-border/40">
-        <PromptThinkingSettings
-          inMenu={false}
-          value={thinkingLevel}
-          levels={availableThinkingLevels}
-          workMode={workMode}
-          disabled={thinkingDisabled}
-          unavailable={thinkingUnavailable === 'always-on' ? 'always-on' : undefined}
-          binary={thinkingCapability.binary}
-          headingAction={fastControl}
-          onChange={level => onThinkingLevelChange?.(level)}
-        />
+      <div className="pt-2">
+        {thinkingUnavailable === 'always-on' ? (
+          <div className="px-3 py-2 text-xs text-foreground/60">{t('thinking.alwaysOn')}</div>
+        ) : (
+          <>
+            <div className="px-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
+              {t('chat.modelPicker.thinkingSection')}
+            </div>
+            {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
+              const isSelected = thinkingLevel === id
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={thinkingDisabled}
+                  onClick={() => onThinkingLevelChange?.(id)}
+                  className={cn(
+                    'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
+                    thinkingDisabled && 'opacity-50 cursor-not-allowed',
+                    !thinkingDisabled && isSelected && 'bg-foreground/5',
+                    !thinkingDisabled && !isSelected && 'hover:bg-foreground/5',
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t(nameKey)}</div>
+                    <div className="text-xs text-foreground/50">{t(descriptionKey)}</div>
+                  </div>
+                  {isSelected && (
+                    <Check className="h-3 w-3 text-foreground/60 shrink-0 ml-3" />
+                  )}
+                </button>
+              )
+            })}
+          </>
+        )}
       </div>
     )
 
@@ -515,10 +535,10 @@ export function CompactModelSelector({
             </>
           )}
         </div>
-        {!thinkingControl && fastControl && (
+        {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
           <div className="flex items-center justify-between gap-3 border-t border-border/40 px-3 py-2">
             <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
-            {fastControl}
+            <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
           </div>
         )}
       </DrawerContent>
