@@ -341,6 +341,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.continueProgress?.(sessionId)
       case 'setPermissionMode':
         return sessionManager.setSessionPermissionMode(sessionId, command.mode)
+      case 'setFastMode':
+        if (typeof command.enabled !== 'boolean') throw new Error('Invalid Fast setting')
+        if (!sessionManager.setSessionFastMode) throw new Error('Fast mode is unavailable')
+        return sessionManager.setSessionFastMode(sessionId, command.enabled)
       case 'setThinkingLevel':
         // Validate thinking level before passing to session manager
         if (!isValidThinkingLevel(command.level)) {

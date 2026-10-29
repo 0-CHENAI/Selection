@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { installGptOAuthFast } from './gpt-oauth-fast.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
@@ -162,6 +163,7 @@ interface InitMessage {
   model: string;
   cwd: string;
   thinkingLevel: string;
+  fastMode?: boolean;
   workspaceRootPath: string;
   sessionId: string;
   sessionPath: string;
@@ -254,6 +256,7 @@ type InboundMessage =
   | { type: 'ensure_session_ready'; id: string }
   | { type: 'set_model'; model: string }
   | { type: 'set_thinking_level'; level: string }
+  | { type: 'set_fast_mode'; enabled: boolean }
   | { type: 'compact'; id: string; customInstructions?: string }
   | { type: 'set_auto_compaction'; id: string; enabled: boolean }
   | RuntimeConfigUpdateMessage
@@ -976,6 +979,7 @@ async function ensureSession(): Promise<AgentSession> {
   installUnknownToolGuard(session);
   applyContextMeterConnection();
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
+  installGptOAuthFast(session, () => initConfig?.fastMode);
   applyCompactionPolicy(session.model, true);
   piSession = session;
 
@@ -2580,6 +2584,9 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       await modelConfigurationQueue.enqueue(() => handleSetModel(msg));
       break;
 
+    case 'set_fast_mode':
+      if (initConfig) initConfig.fastMode = msg.enabled === true;
+      break;
     case 'set_thinking_level':
       await modelConfigurationQueue.enqueue(() => handleSetThinkingLevel(msg));
       break;

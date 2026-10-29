@@ -294,6 +294,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
+    fastMode: sessionOpts.fastMode,
     workingDirectory: orchestrationProjectId ? 'user_default' : draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
@@ -307,6 +308,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
+    fastMode: sessionOpts.fastMode,
     workingDirectory: orchestrationProjectId ? 'user_default' : draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
@@ -321,6 +323,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
       llmConnection: ctx.connection,
       permissionMode: ctx.permissionMode,
       thinkingLevel: ctx.thinkingLevel,
+      fastMode: ctx.fastMode,
       workingDirectory: ctx.workingDirectory ?? 'user_default',
       swarmEnabled: ctx.swarmEnabled,
       enabledSourceSlugs: ctx.sourceSlugs,
@@ -338,6 +341,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
         llmConnection: ctx.connection,
         permissionMode: ctx.permissionMode,
         thinkingLevel: ctx.thinkingLevel,
+        fastMode: ctx.fastMode,
         workingDirectory: ctx.workingDirectory ?? 'user_default',
         swarmEnabled: ctx.swarmEnabled,
         enabledSourceSlugs: ctx.sourceSlugs,
@@ -934,6 +938,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
                   pendingCredential={undefined}
                   onRespondToCredential={onRespondToCredential}
                   onRespondToClarification={onRespondToClarification}
+                  fastMode={sessionOpts.fastMode}
+                  onFastModeChange={(enabled) => setOption('fastMode', enabled)}
                   thinkingLevel={activeThinkingLevel}
                   onThinkingLevelChange={handleThinkingLevelChange}
                   permissionMode={sessionOpts.permissionMode}
@@ -1030,6 +1036,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
               pendingCredential={pendingCredential}
               onRespondToCredential={onRespondToCredential}
               onRespondToClarification={onRespondToClarification}
+              fastMode={sessionOpts.fastMode}
+              onFastModeChange={(enabled) => setOption('fastMode', enabled)}
               thinkingLevel={activeThinkingLevel}
               onThinkingLevelChange={handleThinkingLevelChange}
               permissionMode={sessionOpts.permissionMode}

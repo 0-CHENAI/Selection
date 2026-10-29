@@ -345,6 +345,7 @@ function snapshotTurnContext(managed: ManagedSession, options?: SendMessageOptio
     model: managed.model ?? null,
     llmConnection: managed.llmConnection ?? null,
     thinkingLevel: managed.thinkingLevel,
+    fastMode: managed.fastMode,
     permissionMode: managed.permissionMode,
     workMode: managed.workMode,
     projectId: managed.projectId ?? null,
@@ -1090,6 +1091,8 @@ interface ManagedSession extends WorkModeMetadata {
   llmConnection?: string
   // When true, workspace/global defaults and queued snapshots cannot retarget this session
   connectionLocked?: boolean
+  // GPT OAuth service tier preference, independent of reasoning effort.
+  fastMode?: boolean
   // Thinking level for this session ('off', 'think', 'max')
   thinkingLevel?: ThinkingLevel
   // System prompt preset for mini agents ('default' | 'mini')
@@ -3800,6 +3803,7 @@ export class SessionManager implements ISessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       thinkingLevel: defaultThinkingLevel,
+      fastMode: options?.fastMode === true,
       hidden: options?.hidden,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
@@ -3947,6 +3951,7 @@ export class SessionManager implements ISessionManager {
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
+      fastMode: options?.fastMode === true,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: storedSession.enabledSourceSlugs,
       swarmEnabled: resolvedSwarmEnabled,
@@ -4586,6 +4591,7 @@ export class SessionManager implements ISessionManager {
         workspace: managed.workspace,
         miniModel,
         thinkingLevel: managed.thinkingLevel,
+        fastMode: managed.fastMode,
         session: sessionConfig,
         toolResultRecovery: managed.toolResultRecovery,
         isolatedShellDirectory: managed.isolatedWorkspace?.directory,
@@ -10198,6 +10204,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           context.llmConnection ?? undefined,
         )
       }
+      if (typeof context.fastMode === 'boolean') {
+        managed.fastMode = context.fastMode
+        managed.agent?.setFastMode?.(context.fastMode)
+      }
       const thinking = normalizeThinkingLevel(context.thinkingLevel)
       if (thinking && thinking !== managed.thinkingLevel) this.setSessionThinkingLevel(sessionId, thinking)
       const permission = context.permissionMode ? parsePermissionMode(context.permissionMode) : null
@@ -11249,6 +11259,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       )
     }
 
+    if (typeof context.fastMode === 'boolean') {
+      managed.fastMode = context.fastMode
+      managed.agent?.setFastMode?.(context.fastMode)
+    }
     const nextThinkingLevel = normalizeThinkingLevel(context.thinkingLevel)
     if (nextThinkingLevel && managed.thinkingLevel !== nextThinkingLevel) {
       this.setSessionThinkingLevel(managed.id, nextThinkingLevel)
@@ -13935,6 +13949,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return true
   }
 
+  /** Persist the per-session speed preference without changing a running turn. */
+  setSessionFastMode(sessionId: string, enabled: boolean): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    if (managed.isProcessing) throw new Error('请等待当前回复完成后切换 Fast')
+    managed.fastMode = enabled
+    managed.agent?.setFastMode?.(enabled)
+    this.persistSession(managed)
+  }
+
   /**
    * Set the thinking level for a session. See {@link ThinkingLevel} for valid values.
    * This is sticky and persisted across messages.
@@ -15737,6 +15761,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       llmConnection: header.llmConnection,
       connectionLocked: header.connectionLocked,
       thinkingLevel: header.thinkingLevel,
+      fastMode: header.fastMode,
       hidden: header.hidden,
       transferredSessionSummary: header.transferredSessionSummary,
       transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,

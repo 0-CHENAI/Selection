@@ -726,6 +726,7 @@ export class PiAgent extends BaseAgent {
       model: this._model,
       cwd,
       thinkingLevel: this.resolveConfiguredThinkingLevel(this._thinkingLevel),
+      fastMode: this.config.fastMode === true,
       workspaceRootPath: this.config.workspace.rootPath,
       sessionId,
       sessionPath,
@@ -3087,6 +3088,11 @@ export class PiAgent extends BaseAgent {
       ? { ...model, id: model.id || modelId, provider }
       : { id: typeof model === 'string' ? model : modelId, provider };
     return resolveSessionThinkingLevel(ref, level);
+  }
+
+  setFastMode(enabled: boolean): void {
+    this.config.fastMode = enabled;
+    if (this.subprocess) this.send({ type: 'set_fast_mode', enabled });
   }
 
   override setThinkingLevel(level: ThinkingLevel): void {

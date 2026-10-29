@@ -21,6 +21,7 @@ import { workModeViewAtom } from '@/atoms/work-mode'
 import { createDraftDisplaySession } from '@/lib/draft-session'
 import { mockSources } from '@/playground/mock-utils'
 import ChatPage from '@/pages/ChatPage'
+import { mergeSessionOptions, type SessionOptions } from '@/hooks/useSessionOptions'
 import { AppShell } from '@/components/app-shell/AppShell'
 import { ConfirmationHost } from '@/components/ConfirmationHost'
 import { confirmClientDialog } from '@/lib/confirmation'
@@ -33,6 +34,8 @@ const getDraft = (id: string) => drafts.get(id) ?? ''
 const onInputChange = (id: string, text: string) => { drafts.set(id, text) }
 const store = createStore()
 const fullShell = new URLSearchParams(location.search).has('shell')
+const fastFixture = new URLSearchParams(location.search).has('fast')
+const fixtureModel = fastFixture ? 'gpt-6.1-sol' : 'gpt-4o'
 const scrollFixture = new URLSearchParams(location.search).has('scroll')
 const calls = { creates: [] as CreateSessionOptions[], sends: [] as unknown[][], commands: [] as unknown[][] }
 let pickedDirectory: string | null = '/work/ppt-input'
@@ -74,12 +77,14 @@ setupI18n([initReactI18next]).changeLanguage('zh-CN')
 
 function Fixture() {
   const parent = useAppShellContext()
+  const [sessionOptions, setSessionOptions] = React.useState(new Map<string, SessionOptions>())
   const [id, setId] = React.useState<string | null>(null)
   const [ppt, setPpt] = React.useState(!fullShell)
   const [compact, setCompact] = React.useState(false)
   const [project, setProject] = React.useState<string>()
   const onCreateSession = React.useCallback(async (workspaceId: string, options: CreateSessionOptions = {}) => {
     calls.creates.push(structuredClone(options))
+    setSessionOptions(previous => new Map(previous).set(`created-${calls.creates.length}`, mergeSessionOptions(undefined, { fastMode: options.fastMode, thinkingLevel: options.thinkingLevel ?? 'medium' })))
     const session = { ...createDraftDisplaySession({ ...options, workspaceId, id: `created-${calls.creates.length}` }),
       ...options, sessionFolderPath: `/sessions/created-${calls.creates.length}` } as Session
     store.set(sessionAtomFamily(session.id), session)
@@ -89,6 +94,8 @@ function Fixture() {
   }, [])
   Object.assign(window, { pptFixture: {
     calls, drafts,
+    setModel: (sessionId: string, model: string) => store.set(sessionAtomFamily(sessionId), session => session && ({ ...session, model })),
+    setProcessing: (sessionId: string, value: boolean) => store.set(sessionAtomFamily(sessionId), session => session && ({ ...session, isProcessing: value })),
     configure: (options: { id?: string; ppt?: boolean; compact?: boolean; directory?: string | null; project?: string; mode?: 'NORM' | 'PRO' }) => {
       setId(options.id ?? null); setPpt(options.ppt ?? true); setCompact(options.compact ?? false); setProject(options.project)
       store.set(workModeViewAtom, options.mode ?? 'NORM')
@@ -97,7 +104,7 @@ function Fixture() {
     },
     openCreated: () => setId(`created-${calls.creates.length}`),
     seedSession: async (mode: 'NORM' | 'PRO', count = 0) => {
-      const session = await onCreateSession(parent.activeWorkspaceId!, { workMode: mode, model: 'gpt-4o', llmConnection: 'fixture' })
+      const session = await onCreateSession(parent.activeWorkspaceId!, { workMode: mode, model: fixtureModel, llmConnection: 'fixture' })
       if (count) store.set(sessionAtomFamily(session.id), { ...session, messages: Array.from({ length: count }, (_, i) => ({
         id: `scroll-${i}`, role: i % 2 ? 'assistant' as const : 'user' as const,
         content: `Message ${i + 1}\n\n${'Content remains scrollable inside the conversation. '.repeat(8)}`, timestamp: Date.now() + i,
@@ -116,7 +123,7 @@ function Fixture() {
       const loaded = new Set(store.get(loadedSessionsAtom))
       for (const row of rows) {
         const session = {
-          ...createDraftDisplaySession({ id: row.id, workspaceId, workMode: 'PRO', model: 'gpt-4o', llmConnection: 'fixture' }),
+          ...createDraftDisplaySession({ id: row.id, workspaceId, workMode: 'PRO', model: fixtureModel, llmConnection: 'fixture' }),
           name: row.name,
           preview: row.name,
           lastMessageAt: row.lastMessageAt,
@@ -139,10 +146,12 @@ function Fixture() {
   } })
   const value: typeof parent = { ...parent,
     getDraft, onInputChange,
+    sessionOptions,
+    onSessionOptionsChange: (sessionId, updates) => setSessionOptions(previous => new Map(previous).set(sessionId, mergeSessionOptions(previous.get(sessionId), updates))),
     isFocusedPanel: true, isCompactMode: compact, orchestrationProjectId: project,
     enabledSources: mockSources, skills: [], onCreateSession,
-    llmConnections: [{ slug: 'fixture', name: 'Fixture', providerType: 'pi', piAuthProvider: 'openai', authType: 'api_key',
-      isAuthenticated: true, createdAt: 0, defaultModel: 'gpt-4o', models: ['gpt-4o'] }],
+    llmConnections: [{ slug: 'fixture', name: 'Fixture', providerType: 'pi', piAuthProvider: fastFixture ? 'openai-codex' : 'openai', authType: fastFixture ? 'oauth' : 'api_key',
+      isAuthenticated: true, createdAt: 0, defaultModel: fixtureModel, models: fastFixture ? ['gpt-6.1-sol', 'gpt-4o'] : ['gpt-4o'] }],
     workspaceDefaultLlmConnection: 'fixture',
     onSendMessage: async (...args: unknown[]) => {
       calls.sends.push(args)

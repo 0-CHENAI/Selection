@@ -17,6 +17,7 @@
     "./agent/clarification": "./src/agent/clarification.ts",
     "./agent/modes": "./src/agent/mode-types.ts",
     "./agent/mode-types": "./src/agent/mode-types.ts",
+    "./agent/fast-mode": "./src/agent/fast-mode.ts",
     "./agent/thinking-levels": "./src/agent/thinking-levels.ts",
     "./agent/thinking-capabilities": "./src/agent/thinking-capabilities.ts",
     "./config/models-dev-thinking": "./src/config/models-dev-thinking.ts",
