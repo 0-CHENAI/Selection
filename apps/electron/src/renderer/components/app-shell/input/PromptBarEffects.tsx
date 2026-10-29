@@ -5,21 +5,10 @@ import { HelpCircleIcon } from '@hugeicons/core-free-icons'
 import { Item as MenuItem } from '@radix-ui/react-dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
-import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
+import { Check } from 'lucide-react'
+import { type ThinkingLevel, type ThinkingLevelDefinition, DEFAULT_THINKING_LEVEL, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
-import { EffortParticles } from './EffortParticles'
 import './PromptBarEffects.css'
-
-// Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
-const EFFORT_EDGE = 11
-// Slightly larger than the 22px track so the knob reads as floating above it.
-const EFFORT_THUMB = 26
-
-function effortField(level: ThinkingLevel | undefined): 'max' | 'prelude' | undefined {
-  if (level === 'max') return 'max'
-  if (level === 'high' || level === 'xhigh') return 'prelude'
-  return undefined
-}
 
 export function PromptThinkingSettings({
   value, levels, workMode, disabled, onChange, unavailable, binary, headingAction, inMenu = true,
@@ -39,8 +28,6 @@ export function PromptThinkingSettings({
   inMenu?: boolean
 }) {
   const { t } = useTranslation()
-  const dragFraction = React.useRef<number | null>(null)
-  const [preview, setPreview] = React.useState<number | null>(null)
   if (unavailable) {
     const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
     return (
@@ -54,48 +41,25 @@ export function PromptThinkingSettings({
       </div>
     )
   }
-  const span = Math.max(1, levels.length - 1)
-  const resting = Math.max(0, levels.findIndex(level => level.id === value))
-  const fraction = preview === null ? resting / span : preview
-  const nearest = preview === null ? resting : Math.max(0, Math.min(levels.length - 1, Math.round(preview * span)))
-  const visualLevel = levels[nearest]?.id ?? value
-  const atMax = visualLevel === 'max'
-  const valueKey = binary ? (visualLevel === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(visualLevel)
+  const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
-  const field = inactive ? undefined : effortField(visualLevel)
-  const stepAt = (i: number) => `calc(${EFFORT_EDGE}px + (100% - ${EFFORT_EDGE * 2}px) * ${i / span})`
-  const visualIndex = fraction * span
-  const setIndex = (next: number) => {
-    if (inactive) return
-    const level = levels[Math.max(0, Math.min(levels.length - 1, next))]!
-    if (level.id !== value) onChange(level.id)
-  }
-  const pointerFraction = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const raw = (event.clientX - rect.left - EFFORT_EDGE) / Math.max(1, rect.width - EFFORT_EDGE * 2)
-    return Math.max(0, Math.min(1, raw))
-  }
-  const followPointer = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (inactive) return
-    const next = pointerFraction(event)
-    dragFraction.current = next
-    setPreview(next)
-  }
-  const finishDrag = (commit: boolean) => {
-    const held = dragFraction.current
-    dragFraction.current = null
-    setPreview(null)
-    if (commit && held !== null) setIndex(Math.round(held * span))
+  const atMax = value === 'max'
+  const choose = (level: ThinkingLevel) => {
+    if (inactive || level === value) return
+    onChange(level)
   }
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (inactive || dragFraction.current !== null) return
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 1
-      : event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 0
-    if (!step && event.key !== 'Home' && event.key !== 'End') return
+    if (inactive || inMenu) return
+    const index = Math.max(0, levels.findIndex(level => level.id === value))
+    const next = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? index + 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? index - 1
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? levels.length - 1
+      : -1
+    if (next < 0) return
     event.preventDefault()
-    event.stopPropagation()
-    setIndex(step ? nearest + step : event.key === 'Home' ? 0 : levels.length - 1)
+    choose(levels[Math.max(0, Math.min(levels.length - 1, next))]!.id)
   }
   const help = inMenu && !headingAction ? (
     <Tooltip>
@@ -109,61 +73,57 @@ export function PromptThinkingSettings({
       <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
     </Tooltip>
   ) : null
-  const track = (
+  const options = (
     <div
-      className="prompt-effort-track"
-      role="slider"
-      tabIndex={inactive ? -1 : 0}
-      aria-label={t('thinking.effort')}
-      aria-orientation="horizontal"
-      aria-valuemin={0}
-      aria-valuemax={levels.length - 1}
-      aria-valuenow={nearest}
-      aria-valuetext={t(valueKey)}
-      aria-disabled={inactive}
-      data-dragging={preview !== null || undefined}
-      style={{
-        '--prompt-effort-x': stepAt(visualIndex),
-        '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
-        '--prompt-effort-fill': fraction >= 0.999 ? '100%' : `calc(${stepAt(visualIndex)} + ${EFFORT_THUMB / 2}px)`,
-      } as React.CSSProperties}
-      onPointerDown={event => {
-        if (event.button !== 0 || inactive) return
-        event.currentTarget.setPointerCapture(event.pointerId)
-        event.currentTarget.focus({ preventScroll: true })
-        followPointer(event)
-      }}
-      onPointerMove={event => { if (dragFraction.current !== null && event.buttons & 1) followPointer(event) }}
-      onPointerUp={() => finishDrag(true)}
-      onPointerCancel={() => finishDrag(false)}
-      onLostPointerCapture={event => { if (event.buttons === 0) finishDrag(true) }}
+      className="prompt-effort-options"
+      role={inMenu ? undefined : 'radiogroup'}
+      aria-label={inMenu ? undefined : t('thinking.effort')}
+      aria-disabled={inactive || undefined}
       onKeyDown={onKeyDown}
     >
-      <span className="prompt-effort-fill" aria-hidden="true" />
-      {field && <EffortParticles mode={field} />}
-      {levels.map((level, i) => (
-        <i key={level.id} className={i === nearest ? 'prompt-effort-dot is-current' : 'prompt-effort-dot'} style={{ left: stepAt(i) }} aria-hidden="true" />
-      ))}
-      <span className="prompt-effort-thumb" aria-hidden="true" />
+      {levels.map(level => {
+        const selected = level.id === value
+        const name = t(binary ? (level.id === 'off' ? 'thinking.off' : 'thinking.on') : level.nameKey)
+        const button = (
+          <button
+            type="button"
+            key={inMenu ? undefined : level.id}
+            role={inMenu ? 'menuitemradio' : 'radio'}
+            aria-checked={selected}
+            data-testid={`effort-level-${level.id}`}
+            disabled={inactive}
+            className="prompt-effort-option"
+            onClick={inMenu ? undefined : () => choose(level.id)}
+          >
+            <span className="prompt-effort-option-copy">
+              <span className="prompt-effort-option-name">
+                {name}
+                {level.id === DEFAULT_THINKING_LEVEL && <span className="prompt-effort-default">{t('thinking.default')}</span>}
+              </span>
+              <span className="prompt-effort-option-desc">{t(level.descriptionKey)}</span>
+              {level.id === 'max' && <span className="prompt-effort-max-note">{t('thinking.maxUsage')}</span>}
+            </span>
+            {selected && <Check className="prompt-effort-check" aria-hidden="true" />}
+          </button>
+        )
+        if (!inMenu) return button
+        return (
+          <MenuItem key={level.id} asChild disabled={inactive} onSelect={event => { event.preventDefault(); choose(level.id) }}>
+            {button}
+          </MenuItem>
+        )
+      })}
     </div>
   )
 
   return (
-    <div className="prompt-effort-settings" data-max={atMax || undefined} data-field={field} data-work-mode={workMode}>
+    <div className="prompt-effort-settings" data-max={atMax || undefined} data-work-mode={workMode}>
       <div className="prompt-effort-heading">
         <span className="text-muted-foreground" title={t('thinking.effortHelp')}>{t('thinking.effort')}</span>
-        <span className={atMax ? 'prompt-effort-value is-max font-medium' : 'prompt-effort-value font-medium'}>{t(valueKey)}</span>
+        <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
         {headingAction ?? help}
       </div>
-      <div className="prompt-effort-endpoints text-muted-foreground">
-        <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
-        <span>{t(binary ? 'thinking.on' : 'thinking.smarter')}</span>
-      </div>
-      {inMenu ? (
-        <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>
-          {track}
-        </MenuItem>
-      ) : track}
+      {options}
     </div>
   )
 }

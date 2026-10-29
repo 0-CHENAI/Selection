@@ -2,19 +2,11 @@
 .prompt-field,
 .prompt-effort-settings {
   --prompt-spark: oklch(0.49 0.16 293);
-  --prompt-particle-1: color-mix(in oklch, var(--prompt-spark) 32%, white);
-  --prompt-particle-2: color-mix(in oklch, var(--prompt-spark) 58%, white);
-  --prompt-particle-3: color-mix(in oklch, var(--prompt-spark) 82%, white);
-  --prompt-particle-4: color-mix(in oklch, var(--prompt-spark) 40%, oklch(0.78 0.1 265));
 }
 
 .dark .prompt-field,
 .dark .prompt-effort-settings {
   --prompt-spark: oklch(0.78 0.11 293);
-  --prompt-particle-1: color-mix(in oklch, var(--prompt-spark) 45%, white);
-  --prompt-particle-2: color-mix(in oklch, var(--prompt-spark) 68%, white);
-  --prompt-particle-3: color-mix(in oklch, var(--prompt-spark) 88%, white);
-  --prompt-particle-4: color-mix(in oklch, var(--prompt-spark) 50%, oklch(0.84 0.08 255));
 }
 
 /* Follow the conversation mode in the model menu and the composer. */
@@ -98,147 +90,65 @@
 .prompt-effort-help:focus-visible { color: var(--foreground); }
 .prompt-effort-help:focus-visible { outline: 1px solid var(--ring); outline-offset: 3px; }
 
-.prompt-effort-endpoints {
+.prompt-effort-options {
   display: flex;
-  justify-content: space-between;
-  margin-top: 12px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.prompt-effort-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.prompt-effort-option:hover,
+.prompt-effort-option:focus-visible { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+.prompt-effort-option:focus-visible { outline: 1px solid var(--ring); outline-offset: 1px; }
+.prompt-effort-option:disabled { cursor: default; opacity: 0.55; }
+.prompt-effort-option[aria-checked='true'] { background: color-mix(in srgb, var(--foreground) 5%, transparent); }
+.prompt-effort-option-copy { min-width: 0; flex: 1; }
+.prompt-effort-option-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 18px;
+}
+.prompt-effort-option-desc,
+.prompt-effort-max-note {
+  display: block;
+  margin-top: 1px;
+  color: color-mix(in srgb, var(--foreground) 58%, transparent);
   font-size: 12px;
   line-height: 16px;
 }
-
-.prompt-effort-track {
-  position: relative;
-  height: 22px;
-  margin-top: 8px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  cursor: pointer;
-  touch-action: none;
-  user-select: none;
-  outline: none;
+.prompt-effort-default {
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--foreground) 62%, transparent);
+  font-size: 11px;
+  line-height: 16px;
 }
-/* Radix also focuses a menu item on pointer hover. Keep keyboard feedback on
-   the thumb so hovering never draws a frame around the whole track. */
-.prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb {
-  outline: 1px solid var(--ring);
-  outline-offset: 3px;
-}
-.prompt-effort-track[aria-disabled='true'] { cursor: default; }
-
-.prompt-effort-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: var(--prompt-effort-fill);
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--foreground) 18%, transparent);
-  transition: width 220ms cubic-bezier(0.23, 1, 0.32, 1), background-color 300ms ease;
-}
-
-.prompt-effort-dot {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--foreground) 30%, transparent);
-}
-.prompt-effort-dot.is-current {
-  background: var(--prompt-spark);
-  transform: scale(1.35);
-}
-
-/* 26px circle on the 22px track. Crisp edge and a single short shadow, like a shadcn thumb. */
-.prompt-effort-thumb {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  left: var(--prompt-effort-x);
-  box-sizing: border-box;
-  width: var(--prompt-effort-thumb);
-  height: var(--prompt-effort-thumb);
-  margin-top: calc(var(--prompt-effort-thumb) / -2);
-  margin-left: calc(var(--prompt-effort-thumb) / -2);
-  border: 1px solid color-mix(in srgb, var(--foreground) 32%, transparent);
-  border-radius: 50%;
-  background: var(--foreground);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
-  transform: scale(1);
-  transition:
-    left 220ms cubic-bezier(0.23, 1, 0.32, 1),
-    background-color 300ms ease,
-    transform 180ms cubic-bezier(0.34, 1.45, 0.64, 1);
-}
-
-.dark .prompt-effort-thumb {
-  border-color: color-mix(in srgb, var(--foreground) 40%, transparent);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
-}
-
-.prompt-effort-track:hover .prompt-effort-thumb { transform: scale(1.06); }
-.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: scale(1.15); }
-.prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb,
-.prompt-effort-track[aria-disabled='true'][data-dragging] .prompt-effort-thumb { transform: none; }
-
-.prompt-effort-settings[data-max] .prompt-effort-fill { opacity: 0; }
-.prompt-effort-settings[data-max] .prompt-effort-thumb {
-  background: #fff;
-  border-color: color-mix(in srgb, var(--prompt-spark) 30%, white);
-}
-.prompt-effort-settings[data-max] .prompt-effort-value.is-max {
-  background-image: linear-gradient(90deg,
-    var(--prompt-particle-1),
-    var(--prompt-particle-4),
-    var(--prompt-particle-3),
-    var(--prompt-particle-2),
-    var(--prompt-particle-1));
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: prompt-effort-max-flow 3.4s linear infinite;
-}
-
-.prompt-effort-track[data-dragging] .prompt-effort-fill { transition: none; }
-.prompt-effort-track[data-dragging] .prompt-effort-thumb {
-  transition: background-color 300ms ease, transform 180ms cubic-bezier(0.34, 1.45, 0.64, 1);
-}
-
-/* Max uses tsParticles. The fallback stays if motion is reduced or the engine is still loading. */
-.prompt-effort-particles {
-  position: absolute;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
+.prompt-effort-settings[data-max] .prompt-effort-option[data-testid='effort-level-max'] .prompt-effort-option-name {
   color: var(--prompt-spark);
 }
-.prompt-effort-particle-fallback {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background: linear-gradient(90deg, var(--prompt-particle-1), var(--prompt-particle-2) 55%, var(--prompt-particle-3));
+.prompt-effort-check {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--foreground);
 }
-.prompt-effort-particles[data-mode='prelude'] .prompt-effort-particle-fallback { opacity: 0.28; }
-.prompt-effort-particle-host,
-.prompt-effort-particles canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-@keyframes prompt-effort-max-flow {
-  to { background-position: 220% center; }
-}
+.prompt-effort-settings[data-max] .prompt-effort-check { color: var(--prompt-spark); }
 
 .prompt-fast-seat {
   display: inline-flex;
@@ -291,14 +201,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .prompt-field::before { transition: none; }
-  .prompt-effort-fill,
-  .prompt-effort-thumb { transition: background-color 300ms ease; }
-  .prompt-effort-track:hover .prompt-effort-thumb,
-  .prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }
   .prompt-sparks { display: none; }
-  .prompt-effort-particle-host,
-  .prompt-effort-particles canvas { display: none; }
   .prompt-fast-button,
-  .prompt-fast-button[data-active] svg,
-  .prompt-effort-settings[data-max] .prompt-effort-value.is-max { animation: none; transition: none; }
+  .prompt-fast-button[data-active] svg { animation: none; transition: none; }
 }

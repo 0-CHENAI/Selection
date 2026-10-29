@@ -24,13 +24,6 @@ beforeAll(async () => {
 
 const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8')
 
-function thumbRule(): string {
-  const start = css.indexOf('left: var(--prompt-effort-x);')
-  const blockStart = css.lastIndexOf('.prompt-effort-thumb {', start)
-  const end = css.indexOf('}', start)
-  return css.slice(blockStart, end)
-}
-
 function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false, headingAction?: ReactNode) {
   const i18n = i18next.createInstance()
   void i18n.init({
@@ -55,87 +48,47 @@ function renderSettings(value: 'medium' | 'max' = 'medium', disabled = false, he
   )
 }
 
-describe('thinking effort thumb', () => {
-  it('uses a 26px circle centered on the 22px track', () => {
-    expect(css).toContain('.prompt-effort-track {\n  position: relative;\n  height: 22px;')
-    const rule = thumbRule()
-    expect(rule).toContain('top: 50%;')
-    expect(rule).toContain('width: var(--prompt-effort-thumb);')
-    expect(rule).toContain('height: var(--prompt-effort-thumb);')
-    expect(rule).toContain('margin-top: calc(var(--prompt-effort-thumb) / -2);')
-    expect(rule).toContain('margin-left: calc(var(--prompt-effort-thumb) / -2);')
-    expect(rule).toContain('border-radius: 50%;')
-    expect(rule).toContain('box-sizing: border-box;')
-    expect(rule).toContain('border: 1px solid color-mix(in srgb, var(--foreground) 32%, transparent);')
-    expect(rule).toContain('background: var(--foreground);')
-    expect(rule).toContain('box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);')
-    expect(rule).toContain('transform: scale(1);')
-    expect(rule).not.toContain('inset')
-    expect(rule).not.toContain('height: 28px')
-    expect(rule).not.toContain('border-radius: 7px')
-  })
-
-  it('lifts on hover and drag, and stays still when motion is reduced', () => {
-    expect(css).toContain('.prompt-effort-track:hover .prompt-effort-thumb { transform: scale(1.06); }')
-    expect(css).toContain('.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: scale(1.15); }')
-    expect(css).toContain(".prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb")
-    expect(css).toContain('.dark .prompt-effort-thumb {\n  border-color: color-mix(in srgb, var(--foreground) 40%, transparent);\n  box-shadow: 0 1px 2px rgb(0 0 0 / 0.45);')
-    expect(css).not.toContain('inset ')
-    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
-    expect(reduced).toContain('.prompt-effort-thumb { transition: background-color 300ms ease; }')
-    expect(reduced).toContain('.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }')
-  })
-
-  it('keeps focus, disabled, and max-effort treatments', () => {
-    expect(css).toContain('.prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb')
-    expect(css).toContain(".prompt-effort-track[aria-disabled='true'] { cursor: default; }")
-    expect(css).toContain('.prompt-effort-settings[data-max] .prompt-effort-thumb {\n  background: #fff;')
-    expect(css).toContain('.dark .prompt-effort-settings')
-  })
-
-  it('aligns the fill with the circular thumb and centers the value', () => {
+describe('thinking effort menu', () => {
+  it('lists the real levels and marks medium as Default', () => {
     const html = renderSettings('medium')
     expect(html).toContain('思考强度')
     expect(html).toContain('中等')
-    expect(html).toContain('class="prompt-effort-thumb"')
-    expect(html).toContain('--prompt-effort-thumb:26px')
-    expect(html).not.toContain('data-dragging')
-    // Medium is index 3 of 7 (off, minimal, low, medium, …). Stops stay inset by 11px.
-    expect(html).toContain('--prompt-effort-fill:calc(calc(11px + (100% - 22px) * 0.5) + 13px)')
-    expect(html).toContain('aria-disabled="false"')
-
-    const maxed = renderSettings('max')
-    expect(maxed).toContain('data-max="true"')
-    expect(maxed).toContain('--prompt-effort-fill:100%')
-
-    const disabled = renderSettings('medium', true)
-    expect(disabled).toContain('aria-disabled="true"')
-    expect(disabled).not.toContain('prompt-effort-particles')
+    expect(html).toContain('默认')
+    expect(html).toContain('data-testid="effort-level-medium"')
+    expect(html).toContain('data-testid="effort-level-max"')
+    expect(html).toContain('aria-checked="true"')
+    expect(html).not.toContain('role="slider"')
+    expect(html).not.toContain('prompt-effort-particles')
+    expect(html).not.toContain('prompt-effort-shimmer')
+    expect(css).not.toContain('prompt-effort-track')
+    expect(css).not.toContain('prompt-effort-particles')
   })
 
-  it('shows tsParticles only at Max and keeps a static fallback when motion is reduced', () => {
-    const medium = renderSettings('medium')
-    expect(medium).not.toContain('prompt-effort-particles')
-    expect(medium).not.toContain('prompt-effort-shimmer')
-    const maxed = renderSettings('max')
-    expect(maxed).toContain('class="prompt-effort-particles"')
-    expect(maxed).toContain('data-mode="max"')
-    expect(maxed).toContain('prompt-effort-particle-fallback')
-    expect(maxed).toContain('prompt-effort-value is-max')
-    expect(css).not.toContain('prompt-effort-shimmer')
-    expect(css).not.toContain('re-chibi')
-    const source = readFileSync(join(import.meta.dir, '../EffortParticles.tsx'), 'utf8')
-    expect(source).toContain("from '@tsparticles/react'")
-    expect(source).toContain("from '@tsparticles/slim'")
-    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
-    expect(reduced).toContain('.prompt-effort-particles canvas { display: none; }')
-    expect(reduced).toContain('.prompt-effort-settings[data-max] .prompt-effort-value.is-max { animation: none; transition: none; }')
+  it('shows the Max usage note when Max is selected', () => {
+    const html = renderSettings('max')
+    expect(html).toContain('data-max="true"')
+    expect(html).toContain('data-testid="effort-level-max"')
+    expect(html).toContain('最彻底，但更慢，也会更快用完额度')
+    const maxAt = html.indexOf('data-testid="effort-level-max"')
+    expect(html.slice(maxAt - 80, maxAt + 700)).toContain('aria-checked="true"')
+  })
+
+  it('disables the choices when effort cannot change', () => {
+    const disabled = renderSettings('medium', true)
+    expect(disabled).toContain('disabled=""')
+    expect(disabled).not.toContain('prompt-effort-thumb')
   })
 
   it('keeps a heading action beside the effort name', () => {
     const html = renderSettings('medium', false, createElement('span', { 'data-testid': 'effort-heading-action' }, 'Fast'))
-    const heading = html.slice(html.indexOf('prompt-effort-heading'), html.indexOf('prompt-effort-endpoints'))
+    const heading = html.slice(html.indexOf('prompt-effort-heading'), html.indexOf('prompt-effort-options'))
     expect(heading).toContain('data-testid="effort-heading-action"')
     expect(heading).toContain('Fast')
+  })
+
+  it('drops motion on Fast when the user prefers less motion', () => {
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('.prompt-fast-button[data-active] svg { animation: none; transition: none; }')
+    expect(reduced).toContain('.prompt-sparks { display: none; }')
   })
 })
