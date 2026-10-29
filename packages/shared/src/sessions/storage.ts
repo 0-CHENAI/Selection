@@ -187,6 +187,7 @@ export async function createSession(
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
     thinkingLevel?: SessionConfig['thinkingLevel'];
+    fastMode?: boolean;
     enabledSourceSlugs?: string[];
     model?: string;
     llmConnection?: string;
@@ -249,6 +250,7 @@ export async function createSession(
     sdkCwd,
     permissionMode: options?.permissionMode,
     thinkingLevel: options?.thinkingLevel,
+    fastMode: options?.fastMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
     model: options?.model,
     llmConnection: options?.llmConnection,

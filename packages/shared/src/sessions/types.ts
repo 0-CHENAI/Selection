@@ -42,7 +42,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'pptProgress',
   'sharedProjectMemoryEnabled',
   // Model/Connection
-  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
+  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'fastMode',
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
@@ -270,6 +270,7 @@ export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  fastMode?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -418,6 +419,7 @@ export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  fastMode?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -535,6 +537,7 @@ export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata 
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  fastMode?: boolean;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */

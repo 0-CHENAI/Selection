@@ -53,6 +53,7 @@ export interface QueuedMessageContext {
   model: string | null;
   llmConnection: string | null;
   thinkingLevel: string;
+  fastMode?: boolean;
   permissionMode: string;
 }
 
@@ -61,6 +62,7 @@ export interface TurnContext {
   model?: string | null;
   llmConnection?: string | null;
   thinkingLevel?: string;
+  fastMode?: boolean;
   permissionMode?: string;
   workMode?: 'NORM' | 'PRO';
   projectId?: string | null;

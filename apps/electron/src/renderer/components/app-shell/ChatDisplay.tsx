@@ -215,6 +215,8 @@ interface ChatDisplayProps {
   onRespondToClarification?: (sessionId: string, requestId: string, response: { skipped: boolean; optionIds: string[]; text: string }) => void
   // Thinking level (session-level setting)
   /** Current thinking level ('off', 'think', 'max') */
+  fastMode?: boolean
+  onFastModeChange?: (enabled: boolean) => void
   thinkingLevel?: ThinkingLevel
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
@@ -572,6 +574,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onRespondToCredential,
   onRespondToClarification,
   // Thinking level
+  fastMode = false,
+  onFastModeChange,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
   // Advanced options
@@ -2649,6 +2653,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               textareaRef,
               currentModel,
               onModelChange,
+              fastMode,
+              onFastModeChange,
               thinkingLevel,
               onThinkingLevelChange,
               enabledModes,

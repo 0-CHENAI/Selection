@@ -219,6 +219,7 @@ export interface CoreBackendConfig {
 
   /** Initial thinking level */
   thinkingLevel?: ThinkingLevel;
+  fastMode?: boolean;
 
   /** Headless mode flag (disables interactive tools) */
   isHeadless?: boolean;
@@ -552,6 +553,7 @@ export interface AgentBackend {
 
   /** Set thinking level */
   setThinkingLevel(level: ThinkingLevel): void;
+  setFastMode?(enabled: boolean): void;
 
   // ============================================================
   // Permission Mode

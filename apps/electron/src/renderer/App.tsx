@@ -524,12 +524,13 @@ export default function App() {
         ...current,
         permissionMode: session.permissionMode ?? defaultSessionOptions.permissionMode,
         thinkingLevel: session.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+        fastMode: session.fastMode === true,
       }
 
       const hasNonDefaultMode = merged.permissionMode !== defaultSessionOptions.permissionMode
       const hasNonDefaultThinking = merged.thinkingLevel !== DEFAULT_THINKING_LEVEL
 
-      if (!hasNonDefaultMode && !hasNonDefaultThinking && merged.permissionModeVersion == null) {
+      if (!hasNonDefaultMode && !hasNonDefaultThinking && !merged.fastMode && merged.permissionModeVersion == null) {
         next.delete(session.id)
       } else {
         next.set(session.id, merged)
@@ -572,10 +573,11 @@ export default function App() {
       for (const s of loadedSessions) {
         const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
         const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== DEFAULT_THINKING_LEVEL
-        if (hasNonDefaultMode || hasNonDefaultThinking) {
+        if (hasNonDefaultMode || hasNonDefaultThinking || s.fastMode) {
           optionsMap.set(s.id, {
             permissionMode: s.permissionMode ?? 'ask',
             thinkingLevel: s.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+            fastMode: s.fastMode === true,
           })
         }
       }
@@ -1573,6 +1575,7 @@ export default function App() {
           model: sessionSnapshot?.model ?? null,
           llmConnection: sessionSnapshot?.llmConnection ?? null,
           thinkingLevel: optionSnapshot?.thinkingLevel ?? 'medium',
+          fastMode: optionSnapshot?.fastMode === true,
           permissionMode: optionSnapshot?.permissionMode ?? 'ask',
         } : undefined,
       })
@@ -1623,6 +1626,17 @@ export default function App() {
     if (updates.permissionMode !== undefined) {
       // Sync permission mode change with backend
       window.electronAPI.sessionCommand(sessionId, { type: 'setPermissionMode', mode: updates.permissionMode })
+    }
+    if (updates.fastMode !== undefined) {
+      window.electronAPI.sessionCommand(sessionId, { type: 'setFastMode', enabled: updates.fastMode }).catch(error => {
+        setSessionOptions(prev => {
+          const next = new Map(prev)
+          const current = next.get(sessionId)
+          if (current && current.fastMode === updates.fastMode) next.set(sessionId, { ...current, fastMode: !updates.fastMode })
+          return next
+        })
+        toast.error(String(error))
+      })
     }
     if (updates.thinkingLevel !== undefined) {
       // Sync thinking level change with backend (session-level, persisted)

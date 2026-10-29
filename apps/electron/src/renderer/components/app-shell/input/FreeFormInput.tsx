@@ -1,3 +1,4 @@
+import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
 import { createPendingDraftSync } from './pending-draft-sync'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
@@ -317,6 +318,8 @@ export interface FreeFormInputProps {
   onModelChange: (model: string, connection?: string) => void
   // Thinking level (session-level setting)
   /** Current thinking level ('off', 'think', 'max') */
+  fastMode?: boolean
+  onFastModeChange?: (enabled: boolean) => void
   thinkingLevel?: ThinkingLevel
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
@@ -444,6 +447,8 @@ export function FreeFormInput({
   inputRef: externalInputRef,
   currentModel,
   onModelChange,
+  fastMode = false,
+  onFastModeChange,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
   permissionMode = 'ask',
@@ -524,6 +529,8 @@ export function FreeFormInput({
     if (!effectiveConnection) return null
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
+
+  const fastSupported = supportsGptOAuthFast(currentModel, effectiveConnectionDetails?.piAuthProvider)
 
   const liveOpenRouterModels = useLiveOpenRouterModels(
     !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
@@ -2145,6 +2152,9 @@ export function FreeFormInput({
               currentConnection={currentConnection}
               onModelChange={onModelChange}
               onConnectionChange={onConnectionChange}
+              fastMode={fastMode}
+              onFastModeChange={onFastModeChange}
+              isProcessing={isProcessing}
               thinkingLevel={thinkingLevel}
               onThinkingLevelChange={onThinkingLevelChange}
               isEmptySession={isEmptySession}
@@ -2595,6 +2605,28 @@ export function FreeFormInput({
                 )}
 
                 </div>
+                {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
+                  <div className="shrink-0">
+                    <StyledDropdownMenuSeparator className="my-1" />
+                    <StyledDropdownMenuItem
+                      data-testid="gpt-oauth-fast"
+                      role="menuitemcheckbox"
+                      aria-checked={fastMode && fastSupported}
+                      disabled={isProcessing || !fastSupported}
+                      onSelect={event => { event.preventDefault(); onFastModeChange(!fastMode) }}
+                      className="flex items-center justify-between px-2 py-2"
+                    >
+                      <div className="text-left">
+                        <div className="text-sm font-medium">Fast</div>
+                        <div className="text-xs text-muted-foreground">
+                          {t(!fastSupported
+                            ? 'chat.fastMode.unsupported' : isProcessing ? 'chat.fastMode.busy' : 'chat.fastMode.description')}
+                        </div>
+                      </div>
+                      {fastMode && fastSupported && <Check className="ml-3 h-3 w-3 shrink-0" />}
+                    </StyledDropdownMenuItem>
+                  </div>
+                )}
                 {pickerMode === 'flat' && promptThinkingSettings && (
                   <div className="shrink-0">
                     <StyledDropdownMenuSeparator className="my-1" />

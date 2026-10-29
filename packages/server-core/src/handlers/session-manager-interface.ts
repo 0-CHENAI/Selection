@@ -91,6 +91,7 @@ export interface ISessionManager {
   continueProgress?(sessionId: string): Promise<void>
   setSessionWorkMode?(sessionId: string, mode: 'NORM' | 'PRO'): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
+  setSessionFastMode?(sessionId: string, enabled: boolean): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
   /** Rewrite ordinary project conversations onto the project's folder. sdkCwd stays put. */

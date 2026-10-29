@@ -104,6 +104,7 @@ export interface Session extends WorkModeMetadata {
   model?: string
   llmConnection?: string
   thinkingLevel?: ThinkingLevel
+  fastMode?: boolean
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   lastFinalMessageId?: string
   isAsyncOperationOngoing?: boolean
@@ -177,6 +178,7 @@ export interface CreateSessionOptions {
    * the API request for models with `reasoning: false` in the Pi SDK catalog.
    */
   thinkingLevel?: ThinkingLevel
+  fastMode?: boolean
   /**
    * Working directory for the session:
    * - 'user_default' or undefined: Use workspace's configured default working directory
@@ -782,6 +784,7 @@ export type SessionCommand =
   | { type: 'setActiveViewing'; workspaceId: string }
   | { type: 'setPermissionMode'; mode: PermissionMode }
   | { type: 'setThinkingLevel'; level: ThinkingLevel }
+  | { type: 'setFastMode'; enabled: boolean }
   | { type: 'updateWorkingDirectory'; dir: string }
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'setLabels'; labels: string[] }
