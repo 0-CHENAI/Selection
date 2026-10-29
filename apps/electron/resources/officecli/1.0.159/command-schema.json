@@ -1,8 +1,8 @@
 {
-  "version": "1.0.157",
+  "version": "1.0.159",
   "schemaCrc": "f950ee40",
   "generatedFrom": "reviewed-release-binary",
-  "rootHelpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
+  "rootHelpSha256": "cd4d98c9ff0f27d4a2e0d0028a73c88dc23bc53bcce231a2569f64fdc72d983d",
   "helpAllSha256": "9a6c7bac7f6967a9f8ede86c94611165da1af28d0b3c3ce47ebe4f5aed7e0640",
   "helpAllEntries": 2496,
   "rootCommands": [
@@ -59,10 +59,11 @@
       ]
     },
     "batch": {
-      "helpSha256": "2b4c50199f27bc63d43aee88fb4b008da7740545bcb51880fd52f3a4ed584a7e",
+      "helpSha256": "0e780e83dff5be359208197be15491b003d79e4ec1daf3069d489372dcbc3a15",
       "flags": [
         "--best-effort",
         "--commands",
+        "--compact",
         "--force",
         "--help",
         "--input",
@@ -108,9 +109,10 @@
       ]
     },
     "help": {
-      "helpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
+      "helpSha256": "cd4d98c9ff0f27d4a2e0d0028a73c88dc23bc53bcce231a2569f64fdc72d983d",
       "flags": [
         "--commands",
+        "--compact",
         "--force",
         "--help",
         "--input",

@@ -1,48 +1,47 @@
 {
   "manifestVersion": 1,
-  "version": "1.0.157",
-  "tag": "v1.0.157",
-  "tagCommit": "b65272a18aef891941451705ff93e8a287f3eb72",
+  "version": "1.0.159",
+  "tag": "v1.0.159",
+  "tagCommit": "5e625bf58aca732335590d7aa271f6337535a7ef",
   "schemaCrc": "f950ee40",
   "sourceRepository": "https://github.com/iOfficeAI/OfficeCLI",
   "license": {
     "spdx": "Apache-2.0",
-    "licenseFile": "1.0.157/LICENSE",
+    "licenseFile": "1.0.159/LICENSE",
     "licenseSha256": "7e282402a5a6db33995fe638bb3fe79013f9884d8f7d15a42e481c1e86aadda1",
-    "noticeFile": "1.0.157/NOTICE",
+    "noticeFile": "1.0.159/NOTICE",
     "noticeSha256": "3a4715b268e148a8e9566f5e835f766f5c95c3da4d6e5ddd908806a258a2f07b"
   },
   "assets": {
     "darwin-arm64": {
       "name": "officecli-mac-arm64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-mac-arm64",
-      "sha256": "0dae0990a9cc29688a5d54469f984c34e5b15ab6bbd194a0ffdc571bb9040124"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-mac-arm64",
+      "sha256": "b78ac7f9213e5fd0de0e3cb5d0f81bd427f9dd74b6c31e134fd1167427559167"
     },
     "darwin-x64": {
       "name": "officecli-mac-x64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-mac-x64",
-      "sha256": "178c1e9ebaf44c24d2b4b359064a5dea6eb7b2f539809871a3de1c09599dff9f"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-mac-x64",
+      "sha256": "cc939ccac6fa468e0cd3cdbfdab39efdbf49d88ba9f0efad138fdddf494b1e22"
     },
     "linux-x64": {
       "name": "officecli-linux-x64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-x64",
-      "sha256": "f8eefe88dbfa7464bee421e5421efe57fc26bc3180b30e56eef58594c8245c94"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-linux-x64",
+      "sha256": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea"
     },
     "linux-arm64": {
       "name": "officecli-linux-arm64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-arm64",
-      "sha256": "60db926c8a1371984b9e99622a834777befb02b6f73d0f3fff914ffcc2760d2f"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-linux-arm64",
+      "sha256": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493"
     },
     "win32-x64": {
       "name": "officecli-win-x64.exe",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-win-x64.exe",
-      "sha256": "bd64eba587e56cc71709cdd1f38ae9ac77cd65a9c8ea744b0996897c0557e343",
-      "schemaCrc": "c11d61e0"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-win-x64.exe",
+      "sha256": "572c0a4da35333cf866fa5a2fb8259a4a2a8c9922be031d6b7a86936282ef94e"
     },
     "win32-arm64": {
       "name": "officecli-win-arm64.exe",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-win-arm64.exe",
-      "sha256": "786e08b1ccf09c3a2107912537fe25fa82970b30145e3c59e09d83bf4032b065"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.159/officecli-win-arm64.exe",
+      "sha256": "2769867fb1bd19e1b33acdf9e69d0d94e6dc9ffa2425819e602a4c40ed83a997"
     }
   },
   "commandPolicy": {
@@ -154,8 +153,8 @@
       "directory": "officecli-docx",
       "entry": "SKILL.md",
       "inherits": [],
-      "contentHash": "4dbeacba4bd107417fc31204ce22e91b37e5747d0541090d75ebb0ed14e02559",
-      "resourceHash": "0fbf328a7c0d7c6aab9b9e649739810043b96b57c4c8fe867dccb269bd3c58f2"
+      "contentHash": "a5a294fc04ec9983d766cec70887d563f3337e13a8a25db37d5a522bd37fc298",
+      "resourceHash": "f4c7a0a5b6e5c01283408346e07a0e8e8b6eebf2f2a5b626b03b6530228c9390"
     },
     "excel": {
       "directory": "officecli-xlsx",
@@ -237,13 +236,13 @@
     }
   },
   "commandSchema": {
-    "file": "1.0.157/command-schema.json",
-    "sha256": "0eea0d19cc78ea5344e96d533be5a20cbec6ca4283db44ac77c19cf2411b31a3",
+    "file": "1.0.159/command-schema.json",
+    "sha256": "36bd0a14117f2e07d1edc266312c64f99b402f78b4d69f1f06a723c38d8f805a",
     "unclassifiedCommands": [],
     "staleClassifications": []
   },
   "guideIndex": {
-    "file": "1.0.157/guide-index.json",
-    "sha256": "48b9c02baae41056a2a2ce6623e49725bf87e44d4c25eba7343093e86721076c"
+    "file": "1.0.159/guide-index.json",
+    "sha256": "b0af37860879b101ea15d9fd8bac31ea1d84081250d668d535982760daffb313"
   }
 }
