@@ -77,3 +77,10 @@ test('session turn gives revision precedence over persisted generation preferenc
   expect(prompt).not.toContain('Selected design.md:')
   expect(buildPptTurnPrompt(undefined, path, root)).toBeUndefined()
 })
+
+test('external presentations require a source-bound lossy brief before route selection and editing', async () => {
+  const { PPT_ROUTING_GUIDANCE } = await import('@craft-agent/shared/prompts/ppt-routing')
+  expect(PPT_ROUTING_GUIDANCE).toContain('read the full brief before selecting a route or editing')
+  expect(PPT_ROUTING_GUIDANCE).toContain('verify its source hash')
+  expect(PPT_ROUTING_GUIDANCE).toContain('not a deck or round-trip representation')
+})
