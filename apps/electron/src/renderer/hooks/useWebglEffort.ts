@@ -1,6 +1,6 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { VERT, FRAG_SIM, FRAG_BLUR, FRAG_COMP } from '@/components/app-shell/input/effort-webgl-shaders'
-import { effortThemeFallback, readEffortShaderTheme, type EffortShaderTheme } from '@/components/app-shell/input/effort-theme'
+import { effortThemeFallback, readEffortShaderTheme, stepEffortShaderTheme, type EffortShaderTheme, type EffortThemeBlend } from '@/components/app-shell/input/effort-theme'
 
 type Target = { framebuffer: WebGLFramebuffer; texture: WebGLTexture }
 
@@ -10,6 +10,17 @@ type Target = { framebuffer: WebGLFramebuffer; texture: WebGLTexture }
  */
 export function effortFramePlan(reducedMotion: boolean): { steps: number; loop: boolean } {
   return reducedMotion ? { steps: 32, loop: false } : { steps: 1, loop: true }
+}
+
+/**
+ * The flame loop already runs while motion is allowed. A color blend still
+ * asks for frames if that loop is idle. Reduced motion never adds a loop:
+ * the theme snaps inside the one settled draw.
+ */
+export function effortPaintPlan(reducedMotion: boolean, colorSettled: boolean): { steps: number; loop: boolean } {
+  const plan = effortFramePlan(reducedMotion)
+  if (reducedMotion) return { steps: plan.steps, loop: false }
+  return { steps: plan.steps, loop: plan.loop || !colorSettled }
 }
 
 /** Mounted while Max is visible or fading out. Reduced motion draws one settled frame. */
@@ -32,6 +43,7 @@ export function mountWebglEffort(
   let contextInvalidated = false
   let disposed = false
   let startedAt: number | null = null
+  let colorBlend: EffortThemeBlend | null = null
   let themeObserver: MutationObserver | null = null
   let resizeObserver: ResizeObserver | null = null
 
@@ -194,12 +206,14 @@ export function mountWebglEffort(
     function render(now: number) {
       frame = 0
       if (disposed || !width || !height || document.hidden || contextInvalidated || gl!.isContextLost()) return
-      // Re-read computed colors every frame, matching PromptSparks, so an open
-      // menu follows light, dark, and PRO without a hardcoded palette.
-      applyTheme(currentTheme())
+      // Computed colors snap. Uniforms ease toward them so an open menu follows
+      // light, dark, and PRO without popping. Reduced motion snaps.
+      const stepped = stepEffortShaderTheme(colorBlend, currentTheme(), now, motion.matches)
+      colorBlend = stepped.blend
+      applyTheme(stepped.theme)
       // Freeze both phase and fill for reduced motion, without a RAF loop.
       startedAt ??= now
-      const plan = effortFramePlan(motion.matches)
+      const plan = effortPaintPlan(motion.matches, stepped.settled)
       const elapsed = motion.matches ? 5 : (now - startedAt) / 1000
       gl!.bindVertexArray(vertexArray)
       gl!.viewport(0, 0, width, height)
