@@ -48,3 +48,9 @@ Beta 文案拟用：**更聪明的改稿**——保留 OfficeCLI 的定点编辑
 ### 导出结构修复
 
 已用原生受管 OfficeCLI 1.0.157 独立复现原始导出的 notesMasterIdLst 顺序错误。在现有 ZIP/XML 收尾步骤只交换生成器相邻的 notesMasterIdLst 与 sldIdLst，保留两个节点内容及所有关系。20 项 deck 回归测试通过（480 assertions），包括备注文本与主列表顺序；随包 deck-cli 已重建。修复后真实固定素材导出通过 OfficeCLI validate（no errors），局部截图/旧文件保护重验通过。验收脚本增加真实 validate 退出码断言，防止仅截图正常就放行。
+
+### 组合验证与交付路径修复
+
+O5 #696 的 Validate 41004874701 和 OfficeCLI 41004874522 均成功后，已引入 Ship 分支，保留 O4 brief 与 O5 案例两组集成入口；本地真实组合测试 7 pass / 82 assertions。组合 typecheck:all 通过。
+
+标题案重跑揭示 fixture stamp 不是唯一原因：macOS `/var` 别名与真实 `/private/var` 路径在交付归属比较前未统一，导致已保存记录不被信任而额外导出副本。读取记录现在先解析真实路径，现有边界比较仍拒绝工作目录/会话外文件；加入目录别名回归，确保直接编辑后的已有内容不被覆盖。ppt-live 11 pass / 132 assertions。模型曾尝试在 office_edit 后同步 deck.json，这会触发实时导出；路由合同现在明确本轮不得写回工程，等实际请求后续 deck_revision 时再对账。两项均需新的真实模型回归，不能拿旧轨迹证明修复后通过。
