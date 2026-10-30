@@ -74,3 +74,7 @@ O5 #696 的 Validate 41004874701 和 OfficeCLI 41004874522 均成功后，已引
 采集器为既有工程跟进增加真实的全页修改前截图及源哈希，供模型判断未改页证据；截图存在不等于视觉通过，记录中明确仍需检视。避免把没有此前图像的测试素材描述成已有完整视觉验收。外来稿不伪造匹配工程或先验视觉结论。
 
 打包门禁已在功能分支手动启动：run 41006827680，对应 f9252c2f0。macOS/Windows 构建进行中；publish-release 条件只允许默认分支或 test，因此本次不会发布 release。该结果不能冒充 test 合入后的发布门禁。
+
+### 完整 Validate 第二次结果
+
+第二次完整命令在真实网络 OAuth E2E 的 GitHub metadata discovery 超过默认 5 秒时退出，不能记为全仓通过。原样单独重跑 `packages/shared/src/auth/__tests__/oauth.e2e.test.ts` 为 7 pass / 11 assertions（未改测试、未跳过、未延长超时）；已再次运行完整 validate:ci。Office 定向通过仍与全仓结论分开记录。
