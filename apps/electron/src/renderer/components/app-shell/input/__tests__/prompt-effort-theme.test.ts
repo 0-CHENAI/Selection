@@ -3,13 +3,18 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FRAG_COMP, FRAG_SIM } from '../effort-webgl-shaders'
 import {
+  EFFORT_COLOR_BLEND_MS,
   EFFORT_FIELD_FADE_MS,
   EFFORT_THEME_VARS,
+  easeEffortBlend,
   effortThemeFallback,
+  lerpEffortRgb,
   parseCssColor,
   readEffortShaderTheme,
+  stepEffortShaderTheme,
+  type EffortShaderTheme,
 } from '../effort-theme'
-import { effortFramePlan, mountWebglEffort } from '@/hooks/useWebglEffort'
+import { effortFramePlan, effortPaintPlan, mountWebglEffort } from '@/hooks/useWebglEffort'
 
 const css = readFileSync(join(import.meta.dir, '../PromptBarEffects.css'), 'utf8')
 const themeCss = readFileSync(join(import.meta.dir, '../../../../index.css'), 'utf8')
@@ -50,7 +55,7 @@ describe('max effort theme css', () => {
     expect(lightTrack).toContain('0.975')
     expect(darkTrack).toContain('0.23')
     expect(css).not.toContain('oklch(0.14 0.008 293)')
-    expect(css).toContain('background-color: var(--prompt-effort-max-track)')
+    expect(css).toContain('--prompt-effort-track-bg: var(--prompt-effort-max-track)')
     expect(hues(lightPalette).some(hue => Math.abs(hue - 293) < 1)).toBe(true)
     expect(hues(darkPalette).some(hue => Math.abs(hue - 293) < 1)).toBe(true)
     expect(darkPalette).toContain('color(srgb 0.28 0.1 0.58)')
@@ -71,8 +76,12 @@ describe('max effort theme css', () => {
       expect(block).not.toContain('293')
     }
     expect(proDark).toMatch(/--prompt-effort-core:[^;]*0\.97/)
-    expect(css).toContain(".prompt-effort-settings[data-max] .prompt-effort-fill { background: color-mix(in srgb, var(--prompt-spark) 35%, transparent); }")
-    expect(css).toContain(".prompt-effort-settings[data-max] .prompt-effort-thumb { background: var(--prompt-spark); }")
+    expect(proSpark).toContain('--prompt-effort-label: var(--prompt-spark)')
+    const maxPaint = ruleBodies(css, '.prompt-effort-settings[data-max] {')[0] ?? ''
+    expect(maxPaint).toContain('--prompt-effort-track-bg: var(--prompt-effort-max-track)')
+    expect(maxPaint).toContain('--prompt-effort-fill-bg: color-mix(in srgb, var(--prompt-spark) 35%, transparent)')
+    expect(maxPaint).toContain('--prompt-effort-thumb-bg: var(--prompt-spark)')
+    expect(maxPaint).toContain('--prompt-effort-label: var(--prompt-spark)')
     expect(themeCss).toContain('--pro-accent: oklch(0.50178870 0.09392988 58.44502375)')
     expect(themeCss).toContain('--pro-accent: oklch(0.76808414 0.08380584 76.89195147)')
     const proAccents = [...themeCss.matchAll(/--pro-accent:\s*oklch\([^)]+\)/g)].map(match => match[0])
@@ -82,15 +91,35 @@ describe('max effort theme css', () => {
 
   it('fades the field for one short beat and settles under reduced motion', () => {
     expect(css).toContain(`transition: opacity ${EFFORT_FIELD_FADE_MS}ms ease`)
-    expect(css).toContain(`transition: background-color ${EFFORT_FIELD_FADE_MS}ms ease`)
+    expect(css).toContain(`--prompt-effort-track-bg ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain(`--prompt-effort-fill-bg ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain(`--prompt-effort-thumb-bg ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain(`--prompt-effort-thumb-border ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain(`--prompt-effort-label ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain(`--prompt-field-glow ${EFFORT_COLOR_BLEND_MS}ms ease`)
+    expect(css).toContain('transition: width 220ms cubic-bezier(0.23, 1, 0.32, 1)')
+    expect(css).toContain('left 220ms cubic-bezier(0.23, 1, 0.32, 1)')
+    expect(css).toContain('box-shadow 250ms ease')
+    expect(css).toContain('@property --prompt-spark')
+    expect(css).toContain('syntax: "<color>"')
     expect(css).toContain('.prompt-effort-webgl[data-visible] { opacity: 1; }')
+    const webgl = ruleBodies(css, '.prompt-effort-webgl {')[0] ?? ''
+    expect(webgl).toContain(`transition: opacity ${EFFORT_FIELD_FADE_MS}ms ease`)
+    expect(webgl).not.toContain('border-color')
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(reduced).toContain('.prompt-effort-webgl')
     expect(reduced).toContain('.prompt-effort-track')
+    expect(reduced).toContain('.prompt-effort-settings')
+    expect(reduced).toContain('.prompt-effort-fill')
+    expect(reduced).toContain('.prompt-effort-thumb')
     expect(reduced).toContain('transition: none')
     expect(reduced).not.toContain('infinite')
+    expect(reduced).not.toContain('background-color 300ms')
     expect(effortFramePlan(true)).toEqual({ steps: 32, loop: false })
     expect(effortFramePlan(false)).toEqual({ steps: 1, loop: true })
+    expect(effortPaintPlan(true, false)).toEqual({ steps: 32, loop: false })
+    expect(effortPaintPlan(false, false)).toEqual({ steps: 1, loop: true })
+    expect(effortPaintPlan(false, true)).toEqual({ steps: 1, loop: true })
   })
 })
 
@@ -140,6 +169,83 @@ describe('effort color parsing', () => {
     expect(theme.core[0]).toBeGreaterThan(0.9)
     expect(theme.track).not.toEqual(effortThemeFallback(true).track)
     expect(theme.heat).toBe(0.58)
+  })
+})
+
+function themeWith(base: EffortShaderTheme, patch: Partial<EffortShaderTheme>): EffortShaderTheme {
+  return { ...base, ...patch }
+}
+
+describe('effort color interpolation', () => {
+  it('blends encoded sRGB in oklab instead of gamma space', () => {
+    const red = [1, 0, 0] as const
+    const blue = [0, 0, 1] as const
+    expect(lerpEffortRgb(red, blue, 0)).toEqual([1, 0, 0])
+    expect(lerpEffortRgb(red, blue, 1)).toEqual([0, 0, 1])
+    expect(easeEffortBlend(0)).toBe(0)
+    expect(easeEffortBlend(1)).toBe(1)
+    expect(easeEffortBlend(0.5)).toBeGreaterThan(0.7)
+    const mixed = lerpEffortRgb(red, blue, 0.5)
+    const gamma = [0.5, 0, 0.5]
+    expect(mixed[0]).toBeGreaterThan(0.15)
+    expect(mixed[2]).toBeGreaterThan(0.15)
+    expect(relativeLuma(mixed)).toBeGreaterThan(relativeLuma(gamma))
+    const purple = parseCssColor('oklch(0.55 0.12 293)')
+    const gold = parseCssColor('oklch(0.55 0.1 70)')
+    expect(purple && gold).toBeTruthy()
+    const crossed = lerpEffortRgb(purple!, gold!, 0.5)
+    const straight = purple!.map((channel, index) => (channel + gold![index]!) / 2)
+    expect(Math.abs(crossed[0] - straight[0]) + Math.abs(crossed[2] - straight[2])).toBeGreaterThan(0.02)
+    const roundTrip = lerpEffortRgb([0.2, 0.4, 0.6], [0.2, 0.4, 0.6], 0.4)
+    expect(roundTrip[0]).toBeCloseTo(0.2, 2)
+    expect(roundTrip[1]).toBeCloseTo(0.4, 2)
+    expect(roundTrip[2]).toBeCloseTo(0.6, 2)
+  })
+
+  it('eases toward a new theme and snaps when motion is reduced', () => {
+    const purple = effortThemeFallback(false)
+    const gold = themeWith(effortThemeFallback(true), {
+      ember: [0.8, 0.5, 0.2],
+      mid: [0.86, 0.58, 0.24],
+      core: [1, 0.94, 0.86],
+      track: [0.28, 0.18, 0.08],
+    })
+    const mounted = stepEffortShaderTheme(null, purple, 0, false)
+    expect(mounted.settled).toBe(true)
+    expect(mounted.theme.ember).toEqual([...purple.ember])
+
+    const started = stepEffortShaderTheme(mounted.blend, gold, 1000, false)
+    expect(started.settled).toBe(false)
+    expect(started.theme.ember).toEqual([...purple.ember])
+    expect(started.theme.heat).toBe(purple.heat)
+
+    const midway = stepEffortShaderTheme(started.blend, gold, 1000 + EFFORT_COLOR_BLEND_MS / 2, false)
+    expect(midway.settled).toBe(false)
+    expect(midway.theme.heat).toBeGreaterThan((purple.heat + gold.heat) / 2)
+    expect(midway.theme.ember[0]).toBeGreaterThan(lerpEffortRgb(purple.ember, gold.ember, 0.5)[0])
+
+    const arrived = stepEffortShaderTheme(midway.blend, gold, 1000 + EFFORT_COLOR_BLEND_MS, false)
+    expect(arrived.settled).toBe(true)
+    expect(arrived.theme.ember).toEqual([...gold.ember])
+    expect(arrived.theme.track).toEqual([...gold.track])
+    expect(arrived.theme.heat).toBe(gold.heat)
+    expect(arrived.blend.startedAt).toBeNull()
+
+    const held = stepEffortShaderTheme(arrived.blend, gold, 1000 + EFFORT_COLOR_BLEND_MS + 40, false)
+    expect(held.settled).toBe(true)
+    expect(held.theme.ember).toEqual([...gold.ember])
+
+    const retarget = stepEffortShaderTheme(midway.blend, purple, 1000 + EFFORT_COLOR_BLEND_MS / 2, false)
+    expect(retarget.settled).toBe(false)
+    expect(retarget.theme.ember).toEqual(midway.theme.ember)
+    const returned = stepEffortShaderTheme(retarget.blend, purple, 1000 + EFFORT_COLOR_BLEND_MS / 2 + EFFORT_COLOR_BLEND_MS, false)
+    expect(returned.settled).toBe(true)
+    expect(returned.theme.ember).toEqual([...purple.ember])
+
+    const snapped = stepEffortShaderTheme(midway.blend, gold, 1000, true)
+    expect(snapped.settled).toBe(true)
+    expect(snapped.theme.ember).toEqual([...gold.ember])
+    expect(snapped.theme.chroma).toBe(gold.chroma)
   })
 })
 
@@ -378,5 +484,85 @@ describe('max effort webgl field', () => {
     stale(performance.now())
     expect(queue.size).toBe(0)
     expect(calls.filter(call => call.name === 'drawArrays').length).toBe(24)
+  })
+
+  it('eases shader colors across frames and keeps drawing until the blend settles', () => {
+    console.warn = () => {}
+    const { gl, calls } = fakeGl()
+    const queue = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    const observers: MutationCallback[] = []
+    const style = {
+      color: 'rgb(90, 60, 170)',
+      borderTopColor: 'rgb(110, 70, 190)',
+      borderRightColor: 'rgb(210, 190, 240)',
+      borderBottomColor: 'rgb(230, 224, 245)',
+      getPropertyValue: () => '0.58',
+    }
+    Object.assign(globalThis, {
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        const id = ++frameId
+        queue.set(id, callback)
+        return id
+      },
+      cancelAnimationFrame: (id: number) => { queue.delete(id) },
+      ResizeObserver: class { observe() {} disconnect() {} },
+      MutationObserver: class { constructor(callback: MutationCallback) { observers.push(callback) } observe() {} disconnect() {} },
+    })
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        devicePixelRatio: 1,
+        matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+      },
+    })
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        hidden: false,
+        documentElement: { classList: { contains: () => false } },
+        addEventListener() {},
+        removeEventListener() {},
+      },
+    })
+    Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, value: () => style })
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => gl,
+      getBoundingClientRect: () => ({ width: 180, height: 22 }),
+      addEventListener() {},
+      removeEventListener() {},
+      closest: () => null,
+    }
+    const ember = () => calls.filter(call => call.name === 'uniform3f' && call.args[0] === 'u_ember').at(-1)?.args.slice(1)
+    const stop = mountWebglEffort(canvas as unknown as HTMLCanvasElement, { onContextRestored() {} })
+    expect(ember()).toEqual([90 / 255, 60 / 255, 170 / 255])
+    expect(queue.size).toBe(1)
+
+    style.color = 'rgb(204, 128, 51)'
+    style.borderTopColor = 'rgb(214, 148, 56)'
+    style.borderRightColor = 'rgb(255, 244, 230)'
+    style.borderBottomColor = 'rgb(72, 48, 20)'
+    observers.at(-1)?.([], {} as MutationObserver)
+    const changedAt = performance.now()
+    expect(ember()).toEqual([90 / 255, 60 / 255, 170 / 255])
+    expect(queue.size).toBe(1)
+
+    const pending = queue.entries().next().value as [number, FrameRequestCallback]
+    queue.delete(pending[0])
+    pending[1](changedAt + EFFORT_COLOR_BLEND_MS / 2)
+    const midway = ember() as number[]
+    expect(midway[0]).toBeGreaterThan(90 / 255)
+    expect(midway[0]).toBeLessThan(204 / 255)
+    expect(queue.size).toBe(1)
+
+    const next = queue.entries().next().value as [number, FrameRequestCallback]
+    queue.delete(next[0])
+    next[1](changedAt + EFFORT_COLOR_BLEND_MS)
+    expect(ember()).toEqual([204 / 255, 128 / 255, 51 / 255])
+    expect(queue.size).toBe(1)
+    stop()
+    expect(queue.size).toBe(0)
   })
 })
