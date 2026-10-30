@@ -59,7 +59,7 @@ try {
     writeFileSync(join(data, 'prior-visual-evidence.json'), JSON.stringify({ sourceSha256: createHash('sha256').update(readFileSync(output)).digest('hex'), files: prior.files, note: 'Actual pre-edit screenshots; inspect as needed before relying on unchanged-page evidence. This is not a model visual pass assertion.' }, null, 2))
   }
   const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
-  const before = { deck, projectSha256: external ? null : hash(project), pptxSha256: hash(output) }
+  const before = { deck: JSON.parse(readFileSync(source, 'utf8')), projectSha256: external ? null : hash(project), pptxSha256: hash(output) }
   writeFileSync(join(dir, 'before.json'), JSON.stringify(before, null, 2))
   console.log(JSON.stringify({ sessionId: session.id, outputDirectory: dir, model: connection.defaultModel, case: key }))
   await manager.sendMessage(session.id, `请修改已交付的 ${output}。${cases[key]} 这是本地验收素材，不要联网、创建任务或委派其他代理；只操作当前工作目录与当前会话的数据目录。`, undefined, undefined, external ? { skillSlugs: ['officecli'] } : { ppt: { templateId: 'dsh-monochrome' } })
