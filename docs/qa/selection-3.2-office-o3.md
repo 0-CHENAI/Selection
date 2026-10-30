@@ -25,3 +25,7 @@
 - 原生读图检查 11 套封面及 9 张关键适配页（模块物流 1/9/10、宣言海报 1/6/12、樱花 12、趣味 2、北欧 3）。不是全部 264 页的视觉验收，也不等于 PowerPoint/WPS 保真验证。
 - 初次 headless LibreOffice 未找到中文字体，生成方框；读图发现后以临时 FONTCONFIG_FILE 显式包含 `/System/Library/AssetsV2/com_apple_MobileAsset_Font8` 等本机字体目录，重新生成全部新增资源，PDF 字体确认有 PingFangSC。未修改系统字体或运行时安装。复现时须保证渲染器能访问模板所需中文字体；脚本 `--templates=id1,id2 --force` 仅刷新指定模板。
 - 新增模板预览为开发资源，不是向用户交付的演示稿；沿用模板预览既有 LibreOffice 转 PDF 流程，不引入 LibreOffice Kit。模型真实工具轨迹、英文全部页面视觉验收和 Office 成品编辑验证留待 Ship，不能用结构检查替代。
+
+## CI 回归修正
+
+首次 Validate（run 41003080507）失败于 `engine/ppt-master.test.ts` 的旧断言：仍要求只有五个 `dsh-` ID。O3 扩库后已有十三个此前缀 ID，另三套 retained-native 无此前缀。更新为精确十三项清单，保留原 ppt-master 成稿/主题检查；新增十一套及其双语内容另由 O3 覆盖测试锁住。完整引擎目录复跑 40 pass / 0 fail、2158 assertions。打包 OfficeCLI run 41003080509 已成功；修正后 CI 需重新回读，不能把首次失败称为全绿。
