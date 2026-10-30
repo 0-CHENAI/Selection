@@ -2,11 +2,13 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronRight, ImagePlus, Palette, RectangleHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { PptRequest, PptTheme } from '@craft-agent/shared/protocol'
+import type { PptRequest, PptTemplateVariant, PptTheme } from '@craft-agent/shared/protocol'
 
-export function TemplateOptions({ request, themes, onChange }: {
+export function TemplateOptions({ request, themes, variants, baseTemplate, onChange }: {
   request: PptRequest | undefined
   themes: PptTheme[]
+  variants?: PptTemplateVariant[]
+  baseTemplate?: { id: string; title: string }
   onChange: (value: Partial<PptRequest>) => void
 }) {
   const { t } = useTranslation()
@@ -14,6 +16,13 @@ export function TemplateOptions({ request, themes, onChange }: {
   const logoInput = React.useRef<HTMLInputElement>(null)
   return <>
     <p className="px-2 pb-2 pt-1.5 text-xs text-muted-foreground">{t('ppt.optionalSettings')}</p>
+    {!!variants?.length && <div className="px-2 pb-2">
+      <p className="text-xs text-muted-foreground">{t('ppt.familyThemes')}</p>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {baseTemplate && <button type="button" aria-pressed={request?.templateId === baseTemplate.id} onClick={() => onChange({ templateId: baseTemplate.id })} className={`rounded-full px-2 py-0.5 text-[11px] ${request?.templateId === baseTemplate.id ? 'bg-foreground/10 font-medium text-foreground' : 'bg-foreground/5 text-muted-foreground'}`}>{baseTemplate.title}</button>}
+        {variants.map(variant => <button key={variant.id} type="button" aria-pressed={request?.templateId === variant.id} title={variant.title} onClick={() => onChange({ templateId: variant.id })} className={`rounded-full px-2 py-0.5 text-[11px] ${request?.templateId === variant.id ? 'bg-foreground/10 font-medium text-foreground' : 'bg-foreground/5 text-muted-foreground'}`}>{variant.title}</button>)}
+      </div>
+    </div>}
     <div className="px-2 py-2">
       <div className="flex items-center gap-2 text-sm"><Palette className="size-3.5 text-muted-foreground" /><span className="flex-1">{t('ppt.theme')}</span><span className="text-xs text-muted-foreground">{themes.find(theme => theme.id === request?.themeId)?.name ?? t('ppt.templateAspect')}</span></div>
       <div className="mt-2.5 grid grid-cols-7 gap-1.5 pl-[22px]">

@@ -5,26 +5,35 @@ import { join, resolve } from 'node:path'
 import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { ChartSkillCandidate } from '@craft-agent/shared/skills'
-import { buildPptPrompt, getPptCatalog, getPptTemplatePages, getPptTemplatePreview, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
+import { buildPptPrompt, getPptCatalog, getPptTemplatePages, getPptTemplatePreview, PPT_ARCHIVED_ASSET_MESSAGE, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
+import { coverQuality } from './ppt-cover-quality'
 
 const root = realpathSync(resolve(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design'))
 const dirs: string[] = []
 function temp() { const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ppt-catalog-'))); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
+const defaultIds = ['dsh-cartesian', 'ppt169_china_economy_2025_briefing', 'mbb-consulting', 'operating-review', 'dsh-engineering-blueprint', 'dsh-course-workshop']
+const themeIds = ['dsh-signal', 'dsh-monochrome', 'dsh-editorial-forest', 'dsh-soft-editorial', 'dsh-editorial-notebook']
+
 test('every offered template has real decodable WebP references, Chinese title and approved home order/categories', () => {
   const catalog = getPptCatalog(root)
-  const source = JSON.parse(readFileSync(join(root, 'styles/catalog.json'), 'utf8'))
-  expect(catalog.templates.length).toBe(Object.keys(source).length)
-  expect(catalog.templates.slice(0, 4).map(item => item.id)).toEqual(['ppt169_china_economy_2025_briefing', 'ppt169_qianli_jiangshan_scroll', 'ppt169_raft_consensus_deepdive', 'ppt169_ev_market_priorities'])
+  const source = JSON.parse(readFileSync(join(root, 'styles/catalog.json'), 'utf8')) as Record<string, unknown>
+  expect(Object.keys(source).length).toBeGreaterThan(catalog.templates.length)
+  expect(catalog.templates.filter(item => item.tier === 'default').map(item => item.id)).toEqual(defaultIds)
+  expect(catalog.templates.filter(item => item.tier === 'more')).toHaveLength(13)
+  expect(catalog.templates.find(item => item.id === 'dsh-blue-professional')?.note).toContain('理性简报')
+  expect(catalog.templates.find(item => item.id === 'dsh-cartesian')?.variants?.map(item => item.id)).toEqual(themeIds)
+  expect(catalog.templates.some(item => item.id === 'workshop-teaching' || item.id === 'ppt169_qianli_jiangshan_scroll' || item.id === 'dsh-broadside')).toBe(false)
   expect(catalog.templates.find(item => item.id === 'dsh-cartesian')).toMatchObject({ title: '理性简报', category: '商务' })
+  expect(catalog.templates.find(item => item.id === 'ppt169_china_economy_2025_briefing')).toMatchObject({ title: '数据简报', category: '商务' })
   expect(catalog.templates.find(item => item.id === 'dsh-course-workshop')).toMatchObject({ title: '课程培训', category: '教学' })
   expect(catalog.templates.find(item => item.id === 'academic-research')?.category).toBe('学术')
   for (const item of catalog.templates) {
     expect(item.title).toMatch(/[\u3400-\u9fff]/)
     expect(['商务', '咨询', '学术', '教学', '技术', '创意', '社媒']).toContain(item.category)
     expect(item.referencePages.length).toBe(Math.min(2, item.pages - 1))
-    for (const image of [item.cover, ...item.referencePages]) {
+    for (const image of [item.cover, ...item.referencePages, ...(item.variants ?? []).flatMap(variant => [variant.cover, ...variant.referencePages])]) {
       const data = Buffer.from(image.split(',')[1]!, 'base64')
       expect(data.toString('ascii', 0, 4)).toBe('RIFF')
       expect(data.toString('ascii', 8, 12)).toBe('WEBP')
@@ -34,20 +43,25 @@ test('every offered template has real decodable WebP references, Chinese title a
   expect(getPptCatalog(root)).toBe(catalog)
 })
 
-test('lazy full previews match every real deck in numeric order within the RPC limit', () => {
+test('lazy full previews match every visible deck in numeric order within the RPC limit', () => {
   const source = JSON.parse(readFileSync(join(root, 'styles/catalog.json'), 'utf8')) as Record<string, { deck: string }>
-  const display = JSON.parse(readFileSync(join(root, 'styles/picker.json'), 'utf8')) as { templates: Record<string, { previewId: string }> }
-  for (const [id, entry] of Object.entries(source)) {
+  const display = JSON.parse(readFileSync(join(root, 'styles/picker.json'), 'utf8')) as { templates: Record<string, { previewId: string; tier?: string; variantOf?: string }> }
+  const visible = Object.entries(display.templates).filter(([, item]) => item.tier === 'default' || item.tier === 'more' || item.variantOf)
+  expect(visible.length).toBe(defaultIds.length + 13 + themeIds.length)
+  for (const [id, item] of visible) {
+    const entry = source[id]!
     const deck = JSON.parse(readFileSync(join(root, entry.deck), 'utf8'))
     const pages = getPptTemplatePages(id, root)
     expect(pages.length).toBe(deck.pages.length)
     expect(Buffer.byteLength(JSON.stringify({ type: 'response', result: pages }))).toBeLessThan(DEFAULT_MAX_MESSAGE_BYTES)
     pages.forEach((page, index) => {
-      expect(Buffer.from(page.split(',')[1]!, 'base64')).toEqual(readFileSync(join(root, `styles/previews/pages/${display.templates[id]!.previewId}-${index + 1}.webp`)))
+      expect(Buffer.from(page.split(',')[1]!, 'base64')).toEqual(readFileSync(join(root, `styles/previews/pages/${item.previewId}-${index + 1}.webp`)))
     })
   }
   expect(getPptTemplatePages('dsh-cartesian', root)).toHaveLength(12)
   expect(getPptTemplatePages('ppt169_china_economy_2025_briefing', root)).toHaveLength(17)
+  expect(getPptTemplatePages('dsh-broadside', root)).toHaveLength(12)
+  expect(getPptTemplatePreview('dsh-broadside', root).startsWith('data:application/pdf;base64,')).toBe(true)
 })
 
 test('lazy full preview rejects unknown, traversal and inherited IDs', () => {
@@ -59,7 +73,7 @@ test('lazy full preview rejects unknown, traversal and inherited IDs', () => {
 
 test('every detail document is a real vector PDF within the WebUI transport limit', () => {
   const catalog = getPptCatalog(root)
-  for (const template of catalog.templates) {
+  for (const template of [...catalog.templates, ...catalog.templates.flatMap(item => item.variants ?? [])]) {
     const document = getPptTemplatePreview(template.id, root)
     expect(document.startsWith('data:application/pdf;base64,')).toBe(true)
     const pdf = Buffer.from(document.split(',')[1]!, 'base64')
@@ -90,6 +104,40 @@ test('canonical bundled root rejects traversal, absolute paths and symlink escap
   expect(() => readPptAsset(inside, join(outside, 'secret.txt'))).toThrow()
   expect(() => readPptAsset(inside, '../' + outside.split('/').pop() + '/secret.txt')).toThrow()
   expect(() => readPptAsset(inside, 'escape/secret.txt')).toThrow('escapes')
+})
+
+test('visible card covers are not blank or tofu, and a hollow-box fixture is caught', async () => {
+  const sharp = (await import('sharp')).default
+  const blank = await sharp({ create: { width: 160, height: 90, channels: 3, background: '#E85D26' } }).png().toBuffer()
+  expect((await coverQuality(blank)).blank).toBe(true)
+  const boxes = Array.from({ length: 6 }, (_, index) => `<rect x="${16 + index * 28}" y="70" width="18" height="18" fill="none" stroke="#181915" stroke-width="2"/>`).join('')
+  const tofu = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="100%" height="100%" fill="#E85D26"/>${boxes}</svg>`)).png().toBuffer()
+  expect((await coverQuality(tofu)).tofu).toBe(true)
+  const display = JSON.parse(readFileSync(join(root, 'styles/picker.json'), 'utf8')) as { templates: Record<string, { previewId: string; tier?: string; variantOf?: string }> }
+  const seen = new Set<string>()
+  for (const item of Object.values(display.templates)) {
+    if (item.tier !== 'default' && item.tier !== 'more' && !item.variantOf) continue
+    if (seen.has(item.previewId)) continue
+    seen.add(item.previewId)
+    const quality = await coverQuality(readFileSync(join(root, `styles/previews/${item.previewId}-1.webp`)))
+    expect(quality, item.previewId).toMatchObject({ blank: false, tofu: false })
+  }
+  expect(seen.size).toBe(defaultIds.length + 13 + themeIds.length)
+})
+
+test('archived ids stay valid and explain a missing install without throwing', () => {
+  expect(validatePptRequest({ templateId: 'dsh-broadside' }, root).templateId).toBe('dsh-broadside')
+  expect(validatePptRequest({ templateId: 'ppt169_ev_market_priorities' }, root).templateId).toBe('ppt169_ev_market_priorities')
+  const inside = temp()
+  mkdirSync(join(inside, 'styles/themes'), { recursive: true })
+  writeFileSync(join(inside, 'styles/catalog.json'), JSON.stringify({ 'dsh-broadside': { name: '宣言', design: 'styles/dsh-broadside/design.md', deck: 'styles/样例扩展/archive/imported/dsh-broadside/deck.json' } }))
+  writeFileSync(join(inside, 'styles/picker.json'), JSON.stringify({ homeOrder: [], moreOrder: [], templates: { 'dsh-broadside': { title: '宣言海报', category: '创意', previewId: 'dsh-broadside', tier: 'archive' } } }))
+  writeFileSync(join(inside, 'styles/themes/catalog.json'), '{}')
+  const session = temp()
+  const prompt = buildPptPrompt({ templateId: 'dsh-broadside' }, session, inside)
+  expect(prompt).toContain(PPT_ARCHIVED_ASSET_MESSAGE)
+  expect(prompt).toContain('[skill:ppt-design]')
+  expect(() => getPptTemplatePages('dsh-broadside', inside)).toThrow(PPT_ARCHIVED_ASSET_MESSAGE)
 })
 
 test('request validation only accepts bundled IDs and safe settings', () => {

@@ -37,6 +37,8 @@ await downloadOfficecliDesktopTargets({
 // Replace resources so removed bundled assets do not survive incremental builds.
 rmSync('dist/resources', { recursive: true, force: true });
 cpSync('resources', 'dist/resources', { recursive: true });
+// Archived PPT samples stay in the repo for old ids and comparison, and are not shipped.
+rmSync('dist/resources/skills/ppt-design/styles/样例扩展', { recursive: true, force: true });
 
 console.log('✓ Copied resources/ → dist/resources/');
 

@@ -89,7 +89,7 @@ describe('ppt-master styles and themes', () => {
       expect(read(`styles/${id}/design.md`)).toContain('Hugo He')
       const entry = catalog[id]
       expect(entry).toBeTruthy()
-      expect(entry?.deck?.startsWith('styles/examples/')).toBe(true)
+      expect(entry?.deck?.startsWith('styles/examples/') || entry?.deck?.includes('/archive/')).toBe(true)
       expect(entry?.examples?.length).toBeGreaterThan(0)
       const parsed = parseDeckSource(read(entry!.deck!))
       expect(parsed.issues).toEqual([])
