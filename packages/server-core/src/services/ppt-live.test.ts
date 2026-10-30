@@ -398,3 +398,38 @@ test('watchPptDeck notices a page write and exports it without a tool event', as
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('failed revision preserves the last checked PPTX and overrides stale passing diagnostics', async () => {
+  const root = session()
+  try {
+    const { fixtureTheme, makeDeck, makePage, text } = await import('../../../../apps/electron/resources/skills/ppt-design/styles/kit.ts')
+    const { ensurePptChecks } = await import('./ppt-live')
+    mkdirSync(join(root, 'data'), { recursive: true })
+    const deck = makeDeck('检查门', fixtureTheme, [makePage('p1', 'free', '标题', '$paper', [text('title', '有效标题', 48, 40, 400, 48, 24)], '')])
+    const path = join(root, 'data/deck.json')
+    deck.pages[0]!.elements[0]!.bounds.x = -100
+    writeFileSync(path, JSON.stringify(deck))
+    expect(await exportIncrementalPptx(root)).toBeUndefined()
+    expect(existsSync(join(root, '检查门.pptx'))).toBe(false)
+    deck.pages[0]!.elements[0]!.bounds.x = 48
+    writeFileSync(path, JSON.stringify(deck))
+    const output = await exportIncrementalPptx(root)
+    expect(output).toBeTruthy()
+    const bytes = readFileSync(output!)
+    deck.pages[0]!.elements[0]!.bounds.x = -100
+    writeFileSync(path, JSON.stringify(deck))
+    writeFileSync(join(root, 'data/deck-check.json'), JSON.stringify({ issues: [] }))
+    expect(await exportIncrementalPptx(root)).toBe(output)
+    expect(readFileSync(output!)).toEqual(bytes)
+    await ensurePptChecks(root)
+    const progress = readPptProgress(root, false)
+    expect(progress?.pages?.[0]?.status).toBe('needs_revision')
+    expect(progress?.pages?.[0]?.failed).toBe(true)
+    deck.pages[0]!.elements[0]!.bounds.x = 48
+    deck.pages[0]!.elements[0]!.text = '修订后标题'
+    writeFileSync(path, JSON.stringify(deck))
+    expect(await exportIncrementalPptx(root)).toBe(output)
+    expect(readFileSync(output!)).not.toEqual(bytes)
+    expect(readPptProgress(root, false)?.pages?.[0]?.status).toBe('passed')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

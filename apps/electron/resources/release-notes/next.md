@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
+
 - **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
 
 - **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.

@@ -1761,9 +1761,8 @@ export class SessionManager implements ISessionManager {
     try { await exportIncrementalPptx(dir, { workingDirectory: managed.workingDirectory }) } catch (error) {
       sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
     }
-    // The preview follows the file. Page-check status can land a moment later.
-    this.emitPptProgress(managed, dir, generating)
-    try { await ensurePptChecks(dir) } catch { /* page status stays passed until deck_check can run */ }
+    // Never publish a successful page state before the current deck has been checked.
+    try { await ensurePptChecks(dir) } catch { /* uncached pages remain unverified */ }
     this.emitPptProgress(managed, dir, generating)
   }
 
