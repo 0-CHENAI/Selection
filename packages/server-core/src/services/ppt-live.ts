@@ -3,7 +3,7 @@ import { PPT_ROUTING_GUIDANCE } from '../../../shared/src/prompts/ppt-routing.ts
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { PptChartFallback, PptPageProgress, PptPageStatus, PptPalette, PptProgress, PptRevision, PptRevisionTarget, PptRun, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { PptChartFallback, PptPageProgress, PptPageIssue, PptPageStatus, PptPalette, PptProgress, PptRevision, PptRevisionTarget, PptRun, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { buildPptPrompt, getPptCatalog, getPptSkillRoot } from './ppt-catalog'
 import { customTemplateReference } from './ppt-library'
 
@@ -25,10 +25,10 @@ const RESERVED_FILE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
 
 type RawPage = { id?: unknown; name?: unknown }
 type RawDeck = { title?: unknown; canvas?: { width?: unknown; height?: unknown }; theme?: { colors?: Record<string, unknown> }; pages?: unknown }
-type CheckIssue = { pageId?: string; code?: unknown; message?: unknown }
+type CheckIssue = { pageId?: string; elementId?: unknown; code?: unknown; message?: unknown }
 type Checker = (deck: unknown) => CheckIssue[]
 interface SlideImage { stamp: string; name: string }
-interface PageIssues { count: number; issue?: string; failed: boolean }
+interface PageIssues { count: number; issue?: string; failed: boolean; issues: PptPageIssue[] }
 
 export interface PptProgressOptions {
   /** Test seam. Production uses deck-check.json, then a warmed deck_check cache. */
@@ -529,12 +529,15 @@ function pageIssues(deckPath: string, check?: Checker): Map<string, PageIssues> 
   const details = new Map<string, PageIssues>()
   for (const issue of issues ?? []) {
     if (!issue.pageId) continue
-    const current = details.get(issue.pageId) ?? { count: 0, failed: false }
+    const current = details.get(issue.pageId) ?? { count: 0, failed: false, issues: [] }
     current.count += 1
-    if (!current.issue) {
-      const message = cleanIssue(issue.message)
-      if (message) current.issue = message
-    }
+    const message = cleanIssue(issue.message)
+    if (message && current.issues.length < 50) current.issues.push({
+      code: typeof issue.code === 'string' ? issue.code.slice(0, 80) : 'unknown',
+      message,
+      ...(typeof issue.elementId === 'string' && issue.elementId.length > 0 && issue.elementId.length <= 200 ? { elementId: issue.elementId } : {}),
+    })
+    if (!current.issue && message) current.issue = message
     if (typeof issue.code === 'string' && HARD_ISSUE.has(issue.code)) current.failed = true
     details.set(issue.pageId, current)
   }
@@ -638,6 +641,7 @@ function progressFrom(loaded: LoadedDeck, generating: boolean, file: PptxFile | 
       name: pageName(page, index).slice(0, 80),
       status: pageStatus(index, issueCount, loaded.images.has(index), generating, current),
       issueCount,
+      ...(detail?.issues.length ? { issues: detail.issues } : {}),
       ...(detail?.issue ? { issue: detail.issue } : {}),
       ...(detail?.failed ? { failed: true } : {}),
       ...(image ? { imageStamp: image.stamp, imageName: image.name } : {}),

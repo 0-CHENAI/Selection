@@ -299,7 +299,7 @@ describe('reference styles', () => {
 
   it('ships five bilingual 12-page DSH decks', async () => {
     const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck: string; deckEn: string; license: string }>
-    expect(Object.keys(catalog).filter(key => key.startsWith('dsh-')).sort()).toEqual([...ids].sort())
+    for (const id of ids) expect(catalog[id]).toBeDefined()
     const accents = new Set<string>()
     for (const id of ids) {
       for (const file of [`styles/${id}/deck.json`, `styles/${id}/deck.en.json`]) {
@@ -529,6 +529,31 @@ describe('skill instructions', () => {
       const text = layout.slots.filter(slot => slot.textCapacity)
       expect(text.length).toBeGreaterThan(0)
       expect(text.every(slot => (slot.bounds?.w ?? 0) > 0 && (slot.textCapacity?.maxChars ?? 0) > 0)).toBe(true)
+    }
+  })
+})
+
+
+describe('O3 imported DSH template coverage', () => {
+  it('ships all eleven missing packs with checked bilingual adaptations and real previews', async () => {
+    const { addedDshTemplates } = await import('../../../../../../scripts/adapt-dsh-office-templates')
+    const catalog = JSON.parse(read('styles/catalog.json'))
+    const picker = JSON.parse(read('styles/picker.json'))
+    const diagnostics = JSON.parse(read('styles/dsh-import-diagnostics.json'))
+    expect(addedDshTemplates).toHaveLength(11)
+    expect(diagnostics.adaptations).toHaveLength(22)
+    for (const id of addedDshTemplates) {
+      expect(picker.templates[id].previewId).toBe(id)
+      for (const key of ['deck', 'deckEn']) {
+        expect(catalog[id][key]).toContain(`styles/examples/imported/${id}/`)
+        const parsed = parseDeckSource(read(catalog[id][key]))
+        expect(parsed.issues).toEqual([])
+        expect(parsed.deck!.pages).toHaveLength(12)
+        expect(checkDeck(parsed.deck!)).toEqual([])
+      }
+      expect(read(`styles/${id}/design.md`)).toContain('DSH Desktop')
+      expect(read(`styles/previews/documents/${id}.pdf`).startsWith('%PDF')).toBe(true)
+      for (let page = 1; page <= 12; page++) expect(read(`styles/previews/pages/${id}-${page}.webp`).startsWith('RIFF')).toBe(true)
     }
   })
 })

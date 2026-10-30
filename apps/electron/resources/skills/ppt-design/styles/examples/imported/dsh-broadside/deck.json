@@ -1,0 +1,7000 @@
+{
+  "format": "selection-deck",
+  "version": 1,
+  "title": "橙黑宣言",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "theme": {
+    "id": "dsh-broadside",
+    "name": "Broadside / 橙黑宣言",
+    "margin": 48,
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-broadside), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/broadside",
+    "colors": {
+      "paper": "#111111",
+      "ink": "#F0ECE5",
+      "muted": "#888880",
+      "accent": "#E85D26",
+      "surface": "#282826",
+      "line": "#888880",
+      "inverse": "#F0ECE5",
+      "background": "#111111",
+      "text": "#F0ECE5",
+      "secondary": "#888880"
+    },
+    "fonts": {
+      "cjk": {
+        "mac": "PingFang SC",
+        "win": "Microsoft YaHei",
+        "linux": "Noto Sans CJK SC"
+      },
+      "latin": {
+        "mac": "Arial",
+        "win": "Arial",
+        "linux": "Arial"
+      }
+    },
+    "type": {
+      "display": {
+        "min": 70,
+        "max": 142
+      },
+      "title": {
+        "min": 24,
+        "max": 39
+      },
+      "body": {
+        "min": 15,
+        "max": 23
+      },
+      "caption": {
+        "min": 9,
+        "max": 14
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "01",
+      "layout": "01-cover",
+      "name": "下一步， 动起来",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 34,
+            "w": 800,
+            "h": 24
+          },
+          "text": "橙黑宣言 / 01",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 209,
+            "w": 864,
+            "h": 224
+          },
+          "text": "下一步，\n动起来",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 78,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 506,
+            "w": 760,
+            "h": 16
+          },
+          "text": "DSH / 自编示例",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "#181915",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 503,
+            "w": 40,
+            "h": 20
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "#181915",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "Native PPTD adaptation of Zara Zhang / Broadside. MIT. Example figures are illustrative."
+    },
+    {
+      "id": "02",
+      "layout": "02-content",
+      "name": "把下一步握在手里",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "01 / 核心立场",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "把下一步握在手里",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 155,
+            "w": 300,
+            "h": 177
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 142,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 392,
+            "y": 179,
+            "w": 520,
+            "h": 113
+          },
+          "text": "减少交接。\n明确责任。",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 39,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 392,
+            "y": 321,
+            "w": 520,
+            "h": 1
+          },
+          "line": {
+            "color": "#5D5D55",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 520,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 392,
+            "y": 351,
+            "w": 500,
+            "h": 112
+          },
+          "text": "让一个团队负责从首次需求到再次下单的完整旅程。",
+          "textCapacity": {
+            "maxChars": 23,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 382,
+            "w": 288,
+            "h": 53
+          },
+          "text": "这次运营试验的选择",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "02",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "03",
+      "layout": "03-content",
+      "name": "需求卡在哪里",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "02 / 阻力所在",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "需求卡在哪里",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 165,
+            "w": 447,
+            "h": 164
+          },
+          "text": "42%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 125,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 54,
+            "y": 335,
+            "w": 426,
+            "h": 47
+          },
+          "text": "等待另一团队",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 54,
+            "y": 410,
+            "w": 427,
+            "h": 32
+          },
+          "text": "A / 需要等待第二团队的需求",
+          "textCapacity": {
+            "maxChars": 15,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 10,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 521,
+            "y": 169,
+            "w": 1,
+            "h": 282
+          },
+          "line": {
+            "color": "#A7A69D",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 282
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 153,
+            "w": 357,
+            "h": 26
+          },
+          "text": "B / 等待原因 · 占所有等待的比例",
+          "textCapacity": {
+            "maxChars": 19,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 10,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 193,
+            "w": 285,
+            "h": 27
+          },
+          "text": "报价复核",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s10",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 225,
+            "w": 274,
+            "h": 13
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 211,
+            "w": 62,
+            "h": 31
+          },
+          "text": "42%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 260,
+            "w": 285,
+            "h": 27
+          },
+          "text": "排期",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 292,
+            "w": 215.286,
+            "h": 13
+          },
+          "fill": "#ABADA3"
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 278,
+            "w": 62,
+            "h": 31
+          },
+          "text": "33%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 327,
+            "w": 285,
+            "h": 27
+          },
+          "text": "其他",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s16",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 359,
+            "w": 163.095,
+            "h": 13
+          },
+          "fill": "#ABADA3"
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 345,
+            "w": 62,
+            "h": 31
+          },
+          "text": "25%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l18",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 555,
+            "y": 401,
+            "w": 357,
+            "h": 1
+          },
+          "line": {
+            "color": "#A7A69D",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 357,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 416,
+            "w": 98,
+            "h": 25
+          },
+          "text": "先做什么",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 10,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 664,
+            "y": 411,
+            "w": 248,
+            "h": 48
+          },
+          "text": "明确报价责任人。",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l21",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "两个口径：42% 的需求发生等待；报价复核占这些等待的 42%。",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "03",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "04",
+      "layout": "04-content",
+      "name": "改变结果的归属方式",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "03 / 运营方式变化",
+          "textCapacity": {
+            "maxChars": 11,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "改变结果的归属方式",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l4",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 480,
+            "y": 176,
+            "w": 1,
+            "h": 284
+          },
+          "line": {
+            "color": "#66665F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 284
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 173,
+            "w": 390,
+            "h": 32
+          },
+          "text": "原来",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 173,
+            "w": 390,
+            "h": 32
+          },
+          "text": "现在",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 15,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 215,
+            "w": 370,
+            "h": 122
+          },
+          "text": "5",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 93,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 215,
+            "w": 370,
+            "h": 122
+          },
+          "text": "1",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 93,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 355,
+            "w": 390,
+            "h": 47
+          },
+          "text": "每次需求的交接次数",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 355,
+            "w": 390,
+            "h": 47
+          },
+          "text": "全程负责的团队",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 421,
+            "w": 390,
+            "h": 40
+          },
+          "text": "独立队列，各自考核。",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 421,
+            "w": 390,
+            "h": 40
+          },
+          "text": "统一队列，共同服务目标。",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "04",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "05",
+      "layout": "05-content",
+      "name": "建立能持续学习的回路",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "04 / 作用机制",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "建立能持续学习的回路",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l4",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 245,
+            "y": 214,
+            "w": 110,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 110,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 349,
+            "y": 210,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 6,
+              "y2": 4
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 349,
+            "y": 214,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 4,
+              "x2": 6,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 437,
+            "y": 249,
+            "w": 1,
+            "h": 121
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 121
+            }
+          }
+        },
+        {
+          "id": "l8",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 433,
+            "y": 364,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 4,
+              "y2": 6
+            }
+          }
+        },
+        {
+          "id": "l9",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 437,
+            "y": 364,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 4,
+              "y1": 0,
+              "x2": 0,
+              "y2": 6
+            }
+          }
+        },
+        {
+          "id": "l10",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 251,
+            "y": 407,
+            "w": 105,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 105,
+              "y1": 0,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l11",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 251,
+            "y": 403,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 6,
+              "y1": 0,
+              "x2": 0,
+              "y2": 4
+            }
+          }
+        },
+        {
+          "id": "l12",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 251,
+            "y": 407,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 6,
+              "y1": 4,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l13",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 150,
+            "y": 252,
+            "w": 1,
+            "h": 123
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 123,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l14",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 146,
+            "y": 252,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 6,
+              "x2": 4,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 150,
+            "y": 252,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 4,
+              "y1": 6,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l16",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 69,
+            "y": 185,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 69,
+            "y": 199,
+            "w": 185,
+            "h": 45
+          },
+          "text": "倾听",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l18",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 358,
+            "y": 185,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 358,
+            "y": 199,
+            "w": 185,
+            "h": 45
+          },
+          "text": "试验",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l20",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 358,
+            "y": 376,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 358,
+            "y": 390,
+            "w": 185,
+            "h": 45
+          },
+          "text": "衡量",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 69,
+            "y": 376,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 69,
+            "y": 390,
+            "w": 185,
+            "h": 45
+          },
+          "text": "调整",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 189,
+            "y": 281,
+            "w": 247,
+            "h": 55
+          },
+          "text": "7 天",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 39,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 190,
+            "y": 336,
+            "w": 245,
+            "h": 32
+          },
+          "text": "完成一次完整循环",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 17,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l26",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 606,
+            "y": 177,
+            "w": 1,
+            "h": 276
+          },
+          "line": {
+            "color": "#5B5B53",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 276
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 649,
+            "y": 198,
+            "w": 260,
+            "h": 114
+          },
+          "text": "让反馈\n形成闭环",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 35,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t28",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 649,
+            "y": 350,
+            "w": 260,
+            "h": 103
+          },
+          "text": "每次试验都以一项决策和一名负责人收尾。",
+          "textCapacity": {
+            "maxChars": 19,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 22,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "05",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "06",
+      "layout": "06-content",
+      "name": "用户在哪一步离开",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "05 / 转化",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "用户在哪一步离开",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 153,
+            "w": 556,
+            "h": 23
+          },
+          "text": "A / 群体指数 · 首阶段 = 100",
+          "textCapacity": {
+            "maxChars": 20,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s5",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 188,
+            "w": 470,
+            "h": 42
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 197,
+            "w": 180,
+            "h": 28
+          },
+          "text": "访问",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 190,
+            "w": 79,
+            "h": 39
+          },
+          "text": "100",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 234,
+            "w": 243,
+            "h": 25
+          },
+          "text": "68% 继续",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s9",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 259,
+            "w": 319.6,
+            "h": 42
+          },
+          "fill": "#C9653E"
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 268,
+            "w": 180,
+            "h": 28
+          },
+          "text": "开始",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "bold",
+            "color": "#181915",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 261,
+            "w": 79,
+            "h": 39
+          },
+          "text": "68",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 305,
+            "w": 243,
+            "h": 25
+          },
+          "text": "60% 继续",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 330,
+            "w": 192.7,
+            "h": 42
+          },
+          "fill": "#995E46"
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 339,
+            "w": 180,
+            "h": 28
+          },
+          "text": "完成",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "bold",
+            "color": "#FDFCF9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 332,
+            "w": 79,
+            "h": 39
+          },
+          "text": "41",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 376,
+            "w": 243,
+            "h": 25
+          },
+          "text": "71% 继续",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s17",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 401,
+            "w": 136.3,
+            "h": 42
+          },
+          "fill": "#6F5144"
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 410,
+            "w": 180,
+            "h": 28
+          },
+          "text": "返回",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 403,
+            "w": 79,
+            "h": 39
+          },
+          "text": "29",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l20",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 675,
+            "y": 182,
+            "w": 1,
+            "h": 268
+          },
+          "line": {
+            "color": "#5E5E56",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 268
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 166,
+            "w": 206,
+            "h": 27
+          },
+          "text": "B / 瓶颈",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 208,
+            "w": 206,
+            "h": 92
+          },
+          "text": "27",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 70,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 309,
+            "w": 206,
+            "h": 88
+          },
+          "text": "完成前流\n失的百分点",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 23,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l24",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 706,
+            "y": 411,
+            "w": 206,
+            "h": 1
+          },
+          "line": {
+            "color": "#5E5E56",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 206,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 427,
+            "w": 206,
+            "h": 28
+          },
+          "text": "68 − 41 = 27",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l26",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "开始后完成的比例约为 60%；增加流量前，先改善这一环节。",
+          "textCapacity": {
+            "maxChars": 29,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t28",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "06",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "07",
+      "layout": "07-content",
+      "name": "优先做高影响的事",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "06 / 优先级地图",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "优先做高影响的事",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s4",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 75,
+            "y": 174,
+            "w": 503,
+            "h": 273
+          },
+          "fill": "#E4DFD5"
+        },
+        {
+          "id": "s5",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 75,
+            "y": 174,
+            "w": 251,
+            "h": 136
+          },
+          "fill": "#EFC3B1"
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 326,
+            "y": 174,
+            "w": 1,
+            "h": 273
+          },
+          "line": {
+            "color": "#96958B",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 273
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 75,
+            "y": 310,
+            "w": 503,
+            "h": 1
+          },
+          "line": {
+            "color": "#96958B",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 503,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 92,
+            "y": 186,
+            "w": 212,
+            "h": 26
+          },
+          "text": "马上做",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 345,
+            "y": 186,
+            "w": 210,
+            "h": 26
+          },
+          "text": "排期做",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s10",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 147,
+            "y": 230,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 152,
+            "y": 234,
+            "w": 24,
+            "h": 30
+          },
+          "text": "A",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s12",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 221,
+            "y": 261,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 226,
+            "y": 265,
+            "w": 24,
+            "h": 30
+          },
+          "text": "B",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s14",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 428,
+            "y": 239,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 433,
+            "y": 243,
+            "w": 24,
+            "h": 30
+          },
+          "text": "C",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s16",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 373,
+            "y": 355,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 378,
+            "y": 359,
+            "w": 24,
+            "h": 30
+          },
+          "text": "D",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 75,
+            "y": 455,
+            "w": 501,
+            "h": 27
+          },
+          "text": "投入：低 → 高",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 75,
+            "y": 147,
+            "w": 501,
+            "h": 22
+          },
+          "text": "越靠上：影响越大",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 181,
+            "w": 44,
+            "h": 30
+          },
+          "text": "A",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 181,
+            "w": 231,
+            "h": 51
+          },
+          "text": "改善首次回复",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 234,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 249,
+            "w": 44,
+            "h": 30
+          },
+          "text": "B",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 249,
+            "w": 231,
+            "h": 51
+          },
+          "text": "明确负责人",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l25",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 302,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t26",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 317,
+            "w": 44,
+            "h": 30
+          },
+          "text": "C",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 317,
+            "w": 231,
+            "h": 51
+          },
+          "text": "重建调度",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l28",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 370,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 385,
+            "w": 44,
+            "h": 30
+          },
+          "text": "D",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 385,
+            "w": 231,
+            "h": 51
+          },
+          "text": "增加报表",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l31",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 438,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t32",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t33",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "08",
+      "layout": "08-content",
+      "name": "让活动按节奏推进",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "07 / 活动叙事",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "让活动按节奏推进",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "提出问题",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "为什么一个简单订单需要五次交接？",
+          "textCapacity": {
+            "maxChars": 16,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "切入点 / 认知",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "02",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l10",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 344,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "展示证据",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "展示一个需求如何通过新的流程。",
+          "textCapacity": {
+            "maxChars": 15,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "演示 / 评估",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "03",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 640,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "给出行动",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "邀请一个团队参与下一轮试点。",
+          "textCapacity": {
+            "maxChars": 14,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "试点 / 行动",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "08",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "09",
+      "layout": "09-content",
+      "name": "把改变摆出来",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "08 / 试点结果",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "把改变摆出来",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 176,
+            "w": 864,
+            "h": 142
+          },
+          "text": "54 → 82",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 96,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 52,
+            "y": 326,
+            "w": 839,
+            "h": 42
+          },
+          "text": "每 100 次开始中完成的需求数",
+          "textCapacity": {
+            "maxChars": 16,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 26,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 399,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "8 周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "试点周期",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "2 个团队",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "共用队列",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "+28 点",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "完成率提升",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "09",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "10",
+      "layout": "10-content",
+      "name": "带决策门槛的启动计划",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "09 / 前六周计划",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "带决策门槛的启动计划",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 263,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第1周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 263,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 369,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第2周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 369,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 475,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第3周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l9",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 475,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 581,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第4周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l11",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 581,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 687,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第5周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l13",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 687,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 793,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "第6周",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 793,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 210,
+            "w": 187,
+            "h": 28
+          },
+          "text": "定义",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s17",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 264,
+            "y": 210,
+            "w": 202,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 270,
+            "w": 187,
+            "h": 28
+          },
+          "text": "搭建",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s19",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 370,
+            "y": 270,
+            "w": 308,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 330,
+            "w": 187,
+            "h": 28
+          },
+          "text": "运行",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s21",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 582,
+            "y": 330,
+            "w": 202,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 390,
+            "w": 187,
+            "h": 28
+          },
+          "text": "决策",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s23",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 794,
+            "y": 390,
+            "w": 96,
+            "h": 30
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 458,
+            "w": 203,
+            "h": 27
+          },
+          "text": "门槛 / 第六周",
+          "textCapacity": {
+            "maxChars": 8,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 16,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 263,
+            "y": 456,
+            "w": 649,
+            "h": 36
+          },
+          "text": "仅在完成率提高且等待未变长时扩展。",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t26",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "10",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "11",
+      "layout": "11-content",
+      "name": "让结果持续可见",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "10 / 指标看板",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "让结果持续可见",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 170,
+            "w": 287,
+            "h": 26
+          },
+          "text": "指标",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 170,
+            "w": 154,
+            "h": 26
+          },
+          "text": "实际",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 170,
+            "w": 157,
+            "h": 26
+          },
+          "text": "目标",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 693,
+            "y": 170,
+            "w": 219,
+            "h": 26
+          },
+          "text": "进度 / 0–100%",
+          "textCapacity": {
+            "maxChars": 11,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l8",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 210,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 221,
+            "w": 263,
+            "h": 34
+          },
+          "text": "完成率",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 221,
+            "w": 154,
+            "h": 34
+          },
+          "text": "82%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 221,
+            "w": 151,
+            "h": 34
+          },
+          "text": "75%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s12",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 229,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 229,
+            "w": 164.82,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l14",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 844.75,
+            "y": 223,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 271,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 282,
+            "w": 263,
+            "h": 34
+          },
+          "text": "重复使用",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 282,
+            "w": 154,
+            "h": 34
+          },
+          "text": "61%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 282,
+            "w": 151,
+            "h": 34
+          },
+          "text": "60%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s19",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 290,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s20",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 290,
+            "w": 122.61,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l21",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 814.6,
+            "y": 284,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 332,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 343,
+            "w": 263,
+            "h": 34
+          },
+          "text": "当日回复",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 343,
+            "w": 154,
+            "h": 34
+          },
+          "text": "90%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 343,
+            "w": 151,
+            "h": 34
+          },
+          "text": "95%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s26",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 351,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s27",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 351,
+            "w": 180.9,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l28",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 884.95,
+            "y": 345,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l29",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 393,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 404,
+            "w": 263,
+            "h": 34
+          },
+          "text": "责任已分配",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t31",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 404,
+            "w": 154,
+            "h": 34
+          },
+          "text": "96%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t32",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 404,
+            "w": 151,
+            "h": 34
+          },
+          "text": "100%",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s33",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 412,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s34",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 412,
+            "w": 192.96,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l35",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 895,
+            "y": 406,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l36",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t37",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "白色刻线表示目标。扩展前先调查回复时效差距。",
+          "textCapacity": {
+            "maxChars": 22,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t38",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "版式示例 / 数据为模拟值",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t39",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "11",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "12",
+      "layout": "12-content",
+      "name": "现在， 行动",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 178,
+            "w": 860,
+            "h": 225
+          },
+          "text": "现在，\n行动",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 88,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 506,
+            "w": 760,
+            "h": 16
+          },
+          "text": "DSH / 自编示例",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$cjk",
+            "size": 9,
+            "weight": "regular",
+            "color": "#181915",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 503,
+            "w": 40,
+            "h": 20
+          },
+          "text": "12",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "#181915",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "Native PPTD adaptation of Zara Zhang / Broadside. MIT. Example figures are illustrative."
+    }
+  ]
+}
