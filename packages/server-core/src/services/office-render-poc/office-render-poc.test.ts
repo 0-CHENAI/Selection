@@ -5,6 +5,7 @@ import { strToU8, zipSync } from 'fflate'
 import { OFFICE_RENDER_LIMITS, OFFICE_RENDER_POC_ENV, OfficeRenderPocError } from './gate.ts'
 import { excelDateSerial, readXlsxCells, recalculateWorkbook, type CellInput, type CheckSpec } from './formula.ts'
 import { htmlToPdf, pageIsBlank, preparePrintHtml } from './print.ts'
+import { planNativeOfficeRender, type NativeCapabilities } from './native-plan.ts'
 import { createOfficeRenderPoc, detectOfficeRenderers, exportPdf, recalculate, renderPreview, type PrintHost } from './service.ts'
 
 const enabled = { [OFFICE_RENDER_POC_ENV]: '1' }
@@ -183,6 +184,42 @@ test('除零、未知函数、循环引用和 OfficeCLI 对拍', () => {
   expect(result.stale.map(item => item.ref)).not.toContain('Sheet1!G1')
 })
 
+const bare: NativeCapabilities = {
+  platform: 'linux',
+  electronPrintToPdf: true,
+  electronCapturePage: true,
+  officecliHtml: true,
+  officecliFormula: true,
+  exporterPdfPlugin: false,
+  word: false,
+  powerpoint: false,
+  excel: false,
+}
+
+test('没有 Office、没有 PDF 插件时走 Electron 原生，再回退到替身', () => {
+  const plan = planNativeOfficeRender(bare)
+  expect(plan.pdf.map(step => step.id)).toEqual(['officecli-html-electron-printToPDF', 'selection-html-paginator'])
+  expect(plan.pdf.every(step => !step.requiresOffice)).toBe(true)
+  expect(plan.preview[0]?.id).toBe('officecli-html-electron-capturePage')
+  expect(plan.formula.map(step => step.id)).toEqual(['officecli-computed-writeback', 'selection-formula-fallback'])
+})
+
+test('Windows 上装了 Word 时 PDF 和预览先走 Office 原生', () => {
+  const plan = planNativeOfficeRender({ ...bare, platform: 'win32', word: true, powerpoint: true, excel: true })
+  expect(plan.pdf.map(step => step.id)).toEqual(['word-export-pdf', 'officecli-html-electron-printToPDF', 'selection-html-paginator'])
+  expect(plan.pdf[0]?.requiresOffice).toBe(true)
+  expect(plan.pdf[0]?.ciWithoutOffice).toBe(false)
+  expect(plan.preview[0]?.id).toBe('officecli-screenshot-native')
+  expect(plan.formula[0]?.id).toBe('officecli-computed-writeback')
+  expect(plan.formula.map(step => step.id)).toContain('excel-calculate-full')
+})
+
+test('已安装的 OfficeCLI PDF 插件排在 Word 和 Electron 之前', () => {
+  const plan = planNativeOfficeRender({ ...bare, platform: 'darwin', exporterPdfPlugin: true, word: true })
+  expect(plan.pdf.map(step => step.id)[0]).toBe('officecli-view-pdf-plugin')
+  expect(plan.preview.some(step => step.id === 'officecli-screenshot-native')).toBe(false)
+})
+
 test('系统 Office / LibreOffice 只按命令名探测，探测结果不改变默认渲染器', async () => {
   await expect(detectOfficeRenderers(async () => false)).resolves.toEqual({ word: false, powerpoint: false, excel: false, libreoffice: false })
   await expect(detectOfficeRenderers(async name => name === 'soffice')).resolves.toMatchObject({ libreoffice: true, word: false })
@@ -209,10 +246,12 @@ test('能从 xlsx 包读出公式并按缓存对拍', () => {
 
 test('证据文件记录的实现体积与当前源码一致', () => {
   const evidence = JSON.parse(readFileSync(join(root, 'docs/adr/office-render-recalc-evidence.json'), 'utf8')) as { pocImplementationBytes: number; bundlesLibreOffice: boolean; recommendation: { pdf: string; preview: string; formula: string } }
-  const bytes = ['formula.ts', 'gate.ts', 'print.ts', 'service.ts'].reduce((total, file) => total + readFileSync(join(import.meta.dir, file)).byteLength, 0)
+  const bytes = ['formula.ts', 'gate.ts', 'print.ts', 'service.ts', 'native-plan.ts'].reduce((total, file) => total + readFileSync(join(import.meta.dir, file)).byteLength, 0)
   expect(evidence.pocImplementationBytes).toBe(bytes)
   expect(evidence.bundlesLibreOffice).toBe(false)
-  expect(evidence.recommendation).toEqual({ pdf: 'A1', preview: 'B2', formula: 'C1+C3' })
+  expect(evidence.recommendation.pdf).toBe('A1')
+  expect(evidence.recommendation.preview).toBe('B2')
+  expect(evidence.recommendation.formula).toBe('C1+C3')
 })
 
 const portXlsx = process.env.DSH_PORT_CARGO_XLSX

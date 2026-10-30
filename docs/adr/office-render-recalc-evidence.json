@@ -5,13 +5,30 @@
   "host": "linux-x64",
   "bundlesLibreOffice": false,
   "newRuntimeDependencies": [],
-  "pocImplementationBytes": 56441,
+  "pocImplementationBytes": 59533,
   "installerDeltaBytesUntilWired": 0,
   "libreOfficeKitWinX64Bytes": 71374248,
   "recommendation": {
     "pdf": "A1",
     "preview": "B2",
-    "formula": "C1+C3"
+    "formula": "C1+C3",
+    "nativeFirst": {
+      "pdf": ["officecli-view-pdf-plugin", "word-export-pdf", "officecli-html-electron-printToPDF", "selection-html-paginator"],
+      "preview": ["officecli-screenshot-native", "officecli-html-electron-capturePage"],
+      "formula": ["officecli-computed-writeback", "excel-calculate-full", "selection-formula-fallback"]
+    }
+  },
+  "nativeMethods": {
+    "officecli160Tag": "v1.0.160",
+    "officecli160Published": "2026-10-30T07:27:11Z",
+    "pluginAssetsInRelease": false,
+    "pluginsDirectory": ["plugins/plugin-protocol.md"],
+    "pluginsList157": "No plugins installed.",
+    "exporterPublished": false,
+    "exporterLicense": null,
+    "exporterBytes": null,
+    "wordPdfBackend": "Windows-only temp PDF via Word.SaveAs2 format 17, then deleted",
+    "linuxCannotRun": ["qlmanage", "QLThumbnailGenerator", "PDFKit", "NSPrintOperation", "IThumbnailProvider", "Microsoft Print to PDF", "ExportAsFixedFormat", "CalculateFull"]
   },
   "officecli": {
     "bundled": "1.0.157",

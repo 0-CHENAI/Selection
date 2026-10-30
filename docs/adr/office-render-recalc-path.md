@@ -2,29 +2,33 @@
 
 对应 [#705](https://github.com/0-CHENAI/Selection/issues/705)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。对照基线是阶段 01 冻结的 dsh-desktop `588412b`（见 [基线](../plans/selection-3.2-office-dsh-parity-baseline.md)）。
 
-**状态：待 LinNai 拍板。** 本文和旁边的 PoC 都不改变用户能看到的路径。`screenshot.ts` 的 LibreOffice 回退、系统提示里「PDF export is not included」都还在。PoC 不从 `services/index.ts` 导出，环境变量不是 `SELECTION_OFFICE_RENDER_POC=1` 时调用会直接拒绝。
+**状态：LinNai 还没批准上一版 A1 / B2 / C1+C3。** 2026-10-30 的追问是「能否用原生方法解决？」。下文把原生入口和回退写在一起，仍待拍板。用户能看到的路径没有变。`screenshot.ts` 的 LibreOffice 回退、系统提示里「PDF export is not included」都还在。PoC 不从 `services/index.ts` 导出，环境变量不是 `SELECTION_OFFICE_RENDER_POC=1` 时调用会直接拒绝。
 
 实测数字在 [office-render-recalc-evidence.json](office-render-recalc-evidence.json)。测量环境是 Linux x64，OfficeCLI 1.0.157 / 1.0.159 的官方 linux-x64 二进制，系统 Chrome（HeadlessChrome/156）。没有把这些二进制放进仓库。
 
-## 推荐
+## 推荐（原生优先，没有原生再回退）
 
-| 功能 | 推荐 | 一句话 |
+不打包 LibreOffice Kit。不把未发布的 PDF 插件打进安装包。不把「用户必须安装 Office」写成默认前提。选择顺序由 `native-plan.ts` 固定，单测覆盖三种快照。
+
+| 功能 | 有原生时 | 没有原生时 |
 | --- | --- | --- |
-| PDF 导出 | **A1** | OfficeCLI `view html`，注入文档自己的页盒，再交给 Electron `printToPDF`。PPT 工程以后走同一条 HTML 合同（A3）。 |
-| 渲染预览 | **B2** | 同一份 HTML 做离屏截图。Windows 上若有 Word / PowerPoint，B1 只作为增强。PDF 页用仓库里已有的 pdfjs 读取（B3）。 |
-| 公式重算 | **C1 + C3** | OfficeCLI 负责求值并把新结果写回 `cachedValue`。本 PoC 的 TypeScript 求值器做独立对拍，不引入新依赖。 |
+| PDF | 已安装的 OfficeCLI exporter 插件；否则在装了 Word 的 Windows / macOS 上用 Word 导出 PDF | OfficeCLI 自带 HTML 引擎 + Electron `printToPDF`。再不行才用 TypeScript 分页替身（只适合测试） |
+| 预览 | Windows 且装了 Word 或 PowerPoint：OfficeCLI `view screenshot --render native` | Electron `capturePage` 截同一份 HTML。不依赖系统里另装的 Chrome，也不把 Quick Look / 缩略图接口当默认 |
+| 公式 | OfficeCLI 自带求值器，把 `computedValue` 写回 `cachedValue`。装了 Excel 时可以再跑一次 `CalculateFull` 作复核 | 只有 OfficeCLI 标成未求值的格子才用 TypeScript 求值器补算 |
 
-不打包 LibreOffice Kit，不内置 Python，不移植 PPTD。不把 #673（OfficeCLI 1.0.159）并进来：它没有 PDF 插件，也没有整簿重算命令。
+上一版把 A1 / B2 / C3 写成默认。对照原生入口之后，A1 和 B2 仍是**不装 Office 时**的那一层，而且这一层本身就是 OfficeCLI 的 HTML 引擎加上 Electron 自带的打印和截图。C3 从「对拍主路径」改成「未求值才补算」。C1 就是 OfficeCLI 自己的公式引擎，不是另写一套。
 
-体积：实现源码 56,441 字节，无新依赖，未接入打包入口，**安装包增量为 0**。5 MB / 平台的预算还没动用。LibreOffice Kit 的 win32-x64 单包是 71,374,248 字节。
+体积仍是接入前增量 0。LibreOffice Kit 的 win32-x64 单包是 71,374,248 字节，继续不采用。
 
 ## 要 LinNai 决定的问题
 
-是否同意把 Selection 3.2 的默认实现定为下面这一条，并接受文末列出的保真限制：
+是否同意下面这条「原生优先、没有就回退」，并接受两件做不到的事：macOS / Windows 的 Word 与 Excel COM 这次没有在 Linux 上执行；Quick Look 和 Windows 缩略图接口不进入默认链路？
 
-> PDF 用 A1（HTML → 注入 `@page` → Electron `printToPDF`），预览用 B2（同一 HTML 离屏截图），公式用 C1 写回缓存、C3 独立对拍。不打包 LibreOffice Kit，不把系统 Office / LibreOffice 当默认前提。拍板前不接入用户路径。
+> 1. PDF：先用已经装上的 OfficeCLI exporter 插件；没有插件但本机有 Word 时，用 Word 导出 PDF；两者都没有时，用 OfficeCLI 的 HTML 加上 Electron `printToPDF`。不下载、不内置 PDF 插件，也不打包 LibreOffice。
+> 2. 预览：Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `--render native`；否则用 Electron `capturePage`。不用 Quick Look，也不用 Windows 缩略图接口做正稿预览。
+> 3. 公式：默认只用 OfficeCLI 自带求值器写回缓存。TypeScript 只补它没求出的格子。Excel `CalculateFull` 仅在探测到 Excel 时作复核。
 
-同意之后，下一份实现 PR 才把 `officeRender` 接到预览、导出和技能说明。若不同意，请指出要改的选项（A/B/C 的编号）。
+同意之后才接入用户路径。若只想要其中一条走原生、其余维持上一版，请按 PDF / 预览 / 公式分开说。
 
 ## #673 / OfficeCLI 1.0.159 核验
 
@@ -55,8 +59,8 @@
 
 | 选项 | 实测 | 决定 |
 | --- | --- | --- |
-| A1 OfficeCLI HTML → Electron `printToPDF` | HTML 能出。不注入页盒时，Chrome 打出 **2 页 Letter**（MediaBox 612×792，25,059 字节），不是文档上的 A4。注入 `@page{size:595.3pt 841.9pt}` 并去掉外网字体脚本后，打出 **1 页**，MediaBox 594.96×841.92，15,987 字节。页宽换算 210,009 µm，与 ISO A4 的 210,000 µm 差 9 µm，来自 OfficeCLI 写出的 595.3 pt。 | **默认** |
-| A2 OfficeCLI 1.0.159 原生 PDF | 模式名在，插件不在。1.0.157 同样失败。 | 不采用 |
+| A1 OfficeCLI HTML → Electron `printToPDF` | HTML 能出。不注入页盒时，Chrome 打出 **2 页 Letter**（MediaBox 612×792，25,059 字节），不是文档上的 A4。注入 `@page{size:595.3pt 841.9pt}` 并去掉外网字体脚本后，打出 **1 页**，MediaBox 594.96×841.92，15,987 字节。页宽换算 210,009 µm，与 ISO A4 的 210,000 µm 差 9 µm，来自 OfficeCLI 写出的 595.3 pt。 | **无 Office 时的回退**。Electron `printToPDF` 是应用自带的 |
+| A2 OfficeCLI `view pdf` | 模式名在，插件不在。1.0.157 同样失败。1.0.160 的源码和发布资产里也没有插件二进制。 | 只有用户已经装了插件才排第一。我们不提供这个插件 |
 | A3 PPT 工程自有 HTML → 同一条打印合同 | 合同已在 PoC 里（页盒、边距、宿主接口）。本阶段不改 deck 导出。 | 接入时与 A1 共用 |
 | A4 探测到系统 Office / LibreOffice 再用 | PoC 只按命令名探测 `winword` / `powerpnt` / `excel` / `soffice` / `libreoffice`，不调用。默认渲染器名称不变。 | 只作增强 |
 
@@ -67,7 +71,7 @@ CI 里没有 Electron 窗口。单测注入一个 `PrintHost`，断言它收到�
 | 选项 | 实测 | 决定 |
 | --- | --- | --- |
 | B1 `view screenshot` | 本机没有 Chrome/Edge/Firefox 被 OfficeCLI 找到时，命令等满约 120 秒，退出码仍是 0，得到 1600×1200、8,672 字节的图。页心是空白，没有探测文段。 | 仅当 `--render native` 且系统里真有 Word/PowerPoint 时作为增强 |
-| B2 HTML → 离屏截图 | 同一份 HTML 的 Chrome 截图是 1200×1600、19,945 字节，中文「阶段02探测：会议纪要。」和英文句子都看得见。 | **默认**。生产宿主是 Electron `capturePage`，与这次 Chrome 是同一族排版引擎 |
+| B2 HTML → 离屏截图 | 同一份 HTML 的 Chrome 截图是 1200×1600、19,945 字节，中文「阶段02探测：会议纪要。」和英文句子都看得见。 | **无 Word 时的回退**。生产用 Electron `capturePage`，这样不依赖系统 PATH 上的 Chrome |
 | B3 PDF → pdfjs 取页 | pdfjs-dist 已在 server-core，没有为它加依赖。PoC 能读页数和文本。Node 里没有 canvas，所以这一步不把 PDF 栅格成 PNG；要像素时直接用 B2 的截图。空白检测看的是页面像素方差，纯白缓冲会报 `blank-page` 并停止。 | 与 B2 一起用 |
 | B4 系统 Office / LibreOffice 高保真渲染 | 同 A4，不调用。 | 只作增强 |
 
@@ -90,9 +94,9 @@ OfficeCLI 1.0.157 在这份 Linux 二进制上，下列函数的 `computedValue`
 
 | 选项 | 实测 | 决定 |
 | --- | --- | --- |
-| C1 OfficeCLI 求值 + 写回缓存 | 上面的跨表双读。函数覆盖对案例够用。整簿 4,877 个公式逐个重写的耗时这次没有在 OfficeCLI 上跑，避免改案例原件。 | **主路径** |
-| C2 1.0.159 整簿 recalc | 没有这条命令。 | 不采用 |
-| C3 TypeScript 独立求值 | 无新依赖。覆盖案例里出现的函数，含 `DATE` 的月进位（`DATE(2025,13,1)` = 2026-01-01）。 | **对拍** |
+| C1 OfficeCLI 求值 + 写回缓存 | 上面的跨表双读。函数覆盖对案例够用。整簿 4,877 个公式逐个重写的耗时这次没有在 OfficeCLI 上跑，避免改案例原件。 | **原生主路径**。这就是 OfficeCLI 自带的求值器 |
+| C2 1.0.159 整簿 recalc | 没有这条命令。1.0.160 的提交说明里也没有整簿 recalc。 | 不采用 |
+| C3 TypeScript 独立求值 | 无新依赖。覆盖案例里出现的函数，含 `DATE` 的月进位（`DATE(2025,13,1)` = 2026-01-01）。 | **只补未求值的格子**，不再当作第二套主引擎 |
 | C4 系统 Excel / LibreOffice 复核 | 不调用。 | 只作增强 |
 
 C3 对临时目录里的原件（不入库）：
@@ -105,7 +109,63 @@ C3 对临时目录里的原件（不入库）：
 
 `port-cargo` 的四项检查正好是验收 R1 点名的单元格，期望值是 2516.8532、0.6504859719271668、2.6991141552511415、2190。C3 与这些缓存一致。另有一个缩小的 R1：源单元格从 100 改到 150 后，旧缓存被标成过期，重算结果按新数据通过检查，输入对象本身不被改写。
 
-HyperFormula 仍排除（GPL-3.0 / 商业双许可）。`@formulajs/formulajs` 不必引入：案例实际用到的函数已经在这 56 KB 里。
+HyperFormula 仍排除（GPL-3.0 / 商业双许可）。`@formulajs/formulajs` 不必引入：案例实际用到的函数已经在这约 60 KB 的实现里。
+
+## 原生方法调研（2026-10-30 追问）
+
+「原生」在这里分成三层，不要混在一个词里：OfficeCLI 二进制里已经有的能力、操作系统要本机装了 Office 才有的能力、Electron 进程里 Chromium 自带的能力。
+
+### 1. OfficeCLI 自己的入口
+
+对照了随包 1.0.157、本机下载的 1.0.159，以及上游 tag `v1.0.160`（2026-10-30 发布，发布说明只有 compare 链接）。1.0.160 的发布资产只有六个平台二进制和 `SHA256SUMS`，没有插件包。`plugins/` 目录里只有 `plugin-protocol.md`。组织下没有第二个 exporter 仓库。
+
+| 入口 | 实际做什么 | 能不能当默认 |
+| --- | --- | --- |
+| `view html` | 自带排版引擎，不需要 Office。README 把它写成核心能力。这次 49,594 字节的探测稿带有 A4 页盒。 | 能。PDF 和预览都从这里拿版面 |
+| `view screenshot` | 把上面的 HTML 交给系统里的 Chrome / Edge / Firefox。`--render native` 只在 Windows 且装了 Word 或 PowerPoint 时走 COM，其他平台仍是 HTML。 | 不能当默认。本机没有被它找到的浏览器时，页心是空白 |
+| `view pdf` | `ExporterInvoker` 找 exporter 插件。找不到就抛 `exporter_not_found`，原文是 `No exporter plugin found`。 | 插件槽是原生的，插件本身没有发布 |
+| `plugins list` | 1.0.157 输出 `No plugins installed`，并指向协议文档。协议写明 PDF 是 exporter，正是因为渲染库的体积和许可不适合打进主二进制。 | 发现顺序：环境变量 `OFFICECLI_PLUGIN_EXPORTER_PDF`，然后 `~/.officecli/plugins/exporter/pdf/plugin`，然后二进制旁边的同名路径，然后 PATH 上的 `officecli-exporter-pdf` |
+| `refresh` | 只更新 Word 域。Windows 上调用 `WordPdfBackend.RefreshFields`（要真的 Microsoft Word）；别处用 HTML。 | 不是 Excel 重算 |
+| 公式引擎 | README 写 350 多个内置函数，写入时求值，不经过 Office。跨表实测：`computedValue` 已更新，`cachedValue` 仍是旧的。 | 能。缺的是写回缓存，不是再造一个引擎 |
+| `WordPdfBackend.DocxToPdf` | 仅 Windows。`Word.SaveAs2(path, 17)` 写出临时 PDF，再用 `Windows.Data.Pdf` 栅格成 PNG，然后删掉 PDF。PowerPoint 侧是 `Slide.Export` 成 PNG。 | 这是截图的内部步骤，CLI 不把 PDF 交给调用方。Selection 不在自己的进程里重写这套 COM |
+
+导出插件能不能单独安装：协议允许，而且主程序会调它。今天没有可下载的插件，因此没有许可文本，也没有体积数字。Selection 不自己写一个、也不把 LibreOffice 填进这个槽。以后若上游发布了插件，选择器会把它放在 PDF 的第一步，仍然不随安装包分发。
+
+### 2. 操作系统原生
+
+这一节的 macOS / Windows API 没有在本机执行。这台机器是 Linux x64，没有 `qlmanage`、没有 Word、没有 Excel、没有「Microsoft Print to PDF」。硬调这些接口只会得到「命令不存在」，不能当成保真度数据。
+
+| 方法 | Electron 里怎么碰 | 要不要装 Office | 保真 | 中文 | 速度 | CI |
+| --- | --- | --- | --- | --- | --- | --- |
+| macOS `qlmanage -t` | 可以 `spawn`。不需要原生扩展 | 要有对应的 Quick Look 生成器。没装 Office 时，docx / xlsx / pptx 通常不是 Word 那种分页 | 缩略图，不是逐页正稿 | 看生成器和系统字体 | 一次进程，通常一两秒 | macOS runner 上有 `qlmanage`，没有 Office。只能证明命令在，不能证明 Office 版式 |
+| macOS `QLThumbnailGenerator` | Swift / Objective-C。Electron 的 JS 不能直接调，要小工具或原生扩展 | 同上 | 同上 | 同上 | 同上 | 同上，还多一个要编译的小工具 |
+| macOS PDFKit | 只渲染已经是 PDF 的文件，不读 docx。要原生扩展。仓库里的 pdfjs 已经能读页 | 不要 | 对 PDF 高，对 Office 不适用 | 字体嵌在 PDF 里才稳 | 毫秒到一两秒 | 能，但和 pdfjs 重复 |
+| macOS `NSPrintOperation` / WebKit 打印 | 要原生 WebKit 视图，不是 `webContents`。打的是 HTML | 不要 | 等于另一套 HTML 引擎，不会比 Chromium 更接近 Word | 系统字体 | 与 `printToPDF` 同一量级 | 能写 Swift 小工具，本阶段不值得为同一份 HTML 再维护一套 |
+| Windows 预览处理程序 / `IThumbnailProvider` | COM。要原生扩展或 PowerShell。资源管理器用来出图标 | 要装 Office 才有 Office 版式的处理程序 | 缩略图 | 看处理程序 | 冷启动慢 | 托管的 Windows runner 不带 Office，现在的 `artifact-windows` 测不到 |
+| Windows「Microsoft Print to PDF」 | `webContents.print({ silent, deviceName })` 可以指向这台打印机。保存路径经常还要对话框 | 不要。打印机是系统自带的 | 等于把已经排好的 HTML 再送去打印，不比 `printToPDF` 更接近 Word | Chromium 的字体回退 | 多一次假脱机 | Windows runner 上多半有这台打印机。静默路径不稳定，不采用 |
+| Word `ExportAsFixedFormat` / `SaveAs2(..., 17)` | OfficeCLI 在 Windows 截图里已经这么做，但 PDF 是临时文件。Selection 若再写一遍 COM，就是第二份 Word 自动化 | 要装正版 Word。OfficeCLI 还会核对进程名里有 `Microsoft Word` | 最高，就是 Word 的分页 | Word 的字体，缺字按 Word 的替换 | 冷启动数秒，之后一页很快 | 托管 runner 没有 Office，本阶段不能验证 |
+| Excel `CalculateFull` | COM `Application.CalculateFull`。macOS 上对应的是 AppleScript，不是同一套接口 | 要装 Excel | 和用户打开 Excel 按 F9 相同，图表缓存也会动 | 无关字体 | 大表可能数十秒 | 同样没有 Excel，不能验证 |
+| PowerPoint `Slide.Export` | OfficeCLI 的 Windows 原生截图已经调用 | 要装 PowerPoint | 幻灯片位图，不是 PDF | PowerPoint 的字体 | 冷启动数秒 | 不能在当前 CI 验证 |
+
+所以：操作系统里真正能打出 Word 分页的，只有装了 Office 的 COM / AppleScript。Quick Look 和缩略图接口解决不了「没装 Office 也要逐页正稿」。它们不进默认链路。
+
+### 3. Electron / Chromium 还剩什么
+
+Selection 的 Electron 是 `^39.2.7`。和这次有关、而且进程里已经有的只有两件：
+
+- `webContents.printToPDF`：不弹对话框，能指定页宽页高（微米）和 `preferCSSPageSize`。Chrome 156 对同一份 HTML 的测量就是这一族引擎。应用不需要再装浏览器。
+- `webContents.capturePage`：浏览器窗已经在用。拿来截 OfficeCLI 的 HTML，就不必再找 PATH 上的 Chrome。上次空白图就是因为 OfficeCLI 在外面找不到浏览器。
+
+`webContents.print` 会进系统打印对话框或指定打印机。它不比 `printToPDF` 多出 Office 版式。Chromium 里没有 Excel 公式引擎，也没有 docx 分页器。中文取决于 HTML 里的 `font-family` 和系统字体；探测稿的截图里中文是可见的，`Calibri` 仍不内嵌。
+
+### 这次没测到的，以后怎么验
+
+1. 装了 Word 的 Windows：`view screenshot --render native` 的页心必须有字；同一文档用 Word 导出的 PDF 页数与 Electron `printToPDF` 对照，差在哪一页写进记录。
+2. 装了 Excel 的 Windows：对 `port-cargo` 的副本执行 `CalculateFull`，再读缓存，与 OfficeCLI `computedValue` 和 `checks.json` 用 `1e-6` 比较。不改原件。
+3. macOS runner：只确认 `qlmanage -t` 能给一张 PDF 出缩略图。docx 的缩略图不算数，除非那台机器装了 Word。
+4. 接入 PR 在 Electron 隐藏窗口里对同一份探测 HTML 调用 `printToPDF` 和 `capturePage`，页盒应仍是约 595×842 pt。
+
+这些都不在本 PR 里改 CI。Linux 上能验的是选择器：没有 Office、没有插件时，PDF 和预览落在 Electron，公式落在 OfficeCLI 写回；Windows 且有 Word 时，PDF 和预览把 Office 步放在前面，并且那一步标成 CI 不能在无 Office 的 runner 上跑。
 
 ## 放弃项
 
@@ -124,7 +184,8 @@ HyperFormula 仍排除（GPL-3.0 / 商业双许可）。`@formulajs/formulajs` �
 | --- | --- |
 | `packages/server-core/src/services/office-render-poc/gate.ts` | 门闩、50 MB、60 s、取消、源版本不一致 |
 | `formula.ts` | C3 解析、依赖序、双读、checks、xlsx 读取 |
-| `print.ts` | A1 打印 HTML、PDF 替身、pdfjs 读页、空白检测、区域裁剪 |
+| `print.ts` | 打印 HTML、PDF 替身、pdfjs 读页、空白检测、区域裁剪 |
+| `native-plan.ts` | 原生优先的选择顺序。不调用本机没有的 API |
 | `service.ts` | `exportPdf` / `renderPreview` / `recalculate` / `detectOfficeRenderers`，并发 2 |
 | `office-render-poc.test.ts` | 上述合同。设置了 `DSH_PORT_CARGO_XLSX` 等变量时才跑两个原件，CI 不设置 |
 
