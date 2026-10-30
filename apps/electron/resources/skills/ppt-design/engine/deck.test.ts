@@ -525,15 +525,18 @@ describe('O3 imported DSH template coverage', () => {
     expect(diagnostics.adaptations).toHaveLength(22)
     for (const id of addedDshTemplates) {
       expect(picker.templates[id].previewId).toBe(id)
+      const archived = picker.templates[id].tier === 'archive'
       for (const key of ['deck', 'deckEn']) {
-        expect(catalog[id][key]).toContain(`styles/examples/imported/${id}/`)
+        expect(catalog[id][key]).toContain(archived ? `styles/_archive/imported/${id}/` : `styles/examples/imported/${id}/`)
         const parsed = parseDeckSource(read(catalog[id][key]))
         expect(parsed.issues).toEqual([])
         expect(parsed.deck!.pages).toHaveLength(12)
         expect(checkDeck(parsed.deck!)).toEqual([])
       }
-      expect(read(`styles/previews/documents/${id}.pdf`).startsWith('%PDF')).toBe(true)
-      for (let page = 1; page <= 12; page++) expect(read(`styles/previews/pages/${id}-${page}.webp`).startsWith('RIFF')).toBe(true)
+      const pdf = archived ? `styles/_archive/previews/documents/${id}.pdf` : `styles/previews/documents/${id}.pdf`
+      const pagePath = (page: number) => archived ? `styles/_archive/previews/pages/${id}-${page}.webp` : `styles/previews/pages/${id}-${page}.webp`
+      expect(read(pdf).startsWith('%PDF')).toBe(true)
+      for (let page = 1; page <= 12; page++) expect(read(pagePath(page)).startsWith('RIFF')).toBe(true)
     }
   })
 })

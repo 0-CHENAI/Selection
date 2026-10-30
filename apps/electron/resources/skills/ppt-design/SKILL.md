@@ -41,10 +41,10 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 - 从用户材料提取受众、目的、核心结论、事实和假设、来源、页数。不捏造数据、日期、讲者或标志。
 - 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页允许同一 `layout`，按论证关系安排节奏。
-- 只锁定目录里的一套。DSH 首批五套是 `dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。另补齐十一套 DSH，完整目录与参考页路径见 `styles/catalog.json` 和 `references/styles.md`。ppt-master 转入的十四套是 `academic-research`、`consulting-decision`、`creative-pitch`、`duty-manual`、`incident-postmortem`、`investor-pitch`、`mbb-consulting`、`narrative-keynote`、`operating-review`、`product-launch`、`science-explainer`、`solution-proposal`、`technical-deepdive`、`workshop-teaching`。保留锁定主题 token，允许借用论证版式槽并适配当前画布；不直接拼贴另一套主题和绝对坐标。
+- 只锁定目录里的一套。选择器默认只展示六套：`dsh-cartesian`（理性简报）、`ppt169_china_economy_2025_briefing`（数据简报）、`mbb-consulting`（战略备忘）、`operating-review`（经营复盘）、`dsh-engineering-blueprint`（工程蓝图）、`dsh-course-workshop`（课程培训）。`styles/picker.json` 的 `tier` 为 `default` 或 `more` 才会出现在选择器里；`more` 收在「更多模板」。理性简报上的配色变体是 `dsh-signal`、`dsh-monochrome`、`dsh-editorial-forest`、`dsh-soft-editorial`、`dsh-editorial-notebook`，选中后按该变体的参考页来，不另开卡片。`dsh-blue-professional` 版式和示例与理性简报差得较多，留在更多模板。`workshop-teaching` 并入课程培训，不单列。`tier: archive` 和与可见模板重复的别名不进选择器。完整目录仍在 `styles/catalog.json`，说明见 `references/styles.md`。保留锁定主题 token，允许借用论证版式槽并适配当前画布；不直接拼贴另一套主题和绝对坐标。
 - 颜色和字体可以整套换成 `styles/themes` 里的主题，或换成用户品牌主题。主题只提供 token，不改页面结构。用户给出主色、辅色和可选标志路径时，生成对比度安全的 token，把路径记在 `theme.logo`；要出现标志时再放一个 `src` 相同的图片。不要写入第三方公司的品牌色或标志。
 - 论证版式库有 14 个 960×540 页面（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍）。`deck-cli.mjs layouts` 打印每个槽位的 `bounds` 和 `textCapacity`。`deck_check` 会认出这些 `layout` id。它们可在锁定主题 token 下提供结构槽位，适配后必须预检。
-- 参考页路径写在 `styles/catalog.json` 的 `deck` 字段。DSH 首批五套在 `styles/<id>/deck.json`，另有 `deck.en.json`。新增十一套的可选参考页位于独立 `styles/examples/imported/<id>/`，原导入页保留；请按 catalog 的 `deck` / `deckEn` 路径读取。十四套 ppt-master 风格都指向 `styles/examples/` 里的官方成稿，其中事故复盘、经营复盘和产品发布三套的主参考页含有第三方标识。那些标识只供对照版式，新稿换成用户自己的文字、数据和标志。沿用参考页的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。结构版式在 `layouts/`。新稿不要写 `profile: example`，那只用于已经出版的示例页。
+- 参考页路径写在 `styles/catalog.json` 的 `deck` 字段。DSH 首批五套在 `styles/<id>/deck.json`，另有 `deck.en.json`。仍随安装包提供的十一套里，可选参考页位于独立 `styles/examples/imported/<id>/`，原导入页保留。已归档成稿的 deck、PDF 和逐页预览在 `styles/_archive/`，安装包不含这个目录；catalog 里的路径指向归档位置，原文没有改写。请按 catalog 的 `deck` / `deckEn` 路径读取。仍展示的 ppt-master 风格指向 `styles/examples/` 里的官方成稿。事故复盘留在更多模板，经营复盘是默认套，产品发布已归档；这些成稿里的第三方标识只供对照版式，新稿换成用户自己的文字、数据和标志。沿用参考页的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。结构版式在 `layouts/`。新稿不要写 `profile: example`，那只用于已经出版的示例页。不要把一份样例的正文写进另一套模板来“合并”。
 - 两处中文源页面会在末行落下一个字：`dsh-course-workshop` 的 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 的 `03:t101`「明确每一层边界」。沿用这些页时重排用户句子，让末行不是一个字。不要为了通过而缩小字号，也不要把文本框加宽到撞上邻列。其余参考页预检是干净的。
 - 在会话 `dataFolderPath` 保存 `design-plan.md` 和 `deck.json`。它们是会话材料，不默认交付。
 - 默认规划完成后继续生成。只有用户明确要求先审方案时才停。恢复会话时读取磁盘上的计划和 deck，**不得自动重新选风格或把视觉检查次数清零**。
@@ -65,7 +65,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名改某页版式或叙事时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图；仅改文字或数据仍走 `office_edit`。预览里点选后的修改走 OfficeCLI。
 
-用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。生成时以那里的 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准，不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败时才是几何 SVG。
+用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。PPTX 以 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准。`deck.json` 以同目录的 `deck.json` 和几何预览为准。两者都不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败或上传的是 deck.json 时才是几何 SVG。上传只负责存入模板库并在「自定义」里列出。把个人模板复制成会话里可编辑的工程（#714）还没做，不要在这一步把库里的文件覆盖进会话 `deck.json`。
 
 截图失败但 PPTX 已写出时，`screenshots.available` 为 `false`。这时 G4 不能通过。
 

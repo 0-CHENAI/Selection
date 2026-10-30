@@ -63,6 +63,8 @@ files:
   # prior desktop release into the next app bundle.
   - "!release/**"
   - "!release-swarm-preview/**"
+  # Archived PPT samples stay in git and are omitted from the installer.
+  - "!**/ppt-design/styles/_archive/**"
 
 # Why extraResources instead of `files`: since electron-builder v20.15.2,
 # `node_modules` directories are auto-excluded from `files`. extraResources
@@ -123,6 +125,7 @@ mac:
     - "!**/resources/bin/linux-*/**"
     - "!release/**"
     - "!release-swarm-preview/**"
+    - "!**/ppt-design/styles/_archive/**"
   # Use predictable naming for macOS packages (applies to zip; dmg uses its own config below)
   artifactName: "Selection-${arch}.${ext}"
   # Code signing & notarization (disabled by default for local builds)
@@ -174,6 +177,7 @@ win:
     - "!**/resources/bin/win32-x64/**"
     - "!release/**"
     - "!release-swarm-preview/**"
+    - "!**/ppt-design/styles/_archive/**"
   # Copy executables as extraResources to avoid EBUSY file locking (see comment above)
   extraResources:
     - from: node_modules/@vscode/ripgrep
@@ -214,3 +218,4 @@ linux:
     - "!**/resources/bin/win32-*/**"
     - "!release/**"
     - "!release-swarm-preview/**"
+    - "!**/ppt-design/styles/_archive/**"

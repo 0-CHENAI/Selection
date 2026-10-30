@@ -35,8 +35,9 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     return templateId.startsWith('custom-') ? customTemplatePages(templateId) : getPptTemplatePages(templateId)
   })
   server.handle(RPC_CHANNELS.skills.IMPORT_PPT_TEMPLATE, async (_ctx, input: { name?: string; base64?: string }) => {
-    if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPTX')
-    if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPTX')
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPT template')
+    if (!/\.(pptx|json)$/i.test(input.name)) throw new Error('Invalid PPT template')
+    if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPT template')
     const { record, duplicate } = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
     return { template: await thumbnailPptTemplateCard(customTemplateCard(record)), duplicate }
   })

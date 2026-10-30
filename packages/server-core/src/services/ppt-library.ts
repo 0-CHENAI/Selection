@@ -40,6 +40,8 @@ export interface PptLibraryRecord {
   updatedAt: number
   /** How slide previews were produced. Older libraries omit this and keep SVG files. */
   preview?: 'officecli' | 'geometry' | 'mixed'
+  /** `deck` stores selection-deck JSON. Older records and PPTX uploads omit this. */
+  sourceKind?: 'pptx' | 'deck'
 }
 
 interface ParsedDeck {
@@ -79,7 +81,7 @@ function readJson<T>(path: string): T {
 
 function titleFromName(fileName: string): string {
   const base = fileName.split(/[/\\]/).pop() ?? ''
-  const title = base.replace(/\.pptx$/i, '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 80)
+  const title = base.replace(/\.(pptx|json)$/i, '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 80)
   return title || '未命名模板'
 }
 
@@ -533,6 +535,7 @@ export async function customTemplatePreview(id: string, page: number | undefined
     return `data:text/html;base64,${bytes.toString('base64')}`
   }
   if (existsSync(target)) return encode()
+  if (!existsSync(join(dir, 'source.pptx'))) return previewDataUrl(legacy)
   const existing = detailPending.get(target)
   if (existing) return existing
   const promise = (async () => {
@@ -572,22 +575,114 @@ export function customTemplateReference(id: string, root = pptTemplateLibraryRoo
   const dir = templateDir(root, id)
   const record = readRecord(dir)
   if (!record || record.id !== id) return null
+  const deck = join(dir, 'deck.json')
   const source = join(dir, 'source.pptx')
   const theme = join(dir, 'theme.json')
   const slots = join(dir, 'slots.json')
   const previews = Array.from({ length: record.pageCount }, (_, index) => previewFile(dir, index + 1))
-  return [
+  const storedDeck = existsSync(deck)
+  const lines = [
     `Selected custom template ${record.id} (${record.title}) from the user's template library.`,
-    `Use this stored copy, not a temporary upload: ${source}`,
+    storedDeck
+      ? `Stored deck.json (visual reference only, not the session project): ${deck}`
+      : `Use this stored copy, not a temporary upload: ${source}`,
     `Parsed theme: ${theme}`,
     `Replaceable slots: ${slots}`,
     ...previews.map((path, index) => `Preview page ${index + 1}: ${path}`),
-    `Theme JSON:\n${readFileSync(theme, 'utf8')}`,
-    `Slots JSON:\n${readFileSync(slots, 'utf8')}`,
-  ].join('\n')
+  ]
+  if (existsSync(theme)) lines.push(`Theme JSON:\n${readFileSync(theme, 'utf8')}`)
+  if (existsSync(slots)) lines.push(`Slots JSON:\n${readFileSync(slots, 'utf8')}`)
+  if (storedDeck) lines.push('Issue #714 will copy a personal template into the session project as an editable deck. This upload only stores and lists the file. Do not write this library copy over the session deck, and do not duplicate that project step.')
+  return lines.join('\n')
+}
+
+function isDeckUpload(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.json')
+}
+
+function hexColor(value: unknown): string | undefined {
+  return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value) ? value.toUpperCase() : undefined
+}
+
+function deckPreviewSvg(deck: { canvas?: { width?: number; height?: number }; theme?: { colors?: Record<string, string> }; pages?: Array<{ background?: string; elements?: Array<{ type?: string; text?: string; bounds?: { x?: number; y?: number; w?: number; h?: number }; font?: { size?: number; color?: string } }> }> }, pageIndex: number): string {
+  const page = deck.pages?.[pageIndex]
+  const width = Math.max(1, Number(deck.canvas?.width) || 960)
+  const height = Math.max(1, Number(deck.canvas?.height) || 540)
+  const colors = deck.theme?.colors ?? {}
+  const token = (value: unknown) => {
+    if (typeof value !== 'string') return undefined
+    if (value.startsWith('#') && hexColor(value)) return value
+    if (value.startsWith('$')) return hexColor(colors[value.slice(1)])
+    return undefined
+  }
+  const background = token(page?.background) ?? token(colors.paper) ?? '#F7F4EB'
+  const ink = token(colors.ink) ?? '#1A1A1A'
+  const texts = (page?.elements ?? []).filter(element => element.type === 'text' && element.text).slice(0, 6)
+  const body = texts.map(element => {
+    const x = Number(element.bounds?.x) || 48
+    const y = Number(element.bounds?.y) || 48
+    const size = Number(element.font?.size) || 18
+    const color = token(element.font?.color) ?? ink
+    return `<text x="${x}" y="${y + size}" fill="${color}" font-size="${size}" font-family="sans-serif">${xmlEscape(String(element.text).replace(/\s+/g, ' ').slice(0, 80))}</text>`
+  }).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${background}"/>${body}</svg>`
+}
+
+function importDeckTemplate(bytes: Uint8Array, fileName: string, root: string): { record: PptLibraryRecord; duplicate: boolean } {
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES) throw new Error('Invalid deck.json')
+  let deck: { format?: string; title?: string; canvas?: { width?: number; height?: number }; theme?: { name?: string; colors?: Record<string, string> }; pages?: Array<{ id?: string; elements?: Array<{ type?: string; text?: string; bounds?: { x?: number; y?: number; w?: number; h?: number } }> }> }
+  try { deck = JSON.parse(Buffer.from(bytes).toString('utf8')) } catch { throw new Error('Invalid deck.json') }
+  const width = Number(deck.canvas?.width)
+  const height = Number(deck.canvas?.height)
+  const pages = deck.pages
+  if (deck.format !== 'selection-deck' || !Array.isArray(pages) || pages.length < 1 || pages.length > MAX_SLIDES || !Number.isFinite(width) || !Number.isFinite(height) || width < 200 || width > 2000 || height < 200 || height > 2000) throw new Error('Invalid deck.json')
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const id = `custom-${sha256.slice(0, 16)}`
+  const base = libraryDir(root)
+  const existing = listPptCustomTemplates(base).find(record => record.sha256 === sha256)
+  if (existing) return { record: existing, duplicate: true }
+  const dir = templateDir(base, id)
+  mkdirSync(join(dir, 'previews'), { recursive: true })
+  writeFileSync(join(dir, 'deck.json'), bytes)
+  const colors = deck.theme?.colors ?? {}
+  const theme = { name: deck.theme?.name || deck.title || 'deck', colors, fonts: {}, masters: [], layouts: [] }
+  const slots: PptLibrarySlot[] = []
+  pages.forEach((page, pageIndex) => {
+    for (const element of page.elements ?? []) {
+      if (element.type !== 'text' || !element.text || slots.length >= MAX_SLOTS) continue
+      const bounds = element.bounds ?? {}
+      slots.push({
+        id: `p${pageIndex + 1}-${slots.length + 1}`,
+        page: pageIndex + 1,
+        type: 'text',
+        text: String(element.text).slice(0, 500),
+        bounds: { x: Math.round(Number(bounds.x) || 0), y: Math.round(Number(bounds.y) || 0), w: Math.round(Number(bounds.w) || 0), h: Math.round(Number(bounds.h) || 0) },
+      })
+    }
+    writeFileSync(join(dir, 'previews', `${String(pageIndex + 1).padStart(2, '0')}.svg`), deckPreviewSvg(deck, pageIndex))
+  })
+  writeFileSync(join(dir, 'theme.json'), `${JSON.stringify(theme, null, 2)}\n`)
+  writeFileSync(join(dir, 'slots.json'), `${JSON.stringify(slots, null, 2)}\n`)
+  const ratio = width / height
+  const known: Array<[number, string]> = [[16 / 9, '16:9'], [4 / 3, '4:3'], [1, '1:1'], [9 / 16, '9:16'], [3 / 4, '3:4']]
+  const now = Date.now()
+  const record: PptLibraryRecord = {
+    id,
+    title: titleFromName(fileName),
+    sha256,
+    canvas: { width: Math.round(width), height: Math.round(height), label: known.find(([value]) => Math.abs(ratio - value) < 0.03)?.[1] ?? `${Math.round(width)}×${Math.round(height)}` },
+    pageCount: pages.length,
+    createdAt: now,
+    updatedAt: now,
+    preview: 'geometry',
+    sourceKind: 'deck',
+  }
+  writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(record, null, 2)}\n`)
+  return { record, duplicate: false }
 }
 
 export function importPptTemplate(bytes: Uint8Array, fileName: string, root = pptTemplateLibraryRoot()): { record: PptLibraryRecord; duplicate: boolean } {
+  if (isDeckUpload(fileName)) return importDeckTemplate(bytes, fileName, root)
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES) throw new Error('Invalid PPTX')
   const parsed = parsePptx(bytes)
   const sha256 = createHash('sha256').update(bytes).digest('hex')
@@ -611,6 +706,7 @@ export function importPptTemplate(bytes: Uint8Array, fileName: string, root = pp
     createdAt: now,
     updatedAt: now,
     preview,
+    sourceKind: 'pptx',
   }
   writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(record, null, 2)}\n`)
   return { record, duplicate: false }
@@ -638,6 +734,11 @@ export function exportPptTemplate(id: string, root = pptTemplateLibraryRoot()): 
   const dir = templateDir(root, id)
   const record = readRecord(dir)
   if (!record || record.id !== id) throw new Error('Unknown PPT template')
+  const deck = join(dir, 'deck.json')
+  if (record.sourceKind === 'deck' || (existsSync(deck) && !existsSync(join(dir, 'source.pptx')))) {
+    const name = `${record.title.replace(/[\\/:*?"<>|]/g, ' ').trim() || 'template'}.json`
+    return { name, bytes: new Uint8Array(readFileSync(deck)) }
+  }
   const name = `${record.title.replace(/[\\/:*?"<>|]/g, ' ').trim() || 'template'}.pptx`
   return { name, bytes: new Uint8Array(readFileSync(join(dir, 'source.pptx'))) }
 }
