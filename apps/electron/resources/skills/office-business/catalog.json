@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "origin": "Selection original fictional business cases; no DSH Word/Excel source pack located",
+  "cases": [
+    { "id": "meeting-minutes", "title": "会议纪要", "format": "docx", "guide": "word", "recipe": "cases/meeting-minutes.json", "editScope": "one paragraph text fragment" },
+    { "id": "work-notice", "title": "工作通知草稿", "format": "docx", "guide": "word", "recipe": "cases/work-notice.json", "editScope": "one paragraph text fragment" },
+    { "id": "execution-tracker", "title": "执行台账", "format": "xlsx", "guide": "excel", "recipe": "cases/execution-tracker.json", "editScope": "one input cell and dependent recalculation" }
+  ]
+}

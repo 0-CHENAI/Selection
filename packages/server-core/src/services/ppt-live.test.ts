@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -199,6 +199,15 @@ test('incremental export adds slides as pages are saved and does not rewrite an 
     expect(grown).toBe(first)
     expect(slideNames(grown!).sort()).toEqual(['ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/slide3.xml'])
     writeFileSync(grown!, Buffer.from('KEEP'))
+    expect(await exportIncrementalPptx(root)).toBe(grown)
+    expect(readFileSync(grown!).toString()).toBe('KEEP')
+    // macOS /var -> /private/var and directory aliases must not lose ownership
+    // of an already edited output and cause a duplicate export from stale deck data.
+    const alias = join(root, 'delivery-alias')
+    symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    const outputRecord = join(root, 'data', 'ppt-output.json')
+    const record = JSON.parse(readFileSync(outputRecord, 'utf8'))
+    writeFileSync(outputRecord, JSON.stringify({ ...record, path: join(alias, '往返.pptx') }))
     expect(await exportIncrementalPptx(root)).toBe(grown)
     expect(readFileSync(grown!).toString()).toBe('KEEP')
     const direct = session()

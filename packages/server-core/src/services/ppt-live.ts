@@ -211,7 +211,7 @@ function readOutputRecord(sessionDir: string): PptOutputRecord | null {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as { path?: unknown; stamp?: unknown }
     if (typeof parsed.path !== 'string' || !parsed.path.toLowerCase().endsWith('.pptx') || parsed.path.includes('\0')) return null
-    return { path: resolve(parsed.path), stamp: typeof parsed.stamp === 'string' ? parsed.stamp : '' }
+    return { path: located(parsed.path), stamp: typeof parsed.stamp === 'string' ? parsed.stamp : '' }
   } catch { return null }
 }
 

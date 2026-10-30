@@ -53,7 +53,7 @@ jobs:
       - name: Upload macOS ARM64 installers
         uses: actions/upload-artifact@v6
         with:
-          name: selection-macos-arm64-${{ github.ref_name }}-${{ github.run_number }}
+          name: selection-macos-arm64-${{ github.run_id }}
           path: |
             dist-packages/Selection-arm64.dmg
             dist-packages/Selection-arm64.zip
@@ -111,7 +111,7 @@ jobs:
       - name: Upload Windows x64 installer
         uses: actions/upload-artifact@v6
         with:
-          name: selection-windows-x64-${{ github.ref_name }}-${{ github.run_number }}
+          name: selection-windows-x64-${{ github.run_id }}
           path: |
             dist-packages/Selection-x64.exe
             dist-packages/SHA256SUMS-windows-x64.txt
@@ -137,13 +137,13 @@ jobs:
       - name: Download macOS ARM64 installers
         uses: actions/download-artifact@v8
         with:
-          name: selection-macos-arm64-${{ github.ref_name }}-${{ github.run_number }}
+          name: selection-macos-arm64-${{ github.run_id }}
           path: downloaded/macos-arm64
 
       - name: Download Windows x64 installer
         uses: actions/download-artifact@v8
         with:
-          name: selection-windows-x64-${{ github.ref_name }}-${{ github.run_number }}
+          name: selection-windows-x64-${{ github.run_id }}
           path: downloaded/windows-x64
 
       - name: Prepare release assets
