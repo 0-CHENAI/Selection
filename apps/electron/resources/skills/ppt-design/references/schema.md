@@ -19,7 +19,7 @@
 
 ## page
 
-`id`、`layout`、`background`、`elements`。可选 `name`、`notes`。`notes` 写入 PPTX 讲稿备注。参考页的 `layout` 按页编号，例如 `01-cover`、`02-content`，相邻页不能相同。
+`id`、`layout`、`background`、`elements`。可选 `name`、`notes`。`notes` 写入 PPTX 讲稿备注。参考页的 `layout` 按页编号，例如 `01-cover`、`02-content`，相邻页允许相同，按内容关系选择布局。
 
 ## element
 

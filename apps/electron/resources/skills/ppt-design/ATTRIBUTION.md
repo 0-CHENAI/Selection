@@ -118,3 +118,7 @@ DSH v0.2.21 的署名是：十套模板改编自该提交下的 beautiful-html-t
 G1–G5 和「整项任务最多三次视觉检查」沿用本技能上一版已经写进 Selection 的交付习惯。那一版的配方、换色风格和 OfficeCLI 构图脚本已经移除。早前文档也曾改编自 hugohe3/ppt-master（MIT，Copyright (c) 2025-2026 Hugo He），锁定提交 `622bf0148bca4f697b0184322c7e2aa2a04520a2` 与 `523e5bd972f94c3cac8742fec0d54d43824a17bb`。那些旧配方和品牌材料没有恢复。上面这一节是后来按版式和风格说明重新转入的。
 
 许可保留不表示上游作者认可本集成，也不授予商标权利。
+
+## 叙事组合指引
+
+`references/composition.md` 适配 DSH Desktop `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的 `packages/ppt-runtime/core/skills/dsh-ppt/references/composition.md`（DSH 通用说明，MIT），保留原来源与适用许可，新增 Selection 主题 token、局部修订与原生视觉边界。未复制 DSH runtime。
