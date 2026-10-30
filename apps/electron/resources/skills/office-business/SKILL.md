@@ -33,3 +33,9 @@ description: "会议纪要、工作通知/公文草稿、Excel 执行台账等�
 ## 来源边界
 
 O0/O5 对照 DSH `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的受版本控制文件、ppt-runtime 与本机已安装技能包，未找到可直接复用的 Word/Excel 业务案例目录。因此这些案例是 Selection 自有实现，不伪标 DSH 移植或其版权。沿用的是“案例目录 + 按需业务指引”的组织目标；既有 OfficeCLI 许可和随附官方技能保持原样。
+
+### 2026-10-30 起基线改为 588412b
+
+上文只对 2026-09-15 的快照 `8dec631` 成立。自 2026-10-30 起，Office 对齐的对照基线改为 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。该提交已有 `packages/dsh-desktop-office`：Word 案例 4 个、Excel 案例 3 个，以及 7 个业务技能。旧句「未找到可直接复用的 Word/Excel 业务案例目录」在这个提交上不成立，予以更正；历史段落保留，不改写成当时已经看见这些案例。
+
+本目录里的会议纪要、工作通知和执行台账仍是 Selection 自有虚构样例，不是 dsh 案例的拷贝，后续阶段不得覆盖。dsh 案例与许可见 [基线重冻结](../../../../../docs/plans/selection-3.2-office-dsh-parity-baseline.md)。公文写作若在后续阶段接入，来源说明写「能力参照 dsh-desktop gov-doc-writing，未复用其内容」，不把 dsh 技能正文或 government-notice 原文拷进本目录。

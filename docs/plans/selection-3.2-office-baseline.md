@@ -141,6 +141,14 @@ O1 [#684](https://github.com/0-CHENAI/Selection/issues/684) 以本页入口表�
 - 本轮只新增本文；未运行产品测试、模型端到端、视觉 QA 或发布流水线，未产生 PPT。
 - Draft PR 的 URL、里程碑与 CI 状态以 GitHub PR 和 Epic 进展评论为准；文档落库不等于已合入，也不等于 O1 可以越过门禁启动。
 
+## 2026-10-30 起基线改为 588412b
+
+本节追加于 O0 记录之后，不改写上文。第 8 行的 DSH 对照提交 `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 仍是 O0（#683）当时的证据。缺口表里「本次 DSH 的 ppt-runtime 范围未定位可直接接入的 Word/Excel 业务技能目录」只对那个快照成立。
+
+自 2026-10-30 起，Selection 3.2 后续 Office 对齐（Epic #703，阶段 #704）改以 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563` 为唯一对照。该提交包含 `packages/dsh-desktop-office` 的 7 个案例和 7 个业务技能，也包含 `harness-0.2.0-rc.2` 里的 Office 技能包与 LibreOffice Kit 0.1.3。新的清单、许可审计和差距表 v2 见 [selection-3.2-office-dsh-parity-baseline.md](selection-3.2-office-dsh-parity-baseline.md)。#683 的后续说明引用该页即可，不修改 #683 原文。
+
+O0 作出的「不搬 PPTD、Python office-runtime、LibreOffice Kit」是当时 Epic #682 的非目标。#703 把这三项改成决策阶段 #707、#706、#705。那些决策未完成前，本文的引擎边界仍然是 O0 已交付范围的描述，不是 #703 的最终取舍。
+
 [dsh-skill]: https://github.com/0-CHENAI/dsh-desktop/blob/8dec631777c34fbbcc7d45af787bdd2c468d2cfb/packages/ppt-runtime/core/skills/dsh-ppt/SKILL.md
 [dsh-composition]: https://github.com/0-CHENAI/dsh-desktop/blob/8dec631777c34fbbcc7d45af787bdd2c468d2cfb/packages/ppt-runtime/core/skills/dsh-ppt/references/composition.md
 [dsh-reference]: https://github.com/0-CHENAI/dsh-desktop/blob/8dec631777c34fbbcc7d45af787bdd2c468d2cfb/packages/ppt-runtime/core/lib/types/template-reference.d.ts
