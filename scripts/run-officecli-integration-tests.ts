@@ -12,6 +12,8 @@ const child = Bun.spawn([
   'packages/shared/src/skills/__tests__/storage.test.ts',
   'packages/session-tools-core/src/tool-defs-filtering.test.ts',
   'apps/electron/resources/skills/ppt-design/engine/deck-officecli-roundtrip.test.ts',
+  'apps/electron/resources/skills/officecli/scripts/ppt-brief.test.ts',
+  'scripts/selection-3.2-office-cases.test.ts',
 ], {
   cwd: repoRoot,
   env: {

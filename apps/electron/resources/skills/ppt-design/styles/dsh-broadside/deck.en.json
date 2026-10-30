@@ -1,0 +1,7000 @@
+{
+  "format": "selection-deck",
+  "version": 1,
+  "title": "Broadside",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "theme": {
+    "id": "dsh-broadside",
+    "name": "Broadside / 橙黑宣言",
+    "margin": 48,
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-broadside), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/broadside",
+    "colors": {
+      "paper": "#111111",
+      "ink": "#F0ECE5",
+      "muted": "#888880",
+      "accent": "#E85D26",
+      "surface": "#282826",
+      "line": "#888880",
+      "inverse": "#F0ECE5",
+      "background": "#111111",
+      "text": "#F0ECE5",
+      "secondary": "#888880"
+    },
+    "fonts": {
+      "cjk": {
+        "mac": "PingFang SC",
+        "win": "Microsoft YaHei",
+        "linux": "Noto Sans CJK SC"
+      },
+      "latin": {
+        "mac": "Arial",
+        "win": "Arial",
+        "linux": "Arial"
+      }
+    },
+    "type": {
+      "display": {
+        "min": 70,
+        "max": 142
+      },
+      "title": {
+        "min": 24,
+        "max": 39
+      },
+      "body": {
+        "min": 15,
+        "max": 23
+      },
+      "caption": {
+        "min": 9,
+        "max": 14
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "01",
+      "layout": "01-cover",
+      "name": "make the next move",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 34,
+            "w": 800,
+            "h": 24
+          },
+          "text": "THE BROADSIDE / 01",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 209,
+            "w": 864,
+            "h": 224
+          },
+          "text": "make the\nnext move",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 78,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 506,
+            "w": 760,
+            "h": 16
+          },
+          "text": "DSH / ILLUSTRATIVE EXAMPLE",
+          "textCapacity": {
+            "maxChars": 26,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 503,
+            "w": 40,
+            "h": 20
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "Native PPTD adaptation of Zara Zhang / Broadside. MIT. Example figures are illustrative."
+    },
+    {
+      "id": "02",
+      "layout": "02-content",
+      "name": "own the next move",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "01 / THE POSITION",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "own the next move",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 155,
+            "w": 300,
+            "h": 177
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 142,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 392,
+            "y": 179,
+            "w": 520,
+            "h": 113
+          },
+          "text": "Fewer handoffs.\nMore ownership.",
+          "textCapacity": {
+            "maxChars": 30,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 39,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 392,
+            "y": 321,
+            "w": 520,
+            "h": 1
+          },
+          "line": {
+            "color": "#5D5D55",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 520,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 392,
+            "y": 351,
+            "w": 500,
+            "h": 112
+          },
+          "text": "Give one team the complete journey, from first request to a repeat order.",
+          "textCapacity": {
+            "maxChars": 73,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 382,
+            "w": 288,
+            "h": 53
+          },
+          "text": "THE OPERATING BET",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "02",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "03",
+      "layout": "03-content",
+      "name": "where requests get stuck",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "02 / THE FRICTION",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "where requests get stuck",
+          "textCapacity": {
+            "maxChars": 24,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 165,
+            "w": 447,
+            "h": 164
+          },
+          "text": "42%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 125,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 54,
+            "y": 335,
+            "w": 426,
+            "h": 47
+          },
+          "text": "wait for another team",
+          "textCapacity": {
+            "maxChars": 21,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 54,
+            "y": 410,
+            "w": 427,
+            "h": 32
+          },
+          "text": "A / REQUESTS WITH A SECOND-TEAM WAIT",
+          "textCapacity": {
+            "maxChars": 36,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 10,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 521,
+            "y": 169,
+            "w": 1,
+            "h": 282
+          },
+          "line": {
+            "color": "#A7A69D",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 282
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 153,
+            "w": 357,
+            "h": 26
+          },
+          "text": "B / DELAY REASONS · SHARE OF DELAYS",
+          "textCapacity": {
+            "maxChars": 35,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 10,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 193,
+            "w": 285,
+            "h": 27
+          },
+          "text": "Quote review",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s10",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 225,
+            "w": 274,
+            "h": 13
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 211,
+            "w": 62,
+            "h": 31
+          },
+          "text": "42%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 260,
+            "w": 285,
+            "h": 27
+          },
+          "text": "Scheduling",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 292,
+            "w": 215.286,
+            "h": 13
+          },
+          "fill": "#ABADA3"
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 278,
+            "w": 62,
+            "h": 31
+          },
+          "text": "33%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 327,
+            "w": 285,
+            "h": 27
+          },
+          "text": "Other",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 17,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s16",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 555,
+            "y": 359,
+            "w": 163.095,
+            "h": 13
+          },
+          "fill": "#ABADA3"
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 850,
+            "y": 345,
+            "w": 62,
+            "h": 31
+          },
+          "text": "25%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l18",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 555,
+            "y": 401,
+            "w": 357,
+            "h": 1
+          },
+          "line": {
+            "color": "#A7A69D",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 357,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 555,
+            "y": 416,
+            "w": 98,
+            "h": 25
+          },
+          "text": "FIRST MOVE",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 10,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 664,
+            "y": 411,
+            "w": 248,
+            "h": 48
+          },
+          "text": "Name the quote owner.",
+          "textCapacity": {
+            "maxChars": 21,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l21",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "Two measures: 42% of requests wait; quote review accounts for 42% of those delays.",
+          "textCapacity": {
+            "maxChars": 82,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "03",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "04",
+      "layout": "04-content",
+      "name": "change who owns the outcome",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "03 / THE OPERATING SHIFT",
+          "textCapacity": {
+            "maxChars": 24,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "change who owns the outcome",
+          "textCapacity": {
+            "maxChars": 27,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l4",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 480,
+            "y": 176,
+            "w": 1,
+            "h": 284
+          },
+          "line": {
+            "color": "#66665F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 284
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 173,
+            "w": 390,
+            "h": 32
+          },
+          "text": "BEFORE",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 15,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 173,
+            "w": 390,
+            "h": 32
+          },
+          "text": "AFTER",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 15,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 215,
+            "w": 370,
+            "h": 122
+          },
+          "text": "5",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 93,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 215,
+            "w": 370,
+            "h": 122
+          },
+          "text": "1",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 93,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 355,
+            "w": 390,
+            "h": 47
+          },
+          "text": "handoffs per request",
+          "textCapacity": {
+            "maxChars": 20,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 355,
+            "w": 390,
+            "h": 47
+          },
+          "text": "accountable team",
+          "textCapacity": {
+            "maxChars": 16,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 421,
+            "w": 390,
+            "h": 40
+          },
+          "text": "Separate queues. Local targets.",
+          "textCapacity": {
+            "maxChars": 31,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 520,
+            "y": 421,
+            "w": 390,
+            "h": 40
+          },
+          "text": "One queue. A shared service goal.",
+          "textCapacity": {
+            "maxChars": 33,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "04",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "05",
+      "layout": "05-content",
+      "name": "build a loop that learns",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "04 / THE MECHANISM",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "build a loop that learns",
+          "textCapacity": {
+            "maxChars": 24,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l4",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 245,
+            "y": 214,
+            "w": 110,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 110,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 349,
+            "y": 210,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 6,
+              "y2": 4
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 349,
+            "y": 214,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 4,
+              "x2": 6,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 437,
+            "y": 249,
+            "w": 1,
+            "h": 121
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 121
+            }
+          }
+        },
+        {
+          "id": "l8",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 433,
+            "y": 364,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 4,
+              "y2": 6
+            }
+          }
+        },
+        {
+          "id": "l9",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 437,
+            "y": 364,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 4,
+              "y1": 0,
+              "x2": 0,
+              "y2": 6
+            }
+          }
+        },
+        {
+          "id": "l10",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 251,
+            "y": 407,
+            "w": 105,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 105,
+              "y1": 0,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l11",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 251,
+            "y": 403,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 6,
+              "y1": 0,
+              "x2": 0,
+              "y2": 4
+            }
+          }
+        },
+        {
+          "id": "l12",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 251,
+            "y": 407,
+            "w": 6,
+            "h": 4
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 6,
+              "y1": 4,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l13",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 150,
+            "y": 252,
+            "w": 1,
+            "h": 123
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 123,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l14",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 146,
+            "y": 252,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 6,
+              "x2": 4,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 150,
+            "y": 252,
+            "w": 4,
+            "h": 6
+          },
+          "line": {
+            "color": "$accent",
+            "width": 1.5,
+            "points": {
+              "x1": 4,
+              "y1": 6,
+              "x2": 0,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "l16",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 69,
+            "y": 185,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 69,
+            "y": 199,
+            "w": 185,
+            "h": 45
+          },
+          "text": "LISTEN",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l18",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 358,
+            "y": 185,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 358,
+            "y": 199,
+            "w": 185,
+            "h": 45
+          },
+          "text": "TRY",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l20",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 358,
+            "y": 376,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 358,
+            "y": 390,
+            "w": 185,
+            "h": 45
+          },
+          "text": "MEASURE",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 69,
+            "y": 376,
+            "w": 171,
+            "h": 1
+          },
+          "line": {
+            "color": "$accent",
+            "width": 2,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 171,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 69,
+            "y": 390,
+            "w": 185,
+            "h": 45
+          },
+          "text": "ADJUST",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 24,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 189,
+            "y": 281,
+            "w": 247,
+            "h": 55
+          },
+          "text": "7 days",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 39,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 190,
+            "y": 336,
+            "w": 245,
+            "h": 32
+          },
+          "text": "one complete cycle",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 17,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l26",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 606,
+            "y": 177,
+            "w": 1,
+            "h": 276
+          },
+          "line": {
+            "color": "#5B5B53",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 276
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 649,
+            "y": 198,
+            "w": 260,
+            "h": 114
+          },
+          "text": "CLOSE\nTHE LOOP",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 35,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t28",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 649,
+            "y": 350,
+            "w": 260,
+            "h": 103
+          },
+          "text": "Every test ends with a decision and a named owner.",
+          "textCapacity": {
+            "maxChars": 50,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 22,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "05",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "06",
+      "layout": "06-content",
+      "name": "where the journey loses people",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "05 / CONVERSION",
+          "textCapacity": {
+            "maxChars": 15,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "where the journey loses people",
+          "textCapacity": {
+            "maxChars": 30,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 153,
+            "w": 556,
+            "h": 23
+          },
+          "text": "A / COHORT INDEX · FIRST STAGE = 100",
+          "textCapacity": {
+            "maxChars": 36,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s5",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 188,
+            "w": 470,
+            "h": 42
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 197,
+            "w": 180,
+            "h": 28
+          },
+          "text": "VISIT",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 190,
+            "w": 79,
+            "h": 39
+          },
+          "text": "100",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 234,
+            "w": 243,
+            "h": 25
+          },
+          "text": "68% continue",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s9",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 259,
+            "w": 319.6,
+            "h": 42
+          },
+          "fill": "#C9653E"
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 268,
+            "w": 180,
+            "h": 28
+          },
+          "text": "START",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 261,
+            "w": 79,
+            "h": 39
+          },
+          "text": "68",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 305,
+            "w": 243,
+            "h": 25
+          },
+          "text": "60% continue",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 330,
+            "w": 192.7,
+            "h": 42
+          },
+          "fill": "#995E46"
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 339,
+            "w": 180,
+            "h": 28
+          },
+          "text": "FINISH",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 332,
+            "w": 79,
+            "h": 39
+          },
+          "text": "41",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 376,
+            "w": 243,
+            "h": 25
+          },
+          "text": "71% continue",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "#B4B4A9",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s17",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 48,
+            "y": 401,
+            "w": 136.3,
+            "h": 42
+          },
+          "fill": "#6F5144"
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 61,
+            "y": 410,
+            "w": 180,
+            "h": 28
+          },
+          "text": "RETURN",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 554,
+            "y": 403,
+            "w": 79,
+            "h": 39
+          },
+          "text": "29",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 27,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l20",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 675,
+            "y": 182,
+            "w": 1,
+            "h": 268
+          },
+          "line": {
+            "color": "#5E5E56",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 268
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 166,
+            "w": 206,
+            "h": 27
+          },
+          "text": "B / THE BOTTLENECK",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 208,
+            "w": 206,
+            "h": 92
+          },
+          "text": "27",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 70,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 309,
+            "w": 206,
+            "h": 88
+          },
+          "text": "points lost before completion",
+          "textCapacity": {
+            "maxChars": 29,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l24",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 706,
+            "y": 411,
+            "w": 206,
+            "h": 1
+          },
+          "line": {
+            "color": "#5E5E56",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 206,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 706,
+            "y": 427,
+            "w": 206,
+            "h": 28
+          },
+          "text": "68 − 41 = 27",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l26",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "Only 60% of starters finish. Improve this handoff before increasing traffic.",
+          "textCapacity": {
+            "maxChars": 76,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t28",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "06",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "07",
+      "layout": "07-content",
+      "name": "do the high-impact work first",
+      "background": "$ink",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "06 / PRIORITY MAP",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "do the high-impact work first",
+          "textCapacity": {
+            "maxChars": 29,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s4",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 75,
+            "y": 174,
+            "w": 503,
+            "h": 273
+          },
+          "fill": "#E4DFD5"
+        },
+        {
+          "id": "s5",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 75,
+            "y": 174,
+            "w": 251,
+            "h": 136
+          },
+          "fill": "#EFC3B1"
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 326,
+            "y": 174,
+            "w": 1,
+            "h": 273
+          },
+          "line": {
+            "color": "#96958B",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 273
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 75,
+            "y": 310,
+            "w": 503,
+            "h": 1
+          },
+          "line": {
+            "color": "#96958B",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 503,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 92,
+            "y": 186,
+            "w": 212,
+            "h": 26
+          },
+          "text": "DO NOW",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 345,
+            "y": 186,
+            "w": 210,
+            "h": 26
+          },
+          "text": "PLAN NEXT",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s10",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 147,
+            "y": 230,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 152,
+            "y": 234,
+            "w": 24,
+            "h": 30
+          },
+          "text": "A",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s12",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 221,
+            "y": 261,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 226,
+            "y": 265,
+            "w": 24,
+            "h": 30
+          },
+          "text": "B",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s14",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 428,
+            "y": 239,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t15",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 433,
+            "y": 243,
+            "w": 24,
+            "h": 30
+          },
+          "text": "C",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s16",
+          "type": "shape",
+          "shape": "ellipse",
+          "role": "panel",
+          "bounds": {
+            "x": 373,
+            "y": 355,
+            "w": 34,
+            "h": 34
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 378,
+            "y": 359,
+            "w": 24,
+            "h": 30
+          },
+          "text": "D",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$paper",
+            "align": "center",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 75,
+            "y": 455,
+            "w": 501,
+            "h": 27
+          },
+          "text": "Effort: low → high",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 75,
+            "y": 147,
+            "w": 501,
+            "h": 22
+          },
+          "text": "Impact increases upward",
+          "textCapacity": {
+            "maxChars": 23,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 181,
+            "w": 44,
+            "h": 30
+          },
+          "text": "A",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t21",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 181,
+            "w": 231,
+            "h": 51
+          },
+          "text": "Fix the first reply",
+          "textCapacity": {
+            "maxChars": 19,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 234,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 249,
+            "w": 44,
+            "h": 30
+          },
+          "text": "B",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 249,
+            "w": 231,
+            "h": 51
+          },
+          "text": "Name the owner",
+          "textCapacity": {
+            "maxChars": 14,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l25",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 302,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t26",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 317,
+            "w": 44,
+            "h": 30
+          },
+          "text": "C",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 317,
+            "w": 231,
+            "h": 51
+          },
+          "text": "Rebuild routing",
+          "textCapacity": {
+            "maxChars": 15,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l28",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 370,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t29",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 624,
+            "y": 385,
+            "w": 44,
+            "h": 30
+          },
+          "text": "D",
+          "textCapacity": {
+            "maxChars": 1,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "#B34016",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 681,
+            "y": 385,
+            "w": 231,
+            "h": 51
+          },
+          "text": "Add reporting",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l31",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 624,
+            "y": 438,
+            "w": 288,
+            "h": 1
+          },
+          "line": {
+            "color": "#B2B0A6",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 288,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t32",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t33",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "07",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "08",
+      "layout": "08-content",
+      "name": "give the campaign a sequence",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "07 / CAMPAIGN STORY",
+          "textCapacity": {
+            "maxChars": 19,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "give the campaign a sequence",
+          "textCapacity": {
+            "maxChars": 28,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "01",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "THE QUESTION",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "Why does a simple order need five handoffs?",
+          "textCapacity": {
+            "maxChars": 43,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "Hook / awareness",
+          "textCapacity": {
+            "maxChars": 16,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "02",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l10",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 344,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "THE PROOF",
+          "textCapacity": {
+            "maxChars": 9,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "Show one request moving through the new flow.",
+          "textCapacity": {
+            "maxChars": 45,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "Demo / consideration",
+          "textCapacity": {
+            "maxChars": 20,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 159,
+            "w": 261,
+            "h": 95
+          },
+          "text": "03",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 72,
+            "weight": "bold",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 640,
+            "y": 271,
+            "w": 261,
+            "h": 1
+          },
+          "line": {
+            "color": "#6C6C64",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 261,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 291,
+            "w": 261,
+            "h": 42
+          },
+          "text": "THE ASK",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 351,
+            "w": 261,
+            "h": 84
+          },
+          "text": "Invite one team to run the next pilot.",
+          "textCapacity": {
+            "maxChars": 38,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 21,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 455,
+            "w": 261,
+            "h": 26
+          },
+          "text": "Pilot / action",
+          "textCapacity": {
+            "maxChars": 14,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t19",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "08",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "09",
+      "layout": "09-content",
+      "name": "show the change, not just the claim",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "08 / PILOT RESULTS",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "show the change, not just the claim",
+          "textCapacity": {
+            "maxChars": 35,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 176,
+            "w": 864,
+            "h": 142
+          },
+          "text": "54 → 82",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 96,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 52,
+            "y": 326,
+            "w": 839,
+            "h": 42
+          },
+          "text": "completed requests / 100 starts",
+          "textCapacity": {
+            "maxChars": 31,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 26,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l6",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 399,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$paper",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "8 weeks",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "Pilot length",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "2 teams",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 344,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "Shared queue",
+          "textCapacity": {
+            "maxChars": 12,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 418,
+            "w": 268,
+            "h": 38
+          },
+          "text": "+28 pts",
+          "textCapacity": {
+            "maxChars": 7,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 25,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 640,
+            "y": 464,
+            "w": 268,
+            "h": 23
+          },
+          "text": "Completion lift",
+          "textCapacity": {
+            "maxChars": 15,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 14,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t13",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "09",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "10",
+      "layout": "10-content",
+      "name": "a launch plan with a decision gate",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "09 / THE FIRST SIX WEEKS",
+          "textCapacity": {
+            "maxChars": 24,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "a launch plan with a decision gate",
+          "textCapacity": {
+            "maxChars": 34,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 263,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W1",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l5",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 263,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 369,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W2",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l7",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 369,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t8",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 475,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W3",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l9",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 475,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 581,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W4",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l11",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 581,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t12",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 687,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W5",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l13",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 687,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t14",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 793,
+            "y": 167,
+            "w": 96,
+            "h": 26
+          },
+          "text": "W6",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 793,
+            "y": 204,
+            "w": 1,
+            "h": 227
+          },
+          "line": {
+            "color": "#46463F",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 227
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 210,
+            "w": 187,
+            "h": 28
+          },
+          "text": "FRAME",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s17",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 264,
+            "y": 210,
+            "w": 202,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 270,
+            "w": 187,
+            "h": 28
+          },
+          "text": "BUILD",
+          "textCapacity": {
+            "maxChars": 5,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s19",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 370,
+            "y": 270,
+            "w": 308,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t20",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 330,
+            "w": 187,
+            "h": 28
+          },
+          "text": "RUN",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s21",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 582,
+            "y": 330,
+            "w": 202,
+            "h": 30
+          },
+          "fill": "#707068"
+        },
+        {
+          "id": "t22",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 390,
+            "w": 187,
+            "h": 28
+          },
+          "text": "DECIDE",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s23",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 794,
+            "y": 390,
+            "w": 96,
+            "h": 30
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 458,
+            "w": 203,
+            "h": 27
+          },
+          "text": "Gate / Week 6",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 16,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 263,
+            "y": 456,
+            "w": 649,
+            "h": 36
+          },
+          "text": "Expand only if completion improves without longer waits.",
+          "textCapacity": {
+            "maxChars": 56,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 18,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t26",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t27",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "10",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "11",
+      "layout": "11-content",
+      "name": "keep the score visible",
+      "background": "$paper",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 26,
+            "w": 820,
+            "h": 20
+          },
+          "text": "10 / THE SCORECARD",
+          "textCapacity": {
+            "maxChars": 18,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l2",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 57,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 78,
+            "w": 864,
+            "h": 68
+          },
+          "text": "keep the score visible",
+          "textCapacity": {
+            "maxChars": 22,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 37,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t4",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 170,
+            "w": 287,
+            "h": 26
+          },
+          "text": "METRIC",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t5",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 170,
+            "w": 154,
+            "h": 26
+          },
+          "text": "ACTUAL",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t6",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 170,
+            "w": 157,
+            "h": 26
+          },
+          "text": "TARGET",
+          "textCapacity": {
+            "maxChars": 6,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 12,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t7",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 693,
+            "y": 170,
+            "w": 219,
+            "h": 26
+          },
+          "text": "PROGRESS / 0–100%",
+          "textCapacity": {
+            "maxChars": 17,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "l8",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 210,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t9",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 221,
+            "w": 263,
+            "h": 34
+          },
+          "text": "Completion",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t10",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 221,
+            "w": 154,
+            "h": 34
+          },
+          "text": "82%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t11",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 221,
+            "w": 151,
+            "h": 34
+          },
+          "text": "75%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s12",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 229,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s13",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 229,
+            "w": 164.82,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l14",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 844.75,
+            "y": 223,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l15",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 271,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t16",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 282,
+            "w": 263,
+            "h": 34
+          },
+          "text": "Repeat use",
+          "textCapacity": {
+            "maxChars": 10,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t17",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 282,
+            "w": 154,
+            "h": 34
+          },
+          "text": "61%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t18",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 282,
+            "w": 151,
+            "h": 34
+          },
+          "text": "60%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s19",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 290,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s20",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 290,
+            "w": 122.61,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l21",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 814.6,
+            "y": 284,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l22",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 332,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t23",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 343,
+            "w": 263,
+            "h": 34
+          },
+          "text": "Same-day reply",
+          "textCapacity": {
+            "maxChars": 14,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t24",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 343,
+            "w": 154,
+            "h": 34
+          },
+          "text": "90%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t25",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 343,
+            "w": 151,
+            "h": 34
+          },
+          "text": "95%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s26",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 351,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s27",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 351,
+            "w": 180.9,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l28",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 884.95,
+            "y": 345,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l29",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 393,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "#53534C",
+            "width": 0.7,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t30",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 404,
+            "w": 263,
+            "h": 34
+          },
+          "text": "Owner assigned",
+          "textCapacity": {
+            "maxChars": 14,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "bold",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t31",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 339,
+            "y": 404,
+            "w": 154,
+            "h": 34
+          },
+          "text": "96%",
+          "textCapacity": {
+            "maxChars": 3,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 23,
+            "weight": "regular",
+            "color": "$accent",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t32",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 515,
+            "y": 404,
+            "w": 151,
+            "h": 34
+          },
+          "text": "100%",
+          "textCapacity": {
+            "maxChars": 4,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 20,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "s33",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 412,
+            "w": 201,
+            "h": 15
+          },
+          "fill": "#34342E"
+        },
+        {
+          "id": "s34",
+          "type": "shape",
+          "shape": "rect",
+          "role": "panel",
+          "bounds": {
+            "x": 694,
+            "y": 412,
+            "w": 192.96,
+            "h": 15
+          },
+          "fill": "$accent"
+        },
+        {
+          "id": "l35",
+          "type": "shape",
+          "shape": "line",
+          "role": "rule",
+          "bounds": {
+            "x": 895,
+            "y": 406,
+            "w": 1,
+            "h": 27
+          },
+          "line": {
+            "color": "$ink",
+            "width": 1.5,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 27
+            }
+          }
+        },
+        {
+          "id": "l36",
+          "type": "shape",
+          "shape": "line",
+          "role": "decoration",
+          "bounds": {
+            "x": 48,
+            "y": 465,
+            "w": 864,
+            "h": 1
+          },
+          "line": {
+            "color": "$ink",
+            "width": 0.4,
+            "points": {
+              "x1": 0,
+              "y1": 0,
+              "x2": 864,
+              "y2": 0
+            }
+          }
+        },
+        {
+          "id": "t37",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 475,
+            "w": 864,
+            "h": 25
+          },
+          "text": "A white tick marks the target. Investigate the reply gap before expanding.",
+          "textCapacity": {
+            "maxChars": 74,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 13,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t38",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 507,
+            "w": 760,
+            "h": 16
+          },
+          "text": "ILLUSTRATIVE DATA / LAYOUT STUDY",
+          "textCapacity": {
+            "maxChars": 32,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t39",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 504,
+            "w": 42,
+            "h": 22
+          },
+          "text": "11",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "DSH-authored composition experiment using the parent pack palette and typography. All figures are fictional demonstration data; replace with actual evidence."
+    },
+    {
+      "id": "12",
+      "layout": "12-content",
+      "name": "MAKE IT HAPPEN",
+      "background": "$accent",
+      "elements": [
+        {
+          "id": "t1",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 178,
+            "w": 860,
+            "h": 225
+          },
+          "text": "MAKE IT\nHAPPEN",
+          "textCapacity": {
+            "maxChars": 13,
+            "maxLines": 2
+          },
+          "font": {
+            "family": "$latin",
+            "size": 88,
+            "weight": "bold",
+            "color": "$paper",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial Black",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Serif CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 48,
+            "y": 506,
+            "w": 760,
+            "h": 16
+          },
+          "text": "DSH / ILLUSTRATIVE EXAMPLE",
+          "textCapacity": {
+            "maxChars": 26,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 9,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        },
+        {
+          "id": "t3",
+          "type": "text",
+          "role": "content",
+          "bounds": {
+            "x": 870,
+            "y": 503,
+            "w": 40,
+            "h": 20
+          },
+          "text": "12",
+          "textCapacity": {
+            "maxChars": 2,
+            "maxLines": 1
+          },
+          "font": {
+            "family": "$latin",
+            "size": 11,
+            "weight": "regular",
+            "color": "$ink",
+            "valign": "top",
+            "leading": 1.12,
+            "face": {
+              "latin": "Arial",
+              "cjk": {
+                "mac": "PingFang SC",
+                "win": "Microsoft YaHei",
+                "linux": "Noto Sans CJK SC"
+              }
+            }
+          }
+        }
+      ],
+      "notes": "Native PPTD adaptation of Zara Zhang / Broadside. MIT. Example figures are illustrative."
+    }
+  ]
+}

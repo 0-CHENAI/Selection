@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync } from 'fflate'
 import { isArtifactCardPath, isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
-import { buildPptRevisionPrompt, clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, pptDeckStamp, readChartFallbacks, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from './ppt-live'
+import { clearStalePptGenerating, exportIncrementalPptx, markPptGenerating, pptDeckStamp, readChartFallbacks, readPptProgress, readPptRun, validatePptRevision, watchPptDeck, writePptRun } from './ppt-live'
 
 function session(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), 'ppt-live-')))
@@ -138,7 +138,7 @@ test('a chart skill timeout is shown on the result progress and a bad file is ig
   }
 })
 
-test('a partial deck write is ignored and revision prompts name only the selected pages', () => {
+test('a partial deck write is ignored and revisions validate their selected targets', () => {
   const root = session()
   try {
     mkdirSync(join(root, 'data'), { recursive: true })
@@ -146,17 +146,6 @@ test('a partial deck write is ignored and revision prompts name only the selecte
     expect(readPptProgress(root, true)).toBeNull()
     const revision = validatePptRevision({ action: 'revise', targets: [{ page: 3 }, { page: 4, elementId: 'title' }], comment: '把标题改短' })
     expect(revision.targets).toEqual([{ page: 3 }, { page: 4, elementId: 'title' }])
-    const prompt = buildPptRevisionPrompt(revision, root)
-    expect(prompt).toContain('page 3')
-    expect(prompt).toContain('page 4 element "title"')
-    expect(prompt).toContain(join(root, 'data', 'deck.json'))
-    expect(prompt).toContain('slide-01.png')
-    expect(prompt).toContain('把标题改短')
-    expect(prompt).toContain('Keep every other page identical')
-    expect(prompt).toContain('/slide[n]/shape[@name=<element id>]')
-    expect(prompt).toContain('ppt-output.json')
-    expect(prompt).not.toContain('data/deck.pptx')
-    expect(prompt).not.toContain('live panel')
     expect(() => validatePptRevision({ action: 'revise', targets: [] })).toThrow()
     expect(() => validatePptRevision({ targets: [{ page: 0 }] })).toThrow()
     expect(() => validatePptRevision({ targets: Array.from({ length: 257 }, (_, index) => ({ page: 1, elementId: `e${index}` })) })).toThrow()
@@ -199,6 +188,15 @@ test('incremental export adds slides as pages are saved and does not rewrite an 
     expect(grown).toBe(first)
     expect(slideNames(grown!).sort()).toEqual(['ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/slide3.xml'])
     writeFileSync(grown!, Buffer.from('KEEP'))
+    expect(await exportIncrementalPptx(root)).toBe(grown)
+    expect(readFileSync(grown!).toString()).toBe('KEEP')
+    // macOS /var -> /private/var and directory aliases must not lose ownership
+    // of an already edited output and cause a duplicate export from stale deck data.
+    const alias = join(root, 'delivery-alias')
+    symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    const outputRecord = join(root, 'data', 'ppt-output.json')
+    const record = JSON.parse(readFileSync(outputRecord, 'utf8'))
+    writeFileSync(outputRecord, JSON.stringify({ ...record, path: join(alias, '往返.pptx') }))
     expect(await exportIncrementalPptx(root)).toBe(grown)
     expect(readFileSync(grown!).toString()).toBe('KEEP')
     const direct = session()
@@ -397,4 +395,53 @@ test('watchPptDeck notices a page write and exports it without a tool event', as
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('failed revision preserves the last checked PPTX and overrides stale passing diagnostics', async () => {
+  const root = session()
+  try {
+    const { fixtureTheme, makeDeck, makePage, text } = await import('../../../../apps/electron/resources/skills/ppt-design/styles/kit.ts')
+    const { ensurePptChecks } = await import('./ppt-live')
+    mkdirSync(join(root, 'data'), { recursive: true })
+    const deck = makeDeck('检查门', fixtureTheme, [makePage('p1', 'free', '标题', '$paper', [text('title', '有效标题', 48, 40, 400, 48, 24)], '')])
+    const path = join(root, 'data/deck.json')
+    deck.pages[0]!.elements[0]!.bounds.x = -100
+    writeFileSync(path, JSON.stringify(deck))
+    expect(await exportIncrementalPptx(root)).toBeUndefined()
+    expect(existsSync(join(root, '检查门.pptx'))).toBe(false)
+    deck.pages[0]!.elements[0]!.bounds.x = 48
+    writeFileSync(path, JSON.stringify(deck))
+    const output = await exportIncrementalPptx(root)
+    expect(output).toBeTruthy()
+    const bytes = readFileSync(output!)
+    deck.pages[0]!.elements[0]!.bounds.x = -100
+    writeFileSync(path, JSON.stringify(deck))
+    writeFileSync(join(root, 'data/deck-check.json'), JSON.stringify({ issues: [] }))
+    expect(await exportIncrementalPptx(root)).toBe(output)
+    expect(readFileSync(output!)).toEqual(bytes)
+    await ensurePptChecks(root)
+    const progress = readPptProgress(root, false)
+    expect(progress?.pages?.[0]?.status).toBe('needs_revision')
+    expect(progress?.pages?.[0]?.failed).toBe(true)
+    deck.pages[0]!.elements[0]!.bounds.x = 48
+    deck.pages[0]!.elements[0]!.text = '修订后标题'
+    writeFileSync(path, JSON.stringify(deck))
+    expect(await exportIncrementalPptx(root)).toBe(output)
+    expect(readFileSync(output!)).not.toEqual(bytes)
+    expect(readPptProgress(root, false)?.pages?.[0]?.status).toBe('passed')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+
+test('page diagnostics preserve actionable element targets and bound the UI payload', () => {
+  const root = session()
+  try {
+    deck(root, 3)
+    const progress = readPptProgress(root, false, { check: () => Array.from({ length: 55 }, (_, i) => ({ pageId: 'p2', elementId: `text-${i}`, code: 'overflow', message: 'Text outside canvas' })) })
+    const page = progress!.pages![1]!
+    expect(page.issueCount).toBe(55)
+    expect(page.issues).toHaveLength(50)
+    expect(page.issues![0]).toEqual({ code: 'overflow', elementId: 'text-0', message: 'Text outside canvas' })
+    expect(progress!.pages![0]!.issues ?? []).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

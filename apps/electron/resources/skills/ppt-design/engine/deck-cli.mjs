@@ -13495,12 +13495,7 @@ function pointIn(box, x, y) {
 }
 function checkDeck(deck) {
   const issues = [];
-  let previousLayout;
-  deck.pages.forEach((page, index) => {
-    if (previousLayout && page.layout === previousLayout) {
-      issues.push(issue("adjacent_layout", `\u7B2C ${index + 1} \u9875\u4E0E\u4E0A\u4E00\u9875\u4F7F\u7528\u4E86\u76F8\u540C\u7248\u5F0F ${page.layout}`, page.id));
-    }
-    previousLayout = page.layout;
+  deck.pages.forEach((page) => {
     issues.push(...checkPage(deck, page));
   });
   return issues;
@@ -13785,7 +13780,7 @@ function checkTable(deck, page, element, pageBackground) {
 
 // apps/electron/resources/skills/ppt-design/engine/export-pptx.ts
 var import_jszip2 = __toESM(require_lib3(), 1);
-import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, writeFileSync } from "fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, writeFileSync } from "fs";
 import { dirname, join as join2 } from "path";
 import { fileURLToPath } from "url";
 
@@ -19779,26 +19774,32 @@ function inches(points) {
 }
 
 // apps/electron/resources/skills/ppt-design/engine/screenshot.ts
-import { mkdtempSync, mkdirSync, readdirSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 async function captureSlides(pptx, outDir, pageCount, options = {}) {
+  const selected = options.pageNumbers === undefined ? undefined : [...new Set(options.pageNumbers)].sort((a, b) => a - b);
+  if (selected && (!Number.isInteger(pageCount) || pageCount < 1 || selected.length === 0 || selected.some((page) => !Number.isInteger(page) || page < 1 || page > pageCount))) {
+    return { available: false, files: [], reason: "\u53D7\u5F71\u54CD\u9875\u5FC5\u987B\u662F\u5DF2\u77E5\u9875\u6570\u8303\u56F4\u5185\u7684\u975E\u7A7A\u6574\u6570\u5217\u8868" };
+  }
+  const pages = selected ?? Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1);
   mkdirSync(outDir, { recursive: true });
   const officecli = options.officecli === "" ? null : options.officecli ?? await commandOnPath("officecli");
   if (officecli && pageCount > 0) {
     const files = [];
     let failed = false;
-    for (let page = 1;page <= pageCount; page++) {
+    for (const page of pages) {
       const target = join(outDir, `slide-${String(page).padStart(2, "0")}.png`);
+      rmSync(target, { force: true });
       const result = await run(officecli, ["view", pptx, "screenshot", "--page", String(page), "-o", target], { OFFICECLI_SKIP_UPDATE: "1" });
-      if (result.code !== 0) {
+      if (result.code !== 0 || !existsSync(target)) {
         failed = true;
         break;
       }
       files.push(target);
     }
-    if (!failed && files.length === pageCount)
+    if (!failed && files.length === pages.length)
       return { available: true, renderer: "officecli", files };
   }
   const soffice = options.libreoffice ?? await commandOnPath("soffice") ?? await commandOnPath("libreoffice");
@@ -19825,6 +19826,18 @@ async function captureSlides(pptx, outDir, pageCount, options = {}) {
   rmSync(profile, { recursive: true, force: true });
   if (pdf.code !== 0)
     return { available: false, files: [], renderer: "libreoffice", reason: pdf.stderr || pdf.stdout || "LibreOffice \u8F6C\u6362\u5931\u8D25" };
+  if (selected) {
+    const files = [];
+    for (const page of selected) {
+      const prefix = join(outDir, `slide-${String(page).padStart(2, "0")}`);
+      rmSync(`${prefix}.png`, { force: true });
+      const png = await run(pdftoppm, ["-png", "-r", "108", "-f", String(page), "-l", String(page), "-singlefile", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
+      if (png.code !== 0 || !existsSync(`${prefix}.png`))
+        return { available: false, files, renderer: "libreoffice", reason: png.stderr || "pdftoppm \u5931\u8D25" };
+      files.push(`${prefix}.png`);
+    }
+    return { available: true, renderer: "libreoffice", files };
+  }
   const prefix = join(outDir, "slide");
   const png = await run(pdftoppm, ["-png", "-r", "108", join(outDir, pptxBasename(pptx) + ".pdf"), prefix]);
   if (png.code !== 0)
@@ -20482,20 +20495,29 @@ function shadowOptions(element) {
   };
 }
 function resolveAsset(src) {
-  if (existsSync(src))
+  if (existsSync2(src))
     return src;
   const fromCwd = join2(process.cwd(), src);
-  if (existsSync(fromCwd))
+  if (existsSync2(fromCwd))
     return fromCwd;
   const skill = fileURLToPath(new URL("..", import.meta.url));
   const fromSkill = join2(skill, src);
-  if (existsSync(fromSkill))
+  if (existsSync2(fromSkill))
     return fromSkill;
   return src;
 }
 async function finishSlideXml(bytes, deck, platform) {
   const zip = await import_jszip2.default.loadAsync(bytes);
   let changed = false;
+  const presentation = zip.file("ppt/presentation.xml");
+  if (presentation) {
+    const xml = await presentation.async("string");
+    const next = xml.replace(/(<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>)(<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>)/, "$2$1");
+    if (next !== xml) {
+      zip.file("ppt/presentation.xml", next);
+      changed = true;
+    }
+  }
   for (let index = 0;index < deck.pages.length; index++) {
     const page = deck.pages[index];
     const faces = new Map;
@@ -21438,7 +21460,7 @@ function waterfallColumns(values) {
 function usage() {
   console.log(JSON.stringify({
     status: "error",
-    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]"
+    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4]"
   }));
   process.exit(1);
 }
@@ -21463,7 +21485,12 @@ function parseArgs(argv) {
       flags.officecli = rest[++i];
     else if (token === "--pages")
       flags.pages = Number(rest[++i]);
-    else if (!token.startsWith("-") && !flags.file)
+    else if (token === "--only-pages") {
+      const value = rest[++i];
+      if (!value || !/^\d+(,\d+)*$/.test(value))
+        usage();
+      flags.pageNumbers = value.split(",").map(Number);
+    } else if (!token.startsWith("-") && !flags.file)
       flags.file = token;
     else
       usage();
@@ -21475,6 +21502,8 @@ function emit(status, body, code) {
   process.exit(code);
 }
 var flags = parseArgs(process.argv.slice(2));
+if (flags.pageNumbers && flags.command !== "screenshot")
+  usage();
 if (flags.command === "layouts") {
   console.log(JSON.stringify({ status: "ok", layouts: argumentLayoutCatalog() }));
   process.exit(0);
@@ -21485,7 +21514,7 @@ var file = resolve(flags.file);
 if (flags.command === "screenshot") {
   if (!flags.out)
     usage();
-  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli });
+  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
   emit(result.available ? "ok" : "error", { screenshots: result }, result.available ? 0 : 1);
 }
 var loaded = loadDeckFile(file);

@@ -13,3 +13,10 @@ Commercial Terms of Service: https://www.anthropic.com/legal/commercial-terms
 
 Third-party dependencies are listed in package.json files and are subject
 to their respective licenses.
+
+---
+
+Bundled presentation templates and adapted design guidance retain their
+upstream notices. See apps/electron/resources/skills/ppt-design/ATTRIBUTION.md
+for source snapshots and modification scope, and that directory's NOTICE,
+LICENSE, and licenses/ for the retained MIT and Apache-2.0 license texts.

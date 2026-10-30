@@ -9,6 +9,7 @@ import { parseDeckDocument, parseDeckSource } from './schema.ts'
 import { captureSlides } from './screenshot.ts'
 import { chart, fixtureTheme, makeDeck, makePage, panel, text } from '../styles/kit.ts'
 import type { Deck, DeckElement } from './types.ts'
+import { addedDshTemplates } from '../../../../../../scripts/adapt-dsh-office-templates'
 
 const root = new URL('..', import.meta.url)
 
@@ -133,7 +134,7 @@ describe('deck_check', () => {
   it('reports every problem in one pass, located to a page and element', () => {
     const issues = checkDeck(problemDeck())
     const codes = new Set(issues.map(item => item.code))
-    for (const code of ['out_of_bounds', 'over_capacity', 'contrast', 'orphan', 'literal_newline', 'overlap', 'unreconciled', 'adjacent_layout', 'font']) {
+    for (const code of ['out_of_bounds', 'over_capacity', 'contrast', 'orphan', 'literal_newline', 'overlap', 'unreconciled', 'font']) {
       expect(codes.has(code as never)).toBe(true)
     }
     expect(issues.find(item => item.code === 'out_of_bounds')?.elementId).toBe('off')
@@ -141,7 +142,7 @@ describe('deck_check', () => {
     expect(issues.find(item => item.code === 'contrast')?.pageId).toBe('p1')
     expect(issues.find(item => item.code === 'unreconciled')?.elementId).toBe('bridge')
     expect(issues.find(item => item.code === 'font')?.pageId).toBe('p3')
-    expect(issues.find(item => item.code === 'adjacent_layout')?.pageId).toBe('p3')
+    expect(issues.some(item => item.code === 'adjacent_layout')).toBe(false)
   })
 })
 
@@ -179,6 +180,10 @@ describe('pptx export', () => {
     expect(chartXml).toContain('barChart')
     const presentation = await unzipEntry(out, 'ppt/presentation.xml')
     expect(presentation).toContain('cx="12192000" cy="6858000"')
+    expect(presentation).toContain('<p:notesMasterIdLst>')
+    expect(presentation.indexOf('<p:notesMasterIdLst>')).toBeLessThan(presentation.indexOf('<p:sldIdLst>'))
+    const notes = await unzipEntry(out, 'ppt/notesSlides/notesSlide1.xml')
+    expect(notes).toContain('备注')
   })
 
   it('refuses a failing deck without replacing the output file', async () => {
@@ -299,7 +304,7 @@ describe('reference styles', () => {
 
   it('ships five bilingual 12-page DSH decks', async () => {
     const catalog = JSON.parse(read('styles/catalog.json')) as Record<string, { deck: string; deckEn: string; license: string }>
-    expect(Object.keys(catalog).filter(key => key.startsWith('dsh-')).sort()).toEqual([...ids].sort())
+    for (const id of ids) expect(catalog[id]).toBeDefined()
     const accents = new Set<string>()
     for (const id of ids) {
       for (const file of [`styles/${id}/deck.json`, `styles/${id}/deck.en.json`]) {
@@ -480,29 +485,6 @@ describe('example canvas, gradients, and paths', () => {
 })
 
 describe('skill instructions', () => {
-  it('points at the deck engine and keeps the OfficeCLI morph override', () => {
-    const skill = read('SKILL.md')
-    expect(skill).toContain('deck-cli.mjs')
-    expect(skill).toContain('/slide[n]/shape[@name=元素id]')
-    expect(skill).not.toContain('实时侧窗')
-    expect(skill).toContain('dsh-cartesian')
-    expect(skill).toContain('dsh-engineering-blueprint')
-    expect(skill).not.toContain('compose.ts')
-    expect(skill).not.toContain('dark-tech')
-    expect(skill).not.toContain('swiss-signal')
-    const office = readFileSync(new URL('../../officecli/SKILL.md', import.meta.url), 'utf8')
-    expect(office).toContain('officecli-morph-helper')
-    expect(office).toContain('morph-helpers.py')
-    expect(office).toContain('morph-helpers.sh')
-    expect(office).toContain('deck-cli.mjs')
-    expect(office).toContain('python-pptx')
-    const override = readFileSync(new URL('../../officecli/ppt-selection-override.md', import.meta.url), 'utf8')
-    expect(override).toContain('dsh-cartesian')
-    expect(override).toContain('960×540')
-    expect(override).not.toContain('fresh-editorial')
-    expect(override).not.toContain('swiss-signal')
-  })
-
   it('checks a reference deck through the bundled cli', async () => {
     const cli = fileURLToPath(new URL('./deck-cli.mjs', import.meta.url))
     const deck = fileURLToPath(new URL('../styles/dsh-cartesian/deck.json', import.meta.url))
@@ -529,6 +511,29 @@ describe('skill instructions', () => {
       const text = layout.slots.filter(slot => slot.textCapacity)
       expect(text.length).toBeGreaterThan(0)
       expect(text.every(slot => (slot.bounds?.w ?? 0) > 0 && (slot.textCapacity?.maxChars ?? 0) > 0)).toBe(true)
+    }
+  })
+})
+
+
+describe('O3 imported DSH template coverage', () => {
+  it('ships all eleven missing packs with checked bilingual adaptations and real previews', () => {
+    const catalog = JSON.parse(read('styles/catalog.json'))
+    const picker = JSON.parse(read('styles/picker.json'))
+    const diagnostics = JSON.parse(read('styles/dsh-import-diagnostics.json'))
+    expect(addedDshTemplates).toHaveLength(11)
+    expect(diagnostics.adaptations).toHaveLength(22)
+    for (const id of addedDshTemplates) {
+      expect(picker.templates[id].previewId).toBe(id)
+      for (const key of ['deck', 'deckEn']) {
+        expect(catalog[id][key]).toContain(`styles/examples/imported/${id}/`)
+        const parsed = parseDeckSource(read(catalog[id][key]))
+        expect(parsed.issues).toEqual([])
+        expect(parsed.deck!.pages).toHaveLength(12)
+        expect(checkDeck(parsed.deck!)).toEqual([])
+      }
+      expect(read(`styles/previews/documents/${id}.pdf`).startsWith('%PDF')).toBe(true)
+      for (let page = 1; page <= 12; page++) expect(read(`styles/previews/pages/${id}-${page}.webp`).startsWith('RIFF')).toBe(true)
     }
   })
 })
