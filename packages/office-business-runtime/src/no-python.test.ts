@@ -16,7 +16,7 @@ function filesUnder(dir: string): string[] {
 }
 
 test('office parity path ships no Python and stays out of the installer', () => {
-  expect(OFFICE_BUSINESS_RUNTIME).toEqual({ engine: 'bun', bundledPython: false, userFacing: false })
+  expect(OFFICE_BUSINESS_RUNTIME).toEqual({ engine: 'bun', bundledPython: false, userFacing: true, installerBundle: false })
 
   const roots = [
     join(repoRoot, 'packages/office-business-runtime'),

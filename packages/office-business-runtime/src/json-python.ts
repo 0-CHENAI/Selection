@@ -2,9 +2,11 @@ import { pythonFloatLiteral } from './python-number.ts'
 
 export type PyJson =
   | null
+  | boolean
   | string
   | { t: 'int'; n: number }
   | { t: 'float'; n: number }
+  | { t: 'arr'; items: readonly PyJson[] }
   | { t: 'obj'; entries: ReadonlyArray<readonly [string, PyJson]> }
 
 /** CPython json.dumps(..., indent=2) 再加 print 的换行。ensure_ascii=True。 */
@@ -14,9 +16,17 @@ export function pythonJsonStdout(value: PyJson): string {
 
 function dump(value: PyJson, level: number): string {
   if (value === null) return 'null'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (typeof value === 'string') return escapeString(value)
   if (value.t === 'int') return String(value.n)
   if (value.t === 'float') return pythonFloatLiteral(value.n)
+  if (value.t === 'arr') {
+    if (value.items.length === 0) return '[]'
+    const pad = ' '.repeat((level + 1) * 2)
+    const close = ' '.repeat(level * 2)
+    const lines = value.items.map(item => `${pad}${dump(item, level + 1)}`)
+    return `[\n${lines.join(',\n')}\n${close}]`
+  }
   const pad = ' '.repeat((level + 1) * 2)
   const close = ' '.repeat(level * 2)
   const lines = value.entries.map(([key, child]) => `${pad}${escapeString(key)}: ${dump(child, level + 1)}`)

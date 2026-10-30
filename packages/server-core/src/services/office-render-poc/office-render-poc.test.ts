@@ -227,6 +227,15 @@ test('系统 Office / LibreOffice 只按命令名探测，探测结果不改变�
   expect(exported.renderer).toBe('selection-html-paginator')
 })
 
+test('列相对、行绝对的引用按一个单元格解析', () => {
+  const result = recalculateWorkbook([
+    { sheet: 'S', address: 'C72', value: '企业版' },
+    { sheet: 'S', address: 'A1', formula: 'C$72', cachedValue: '' },
+  ])
+  expect(result.values['S!A1']).toBe('企业版')
+  expect(result.errors).toEqual([])
+})
+
 test('能从 xlsx 包读出公式并按缓存对拍', () => {
   const sheet = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>10</v></c><c r="A2"><v>20</v></c><c r="A3"><f>SUM(A1:A2)</f><v>0</v></c><c r="B1" t="inlineStr"><is><t>进港</t></is></c></row></sheetData></worksheet>`
   const workbook = `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`

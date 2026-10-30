@@ -20,6 +20,9 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 | selection-meeting-minutes | Selection 样例 | — | `cases/selection-samples/meeting-minutes.json` |
 | selection-work-notice | Selection 样例 | — | `cases/selection-samples/work-notice.json` |
 | execution-tracker | Selection 样例 | — | `cases/execution-tracker.json` |
+| annual-business | 经营分析 | saas-metrics-coach | `cases/annual-business/` |
+| port-cargo | 物流分析 | dataset-health-audit、data-viz-gen | `cases/port-cargo/`，含 `inputs/port.json` |
+| bio-assay | 实验数据 | dataset-health-audit、data-viz-gen | `cases/bio-assay/`，含 `inputs/bio.json` |
 
 选中案例后读取 `businessSkill` 指向的 `business-skills/<name>/SKILL.md`。公文技能再按该文件的索引打开需要的分册，不要一次读完。
 
@@ -53,6 +56,18 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 
 Selection 样例 `selection-work-notice` 只把报送期限改至 11 月 6 日，是普通工作通知草稿，不宣称符合公文标准。
 
+## 与 dsh 业务方法的分工
+
+`financial-model` 继续负责财务模型的表结构、假设和情景。`data-dashboard` 继续负责仪表盘版式和 OfficeCLI 图表语法。下面三份技能只补 dsh 的业务口径，不替换这两份指南：
+
+- `saas-metrics-coach`：ARR、流失、LTV:CAC、Quick Ratio、单位经济。年度经营案例用它。
+- `dataset-health-audit`：12 个加权维度的数据体检。港口和实验案例在改明细后用它。
+- `data-viz-gen`：对比和趋势先写 OfficeCLI 原生图表，HTML/SVG 信息图只作补充。
+
+计算用 Bun CLI（`packages/office-business-runtime`），不调用 Python。Excel 交付前必须 `xlsx_recalculate`：OfficeCLI 把 `computedValue` 写回缓存；Windows 或 macOS 且装了 Excel 时再 `CalculateFull`；TypeScript 只补未求值的格子。有 `checks.json` 就逐项核对，否则双读关键单元格。区域渲染后原生读图，禁止 OCR，空白页立即停止。未重算不能交付。
+
+dsh 案例在 `cases/annual-business`、`cases/port-cargo`、`cases/bio-assay`。`example.xlsx` 只读。用 `inputs/*.json` 在工作区副本上生成，不要覆盖原件。下面的执行台账仍是 Selection 虚构样例，与这三个案例无关。
+
 ## Excel 执行台账
 
 材料：事项、计划量、完成量、状态来源和更新时间。输入与计算分开。案例 `execution-tracker.json` 将接口复核完成数 4 改为 6：该行完成率 60%，合计完成 14/18、77.8%。数据全为虚构。
@@ -72,5 +87,9 @@ O0/O5 对照 DSH `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的受版本控制�
 上一节是阶段 01 的更正，当时还没有搬入文件。阶段 07 按后来的决定放进了 4 个 Word 案例。LinNai 于 2026-10-30 22:52 确认 `government-notice` 可以原样搬入，所以上一句「不把 government-notice 原文拷进本目录」不再约束案例文件；案例现位于 `cases/government-notice/`。gov-doc-writing 的技能正文、分册和例句仍然不复用，自写内容在 `business-skills/gov-doc-writing/`，来源说明是「能力参照 dsh-desktop gov-doc-writing，未复用其内容」。
 
 虚构小样没有删除，改到「Selection 样例」，路径是 `cases/selection-samples/`，id 改为 `selection-meeting-minutes` 和 `selection-work-notice`，以免覆盖 dsh 的 `meeting-minutes`。是否最终移除等 LinNai 确认。执行台账仍是 `cases/execution-tracker.json`。
+
+### 2026-10-30 阶段 09 已放入 Excel 案例
+
+阶段 09 放进了 `annual-business`、`port-cargo`、`bio-assay`。原件 sha256 与阶段 01 清单一致，`example.xlsx` 只读。业务技能是 `saas-metrics-coach`、`dataset-health-audit`、`data-viz-gen`，计算用 Bun，不调用 Python。
 
 许可和来源见 [NOTICE](NOTICE) 与 [ATTRIBUTION.md](ATTRIBUTION.md)。

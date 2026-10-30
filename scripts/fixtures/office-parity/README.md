@@ -34,3 +34,16 @@ python3 validate_minutes.py pass-basic.md
 ```
 
 `*.md.stdout` 是完整 stdout，含末尾换行。`manifest.json` 记录退出码。用法行因脚本名不同，不纳入逐字节对拍；报告正文和退出码要求一致。重新生成时只替换这些 stdout，不要提交 `.py`。
+
+## metrics / unit-economics / data-quality / infographic
+
+阶段 09 追加。生成环境仍是 Python 3.12.3，只在开发机运行 dsh `588412b` 的原脚本，仓库只保留 stdout 和指名调色板的 HTML。
+
+| 目录 | 来源脚本 | sha256 |
+| --- | --- | --- |
+| `metrics/` | `saas-metrics-coach/scripts/metrics_calculator.py` | `decb7362196e97172e876f9732456ef41e91e123c6a335f62883d87fc0cfbf49` |
+| `unit-economics/` | `saas-metrics-coach/scripts/unit_economics_simulator.py` | `08a17b6fed9ef619f92ce5cc84cd44d592b229c2fa369a8a1913fce8bcf71f3b` |
+| `data-quality/` | `dataset-health-audit/scripts/data_quality_checker.py` | `78e0b59f649841ba06b107689a587237112d67047636e10727368bcdf8f93fdb` |
+| `infographic/` | `data-viz-gen/scripts/build_infographic.py` | `ff58f92a2d6c9d56274a1d0776cc28770c5c4a3fe672f72f048b59b402648dbf` |
+
+数值类对拍容差 1e-9。Quick Ratio、指标文本、单位经济文本和指名调色板的 SVG 用逐字节 stdout / HTML。`palette: auto` 不进入 golden，TypeScript 使用稳定哈希。

@@ -1,0 +1,15 @@
+{
+  "MRR": 48000.0,
+  "ARR": 576000.0,
+  "ARPA": 300.0,
+  "MoM_Growth_Pct": 14.29,
+  "Churn_Pct": 2.5,
+  "CAC": 818.18,
+  "LTV": 8640.0,
+  "LTV_CAC": 10.56,
+  "Payback_Months": 3.8,
+  "NRR_Pct": 96.43,
+  "Rule_of_40": 186.5,
+  "_missing": [],
+  "_gross_margin": 0.72
+}
