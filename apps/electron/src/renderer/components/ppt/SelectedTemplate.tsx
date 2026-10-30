@@ -6,6 +6,7 @@ import { MoreHorizontal, X } from 'lucide-react'
 import type { PptRequest, PptTemplate } from '@craft-agent/shared/protocol'
 import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { resolvePptTemplate } from './template-lookup'
 import { usePptCatalog } from './usePptCatalog'
 import { TemplateOptions } from './TemplateOptions'
 import { attachTrail, CARD_HEIGHT, CARD_WIDTH, CTRL, FAN, tiltExtent } from './geometry'
@@ -15,7 +16,7 @@ export function SelectedTemplate({ composerKey, disabled }: { composerKey: strin
   const [, setRequest] = useAtom(pptComposerAtomFamily(composerKey))
   const override = useAtomValue(pptComposerOverrideAtomFamily(composerKey))
   const { catalog } = usePptCatalog()
-  const template = catalog?.templates.find(item => item.id === override?.templateId)
+  const template = resolvePptTemplate(catalog?.templates, override?.templateId)
   if (!override?.templateId || !template) return null
   return <TemplateCard template={template} composerKey={composerKey} disabled={disabled} onRemove={() => setRequest(null)} />
 }
@@ -29,6 +30,7 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
   const [hover, setHover] = React.useState(false)
   const ref = React.useRef<HTMLDivElement>(null)
   const patch = (value: Partial<PptRequest>) => setRequest(previous => ({ ...previous, ...value }))
+  const parent = catalog?.templates.find(item => item.id === template.id || item.variants?.some(variant => variant.id === template.id))
   const extent = tiltExtent(CARD_WIDTH)
   const tilt = hover ? -1.5 : -3
   const left = Math.ceil(Math.max(2, -extent.left))
@@ -53,7 +55,7 @@ function TemplateCard({ template, composerKey, disabled, onRemove }: { template:
       <button type="button" data-testid="ppt-remove-template" disabled={disabled} onClick={onRemove} aria-label={t('ppt.removeTemplate')} className="ppt-template-remove absolute z-10 grid place-items-center rounded-full border border-white/30 bg-black/90 text-white transition-opacity motion-reduce:transition-none" style={{ top: -CTRL.xOff, right: -CTRL.xOff, width: CTRL.size, height: CTRL.size, opacity: hover || open ? 1 : 0, transform: `rotate(${-tilt}deg)` }}><X className="size-3" /></button>
       <Popover open={open} onOpenChange={setOpen}><PopoverTrigger asChild><button type="button" disabled={disabled} data-testid="ppt-template-options" aria-label={t('ppt.options')} className="absolute z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-foreground shadow-minimal" style={{ right: -CTRL.menuOff, bottom: -CTRL.menuOff, transform: `rotate(${-tilt}deg)` }}><MoreHorizontal className="size-3.5" /></button></PopoverTrigger>
         <PopoverContent side="bottom" align="start" className="w-[300px] p-1.5" data-testid="ppt-options-panel">
-          <TemplateOptions request={request ?? undefined} themes={catalog?.themes ?? []} onChange={patch} />
+          <TemplateOptions request={request ?? undefined} themes={catalog?.themes ?? []} variants={parent?.variants} baseTemplate={parent?.variants?.length ? { id: parent.id, title: parent.title } : undefined} onChange={patch} />
         </PopoverContent>
       </Popover>
     </motion.div>

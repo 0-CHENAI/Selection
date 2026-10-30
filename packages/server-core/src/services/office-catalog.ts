@@ -59,16 +59,27 @@ function asSkills(value: unknown): string[] {
   return skills
 }
 
+function safeRelative(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.includes('..') || isAbsolute(value)) return undefined
+  return value
+}
+
 function parseTemplate(value: unknown): OfficeTemplate {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Office 案例目录无效。')
   const item = value as Record<string, unknown>
+  const selection = item.selection && typeof item.selection === 'object' && !Array.isArray(item.selection)
+    ? item.selection as Record<string, unknown>
+    : undefined
   const mode = MODE[String(item.mode)]
   if (typeof item.id !== 'string' || !/^[a-z0-9-]+$/.test(item.id) || !mode) throw new Error('Office 案例目录无效。')
-  if (typeof item.title !== 'string' || typeof item.revision !== 'string' || !/^[0-9.]+$/.test(item.revision)) throw new Error('Office 案例目录无效。')
-  if (typeof item.source !== 'string' || item.source.includes('..') || isAbsolute(item.source)) throw new Error('Office 案例目录无效。')
-  if (typeof item.sampleFile !== 'string' || item.sampleFile.includes('..') || item.sampleFile.includes('/') || item.sampleFile.includes('\\')) throw new Error('Office 案例目录无效。')
-  const previewCount = item.previewCount === undefined ? 0 : item.previewCount
-  if (typeof previewCount !== 'number' || !Number.isInteger(previewCount) || previewCount < 0 || previewCount > 500) throw new Error('Office 案例目录无效。')
+  if (typeof item.title !== 'string' || typeof item.revision !== 'string' || !/^[A-Za-z0-9._-]+$/.test(item.revision)) throw new Error('Office 案例目录无效。')
+  const source = safeRelative(item.source) ?? safeRelative(selection?.assetDir) ?? safeRelative(typeof selection?.recipe === 'string' ? selection.recipe.replace(/\/[^/]+$/, '') : undefined) ?? `cases/${item.id}`
+  const sampleFile = item.sampleFile === null || item.sampleFile === undefined ? '' : item.sampleFile
+  if (typeof sampleFile !== 'string' || sampleFile.includes('..') || sampleFile.includes('/') || sampleFile.includes('\\')) throw new Error('Office 案例目录无效。')
+  const previewCount = typeof item.previewCount === 'number'
+    ? item.previewCount
+    : Array.isArray(item.previewPages) ? item.previewPages.length : 0
+  if (!Number.isInteger(previewCount) || previewCount < 0 || previewCount > 500) throw new Error('Office 案例目录无效。')
   return {
     id: item.id,
     title: item.title,
@@ -78,16 +89,17 @@ function parseTemplate(value: unknown): OfficeTemplate {
     description: typeof item.description === 'string' ? item.description : undefined,
     prompt: typeof item.prompt === 'string' ? item.prompt : undefined,
     businessSkills: asSkills(item.businessSkills ?? item.businessSkill),
-    source: item.source,
-    sampleFile: item.sampleFile,
+    source,
+    sampleFile,
     previewCount,
   }
 }
 
 export function listOfficeTemplates(root = getOfficeBusinessRoot()): OfficeTemplate[] {
   const catalog = readCatalog(root)
-  if (!Array.isArray(catalog.templates)) throw new Error('Office 案例目录无效。')
-  const templates = catalog.templates.map(parseTemplate)
+  const entries = Array.isArray(catalog.cases) ? catalog.cases : catalog.templates
+  if (!Array.isArray(entries)) throw new Error('Office 案例目录无效。')
+  const templates = entries.map(parseTemplate)
   const ids = new Set<string>()
   for (const template of templates) {
     if (ids.has(template.id)) throw new Error(`Office 案例重复：${template.id}`)
@@ -183,9 +195,11 @@ export function officeTemplatePreview(templateId: string, revision: string, page
   const template = selectOfficeTemplate(templateId, revision, templates)
   const entry = templateById(templates, template.templateId!)
   if (page !== undefined && (!Number.isInteger(page) || page < 1)) throw new Error('预览页码无效。')
-  const relativePath = page === undefined || entry.previewCount === 0
-    ? join('sources', entry.source, entry.sampleFile)
-    : join('sources', entry.source, 'preview', `${page}.png`)
+  const relativePath = !entry.sampleFile
+    ? entry.source
+    : page === undefined || entry.previewCount === 0
+      ? join('sources', entry.source, entry.sampleFile)
+      : join('sources', entry.source, 'preview', `${page}.png`)
   if (page !== undefined && entry.previewCount > 0 && page > entry.previewCount) throw new Error('预览页码超出案例页数。')
   if (page !== undefined && entry.previewCount === 0) throw new Error('该案例还没有分页预览。')
   const path = safeOfficePath(root, relativePath)
@@ -268,16 +282,18 @@ function guidePath(slug: 'officecli-docx' | 'officecli-xlsx'): string {
 }
 
 function businessSkillPath(slug: string, skillsRoot?: string): string {
+  if (!isOfficeBusinessSkill(slug)) throw new Error('所选业务技能不可用。')
+  const canonical = join(getOfficeBusinessRoot(), 'business-skills', slug, 'SKILL.md')
+  if (existsSync(canonical)) return canonical
   const root = skillsRoot ?? getBundledSkillsDir()
-  if (!root || !isOfficeBusinessSkill(slug)) throw new Error('所选业务技能不可用。')
-  const path = join(root, slug, 'SKILL.md')
-  if (!existsSync(path)) throw new Error('所选业务技能不可用。')
-  return path
+  const path = root ? join(root, slug, 'SKILL.md') : ''
+  if (path && existsSync(path)) return path
+  throw new Error('所选业务技能不可用。')
 }
 
 export function readBusinessSkillText(slug: string, skillsRoot?: string): string {
   const body = readText(businessSkillPath(slug, skillsRoot))
-  if (body.includes('## 文件交付')) return body
+  if (body.includes('## 文件交付') || body.includes('## Selection 文件交付')) return body
   return `${body}\n\n${OFFICE_FILE_DELIVERY_SUFFIX}`
 }
 
@@ -297,7 +313,7 @@ export function buildOfficeInjection(state: OfficeDocumentState, templates: Offi
     `当前输出格式：${label}。`,
     `${guide} 指南（实现是 OfficeCLI 的 ${slug}，不搬入 python-docx 或 openpyxl 正文）：`,
     foundation,
-    '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。',
+    '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。预览在 Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `view screenshot --render native`，否则用 Electron capturePage。PDF 再不行时用 OfficeCLI HTML 加 Electron printToPDF。',
   ]
   const template = selectedOfficeTemplate(state, templates)
   if (template) {

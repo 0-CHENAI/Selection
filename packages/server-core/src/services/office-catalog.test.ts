@@ -20,11 +20,7 @@ import {
 } from './office-catalog'
 import { getOfficeRenderCapabilities, officeRenderPreview, officeRenderRecalc, resolveOfficeRenderPlan, setOfficeRenderCapabilities, setOfficeRenderHosts } from './office-render'
 
-const cases = [
-  { id: 'meeting-minutes', title: '会议纪要', format: 'docx', guide: 'word', recipe: 'cases/meeting-minutes.json', editScope: 'one paragraph text fragment' },
-  { id: 'work-notice', title: '工作通知草稿', format: 'docx', guide: 'word', recipe: 'cases/work-notice.json', editScope: 'one paragraph text fragment' },
-  { id: 'execution-tracker', title: '执行台账', format: 'xlsx', guide: 'excel', recipe: 'cases/execution-tracker.json', editScope: 'one input cell and dependent recalculation' },
-]
+const wordCaseIds = ['meeting-minutes', 'coffee-market', 'equity-research', 'government-notice', 'selection-meeting-minutes', 'selection-work-notice', 'execution-tracker']
 
 function activeText(messages: readonly OfficeTranscriptMessage[]): string {
   return projectOfficeModelContext(messages.filter(message => message.officeInjection?.status !== 'replaced' || message.content === OFFICE_FORMAT_UPDATED))
@@ -49,11 +45,10 @@ describe('office document mode', () => {
         expect(planned.modelAddition).toContain('OfficeCLI DOCX Skill')
         expect(planned.modelAddition).toContain('meeting-minutes@20261012.1')
         expect(planned.modelAddition).toContain('<business_skill name="meeting-recap">')
-        expect(planned.modelAddition).toContain('# meeting-recap')
-        expect(planned.modelAddition).toContain('## 文件交付')
-        expect(planned.modelAddition).toContain('不要使用 `load_workspace_dependencies`')
-        expect(planned.modelAddition).toContain('printToPDF')
+        expect(planned.modelAddition).toContain('行动项')
+        expect(planned.modelAddition).toContain('Selection 文件交付')
         expect(planned.modelAddition).toContain('--render native')
+        expect(planned.modelAddition).toContain('printToPDF')
       } else {
         expect(planned.modelAddition).toBeUndefined()
       }
@@ -178,18 +173,19 @@ describe('office document mode', () => {
 
   test('catalog lists the contract and leaves the fictional recipes alone', () => {
     const root = join(import.meta.dir, '../../../../apps/electron/resources/skills/office-business')
-    const catalog = JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8')) as { cases: unknown; templates: { id: string }[] }
-    expect(catalog.cases).toEqual(cases)
-    expect(readFileSync(join(root, 'cases/meeting-minutes.json'), 'utf8')).toContain('11月3日')
-    expect(catalog.templates.map(item => item.id)).toEqual([
-      'meeting-minutes', 'coffee-market', 'equity-research', 'government-notice', 'annual-business', 'port-cargo', 'bio-assay',
+    const catalog = JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8')) as { cases: Array<{ id: string; businessSkill?: string; revision?: string }> }
+    expect(catalog.cases.map(item => item.id).slice(0, wordCaseIds.length)).toEqual(wordCaseIds)
+    expect(catalog.cases.find(item => item.id === 'meeting-minutes')).toMatchObject({ businessSkill: 'meeting-recap', revision: '20261012.1' })
+    expect(readFileSync(join(root, 'cases/selection-samples/meeting-minutes.json'), 'utf8')).toContain('11月3日')
+    expect(catalog.cases.map(item => item.id)).toEqual([
+      ...wordCaseIds, 'annual-business', 'port-cargo', 'bio-assay',
     ])
     const preview = officeTemplatePreview('annual-business', '20260914.1', 20, listOfficeTemplates(), root)
     expect(preview.available).toBe(false)
     expect(preview.path).toBe('sources/legacy/annual-business/preview/20.png')
     expect(() => officeTemplatePreview('annual-business', '20260914.1', 21, listOfficeTemplates(), root)).toThrow('超出')
     const listed = executeOfficeTemplates({ raw: JSON.stringify({ endpoint: 'catalog' }) })
-    expect(listed.result.templates).toHaveLength(7)
+    expect(listed.result.templates).toHaveLength(10)
     expect(listed.result.mode).toBeNull()
   })
 

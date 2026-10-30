@@ -1,19 +1,208 @@
 {
-  "version": 1,
-  "origin": "Selection original fictional business cases; no DSH Word/Excel source pack located",
+  "version": 2,
+  "origin": "dsh-desktop 588412b Word cases, plus Selection fictional samples kept under category 样例",
+  "baseline": "588412b9002fcb3ac88751fab7915e050c965563",
   "cases": [
-    { "id": "meeting-minutes", "title": "会议纪要", "format": "docx", "guide": "word", "recipe": "cases/meeting-minutes.json", "editScope": "one paragraph text fragment" },
-    { "id": "work-notice", "title": "工作通知草稿", "format": "docx", "guide": "word", "recipe": "cases/work-notice.json", "editScope": "one paragraph text fragment" },
-    { "id": "execution-tracker", "title": "执行台账", "format": "xlsx", "guide": "excel", "recipe": "cases/execution-tracker.json", "editScope": "one input cell and dependent recalculation" }
+    {
+      "id": "meeting-minutes",
+      "title": "会议纪要 · 发布会筹备",
+      "titleEn": "Launch preparation meeting minutes",
+      "description": "发布会筹备会议的三页纪要：五个议题、十五项行动记录及后续确认，保留责任、相对期限和原文依据。",
+      "prompt": "参考「会议纪要 · 发布会筹备」的结构和版式，将我提供的会议记录整理成可编辑 Word 纪要，保留关键讨论、已定安排、待确认事项，以及任务、负责人、期限和交付要求。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261012.1",
+      "category": "会议纪要",
+      "businessSkill": "meeting-recap",
+      "source": "curated/meeting-minutes",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/meeting-minutes",
+        "license": "MIT",
+        "exampleSha256": "b301c5e5801c62887a44f26379bc71f6c60cbdd21f45db13d63543f88abe6575"
+      }
+    },
+    {
+      "id": "coffee-market",
+      "title": "中国现制咖啡市场调研报告",
+      "titleEn": "Coffee market research",
+      "description": "以公开披露为基础的 2024 年市场研究：品牌网络、同店表现、消费场景与门店贡献，7 页报告及来源索引。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.6",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/coffee-market",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/coffee-market",
+        "license": "MIT",
+        "exampleSha256": "8cd61c57b0be98534ec361e7a4dfb38486ddc1547ac8c05426fc4f32680e958a",
+        "note": "dsh catalog 没有 prompt 字段，做同款时读 design.md 与 inputs/。"
+      }
+    },
+    {
+      "id": "equity-research",
+      "title": "小米汽车研究报告",
+      "titleEn": "Company research report",
+      "description": "投资逻辑、经营数据与风险分析，配合图表和来源标注。示例文稿。",
+      "prompt": "参考「小米汽车研究报告」的章节结构与研报样式，帮我研究【公司或行业】。面向【读者】，重点分析【核心问题】，生成含图表与来源标注的 Word 报告。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.5",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/equity-research",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/equity-research",
+        "license": "MIT",
+        "exampleSha256": "377a91187d9e295c9a3a492a803599b3757e887a878a85f41eb03eea42809418"
+      }
+    },
+    {
+      "id": "government-notice",
+      "title": "中国中车质量安全月活动通知",
+      "titleEn": "Official notice",
+      "description": "用户提供的 2025 年公文生成样例：活动主题、重点工作、组织实施与信息报送。保留原文待补充项。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260914.2",
+      "category": "公文写作",
+      "businessSkill": "gov-doc-writing",
+      "source": "legacy/government-notice",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/government-notice",
+        "license": "LinNai sample",
+        "exampleSha256": "c763f627f09e543505b4cfaea34487a0b8cd724b549e4762633153da61ddf961",
+        "note": "LinNai 2026-10-30 22:52 确认该样例可以原样搬入。技能正文仍自写。"
+      }
+    },
+    {
+      "id": "selection-meeting-minutes",
+      "title": "会议纪要",
+      "titleEn": "Selection fictional minutes",
+      "description": "Selection 自编虚构小样，只演示把一条提交期限从 11 月 3 日改为 11 月 5 日。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/meeting-minutes.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "selection-work-notice",
+      "title": "工作通知草稿",
+      "titleEn": "Selection fictional notice",
+      "description": "Selection 自编虚构小样，只演示把报送期限改为 11 月 6 日。不宣称符合公文标准。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/work-notice.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "execution-tracker",
+      "title": "执行台账",
+      "titleEn": "Selection fictional tracker",
+      "description": "Selection 自编虚构 Excel 小样，只演示改一个输入格并保留公式。",
+      "mode": "excel",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/execution-tracker.json",
+        "format": "xlsx",
+        "guide": "excel",
+        "editScope": "one input cell and dependent recalculation",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "annual-business",
+      "title": "年度经营与客户分析",
+      "titleEn": "Annual business and customers",
+      "description": "用联动工作表整理年度经营、增长、收入质量和客户留存。案例文件在阶段 09 搬入。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260914.1",
+      "category": "经营分析",
+      "businessSkill": "saas-metrics-coach",
+      "source": "legacy/annual-business",
+      "previewPages": null,
+      "previewCount": 20,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+      }
+    },
+    {
+      "id": "port-cargo",
+      "title": "青岚港货物流向与作业效率",
+      "titleEn": "Port cargo and operations",
+      "description": "整理吞吐、流向和作业效率，并核对数据质量。案例文件在阶段 09 搬入。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260911.6",
+      "category": "物流分析",
+      "businessSkills": [
+        "dataset-health-audit",
+        "data-viz-gen"
+      ],
+      "source": "legacy/port-cargo",
+      "previewPages": null,
+      "previewCount": 5,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+      }
+    },
+    {
+      "id": "bio-assay",
+      "title": "荧光酶活性筛选与批次质控",
+      "titleEn": "Bioassay and batch quality",
+      "description": "整理批次读数、剂量响应和质控图。案例文件在阶段 09 搬入。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260911.6",
+      "category": "实验数据",
+      "businessSkills": [
+        "dataset-health-audit",
+        "data-viz-gen"
+      ],
+      "source": "legacy/bio-assay",
+      "previewPages": null,
+      "previewCount": 4,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+      }
+    }
   ],
-  "templatesNote": "dsh 588412b 的案例目录合同，供阶段 05 的模式、注入和 revision 校验使用。这里只登记 id、revision 和业务技能。案例文件在阶段 07 / 09 搬入，不覆盖 cases/ 里的虚构小样。",
-  "templates": [
-    { "id": "meeting-minutes", "title": "会议纪要 · 发布会筹备", "mode": "word", "revision": "20261012.1", "category": "会议纪要", "description": "把会议记录整理成可编辑纪要，保留议题、决定、待确认事项和行动项。", "businessSkills": ["meeting-recap"], "source": "curated/meeting-minutes", "sampleFile": "example.docx", "previewCount": 0 },
-    { "id": "coffee-market", "title": "中国现制咖啡市场调研报告", "mode": "word", "revision": "20260911.6", "category": "调研分析", "description": "按公开资料整理市场研究的章节、图表和来源。", "businessSkills": ["research-writer"], "source": "legacy/coffee-market", "sampleFile": "example.docx", "previewCount": 0 },
-    { "id": "equity-research", "title": "小米汽车研究报告", "mode": "word", "revision": "20260911.5", "category": "调研分析", "description": "按研报结构整理投资逻辑、经营数据和风险。", "businessSkills": ["research-writer"], "source": "legacy/equity-research", "sampleFile": "example.docx", "previewCount": 0 },
-    { "id": "government-notice", "title": "中国中车质量安全月活动通知", "mode": "word", "revision": "20260914.2", "category": "公文写作", "description": "按公文案例的结构起草通知。正文方法由 Selection 自写，不照搬外部技能原文。", "businessSkills": ["gov-doc-writing"], "source": "legacy/government-notice", "sampleFile": "example.docx", "previewCount": 0 },
-    { "id": "annual-business", "title": "年度经营与客户分析", "mode": "excel", "revision": "20260914.1", "category": "经营分析", "description": "用联动工作表整理年度经营、增长、收入质量和客户留存。", "businessSkills": ["saas-metrics-coach"], "source": "legacy/annual-business", "sampleFile": "example.xlsx", "previewCount": 20 },
-    { "id": "port-cargo", "title": "青岚港货物流向与作业效率", "mode": "excel", "revision": "20260911.6", "category": "物流分析", "description": "整理吞吐、流向和作业效率，并核对数据质量。", "businessSkills": ["dataset-health-audit", "data-viz-gen"], "source": "legacy/port-cargo", "sampleFile": "example.xlsx", "previewCount": 5 },
-    { "id": "bio-assay", "title": "荧光酶活性筛选与批次质控", "mode": "excel", "revision": "20260911.6", "category": "实验数据", "description": "整理批次读数、剂量响应和质控图。", "businessSkills": ["dataset-health-audit", "data-viz-gen"], "source": "legacy/bio-assay", "sampleFile": "example.xlsx", "previewCount": 4 }
-  ]
+  "templatesNote": "cases 是阶段 07 的 Word 案例登记，加上阶段 05 为 Excel 模式预留的三条目录合同。Excel 案例文件在阶段 09 搬入。Selection 虚构小样仍在 selection-* / execution-tracker，不覆盖 dsh 案例。"
 }
