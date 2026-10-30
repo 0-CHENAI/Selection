@@ -8,3 +8,14 @@ Quick Ratio 的计算公式、评级文案和文本报告版式派生自：
 
 本目录是 TypeScript 等价实现，不包含该 Python 源码。
 Selection 仓库许可证为 Apache-2.0。上述 MIT 声明随派生文本保留。
+
+纪要结构校验的规则、报告文案和退出码派生自：
+
+  dsh-desktop
+  packages/dsh-desktop-office/business-skills/meeting-recap/scripts/validate_minutes.py
+  提交 588412b9002fcb3ac88751fab7915e050c965563
+  sha256 cca5ddea85bb07a64a93b012393b62ebc92777ec0cbb9c7638cbeb5ea38cc720
+  MIT License
+  Copyright (c) 2026 meeting-minutes contributors
+
+本目录是 TypeScript 等价实现，不包含该 Python 源码。

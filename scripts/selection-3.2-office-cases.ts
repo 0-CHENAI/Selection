@@ -4,7 +4,11 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } fro
 import { dirname, join, resolve } from 'node:path'
 import { getOfficecliWrapperDir, resolveOfficecliBinary } from '../packages/shared/src/utils/officecli'
 
-export const officeCaseIds = ['meeting-minutes', 'work-notice', 'execution-tracker'] as const
+export const officeCaseRecipes = [
+  'cases/selection-samples/meeting-minutes.json',
+  'cases/selection-samples/work-notice.json',
+  'cases/execution-tracker.json',
+] as const
 export async function runOfficeCases(output: string) {
   mkdirSync(output, { recursive: true })
   if (readdirSync(output).length) throw new Error('QA directory must be empty')
@@ -19,8 +23,9 @@ export async function runOfficeCases(output: string) {
     return stdout
   }
   const results = []
-  for (const id of officeCaseIds) {
-    const definition = JSON.parse(readFileSync(resolve(import.meta.dir, `../apps/electron/resources/skills/office-business/cases/${id}.json`), 'utf8'))
+  for (const recipe of officeCaseRecipes) {
+    const definition = JSON.parse(readFileSync(resolve(import.meta.dir, `../apps/electron/resources/skills/office-business/${recipe}`), 'utf8'))
+    const id = definition.id as string
     const template = join(output, `${id}-template.${definition.format}`)
     const edited = join(output, `${id}-edited.${definition.format}`)
     const batch = join(output, `${id}-create.json`)

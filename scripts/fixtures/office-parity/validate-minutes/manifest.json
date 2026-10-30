@@ -1,0 +1,115 @@
+{
+  "dshCommit": "588412b9002fcb3ac88751fab7915e050c965563",
+  "scriptPath": "packages/dsh-desktop-office/business-skills/meeting-recap/scripts/validate_minutes.py",
+  "scriptSha256": "cca5ddea85bb07a64a93b012393b62ebc92777ec0cbb9c7638cbeb5ea38cc720",
+  "cases": [
+    {
+      "id": "pass-basic",
+      "input": "pass-basic.md",
+      "stdout": "pass-basic.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "pass-aliases",
+      "input": "pass-aliases.md",
+      "stdout": "pass-aliases.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "pass-no-table",
+      "input": "pass-no-table.md",
+      "stdout": "pass-no-table.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "pass-relative",
+      "input": "pass-relative.md",
+      "stdout": "pass-relative.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "pass-leap",
+      "input": "pass-leap.md",
+      "stdout": "pass-leap.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "pass-han-boundary",
+      "input": "pass-han-boundary.md",
+      "stdout": "pass-han-boundary.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "fail-title",
+      "input": "fail-title.md",
+      "stdout": "fail-title.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-topics",
+      "input": "fail-topics.md",
+      "stdout": "fail-topics.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-actions",
+      "input": "fail-actions.md",
+      "stdout": "fail-actions.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-blank-actions",
+      "input": "fail-blank-actions.md",
+      "stdout": "fail-blank-actions.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-header",
+      "input": "fail-header.md",
+      "stdout": "fail-header.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-short-row",
+      "input": "fail-short-row.md",
+      "stdout": "fail-short-row.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-empty-cell",
+      "input": "fail-empty-cell.md",
+      "stdout": "fail-empty-cell.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-duplicate",
+      "input": "fail-duplicate.md",
+      "stdout": "fail-duplicate.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "warn-pending",
+      "input": "warn-pending.md",
+      "stdout": "warn-pending.md.stdout",
+      "exitCode": 0
+    },
+    {
+      "id": "fail-date",
+      "input": "fail-date.md",
+      "stdout": "fail-date.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-separator-only",
+      "input": "fail-separator-only.md",
+      "stdout": "fail-separator-only.md.stdout",
+      "exitCode": 1
+    },
+    {
+      "id": "fail-spaced-date",
+      "input": "fail-spaced-date.md",
+      "stdout": "fail-spaced-date.md.stdout",
+      "exitCode": 1
+    }
+  ]
+}
