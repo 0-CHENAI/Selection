@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
+import { useWebglEffort } from '@/hooks/useWebglEffort'
 import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
@@ -14,8 +15,14 @@ const EFFORT_EDGE = 11
 // Slightly larger than the 22px track so the knob reads as floating above it.
 const EFFORT_THUMB = 26
 
+function MaxEffortField() {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null)
+  useWebglEffort(canvasRef)
+  return <canvas ref={canvasRef} className="prompt-effort-webgl" aria-hidden="true" />
+}
+
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange, unavailable, binary,
+  value, levels, workMode, disabled, onChange, unavailable, binary, inMenu = true,
 }: {
   value: ThinkingLevel
   levels: readonly ThinkingLevelDefinition[]
@@ -26,6 +33,8 @@ export function PromptThinkingSettings({
   unavailable?: 'unsupported' | 'always-on'
   /** Two stops that only turn thinking on or off. */
   binary?: boolean
+  /** Drawer controls are not descendants of a Radix dropdown menu. */
+  inMenu?: boolean
 }) {
   const { t } = useTranslation()
   const [dragging, setDragging] = React.useState(false)
@@ -42,7 +51,7 @@ export function PromptThinkingSettings({
     )
   }
   const index = Math.max(0, levels.findIndex(level => level.id === value))
-  const maxed = levels.length > 1 && value === levels.at(-1)?.id
+  const maxed = !binary && !disabled && levels.length > 1 && value === 'max' && levels.some(level => level.id === 'max')
   const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
@@ -68,6 +77,48 @@ export function PromptThinkingSettings({
     event.stopPropagation()
     setIndex(step ? index + step : event.key === 'Home' ? 0 : levels.length - 1)
   }
+  const helpButton = (
+    <button type="button" className="prompt-effort-help" aria-label={t('thinking.effortHelp')}>
+      <HugeiconsIcon icon={HelpCircleIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
+    </button>
+  )
+  const slider = (
+    <div
+      className="prompt-effort-track"
+      role="slider"
+      tabIndex={inactive ? -1 : 0}
+      aria-label={t('thinking.effort')}
+      aria-orientation="horizontal"
+      aria-valuemin={0}
+      aria-valuemax={levels.length - 1}
+      aria-valuenow={index}
+      aria-valuetext={t(valueKey)}
+      aria-disabled={inactive}
+      data-dragging={dragging || undefined}
+      style={{
+        '--prompt-effort-x': stepAt(index),
+        '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
+        '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + ${EFFORT_THUMB / 2}px)`,
+      } as React.CSSProperties}
+      onPointerDown={event => {
+        if (event.button !== 0 || inactive) return
+        event.currentTarget.setPointerCapture(event.pointerId)
+        event.currentTarget.focus({ preventScroll: true })
+        setDragging(true)
+        fromPointer(event)
+      }}
+      onPointerMove={event => { if (event.buttons & 1) fromPointer(event) }}
+      onPointerUp={stopDragging}
+      onPointerCancel={stopDragging}
+      onLostPointerCapture={stopDragging}
+      onKeyDown={onKeyDown}
+    >
+      <span className="prompt-effort-fill" aria-hidden="true" />
+      {levels.map((level, i) => <i key={level.id} className="prompt-effort-dot" style={{ left: stepAt(i) }} aria-hidden="true" />)}
+      {maxed && <MaxEffortField />}
+      <span className="prompt-effort-thumb" aria-hidden="true" />
+    </div>
+  )
 
   return (
     <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
@@ -76,11 +127,9 @@ export function PromptThinkingSettings({
         <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <MenuItem asChild onSelect={event => event.preventDefault()}>
-              <button type="button" className="prompt-effort-help" aria-label={t('thinking.effortHelp')}>
-                <HugeiconsIcon icon={HelpCircleIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
-              </button>
-            </MenuItem>
+            {inMenu
+              ? <MenuItem asChild onSelect={event => event.preventDefault()}>{helpButton}</MenuItem>
+              : helpButton}
           </TooltipTrigger>
           <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
         </Tooltip>
@@ -89,41 +138,9 @@ export function PromptThinkingSettings({
         <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
         <span>{t(binary ? 'thinking.on' : 'thinking.smarter')}</span>
       </div>
-      <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>
-        <div
-          className="prompt-effort-track"
-          role="slider"
-          aria-label={t('thinking.effort')}
-          aria-orientation="horizontal"
-          aria-valuemin={0}
-          aria-valuemax={levels.length - 1}
-          aria-valuenow={index}
-          aria-valuetext={t(valueKey)}
-          aria-disabled={inactive}
-          data-dragging={dragging || undefined}
-          style={{
-            '--prompt-effort-x': stepAt(index),
-            '--prompt-effort-thumb': `${EFFORT_THUMB}px`,
-            '--prompt-effort-fill': index === levels.length - 1 ? '100%' : `calc(${stepAt(index)} + ${EFFORT_THUMB / 2}px)`,
-          } as React.CSSProperties}
-          onPointerDown={event => {
-            if (event.button !== 0 || inactive) return
-            event.currentTarget.setPointerCapture(event.pointerId)
-            event.currentTarget.focus({ preventScroll: true })
-            setDragging(true)
-            fromPointer(event)
-          }}
-          onPointerMove={event => { if (event.buttons & 1) fromPointer(event) }}
-          onPointerUp={stopDragging}
-          onPointerCancel={stopDragging}
-          onLostPointerCapture={stopDragging}
-          onKeyDown={onKeyDown}
-        >
-          <span className="prompt-effort-fill" aria-hidden="true" />
-          {levels.map((level, i) => <i key={level.id} className="prompt-effort-dot" style={{ left: stepAt(i) }} aria-hidden="true" />)}
-          <span className="prompt-effort-thumb" aria-hidden="true" />
-        </div>
-      </MenuItem>
+      {inMenu
+        ? <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>{slider}</MenuItem>
+        : slider}
     </div>
   )
 }

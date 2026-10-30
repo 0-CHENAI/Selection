@@ -136,6 +136,20 @@
   background: color-mix(in srgb, var(--foreground) 30%, transparent);
 }
 
+.prompt-effort-webgl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.prompt-effort-settings[data-max] .prompt-effort-track {
+  background: oklch(0.14 0.008 293);
+}
+.prompt-effort-settings[data-max] .prompt-effort-dot { visibility: hidden; }
+
 /* 26px circle on the 22px track. Crisp edge and a single short shadow, like a shadcn thumb. */
 .prompt-effort-thumb {
   position: absolute;
