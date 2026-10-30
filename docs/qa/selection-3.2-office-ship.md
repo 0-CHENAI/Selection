@@ -66,3 +66,11 @@ O5 #696 的 Validate 41004874701 和 OfficeCLI 41004874522 均成功后，已引
 默认连接 pi-api-key / Laufry，隐藏会话 `261030-warm-dolphin`，证据 `/var/folders/jr/49n0sbtj1h56v4zmy5v7rwzh0000gn/T/selection-3.2-route-title-EMxng1/trace.json`。实际调用 `officecli set /slide[2]/shape[@name=t3]/paragraph[1]/run[1] --prop text=理解关键用户时刻`；deck.json 前后 SHA256 一致，无重锁或 deck 重导出，目录只有一份用户交付 PPTX。
 
 独立复核最终字节：用同版本导出器从 trace.before.deck 重建内容基线（该次采集尚未保留原始二进制，因此不声称 ZIP 字节相同），逐个比较全部 `ppt/` 部件的 XML 结构/属性/文字和媒体字节，仅忽略 XML 子节点间缩进。唯一实质差异为 slide2.xml 的指定标题文字；版式/母版 XML 只发生空白序列化变化。其余页面、备注、主题、媒体均一致。原生 OfficeCLI validate 零错误；原生读图 `data/qa/final-slide-2.png` 标题正确，无裁切/重叠/缺字。
+
+### 外来稿读取缺口与基线完善
+
+首轮 external 轨迹在实际编辑前执行了 brief 生成与 --verify，但只读取自行压缩的文本版，错误地把形状 format 内的字段当作顶层字段，遗漏 path/format 等信息；不计为“完整读取 brief”通过。参考文档改为明确当前 JSON 字段路径，要求直接连续分段读原 JSON，禁止以删字段的二次摘要代替。待当前用例结束后重新验收。
+
+采集器为既有工程跟进增加真实的全页修改前截图及源哈希，供模型判断未改页证据；截图存在不等于视觉通过，记录中明确仍需检视。避免把没有此前图像的测试素材描述成已有完整视觉验收。外来稿不伪造匹配工程或先验视觉结论。
+
+打包门禁已在功能分支手动启动：run 41006827680，对应 f9252c2f0。macOS/Windows 构建进行中；publish-release 条件只允许默认分支或 test，因此本次不会发布 release。该结果不能冒充 test 合入后的发布门禁。

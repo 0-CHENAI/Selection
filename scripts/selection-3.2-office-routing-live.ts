@@ -11,7 +11,8 @@ import { getSessionPath } from '@craft-agent/shared/sessions'
 import { SessionManager, setSessionPlatform } from '@craft-agent/server-core/sessions'
 import { createHeadlessPlatform } from '@craft-agent/server-core/runtime'
 import { unzipSync } from 'fflate'
-import { exportDeck, loadDeckFile } from '../apps/electron/resources/skills/ppt-design/engine/index'
+import { resolveOfficecliBinary } from '../packages/shared/src/utils/officecli'
+import { captureSlides, exportDeck, loadDeckFile } from '../apps/electron/resources/skills/ppt-design/engine/index'
 
 const repo = resolve(import.meta.dir, '..')
 const workspace = getWorkspaces()[0]
@@ -48,6 +49,15 @@ try {
     writeFileSync(join(data, 'plan.md'), '既有12页演示稿。当前设计为 dsh-monochrome；沿用 deck.json 中的主题。此轮是已有交付的跟进修改。')
   }
   copyFileSync(output, join(dir, 'before.pptx.bin'))
+  // A real follow-up starts with prior-page evidence. Do not pretend that a deck
+  // without screenshots has already passed visual review.
+  if (!external) {
+    const binary = resolveOfficecliBinary()
+    assert(binary, 'Prepare the managed OfficeCLI runtime before live acceptance')
+    const prior = await captureSlides(output, join(data, 'slides'), deck.pages.length, { officecli: binary })
+    assert(prior.available && prior.renderer === 'officecli' && prior.files.length === deck.pages.length, 'Prior evidence must cover every page')
+    writeFileSync(join(data, 'prior-visual-evidence.json'), JSON.stringify({ sourceSha256: createHash('sha256').update(readFileSync(output)).digest('hex'), files: prior.files, note: 'Actual pre-edit screenshots; inspect as needed before relying on unchanged-page evidence. This is not a model visual pass assertion.' }, null, 2))
+  }
   const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
   const before = { deck, projectSha256: external ? null : hash(project), pptxSha256: hash(output) }
   writeFileSync(join(dir, 'before.json'), JSON.stringify(before, null, 2))
