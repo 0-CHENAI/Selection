@@ -52,7 +52,15 @@ export function prepareOrdinarySessionSidebarLinks<T extends SidebarLinkLike>(li
     })
   }
   if (projects) ordered.push(projects)
-  if (office) ordered.push(office)
+  if (office) {
+    ordered.push({
+      ...office,
+      items: undefined,
+      expandable: false,
+      expanded: undefined,
+      onToggle: undefined,
+    })
+  }
   if (separator) ordered.push(separator)
   if (sources) ordered.push(sources)
 

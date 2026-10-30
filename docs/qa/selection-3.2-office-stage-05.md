@@ -18,7 +18,7 @@
 
 同一会话同一时刻只有一种文档模式。切到 PPT 时，Word / Excel 注入换成「输出格式已按当前会话选择更新。」PPT 成稿技能仍是 `ppt-design`，不把 `officecli-pptx` 当成模式技能。中途上传的文件记作用户材料，不改 `templateId`。
 
-侧边栏原来的「PPT」入口改成「Office」，下面有 PPT、Word、Excel。PPT 仍走原来的模板选择和 `ppt/session/...` 地址。`office`、`office/ppt` 解析成同一份 PPT 列表。Word / Excel 用 `office/word`、`office/excel`。旧的 `nav:ppt` 仍指向 PPT 子项。
+侧边栏只有一个「Office」入口，不再展开 PPT / Word / Excel。中间的历史列表把这三类会话放在一起，每行有一个小的类型图标。主区域空白页在输入框上方切换 PPT、Word、Excel；`ppt`、`office`、`office/ppt` 打开 PPT，`office/word` 和 `office/excel` 打开对应分区。只提供旧 id `nav:ppt` 的侧边栏定义仍会落到 Office 这一项。
 
 ## 验收
 

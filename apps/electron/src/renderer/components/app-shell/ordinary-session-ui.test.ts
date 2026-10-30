@@ -47,6 +47,7 @@ describe('ordinary session UI migration', () => {
       'nav:sources',
       'nav:skills',
     ])
+    expect(links.find(link => link.id === 'nav:office')).toMatchObject({ expandable: false, items: undefined })
     const legacy = prepareOrdinarySessionSidebarLinks([
       { id: 'nav:ppt' },
       { id: 'nav:allSessions' },

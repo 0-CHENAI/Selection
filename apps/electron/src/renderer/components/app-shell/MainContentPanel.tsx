@@ -35,7 +35,6 @@ import {
 import { useSessionSelection, useIsMultiSelectActive, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
 import { SourceInfoPage, ChatPage } from '@/pages'
-import { OfficeSectionHome } from '@/components/office/OfficeSectionHome'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
@@ -327,11 +326,11 @@ export function MainContentPanel({
 
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        {navState.filter.kind === 'office' && !navState.details ? (
-          <OfficeSectionHome section={navState.filter.section} />
-        ) : (
-          <ChatPage sessionId={navState.details?.sessionId ?? null} pptMode={navState.filter.kind === 'ppt'} />
-        )}
+        <ChatPage
+          sessionId={navState.details?.sessionId ?? null}
+          pptMode={navState.filter.kind === 'ppt'}
+          officeSection={navState.filter.kind === 'ppt' ? 'ppt' : navState.filter.kind === 'office' ? navState.filter.section : undefined}
+        />
       </Panel>
     )
   }

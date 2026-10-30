@@ -14,7 +14,7 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
-import type { ManagedArtifact, PptRequest, PptRevision, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { ManagedArtifact, OfficeRequest, PptRequest, PptRevision, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { RPC_CHANNELS, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -1365,7 +1365,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest, pptRevision?: PptRevision) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: SendMessageOptions['annotationFollowUps'], ppt?: PptRequest, office?: OfficeRequest, pptRevision?: PptRevision) => {
     let locallyCommitted = false
     let optimisticMessageId: string | undefined
     try {
@@ -1546,7 +1546,7 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         isPending: true,  // Optimistic - will be confirmed by backend
         isQueued: sendingMidStream,
-        ...(ppt ? { turnContext: { ppt } } : {}),
+        ...(ppt ? { turnContext: { ppt } } : office ? { turnContext: { office } } : {}),
       }
 
       // Optimistic UI update - add user message and set processing state
@@ -1568,6 +1568,7 @@ export default function App() {
         optimisticMessageId: userMessage.id,
         annotationFollowUps,
         ppt,
+        office,
         ...(revision ? { pptRevision: revision } : {}),
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
@@ -1580,6 +1581,7 @@ export default function App() {
         } : undefined,
       })
       if (ppt) updateSessionById(sessionId, { ppt })
+      if (office) updateSessionById(sessionId, { office })
       // Keep the preview and its selection visible while the revision runs.
       return true
     } catch (error) {
@@ -1604,7 +1606,7 @@ export default function App() {
     const sessionId = sessionSelection.selected
     if (!sessionId) return false
     const ppt = store.get(sessionAtomFamily(sessionId))?.ppt ?? {}
-    return await handleSendMessage(sessionId, text, undefined, ['ppt-design'], undefined, undefined, ppt, revision) === true
+    return await handleSendMessage(sessionId, text, undefined, ['ppt-design'], undefined, undefined, ppt, undefined, revision) === true
   }, [sessionSelection.selected, store, handleSendMessage])
 
   /**
