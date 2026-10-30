@@ -1,0 +1,52 @@
+.prompt-fast-seat {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.prompt-fast-button {
+  --fast-accent: oklch(0.53 0.2 293);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+.dark .prompt-fast-button { --fast-accent: oklch(0.78 0.15 293); }
+.prompt-fast-seat[data-work-mode='PRO'] .prompt-fast-button { --fast-accent: var(--pro-accent); }
+.prompt-fast-button:hover { background: color-mix(in srgb, var(--fast-accent) 8%, transparent); }
+.prompt-fast-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.prompt-fast-button:disabled {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+}
+.prompt-fast-button[data-active] {
+  color: var(--fast-accent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--fast-accent) 14%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fast-accent) 42%, transparent),
+    0 0 12px color-mix(in srgb, var(--fast-accent) 34%, transparent);
+}
+.prompt-fast-button[data-active] svg {
+  fill: color-mix(in srgb, var(--fast-accent) 28%, transparent);
+  animation: prompt-fast-charge 2.4s ease-in-out infinite;
+}
+@keyframes prompt-fast-charge {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-fast-button,
+  .prompt-fast-button[data-active] svg { animation: none; transition: none; }
+}

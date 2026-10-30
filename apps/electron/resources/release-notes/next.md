@@ -30,6 +30,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Max 思考强度与 Fast** — 桌面模型菜单和紧凑选择器共用思考强度滑轨；仅 Max 显示圆角方格 WebGL 点燃、拖尾与辉光，其他档位保持普通轨道。方格轮廓在辉光合成后重新裁切，减少动态效果时显示静态画面，离开 Max 或关闭菜单即释放渲染资源。保留 GPT OAuth Fast 的独立会话持久化，并补齐 #681 的闪电开关、忙碌和不支持状态；Fast 不改变思考强度。
+
 - **PPT 中途附件** — PPT 会话生成之后仍可从输入栏附加图片和文件，也可以粘贴截图，或把文件拖到已打开的 Office 预览上。没有选中元素时，附件按普通对话保存进会话并交给模型。已经选中元素时会说明定向修改不能同时带附件，而不是静默禁用。Fixes #669.
 
 - **开发启动与加载布局** — 修复 Vite 冷启动把共享 debug 工具中的主进程日志 transport 扫进 renderer、导致 `https` 预构建报错的问题；主进程继续接收文件日志。启动 HTML 在业务脚本和 CSS 加载前约束根容器，消除初始 loading 页的意外页面滚动条，消息与模板详情仍保留内部滚动。增加真实冷预构建和完整 NORM/PPT 导航回归。
