@@ -2637,7 +2637,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             ) : undefined}
             className={officeHome ? 'max-w-[1000px] px-8 @xs/panel:px-8 pb-0' : compactMode ? 'px-3' : 'px-5 @xs/panel:px-5'}
             showOptionBadges={officeHome ? false : undefined}
-            beforeInput={officeHome && homeSection && onOfficeSectionChange ? <OfficeModeSwitcher section={homeSection} onChange={onOfficeSectionChange} /> : undefined}
+            {...(officeHome && homeSection && onOfficeSectionChange ? { beforeInput: <OfficeModeSwitcher section={homeSection} onChange={onOfficeSectionChange} /> } : {})}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
