@@ -433,3 +433,17 @@ test('failed revision preserves the last checked PPTX and overrides stale passin
     expect(readPptProgress(root, false)?.pages?.[0]?.status).toBe('passed')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+
+test('page diagnostics preserve actionable element targets and bound the UI payload', () => {
+  const root = session()
+  try {
+    deck(root, 3)
+    const progress = readPptProgress(root, false, { check: () => Array.from({ length: 55 }, (_, i) => ({ pageId: 'p2', elementId: `text-${i}`, code: 'overflow', message: 'Text outside canvas' })) })
+    const page = progress!.pages![1]!
+    expect(page.issueCount).toBe(55)
+    expect(page.issues).toHaveLength(50)
+    expect(page.issues![0]).toEqual({ code: 'overflow', elementId: 'text-0', message: 'Text outside canvas' })
+    expect(progress!.pages![0]!.issues ?? []).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

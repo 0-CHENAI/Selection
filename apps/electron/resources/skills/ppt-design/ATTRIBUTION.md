@@ -4,7 +4,7 @@
 
 页面格式、预检和 PPTX 导出是 Selection 自己的实现，使用 [PptxGenJS](https://github.com/gitbrent/PptxGenJS) 3.12.0（MIT，Copyright (c) 2015-Present Brent Ely）。没有复制 DSH Desktop 的 `packages/ppt-runtime` 或 PPTD 引擎。
 
-参考页由开发脚本 `scripts/import-dsh-templates.ts` 从 DSH Desktop v0.2.21（提交 `1439949f46ddfe0b94446558511f979f0c4215ba`）生成的 `.page` / `.pptd` 转入 selection-deck。脚本按套名导入，这次只转入下面五套，每套中文 `deck.json` 与英文 `deck.en.json` 各 12 页。其余套没有进入本目录。
+参考页由开发脚本 `scripts/import-dsh-templates.ts` 从 DSH Desktop v0.2.21（提交 `1439949f46ddfe0b94446558511f979f0c4215ba`）生成的 `.page` / `.pptd` 转入 selection-deck。脚本按套名导入，第一批只转入下面五套，每套中文 `deck.json` 与英文 `deck.en.json` 各 12 页。后续补齐记录见文末。
 
 | 风格 | 来源 | 许可 |
 |---|---|---|
@@ -122,3 +122,12 @@ G1–G5 和「整项任务最多三次视觉检查」沿用本技能上一版已
 ## 叙事组合指引
 
 `references/composition.md` 适配 DSH Desktop `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的 `packages/ppt-runtime/core/skills/dsh-ppt/references/composition.md`（DSH 通用说明，MIT），保留原来源与适用许可，新增 Selection 主题 token、局部修订与原生视觉边界。未复制 DSH runtime。
+
+## Selection 3.2 O3 新增包与样例扩展
+
+2026-10-30 从 DSH 已提交快照 `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 补齐 11 套，每套中英文各 12 页。原始转入工程保留在 `styles/<id>/`；适配后的可选参考页另存于 `styles/examples/imported/<id>/`，不覆盖已有模板或原封面/内容/尾页。未分发字体。
+
+- Zara Zhang / beautiful-html-templates（MIT，Copyright (c) 2026 Zara Zhang；上游固定提交沿用前述 e5e204f）：dsh-monochrome、dsh-blue-professional、dsh-neo-grid-bold、dsh-signal、dsh-broadside、dsh-playful、dsh-sakura-chroma、dsh-editorial-forest。
+- DSH retained-native（MIT，Copyright (c) 2026 DataElement；原始来源 de281a1ceccadb00b92df53adb106a2e87ec0b4b）：swiss-signal-grid、modular-logistics-system、nordic-operating-report。其目录名带 curated-，metadata.definition.slug 不带此前缀；按真实 slug 接入。
+- 新增包仅使用上述 MIT 来源；既有两套 Apache-2.0 模板与其 NOTICE/许可原样保留。各套 design.md 保留 DSH 原文；本文件已有的完整 MIT 许可与署名继续适用。
+- Selection 样例扩展通过 scripts/adapt-dsh-office-templates.ts 重现：不缩小字号、不删改事实，调整显式换行、实际容量、对比度与冲突几何；樱花背景斜带、物流参考网格标为装饰。原始与剩余诊断见 styles/dsh-import-diagnostics.json。预览从实际可选扩展工程导出。

@@ -54,6 +54,12 @@ export interface PptChartFallback {
 /** deck_check outcome shown for one page on the PPT result card. */
 export type PptPageStatus = 'passed' | 'needs_revision' | 'fixing' | 'pending'
 
+export interface PptPageIssue {
+  code: string
+  message: string
+  elementId?: string
+}
+
 export interface PptPageProgress {
   /** 1-based page number. */
   index: number
@@ -61,6 +67,8 @@ export interface PptPageProgress {
   name: string
   status: PptPageStatus
   issueCount: number
+  /** Bounded actionable diagnostics; issueCount retains the full count. */
+  issues?: PptPageIssue[]
   /** First cleaned check message for this page. */
   issue?: string
   /** A hard check failed: schema, bounds, capacity, or a literal newline. */
