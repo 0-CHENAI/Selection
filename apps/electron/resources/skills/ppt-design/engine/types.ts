@@ -2,6 +2,69 @@
 
 export const DECK_FORMAT = 'selection-deck' as const
 export const DECK_VERSION = 1 as const
+/** Version 2 is the import project. Version 1 files stay valid and do not gain these fields. */
+export type DeckVersion = 1 | 2
+
+export type DeckSource = {
+  kind: 'import' | 'template-project' | 'authored'
+  fileName?: string
+  sha256?: string
+}
+
+export type DeckLayoutRef = {
+  master?: string
+  layout?: string
+}
+
+export type DeckCrop = { l: number; t: number; r: number; b: number }
+
+export type DeckMask = {
+  shape: 'rect' | 'roundRect' | 'ellipse' | 'path'
+  path?: string
+}
+
+export type DeckTextRun = {
+  text: string
+  size?: number
+  bold?: boolean
+  italic?: boolean
+  color?: string
+}
+
+/** Route B. Present only on objects the project must not restyle. */
+export type DeckRetained = {
+  feature: string
+  message: string
+}
+
+/** Same field meanings as a notes JSON blob `dsh.template-images/v1`. */
+export type ImageSlotContract = {
+  schema: 'dsh.template-images/v1'
+  layoutId: string
+  pageRole: string
+  style: {
+    medium: string
+    palette: string
+    lighting: string
+    tone: string
+    textTreatment: string
+    continuity: string
+  }
+  contentPolicy?: 'provided-facts-or-qualitative'
+  slots: ImageSlot[]
+}
+
+export type ImageSlot = {
+  elementId: string
+  role: string
+  contentSources: string[]
+  sourcePolicy: 'contextual-scene' | 'provided-portrait' | 'native-graphic'
+  subject: string
+  composition: string
+  aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
+  reuseGroup: string
+  maskElementIds: string[]
+}
 export const CANVAS_WIDTH = 960
 export const CANVAS_HEIGHT = 540
 
@@ -223,6 +286,13 @@ export type DeckElement = {
   /** Present when this image is a chart from an external skill. */
   chartImage?: ChartImageSpec
   table?: TableSpec
+  /** Set when this shape was expanded out of a group. */
+  group?: { id: string }
+  crop?: DeckCrop
+  mask?: DeckMask
+  link?: { href: string }
+  runs?: DeckTextRun[]
+  retained?: DeckRetained
 }
 
 export type DeckPage = {
@@ -232,11 +302,16 @@ export type DeckPage = {
   background: string
   elements: DeckElement[]
   notes?: string
+  layoutRef?: DeckLayoutRef
+  /** Same contract as a notes JSON blob. Optional so version 1 pages stay unchanged. */
+  imageSlots?: ImageSlotContract
 }
 
 export type Deck = {
   format: typeof DECK_FORMAT
-  version: typeof DECK_VERSION
+  version: DeckVersion
+  /** Import provenance. Omitted on version 1. */
+  source?: DeckSource
   title: string
   canvas: { width: number; height: number }
   theme: Theme

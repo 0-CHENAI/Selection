@@ -1,6 +1,6 @@
 # 在 deck.json 上承接 dsh 的 PPT 功能
 
-状态：提议。对应 [#707](https://github.com/0-CHENAI/Selection/issues/707)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。LinNai 还没有拍板。拍板前不接入 CLI、技能和界面，不改现有模板，不开始 #713–#716。
+状态：LinNai 已拍板（2026-10-30）。对应 [#707](https://github.com/0-CHENAI/Selection/issues/707)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。路线 A 为主，路线 B 兜底，路线 C 只做定点修改。阶段 10（[#713](https://github.com/0-CHENAI/Selection/issues/713)）按此把外来稿导入接到 deck.json。现有模板仍然不改写。
 
 对照基线是阶段 01（[#719](https://github.com/0-CHENAI/Selection/pull/719)）冻结的 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。Selection 侧工程格式仍是 `selection-deck` version 1。dsh 的打包 JS 只用来核对它覆盖哪些对象、诊断怎么分级，不搬进本仓库。
 

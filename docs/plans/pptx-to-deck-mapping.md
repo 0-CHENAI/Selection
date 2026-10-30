@@ -13,7 +13,7 @@
 | 保留不可编辑 | 导出时按原位置留着，工程里不能改版式，也不能跟着换主题 | `placeholder`，以及我们不解码的 EMF/WMF |
 | 不支持 | 不进工程，也不在导出里假装还在。诊断用 ADR 附录 B 的句子 | `unsupported`，以及 SmartArt、音视频、OLE、动画 |
 
-本阶段的 `importSimplePptx` 只实现表里写明「证明已做」的行。其余行只登记诊断，不写保留层。
+阶段 04 的 `importSimplePptx` 只实现表里写明「证明已做」的行。阶段 10 的 `importPptx` 补上表里的保真和近似项，并把保留项写进 `retained.json`，导出时按原位置贴回。
 
 ## 对象对照
 
