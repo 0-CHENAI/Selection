@@ -259,6 +259,10 @@
         "typescript": "^5.8.2",
       },
     },
+    "packages/office-business-runtime": {
+      "name": "@craft-agent/office-business-runtime",
+      "version": "3.1.0",
+    },
     "packages/pi-agent-server": {
       "name": "@craft-agent/pi-agent-server",
       "version": "3.1.0",
@@ -635,6 +639,8 @@
     "@craft-agent/electron": ["@craft-agent/electron@workspace:apps/electron"],
 
     "@craft-agent/messaging-gateway": ["@craft-agent/messaging-gateway@workspace:packages/messaging-gateway"],
+
+    "@craft-agent/office-business-runtime": ["@craft-agent/office-business-runtime@workspace:packages/office-business-runtime"],
 
     "@craft-agent/pi-agent-server": ["@craft-agent/pi-agent-server@workspace:packages/pi-agent-server"],
 

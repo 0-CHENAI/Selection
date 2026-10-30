@@ -1,0 +1,20 @@
+{
+  "quick_ratio": 4.0,
+  "quick_ratio_display": "4.00",
+  "status": "EXCELLENT",
+  "interpretation": "Strong, efficient growth - gaining revenue 4x faster than losing it",
+  "components": {
+    "growth_mrr": 8000.0,
+    "lost_mrr": 2000.0,
+    "new_mrr": 8000.0,
+    "expansion_mrr": 0,
+    "churned_mrr": 2000.0,
+    "contraction_mrr": 0
+  },
+  "breakdown": {
+    "new_mrr_pct": 100.0,
+    "expansion_mrr_pct": 0.0,
+    "churned_mrr_pct": 100.0,
+    "contraction_mrr_pct": 0.0
+  }
+}
