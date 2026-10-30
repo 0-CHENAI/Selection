@@ -164,6 +164,15 @@ export function writeChartFallbacks(sessionPath: string, fallbacks: PptChartFall
   writeFileSync(join(dir, 'chart-fallback.json'), JSON.stringify({ fallbacks }))
 }
 
+export type PptUploadRole = 'template-library' | 'external-deck' | 'other'
+
+/** Template gallery registrations and in-conversation attachments are different files. */
+export function pptUploadRole(fileName: string, where: 'template-gallery' | 'conversation'): PptUploadRole {
+  const extension = fileName.toLowerCase().split('.').pop()
+  if (extension !== 'pptx' && extension !== 'ppt') return 'other'
+  return where === 'template-gallery' ? 'template-library' : 'external-deck'
+}
+
 /** Saved markers and an authorized active PPTX remain existing context, even without a readable project. */
 export function hasPptContext(sessionPath: string, presentationPath?: string): boolean {
   return !!presentationPath?.toLowerCase().endsWith('.pptx') || existsSync(join(sessionPath, 'data', 'deck.json')) || existsSync(join(sessionPath, 'data', 'ppt-output.json'))
@@ -203,6 +212,7 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
         : `Read the existing plan and project under ${join(sessionPath, 'data')}. Read ${join(sessionPath, 'data', 'ppt-output.json')} for the delivered PPTX path; verify that it exists before editing. A missing or malformed project is not permission to start over.`,
       `Stored composer preferences (reference only, not a restyle instruction): ${JSON.stringify({ templateId: request.templateId, themeId: request.themeId, aspectRatio: request.aspectRatio, brandColor: request.brandColor })}`,
       'Read attachments from this turn even when a deck already exists. Preserve the current style unless the user explicitly requests a change. For an explicitly requested new deck or restyle, read the selected design references through ppt-design; do not apply them to a local edit.',
+      `A PPTX attached during this PPT conversation is an ${pptUploadRole('attachment.pptx', 'conversation').replace('-', ' ')}, not a personal template. Do not register it in the template library and do not treat it as the selected custom template. For a layout change or restyle, import it with deck-cli import into a new project and leave the original file untouched. Targeted text edits stay on office_edit.`,
       ...(logoReference ? [logoReference] : []),
       ...chartParts,
       '</ppt_follow_up_context>',

@@ -1,9 +1,24 @@
 /**
- * deck.json version 2 草案。阶段 04（#707）只把字段和迁移规则定下来。
- * 生产解析仍是 schema.ts 的 version 1：本文件不被 schema.ts 或 index.ts 引用。
- * 旧工程不改写。LinNai 拍板前不要把这些字段放进真实模板。
+ * deck.json version 2 的迁移函数。字段类型在 types.ts。
+ * 阶段 10 起，schema.ts 会读取这些字段；version 1 模板仍然不写它们。
  */
-import { DECK_FORMAT, DECK_VERSION, type Deck, type DeckElement, type DeckPage } from './types.ts'
+import {
+  DECK_FORMAT,
+  DECK_VERSION,
+  type Deck,
+  type DeckCrop,
+  type DeckElement,
+  type DeckLayoutRef,
+  type DeckMask,
+  type DeckPage,
+  type DeckRetained,
+  type DeckSource,
+  type DeckTextRun,
+  type ImageSlot,
+  type ImageSlotContract,
+} from './types.ts'
+
+export type { ImageSlot, ImageSlotContract } from './types.ts'
 
 export const DECK_VERSION_DRAFT = 2 as const
 
@@ -16,79 +31,16 @@ export const DECK_V2_DRAFT_FIELDS = {
   element: ['group', 'crop', 'mask', 'link', 'runs', 'retained'],
 } as const
 
-export type DraftSource = {
-  kind: 'import' | 'template-project' | 'authored'
-  fileName?: string
-  sha256?: string
-}
+export type DraftSource = DeckSource
+export type DraftLayoutRef = DeckLayoutRef
 
-export type DraftLayoutRef = {
-  master?: string
-  layout?: string
-}
-
-/** 与 dsh.template-images/v1 字段语义一致。schema 字符串保持原值，便于读写备注里的同一份 JSON。 */
-export type ImageSlotContract = {
-  schema: 'dsh.template-images/v1'
-  layoutId: string
-  pageRole: string
-  style: {
-    medium: string
-    palette: string
-    lighting: string
-    tone: string
-    textTreatment: string
-    continuity: string
-  }
-  contentPolicy?: 'provided-facts-or-qualitative'
-  slots: ImageSlot[]
-}
-
-export type ImageSlot = {
-  elementId: string
-  role: string
-  contentSources: string[]
-  sourcePolicy: 'contextual-scene' | 'provided-portrait' | 'native-graphic'
-  subject: string
-  composition: string
-  aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
-  reuseGroup: string
-  maskElementIds: string[]
-}
-
-export type DraftCrop = { l: number; t: number; r: number; b: number }
-
-export type DraftMask = {
-  shape: 'rect' | 'roundRect' | 'ellipse' | 'path'
-  path?: string
-}
-
-export type DraftTextRun = {
-  text: string
-  size?: number
-  bold?: boolean
-  italic?: boolean
-  color?: string
-}
-
+export type DraftCrop = DeckCrop
+export type DraftMask = DeckMask
+export type DraftTextRun = DeckTextRun
 export type DraftGroup = { id: string }
-
-export type DraftRetained = { feature: string; message: string }
-
-export type DraftElement = DeckElement & {
-  group?: DraftGroup
-  crop?: DraftCrop
-  mask?: DraftMask
-  link?: { href: string }
-  runs?: DraftTextRun[]
-  retained?: DraftRetained
-}
-
-export type DraftPage = Omit<DeckPage, 'elements'> & {
-  layoutRef?: DraftLayoutRef
-  imageSlots?: ImageSlotContract
-  elements: DraftElement[]
-}
+export type DraftRetained = DeckRetained
+export type DraftElement = DeckElement
+export type DraftPage = DeckPage
 
 export type DraftDeck = Omit<Deck, 'version' | 'pages'> & {
   version: typeof DECK_VERSION_DRAFT
