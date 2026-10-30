@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
+
 - **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.
 
 - **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
