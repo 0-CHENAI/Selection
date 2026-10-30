@@ -1,0 +1,20 @@
+{
+  "quick_ratio": 0.3333333333333333,
+  "quick_ratio_display": "0.33",
+  "status": "CRITICAL",
+  "interpretation": "Losing revenue faster than gaining - growth is unsustainable",
+  "components": {
+    "growth_mrr": 1000.0,
+    "lost_mrr": 3000.0,
+    "new_mrr": 1000.0,
+    "expansion_mrr": 0.0,
+    "churned_mrr": 2500.0,
+    "contraction_mrr": 500.0
+  },
+  "breakdown": {
+    "new_mrr_pct": 100.0,
+    "expansion_mrr_pct": 0.0,
+    "churned_mrr_pct": 83.3,
+    "contraction_mrr_pct": 16.7
+  }
+}

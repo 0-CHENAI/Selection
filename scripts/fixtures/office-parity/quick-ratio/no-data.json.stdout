@@ -1,0 +1,20 @@
+{
+  "quick_ratio": 0,
+  "quick_ratio_display": "0",
+  "status": "NO_DATA",
+  "interpretation": "No revenue movement recorded - insufficient data to assess growth efficiency",
+  "components": {
+    "growth_mrr": 0.0,
+    "lost_mrr": 0.0,
+    "new_mrr": 0.0,
+    "expansion_mrr": 0,
+    "churned_mrr": 0.0,
+    "contraction_mrr": 0
+  },
+  "breakdown": {
+    "new_mrr_pct": 0,
+    "expansion_mrr_pct": 0,
+    "churned_mrr_pct": 0,
+    "contraction_mrr_pct": 0
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "quick_ratio": 3.4285714285714284,
+  "quick_ratio_display": "3.43",
+  "status": "HEALTHY",
+  "interpretation": "Good growth efficiency - gaining revenue 2x+ faster than losing it",
+  "components": {
+    "growth_mrr": 12000.0,
+    "lost_mrr": 3500.0,
+    "new_mrr": 10000.0,
+    "expansion_mrr": 2000.0,
+    "churned_mrr": 3000.0,
+    "contraction_mrr": 500.0
+  },
+  "breakdown": {
+    "new_mrr_pct": 83.3,
+    "expansion_mrr_pct": 16.7,
+    "churned_mrr_pct": 85.7,
+    "contraction_mrr_pct": 14.3
+  }
+}

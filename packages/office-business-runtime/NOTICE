@@ -1,0 +1,10 @@
+Quick Ratio 的计算公式、评级文案和文本报告版式派生自：
+
+  dsh-desktop
+  packages/dsh-desktop-office/business-skills/saas-metrics-coach/scripts/quick_ratio_calculator.py
+  提交 588412b9002fcb3ac88751fab7915e050c965563
+  MIT License
+  Copyright (c) 2026 Abbas Mir
+
+本目录是 TypeScript 等价实现，不包含该 Python 源码。
+Selection 仓库许可证为 Apache-2.0。上述 MIT 声明随派生文本保留。

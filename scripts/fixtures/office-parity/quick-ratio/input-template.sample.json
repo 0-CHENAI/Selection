@@ -1,0 +1,15 @@
+{
+  "id": "input-template-example",
+  "dshCommit": "588412b9002fcb3ac88751fab7915e050c965563",
+  "template": "packages/dsh-desktop-office/business-skills/saas-metrics-coach/assets/input-template.md",
+  "templateSha256": "235fcd9768c07b96baf32a34eea747d2647515dc4da067cc9ed5b0c61e1077b3",
+  "skillExample": "packages/dsh-desktop-office/business-skills/saas-metrics-coach/SKILL.md 中 quick_ratio_calculator.py 的命令行示例",
+  "note": "input-template.md 本身没有 New MRR 一行。P1 用技能文档里的示例补上 --new-mrr 10000，Expansion / Churned / Contraction 对应该模板的三个 MRR 字段。空白模板正文不在本阶段搬入。",
+  "fields": {
+    "newMrr": 10000,
+    "expansionMrr": 2000,
+    "churnedMrr": 3000,
+    "contractionMrr": 500
+  },
+  "argv": ["--new-mrr", "10000", "--expansion", "2000", "--churned", "3000", "--contraction", "500"]
+}
