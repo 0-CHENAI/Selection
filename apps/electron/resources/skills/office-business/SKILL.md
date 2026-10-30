@@ -39,3 +39,7 @@ O0/O5 对照 DSH `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的受版本控制�
 上文只对 2026-09-15 的快照 `8dec631` 成立。自 2026-10-30 起，Office 对齐的对照基线改为 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。该提交已有 `packages/dsh-desktop-office`：Word 案例 4 个、Excel 案例 3 个，以及 7 个业务技能。旧句「未找到可直接复用的 Word/Excel 业务案例目录」在这个提交上不成立，予以更正；历史段落保留，不改写成当时已经看见这些案例。
 
 本目录里的会议纪要、工作通知和执行台账仍是 Selection 自有虚构样例，不是 dsh 案例的拷贝，后续阶段不得覆盖。dsh 案例与许可见 [基线重冻结](../../../../../docs/plans/selection-3.2-office-dsh-parity-baseline.md)。公文写作若在后续阶段接入，来源说明写「能力参照 dsh-desktop gov-doc-writing，未复用其内容」，不把 dsh 技能正文或 government-notice 原文拷进本目录。
+
+## 文档模式
+
+`catalog.json` 的 `cases` 仍是上面的虚构小样。`templates` 是 Word / Excel 会话模式用的案例目录合同：带 revision 和业务技能名，不包含案例文件。选择结果写在会话元数据里，和 NORM / PRO 分开。同一会话同一时刻只有一种文档模式。中途上传的文件是用户材料，不替换所选案例。业务技能在各自目录注册，模型可以调用，用户也可以显式调用。

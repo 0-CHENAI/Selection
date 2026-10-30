@@ -20,4 +20,21 @@ describe('PPT navigation', () => {
     expect(state.details).toEqual({ type: 'session', sessionId: 'deck-123' })
     expect(buildRouteFromNavigationState(state)).toBe('ppt/session/deck-123')
   })
+  it('keeps old PPT urls and accepts the Office area aliases', () => {
+    for (const route of ['ppt', 'office', 'office/ppt']) {
+      const state = parseRouteToNavigationState(route)
+      if (!state || !isSessionsNavigation(state)) throw new Error(route)
+      expect(state.filter).toEqual({ kind: 'ppt' })
+      expect(buildRouteFromNavigationState(state)).toBe('ppt')
+    }
+    const word = parseRouteToNavigationState(routes.view.office('word', 'minutes-1'))
+    if (!word || !isSessionsNavigation(word)) throw new Error('Expected Word section')
+    expect(word.filter).toEqual({ kind: 'office', section: 'word' })
+    expect(word.details).toEqual({ type: 'session', sessionId: 'minutes-1' })
+    expect(buildRouteFromNavigationState(word)).toBe('office/word/session/minutes-1')
+    const excel = parseRouteToNavigationState('office/excel')
+    if (!excel || !isSessionsNavigation(excel)) throw new Error('Expected Excel section')
+    expect(excel.filter).toEqual({ kind: 'office', section: 'excel' })
+    expect(buildRouteFromNavigationState(excel)).toBe('office/excel')
+  })
 })

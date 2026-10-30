@@ -275,7 +275,7 @@ export interface ElectronAPI {
   respondToClarification(sessionId: string, requestId: string, response: import('@craft-agent/shared/agent/clarification').ClarificationResponseInput): Promise<boolean>
 
   // Consolidated session command handler
-  sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number } | import('@craft-agent/shared/protocol').HandoverResult>
+  sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number } | import('@craft-agent/shared/protocol').HandoverResult | import('@craft-agent/shared/protocol').OfficeTemplatesResult>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>
@@ -870,9 +870,13 @@ export type RightSidebarPanel =
 /**
  * Session filter options
  */
+export type OfficeSection = 'word' | 'excel'
+
 export type SessionFilter =
   | { kind: 'allSessions' }
   | { kind: 'ppt' }
+  /** Word / Excel lists inside the Office area. PPT keeps `{ kind: 'ppt' }`. */
+  | { kind: 'office'; section: OfficeSection }
   | { kind: 'flagged' }
   | { kind: 'state'; stateId: string }
   | { kind: 'label'; labelId: string }
@@ -1105,7 +1109,9 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
   const parseSessionsKey = (filterKey: string, sessionId?: string): NavigationState | null => {
     let filter: SessionFilter
     if (filterKey === 'allSessions') filter = { kind: 'allSessions' }
-    else if (filterKey === 'ppt') filter = { kind: 'ppt' }
+    else if (filterKey === 'ppt' || filterKey === 'office' || filterKey === 'office/ppt') filter = { kind: 'ppt' }
+    else if (filterKey === 'office/word') filter = { kind: 'office', section: 'word' }
+    else if (filterKey === 'office/excel') filter = { kind: 'office', section: 'excel' }
     else if (filterKey === 'flagged') filter = { kind: 'flagged' }
     else if (filterKey === 'archived') filter = { kind: 'archived' }
     else if (filterKey.startsWith('state:')) {

@@ -5,5 +5,15 @@
     { "id": "meeting-minutes", "title": "会议纪要", "format": "docx", "guide": "word", "recipe": "cases/meeting-minutes.json", "editScope": "one paragraph text fragment" },
     { "id": "work-notice", "title": "工作通知草稿", "format": "docx", "guide": "word", "recipe": "cases/work-notice.json", "editScope": "one paragraph text fragment" },
     { "id": "execution-tracker", "title": "执行台账", "format": "xlsx", "guide": "excel", "recipe": "cases/execution-tracker.json", "editScope": "one input cell and dependent recalculation" }
+  ],
+  "templatesNote": "dsh 588412b 的案例目录合同，供阶段 05 的模式、注入和 revision 校验使用。这里只登记 id、revision 和业务技能。案例文件在阶段 07 / 09 搬入，不覆盖 cases/ 里的虚构小样。",
+  "templates": [
+    { "id": "meeting-minutes", "title": "会议纪要 · 发布会筹备", "mode": "word", "revision": "20261012.1", "category": "会议纪要", "description": "把会议记录整理成可编辑纪要，保留议题、决定、待确认事项和行动项。", "businessSkills": ["meeting-recap"], "source": "curated/meeting-minutes", "sampleFile": "example.docx", "previewCount": 0 },
+    { "id": "coffee-market", "title": "中国现制咖啡市场调研报告", "mode": "word", "revision": "20260911.6", "category": "调研分析", "description": "按公开资料整理市场研究的章节、图表和来源。", "businessSkills": ["research-writer"], "source": "legacy/coffee-market", "sampleFile": "example.docx", "previewCount": 0 },
+    { "id": "equity-research", "title": "小米汽车研究报告", "mode": "word", "revision": "20260911.5", "category": "调研分析", "description": "按研报结构整理投资逻辑、经营数据和风险。", "businessSkills": ["research-writer"], "source": "legacy/equity-research", "sampleFile": "example.docx", "previewCount": 0 },
+    { "id": "government-notice", "title": "中国中车质量安全月活动通知", "mode": "word", "revision": "20260914.2", "category": "公文写作", "description": "按公文案例的结构起草通知。正文方法由 Selection 自写，不照搬外部技能原文。", "businessSkills": ["gov-doc-writing"], "source": "legacy/government-notice", "sampleFile": "example.docx", "previewCount": 0 },
+    { "id": "annual-business", "title": "年度经营与客户分析", "mode": "excel", "revision": "20260914.1", "category": "经营分析", "description": "用联动工作表整理年度经营、增长、收入质量和客户留存。", "businessSkills": ["saas-metrics-coach"], "source": "legacy/annual-business", "sampleFile": "example.xlsx", "previewCount": 20 },
+    { "id": "port-cargo", "title": "青岚港货物流向与作业效率", "mode": "excel", "revision": "20260911.6", "category": "物流分析", "description": "整理吞吐、流向和作业效率，并核对数据质量。", "businessSkills": ["dataset-health-audit", "data-viz-gen"], "source": "legacy/port-cargo", "sampleFile": "example.xlsx", "previewCount": 5 },
+    { "id": "bio-assay", "title": "荧光酶活性筛选与批次质控", "mode": "excel", "revision": "20260911.6", "category": "实验数据", "description": "整理批次读数、剂量响应和质控图。", "businessSkills": ["dataset-health-audit", "data-viz-gen"], "source": "legacy/bio-assay", "sampleFile": "example.xlsx", "previewCount": 4 }
   ]
 }

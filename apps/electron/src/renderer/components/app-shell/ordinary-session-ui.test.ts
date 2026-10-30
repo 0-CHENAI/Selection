@@ -30,10 +30,10 @@ describe('ordinary session UI migration', () => {
     expect(links[0]).toMatchObject({ expandable: false, items: undefined })
   })
 
-  it('places PPT directly under projects', () => {
+  it('places the Office area directly under projects and still accepts the old PPT id', () => {
     const links = prepareOrdinarySessionSidebarLinks([
       { id: 'nav:skills' },
-      { id: 'nav:ppt' },
+      { id: 'nav:office', items: [{ id: 'nav:ppt' }] },
       { id: 'nav:allSessions' },
       { id: 'nav:projects' },
       { id: 'separator:chats-sources' },
@@ -42,11 +42,17 @@ describe('ordinary session UI migration', () => {
     expect(links.map(link => link.id)).toEqual([
       'nav:allSessions',
       'nav:projects',
-      'nav:ppt',
+      'nav:office',
       'separator:chats-sources',
       'nav:sources',
       'nav:skills',
     ])
+    const legacy = prepareOrdinarySessionSidebarLinks([
+      { id: 'nav:ppt' },
+      { id: 'nav:allSessions' },
+      { id: 'nav:projects' },
+    ])
+    expect(legacy.map(link => link.id)).toEqual(['nav:allSessions', 'nav:projects', 'nav:ppt'])
   })
 
   it('clears legacy status and label filters without losing a single project scope', () => {

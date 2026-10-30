@@ -9,4 +9,5 @@ export * from './artifacts'
 export * from './office-follow-up'
 
 export * from './handover'
+export * from './office'
 export * from './ppt'

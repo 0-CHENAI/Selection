@@ -6,6 +6,12 @@
 
 export * from './types.ts';
 export {
+  OFFICE_BUSINESS_SKILL_SLUGS,
+  OFFICE_FILE_DELIVERY_SUFFIX,
+  isOfficeBusinessSkill,
+  type OfficeBusinessSkillSlug,
+} from './office-business-skills.ts';
+export {
   CHART_SKILL_SLUG,
   KNOWN_CHART_SKILL_SLUGS,
   chartBackend,

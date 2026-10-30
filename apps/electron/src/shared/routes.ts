@@ -101,6 +101,15 @@ export const routes = {
     ppt: (sessionId?: string) =>
       sessionId ? `ppt/session/${sessionId}` as const : 'ppt' as const,
 
+    /**
+     * Office area. `ppt` stays the canonical PPT URL.
+     * `office` and `office/ppt` parse back to that same filter.
+     */
+    office: (section: 'ppt' | 'word' | 'excel' = 'ppt', sessionId?: string) => {
+      if (section === 'ppt') return sessionId ? `ppt/session/${sessionId}` as const : 'ppt' as const
+      return sessionId ? `office/${section}/session/${sessionId}` as const : `office/${section}` as const
+    },
+
     /** Flagged view (sessions navigator, flagged filter) */
     flagged: (sessionId?: string) =>
       sessionId ? `flagged/session/${sessionId}` as const : 'flagged' as const,

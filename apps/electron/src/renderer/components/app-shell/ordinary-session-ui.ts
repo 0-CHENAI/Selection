@@ -36,7 +36,7 @@ export function prepareOrdinarySessionSidebarLinks<T extends SidebarLinkLike>(li
   const byId = new Map(links.map(link => [link.id, link]))
   const ordinary = byId.get('nav:allSessions')
   const projects = byId.get('nav:projects')
-  const ppt = byId.get('nav:ppt')
+  const office = byId.get('nav:office') ?? byId.get('nav:ppt')
   const sources = byId.get('nav:sources')
   const separator = byId.get('separator:chats-sources')
 
@@ -52,13 +52,14 @@ export function prepareOrdinarySessionSidebarLinks<T extends SidebarLinkLike>(li
     })
   }
   if (projects) ordered.push(projects)
-  if (ppt) ordered.push(ppt)
+  if (office) ordered.push(office)
   if (separator) ordered.push(separator)
   if (sources) ordered.push(sources)
 
   const promoted = new Set([
     'nav:allSessions',
     'nav:projects',
+    'nav:office',
     'nav:ppt',
     'separator:chats-sources',
     'nav:sources',

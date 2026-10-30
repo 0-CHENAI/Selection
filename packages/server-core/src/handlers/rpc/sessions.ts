@@ -354,6 +354,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       case 'setWorkMode':
         if (!sessionManager.setSessionWorkMode) throw new Error('Work mode selection is unavailable')
         return sessionManager.setSessionWorkMode(sessionId, command.mode)
+      case 'officeTemplates':
+        if (!sessionManager.applyOfficeTemplates) throw new Error('Office 案例选择不可用。')
+        return sessionManager.applyOfficeTemplates(sessionId, command.body)
       case 'updateWorkingDirectory':
         return sessionManager.updateWorkingDirectory(sessionId, command.dir)
       case 'setSources':

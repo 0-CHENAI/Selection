@@ -26,6 +26,8 @@ import {
   Info,
   FolderKanban,
   Presentation,
+  FileText,
+  Table,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -414,6 +416,7 @@ function AppShellContent({
     switch (sessionFilter.kind) {
       case 'allSessions': return 'allSessions'
       case 'ppt': return 'ppt'
+      case 'office': return `office/${sessionFilter.section}`
       case 'flagged': return 'flagged'
       case 'archived': return 'archived'
       case 'state': return `state:${sessionFilter.stateId}`
@@ -1156,9 +1159,9 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && isWorkModeRoot(s, workModeView))
+    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView))
     return metas.filter(s =>
-      s.ppt === undefined && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
 
@@ -1166,6 +1169,12 @@ function AppShellContent({
     s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
     && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
   ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  const officeSectionMetas = useCallback((section: 'word' | 'excel') => Array.from(sessionMetaMap.values()).filter(s =>
+    s.office?.mode === section
+    && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
+  ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  const wordSessionMetas = useMemo(() => officeSectionMetas('word'), [officeSectionMetas])
+  const excelSessionMetas = useMemo(() => officeSectionMetas('excel'), [officeSectionMetas])
 
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
@@ -1289,6 +1298,9 @@ function AppShellContent({
       case 'ppt':
         result = pptSessionMetas
         break
+      case 'office':
+        result = sessionFilter.section === 'word' ? wordSessionMetas : excelSessionMetas
+        break
       case 'allSessions':
         // Ordinary sessions include legacy archived/classified conversations.
         result = workspaceSessionMetas
@@ -1326,7 +1338,7 @@ function AppShellContent({
     result = filterSessionsBySidebarProjectScope(result, projectFilter)
 
     return result
-  }, [workspaceSessionMetas, activeSessionMetas, pptSessionMetas, sessionFilter, projectFilter])
+  }, [workspaceSessionMetas, activeSessionMetas, pptSessionMetas, wordSessionMetas, excelSessionMetas, sessionFilter, projectFilter])
 
   // Ensure session messages are loaded when selected
   React.useEffect(() => {
@@ -1452,6 +1464,12 @@ function AppShellContent({
     setSearchActive(false)
     setSearchQuery('')
     navigate(routes.view.ppt(), draftSessionNavigateOptions())
+  }, [])
+
+  const handleOfficeSectionClick = useCallback((section: 'word' | 'excel') => {
+    setSearchActive(false)
+    setSearchQuery('')
+    navigate(routes.view.office(section), draftSessionNavigateOptions())
   }, [])
 
   // Handler for sources view (all sources)
@@ -1828,14 +1846,17 @@ function AppShellContent({
     // the same order as the visible #181 sidebar.
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
+    result.push({ id: 'nav:office', type: 'nav', action: handlePptClick })
     result.push({ id: 'nav:ppt', type: 'nav', action: handlePptClick })
+    result.push({ id: 'nav:office:word', type: 'nav', action: () => handleOfficeSectionClick('word') })
+    result.push({ id: 'nav:office:excel', type: 'nav', action: () => handleOfficeSectionClick('excel') })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handlePptClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handlePptClick, handleOfficeSectionClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1976,7 +1997,8 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
-      case 'ppt': return 'PPT'
+      case 'ppt': return t('sidebar.officePpt')
+      case 'office': return sessionFilter.section === 'word' ? t('sidebar.officeWord') : t('sidebar.officeExcel')
       case 'allSessions':
         return getIncludedProjectName(projectFilter, projects) ?? t("sidebar.allSessions")
       case 'flagged':
@@ -2210,12 +2232,41 @@ function AppShellContent({
                       })),
                     },
                     {
-                      id: 'nav:ppt',
-                      title: 'PPT',
-                      label: String(pptSessionMetas.length),
+                      id: 'nav:office',
+                      title: t('sidebar.office'),
+                      label: String(pptSessionMetas.length + wordSessionMetas.length + excelSessionMetas.length),
                       icon: Presentation,
-                      variant: isPptView ? 'default' : 'ghost',
+                      variant: 'ghost',
+                      expandable: true,
+                      expanded: isPptView || sessionFilter?.kind === 'office' || isExpanded('nav:office'),
+                      onToggle: () => toggleExpanded('nav:office'),
                       onClick: handlePptClick,
+                      items: [
+                        {
+                          id: 'nav:ppt',
+                          title: t('sidebar.officePpt'),
+                          label: String(pptSessionMetas.length),
+                          icon: Presentation,
+                          variant: isPptView ? 'default' : 'ghost',
+                          onClick: handlePptClick,
+                        },
+                        {
+                          id: 'nav:office:word',
+                          title: t('sidebar.officeWord'),
+                          label: String(wordSessionMetas.length),
+                          icon: FileText,
+                          variant: sessionFilter?.kind === 'office' && sessionFilter.section === 'word' ? 'default' : 'ghost',
+                          onClick: () => handleOfficeSectionClick('word'),
+                        },
+                        {
+                          id: 'nav:office:excel',
+                          title: t('sidebar.officeExcel'),
+                          label: String(excelSessionMetas.length),
+                          icon: Table,
+                          variant: sessionFilter?.kind === 'office' && sessionFilter.section === 'excel' ? 'default' : 'ghost',
+                          onClick: () => handleOfficeSectionClick('excel'),
+                        },
+                      ],
                     },
                     {
                       id: "nav:automations",
