@@ -20,6 +20,9 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 | selection-meeting-minutes | Selection 样例 | — | `cases/selection-samples/meeting-minutes.json` |
 | selection-work-notice | Selection 样例 | — | `cases/selection-samples/work-notice.json` |
 | execution-tracker | Selection 样例 | — | `cases/execution-tracker.json` |
+| annual-business | 经营分析 | saas-metrics-coach | `cases/annual-business/` |
+| port-cargo | 物流分析 | dataset-health-audit、data-viz-gen | `cases/port-cargo/`，含 `inputs/port.json` |
+| bio-assay | 实验数据 | dataset-health-audit、data-viz-gen | `cases/bio-assay/`，含 `inputs/bio.json` |
 
 选中案例后读取 `businessSkill` 指向的 `business-skills/<name>/SKILL.md`。公文技能再按该文件的索引打开需要的分册，不要一次读完。
 
@@ -53,6 +56,18 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 
 Selection 样例 `selection-work-notice` 只把报送期限改至 11 月 6 日，是普通工作通知草稿，不宣称符合公文标准。
 
+## 与 dsh 业务方法的分工
+
+`financial-model` 继续负责财务模型的表结构、假设和情景。`data-dashboard` 继续负责仪表盘版式和 OfficeCLI 图表语法。下面三份技能只补 dsh 的业务口径，不替换这两份指南：
+
+- `saas-metrics-coach`：ARR、流失、LTV:CAC、Quick Ratio、单位经济。年度经营案例用它。
+- `dataset-health-audit`：12 个加权维度的数据体检。港口和实验案例在改明细后用它。
+- `data-viz-gen`：对比和趋势先写 OfficeCLI 原生图表，HTML/SVG 信息图只作补充。
+
+计算用 Bun CLI（`packages/office-business-runtime`），不调用 Python。Excel 交付前必须 `xlsx_recalculate`：OfficeCLI 把 `computedValue` 写回缓存；Windows 或 macOS 且装了 Excel 时再 `CalculateFull`；TypeScript 只补未求值的格子。有 `checks.json` 就逐项核对，否则双读关键单元格。区域渲染后原生读图，禁止 OCR，空白页立即停止。未重算不能交付。
+
+dsh 案例在 `cases/annual-business`、`cases/port-cargo`、`cases/bio-assay`。`example.xlsx` 只读。用 `inputs/*.json` 在工作区副本上生成，不要覆盖原件。下面的执行台账仍是 Selection 虚构样例，与这三个案例无关。
+
 ## Excel 执行台账
 
 材料：事项、计划量、完成量、状态来源和更新时间。输入与计算分开。案例 `execution-tracker.json` 将接口复核完成数 4 改为 6：该行完成率 60%，合计完成 14/18、77.8%。数据全为虚构。
@@ -73,10 +88,14 @@ O0/O5 对照 DSH `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的受版本控制�
 
 虚构小样没有删除，改到「Selection 样例」，路径是 `cases/selection-samples/`，id 改为 `selection-meeting-minutes` 和 `selection-work-notice`，以免覆盖 dsh 的 `meeting-minutes`。是否最终移除等 LinNai 确认。执行台账仍是 `cases/execution-tracker.json`。
 
+### 2026-10-30 阶段 09 已放入 Excel 案例
+
+阶段 09 放进了 `annual-business`、`port-cargo`、`bio-assay`。原件 sha256 与阶段 01 清单一致，`example.xlsx` 只读。业务技能是 `saas-metrics-coach`、`dataset-health-audit`、`data-viz-gen`，计算用 Bun，不调用 Python。
+
 许可和来源见 [NOTICE](NOTICE) 与 [ATTRIBUTION.md](ATTRIBUTION.md)。
 
 阶段 02 随后定了渲染顺序：原生优先。Windows 且装了 Word 或 PowerPoint 时，预览用 OfficeCLI `view screenshot --render native`；否则用 Electron `capturePage`。PDF 先用已安装的 exporter，再在装了 Word 时用 Word 导出，再不行用 OfficeCLI HTML 加 Electron `printToPDF`。宿主还没接到本进程时，不要假装已经导出，也不要用 OCR。
 
 ## 文档模式
 
-`catalog.json` 的 `cases` 同时是选择器和注入用的目录。Word 四条是阶段 07 的案例登记；Excel 三条（`annual-business`、`port-cargo`、`bio-assay`）仍是阶段 05 的目录合同，文件留到阶段 09。选择结果写在会话元数据里，和 NORM / PRO 分开。同一会话同一时刻只有一种文档模式。中途上传的文件是用户材料，不替换所选案例。业务技能在 `business-skills/`，模型可以调用，用户也可以显式调用。侧边栏入口是 Office，下面分 PPT、Word、Excel。
+`catalog.json` 的 `cases` 同时是选择器和注入用的目录。Word 四条来自阶段 07。Excel 三条（`annual-business`、`port-cargo`、`bio-assay`）已在阶段 09 放入，`example.xlsx` 只读。选择结果写在会话元数据里，和 NORM / PRO 分开。同一会话同一时刻只有一种文档模式。中途上传的文件是用户材料，不替换所选案例。业务技能在 `business-skills/`，模型可以调用，用户也可以显式调用。侧边栏只有一个 Office 入口；空白页在输入框上方切换 PPT、Word、Excel。

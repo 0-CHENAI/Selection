@@ -7,9 +7,9 @@
 import { strFromU8, unzipSync } from 'fflate'
 
 export const FORMULA_FUNCTIONS = [
-  'ABS', 'AND', 'AVERAGE', 'AVERAGEIFS', 'CONCAT', 'COUNT', 'COUNTA', 'COUNTIF', 'COUNTIFS',
-  'DATE', 'IF', 'IFERROR', 'INDEX', 'INT', 'MAX', 'MIN', 'MOD', 'NOT', 'OR', 'POWER',
-  'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'STDEV', 'SUM', 'SUMIF', 'SUMIFS', 'SUMPRODUCT', 'TRIM',
+  'ABS', 'AND', 'AVERAGE', 'AVERAGEIFS', 'CHOOSE', 'CONCAT', 'COUNT', 'COUNTA', 'COUNTIF', 'COUNTIFS',
+  'DATE', 'IF', 'IFERROR', 'INDEX', 'INT', 'MAX', 'MIN', 'MOD', 'NA', 'NOT', 'OR', 'POWER',
+  'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'STDEV', 'SUM', 'SUMIF', 'SUMIFS', 'SUMPRODUCT', 'TEXT', 'TRIM',
 ] as const
 
 const FUNCTION_SET = new Set<string>(FORMULA_FUNCTIONS)
@@ -329,6 +329,9 @@ function evalCall(name: string, args: Val[]): Val {
     return isCellError(value) ? fallback : value
   }
   if (fn === 'DATE') return evalDate(args)
+  if (fn === 'TEXT') return evalText(args)
+  if (fn === 'NA') return { error: '#N/A' }
+  if (fn === 'CHOOSE') return evalChoose(args)
   if (fn === 'INDEX') return evalIndex(args)
   if (fn === 'AND' || fn === 'OR' || fn === 'NOT') return evalLogic(fn, args)
   if (fn === 'CONCAT') return evalConcat(args)
@@ -369,6 +372,30 @@ function evalIf(args: Val[]): Val {
   const truth = truthy(cond)
   if (isCellError(truth)) return truth
   return truth ? yes : no
+}
+
+function evalChoose(args: Val[]): CellData {
+  const index = asNumber(scalarOf(args[0] ?? { error: '#VALUE!' }))
+  if (isCellError(index)) return index
+  const choice = Math.trunc(index)
+  if (choice < 1 || choice >= args.length) return { error: '#VALUE!' }
+  const selected = args[choice]
+  return isGrid(selected) ? { error: '#VALUE!' } : selected ?? { error: '#VALUE!' }
+}
+
+/** 年度经营案例只用 TEXT(日期, "m/d")。其他格式不冒充 Excel 的完整格式引擎。 */
+function evalText(args: Val[]): CellData {
+  const value = scalarOf(args[0] ?? { error: '#VALUE!' })
+  const format = scalarOf(args[1] ?? { error: '#VALUE!' })
+  if (isCellError(value)) return value
+  if (isCellError(format)) return format
+  const picture = excelText(format).trim().toLowerCase()
+  if (picture !== 'm/d') return { error: '#VALUE!' }
+  const serial = asNumber(value)
+  if (isCellError(serial)) return serial
+  const utc = Date.UTC(1899, 11, 30) + Math.round(serial) * 86_400_000
+  const date = new Date(utc)
+  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`
 }
 
 function evalDate(args: Val[]): CellData {
@@ -912,7 +939,8 @@ function tokenize(input: string): Tok[] {
         i = after.end
         continue
       }
-      if (cell && cell.end === word.end) {
+      // C$72 这种「列相对、行绝对」里，$ 会让单元格比单词更长。整段仍是一个引用。
+      if (cell && cell.end >= word.end) {
         tokens.push({ k: 'cell', col: cell.col, row: cell.row })
         i = cell.end
         continue
@@ -957,12 +985,14 @@ function decodeXml(value: string): string {
     .replace(/&apos;/g, "'")
 }
 
-/** 从 xlsx 包读出单元格。共享公式、图表缓存不在本 PoC 范围内。 */
+/**
+ * 从 xlsx 包读出单元格。共享公式、图表缓存不在本读取范围内。
+ * 年度经营案例的工作表使用 `x:` 前缀；港口和实验案例使用默认命名空间。读取前去掉元素前缀。
+ */
 export function readXlsxCells(bytes: Uint8Array): CellInput[] {
-  // 延迟引用，避免公式单测拉起解压器以外的路径。调用方只在需要读包时进来。
   const cells: CellInput[] = []
   const files = unzip(bytes)
-  const workbook = textFile(files, 'xl/workbook.xml')
+  const workbook = stripElementPrefixes(textFile(files, 'xl/workbook.xml'))
   const rels = textFile(files, 'xl/_rels/workbook.xml.rels')
   const relMap = new Map<string, string>()
   for (const tag of rels.match(/<Relationship\b[^>]*>/g) ?? []) {
@@ -976,7 +1006,7 @@ export function readXlsxCells(bytes: Uint8Array): CellInput[] {
     const target = attr['r:id'] ? relMap.get(attr['r:id']) : undefined
     if (!name || !target) continue
     const path = target.replace(/^\/+/, '').replace(/^xl\//, '')
-    const xml = textFile(files, `xl/${path}`)
+    const xml = stripElementPrefixes(textFile(files, `xl/${path}`))
     for (const match of xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attr = tagAttrs(`<c ${match[1]}>`)
       const address = attr.r
@@ -1009,8 +1039,12 @@ function cellValue(type: string | undefined, raw: string | undefined, inline: st
   return Number.isFinite(number) ? number : text
 }
 
+function stripElementPrefixes(xml: string): string {
+  return xml.replace(/<(\/?)[A-Za-z_][\w.-]*:/g, '<$1')
+}
+
 function sharedStrings(files: Map<string, string>): string[] {
-  const xml = files.get('xl/sharedStrings.xml')
+  const xml = stripElementPrefixes(files.get('xl/sharedStrings.xml') ?? '')
   if (!xml) return []
   return [...xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(match =>
     [...match[1]!.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(item => decodeXml(item[1] ?? '')).join(''),

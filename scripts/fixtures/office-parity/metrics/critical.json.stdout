@@ -1,0 +1,16 @@
+{
+  "MRR": 22000.0,
+  "ARR": 264000.0,
+  "ARPA": 275.0,
+  "MoM_Growth_Pct": -6.38,
+  "Churn_Pct": 11.25,
+  "CAC": 2500.0,
+  "LTV": 1588.89,
+  "LTV_CAC": 0.64,
+  "Payback_Months": 14.0,
+  "NRR_Est_Pct": 88.75,
+  "_missing": [
+    "NRR (accurate) \u2014 using churn-only estimate; provide expansion MRR for full NRR"
+  ],
+  "_gross_margin": 0.65
+}

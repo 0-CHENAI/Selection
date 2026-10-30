@@ -1,0 +1,16 @@
+{
+  "MRR": 50000.0,
+  "ARR": 600000.0,
+  "ARPA": 500.0,
+  "Churn_Pct": 5.0,
+  "LTV": 7000.0,
+  "NRR_Est_Pct": 95.0,
+  "_missing": [
+    "MoM Growth \u2014 need last month MRR",
+    "CAC \u2014 need S&M spend + new customers",
+    "LTV:CAC \u2014 need both LTV and CAC",
+    "Payback Period \u2014 need CAC and ARPA",
+    "NRR (accurate) \u2014 using churn-only estimate; provide expansion MRR for full NRR"
+  ],
+  "_gross_margin": 0.7
+}

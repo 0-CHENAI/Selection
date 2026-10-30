@@ -1,23 +1,111 @@
 ---
-name: 数据质量
-description: "检查缺失、异常、单位、口径、重复和可复现计算，配合 OfficeCLI xlsx 分析业务数据。"
+name: dataset-health-audit
+description: "执行数据质量检查，对CSV/Excel/TSV/JSON等表格数据进行12个维度的全面审计，输出质量评分、问题详情和修复建议。当用户需要进行数据质量检测、查看缺失值、重复行、异常值、格式问题、类型混淆，或提及数据质量、质检、数据清洗前检查、异常值检测、格式校验、空值、数据健康度、质量评分等关键词时触发。"
+license: MIT
 ---
 
-# dataset-health-audit
+# data-quality-checker
 
-本文件是阶段 05 注册的数据质量入口。完整的检查维度和评分在阶段 09 写入本目录；分册只在需要时读取。
+数据质检工具 —— 对表格数据执行 12 个维度的质量检测，输出每项评分（0-100）、总分和具体修复建议。
 
-先用 OfficeCLI 把表读出来，再看缺失、重复、类型、单位和明显超出范围的值。不要在原表上覆盖公式。发现的问题写入说明，不把有问题的单元格改成看起来正常的数。
+## 能力概览
 
-## 文件交付
+| 维度 | 说明 |
+|------|------|
+| 缺失值检测 | 每列的空值/NaN 数量与比例 |
+| 重复行检测 | 完全重复的行数与比例 |
+| 数据类型一致性 | 同列中混杂不同类型（如数字列混入文字） |
+| 数值范围/异常值 | 基于 IQR 方法检测离群值 |
+| 格式合规性 | 日期、邮箱、手机号等字段的格式一致性 |
+| 唯一性约束 | ID 类字段是否存在重复 |
+| 空白字符串 | 前后空格、空字符串、仅空白字符 |
+| 常量列 | 仅含单一值的列（信息量为零） |
+| 数据分布偏斜 | 数值列的偏度是否过大 |
+| 列名规范性 | 列名是否含空格、特殊字符、大小写不一致 |
+| 基数异常 | 唯一值数量异常（过高或过低） |
+| 跨列一致性 | 日期先后、数值大小等跨列逻辑校验 |
 
-当前用户材料提供事实，所选案例提供结构和版式。制作 Word 时配合 OfficeCLI 的 officecli-docx（命令 `officecli load_skill word`），制作 Excel 时配合 officecli-xlsx（命令 `officecli load_skill excel`）。不要调用 Python，不要使用 python-docx、openpyxl 或 pandas。
+## Quick Start
 
-计算与校验使用阶段 03 的 TypeScript / Bun 实现。Quick Ratio 的入口是 `packages/office-business-runtime` 的 quick-ratio CLI；其余脚本在阶段 07 和 09 接入。不要使用 `load_workspace_dependencies`。
+```bash
+# 基本质检
+bun packages/office-business-runtime/src/cli/data-quality.ts data.csv
 
-预览、PDF 和公式重算按阶段 02 已定的原生优先顺序选择步骤，宿主未接上时说明边界，不要假装已经导出：
-- PDF：已安装的 OfficeCLI exporter；否则在装了 Word 的 Windows 或 macOS 上用 Word 导出；再不行用 OfficeCLI HTML 加 Electron printToPDF。测试才用 TypeScript 分页替身。
-- 预览：Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `view screenshot --render native`；否则用 Electron capturePage。
-- 公式：OfficeCLI 把 computedValue 写回 cachedValue。探测到 Excel 时再跑 CalculateFull 复核。只有没求出的格子才用 TypeScript 补算。
+# 保存报告到 JSON
+bun packages/office-business-runtime/src/cli/data-quality.ts data.csv --output report.json
 
-Excel 在 officeRender.recalc 完成核对前，不要把缓存值当成已重算结果。交付文件写在工作区副本上，不覆盖案例原件和原始模板。不要用 OCR。
+# 指定 ID 列（用于唯一性检查）
+bun packages/office-business-runtime/src/cli/data-quality.ts users.csv --id-columns "user_id,email"
+
+# 指定日期列（用于格式检查）
+bun packages/office-business-runtime/src/cli/data-quality.ts orders.csv --date-columns "created_at,updated_at"
+```
+
+## 详细用法
+
+### 基本调用
+
+```bash
+bun packages/office-business-runtime/src/cli/data-quality.ts <数据文件> [选项]
+```
+
+### 参数说明
+
+| 参数 | 缩写 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `input` | — | 是 | — | 输入文件路径（CSV/TSV/Excel/JSON） |
+| `--output` | `-o` | 否 | 标准输出 | 输出 JSON 报告路径 |
+| `--id-columns` | `-id` | 否 | 自动检测 | 应唯一的列名，逗号分隔 |
+| `--date-columns` | `-dc` | 否 | 自动检测 | 日期类型的列名，逗号分隔 |
+| `--sample` | `-s` | 否 | 全量 | 采样行数（大文件时使用） |
+| `--encoding` | `-e` | 否 | utf-8 | 文件编码 |
+
+## 输出结构（JSON）
+
+```json
+{
+  "file": "data.csv",
+  "rows": 10000,
+  "columns": 15,
+  "overall_score": 78.5,
+  "grade": "B",
+  "dimensions": {
+    "missing_values": {
+      "score": 85.0,
+      "issues": [
+        {"column": "age", "missing_count": 150, "missing_pct": 1.5, "suggestion": "用中位数或众数填充"}
+      ]
+    },
+    "duplicates": {
+      "score": 95.0,
+      "issues": [...]
+    }
+  },
+  "top_suggestions": [
+    "列 age 有 1.5% 缺失值，建议用中位数填充",
+    "发现 200 行完全重复，建议去重"
+  ]
+}
+```
+
+## 评分标准
+
+| 等级 | 分数范围 | 含义 |
+|------|----------|------|
+| A+ | 95-100 | 数据质量优秀，可直接使用 |
+| A | 90-95 | 质量良好，少量小问题 |
+| B | 80-90 | 质量中等，建议修复后使用 |
+| C | 60-80 | 质量较差，需重点清洗 |
+| D | 40-60 | 质量很差，大量问题需修复 |
+| F | 0-40 | 数据基本不可用，需重新采集或大规模清洗 |
+
+## 依赖
+
+Bun。不安装 pandas、numpy 或 Python。xlsx 先用 OfficeCLI 导出成 CSV 再体检；本 CLI 直接读取 CSV、TSV 和 JSON。
+
+
+## Selection 交付
+
+不要调用 Python。12 个维度和加权总分由上面的 Bun CLI 计算。任意 pandas 表达式、透视和自定义 DataFrame 代码不在本技能里。
+
+Excel 交付前：`xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子）→ `checks.json` 逐项核对，没有 checks 就双读关键单元格 → 区域渲染后原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。

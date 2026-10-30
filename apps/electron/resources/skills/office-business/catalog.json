@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "origin": "dsh-desktop 588412b Word cases, plus Selection fictional samples kept under category 样例",
+  "origin": "dsh-desktop 588412b 的 Word 与 Excel 案例，加上 Selection 虚构样例（分类「Selection 样例」）。虚构样例不覆盖 dsh 原件。",
   "baseline": "588412b9002fcb3ac88751fab7915e050c965563",
   "cases": [
     {
@@ -146,63 +146,219 @@
     {
       "id": "annual-business",
       "title": "年度经营与客户分析",
-      "titleEn": "Annual business and customers",
-      "description": "用联动工作表整理年度经营、增长、收入质量和客户留存。案例文件在阶段 09 搬入。",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "六张工作表联动年度经营、增长测算、收入质量与客户留存；包含日度波动、原生图表及计算明细。模拟数据。",
       "mode": "excel",
       "sampleFile": "example.xlsx",
       "revision": "20260914.1",
       "category": "经营分析",
-      "businessSkill": "saas-metrics-coach",
       "source": "legacy/annual-business",
-      "previewPages": null,
-      "previewCount": 20,
+      "previewPages": [
+        {
+          "sheet": "经营总览",
+          "range": "A1:P51",
+          "aspectRatio": 0.7821946169772257
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A52:P101",
+          "aspectRatio": 0.9797717842323651
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A102:P149",
+          "aspectRatio": 0.94214463840399
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A150:P197",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A198:P245",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A246:P293",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A294:P341",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A342:P389",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A390:P437",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A438:P468",
+          "aspectRatio": 1.4519600307455802
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A1:P44",
+          "aspectRatio": 0.9319190922545634
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A45:P94",
+          "aspectRatio": 0.8259728902492348
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A95:P138",
+          "aspectRatio": 0.9310004928536225
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A1:P44",
+          "aspectRatio": 0.9319190922545634
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A45:P95",
+          "aspectRatio": 0.8103818103818103
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A96:P134",
+          "aspectRatio": 1.0529542920847268
+        },
+        {
+          "sheet": "客户留存",
+          "range": "A1:P42",
+          "aspectRatio": 0.9692149820420729
+        },
+        {
+          "sheet": "客户留存",
+          "range": "A43:P88",
+          "aspectRatio": 0.9603457041179461
+        },
+        {
+          "sheet": "月度经营数据",
+          "range": "A1:P48",
+          "aspectRatio": 0.9386834986474302
+        },
+        {
+          "sheet": "客户批次数据",
+          "range": "A1:P29",
+          "aspectRatio": 1.3708272859216255
+        }
+      ],
+      "titleEn": "Annual business and customers",
+      "businessSkill": "saas-metrics-coach",
       "selection": {
         "namespace": "selection.office.v1",
-        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+        "assetDir": "cases/annual-business",
+        "license": "MIT"
       }
     },
     {
       "id": "port-cargo",
       "title": "青岚港货物流向与作业效率",
-      "titleEn": "Port cargo and operations",
-      "description": "整理吞吐、流向和作业效率，并核对数据质量。案例文件在阶段 09 搬入。",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "365 天、2,190 条模拟装卸记录；吞吐波动、进出港结构、航线与作业效率。5 张工作表。",
       "mode": "excel",
       "sampleFile": "example.xlsx",
       "revision": "20260911.6",
       "category": "物流分析",
+      "source": "legacy/port-cargo",
+      "previewPages": [
+        {
+          "sheet": "港口总览",
+          "range": "A1:P54",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "货类与航线",
+          "range": "A1:L52",
+          "aspectRatio": 1.414703110273327
+        },
+        {
+          "sheet": "作业效率",
+          "range": "A1:L52",
+          "aspectRatio": 1.414703110273327
+        },
+        {
+          "sheet": "日度汇总",
+          "range": "A1:H46",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "作业明细",
+          "range": "A1:L46",
+          "aspectRatio": 0.7068620919387075
+        }
+      ],
+      "titleEn": "Port cargo and operations",
       "businessSkills": [
         "dataset-health-audit",
         "data-viz-gen"
       ],
-      "source": "legacy/port-cargo",
-      "previewPages": null,
-      "previewCount": 5,
       "selection": {
         "namespace": "selection.office.v1",
-        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+        "assetDir": "cases/port-cargo",
+        "license": "MIT"
       }
     },
     {
       "id": "bio-assay",
       "title": "荧光酶活性筛选与批次质控",
-      "titleEn": "Bioassay and batch quality",
-      "description": "整理批次读数、剂量响应和质控图。案例文件在阶段 09 搬入。",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "3 批次、288 个模拟孔位；剂量响应、技术重复 CV、跨批次统计与三板热力图。4 张工作表。",
       "mode": "excel",
       "sampleFile": "example.xlsx",
       "revision": "20260911.6",
       "category": "实验数据",
+      "source": "legacy/bio-assay",
+      "previewPages": [
+        {
+          "sheet": "实验总览",
+          "range": "A1:P54",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "剂量响应",
+          "range": "A1:H52",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "板内质控",
+          "range": "A1:M57",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "原始读数",
+          "range": "A1:G46",
+          "aspectRatio": 0.7068620919387075
+        }
+      ],
+      "titleEn": "Bioassay and batch quality",
       "businessSkills": [
         "dataset-health-audit",
         "data-viz-gen"
       ],
-      "source": "legacy/bio-assay",
-      "previewPages": null,
-      "previewCount": 4,
       "selection": {
         "namespace": "selection.office.v1",
-        "note": "阶段 05 的目录合同。案例字节留到阶段 09。"
+        "assetDir": "cases/bio-assay",
+        "license": "MIT"
       }
     }
-  ],
-  "templatesNote": "cases 是阶段 07 的 Word 案例登记，加上阶段 05 为 Excel 模式预留的三条目录合同。Excel 案例文件在阶段 09 搬入。Selection 虚构小样仍在 selection-* / execution-tracker，不覆盖 dsh 案例。"
+  ]
 }

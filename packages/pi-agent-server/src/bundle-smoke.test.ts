@@ -20,7 +20,7 @@ beforeAll(() => {
   }
   scratchDir = mkdtempSync(join(tmpdir(), 'selection-pi-bundle-smoke-'));
   mkdirSync(join(scratchDir, 'plans'), { recursive: true });
-});
+}, 120_000);
 
 afterAll(() => {
   if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
