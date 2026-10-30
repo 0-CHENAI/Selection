@@ -2,7 +2,7 @@
 /** Real model trace capture. This deliberately does not call a text match a passing route. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getWorkspaces, getLlmConnections, getDefaultLlmConnection } from '@craft-agent/shared/config'
@@ -39,7 +39,9 @@ try {
   const deck = loadDeckFile(project).deck!
   const output = join(dir, '演示稿.pptx')
   assert.equal((await exportDeck(deck, output)).status, 'ok')
-  writeFileSync(join(data, 'ppt-output.json'), JSON.stringify({ path: output }))
+  const stat = statSync(project)
+  writeFileSync(join(data, 'ppt-output.json'), JSON.stringify({ path: output, stamp: `${stat.mtimeMs}:${stat.size}` }))
+  copyFileSync(output, join(data, 'before.pptx'))
   writeFileSync(join(data, 'plan.md'), '既有12页演示稿。当前设计为 dsh-monochrome；沿用 deck.json 中的主题。此轮是已有交付的跟进修改。')
   const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
   const before = { deck, projectSha256: hash(project), pptxSha256: hash(output) }

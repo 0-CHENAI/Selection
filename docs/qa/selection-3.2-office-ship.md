@@ -40,3 +40,7 @@ bun scripts/selection-3.2-office-routing-live.ts restyle
 - test 未获合入批准；因此 test 合入后的 Validate + Package 尚不具备执行前提。不得关闭 #689 或里程碑，不得把集成分支当正式发布。
 
 Beta 文案拟用：**更聪明的改稿**——保留 OfficeCLI 的定点编辑，增强已有演示稿的版式修订、按页反馈、模板参考和外来稿结构理解。没有替换编辑器，也没有承诺任意复杂 PPTX 的无损往返。
+
+### 标题案首次真实轨迹发现
+
+默认模型 Laufry 的首轮实际调用 OfficeCLI 对第 2 页标题 run 定点修改，deck.json 散列不变、PPTX 散列变化，随后只截图第 2 页并读图。尚未计为完整通过：fixture 的 ppt-output.json 缺少源 stamp，宿主在模型执行前额外导出了一份副本，干扰交付路径；采集器已补齐真实文件 mtime/size stamp 后重跑。同时工具报告原始 deck 导出的 PPTX 已有 notesMasterIdLst 顺序校验错误，需独立核实，不应把它隐藏在“预存问题”下宣称发布质量通过。
