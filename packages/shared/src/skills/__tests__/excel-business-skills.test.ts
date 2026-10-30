@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { toSkillCatalogEntries } from '../catalog.ts'
 import { loadAllSkills } from '../storage.ts'
 
+// 三个 Excel 业务技能必须出现在 bundled catalog，供模型和用户按 slug 读取。
 describe('Excel business skills', () => {
   test('saas-metrics-coach, dataset-health-audit and data-viz-gen are callable from the catalog', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'excel-skills-'))
