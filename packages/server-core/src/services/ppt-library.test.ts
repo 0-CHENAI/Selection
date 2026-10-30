@@ -186,6 +186,42 @@ test('custom PPTX is stored in the user library and reused by hash', async () =>
   }
 }, 90_000)
 
+test('a deck.json upload is stored, listed and exported without becoming a session project', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ppt-library-deck-'))
+  const root = join(home, 'ppt-templates')
+  const previous = process.env.CRAFT_CONFIG_DIR
+  process.env.CRAFT_CONFIG_DIR = home
+  try {
+    const deck = { format: 'selection-deck', version: 1, title: '公司模板', canvas: { width: 960, height: 540 }, theme: { name: '公司', colors: { paper: '#F7F4EB', ink: '#1A1A1A' } }, pages: [{ id: '01', elements: [{ type: 'text', text: '封面标题', bounds: { x: 48, y: 48, w: 400, h: 40 } }] }] }
+    const bytes = new TextEncoder().encode(JSON.stringify(deck))
+    const imported = importPptTemplate(bytes, '公司模板.json', root)
+    expect(imported.duplicate).toBe(false)
+    expect(imported.record.sourceKind).toBe('deck')
+    expect(imported.record.pageCount).toBe(1)
+    expect(imported.record.canvas.label).toBe('16:9')
+    expect(readFileSync(join(root, imported.record.id, 'deck.json'), 'utf8')).toBe(JSON.stringify(deck))
+    expect(existsSync(join(root, imported.record.id, 'source.pptx'))).toBe(false)
+    expect(readFileSync(join(root, imported.record.id, 'previews', '01.svg'), 'utf8')).toContain('封面标题')
+    const listed = listCustomCatalogTemplates(root)
+    expect(listed.map(item => item.title)).toEqual(['公司模板'])
+    const exported = exportPptTemplate(imported.record.id, root)
+    expect(exported.name).toBe('公司模板.json')
+    expect(Buffer.from(exported.bytes).toString('utf8')).toBe(JSON.stringify(deck))
+    const prompt = buildPptPrompt({ templateId: imported.record.id }, join(home, 'session'))
+    expect(prompt).toContain('deck.json')
+    expect(prompt).toContain('#714')
+    expect(prompt).not.toContain('source.pptx')
+    expect(() => importPptTemplate(new TextEncoder().encode('{"format":"other"}'), '坏.json', root)).toThrow('Invalid deck.json')
+    const again = importPptTemplate(bytes, '另一份.json', root)
+    expect(again.duplicate).toBe(true)
+    expect(again.record.id).toBe(imported.record.id)
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_CONFIG_DIR
+    else process.env.CRAFT_CONFIG_DIR = previous
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
 test('bundled OfficeCLI HTML screenshot is kept when it returns a PNG', async () => {
   const bin = resolveOfficecliBinary({ env: { ...process.env, CRAFT_OFFICECLI: undefined } })
   if (!bin || process.platform === 'win32') return

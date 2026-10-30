@@ -1,526 +1,560 @@
 {
   "homeOrder": [
-    "ppt169_china_economy_2025_briefing",
-    "ppt169_qianli_jiangshan_scroll",
-    "ppt169_raft_consensus_deepdive",
-    "ppt169_ev_market_priorities",
-    "ppt169_attention_is_all_you_need",
-    "ppt169_mid_autumn_papercut",
-    "ppt169_dujiangyan_zh_sparse",
-    "xiaohongshu_song_diancha",
     "dsh-cartesian",
-    "ppt169_infosec_training_zh_long",
-    "ppt169_solar_cheapest_power",
-    "ppt169_pixel_breakfast_atlas",
-    "ppt169_kubernetes_blueprint_2026",
-    "ppt43_sleep_science_explainer",
-    "ppt169_sanxingdui_kiosk_zh",
-    "dsh-course-workshop",
-    "ppt169_beidou_navigation_narrated",
-    "ppt169_tokaido_shinkansen_60_ja",
-    "moments_midautumn_moon_quick",
-    "ppt169_teachers_day_chalkboard"
+    "ppt169_china_economy_2025_briefing",
+    "mbb-consulting",
+    "operating-review",
+    "dsh-engineering-blueprint",
+    "dsh-course-workshop"
   ],
+  "moreOrder": [
+    "academic-research",
+    "consulting-decision",
+    "duty-manual",
+    "incident-postmortem",
+    "science-explainer",
+    "solution-proposal",
+    "technical-deepdive",
+    "ppt169_jilin_geohazard_rules_beautify",
+    "wechat_tea_header_set",
+    "swiss-signal-grid",
+    "modular-logistics-system",
+    "nordic-operating-report",
+    "dsh-blue-professional"
+  ],
+  "aliases": {
+    "ppt169_fire_control_room_duty_manual": "duty-manual",
+    "ppt169_every_day_counts_proposal": "solution-proposal",
+    "ppt169_night_shelf_creative_pitch": "creative-pitch",
+    "a4_four_day_week_decision_memo": "consulting-decision",
+    "ppt169_heatline_seed_pitch": "investor-pitch",
+    "ppt169_how_color_works_workshop": "workshop-teaching",
+    "ppt169_raft_consensus_deepdive": "technical-deepdive",
+    "ppt43_sleep_science_explainer": "science-explainer",
+    "ppt169_qianli_jiangshan_scroll": "narrative-keynote",
+    "ppt169_researchstudio_reel_paper": "academic-research",
+    "ppt169_ev_market_priorities": "mbb-consulting",
+    "ppt169_apple_fy2025_review": "operating-review",
+    "ppt169_uv_launch": "product-launch",
+    "ppt169_cloudflare_outage_postmortem": "incident-postmortem"
+  },
   "templates": {
     "dsh-cartesian": {
       "title": "理性简报",
       "category": "商务",
-      "previewId": "dsh-cartesian"
+      "previewId": "dsh-cartesian",
+      "tier": "default"
     },
-    "dsh-course-workshop": {
-      "title": "课程培训",
-      "category": "教学",
-      "previewId": "dsh-course-workshop"
-    },
-    "dsh-editorial-notebook": {
-      "title": "编辑手记",
-      "category": "创意",
-      "previewId": "dsh-editorial-notebook"
-    },
-    "dsh-engineering-blueprint": {
-      "title": "工程蓝图",
-      "category": "技术",
-      "previewId": "dsh-engineering-blueprint"
-    },
-    "dsh-soft-editorial": {
-      "title": "柔和编辑部",
-      "category": "咨询",
-      "previewId": "dsh-soft-editorial"
-    },
-    "academic-research": {
-      "title": "学术报告",
-      "category": "学术",
-      "previewId": "academic-research"
-    },
-    "consulting-decision": {
-      "title": "决策备忘",
-      "category": "咨询",
-      "previewId": "consulting-decision"
-    },
-    "creative-pitch": {
-      "title": "创意提案",
-      "category": "创意",
-      "previewId": "creative-pitch"
-    },
-    "duty-manual": {
-      "title": "值班手册",
-      "category": "教学",
-      "previewId": "duty-manual"
-    },
-    "incident-postmortem": {
-      "title": "事故复盘",
-      "category": "技术",
-      "previewId": "incident-postmortem"
-    },
-    "investor-pitch": {
-      "title": "融资叙事",
-      "category": "咨询",
-      "previewId": "investor-pitch"
+    "ppt169_china_economy_2025_briefing": {
+      "title": "数据简报",
+      "category": "商务",
+      "previewId": "ppt169_china_economy_2025_briefing",
+      "tier": "default"
     },
     "mbb-consulting": {
       "title": "战略备忘",
       "category": "咨询",
-      "previewId": "mbb-consulting"
-    },
-    "narrative-keynote": {
-      "title": "叙事主旨",
-      "category": "创意",
-      "previewId": "narrative-keynote"
+      "previewId": "mbb-consulting",
+      "tier": "default"
     },
     "operating-review": {
       "title": "经营复盘",
       "category": "商务",
-      "previewId": "operating-review"
+      "previewId": "operating-review",
+      "tier": "default"
     },
-    "product-launch": {
-      "title": "产品发布",
+    "dsh-engineering-blueprint": {
+      "title": "工程蓝图",
       "category": "技术",
-      "previewId": "product-launch"
+      "previewId": "dsh-engineering-blueprint",
+      "tier": "default"
+    },
+    "dsh-course-workshop": {
+      "title": "课程培训",
+      "category": "教学",
+      "previewId": "dsh-course-workshop",
+      "tier": "default"
+    },
+    "academic-research": {
+      "title": "学术报告",
+      "category": "学术",
+      "previewId": "academic-research",
+      "tier": "more"
+    },
+    "consulting-decision": {
+      "title": "决策备忘",
+      "category": "咨询",
+      "previewId": "consulting-decision",
+      "tier": "more"
+    },
+    "duty-manual": {
+      "title": "值班手册",
+      "category": "教学",
+      "previewId": "duty-manual",
+      "tier": "more"
+    },
+    "incident-postmortem": {
+      "title": "事故复盘",
+      "category": "技术",
+      "previewId": "incident-postmortem",
+      "tier": "more"
     },
     "science-explainer": {
       "title": "科学讲解",
       "category": "教学",
-      "previewId": "science-explainer"
+      "previewId": "science-explainer",
+      "tier": "more"
     },
     "solution-proposal": {
       "title": "方案建议",
       "category": "咨询",
-      "previewId": "solution-proposal"
+      "previewId": "solution-proposal",
+      "tier": "more"
     },
     "technical-deepdive": {
       "title": "技术深潜",
       "category": "技术",
-      "previewId": "technical-deepdive"
-    },
-    "workshop-teaching": {
-      "title": "工作坊",
-      "category": "教学",
-      "previewId": "workshop-teaching"
-    },
-    "ppt169_goldberg_variations": {
-      "title": "哥德堡变奏曲:一座对称的建筑",
-      "category": "教学",
-      "previewId": "ppt169_goldberg_variations"
-    },
-    "ppt169_sub2_marathon_quick": {
-      "title": "1:59:40:人类跑进两小时的那一天",
-      "category": "商务",
-      "previewId": "ppt169_sub2_marathon_quick"
-    },
-    "moments_midautumn_moon_quick": {
-      "title": "十五的月亮十六圆?",
-      "category": "社媒",
-      "previewId": "moments_midautumn_moon_quick"
-    },
-    "wechat_typst_series_banners": {
-      "title": "Typst 入门 · 公众号系列横幅",
-      "category": "社媒",
-      "previewId": "wechat_typst_series_banners"
-    },
-    "ppt169_container_shipping_editorial": {
-      "title": "集装箱如何改变世界",
-      "category": "商务",
-      "previewId": "ppt169_container_shipping_editorial"
-    },
-    "story_art_of_war_reading_cards": {
-      "title": "孙子兵法 · 英译读书卡",
-      "category": "社媒",
-      "previewId": "story_art_of_war_reading_cards"
-    },
-    "ppt169_sanxingdui_kiosk_zh": {
-      "title": "三星堆博物馆自助导览",
-      "category": "创意",
-      "previewId": "ppt169_sanxingdui_kiosk_zh"
-    },
-    "ppt169_muelltrennung_de_quick": {
-      "title": "德国垃圾分类指南",
-      "category": "教学",
-      "previewId": "ppt169_muelltrennung_de_quick"
-    },
-    "xiaohongshu_first_aid_kit_zh": {
-      "title": "家用急救包怎么配",
-      "category": "社媒",
-      "previewId": "xiaohongshu_first_aid_kit_zh"
-    },
-    "ppt169_dujiangyan_zh_sparse": {
-      "title": "都江堰：一座还在上班的两千岁工程",
-      "category": "创意",
-      "previewId": "ppt169_dujiangyan_zh_sparse"
-    },
-    "ppt169_china_rail_2024_zh": {
-      "title": "中国铁路 2024：数据与现场",
-      "category": "商务",
-      "previewId": "ppt169_china_rail_2024_zh"
-    },
-    "ppt169_china_rail_2024_zh_sonnet": {
-      "title": "中国铁路2024：数据与现场（Sonnet 对照）",
-      "category": "商务",
-      "previewId": "ppt169_china_rail_2024_zh_sonnet"
-    },
-    "ppt169_infosec_training_zh_long": {
-      "title": "信息安全意识培训（2026 版 · 新员工必修）",
-      "category": "教学",
-      "previewId": "ppt169_infosec_training_zh_long"
-    },
-    "ppt169_nev_export_bilingual_zh_en": {
-      "title": "中国新能源汽车出海 2025",
-      "category": "商务",
-      "previewId": "ppt169_nev_export_bilingual_zh_en"
-    },
-    "ppt169_dead_sea_scrolls_he_quick": {
-      "title": "死海古卷：从洞穴到博物馆",
-      "category": "创意",
-      "previewId": "ppt169_dead_sea_scrolls_he_quick"
-    },
-    "ppt169_vietnam_coffee_vi_quick": {
-      "title": "越南咖啡：从中央高原走向世界",
-      "category": "商务",
-      "previewId": "ppt169_vietnam_coffee_vi_quick"
-    },
-    "ppt169_russia_demography_ru": {
-      "title": "俄罗斯人口三十年：1991—2024",
-      "category": "商务",
-      "previewId": "ppt169_russia_demography_ru"
-    },
-    "ppt169_thai_jasmine_rice_th": {
-      "title": "泰国茉莉香米：从稻田到世界",
-      "category": "创意",
-      "previewId": "ppt169_thai_jasmine_rice_th"
-    },
-    "ppt43_fourier_transform_formulas_zh": {
-      "title": "傅里叶变换:把信号拆成频率",
-      "category": "教学",
-      "previewId": "ppt43_fourier_transform_formulas_zh"
-    },
-    "ppt169_chandrayaan3_hi_quick": {
-      "title": "月船三号：抵达月球南极",
-      "category": "教学",
-      "previewId": "ppt169_chandrayaan3_hi_quick"
-    },
-    "ppt169_arabic_coffee_ar": {
-      "title": "阿拉伯咖啡",
-      "category": "创意",
-      "previewId": "ppt169_arabic_coffee_ar"
-    },
-    "ppt169_jeju_haenyeo_ko": {
-      "title": "济州海女",
-      "category": "创意",
-      "previewId": "ppt169_jeju_haenyeo_ko"
+      "previewId": "technical-deepdive",
+      "tier": "more"
     },
     "ppt169_jilin_geohazard_rules_beautify": {
       "title": "吉林省地质灾害治理工程项目管理办法 · 政策解读(美化)",
       "category": "商务",
-      "previewId": "ppt169_jilin_geohazard_rules_beautify"
-    },
-    "ppt169_telford_feedback_2023_24_quick": {
-      "title": "企业反馈报告：2023—2024",
-      "category": "商务",
-      "previewId": "ppt169_telford_feedback_2023_24_quick"
-    },
-    "ppt169_taiwan_super_aged_society_zh_hant": {
-      "title": "臺灣進入超高齡社會",
-      "category": "商务",
-      "previewId": "ppt169_taiwan_super_aged_society_zh_hant"
-    },
-    "ppt169_tokaido_shinkansen_60_ja": {
-      "title": "東海道新幹線 60年",
-      "category": "创意",
-      "previewId": "ppt169_tokaido_shinkansen_60_ja"
-    },
-    "ppt169_beidou_navigation_narrated": {
-      "title": "北斗:从一颗星到全球组网",
-      "category": "教学",
-      "previewId": "ppt169_beidou_navigation_narrated"
-    },
-    "ppt169_fire_control_room_duty_manual": {
-      "title": "消防控制室值班手册",
-      "category": "教学",
-      "previewId": "duty-manual"
-    },
-    "ppt169_every_day_counts_proposal": {
-      "title": "让每一天都有价值",
-      "category": "咨询",
-      "previewId": "solution-proposal"
-    },
-    "ppt169_night_shelf_creative_pitch": {
-      "title": "夜间书架：创意提案",
-      "category": "创意",
-      "previewId": "creative-pitch"
-    },
-    "a4_four_day_week_decision_memo": {
-      "title": "我们应该实行每周四天工作制吗？",
-      "category": "咨询",
-      "previewId": "consulting-decision"
-    },
-    "ppt169_heatline_seed_pitch": {
-      "title": "热浪：种子轮融资",
-      "category": "咨询",
-      "previewId": "investor-pitch"
-    },
-    "ppt169_how_color_works_workshop": {
-      "title": "色彩如何运作",
-      "category": "教学",
-      "previewId": "workshop-teaching"
-    },
-    "ppt169_raft_consensus_deepdive": {
-      "title": "Raft：为了让人看懂而设计的共识算法",
-      "category": "技术",
-      "previewId": "technical-deepdive"
-    },
-    "ppt169_teachers_day_chalkboard": {
-      "title": "粉笔写下的节日 · 教师节黑板报",
-      "category": "创意",
-      "previewId": "ppt169_teachers_day_chalkboard"
-    },
-    "ppt43_sleep_science_explainer": {
-      "title": "我们为什么要睡觉",
-      "category": "教学",
-      "previewId": "science-explainer"
-    },
-    "ppt169_qianli_jiangshan_scroll": {
-      "title": "千里江山图·十八岁的青绿",
-      "category": "创意",
-      "previewId": "narrative-keynote"
-    },
-    "ppt169_researchstudio_reel_paper": {
-      "title": "研究工作室：从论文到海报、视频与博客",
-      "category": "学术",
-      "previewId": "academic-research"
-    },
-    "ppt169_ev_market_priorities": {
-      "title": "电动车增长的下一站:2026–2028 车企市场优先级与产品组合决策",
-      "category": "咨询",
-      "previewId": "mbb-consulting"
-    },
-    "ppt169_apple_fy2025_review": {
-      "title": "Apple FY2025 经营复盘:收入创新高,增长的一半来自服务",
-      "category": "商务",
-      "previewId": "operating-review"
-    },
-    "ppt169_uv_launch": {
-      "title": "uv:一个二进制,收干净 Python 装包那一摊",
-      "category": "技术",
-      "previewId": "product-launch"
-    },
-    "ppt169_cloudflare_outage_postmortem": {
-      "title": "Cloudflare 故障复盘：2025 年 11 月 18 日",
-      "category": "技术",
-      "previewId": "incident-postmortem"
-    },
-    "ppt169_solar_cheapest_power": {
-      "title": "光伏为什么最便宜,以及它开始变贵",
-      "category": "商务",
-      "previewId": "ppt169_solar_cheapest_power"
-    },
-    "ppt169_apollo_photo_essay": {
-      "title": "阿波罗:人类离开地球的四年",
-      "category": "创意",
-      "previewId": "ppt169_apollo_photo_essay"
-    },
-    "ppt169_solar_terms_year": {
-      "title": "二十四节气·全年手账",
-      "category": "创意",
-      "previewId": "ppt169_solar_terms_year"
-    },
-    "ppt169_brutalism_field_guide": {
-      "title": "粗野主义建筑实地指南",
-      "category": "创意",
-      "previewId": "ppt169_brutalism_field_guide"
+      "previewId": "ppt169_jilin_geohazard_rules_beautify",
+      "tier": "more"
     },
     "wechat_tea_header_set": {
       "title": "中国茶六大类 · 公众号头图",
       "category": "社媒",
-      "previewId": "wechat_tea_header_set"
-    },
-    "banner_autumn_solar_terms": {
-      "title": "二十四节气手账·秋 · 横幅",
-      "category": "社媒",
-      "previewId": "banner_autumn_solar_terms"
-    },
-    "custom_1920x600_autumn_web_banner": {
-      "title": "二十四节气手账·秋 · 网页横幅",
-      "category": "社媒",
-      "previewId": "custom_1920x600_autumn_web_banner"
-    },
-    "moments_nine_heritage_goods": {
-      "title": "九件老国货",
-      "category": "社媒",
-      "previewId": "moments_nine_heritage_goods"
-    },
-    "ppt169_webgpu_intro_quick": {
-      "title": "WebGPU 是什么",
-      "category": "技术",
-      "previewId": "ppt169_webgpu_intro_quick"
-    },
-    "a4_tea_six_classes": {
-      "title": "中国茶六大类",
-      "category": "创意",
-      "previewId": "a4_tea_six_classes"
-    },
-    "ppt169_china_economy_2025_briefing": {
-      "title": "2025 年中国经济数据简报",
-      "category": "商务",
-      "previewId": "ppt169_china_economy_2025_briefing"
-    },
-    "story_autumn_solar_terms": {
-      "title": "二十四节气手账·秋",
-      "category": "社媒",
-      "previewId": "story_autumn_solar_terms"
-    },
-    "ppt169_pixel_breakfast_atlas": {
-      "title": "中国早餐图鉴",
-      "category": "创意",
-      "previewId": "ppt169_pixel_breakfast_atlas"
-    },
-    "ppt169_mid_autumn_papercut": {
-      "title": "中秋：一枚月饼里的八百年",
-      "category": "创意",
-      "previewId": "ppt169_mid_autumn_papercut"
-    },
-    "ppt169_attention_is_all_you_need": {
-      "title": "注意力机制：你所需要的一切",
-      "category": "学术",
-      "previewId": "ppt169_attention_is_all_you_need"
-    },
-    "xiaohongshu_song_diancha": {
-      "title": "宋人点茶 · 七汤",
-      "category": "社媒",
-      "previewId": "xiaohongshu_song_diancha"
-    },
-    "ppt43_wave_interference_diffraction": {
-      "title": "波的干涉与衍射",
-      "category": "教学",
-      "previewId": "ppt43_wave_interference_diffraction"
-    },
-    "ppt169_china_telecom_2025": {
-      "title": "中国电信 2025 年业绩解读",
-      "category": "商务",
-      "previewId": "ppt169_china_telecom_2025"
-    },
-    "ppt169_pritzker_2026_quick": {
-      "title": "2026 普利兹克建筑奖速览",
-      "category": "创意",
-      "previewId": "ppt169_pritzker_2026_quick"
-    },
-    "ppt169_kubernetes_blueprint_2026": {
-      "title": "2026 Kubernetes 架构蓝图",
-      "category": "技术",
-      "previewId": "ppt169_kubernetes_blueprint_2026"
-    },
-    "ppt169_what_is_ppt": {
-      "title": "什么是 PPT",
-      "category": "教学",
-      "previewId": "ppt169_what_is_ppt"
-    },
-    "ppt169_lora_hu_2021": {
-      "title": "LoRA：低秩适配论文解读",
-      "category": "学术",
-      "previewId": "ppt169_lora_hu_2021"
-    },
-    "ppt169_pritzker_2026": {
-      "title": "2026 普利兹克建筑奖",
-      "category": "创意",
-      "previewId": "ppt169_pritzker_2026"
-    },
-    "ppt169_global_ai_capital_2026": {
-      "title": "2026 全球人工智能资本版图",
-      "category": "商务",
-      "previewId": "ppt169_global_ai_capital_2026"
-    },
-    "ppt169_swiss_grid_systems": {
-      "title": "瑞士网格设计系统",
-      "category": "创意",
-      "previewId": "ppt169_swiss_grid_systems"
-    },
-    "ppt169_glassmorphism_demo": {
-      "title": "玻璃拟态设计",
-      "category": "创意",
-      "previewId": "ppt169_glassmorphism_demo"
-    },
-    "ppt169_sugar_rush_memphis": {
-      "title": "糖果色孟菲斯",
-      "category": "创意",
-      "previewId": "ppt169_sugar_rush_memphis"
-    },
-    "ppt169_indie_bookstore_zine_guide": {
-      "title": "独立书店与小志指南",
-      "category": "创意",
-      "previewId": "ppt169_indie_bookstore_zine_guide"
-    },
-    "dsh-monochrome": {
-      "title": "极简研究",
-      "category": "学术",
-      "previewId": "dsh-monochrome"
-    },
-    "dsh-blue-professional": {
-      "title": "专业蓝图",
-      "category": "商务",
-      "previewId": "dsh-blue-professional"
-    },
-    "dsh-neo-grid-bold": {
-      "title": "醒目网格",
-      "category": "创意",
-      "previewId": "dsh-neo-grid-bold"
+      "previewId": "wechat_tea_header_set",
+      "tier": "more"
     },
     "swiss-signal-grid": {
       "title": "瑞士信号",
       "category": "咨询",
-      "previewId": "swiss-signal-grid"
-    },
-    "dsh-signal": {
-      "title": "信号简报",
-      "category": "咨询",
-      "previewId": "dsh-signal"
-    },
-    "dsh-broadside": {
-      "title": "宣言海报",
-      "category": "创意",
-      "previewId": "dsh-broadside"
-    },
-    "dsh-playful": {
-      "title": "趣味提案",
-      "category": "创意",
-      "previewId": "dsh-playful"
-    },
-    "dsh-sakura-chroma": {
-      "title": "樱花彩谱",
-      "category": "创意",
-      "previewId": "dsh-sakura-chroma"
+      "previewId": "swiss-signal-grid",
+      "tier": "more"
     },
     "modular-logistics-system": {
       "title": "模块物流",
       "category": "技术",
-      "previewId": "modular-logistics-system"
+      "previewId": "modular-logistics-system",
+      "tier": "more"
     },
     "nordic-operating-report": {
       "title": "北欧经营",
       "category": "商务",
-      "previewId": "nordic-operating-report"
+      "previewId": "nordic-operating-report",
+      "tier": "more"
+    },
+    "dsh-blue-professional": {
+      "title": "专业蓝图",
+      "category": "商务",
+      "previewId": "dsh-blue-professional",
+      "tier": "more",
+      "note": "版式和示例内容与理性简报差得比较多，没有并进那一组配色，单独放在更多模板。"
+    },
+    "dsh-signal": {
+      "title": "信号简报",
+      "category": "咨询",
+      "previewId": "dsh-signal",
+      "variantOf": "dsh-cartesian"
+    },
+    "dsh-monochrome": {
+      "title": "极简研究",
+      "category": "学术",
+      "previewId": "dsh-monochrome",
+      "variantOf": "dsh-cartesian"
     },
     "dsh-editorial-forest": {
       "title": "森林编辑",
       "category": "商务",
-      "previewId": "dsh-editorial-forest"
+      "previewId": "dsh-editorial-forest",
+      "variantOf": "dsh-cartesian"
+    },
+    "dsh-soft-editorial": {
+      "title": "柔和编辑部",
+      "category": "咨询",
+      "previewId": "dsh-soft-editorial",
+      "variantOf": "dsh-cartesian"
+    },
+    "dsh-editorial-notebook": {
+      "title": "编辑手记",
+      "category": "创意",
+      "previewId": "dsh-editorial-notebook",
+      "variantOf": "dsh-cartesian"
+    },
+    "workshop-teaching": {
+      "title": "工作坊",
+      "category": "教学",
+      "previewId": "workshop-teaching",
+      "mergedInto": "dsh-course-workshop"
+    },
+    "creative-pitch": {
+      "title": "创意提案",
+      "category": "创意",
+      "previewId": "creative-pitch",
+      "tier": "archive"
+    },
+    "investor-pitch": {
+      "title": "融资叙事",
+      "category": "咨询",
+      "previewId": "investor-pitch",
+      "tier": "archive"
+    },
+    "narrative-keynote": {
+      "title": "叙事主旨",
+      "category": "创意",
+      "previewId": "narrative-keynote",
+      "tier": "archive"
+    },
+    "product-launch": {
+      "title": "产品发布",
+      "category": "技术",
+      "previewId": "product-launch",
+      "tier": "archive"
+    },
+    "ppt169_goldberg_variations": {
+      "title": "哥德堡变奏曲:一座对称的建筑",
+      "category": "教学",
+      "previewId": "ppt169_goldberg_variations",
+      "tier": "archive"
+    },
+    "ppt169_sub2_marathon_quick": {
+      "title": "1:59:40:人类跑进两小时的那一天",
+      "category": "商务",
+      "previewId": "ppt169_sub2_marathon_quick",
+      "tier": "archive"
+    },
+    "moments_midautumn_moon_quick": {
+      "title": "十五的月亮十六圆?",
+      "category": "社媒",
+      "previewId": "moments_midautumn_moon_quick",
+      "tier": "archive"
+    },
+    "wechat_typst_series_banners": {
+      "title": "Typst 入门 · 公众号系列横幅",
+      "category": "社媒",
+      "previewId": "wechat_typst_series_banners",
+      "tier": "archive"
+    },
+    "ppt169_container_shipping_editorial": {
+      "title": "集装箱如何改变世界",
+      "category": "商务",
+      "previewId": "ppt169_container_shipping_editorial",
+      "tier": "archive"
+    },
+    "story_art_of_war_reading_cards": {
+      "title": "孙子兵法 · 英译读书卡",
+      "category": "社媒",
+      "previewId": "story_art_of_war_reading_cards",
+      "tier": "archive"
+    },
+    "ppt169_sanxingdui_kiosk_zh": {
+      "title": "三星堆博物馆自助导览",
+      "category": "创意",
+      "previewId": "ppt169_sanxingdui_kiosk_zh",
+      "tier": "archive"
+    },
+    "ppt169_muelltrennung_de_quick": {
+      "title": "德国垃圾分类指南",
+      "category": "教学",
+      "previewId": "ppt169_muelltrennung_de_quick",
+      "tier": "archive"
+    },
+    "xiaohongshu_first_aid_kit_zh": {
+      "title": "家用急救包怎么配",
+      "category": "社媒",
+      "previewId": "xiaohongshu_first_aid_kit_zh",
+      "tier": "archive"
+    },
+    "ppt169_dujiangyan_zh_sparse": {
+      "title": "都江堰：一座还在上班的两千岁工程",
+      "category": "创意",
+      "previewId": "ppt169_dujiangyan_zh_sparse",
+      "tier": "archive"
+    },
+    "ppt169_china_rail_2024_zh": {
+      "title": "中国铁路 2024：数据与现场",
+      "category": "商务",
+      "previewId": "ppt169_china_rail_2024_zh",
+      "tier": "archive"
+    },
+    "ppt169_china_rail_2024_zh_sonnet": {
+      "title": "中国铁路2024：数据与现场（Sonnet 对照）",
+      "category": "商务",
+      "previewId": "ppt169_china_rail_2024_zh_sonnet",
+      "tier": "archive"
+    },
+    "ppt169_infosec_training_zh_long": {
+      "title": "信息安全意识培训（2026 版 · 新员工必修）",
+      "category": "教学",
+      "previewId": "ppt169_infosec_training_zh_long",
+      "tier": "archive"
+    },
+    "ppt169_nev_export_bilingual_zh_en": {
+      "title": "中国新能源汽车出海 2025",
+      "category": "商务",
+      "previewId": "ppt169_nev_export_bilingual_zh_en",
+      "tier": "archive"
+    },
+    "ppt169_dead_sea_scrolls_he_quick": {
+      "title": "死海古卷：从洞穴到博物馆",
+      "category": "创意",
+      "previewId": "ppt169_dead_sea_scrolls_he_quick",
+      "tier": "archive"
+    },
+    "ppt169_vietnam_coffee_vi_quick": {
+      "title": "越南咖啡：从中央高原走向世界",
+      "category": "商务",
+      "previewId": "ppt169_vietnam_coffee_vi_quick",
+      "tier": "archive"
+    },
+    "ppt169_russia_demography_ru": {
+      "title": "俄罗斯人口三十年：1991—2024",
+      "category": "商务",
+      "previewId": "ppt169_russia_demography_ru",
+      "tier": "archive"
+    },
+    "ppt169_thai_jasmine_rice_th": {
+      "title": "泰国茉莉香米：从稻田到世界",
+      "category": "创意",
+      "previewId": "ppt169_thai_jasmine_rice_th",
+      "tier": "archive"
+    },
+    "ppt43_fourier_transform_formulas_zh": {
+      "title": "傅里叶变换:把信号拆成频率",
+      "category": "教学",
+      "previewId": "ppt43_fourier_transform_formulas_zh",
+      "tier": "archive"
+    },
+    "ppt169_chandrayaan3_hi_quick": {
+      "title": "月船三号：抵达月球南极",
+      "category": "教学",
+      "previewId": "ppt169_chandrayaan3_hi_quick",
+      "tier": "archive"
+    },
+    "ppt169_arabic_coffee_ar": {
+      "title": "阿拉伯咖啡",
+      "category": "创意",
+      "previewId": "ppt169_arabic_coffee_ar",
+      "tier": "archive"
+    },
+    "ppt169_jeju_haenyeo_ko": {
+      "title": "济州海女",
+      "category": "创意",
+      "previewId": "ppt169_jeju_haenyeo_ko",
+      "tier": "archive"
+    },
+    "ppt169_telford_feedback_2023_24_quick": {
+      "title": "企业反馈报告：2023—2024",
+      "category": "商务",
+      "previewId": "ppt169_telford_feedback_2023_24_quick",
+      "tier": "archive"
+    },
+    "ppt169_taiwan_super_aged_society_zh_hant": {
+      "title": "臺灣進入超高齡社會",
+      "category": "商务",
+      "previewId": "ppt169_taiwan_super_aged_society_zh_hant",
+      "tier": "archive"
+    },
+    "ppt169_tokaido_shinkansen_60_ja": {
+      "title": "東海道新幹線 60年",
+      "category": "创意",
+      "previewId": "ppt169_tokaido_shinkansen_60_ja",
+      "tier": "archive"
+    },
+    "ppt169_beidou_navigation_narrated": {
+      "title": "北斗:从一颗星到全球组网",
+      "category": "教学",
+      "previewId": "ppt169_beidou_navigation_narrated",
+      "tier": "archive"
+    },
+    "ppt169_teachers_day_chalkboard": {
+      "title": "粉笔写下的节日 · 教师节黑板报",
+      "category": "创意",
+      "previewId": "ppt169_teachers_day_chalkboard",
+      "tier": "archive"
+    },
+    "ppt169_solar_cheapest_power": {
+      "title": "光伏为什么最便宜,以及它开始变贵",
+      "category": "商务",
+      "previewId": "ppt169_solar_cheapest_power",
+      "tier": "archive"
+    },
+    "ppt169_apollo_photo_essay": {
+      "title": "阿波罗:人类离开地球的四年",
+      "category": "创意",
+      "previewId": "ppt169_apollo_photo_essay",
+      "tier": "archive"
+    },
+    "ppt169_solar_terms_year": {
+      "title": "二十四节气·全年手账",
+      "category": "创意",
+      "previewId": "ppt169_solar_terms_year",
+      "tier": "archive"
+    },
+    "ppt169_brutalism_field_guide": {
+      "title": "粗野主义建筑实地指南",
+      "category": "创意",
+      "previewId": "ppt169_brutalism_field_guide",
+      "tier": "archive"
+    },
+    "banner_autumn_solar_terms": {
+      "title": "二十四节气手账·秋 · 横幅",
+      "category": "社媒",
+      "previewId": "banner_autumn_solar_terms",
+      "tier": "archive"
+    },
+    "custom_1920x600_autumn_web_banner": {
+      "title": "二十四节气手账·秋 · 网页横幅",
+      "category": "社媒",
+      "previewId": "custom_1920x600_autumn_web_banner",
+      "tier": "archive"
+    },
+    "moments_nine_heritage_goods": {
+      "title": "九件老国货",
+      "category": "社媒",
+      "previewId": "moments_nine_heritage_goods",
+      "tier": "archive"
+    },
+    "ppt169_webgpu_intro_quick": {
+      "title": "WebGPU 是什么",
+      "category": "技术",
+      "previewId": "ppt169_webgpu_intro_quick",
+      "tier": "archive"
+    },
+    "a4_tea_six_classes": {
+      "title": "中国茶六大类",
+      "category": "创意",
+      "previewId": "a4_tea_six_classes",
+      "tier": "archive"
+    },
+    "story_autumn_solar_terms": {
+      "title": "二十四节气手账·秋",
+      "category": "社媒",
+      "previewId": "story_autumn_solar_terms",
+      "tier": "archive"
+    },
+    "ppt169_pixel_breakfast_atlas": {
+      "title": "中国早餐图鉴",
+      "category": "创意",
+      "previewId": "ppt169_pixel_breakfast_atlas",
+      "tier": "archive"
+    },
+    "ppt169_mid_autumn_papercut": {
+      "title": "中秋：一枚月饼里的八百年",
+      "category": "创意",
+      "previewId": "ppt169_mid_autumn_papercut",
+      "tier": "archive"
+    },
+    "ppt169_attention_is_all_you_need": {
+      "title": "注意力机制：你所需要的一切",
+      "category": "学术",
+      "previewId": "ppt169_attention_is_all_you_need",
+      "tier": "archive"
+    },
+    "xiaohongshu_song_diancha": {
+      "title": "宋人点茶 · 七汤",
+      "category": "社媒",
+      "previewId": "xiaohongshu_song_diancha",
+      "tier": "archive"
+    },
+    "ppt43_wave_interference_diffraction": {
+      "title": "波的干涉与衍射",
+      "category": "教学",
+      "previewId": "ppt43_wave_interference_diffraction",
+      "tier": "archive"
+    },
+    "ppt169_china_telecom_2025": {
+      "title": "中国电信 2025 年业绩解读",
+      "category": "商务",
+      "previewId": "ppt169_china_telecom_2025",
+      "tier": "archive"
+    },
+    "ppt169_pritzker_2026_quick": {
+      "title": "2026 普利兹克建筑奖速览",
+      "category": "创意",
+      "previewId": "ppt169_pritzker_2026_quick",
+      "tier": "archive"
+    },
+    "ppt169_kubernetes_blueprint_2026": {
+      "title": "2026 Kubernetes 架构蓝图",
+      "category": "技术",
+      "previewId": "ppt169_kubernetes_blueprint_2026",
+      "tier": "archive"
+    },
+    "ppt169_what_is_ppt": {
+      "title": "什么是 PPT",
+      "category": "教学",
+      "previewId": "ppt169_what_is_ppt",
+      "tier": "archive"
+    },
+    "ppt169_lora_hu_2021": {
+      "title": "LoRA：低秩适配论文解读",
+      "category": "学术",
+      "previewId": "ppt169_lora_hu_2021",
+      "tier": "archive"
+    },
+    "ppt169_pritzker_2026": {
+      "title": "2026 普利兹克建筑奖",
+      "category": "创意",
+      "previewId": "ppt169_pritzker_2026",
+      "tier": "archive"
+    },
+    "ppt169_global_ai_capital_2026": {
+      "title": "2026 全球人工智能资本版图",
+      "category": "商务",
+      "previewId": "ppt169_global_ai_capital_2026",
+      "tier": "archive"
+    },
+    "ppt169_swiss_grid_systems": {
+      "title": "瑞士网格设计系统",
+      "category": "创意",
+      "previewId": "ppt169_swiss_grid_systems",
+      "tier": "archive"
+    },
+    "ppt169_glassmorphism_demo": {
+      "title": "玻璃拟态设计",
+      "category": "创意",
+      "previewId": "ppt169_glassmorphism_demo",
+      "tier": "archive"
+    },
+    "ppt169_sugar_rush_memphis": {
+      "title": "糖果色孟菲斯",
+      "category": "创意",
+      "previewId": "ppt169_sugar_rush_memphis",
+      "tier": "archive"
+    },
+    "ppt169_indie_bookstore_zine_guide": {
+      "title": "独立书店与小志指南",
+      "category": "创意",
+      "previewId": "ppt169_indie_bookstore_zine_guide",
+      "tier": "archive"
+    },
+    "dsh-neo-grid-bold": {
+      "title": "醒目网格",
+      "category": "创意",
+      "previewId": "dsh-neo-grid-bold",
+      "tier": "archive"
+    },
+    "dsh-broadside": {
+      "title": "宣言海报",
+      "category": "创意",
+      "previewId": "dsh-broadside",
+      "tier": "archive"
+    },
+    "dsh-playful": {
+      "title": "趣味提案",
+      "category": "创意",
+      "previewId": "dsh-playful",
+      "tier": "archive"
+    },
+    "dsh-sakura-chroma": {
+      "title": "樱花彩谱",
+      "category": "创意",
+      "previewId": "dsh-sakura-chroma",
+      "tier": "archive"
     }
   }
 }

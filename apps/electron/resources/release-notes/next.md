@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Excel 案例与业务技能** — 搬入年度经营、青岚港和荧光酶三个案例，以及 SaaS 指标、数据体检和信息图技能。计算用 Bun，交付前重算并核对；图表优先用 OfficeCLI 原生图表。Issue #712。
 
+- **Word 案例与业务技能** — 接入会议纪要、咖啡市场调研、公司研报和政府通知四份案例，以及会议纪要、工作汇报、研究写作三份许可技能。公文写作由 Selection 自写，对齐文种、版式和待补充规则，不复用无许可原文。纪要结构校验改为 Bun 命令。政府通知样例按确认原样收入。（#710）
+
 - **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
 
 - **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
@@ -37,6 +39,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Full Takeover risk warning** — Switching a workspace into Full Takeover now shows a confirmation that explains the reduced prompts and requires ticking "I understand the risk" before the mode is enabled. The acknowledgement is stored per workspace, so later switches in that workspace go through silently; other workspaces ask once. Approving a plan now elevates Explore to Smart Approval instead of silently enabling Full Takeover.
 
 ## Improvements
+
+- **PPT 模板选择器收束** — 默认只留六套：理性简报、数据简报、战略备忘、经营复盘、工程蓝图、课程培训。其余收进折叠的「更多模板」，理性简报可换五套配色，重复卡片不再出现，归档成稿移出安装包。自定义页可以上传 PPTX 或 deck.json。后加的 DSH 卡片封面已按整页预览重做，中文不再是空框。
 
 - **模板与按页修订** — PPT 模板库补齐 11 套中英文 DSH 模板及逐页预览；成果文件可按页描述修改，或直接选择结构诊断问题修复，保留其余页与主题。（#686）
 

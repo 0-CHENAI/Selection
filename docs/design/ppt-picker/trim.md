@@ -1,0 +1,53 @@
+# PPT 模板选择器裁剪（2026-10-30）
+
+按 LinNai 的决定收束选择器。模板原文和版式没有改写，样例仍单独存放。
+
+## 选择器
+
+默认六套，顺序固定：
+
+1. `dsh-cartesian` 理性简报
+2. `ppt169_china_economy_2025_briefing` 数据简报
+3. `mbb-consulting` 战略备忘
+4. `operating-review` 经营复盘
+5. `dsh-engineering-blueprint` 工程蓝图
+6. `dsh-course-workshop` 课程培训
+
+`styles/picker.json` 用 `tier`：`default`、`more`、`archive`。选择器只列出 `default` 和 `more`。`more` 在界面里收成「更多模板」，共 13 张：清单里的 12 张，加上 `dsh-blue-professional`。
+
+理性简报的配色（`variantOf`，不是独立卡片）：`dsh-signal`、`dsh-monochrome`、`dsh-editorial-forest`、`dsh-soft-editorial`、`dsh-editorial-notebook`。对照过页面结构，这五套与理性简报有多页相同的元素排布。`dsh-blue-professional` 只有 1/12 页结构相同，示例也是另一套市场叙事，所以留在更多模板，卡片上写了原因。
+
+`workshop-teaching` 与课程培训场景重叠，选择器不再单列。课程培训的 deck 没有被改写，工作坊样例仍按 catalog 指向自己的文件。
+
+15 张重复卡从选择器移除：14 张与某套可见或归档模板共用同一份 deck 和预览，记在 `aliases`；`ppt169_china_rail_2024_zh_sonnet` 是对照稿，单独归档。这些 id 仍在 `catalog.json` 里，旧会话可以继续被接受。
+
+## 自定义上传
+
+「自定义」页可以上传 PPTX 或 selection-deck 的 `deck.json`。文件存在用户目录 `ppt-templates/custom-…/`：PPTX 仍写 `source.pptx`，deck 写 `deck.json`，并生成主题、槽位和预览，供列表、选用、重命名、删除和导出。同内容按哈希去重。
+
+#714 要做的是把个人模板复制成会话里的可编辑工程。这次没有做那一步，提示里也写明库里的副本不是会话工程。
+
+## 归档与安装包体积
+
+归档成稿的 deck、PDF、逐页 WebP、卡片封面，以及只被这些成稿引用的图片，移到 `apps/electron/resources/skills/ppt-design/styles/_archive/`。`copy-assets` 和 `electron-builder.yml` 都排除这个目录。deck 里的文字、版式和 `src` 没有改。图片对照表是 `asset-map.tsv`。
+
+测量的是会进入安装包的 `ppt-design/styles` 字节（归档目录留在仓库，不计入打包）：
+
+| | 字节 |
+|---|---|
+| 裁剪前 styles | 249,162,888 |
+| 裁剪后仍打包的 styles | 45,139,339 |
+| 归档目录（不打包） | 204,173,588 |
+| 节省 | 204,023,549 |
+
+其中 deck 源、PDF 和逐页预览约 105 MiB，卡片封面约 1.9 MiB，只被归档稿引用的图片约 87 MiB。先前估计的约 114 MB 接近前两项的十进制大小。
+
+`validatePptRequest` 仍接受归档 id。安装包里没有文件时，生成提示和预览接口返回明确说明，不把缺文件当成未知模板抛到会话外面。
+
+## 封面豆腐块
+
+后加的 11 套 DSH，卡片封面 `styles/previews/<id>-1..3.webp` 里中文是空框，`previews/pages/` 和 PDF 正常。
+
+原因：这些页的中文指定了 `PingFang SC`、`Microsoft YaHei`、`Noto Sans CJK SC`，部分大标题的 `face.cjk.linux` 是 `Noto Serif CJK SC`。预览脚本 `scripts/render-ppt-picker-previews.ts` 没有像其他渲染脚本那样设置 fontconfig 别名，LibreOffice 能画出 Arial / Arial Black，中文落成 `.notdef` 空框。后来的整页 WebP 和 PDF 是在字体可用时生成的，脚本又用 `existsSync` 保留已有的卡片封面，所以坏封面没被整页图换掉。
+
+这次把仍展示的封面（默认、更多、配色）改成对应的整页 WebP，并让脚本在渲染前写入 CJK 别名，且每次都用整页图覆盖前三张封面。`ppt-cover-quality` 会把近乎纯色的封面和一排空心方框判出来。

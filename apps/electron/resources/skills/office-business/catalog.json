@@ -1,30 +1,147 @@
 {
-  "version": 1,
-  "origin": "Selection 自有虚构样例，加上 dsh-desktop 588412b 的三个 MIT Excel 案例。虚构样例不覆盖。",
+  "version": 2,
+  "origin": "dsh-desktop 588412b 的 Word 与 Excel 案例，加上 Selection 虚构样例（分类「Selection 样例」）。虚构样例不覆盖 dsh 原件。",
+  "baseline": "588412b9002fcb3ac88751fab7915e050c965563",
   "cases": [
     {
       "id": "meeting-minutes",
-      "title": "会议纪要",
-      "format": "docx",
-      "guide": "word",
-      "recipe": "cases/meeting-minutes.json",
-      "editScope": "one paragraph text fragment"
+      "title": "会议纪要 · 发布会筹备",
+      "titleEn": "Launch preparation meeting minutes",
+      "description": "发布会筹备会议的三页纪要：五个议题、十五项行动记录及后续确认，保留责任、相对期限和原文依据。",
+      "prompt": "参考「会议纪要 · 发布会筹备」的结构和版式，将我提供的会议记录整理成可编辑 Word 纪要，保留关键讨论、已定安排、待确认事项，以及任务、负责人、期限和交付要求。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261012.1",
+      "category": "会议纪要",
+      "businessSkill": "meeting-recap",
+      "source": "curated/meeting-minutes",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/meeting-minutes",
+        "license": "MIT",
+        "exampleSha256": "b301c5e5801c62887a44f26379bc71f6c60cbdd21f45db13d63543f88abe6575"
+      }
     },
     {
-      "id": "work-notice",
+      "id": "coffee-market",
+      "title": "中国现制咖啡市场调研报告",
+      "titleEn": "Coffee market research",
+      "description": "以公开披露为基础的 2024 年市场研究：品牌网络、同店表现、消费场景与门店贡献，7 页报告及来源索引。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.6",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/coffee-market",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/coffee-market",
+        "license": "MIT",
+        "exampleSha256": "8cd61c57b0be98534ec361e7a4dfb38486ddc1547ac8c05426fc4f32680e958a",
+        "note": "dsh catalog 没有 prompt 字段，做同款时读 design.md 与 inputs/。"
+      }
+    },
+    {
+      "id": "equity-research",
+      "title": "小米汽车研究报告",
+      "titleEn": "Company research report",
+      "description": "投资逻辑、经营数据与风险分析，配合图表和来源标注。示例文稿。",
+      "prompt": "参考「小米汽车研究报告」的章节结构与研报样式，帮我研究【公司或行业】。面向【读者】，重点分析【核心问题】，生成含图表与来源标注的 Word 报告。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.5",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/equity-research",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/equity-research",
+        "license": "MIT",
+        "exampleSha256": "377a91187d9e295c9a3a492a803599b3757e887a878a85f41eb03eea42809418"
+      }
+    },
+    {
+      "id": "government-notice",
+      "title": "中国中车质量安全月活动通知",
+      "titleEn": "Official notice",
+      "description": "用户提供的 2025 年公文生成样例：活动主题、重点工作、组织实施与信息报送。保留原文待补充项。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260914.2",
+      "category": "公文写作",
+      "businessSkill": "gov-doc-writing",
+      "source": "legacy/government-notice",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/government-notice",
+        "license": "LinNai sample",
+        "exampleSha256": "c763f627f09e543505b4cfaea34487a0b8cd724b549e4762633153da61ddf961",
+        "note": "LinNai 2026-10-30 22:52 确认该样例可以原样搬入。技能正文仍自写。"
+      }
+    },
+    {
+      "id": "selection-meeting-minutes",
+      "title": "会议纪要",
+      "titleEn": "Selection fictional minutes",
+      "description": "Selection 自编虚构小样，只演示把一条提交期限从 11 月 3 日改为 11 月 5 日。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/meeting-minutes.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "selection-work-notice",
       "title": "工作通知草稿",
-      "format": "docx",
-      "guide": "word",
-      "recipe": "cases/work-notice.json",
-      "editScope": "one paragraph text fragment"
+      "titleEn": "Selection fictional notice",
+      "description": "Selection 自编虚构小样，只演示把报送期限改为 11 月 6 日。不宣称符合公文标准。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/work-notice.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
     },
     {
       "id": "execution-tracker",
       "title": "执行台账",
-      "format": "xlsx",
-      "guide": "excel",
-      "recipe": "cases/execution-tracker.json",
-      "editScope": "one input cell and dependent recalculation"
+      "titleEn": "Selection fictional tracker",
+      "description": "Selection 自编虚构 Excel 小样，只演示改一个输入格并保留公式。",
+      "mode": "excel",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/execution-tracker.json",
+        "format": "xlsx",
+        "guide": "excel",
+        "editScope": "one input cell and dependent recalculation",
+        "keptPendingConfirmation": true
+      }
     },
     {
       "id": "annual-business",
@@ -141,7 +258,12 @@
         }
       ],
       "titleEn": "Annual business and customers",
-      "businessSkill": "saas-metrics-coach"
+      "businessSkill": "saas-metrics-coach",
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/annual-business",
+        "license": "MIT"
+      }
     },
     {
       "id": "port-cargo",
@@ -186,7 +308,12 @@
       "businessSkills": [
         "dataset-health-audit",
         "data-viz-gen"
-      ]
+      ],
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/port-cargo",
+        "license": "MIT"
+      }
     },
     {
       "id": "bio-assay",
@@ -226,7 +353,12 @@
       "businessSkills": [
         "dataset-health-audit",
         "data-viz-gen"
-      ]
+      ],
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/bio-assay",
+        "license": "MIT"
+      }
     }
   ]
 }
