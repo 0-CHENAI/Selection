@@ -176,8 +176,8 @@ import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
-import { buildPptPrompt, getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
-import { buildPptRevisionPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
+import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
+import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
@@ -1761,9 +1761,8 @@ export class SessionManager implements ISessionManager {
     try { await exportIncrementalPptx(dir, { workingDirectory: managed.workingDirectory }) } catch (error) {
       sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
     }
-    // The preview follows the file. Page-check status can land a moment later.
-    this.emitPptProgress(managed, dir, generating)
-    try { await ensurePptChecks(dir) } catch { /* page status stays passed until deck_check can run */ }
+    // Never publish a successful page state before the current deck has been checked.
+    try { await ensurePptChecks(dir) } catch { /* uncached pages remain unverified */ }
     this.emitPptProgress(managed, dir, generating)
   }
 
@@ -8158,9 +8157,8 @@ export class SessionManager implements ISessionManager {
         markPptGenerating(chatSessionDir, true)
         this.ensurePptExportWatch(managed)
       }
-      const pptContext = options?.ppt ? buildPptPrompt(options.ppt, chatSessionDir, getPptSkillRoot(), installedSkills, message) : undefined
-      const pptRevisionContext = options?.pptRevision ? buildPptRevisionPrompt(options.pptRevision, chatSessionDir) : undefined
-      const currentInput = [pptContext, pptRevisionContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
+      const pptContext = buildPptTurnPrompt(options, chatSessionDir, undefined, installedSkills, message)
+      const currentInput = [pptContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
       if (preparedImages.ok && skippedImageCount > 0) {
         const modelName = messageBackendContext.resolvedModel || 'model'

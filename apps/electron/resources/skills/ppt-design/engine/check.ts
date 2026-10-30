@@ -94,12 +94,7 @@ function pointIn(box: Bounds, x: number, y: number): boolean {
 
 export function checkDeck(deck: Deck): DeckIssue[] {
   const issues: DeckIssue[] = []
-  let previousLayout: string | undefined
-  deck.pages.forEach((page, index) => {
-    if (previousLayout && page.layout === previousLayout) {
-      issues.push(issue('adjacent_layout', `第 ${index + 1} 页与上一页使用了相同版式 ${page.layout}`, page.id))
-    }
-    previousLayout = page.layout
+  deck.pages.forEach(page => {
     issues.push(...checkPage(deck, page))
   })
   return issues
