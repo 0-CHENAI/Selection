@@ -2,17 +2,54 @@
 .prompt-field,
 .prompt-effort-settings {
   --prompt-spark: oklch(0.49 0.16 293);
+  /* Pale lavender track; medium-saturation cells; bright core, not paper white. */
+  --prompt-effort-max-track: color-mix(in oklch, var(--prompt-spark) 24%, oklch(0.975 0.012 293));
+  --prompt-effort-ember: color-mix(in oklch, var(--prompt-spark) 64%, oklch(0.66 0.05 293));
+  --prompt-effort-mid: color-mix(in oklch, var(--prompt-spark) 82%, oklch(0.58 0.07 300));
+  --prompt-effort-core: color-mix(in oklch, var(--prompt-spark) 36%, oklch(0.84 0.035 293));
+  --prompt-effort-heat: 0.58;
+  --prompt-effort-exposure: 0.8;
+  --prompt-effort-floor: 0.05;
+  --prompt-effort-rise: 0.2;
+  --prompt-effort-chroma: 1;
 }
 
 .dark .prompt-field,
 .dark .prompt-effort-settings {
   --prompt-spark: oklch(0.78 0.11 293);
+  /* Lifted purple, not the old near-black track. Rich purple glow, white-hot core. */
+  --prompt-effort-max-track: color-mix(in oklch, var(--prompt-spark) 12%, oklch(0.23 0.03 293));
+  --prompt-effort-ember: color-mix(in oklch, var(--prompt-spark) 18%, color(srgb 0.28 0.1 0.58));
+  --prompt-effort-mid: color-mix(in oklch, var(--prompt-spark) 22%, color(srgb 0.62 0.32 1));
+  --prompt-effort-core: color-mix(in oklch, var(--prompt-spark) 8%, color(srgb 1 0.94 0.98));
+  --prompt-effort-heat: 1.2;
+  --prompt-effort-exposure: 1.1;
+  --prompt-effort-floor: 0;
+  --prompt-effort-rise: 0.12;
+  --prompt-effort-chroma: 0;
 }
 
-/* Follow the conversation mode in the model menu and the composer. */
+/* PRO Max follows --pro-accent (copper / champagne), not the purple spark. */
 .prompt-field[data-work-mode='PRO'],
 .prompt-effort-settings[data-work-mode='PRO'] {
   --prompt-spark: var(--pro-accent);
+}
+
+.prompt-effort-settings[data-work-mode='PRO'] {
+  /* Soft champagne track and medium gold cells. */
+  --prompt-effort-max-track: color-mix(in oklch, var(--prompt-spark) 26%, oklch(0.975 0.02 85));
+  --prompt-effort-ember: color-mix(in oklch, var(--prompt-spark) 72%, oklch(0.68 0.06 75));
+  --prompt-effort-mid: color-mix(in oklch, var(--prompt-spark) 88%, oklch(0.62 0.09 68));
+  --prompt-effort-core: color-mix(in oklch, var(--prompt-spark) 42%, oklch(0.88 0.045 85));
+}
+
+.dark .prompt-effort-settings[data-work-mode='PRO'] {
+  --prompt-spark: var(--pro-accent);
+  /* Rich amber glow on a warm lifted track, with a warm-white core. */
+  --prompt-effort-max-track: color-mix(in oklch, var(--prompt-spark) 14%, oklch(0.22 0.04 72));
+  --prompt-effort-ember: color-mix(in oklch, var(--prompt-spark) 24%, oklch(0.47 0.15 62));
+  --prompt-effort-mid: color-mix(in oklch, var(--prompt-spark) 38%, oklch(0.62 0.16 78));
+  --prompt-effort-core: color-mix(in oklch, var(--prompt-spark) 10%, oklch(0.97 0.03 88));
 }
 
 .prompt-effort-settings[data-work-mode='PRO'] .prompt-effort-value {
@@ -103,7 +140,8 @@
   height: 22px;
   margin-top: 8px;
   border-radius: 11px;
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  transition: background-color 260ms ease;
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -143,10 +181,19 @@
   height: 100%;
   border-radius: inherit;
   pointer-events: none;
+  opacity: 0;
+  background: transparent;
+  /* Used colors the WebGL field re-reads: ember, mid, core, track. */
+  color: var(--prompt-effort-ember);
+  border-top: 0 solid var(--prompt-effort-mid);
+  border-right: 0 solid var(--prompt-effort-core);
+  border-bottom: 0 solid var(--prompt-effort-max-track);
+  transition: opacity 260ms ease;
 }
+.prompt-effort-webgl[data-visible] { opacity: 1; }
 
 .prompt-effort-settings[data-max] .prompt-effort-track {
-  background: oklch(0.14 0.008 293);
+  background-color: var(--prompt-effort-max-track);
 }
 .prompt-effort-settings[data-max] .prompt-effort-dot { visibility: hidden; }
 
@@ -186,7 +233,9 @@
 .prompt-effort-settings[data-max] .prompt-effort-thumb { background: var(--prompt-spark); }
 
 @media (prefers-reduced-motion: reduce) {
-  .prompt-field::before { transition: none; }
+  .prompt-field::before,
+  .prompt-effort-track,
+  .prompt-effort-webgl { transition: none; }
   .prompt-effort-fill,
   .prompt-effort-thumb { transition: background-color 300ms ease; }
   .prompt-effort-track:hover .prompt-effort-thumb,

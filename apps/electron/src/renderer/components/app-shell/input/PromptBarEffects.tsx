@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { type ThinkingLevel, type ThinkingLevelDefinition, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { useWebglEffort } from '@/hooks/useWebglEffort'
+import { EFFORT_FIELD_FADE_MS } from './effort-theme'
 import './PromptBarEffects.css'
 
 // Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
@@ -15,10 +16,69 @@ const EFFORT_EDGE = 11
 // Slightly larger than the 22px track so the knob reads as floating above it.
 const EFFORT_THUMB = 26
 
-function MaxEffortField() {
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(REDUCED_MOTION_QUERY).matches
+}
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = React.useState(prefersReducedMotion)
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia(REDUCED_MOTION_QUERY)
+    const sync = () => setReduced(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+  return reduced
+}
+
+/** Keep the canvas through the fade-out, then drop it so WebGL can tear down. */
+function useMaxEffortPresence(active: boolean) {
+  const reducedMotion = usePrefersReducedMotion()
+  const [present, setPresent] = React.useState(active)
+  const [visible, setVisible] = React.useState(() => active && prefersReducedMotion())
+  const presentRef = React.useRef(present)
+  presentRef.current = present
+
+  React.useEffect(() => {
+    if (active) {
+      setPresent(true)
+      if (reducedMotion) {
+        setVisible(true)
+        return
+      }
+      setVisible(false)
+      let inner = 0
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => {
+        cancelAnimationFrame(outer)
+        if (inner) cancelAnimationFrame(inner)
+      }
+    }
+    setVisible(false)
+    if (!presentRef.current) return
+    if (reducedMotion) {
+      setPresent(false)
+      return
+    }
+    const timer = window.setTimeout(() => setPresent(false), EFFORT_FIELD_FADE_MS)
+    return () => window.clearTimeout(timer)
+  }, [active, reducedMotion])
+
+  return { present, visible }
+}
+
+function MaxEffortField({ visible }: { visible: boolean }) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   useWebglEffort(canvasRef)
-  return <canvas ref={canvasRef} className="prompt-effort-webgl" aria-hidden="true" />
+  return <canvas ref={canvasRef} className="prompt-effort-webgl" data-visible={visible || undefined} aria-hidden="true" />
 }
 
 export function PromptThinkingSettings({
@@ -38,6 +98,8 @@ export function PromptThinkingSettings({
 }) {
   const { t } = useTranslation()
   const [dragging, setDragging] = React.useState(false)
+  const maxed = !unavailable && !binary && !disabled && levels.length > 1 && value === 'max' && levels.some(level => level.id === 'max')
+  const maxField = useMaxEffortPresence(maxed)
   if (unavailable) {
     const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
     return (
@@ -51,7 +113,6 @@ export function PromptThinkingSettings({
     )
   }
   const index = Math.max(0, levels.findIndex(level => level.id === value))
-  const maxed = !binary && !disabled && levels.length > 1 && value === 'max' && levels.some(level => level.id === 'max')
   const valueKey = binary ? (value === 'off' ? 'thinking.off' : 'thinking.on') : getThinkingLevelNameKey(value)
   if (levels.length === 0) return null
   const inactive = disabled || levels.length === 1
@@ -115,7 +176,7 @@ export function PromptThinkingSettings({
     >
       <span className="prompt-effort-fill" aria-hidden="true" />
       {levels.map((level, i) => <i key={level.id} className="prompt-effort-dot" style={{ left: stepAt(i) }} aria-hidden="true" />)}
-      {maxed && <MaxEffortField />}
+      {maxField.present && <MaxEffortField visible={maxField.visible} />}
       <span className="prompt-effort-thumb" aria-hidden="true" />
     </div>
   )
