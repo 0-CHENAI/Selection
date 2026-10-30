@@ -28,3 +28,11 @@
 截图是 OfficeCLI 在 macOS 的 HTML 预览结果，不是 Microsoft Word / WPS 的分页保真证明；这组三个文件是小型开发验收样例，不是用户业务成品。多页公文、复杂模板、宏与跨工作簿模型尚未用本案例覆盖。模型是否遵循技能和交付路径还需 Ship 真实轨迹，不以 CLI 集成替代。
 
 本地验证记录：业务目录与真实三例集成 2 pass / 0 fail、63 assertions；普通目录/PPT 技能发现 3 pass / 1 明确 skip / 0 fail。全仓 `typecheck:all` 与 `git diff --check` 通过。正式 CI 尚需回读，不能把上述定向测试称为全仓验证通过。
+
+## 2026-10-30 起基线改为 588412b
+
+上文第 9 行「未找到可搬的 Word/Excel 案例目录」只描述 O5 当时对照的 DSH 快照 `8dec631777c34fbbcc7d45af787bdd2c468d2cfb`。该句与 O0 #683 的记录一起保留，不改写历史。
+
+2026-10-30 的重冻结（#704，父规划 #703）把对照提交改为 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。在这个提交上，`packages/dsh-desktop-office/sources/` 有 7 个案例（Word 4、Excel 3），`business-skills/` 有 7 个技能。因此「dsh 没有可搬的 Word/Excel 案例」不再作为后续阶段的前提。清单、许可和来源见 [selection-3.2-office-dsh-parity-baseline.md](../plans/selection-3.2-office-dsh-parity-baseline.md)。本 O5 交付的三份虚构 recipe 仍然有效，且不是那些 dsh 案例的拷贝。
+
+#688 与 #683 的后续说明应引用本节和上述基线，不必修改原 Issue 正文。公文写作能力可以做，但来源说明须写「能力参照 dsh-desktop gov-doc-writing，未复用其内容」。
