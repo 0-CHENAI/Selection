@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { parseImageContract } from './schema-v2-draft.ts'
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -13,6 +14,10 @@ import {
   type ChartSpec,
   type ColorStop,
   type Deck,
+  type DeckCrop,
+  type DeckMask,
+  type DeckSource,
+  type DeckTextRun,
   type GradientFill,
   type PatternFill,
   type ShadowSpec,
@@ -25,6 +30,9 @@ import {
 } from './types.ts'
 
 const HEX = /^#[0-9A-Fa-f]{6}$/
+const SHA256 = /^[0-9a-f]{64}$/
+const ELEMENT_KEYS = ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'chartImage', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit']
+const ELEMENT_V2_KEYS = [...ELEMENT_KEYS, 'group', 'crop', 'mask', 'link', 'runs', 'retained']
 const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const FONT_TOKEN = /^\$cjk$|^\$latin$/
 const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/
@@ -360,14 +368,14 @@ function parseChartImage(value: unknown, id: string, issues: DeckIssue[], pageId
   return { skill, format, data: data.trim() }
 }
 
-function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): DeckElement | null {
+function parseElement(value: unknown, pageId: string, issues: DeckIssue[], v2: boolean): DeckElement | null {
   if (!isObject(value)) {
     issues.push(issue('schema', '元素必须是对象', pageId))
     return null
   }
   const id = value.id
   const elementId = typeof id === 'string' ? id : undefined
-  rejectUnknown(value, ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'chartImage', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit'], `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
+  rejectUnknown(value, v2 ? ELEMENT_V2_KEYS : ELEMENT_KEYS, `元素 ${elementId ?? '?'}`, issues, pageId, elementId)
   if (typeof id !== 'string' || !id.trim()) {
     issues.push(issue('schema', '元素缺少 id', pageId))
     return null
@@ -424,7 +432,110 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[]): Deck
     const table = parseTable(value.table, id, issues, pageId, id)
     if (table) element.table = table
   }
+  if (v2) applyV2Element(value, element, pageId, issues)
   return element
+}
+
+function applyV2Element(value: Record<string, unknown>, element: DeckElement, pageId: string, issues: DeckIssue[]): void {
+  if (value.group !== undefined) {
+    if (!isObject(value.group) || typeof value.group.id !== 'string' || !value.group.id.trim() || value.group.id.length > 80 || Object.keys(value.group).some(key => key !== 'id')) {
+      issues.push(issue('schema', `元素 ${element.id} 的 group 必须是 {id}`, pageId, element.id))
+    } else element.group = { id: value.group.id }
+  }
+  if (value.crop !== undefined) {
+    const crop = parseCrop(value.crop, element.id, pageId, issues)
+    if (crop) element.crop = crop
+  }
+  if (value.mask !== undefined) {
+    const mask = parseMask(value.mask, element.id, pageId, issues)
+    if (mask) element.mask = mask
+  }
+  if (value.link !== undefined) {
+    if (!isObject(value.link) || typeof value.link.href !== 'string' || !safeHref(value.link.href) || Object.keys(value.link).some(key => key !== 'href')) {
+      issues.push(issue('schema', `元素 ${element.id} 的 link.href 必须是 http(s) 链接`, pageId, element.id))
+    } else element.link = { href: value.link.href }
+  }
+  if (value.runs !== undefined) {
+    const runs = parseRuns(value.runs, element.id, pageId, issues)
+    if (runs) element.runs = runs
+  }
+  if (value.retained !== undefined) {
+    if (!isObject(value.retained) || typeof value.retained.feature !== 'string' || !value.retained.feature.trim() || value.retained.feature.length > 80 || typeof value.retained.message !== 'string' || !value.retained.message.trim() || value.retained.message.length > 500 || Object.keys(value.retained).some(key => key !== 'feature' && key !== 'message')) {
+      issues.push(issue('schema', `元素 ${element.id} 的 retained 必须是 {feature, message}`, pageId, element.id))
+    } else element.retained = { feature: value.retained.feature, message: value.retained.message }
+  }
+}
+
+function parseCrop(value: unknown, elementId: string, pageId: string, issues: DeckIssue[]): DeckCrop | undefined {
+  if (!isObject(value)) {
+    issues.push(issue('schema', `元素 ${elementId} 的 crop 必须是对象`, pageId, elementId))
+    return undefined
+  }
+  rejectUnknown(value, ['l', 't', 'r', 'b'], `${elementId}.crop`, issues, pageId, elementId)
+  const crop = { l: value.l, t: value.t, r: value.r, b: value.b }
+  for (const key of ['l', 't', 'r', 'b'] as const) {
+    if (typeof crop[key] !== 'number' || crop[key] < 0 || crop[key] > 1) {
+      issues.push(issue('schema', `元素 ${elementId} 的 crop.${key} 必须在 0 到 1 之间`, pageId, elementId))
+      return undefined
+    }
+  }
+  return crop as DeckCrop
+}
+
+function parseMask(value: unknown, elementId: string, pageId: string, issues: DeckIssue[]): DeckMask | undefined {
+  if (!isObject(value)) {
+    issues.push(issue('schema', `元素 ${elementId} 的 mask 必须是对象`, pageId, elementId))
+    return undefined
+  }
+  rejectUnknown(value, ['shape', 'path'], `${elementId}.mask`, issues, pageId, elementId)
+  if (value.shape !== 'rect' && value.shape !== 'roundRect' && value.shape !== 'ellipse' && value.shape !== 'path') {
+    issues.push(issue('schema', `元素 ${elementId} 的 mask.shape 不支持`, pageId, elementId))
+    return undefined
+  }
+  if (value.shape === 'path' && (typeof value.path !== 'string' || !value.path.trim())) {
+    issues.push(issue('schema', `元素 ${elementId} 的 mask.path 缺少路径`, pageId, elementId))
+    return undefined
+  }
+  return { shape: value.shape, path: typeof value.path === 'string' ? value.path : undefined }
+}
+
+function parseRuns(value: unknown, elementId: string, pageId: string, issues: DeckIssue[]): DeckTextRun[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    issues.push(issue('schema', `元素 ${elementId} 的 runs 必须是 1 到 64 段`, pageId, elementId))
+    return undefined
+  }
+  const runs: DeckTextRun[] = []
+  for (const entry of value) {
+    if (!isObject(entry)) {
+      issues.push(issue('schema', `元素 ${elementId} 的 run 必须是对象`, pageId, elementId))
+      return undefined
+    }
+    rejectUnknown(entry, ['text', 'size', 'bold', 'italic', 'color'], `${elementId}.runs`, issues, pageId, elementId)
+    if (typeof entry.text !== 'string') {
+      issues.push(issue('schema', `元素 ${elementId} 的 run 缺少 text`, pageId, elementId))
+      return undefined
+    }
+    if (entry.size !== undefined && (typeof entry.size !== 'number' || entry.size < 6 || entry.size > 240)) {
+      issues.push(issue('schema', `元素 ${elementId} 的 run 字号无效`, pageId, elementId))
+      return undefined
+    }
+    if (entry.color !== undefined && (typeof entry.color !== 'string' || !COLOR_REF.test(entry.color))) {
+      issues.push(issue('schema', `元素 ${elementId} 的 run 颜色无效`, pageId, elementId))
+      return undefined
+    }
+    runs.push({
+      text: entry.text,
+      size: typeof entry.size === 'number' ? entry.size : undefined,
+      bold: entry.bold === true ? true : undefined,
+      italic: entry.italic === true ? true : undefined,
+      color: typeof entry.color === 'string' ? entry.color : undefined,
+    })
+  }
+  return runs
+}
+
+function safeHref(value: string): boolean {
+  return /^https?:\/\/[^\s]+$/i.test(value) && value.length <= 2000 && !/[\u0000-\u001f]/.test(value)
 }
 
 function parseText(value: Record<string, unknown>, element: DeckElement, pageId: string, issues: DeckIssue[]): void {
@@ -769,13 +880,13 @@ function parseTable(value: unknown, path: string, issues: DeckIssue[], pageId: s
   }
 }
 
-function parsePage(value: unknown, issues: DeckIssue[]): DeckPage | null {
+function parsePage(value: unknown, issues: DeckIssue[], v2: boolean): DeckPage | null {
   if (!isObject(value)) {
     issues.push(issue('schema', '页面必须是对象'))
     return null
   }
   const id = typeof value.id === 'string' ? value.id : undefined
-  rejectUnknown(value, ['id', 'layout', 'name', 'background', 'elements', 'notes'], `页面 ${id ?? '?'}`, issues, id)
+  rejectUnknown(value, v2 ? ['id', 'layout', 'name', 'background', 'elements', 'notes', 'layoutRef', 'imageSlots'] : ['id', 'layout', 'name', 'background', 'elements', 'notes'], `页面 ${id ?? '?'}`, issues, id)
   if (!id || !id.trim()) {
     issues.push(issue('schema', '页面缺少 id'))
     return null
@@ -791,14 +902,14 @@ function parsePage(value: unknown, issues: DeckIssue[]): DeckPage | null {
   const elements: DeckElement[] = []
   const seen = new Set<string>()
   for (const entry of value.elements) {
-    const element = parseElement(entry, id, issues)
+    const element = parseElement(entry, id, issues, v2)
     if (!element) continue
     if (seen.has(element.id)) issues.push(issue('schema', `页面内元素 id 重复：${element.id}`, id, element.id))
     seen.add(element.id)
     elements.push(element)
   }
   if (typeof value.layout !== 'string' || typeof value.background !== 'string') return null
-  return {
+  const page: DeckPage = {
     id,
     layout: value.layout,
     name: typeof value.name === 'string' ? value.name : undefined,
@@ -806,14 +917,39 @@ function parsePage(value: unknown, issues: DeckIssue[]): DeckPage | null {
     elements,
     notes: typeof value.notes === 'string' ? value.notes : undefined,
   }
+  if (v2 && value.layoutRef !== undefined) {
+    if (!isObject(value.layoutRef) || Object.keys(value.layoutRef).some(key => key !== 'master' && key !== 'layout')) {
+      issues.push(issue('schema', '页面 layoutRef 只含 master 和 layout', id))
+    } else {
+      const master = optionalName(value.layoutRef.master, 'layoutRef.master', id, issues)
+      const layout = optionalName(value.layoutRef.layout, 'layoutRef.layout', id, issues)
+      if (master || layout) page.layoutRef = { master, layout }
+    }
+  }
+  if (v2 && value.imageSlots !== undefined) {
+    const parsed = parseImageContract(JSON.stringify(value.imageSlots), elements.map(item => ({ id: item.id, type: item.type })))
+    if (parsed.status !== 'ok') issues.push(issue('schema', parsed.status === 'invalid' ? parsed.message : '页面 imageSlots 无效', id))
+    else page.imageSlots = parsed.contract
+  }
+  return page
+}
+
+function optionalName(value: unknown, path: string, pageId: string, issues: DeckIssue[]): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !value.trim() || value.length > 200) {
+    issues.push(issue('schema', `页面 ${path} 必须是短字符串`, pageId))
+    return undefined
+  }
+  return value
 }
 
 export function parseDeckDocument(value: unknown): { deck: Deck | null; issues: DeckIssue[] } {
   const issues: DeckIssue[] = []
   if (!isObject(value)) return { deck: null, issues: [issue('schema', 'deck 必须是对象')] }
-  rejectUnknown(value, ['format', 'version', 'title', 'canvas', 'theme', 'pages', 'profile'], 'deck', issues)
+  const v2 = value.version === 2
+  rejectUnknown(value, v2 ? ['format', 'version', 'title', 'canvas', 'theme', 'pages', 'profile', 'source'] : ['format', 'version', 'title', 'canvas', 'theme', 'pages', 'profile'], 'deck', issues)
   if (value.format !== DECK_FORMAT) issues.push(issue('schema', `format 必须是 ${DECK_FORMAT}`))
-  if (value.version !== DECK_VERSION) issues.push(issue('schema', `version 必须是 ${DECK_VERSION}`))
+  if (value.version !== DECK_VERSION && value.version !== 2) issues.push(issue('schema', `version 必须是 ${DECK_VERSION} 或 2`))
   if (typeof value.title !== 'string' || !value.title.trim()) issues.push(issue('schema', 'title 必须是非空字符串'))
   if (!isObject(value.canvas)) issues.push(issue('schema', 'canvas 必须是对象'))
   else {
@@ -835,17 +971,19 @@ export function parseDeckDocument(value: unknown): { deck: Deck | null; issues: 
   const pages: DeckPage[] = []
   const seen = new Set<string>()
   for (const entry of value.pages) {
-    const page = parsePage(entry, issues)
+    const page = parsePage(entry, issues, v2)
     if (!page) continue
     if (seen.has(page.id)) issues.push(issue('schema', `页面 id 重复：${page.id}`, page.id))
     seen.add(page.id)
     pages.push(page)
   }
+  const source = v2 ? parseSource(value.source, issues) : undefined
   if (issues.length > 0 || !theme || typeof value.title !== 'string') return { deck: null, issues }
   return {
     deck: {
       format: DECK_FORMAT,
-      version: DECK_VERSION,
+      version: v2 ? 2 : DECK_VERSION,
+      source,
       title: value.title,
       canvas: { width: Number(value.canvas.width), height: Number(value.canvas.height) },
       theme,
@@ -853,6 +991,30 @@ export function parseDeckDocument(value: unknown): { deck: Deck | null; issues: 
       profile: value.profile === 'example' || value.profile === 'authored' ? value.profile : undefined,
     },
     issues,
+  }
+}
+
+function parseSource(value: unknown, issues: DeckIssue[]): DeckSource | undefined {
+  if (value === undefined) return undefined
+  if (!isObject(value)) {
+    issues.push(issue('schema', 'source 必须是对象'))
+    return undefined
+  }
+  rejectUnknown(value, ['kind', 'fileName', 'sha256'], 'source', issues)
+  if (value.kind !== 'import' && value.kind !== 'template-project' && value.kind !== 'authored') {
+    issues.push(issue('schema', 'source.kind 只支持 import、template-project 或 authored'))
+    return undefined
+  }
+  if (value.fileName !== undefined && (typeof value.fileName !== 'string' || !value.fileName.trim() || value.fileName.length > 240)) {
+    issues.push(issue('schema', 'source.fileName 无效'))
+  }
+  if (value.sha256 !== undefined && (typeof value.sha256 !== 'string' || !SHA256.test(value.sha256))) {
+    issues.push(issue('schema', 'source.sha256 必须是 64 位十六进制'))
+  }
+  return {
+    kind: value.kind,
+    fileName: typeof value.fileName === 'string' ? value.fileName : undefined,
+    sha256: typeof value.sha256 === 'string' ? value.sha256 : undefined,
   }
 }
 

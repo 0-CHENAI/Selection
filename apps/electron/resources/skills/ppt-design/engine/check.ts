@@ -170,6 +170,7 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
     if (off && !chartPicture) {
       issues.push(issue('out_of_bounds', `元素超出 ${width}×${height} 画布（x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}）`, page.id, element.id))
     }
+    if (element.retained) continue
     if (chartPicture) issues.push(...checkChartImage(deck, page, element))
     if (element.type === 'text' && element.text && element.font && element.textCapacity) {
       issues.push(...checkText(deck, page, element, background))
@@ -181,7 +182,8 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
       issues.push(...checkTable(deck, page, element, background))
     }
   }
-  issues.push(...checkOverlap(page, deck.profile === 'example'))
+  const editable = { ...page, elements: page.elements.filter(element => !element.retained) }
+  issues.push(...checkOverlap(editable, deck.profile === 'example'))
   return issues
 }
 

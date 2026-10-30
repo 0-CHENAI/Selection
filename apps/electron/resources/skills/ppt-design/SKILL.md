@@ -25,7 +25,7 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 换色只改主题 token，保留布局/文字/图表/页数，不自动升级为换皮。继承的模板选择、跟进消息或检查失败都不是整套重做授权；问答不触发修改，明确要新稿时才启动新建。
 
-没有匹配 deck 的外来 PPTX 先用 OfficeCLI 检查并定点改；不能伪造保真导入，也不能为局部修改重建整套。无法原位完成的版式修改须说明限制，整套重建仍需明确意图。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。
+没有匹配 deck 的外来 PPTX，先读 brief，再按意图分流。`office_edit`（改几个字、改数据、局部格式）仍复制后用 OfficeCLI 定点改，不导入工程。`deck_revision` / `restyle`（改版式或整套换风格）用 `ppt_import` 把文件导入成新的 deck.json 工程，再修订。原件只读，不覆盖原始模板和个人模板库。映射不了的对象标成保留不可编辑，导出时按原位置贴回，改版式时它们不跟着动。不承诺逐对象还原。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。PPT 模式中途上传的 PPTX 是外来稿，不是个人模板，不要登记进模板库。
 
 ## 先读，再执行
 
@@ -115,6 +115,14 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 - 中间文件放在 `dataFolderPath`（`deck.json`、截图、检查结果）。可见的 PPTX 只有 `ppt-output.json` 里的那一份：没有工作目录时在会话文件夹，有工作目录时在该目录。不要复制第二份，也不要覆盖同目录里无关的已有文件。
 - 只交付这一份 `.pptx` 和一段事实说明。许可与适配来源见 [ATTRIBUTION](ATTRIBUTION.md)。
 
-### 外来稿先读 brief
+### 外来稿先读 brief，再决定要不要导入
 
-没有匹配 deck 的外来 PPTX 必须先执行 [OfficeCLI 外来稿流程](../officecli/references/external-ppt-brief.md)，生成并完整读取有损结构 brief，校验源文件哈希后再选路由或编辑。不要把摘要当成可逆 deck；页主张候选需对照原生截图与用户素材复核。源文件变化后重建 brief。
+没有匹配 deck 的外来 PPTX 必须先执行 [OfficeCLI 外来稿流程](../officecli/references/external-ppt-brief.md)，生成并完整读取有损结构 brief，校验源文件哈希后再选路由。页主张候选需对照原生截图与用户素材复核。源文件变化后重建 brief。
+
+改版式或整套换风格时，用下面的命令把原件导入到新目录。不要把输出目录放进 `styles/` 或 `ppt-templates/`，也不要覆盖原 PPTX。
+
+```text
+"$CRAFT_BUN" "<skill>/engine/deck-cli.mjs" import "<source.pptx>" --out "<dataFolderPath>/import-<name>"
+```
+
+标准输出是一行 JSON。`deck` 指向新的 `deck.json`，`diagnostics` 是逐页覆盖（保真 / 近似 / 保留不可编辑 / 不支持）。`preview.status` 为 `unavailable` 时，渲染路径还没选定，不能把缺预览说成导入失败。带 `retained` 的元素不能当 `{page, elementId}` 修订目标。改完可编辑对象后，`deck-cli.mjs render` 会把旁边的 `retained.json` 按原位置贴回导出文件。
