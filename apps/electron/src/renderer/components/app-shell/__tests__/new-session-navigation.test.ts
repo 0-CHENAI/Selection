@@ -10,7 +10,7 @@ describe('new session navigation', () => {
   it('opens the draft composer with auto-select suppressed', () => {
     const appShell = read('../AppShell.tsx')
     expect(appShell).toContain('draftSessionNavigateOptions(newPanel)')
-    expect(appShell).toContain('navigate(isPptView ? routes.view.ppt() : routes.view.allSessions(), draftSessionNavigateOptions(newPanel))')
+    expect(appShell).toContain('navigate(isOfficeArea ? routes.view.office(officeHomeSection) : routes.view.allSessions(), draftSessionNavigateOptions(newPanel))')
   })
 
   it('forwards skipAutoSelect through the navigate event bridge', () => {
