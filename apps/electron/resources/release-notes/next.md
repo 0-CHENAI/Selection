@@ -170,3 +170,4 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.
 
 - **模板与按页修订** — PPT 模板库补齐 11 套中英文 DSH 模板及逐页预览；成果文件可按页描述修改，或直接选择结构诊断问题修复，保留其余页与主题。（#686）
+- **先理解外来演示稿** — 编辑已有 PPTX 前先读取逐页结构摘要、定位原对象并核验文件版本，减少误改与无必要重建；摘要明确保真边界，不代表更换编辑器。（#687）

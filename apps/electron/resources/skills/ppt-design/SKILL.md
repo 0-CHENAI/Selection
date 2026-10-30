@@ -114,3 +114,7 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 - 用户要求 Morph 或 3D 时，只增加对象配对和运动检查，不另做一套静态设计。静态截图不能证明播放效果。
 - 中间文件放在 `dataFolderPath`（`deck.json`、截图、检查结果）。可见的 PPTX 只有 `ppt-output.json` 里的那一份：没有工作目录时在会话文件夹，有工作目录时在该目录。不要复制第二份，也不要覆盖同目录里无关的已有文件。
 - 只交付这一份 `.pptx` 和一段事实说明。许可与适配来源见 [ATTRIBUTION](ATTRIBUTION.md)。
+
+### 外来稿先读 brief
+
+没有匹配 deck 的外来 PPTX 必须先执行 [OfficeCLI 外来稿流程](../officecli/references/external-ppt-brief.md)，生成并完整读取有损结构 brief，校验源文件哈希后再选路由或编辑。不要把摘要当成可逆 deck；页主张候选需对照原生截图与用户素材复核。源文件变化后重建 brief。

@@ -19,7 +19,7 @@ Selection already ships the correct OfficeCLI binary and its official skills. Us
 
 换色只改主题 token，保留布局/文字/图表/页数，不自动升级为换皮。继承的模板选择、跟进消息或检查失败都不是整套重做授权；问答不触发修改，明确要新稿时才启动新建。
 
-没有匹配 deck 的外来 PPTX 先用 OfficeCLI 检查并定点改；不能伪造保真导入，也不能为局部修改重建整套。无法原位完成的版式修改须说明限制，整套重建仍需明确意图。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。
+没有匹配 deck 的外来 PPTX 必须先按 [外来稿 brief](references/external-ppt-brief.md) 用 `scripts/ppt-brief.ts`（OfficeCLI query）生成有损结构摘要，编辑前完整读取并校验源文件哈希，再选三分路由；变化后重新生成。定点改仍用 OfficeCLI；不能伪造保真导入，也不能为局部修改重建整套。无法原位完成的版式修改须说明限制，整套重建仍需明确意图。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。
 
 ## Load only what the task needs
 
