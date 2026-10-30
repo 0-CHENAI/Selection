@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OfficeInjectionMarker } from '@craft-agent/core/types'
 import {
@@ -270,11 +270,27 @@ function readText(path: string): string {
   return stripFrontmatter(readFileSync(path, 'utf8'))
 }
 
+function devOfficecliSkill(slug: 'officecli-docx' | 'officecli-xlsx'): string[] {
+  const roots = [
+    join(process.cwd(), 'apps', 'electron', 'resources', 'officecli'),
+    join(process.cwd(), 'resources', 'officecli'),
+    join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'officecli'),
+  ]
+  const found: string[] = []
+  for (const root of roots) {
+    if (!existsSync(root)) continue
+    for (const version of readdirSync(root)) {
+      found.push(join(root, version, 'skills', slug, 'SKILL.md'))
+    }
+  }
+  return found
+}
+
 function guidePath(slug: 'officecli-docx' | 'officecli-xlsx'): string {
   const bundled = getBundledOfficecliSkillsDir()
   const candidates = [
     bundled ? join(bundled, slug, 'SKILL.md') : '',
-    join(import.meta.dir, '../../../../apps/electron/resources/officecli/1.0.157/skills', slug, 'SKILL.md'),
+    ...devOfficecliSkill(slug),
   ].filter(Boolean)
   const found = candidates.find(path => existsSync(path))
   if (!found) throw new Error('Office 基础技能不可用。')
