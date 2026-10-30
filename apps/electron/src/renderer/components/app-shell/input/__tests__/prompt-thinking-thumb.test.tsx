@@ -1,10 +1,12 @@
 import { createElement, Fragment, type ReactNode } from 'react'
-import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { renderToStaticMarkup } from 'react-dom/server'
 import i18next, { type InitOptions } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
-import { THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
+import { THINKING_LEVELS, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
+import { EFFORT_FIELD_FADE_MS } from '../effort-theme'
 
 const passthrough = ({ children }: { children?: ReactNode }) => createElement(Fragment, null, children)
 mock.module('@craft-agent/ui', () => ({
@@ -73,5 +75,120 @@ describe('thinking effort', () => {
     const disabled = renderSettings('medium', { disabled: true, inMenu: false })
     expect(disabled).toContain('aria-disabled="true"')
     expect(disabled).toContain('tabindex="-1"')
+  })
+
+  it('marks PRO so the Max field can follow the gold accent', () => {
+    expect(renderSettings('max', { workMode: 'PRO' })).toContain('data-work-mode="PRO"')
+    expect(renderSettings('max', { workMode: 'PRO' })).toContain('<canvas')
+    expect(renderSettings('max', { workMode: 'NORM' })).toContain('data-work-mode="NORM"')
+  })
+})
+
+const hostKeys = ['window', 'requestAnimationFrame', 'cancelAnimationFrame'] as const
+
+function restoreHost(previous: Array<PropertyDescriptor | undefined>) {
+  hostKeys.forEach((key, index) => {
+    const descriptor = previous[index]
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+    else Reflect.deleteProperty(globalThis, key)
+  })
+}
+
+describe('max effort field fade', () => {
+  const previous = hostKeys.map(key => Object.getOwnPropertyDescriptor(globalThis, key))
+  afterEach(() => restoreHost(previous))
+
+  function host(reduced: boolean) {
+    const frames: FrameRequestCallback[] = []
+    const timers: Array<{ fn: () => void; ms: number }> = []
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        matchMedia: (query: string) => ({
+          matches: reduced && query.includes('reduce'),
+          addEventListener() {},
+          removeEventListener() {},
+        }),
+        setTimeout(fn: () => void, ms?: number) {
+          timers.push({ fn, ms: ms ?? 0 })
+          return timers.length
+        },
+        clearTimeout() {},
+      },
+    })
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frames.push(callback)
+        return frames.length
+      },
+    })
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+    return { frames, timers }
+  }
+
+  function flush(frames: FrameRequestCallback[]) {
+    const pending = frames.splice(0)
+    for (const frame of pending) frame(0)
+  }
+
+  function mount(value: ThinkingLevel) {
+    let renderer: ReactTestRenderer
+    const i18n = i18next.createInstance()
+    void i18n.init({
+      lng: 'zh-Hans',
+      fallbackLng: 'en',
+      initImmediate: false,
+      resources: { 'zh-Hans': { translation: LOCALE_REGISTRY['zh-Hans'].messages } },
+    } as InitOptions)
+    act(() => {
+      renderer = create(
+        <I18nextProvider i18n={i18n}>
+          <PromptThinkingSettings value={value} levels={THINKING_LEVELS} workMode="NORM" onChange={() => {}} />
+        </I18nextProvider>,
+      )
+    })
+    return {
+      canvas: () => renderer.root.findAllByType('canvas'),
+      update: (next: ThinkingLevel) => act(() => {
+        renderer.update(
+          <I18nextProvider i18n={i18n}>
+            <PromptThinkingSettings value={next} levels={THINKING_LEVELS} workMode="NORM" onChange={() => {}} />
+          </I18nextProvider>,
+        )
+      }),
+      unmount: () => act(() => renderer.unmount()),
+    }
+  }
+
+  it('fades out of Max before the canvas unmounts', () => {
+    const { frames, timers } = host(false)
+    const view = mount('max')
+    expect(view.canvas()).toHaveLength(1)
+    expect(view.canvas()[0]?.props['data-visible']).toBeUndefined()
+    act(() => flush(frames))
+    act(() => flush(frames))
+    expect(view.canvas()[0]?.props['data-visible']).toBe(true)
+    view.update('medium')
+    expect(view.canvas()).toHaveLength(1)
+    expect(view.canvas()[0]?.props['data-visible']).toBeUndefined()
+    expect(timers.map(timer => timer.ms)).toEqual([EFFORT_FIELD_FADE_MS])
+    act(() => { timers[0]?.fn() })
+    expect(view.canvas()).toHaveLength(0)
+    view.unmount()
+  })
+
+  it('settles immediately when reduced motion is requested', () => {
+    const { frames, timers } = host(true)
+    const view = mount('max')
+    expect(view.canvas()).toHaveLength(1)
+    expect(view.canvas()[0]?.props['data-visible']).toBe(true)
+    expect(frames).toHaveLength(0)
+    expect(timers).toHaveLength(0)
+    view.update('low')
+    expect(view.canvas()).toHaveLength(0)
+    expect(timers).toHaveLength(0)
+    expect(frames).toHaveLength(0)
+    view.unmount()
   })
 })

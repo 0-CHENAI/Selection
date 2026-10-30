@@ -2,6 +2,10 @@
  * Adapted from https://github.com/254558/claude-range-slider and the approved
  * rounded-cell demo. Sample energy at cell centers; remask after bloom so
  * brightness never changes the shared cell silhouette.
+ *
+ * Ember, mid, core, and track colors are uniforms. CSS resolves them from
+ * `--prompt-spark` (purple, or `--pro-accent` gold in PRO) so light, dark,
+ * and work mode stay in sync with the track.
  */
 export const VERT = `#version 300 es
   layout(location=0) in vec2 a_pos;
@@ -29,6 +33,8 @@ export const FRAG_SIM = `#version 300 es
   uniform float u_time, u_slider, u_elapsed;
   uniform vec2 u_cells;
   uniform sampler2D u_back;
+  uniform vec3 u_ember, u_mid, u_core;
+  uniform float u_heat;
   float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
   ${CELL_SDF_GLSL}
   void main(){
@@ -91,16 +97,16 @@ export const FRAG_SIM = `#version 300 es
     float leadF    = sin(leadD * 100.0 + t * 20.0 * ts + h2 * 6.28) * 0.5 + 0.5;
     float leadSpark = leadZone * step(0.6, h2) * leadF * act * es * 0.5;
     float total = energy + edge + leadSpark;
-    vec3 ember = vec3(0.28, 0.10, 0.58);
-    vec3 wpur  = vec3(0.62, 0.32, 1.0);
-    vec3 wht   = vec3(1.0, 0.94, 0.98);
+    vec3 ember = u_ember;
+    vec3 wpur  = u_mid;
+    vec3 wht   = u_core;
     float temp = 1.0 - dn;
     vec3 col   = mix(ember, wpur, temp);
     col        = mix(col, wht, pow(temp, 4.5));
     col       *= total;
     float pulse = sin(t * 2.8) * 0.15 + 1.0;
     float core  = exp(-pow((cx - u_slider) * 16.0, 2.0));
-    col += wht * core * 1.2 * pulse * act * es;
+    col += wht * core * u_heat * pulse * act * es;
     col += wpur * exp(-pow((cx - u_slider) * 3.5, 2.0)) * 0.10 * act * es;
     col *= cell;
     col *= fade_mask;
@@ -133,13 +139,21 @@ export const FRAG_COMP = `#version 300 es
   in vec2 v_uv; out vec4 fc;
   uniform sampler2D u_scene, u_glow;
   uniform vec2 u_cells;
+  uniform vec3 u_mid, u_core, u_track;
+  uniform float u_exposure, u_floor, u_rise, u_chroma;
   ${CELL_SDF_GLSL}
   void main(){
     vec3 s=texture(u_scene,v_uv).rgb;
     vec3 g=texture(u_glow,v_uv).rgb;
-    vec3 mapped = 1.0 - exp(-(s + g * 1.0 + s * g * 0.22) * 1.10);
-    vec2 ap = abs(fract(v_uv * u_cells) - 0.5);
-    float cell = cellMask(ap);
-    fc = vec4(mapped * cell, 1.0);
+    vec3 lit=s + g + s * g * 0.22;
+    vec3 mapped=1.0 - exp(-lit * u_exposure);
+    float luma=dot(lit, vec3(0.2126, 0.7152, 0.0722));
+    float hot=smoothstep(0.08, 0.7, luma);
+    vec3 chromatic=mix(u_mid, u_core, hot);
+    vec3 shown=mix(mapped, mix(chromatic, mapped, hot), clamp(u_chroma, 0.0, 1.0));
+    vec2 ap=abs(fract(v_uv * u_cells) - 0.5);
+    float cell=cellMask(ap);
+    float presence=cell * smoothstep(u_floor, u_floor + max(u_rise, 1e-3), luma);
+    fc=vec4(mix(u_track, shown, presence), 1.0);
   }
 `;
