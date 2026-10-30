@@ -466,6 +466,61 @@
       "title": "独立书店与小志指南",
       "category": "创意",
       "previewId": "ppt169_indie_bookstore_zine_guide"
+    },
+    "dsh-monochrome": {
+      "title": "极简研究",
+      "category": "学术",
+      "previewId": "dsh-monochrome"
+    },
+    "dsh-blue-professional": {
+      "title": "专业蓝图",
+      "category": "商务",
+      "previewId": "dsh-blue-professional"
+    },
+    "dsh-neo-grid-bold": {
+      "title": "醒目网格",
+      "category": "创意",
+      "previewId": "dsh-neo-grid-bold"
+    },
+    "swiss-signal-grid": {
+      "title": "瑞士信号",
+      "category": "咨询",
+      "previewId": "swiss-signal-grid"
+    },
+    "dsh-signal": {
+      "title": "信号简报",
+      "category": "咨询",
+      "previewId": "dsh-signal"
+    },
+    "dsh-broadside": {
+      "title": "宣言海报",
+      "category": "创意",
+      "previewId": "dsh-broadside"
+    },
+    "dsh-playful": {
+      "title": "趣味提案",
+      "category": "创意",
+      "previewId": "dsh-playful"
+    },
+    "dsh-sakura-chroma": {
+      "title": "樱花彩谱",
+      "category": "创意",
+      "previewId": "dsh-sakura-chroma"
+    },
+    "modular-logistics-system": {
+      "title": "模块物流",
+      "category": "技术",
+      "previewId": "modular-logistics-system"
+    },
+    "nordic-operating-report": {
+      "title": "北欧经营",
+      "category": "商务",
+      "previewId": "nordic-operating-report"
+    },
+    "dsh-editorial-forest": {
+      "title": "森林编辑",
+      "category": "商务",
+      "previewId": "dsh-editorial-forest"
     }
   }
 }

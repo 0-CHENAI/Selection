@@ -225,3 +225,16 @@ test('the revision panel compares covers and applies to every page', () => {
   expect(html).toContain('取消')
   expect(html).not.toContain('<pre')
 })
+
+
+test('issue repair is a targeted revision and preserves diagnostic scope', async () => {
+  const { issueRevision, PptIssueRevisionPanel } = await import('./PptIssueRevisionPanel')
+  const issue = { code: 'overflow', message: '标题超出页面', elementId: 'title' }
+  expect(issueRevision(6, issue)).toMatchObject({ action: 'revise', targets: [{ page: 6, elementId: 'title' }] })
+  expect(issueRevision(2, { code: 'schema', message: '页面结构需修复' }).targets).toEqual([{ page: 2 }])
+  const html = renderToStaticMarkup(<I18nextProvider i18n={i18n}><PptIssueRevisionPanel pages={[page(6, 'needs_revision', { issues: [issue] })]} total={15} onOpen={() => {}} onApply={() => {}} onCancel={() => {}} /></I18nextProvider>)
+  expect(html).toContain('标题超出页面')
+  expect(html).toContain('value="6" selected=""')
+  expect(html).toContain('修复此问题')
+  expect(html).not.toContain('应用到全部')
+})

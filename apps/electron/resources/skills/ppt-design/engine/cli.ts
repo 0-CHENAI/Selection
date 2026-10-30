@@ -15,12 +15,13 @@ type Flags = {
   platform?: PlatformName
   officecli?: string
   pages?: number
+  pageNumbers?: number[]
 }
 
 function usage(): never {
   console.log(JSON.stringify({
     status: 'error',
-    message: '用法：deck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N]',
+    message: '用法：deck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4]',
   }))
   process.exit(1)
 }
@@ -40,6 +41,11 @@ function parseArgs(argv: string[]): Flags {
       flags.platform = value
     } else if (token === '--officecli') flags.officecli = rest[++i]
     else if (token === '--pages') flags.pages = Number(rest[++i])
+    else if (token === '--only-pages') {
+      const value = rest[++i]
+      if (!value || !/^\d+(,\d+)*$/.test(value)) usage()
+      flags.pageNumbers = value.split(',').map(Number)
+    }
     else if (!token.startsWith('-') && !flags.file) flags.file = token
     else usage()
   }
@@ -52,6 +58,7 @@ function emit(status: RenderStatus, body: Record<string, unknown>, code: number)
 }
 
 const flags = parseArgs(process.argv.slice(2))
+if (flags.pageNumbers && flags.command !== 'screenshot') usage()
 if (flags.command === 'layouts') {
   console.log(JSON.stringify({ status: 'ok', layouts: argumentLayoutCatalog() }))
   process.exit(0)
@@ -61,7 +68,7 @@ const file = resolve(flags.file)
 
 if (flags.command === 'screenshot') {
   if (!flags.out) usage()
-  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli })
+  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers })
   emit(result.available ? 'ok' : 'error', { screenshots: result }, result.available ? 0 : 1)
 }
 

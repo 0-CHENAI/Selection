@@ -1124,5 +1124,104 @@
     "license": "MIT",
     "credits": "- Runtime: Default Generate (Strategist → Image_Generator → Executor) from a zine-culture guide compiled from twenty public sources listed on the credits page - Image system: 10 AI illustrations generated in-pipeline, 18 SVG pattern fills for the riso grain - `images/`: RGB PNGs converted to JPEG (quality 82) and unreferenced files dropped; every `href` and spec reference updated - `svg_output/`: authored SVG slides (native-export source)",
     "source": "ppt-master-examples ppt169_indie_bookstore_zine_guide, MIT, Copyright (c) 2025-2026 Hugo He"
+  },
+  "dsh-monochrome": {
+    "name": "Monochrome / 极简研究",
+    "design": "styles/dsh-monochrome/design.md",
+    "deck": "styles/examples/imported/dsh-monochrome/deck.json",
+    "deckEn": "styles/examples/imported/dsh-monochrome/deck.en.json",
+    "when": "极简研究 · Monochrome",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-monochrome), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/monochrome",
+    "license": "MIT"
+  },
+  "dsh-blue-professional": {
+    "name": "Blue Professional / 蓝色商务",
+    "design": "styles/dsh-blue-professional/design.md",
+    "deck": "styles/examples/imported/dsh-blue-professional/deck.json",
+    "deckEn": "styles/examples/imported/dsh-blue-professional/deck.en.json",
+    "when": "蓝色商务 · Blue Professional",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-blue-professional), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/blue-professional",
+    "license": "MIT"
+  },
+  "dsh-neo-grid-bold": {
+    "name": "Neo-Grid Bold / 荧光网格",
+    "design": "styles/dsh-neo-grid-bold/design.md",
+    "deck": "styles/examples/imported/dsh-neo-grid-bold/deck.json",
+    "deckEn": "styles/examples/imported/dsh-neo-grid-bold/deck.en.json",
+    "when": "荧光网格 · Neo-Grid Bold",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-neo-grid-bold), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/neo-grid-bold",
+    "license": "MIT"
+  },
+  "swiss-signal-grid": {
+    "name": "Swiss Signal Grid · WorkBuddy Original DESIGN SYSTEM",
+    "design": "styles/swiss-signal-grid/design.md",
+    "deck": "styles/examples/imported/swiss-signal-grid/deck.json",
+    "deckEn": "styles/examples/imported/swiss-signal-grid/deck.en.json",
+    "when": "原创瑞士信号网格模板，适合管理层数据汇报、市场洞察、风险集中度、经营模式比较与进入决策。",
+    "source": "DSH Desktop v0.2.21 retained native template, MIT, commit de281a1ceccadb00b92df53adb106a2e87ec0b4b",
+    "license": "MIT"
+  },
+  "dsh-signal": {
+    "name": "Signal / 深蓝决策",
+    "design": "styles/dsh-signal/design.md",
+    "deck": "styles/examples/imported/dsh-signal/deck.json",
+    "deckEn": "styles/examples/imported/dsh-signal/deck.en.json",
+    "when": "深蓝决策 · Signal",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-signal), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/signal",
+    "license": "MIT"
+  },
+  "dsh-broadside": {
+    "name": "Broadside / 橙黑宣言",
+    "design": "styles/dsh-broadside/design.md",
+    "deck": "styles/examples/imported/dsh-broadside/deck.json",
+    "deckEn": "styles/examples/imported/dsh-broadside/deck.en.json",
+    "when": "橙黑宣言 · Broadside",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-broadside), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/broadside",
+    "license": "MIT"
+  },
+  "dsh-playful": {
+    "name": "Playful / 杏色创意",
+    "design": "styles/dsh-playful/design.md",
+    "deck": "styles/examples/imported/dsh-playful/deck.json",
+    "deckEn": "styles/examples/imported/dsh-playful/deck.en.json",
+    "when": "杏色创意 · Playful",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-playful), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/playful",
+    "license": "MIT"
+  },
+  "dsh-sakura-chroma": {
+    "name": "Sakura Chroma / 复古彩带",
+    "design": "styles/dsh-sakura-chroma/design.md",
+    "deck": "styles/examples/imported/dsh-sakura-chroma/deck.json",
+    "deckEn": "styles/examples/imported/dsh-sakura-chroma/deck.en.json",
+    "when": "复古彩带 · Sakura Chroma",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-sakura-chroma), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/sakura-chroma",
+    "license": "MIT"
+  },
+  "modular-logistics-system": {
+    "name": "Modular Logistics System · WorkBuddy Original DESIGN SYSTEM",
+    "design": "styles/modular-logistics-system/design.md",
+    "deck": "styles/examples/imported/modular-logistics-system/deck.json",
+    "deckEn": "styles/examples/imported/modular-logistics-system/deck.en.json",
+    "when": "原创模块化物流经营模板，适合跨境履约、供应链、市场进入、能力建设与管理层行动汇报。",
+    "source": "DSH Desktop v0.2.21 retained native template, MIT, commit de281a1ceccadb00b92df53adb106a2e87ec0b4b",
+    "license": "MIT"
+  },
+  "nordic-operating-report": {
+    "name": "Nordic Operating Report · WorkBuddy Original DESIGN SYSTEM",
+    "design": "styles/nordic-operating-report/design.md",
+    "deck": "styles/examples/imported/nordic-operating-report/deck.json",
+    "deckEn": "styles/examples/imported/nordic-operating-report/deck.en.json",
+    "when": "原创北欧年度经营报告模板，适合管理层经营复盘、国际扩张、跨境履约、市场进入、能力建设与行动计划。",
+    "source": "DSH Desktop v0.2.21 retained native template, MIT, commit de281a1ceccadb00b92df53adb106a2e87ec0b4b",
+    "license": "MIT"
+  },
+  "dsh-editorial-forest": {
+    "name": "Editorial Forest / 森林季刊",
+    "design": "styles/dsh-editorial-forest/design.md",
+    "deck": "styles/examples/imported/dsh-editorial-forest/deck.json",
+    "deckEn": "styles/examples/imported/dsh-editorial-forest/deck.en.json",
+    "when": "森林季刊 · Editorial Forest",
+    "source": "DSH Desktop v0.2.21 adaptation of Zara Zhang (dsh-editorial-forest), MIT, https://github.com/zarazhangrui/beautiful-html-templates/tree/e5e204fb1f3b06290846e7dcd7aceddabeceec8c/templates/editorial-forest",
+    "license": "MIT"
   }
 }

@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { PPT_ROUTING_GUIDANCE } from '../../../shared/src/prompts/ppt-routing.ts'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { chartBackend, chartSkillInstructions, getBundledSkillsDir, nativeChartNotice, type ChartSkillCandidate } from '@craft-agent/shared/skills'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
@@ -165,6 +166,40 @@ export function writeChartFallbacks(sessionPath: string, fallbacks: PptChartFall
 
 export function buildPptPrompt(request: PptRequest, sessionPath: string, root = getPptSkillRoot(), skills: ChartSkillCandidate[] = [], message?: string): string {
   request = validatePptRequest(request, root)
+  let logoReference: string | undefined
+  if (request.logo) {
+    const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' }[request.logo.mimeType]!
+    const dir = join(sessionPath, 'attachments', 'ppt-brand')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `logo.${extension}`)
+    writeFileSync(path, Buffer.from(request.logo.base64, 'base64'))
+    logoReference = `Use the supplied brand logo (${JSON.stringify(request.logo.name)}): ${path}`
+  }
+  const chartParts: string[] = []
+  const backend = chartBackend(message, skills)
+  const fallbackFile = join(sessionPath, 'data', 'chart-fallback.json')
+  if (backend.mode === 'external' && backend.skill) {
+    chartParts.push(chartSkillInstructions(backend.skill, themeColors(request, root), request.brandColor))
+    chartParts.push(`Chart fallback file: ${fallbackFile}. Rewrite it as {"fallbacks":[]} when every external chart succeeds.`)
+    chartParts.push(`[skill:${backend.skill.slug}]`)
+  } else {
+    if (backend.fallback) chartParts.push(`The user named chart skill ${backend.fallback.skill}, which is not installed. Use native editable charts. Do not call another chart skill, and do not ask which one to use. The result card already records this fallback.`)
+    chartParts.push(nativeChartNotice(skills))
+  }
+  writeChartFallbacks(sessionPath, backend.fallback ? [backend.fallback] : [])
+  // Persisted composer preferences describe the existing deck, not a new generation request.
+  if (existsSync(join(sessionPath, 'data', 'deck.json')) || existsSync(join(sessionPath, 'data', 'ppt-output.json'))) {
+    return [
+      '<ppt_follow_up_context>',
+      PPT_ROUTING_GUIDANCE,
+      `Read the existing plan and project under ${join(sessionPath, 'data')}. Read ${join(sessionPath, 'data', 'ppt-output.json')} for the delivered PPTX path; verify that it exists before editing. A missing or malformed project is not permission to start over.`,
+      `Stored composer preferences (reference only, not a restyle instruction): ${JSON.stringify({ templateId: request.templateId, themeId: request.themeId, aspectRatio: request.aspectRatio, brandColor: request.brandColor })}`,
+      'Read attachments from this turn even when a deck already exists. Preserve the current style unless the user explicitly requests a change. For an explicitly requested new deck or restyle, read the selected design references through ppt-design; do not apply them to a local edit.',
+      ...(logoReference ? [logoReference] : []),
+      ...chartParts,
+      '</ppt_follow_up_context>',
+    ].join('\n')
+  }
   const parts = ['[skill:ppt-design]', '<ppt_generation_context>', 'Create an editable PPT using ppt-design and its selection-deck engine. Follow the user’s natural-language requirements and attached source files. Images and files attached on this turn are source material: read their stored paths even when a deck already exists. Do not ignore a new attachment because the conversation is already in progress.']
   if (request.templateId) {
     const custom = customTemplateReference(request.templateId)
@@ -193,27 +228,10 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
   }
   if (request.brandColor) parts.push(`Use brand color ${request.brandColor} as the primary brand accent.`)
   if (request.aspectRatio) parts.push(`Requested canvas/aspect ratio: ${request.aspectRatio === 'template' ? 'retain the selected template’s native canvas' : request.aspectRatio}.`)
-  if (request.logo) {
-    const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' }[request.logo.mimeType]!
-    const dir = join(sessionPath, 'attachments', 'ppt-brand')
-    mkdirSync(dir, { recursive: true })
-    const path = join(dir, `logo.${extension}`)
-    writeFileSync(path, Buffer.from(request.logo.base64, 'base64'))
-    parts.push(`Use the supplied brand logo (${JSON.stringify(request.logo.name)}): ${path}`)
-  }
+  if (logoReference) parts.push(logoReference)
   const deckPath = join(sessionPath, 'data', 'deck.json')
   const slidesDir = join(sessionPath, 'data', 'slides')
-  const backend = chartBackend(message, skills)
-  const fallbackFile = join(sessionPath, 'data', 'chart-fallback.json')
-  if (backend.mode === 'external' && backend.skill) {
-    parts.push(chartSkillInstructions(backend.skill, themeColors(request, root), request.brandColor))
-    parts.push(`Chart fallback file: ${fallbackFile}. Rewrite it as {"fallbacks":[]} when every external chart succeeds.`)
-    parts.push(`[skill:${backend.skill.slug}]`)
-  } else {
-    if (backend.fallback) parts.push(`The user named chart skill ${backend.fallback.skill}, which is not installed. Use native editable charts. Do not call another chart skill, and do not ask which one to use. The result card already records this fallback.`)
-    parts.push(nativeChartNotice(skills))
-  }
-  writeChartFallbacks(sessionPath, backend.fallback ? [backend.fallback] : [])
+  parts.push(...chartParts)
   parts.push(`Write the working deck to ${deckPath}. That JSON is session scratch, not the delivered file. Render each finished page to ${slidesDir}/slide-01.png and onward (1-based, two digits) before continuing. Those PNGs are the page images for the visual check. Run deck_check, then \`deck-cli.mjs screenshot <delivered.pptx> --out ${slidesDir} --pages <page count>\`. Pass --pages; without it OfficeCLI is not used. Do not write or copy a second pptx. The app exports the only user-visible file from the saved deck while this turn runs: the session folder when no working directory is selected, otherwise the working directory. The file name comes from the deck title. Read ${join(sessionPath, 'data', 'ppt-output.json')} for its absolute path, and validate that file.`)
   parts.push('</ppt_generation_context>')
   return parts.join('\n\n')

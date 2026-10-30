@@ -4,6 +4,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
+
+- **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
+
 - **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.
 
 - **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
@@ -164,3 +168,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Ordinary chat folder controls** — Open the system folder picker directly and clear a selected working folder with a borderless close button. Hover and keyboard focus fade only the folder name; touch keeps the action visible. Project folder bindings remain fixed.
 
 - **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.
+
+- **模板与按页修订** — PPT 模板库补齐 11 套中英文 DSH 模板及逐页预览；成果文件可按页描述修改，或直接选择结构诊断问题修复，保留其余页与主题。（#686）
+- **先理解外来演示稿** — 编辑已有 PPTX 前先读取逐页结构摘要、定位原对象并核验文件版本，减少误改与无必要重建；摘要明确保真边界，不代表更换编辑器。（#687）

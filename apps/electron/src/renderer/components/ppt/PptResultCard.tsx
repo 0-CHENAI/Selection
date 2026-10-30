@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { PptIssueRevisionPanel } from './PptIssueRevisionPanel'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, Layers3, MoreHorizontal, Palette, PanelRight, Square } from 'lucide-react'
 import {
@@ -47,7 +48,7 @@ function progressSignature(progress: Session['pptProgress']): string {
     themeId: progress.themeId,
     run: progress.run,
     aspect: progress.aspect,
-    pages: progress.pages?.map(page => [page.index, page.id, page.name, page.status, page.failed ? 1 : 0, page.issue ?? '', page.issueCount]),
+    pages: progress.pages?.map(page => [page.index, page.id, page.name, page.status, page.failed ? 1 : 0, page.issue ?? '', page.issueCount, page.issues]),
     charts: progress.chartFallbacks,
   })
 }
@@ -114,14 +115,17 @@ export function PptArtifactMenuItems({
   canRevise,
   onRestyle,
   onRecolor,
+  onRevise,
 }: {
   chartFallbacks?: PptChartFallback[]
   canRevise: boolean
   onRestyle: () => void
   onRecolor: () => void
+  onRevise?: () => void
 }) {
   const { t } = useTranslation()
   return <>
+    {canRevise && onRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-revise" onSelect={onRevise}><PanelRight />{t('ppt.result.revisePages')}</StyledDropdownMenuItem>}
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-restyle" onSelect={onRestyle}><Layers3 />{t('ppt.result.restyleMenu')}</StyledDropdownMenuItem>}
     {canRevise && <StyledDropdownMenuItem data-testid="ppt-artifact-recolor" onSelect={onRecolor}><Palette />{t('ppt.result.recolorMenu')}</StyledDropdownMenuItem>}
     {chartFallbacks?.map((item, index) => <StyledDropdownMenuItem key={`${item.skill}-${item.page ?? 'deck'}-${index}`} disabled className="whitespace-normal text-xs text-muted-foreground">
@@ -164,8 +168,8 @@ function PptArtifactTrailing({
   const { t } = useTranslation()
   const { catalog } = usePptCatalog()
   const thumbs = usePptSlideThumbs(sessionFolder, pages)
-  const [panel, setPanel] = useState<'style' | 'color' | null>(null)
-  const pendingPanel = useRef<'style' | 'color' | null>(null)
+  const [panel, setPanel] = useState<'style' | 'color' | 'issues' | null>(null)
+  const pendingPanel = useRef<'style' | 'color' | 'issues' | null>(null)
   const menuTrigger = useRef<HTMLButtonElement>(null)
   useEffect(() => { if (generating) { pendingPanel.current = null; setPanel(null) } }, [generating])
   const frame = pptLiveFrame({ generating, total, completed, current })
@@ -205,14 +209,15 @@ function PptArtifactTrailing({
             setPanel(pendingPanel.current)
             pendingPanel.current = null
           }}>
-            <PptArtifactMenuItems chartFallbacks={chartFallbacks} canRevise={!!onApply} onRestyle={() => { pendingPanel.current = 'style' }} onRecolor={() => { pendingPanel.current = 'color' }} />
+            <PptArtifactMenuItems chartFallbacks={chartFallbacks} canRevise={!!onApply} onRevise={() => { pendingPanel.current = 'issues' }} onRestyle={() => { pendingPanel.current = 'style' }} onRecolor={() => { pendingPanel.current = 'color' }} />
             {standardItems}
           </StyledDropdownMenuContent>
         </DropdownMenu>
       </div>
     </PopoverAnchor>
     <PopoverContent align="end" onEscapeKeyDown={() => menuTrigger.current?.focus()} className="w-[24rem] max-w-[calc(100vw-2rem)] p-3">
-      {panel && <PptRevisionPanel key={`${panel}:${templateId ?? ''}:${themeId ?? ''}`} tab={panel} onTab={setPanel} templates={catalog?.templates ?? []} themes={catalog?.themes ?? []} currentTemplateId={templateId} currentThemeId={themeId} coverUrl={coverUrl} total={total} onApply={apply} onCancel={() => setPanel(null)} />}
+      {panel === 'issues' && <PptIssueRevisionPanel pages={pages} total={total} onOpen={onOpen} onApply={(text, revision) => { setPanel(null); onApply?.(text, revision) }} onCancel={() => setPanel(null)} />}
+      {panel && panel !== 'issues' && <PptRevisionPanel key={`${panel}:${templateId ?? ''}:${themeId ?? ''}`} tab={panel} onTab={setPanel} templates={catalog?.templates ?? []} themes={catalog?.themes ?? []} currentTemplateId={templateId} currentThemeId={themeId} coverUrl={coverUrl} total={total} onApply={apply} onCancel={() => setPanel(null)} />}
     </PopoverContent>
   </Popover>
 }
