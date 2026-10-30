@@ -30,7 +30,7 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 ## 先读，再执行
 
 1. 规划时读 [工作流](references/workflow.md)。选定风格前只读 [风格索引](references/styles.md)，然后只读那一套的 `design.md`。中文参考页是 `deck.json`，英文参考页是 `deck.en.json`。
-2. 写页面时读 [版式](references/layouts.md)、[排版](references/typography.md) 和 [格式](references/schema.md)。
+2. 写页面时读 [叙事组合](references/composition.md)、[版式](references/layouts.md)、[排版](references/typography.md) 和 [格式](references/schema.md)。
 3. 看截图前读 [逐页视觉检查](references/visual-review.md)。
 4. 先读 [OfficeCLI 路由](../officecli/SKILL.md)。导出后的检查执行 `officecli load_skill pptx`；仅当用户要求募资叙事或跨页动画时，再追加 pitch-deck / morph-ppt / morph-ppt-3d。
 5. **所有指南加载后**读 [Selection 覆盖规则](../officecli/ppt-selection-override.md)，再做文档操作。后来又加载指南时，重新应用覆盖规则。
@@ -40,10 +40,10 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 ## 从故事线到页面
 
 - 从用户材料提取受众、目的、核心结论、事实和假设、来源、页数。不捏造数据、日期、讲者或标志。
-- 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页不重复同一 `layout`。
-- 只锁定目录里的一套。DSH 五套是 `dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。ppt-master 转入的十四套是 `academic-research`、`consulting-decision`、`creative-pitch`、`duty-manual`、`incident-postmortem`、`investor-pitch`、`mbb-consulting`、`narrative-keynote`、`operating-review`、`product-launch`、`science-explainer`、`solution-proposal`、`technical-deepdive`、`workshop-teaching`。几何和版式节奏来自锁定的那一套，不能混用另一套的坐标。
+- 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页允许同一 `layout`，按论证关系安排节奏。
+- 只锁定目录里的一套。DSH 五套是 `dsh-cartesian`、`dsh-course-workshop`、`dsh-editorial-notebook`、`dsh-engineering-blueprint`、`dsh-soft-editorial`。ppt-master 转入的十四套是 `academic-research`、`consulting-decision`、`creative-pitch`、`duty-manual`、`incident-postmortem`、`investor-pitch`、`mbb-consulting`、`narrative-keynote`、`operating-review`、`product-launch`、`science-explainer`、`solution-proposal`、`technical-deepdive`、`workshop-teaching`。保留锁定主题 token，允许借用论证版式槽并适配当前画布；不直接拼贴另一套主题和绝对坐标。
 - 颜色和字体可以整套换成 `styles/themes` 里的主题，或换成用户品牌主题。主题只提供 token，不改页面结构。用户给出主色、辅色和可选标志路径时，生成对比度安全的 token，把路径记在 `theme.logo`；要出现标志时再放一个 `src` 相同的图片。不要写入第三方公司的品牌色或标志。
-- 论证版式库有 14 个 960×540 页面（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍）。`deck-cli.mjs layouts` 打印每个槽位的 `bounds` 和 `textCapacity`。`deck_check` 会认出这些 `layout` id。它们不代替锁定风格的参考页。
+- 论证版式库有 14 个 960×540 页面（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍）。`deck-cli.mjs layouts` 打印每个槽位的 `bounds` 和 `textCapacity`。`deck_check` 会认出这些 `layout` id。它们可在锁定主题 token 下提供结构槽位，适配后必须预检。
 - 参考页路径写在 `styles/catalog.json` 的 `deck` 字段。DSH 五套在 `styles/<id>/deck.json`，另有 `deck.en.json`。十四套 ppt-master 风格都指向 `styles/examples/` 里的官方成稿，其中事故复盘、经营复盘和产品发布三套的主参考页含有第三方标识。那些标识只供对照版式，新稿换成用户自己的文字、数据和标志。沿用参考页的坐标和页眉页脚，替换成用户的文字和数据。几何改动之后必须重新预检。图示标签可以小于 16 pt，以该套 `design.md` 为准，不要统一放大。结构版式在 `layouts/`。新稿不要写 `profile: example`，那只用于已经出版的示例页。
 - 两处中文源页面会在末行落下一个字：`dsh-course-workshop` 的 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 的 `03:t101`「明确每一层边界」。沿用这些页时重排用户句子，让末行不是一个字。不要为了通过而缩小字号，也不要把文本框加宽到撞上邻列。其余参考页预检是干净的。
 - 在会话 `dataFolderPath` 保存 `design-plan.md` 和 `deck.json`。它们是会话材料，不默认交付。
@@ -85,6 +85,14 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 点名的技能没有安装时，同样改回原生图表，并在 `chart-fallback.json` 记下 `reason` 为 `missing`。不要改叫另一个图表技能，也不要询问。
 
+### G4 检查范围（O2）
+
+新稿、整套换皮或没有有效既往视觉证据时检查全部页。局部文字/单页/指定页版式修订，仅重新截图并原生读图受影响页；记录页码、修改内容和沿用的未改页证据。主题/字体等全局修改检查全部页；页序重排检查受影响的叙事顺序与页面。无法证明未改页未受影响时扩大到全量。
+
+已知总页数 N，局部截图使用 `deck-cli.mjs screenshot <pptx> --out <dataFolderPath>/slides --pages N --only-pages 2,4`，列表为从 1 开始的实际页码，保持原文件名，不重编号、不覆盖无关截图。直接 CLI 定点修改也可逐页调用 OfficeCLI screenshot。截图不是视觉验收，仍需 Read 或 call_llm attachments 原生读图。
+
+后文的每轮检查均指本节确定的范围。首次与至多两次修复复查共用原三次上限，不因范围缩小、换会话或换 renderer 而重置；检查后修改使对应页证据失效，不允许复用过期截图宣称通过。
+
 ## 质量门：G1 → G5
 
 | 门 | 必须通过的内容 |
@@ -92,12 +100,12 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 | G1 故事/页序 | 用户材料、逐页主张、实际页数和顺序一致。 |
 | G2 设计/排版 | 只锁定一个风格；`deck_check` 没有问题；字号不低于该风格的下限。预检不是视觉检查。 |
 | G3 保存/读回 | OfficeCLI `validate` 没有未解决的错误或警告。文字、图表数据、单位、备注、来源和页序读回正确。 |
-| G4 逐页视觉 | 跟随 `<session_state>` 的 `imageInput`。`enabled`：每一页用 Read 或 `call_llm` 的 `attachments` 看截图。`unavailable`：写明 `image_capability_mismatch`，G4 不算通过。不要改用 OCR。接触表不能代替逐页。 |
+| G4 逐页视觉 | 跟随 `<session_state>` 的 `imageInput`。`enabled`：检查范围内每一页用 Read 或 `call_llm` 的 `attachments` 看截图。`unavailable`：写明 `image_capability_mismatch`，G4 不算通过。不要改用 OCR。接触表不能代替逐页。 |
 | G5 关闭/重开 | 最终绝对路径上的文件重新读过，页数和内容正确。 |
 
 G4 **整项任务最多 3 次：首次 + 至多 2 次修复复查**。更换渲染器、审查者、会话或 pitch/Morph 都不重置次数。任何检查之后的修改，都必须还有剩余的一次视觉检查盖住。第三次仍有缺陷，或没有可用截图：写明页码、问题和阻塞，不能声称可交付。
 
-G4 跟随当前模型的读图能力，而不是固定改走 OCR。`imageInput: enabled` 时用 Read 或 `call_llm` 的 `attachments` 看每一页；`imageInput: unavailable` 或返回 `image_capability_mismatch` 时停下来说明 G4 未通过。两种结果都不要用 Swift/Vision（`VNRecognizeTextRequest`）、tesseract，或名为 `Swift: OCR` / `OCR New Pages` 的步骤代替看图。
+G4 跟随当前模型的读图能力，而不是固定改走 OCR。`imageInput: enabled` 时用 Read 或 `call_llm` 的 `attachments` 看受影响范围内每一页；`imageInput: unavailable` 或返回 `image_capability_mismatch` 时停下来说明 G4 未通过。两种结果都不要用 Swift/Vision（`VNRecognizeTextRequest`）、tesseract，或名为 `Swift: OCR` / `OCR New Pages` 的步骤代替看图。
 
 Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
 

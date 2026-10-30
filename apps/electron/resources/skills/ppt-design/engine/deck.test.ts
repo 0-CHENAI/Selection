@@ -133,7 +133,7 @@ describe('deck_check', () => {
   it('reports every problem in one pass, located to a page and element', () => {
     const issues = checkDeck(problemDeck())
     const codes = new Set(issues.map(item => item.code))
-    for (const code of ['out_of_bounds', 'over_capacity', 'contrast', 'orphan', 'literal_newline', 'overlap', 'unreconciled', 'adjacent_layout', 'font']) {
+    for (const code of ['out_of_bounds', 'over_capacity', 'contrast', 'orphan', 'literal_newline', 'overlap', 'unreconciled', 'font']) {
       expect(codes.has(code as never)).toBe(true)
     }
     expect(issues.find(item => item.code === 'out_of_bounds')?.elementId).toBe('off')
@@ -141,7 +141,7 @@ describe('deck_check', () => {
     expect(issues.find(item => item.code === 'contrast')?.pageId).toBe('p1')
     expect(issues.find(item => item.code === 'unreconciled')?.elementId).toBe('bridge')
     expect(issues.find(item => item.code === 'font')?.pageId).toBe('p3')
-    expect(issues.find(item => item.code === 'adjacent_layout')?.pageId).toBe('p3')
+    expect(issues.some(item => item.code === 'adjacent_layout')).toBe(false)
   })
 })
 

@@ -1,4 +1,7 @@
 import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
+import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
+import { FastModeButton, fastModeDetailKey } from './FastModeButton'
+import { PromptThinkingSettings } from './PromptBarEffects'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import * as React from 'react'
@@ -158,6 +161,7 @@ interface CompactModelSelectorProps {
   onConnectionChange?: (connectionSlug: string) => void
   fastMode?: boolean
   onFastModeChange?: (enabled: boolean) => void
+  workMode?: WorkMode
   isProcessing?: boolean
   thinkingLevel?: ThinkingLevel
   onThinkingLevelChange?: (level: ThinkingLevel) => void
@@ -175,6 +179,7 @@ export function CompactModelSelector({
   onConnectionChange,
   fastMode = false,
   onFastModeChange,
+  workMode,
   isProcessing = false,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
@@ -298,42 +303,16 @@ export function CompactModelSelector({
   const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
     ? null
     : (
-      <div className="pt-2">
-        {thinkingUnavailable === 'always-on' ? (
-          <div className="px-3 py-2 text-xs text-foreground/60">{t('thinking.alwaysOn')}</div>
-        ) : (
-          <>
-            <div className="px-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
-              {t('chat.modelPicker.thinkingSection')}
-            </div>
-            {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
-              const isSelected = thinkingLevel === id
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  disabled={thinkingDisabled}
-                  onClick={() => onThinkingLevelChange?.(id)}
-                  className={cn(
-                    'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
-                    thinkingDisabled && 'opacity-50 cursor-not-allowed',
-                    !thinkingDisabled && isSelected && 'bg-foreground/5',
-                    !thinkingDisabled && !isSelected && 'hover:bg-foreground/5',
-                  )}
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t(nameKey)}</div>
-                    <div className="text-xs text-foreground/50">{t(descriptionKey)}</div>
-                  </div>
-                  {isSelected && (
-                    <Check className="h-3 w-3 text-foreground/60 shrink-0 ml-3" />
-                  )}
-                </button>
-              )
-            })}
-          </>
-        )}
-      </div>
+      <PromptThinkingSettings
+        value={thinkingLevel}
+        levels={availableThinkingLevels}
+        workMode={workMode}
+        disabled={thinkingDisabled || !onThinkingLevelChange}
+        unavailable={thinkingUnavailable}
+        binary={thinkingCapability.binary}
+        inMenu={false}
+        onChange={level => onThinkingLevelChange?.(level)}
+      />
     )
 
   return (
@@ -532,16 +511,10 @@ export function CompactModelSelector({
           )}
         </div>
         {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
-          <button type="button" role="switch" aria-checked={fastMode && fastSupported}
-            data-testid="gpt-oauth-fast" disabled={isProcessing || !fastSupported}
-            onClick={() => onFastModeChange(!fastMode)}
-            className="flex w-full items-center justify-between px-3 py-2 text-left disabled:opacity-50">
-            <div>
-              <div className="text-sm font-medium">Fast</div>
-              <div className="text-xs text-muted-foreground">{t(!fastSupported ? 'chat.fastMode.unsupported' : isProcessing ? 'chat.fastMode.busy' : 'chat.fastMode.description')}</div>
-            </div>
-            {fastMode && fastSupported && <Check className="ml-3 h-3 w-3 shrink-0" />}
-          </button>
+          <div className="flex items-center justify-between gap-3 border-t border-border/40 px-3 py-2">
+            <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
+            <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
+          </div>
         )}
       </DrawerContent>
     </Drawer>

@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
+
 - **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
 
 - **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.
@@ -31,6 +33,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Full Takeover risk warning** — Switching a workspace into Full Takeover now shows a confirmation that explains the reduced prompts and requires ticking "I understand the risk" before the mode is enabled. The acknowledgement is stored per workspace, so later switches in that workspace go through silently; other workspaces ask once. Approving a plan now elevates Explore to Smart Approval instead of silently enabling Full Takeover.
 
 ## Improvements
+
+- **Max 思考强度与 Fast** — 桌面模型菜单和紧凑选择器共用思考强度滑轨；仅 Max 显示圆角方格 WebGL 点燃、拖尾与辉光，其他档位保持普通轨道。方格轮廓在辉光合成后重新裁切，减少动态效果时显示静态画面，离开 Max 或关闭菜单即释放渲染资源。保留 GPT OAuth Fast 的独立会话持久化，并补齐 #681 的闪电开关、忙碌和不支持状态；Fast 不改变思考强度。
 
 - **PPT 中途附件** — PPT 会话生成之后仍可从输入栏附加图片和文件，也可以粘贴截图，或把文件拖到已打开的 Office 预览上。没有选中元素时，附件按普通对话保存进会话并交给模型。已经选中元素时会说明定向修改不能同时带附件，而不是静默禁用。Fixes #669.
 
