@@ -26,6 +26,18 @@ description: "会议纪要、工作通知/公文草稿、Excel 执行台账等�
 
 材料：发文目的、接收范围、明确事项、执行时间、报送方式、联系人及机构模板。以用户机构模板为准；这里的通知是普通工作通知草稿，**不宣称符合某项公文标准**。不自行添加文号、印章、签发信息。案例 `work-notice.json` 只把报送期限改至 11 月 6 日，保留工作要求之外的安排。需要正式格式时按用户明确提供的规范核对，不凭示例推断。
 
+## 与 dsh 业务方法的分工
+
+`financial-model` 继续负责财务模型的表结构、假设和情景。`data-dashboard` 继续负责仪表盘版式和 OfficeCLI 图表语法。下面三份技能只补 dsh 的业务口径，不替换这两份指南：
+
+- `saas-metrics-coach`：ARR、流失、LTV:CAC、Quick Ratio、单位经济。年度经营案例用它。
+- `dataset-health-audit`：12 个加权维度的数据体检。港口和实验案例在改明细后用它。
+- `data-viz-gen`：对比和趋势先写 OfficeCLI 原生图表，HTML/SVG 信息图只作补充。
+
+计算用 Bun CLI（`packages/office-business-runtime`），不调用 Python。Excel 交付前必须 `xlsx_recalculate`：OfficeCLI 把 `computedValue` 写回缓存；Windows 或 macOS 且装了 Excel 时再 `CalculateFull`；TypeScript 只补未求值的格子。有 `checks.json` 就逐项核对，否则双读关键单元格。区域渲染后原生读图，禁止 OCR，空白页立即停止。未重算不能交付。
+
+dsh 案例在 `cases/annual-business`、`cases/port-cargo`、`cases/bio-assay`。`example.xlsx` 只读。用 `inputs/*.json` 在工作区副本上生成，不要覆盖原件。下面的执行台账仍是 Selection 虚构样例，与这三个案例无关。
+
 ## Excel 执行台账
 
 材料：事项、计划量、完成量、状态来源和更新时间。输入与计算分开，完成率用防零分母公式，状态有验证列表。案例 `execution-tracker.json` 将接口复核完成数 4 改为 6：该行完成率 60%，合计完成 14/18、77.8%。数据全为虚构；不要把缓存值当事实，逐格对账并确认公式仍在。

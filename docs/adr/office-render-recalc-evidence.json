@@ -5,7 +5,7 @@
   "host": "linux-x64",
   "bundlesLibreOffice": false,
   "newRuntimeDependencies": [],
-  "pocImplementationBytes": 59533,
+  "pocImplementationBytes": 61086,
   "installerDeltaBytesUntilWired": 0,
   "libreOfficeKitWinX64Bytes": 71374248,
   "recommendation": {

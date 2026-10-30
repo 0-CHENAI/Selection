@@ -3,7 +3,7 @@
   "version": "3.1.0",
   "license": "Apache-2.0",
   "private": true,
-  "description": "内部 Office 业务计算运行时。LinNai 拍板前不注册技能、不进入安装包。",
+  "description": "Office 业务计算运行时。Bun CLI，不内置 Python，不进入安装包。",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",

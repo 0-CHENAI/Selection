@@ -1,0 +1,16 @@
+{
+  "title": "季度营收",
+  "subtitle": "指名调色板",
+  "type": "comparison",
+  "palette": "corporate",
+  "footer": "模拟数据",
+  "output": "infographic.html",
+  "data": {
+    "chart_title": "季度营收对比",
+    "categories": ["Q1", "Q2", "Q3", "Q4"],
+    "series": [
+      {"name": "2024", "values": [320, 410, 380, 520]},
+      {"name": "2025", "values": [380, 490, 450, 610]}
+    ]
+  }
+}

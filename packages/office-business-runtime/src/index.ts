@@ -1,12 +1,18 @@
 /**
- * 内部运行时。LinNai 确认 docs/adr/office-python-features-in-ts.md 之前，
- * 不注册为技能、不进入安装包、不对用户可见。
+ * Office 业务计算运行时。阶段 09 起供技能调用。
+ * 安装包不内置 Python，本包也不打进 electron-builder 的 files。
  */
 export const OFFICE_BUSINESS_RUNTIME = {
   engine: 'bun',
   bundledPython: false,
-  userFacing: false,
+  userFacing: true,
+  installerBundle: false,
 } as const
 
-export { runQuickRatioCli, type CliResult } from './cli/quick-ratio.ts'
+export { runQuickRatioCli } from './cli/quick-ratio.ts'
+export type { CliResult } from './cli/quick-ratio.ts'
 export { floatNum, quickRatioJson, quickRatioText, type PyNum, type QuickRatioArgs } from './quick-ratio.ts'
+export { runMetricsCli } from './cli/metrics.ts'
+export { runUnitEconomicsCli } from './cli/unit-economics.ts'
+export { runDataQualityCli } from './cli/data-quality.ts'
+export { runInfographicCli } from './cli/build-infographic.ts'

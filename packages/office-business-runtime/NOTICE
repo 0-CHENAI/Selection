@@ -1,10 +1,28 @@
-Quick Ratio 的计算公式、评级文案和文本报告版式派生自：
+SaaS 指标、Quick Ratio 和单位经济的公式、评级文案和文本报告派生自：
 
   dsh-desktop
+  packages/dsh-desktop-office/business-skills/saas-metrics-coach/scripts/metrics_calculator.py
   packages/dsh-desktop-office/business-skills/saas-metrics-coach/scripts/quick_ratio_calculator.py
+  packages/dsh-desktop-office/business-skills/saas-metrics-coach/scripts/unit_economics_simulator.py
   提交 588412b9002fcb3ac88751fab7915e050c965563
   MIT License
   Copyright (c) 2026 Abbas Mir
 
-本目录是 TypeScript 等价实现，不包含该 Python 源码。
+数据体检的 12 个维度、权重、等级和建议文案派生自：
+
+  dsh-desktop
+  packages/dsh-desktop-office/business-skills/dataset-health-audit/scripts/data_quality_checker.py
+  提交 588412b9002fcb3ac88751fab7915e050c965563
+  MIT License
+  Copyright (c) 2026 data-quality-checker contributors
+
+信息图的调色板、SVG 结构和 HTML 版式派生自：
+
+  dsh-desktop
+  packages/dsh-desktop-office/business-skills/data-viz-gen/scripts/build_infographic.py
+  提交 588412b9002fcb3ac88751fab7915e050c965563
+  MIT License
+  Copyright (c) 2025 infographic-builder contributors
+
+本目录是 TypeScript 等价实现，不包含这些 Python 源码。
 Selection 仓库许可证为 Apache-2.0。上述 MIT 声明随派生文本保留。

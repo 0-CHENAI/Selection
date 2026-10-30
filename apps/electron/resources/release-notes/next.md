@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Excel 案例与业务技能** — 搬入年度经营、青岚港和荧光酶三个案例，以及 SaaS 指标、数据体检和信息图技能。计算用 Bun，交付前重算并核对；图表优先用 OfficeCLI 原生图表。Issue #712。
+
 - **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
 
 - **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
