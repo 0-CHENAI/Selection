@@ -71,7 +71,7 @@ Prose quality is a different skill. This router formats and delivers Office file
 
 ## 业务案例
 
-会议纪要、工作通知/公文草稿、Excel 执行台账先读 [Office 业务案例](../office-business/SKILL.md) 与其 catalog，再加载上表相应正式格式指南。已有模板采用副本 + 指定段落/单元格修改，保留原件、样式、页眉页脚和公式。案例不授权重建用户原稿。
+Word 案例（会议纪要、调研报告、公文通知）、Excel 执行台账和对应业务技能先读 [Office 业务案例](../office-business/SKILL.md) 与其 catalog。业务技能在 `office-business/business-skills/`。已有模板采用副本 + 指定段落/单元格修改，保留原件、样式、页眉页脚和公式。案例不授权重建用户原稿，也不改用 python-docx 或 LibreOffice Kit。
 
 ## Artifact paths
 

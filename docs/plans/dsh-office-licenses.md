@@ -93,3 +93,7 @@ Office 案例与业务技能（dsh-desktop 588412b9002fcb3ac88751fab7915e050c965
 ```
 
 草案里的项目在对应阶段落地时改成当时的真实路径。没被搬入的项目不要写进已发布的 NOTICE。
+
+## 2026-10-30 22:52 补充：government-notice 可以原样搬入
+
+上文把 `government-notice` 写成不搬，是阶段 01 当时的结论。LinNai 于 2026-10-30 22:52 在 #704 / #710 确认：该 Word 案例是本人提供的样例，可以原样搬入，含嵌入字体。阶段 07 已按此放入 `apps/electron/resources/skills/office-business/cases/government-notice/`。gov-doc-writing 技能正文、分册和示例仍然不复用。清单生成脚本仍会把该案例标成「不搬」，因为清单是阶段 01 的再生结果；以本节和阶段 07 的 NOTICE 为准。

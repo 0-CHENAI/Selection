@@ -1,6 +1,6 @@
 # ADR：dsh Python 脚本功能在 TypeScript / Bun + OfficeCLI 中的等价实现
 
-- 状态：提议，待 LinNai 拍板。拍板前不合入集成分支 `office-align-3.2`。
+- 状态：2026-10-30 作为阶段 03 提议写入并随 #720 合入。阶段 07 开工时，LinNai 确认本映射作为实现依据。阶段 07 据此实现纪要结构校验，并把 Word 技能里的 Python 交付说明改成 OfficeCLI / Bun。安装包仍不包含本运行时，也不包含 Python。
 - 日期：2026-10-30
 - 阶段：#703 阶段 03，Issue #706
 - 基线：dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`；清单与 sha256 以 #704 / #719 的 [dsh-office-inventory.json](../plans/dsh-office-inventory.json) 为准
