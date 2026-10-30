@@ -179,6 +179,10 @@ describe('pptx export', () => {
     expect(chartXml).toContain('barChart')
     const presentation = await unzipEntry(out, 'ppt/presentation.xml')
     expect(presentation).toContain('cx="12192000" cy="6858000"')
+    expect(presentation).toContain('<p:notesMasterIdLst>')
+    expect(presentation.indexOf('<p:notesMasterIdLst>')).toBeLessThan(presentation.indexOf('<p:sldIdLst>'))
+    const notes = await unzipEntry(out, 'ppt/notesSlides/notesSlide1.xml')
+    expect(notes).toContain('备注')
   })
 
   it('refuses a failing deck without replacing the output file', async () => {

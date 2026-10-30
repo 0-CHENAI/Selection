@@ -20509,6 +20509,15 @@ function resolveAsset(src) {
 async function finishSlideXml(bytes, deck, platform) {
   const zip = await import_jszip2.default.loadAsync(bytes);
   let changed = false;
+  const presentation = zip.file("ppt/presentation.xml");
+  if (presentation) {
+    const xml = await presentation.async("string");
+    const next = xml.replace(/(<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>)(<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>)/, "$2$1");
+    if (next !== xml) {
+      zip.file("ppt/presentation.xml", next);
+      changed = true;
+    }
+  }
   for (let index = 0;index < deck.pages.length; index++) {
     const page = deck.pages[index];
     const faces = new Map;

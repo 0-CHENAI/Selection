@@ -44,3 +44,7 @@ Beta 文案拟用：**更聪明的改稿**——保留 OfficeCLI 的定点编辑
 ### 标题案首次真实轨迹发现
 
 默认模型 Laufry 的首轮实际调用 OfficeCLI 对第 2 页标题 run 定点修改，deck.json 散列不变、PPTX 散列变化，随后只截图第 2 页并读图。尚未计为完整通过：fixture 的 ppt-output.json 缺少源 stamp，宿主在模型执行前额外导出了一份副本，干扰交付路径；采集器已补齐真实文件 mtime/size stamp 后重跑。同时工具报告原始 deck 导出的 PPTX 已有 notesMasterIdLst 顺序校验错误，需独立核实，不应把它隐藏在“预存问题”下宣称发布质量通过。
+
+### 导出结构修复
+
+已用原生受管 OfficeCLI 1.0.157 独立复现原始导出的 notesMasterIdLst 顺序错误。在现有 ZIP/XML 收尾步骤只交换生成器相邻的 notesMasterIdLst 与 sldIdLst，保留两个节点内容及所有关系。20 项 deck 回归测试通过（480 assertions），包括备注文本与主列表顺序；随包 deck-cli 已重建。修复后真实固定素材导出通过 OfficeCLI validate（no errors），局部截图/旧文件保护重验通过。验收脚本增加真实 validate 退出码断言，防止仅截图正常就放行。
