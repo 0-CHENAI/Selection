@@ -1,0 +1,132 @@
+{
+  "id": "meeting-minutes",
+  "format": "docx",
+  "create": [
+    {
+      "command": "set",
+      "path": "/",
+      "props": {
+        "pageWidth": "11906",
+        "pageHeight": "16838",
+        "marginTop": "1440",
+        "marginBottom": "1440",
+        "marginLeft": "1440",
+        "marginRight": "1440"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "项目协调会纪要",
+        "style": "Title",
+        "size": "22pt",
+        "spaceAfter": "8pt",
+        "bold": "true",
+        "align": "center"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "示例项目组 · 2026年10月30日",
+        "style": "Normal",
+        "size": "10pt",
+        "spaceAfter": "8pt",
+        "align": "center"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "一、会议结论",
+        "style": "Heading1",
+        "size": "18pt",
+        "spaceAfter": "8pt",
+        "bold": "true"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "资料汇总由项目组负责，提交日期为11月3日。",
+        "style": "Normal",
+        "size": "12pt",
+        "spaceAfter": "8pt",
+        "firstLineIndent": "480"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "二、责任与后续",
+        "style": "Heading1",
+        "size": "18pt",
+        "spaceAfter": "8pt",
+        "bold": "true"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "技术组复核接口清单；下次会议核对交付结果。",
+        "style": "Normal",
+        "size": "12pt",
+        "spaceAfter": "8pt",
+        "firstLineIndent": "480"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/body",
+      "type": "paragraph",
+      "props": {
+        "text": "本文件为虚构业务案例，仅用于演示模板副本与定点改稿。",
+        "style": "Normal",
+        "size": "10pt",
+        "spaceAfter": "8pt",
+        "firstLineIndent": "480"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/",
+      "type": "header",
+      "props": {
+        "type": "default",
+        "text": "Selection · 办公案例",
+        "size": "9pt"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/",
+      "type": "footer",
+      "props": {
+        "type": "default",
+        "text": "第 ",
+        "field": "page",
+        "align": "center",
+        "size": "9pt"
+      }
+    }
+  ],
+  "edit": {
+    "path": "/body/p[4]",
+    "find": "11月3日",
+    "replace": "11月5日"
+  },
+  "unchangedText": "技术组复核接口清单；下次会议核对交付结果。",
+  "expectedText": "资料汇总由项目组负责，提交日期为11月5日。"
+}

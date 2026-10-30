@@ -69,6 +69,10 @@ Prose quality is a different skill. This router formats and delivers Office file
 - Legacy `.doc`, `.xls`, and `.ppt` files must be converted to OOXML before editing. Do not silently use another library.
 - For Morph workflows, ignore official-guide references to `morph-helpers.py` and `morph-helpers.sh`. Selection replaces both with the cross-platform bundled command `officecli-morph-helper` (`clone`, `ghost`, `verify`, `final-check`, and `clean-accumulation`); it runs on Selection's bundled Bun runtime and requires no Python or particular user shell.
 
+## 业务案例
+
+会议纪要、工作通知/公文草稿、Excel 执行台账先读 [Office 业务案例](../office-business/SKILL.md) 与其 catalog，再加载上表相应正式格式指南。已有模板采用副本 + 指定段落/单元格修改，保留原件、样式、页眉页脚和公式。案例不授权重建用户原稿。
+
 ## Artifact paths
 
 - Use the user-requested destination for the final Office file. If the user did not provide one, use the effective working directory. Set the final file variable to that absolute path.

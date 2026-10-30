@@ -176,3 +176,4 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Fixes
 
 - **PPT 导出结构校验** — 修正备注母版列表的 OOXML 顺序，保留备注、母版和页面关系，避免生成的演示稿在 OfficeCLI 校验时报告结构错误。Issue #689。
+- **Office 业务案例** — 新增会议纪要、工作通知和执行台账指引，采用模板副本与段落/单元格定点修改，保留页眉页脚、样式和公式；继续使用 OfficeCLI。（#688）
