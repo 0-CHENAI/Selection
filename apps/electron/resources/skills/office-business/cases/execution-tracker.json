@@ -1,0 +1,247 @@
+{
+  "id": "execution-tracker",
+  "format": "xlsx",
+  "create": [
+    {
+      "command": "set",
+      "path": "/Sheet1/A1",
+      "props": {
+        "value": "事项"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/B1",
+      "props": {
+        "value": "计划数"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/C1",
+      "props": {
+        "value": "完成数"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D1",
+      "props": {
+        "value": "完成率"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/E1",
+      "props": {
+        "value": "状态"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/A2",
+      "props": {
+        "value": "接口复核"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/B2",
+      "props": {
+        "value": "10"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/C2",
+      "props": {
+        "value": "4"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/E2",
+      "props": {
+        "value": "进行中"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/A3",
+      "props": {
+        "value": "资料归档"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/B3",
+      "props": {
+        "value": "8"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/C3",
+      "props": {
+        "value": "8"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/E3",
+      "props": {
+        "value": "已完成"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/A4",
+      "props": {
+        "value": "合计"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D2",
+      "props": {
+        "formula": "IFERROR(C2/B2,0)"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D3",
+      "props": {
+        "formula": "IFERROR(C3/B3,0)"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/B4",
+      "props": {
+        "formula": "SUM(B2:B3)"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/C4",
+      "props": {
+        "formula": "SUM(C2:C3)"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D4",
+      "props": {
+        "formula": "IFERROR(C4/B4,0)"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D2",
+      "props": {
+        "numFmt": "0.0%"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D3",
+      "props": {
+        "numFmt": "0.0%"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/D4",
+      "props": {
+        "numFmt": "0.0%"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/col[A]",
+      "props": {
+        "width": "24"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/col[B]",
+      "props": {
+        "width": "14"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/col[C]",
+      "props": {
+        "width": "14"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/col[D]",
+      "props": {
+        "width": "16"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/col[E]",
+      "props": {
+        "width": "16"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/A1:E4",
+      "props": {
+        "font.name": "Arial",
+        "font.size": "11pt"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1/A1:E1",
+      "props": {
+        "font.bold": "true",
+        "fill": "E8EEF3"
+      }
+    },
+    {
+      "command": "set",
+      "path": "/Sheet1",
+      "props": {
+        "freeze": "A2",
+        "orientation": "landscape",
+        "fitToPage": "true"
+      }
+    },
+    {
+      "command": "add",
+      "parent": "/Sheet1",
+      "type": "validation",
+      "props": {
+        "sqref": "E2:E3",
+        "type": "list",
+        "formula1": "未开始,进行中,已完成",
+        "showError": "true",
+        "errorTitle": "请选择状态",
+        "error": "使用下拉列表中的状态"
+      }
+    }
+  ],
+  "edit": {
+    "path": "/Sheet1/C2",
+    "value": "6"
+  },
+  "formulas": {
+    "/Sheet1/D2": "IFERROR(C2/B2,0)",
+    "/Sheet1/C4": "SUM(C2:C3)",
+    "/Sheet1/D4": "IFERROR(C4/B4,0)"
+  },
+  "expectedValues": {
+    "/Sheet1/D2": 0.6,
+    "/Sheet1/C4": 14,
+    "/Sheet1/D4": 0.7777777777777778
+  }
+}

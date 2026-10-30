@@ -166,3 +166,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Ordinary chat folder controls** — Open the system folder picker directly and clear a selected working folder with a borderless close button. Hover and keyboard focus fade only the folder name; touch keeps the action visible. Project folder bindings remain fixed.
 
 - **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.
+
+- **Office 业务案例** — 新增会议纪要、工作通知和执行台账指引，采用模板副本与段落/单元格定点修改，保留页眉页脚、样式和公式；继续使用 OfficeCLI。（#688）
