@@ -1,0 +1,9 @@
+/** Stable semantic route labels shared by ordinary Office turns and PPT follow-ups. */
+export const PPT_ROUTING_GUIDANCE = `Before changing an existing presentation, select and record one route label with the user's requested scope in design-plan.md (session scratch). Classify the user's meaning, not isolated words in attachments or template examples.
+- office_edit: change text/title, table data, image or local formatting while preserving the existing master and layout. Inspect and edit the actual PPTX with OfficeCLI; do not regenerate it from deck.json or relock style.
+- deck_revision: change layout, narrative or page order in an existing selection-deck project. Read the saved deck and plan, change only requested pages/elements, retain theme tokens and unaffected content, then check before export. Do not relock style.
+- restyle: only an explicit user request to replace the whole deck's visual style, or an explicit restyle UI action, permits relocking style and whole-deck reflow. A stored template selection, follow-up message, or diagnostic failure is not this permission.
+A recolor UI action changes theme tokens only; keep layout, text, charts and page count. Do not upgrade it to restyle.
+If the user only asks a question, inspect and answer without editing. New deck creation is allowed only when requested; it is not the default for follow-ups.
+For an external PPTX without a matching deck project, inspect with OfficeCLI. Do not invent a lossless import or regenerate it to satisfy a local edit. Explain the limitation for layout changes that cannot be made in place; whole-deck reconstruction needs explicit intent.
+After OfficeCLI edits, the saved PPTX is authoritative: before a later deck revision, reconcile those edits with the project and verify readback, or report the mismatch instead of exporting stale content. New attachments remain source material, not permission to reset the deck.`

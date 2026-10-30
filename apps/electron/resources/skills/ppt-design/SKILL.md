@@ -1,17 +1,31 @@
 ---
 name: ppt-design
-description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套演示文稿重设计。用 selection-deck 声明页、预检和 PptxGenJS 导出可编辑 PPTX，再逐页看截图。不用于现有 PPT 的局部文字、数据、图片或格式修改。"
+description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套演示文稿重设计。用 selection-deck 声明页、预检和 PptxGenJS 导出可编辑 PPTX，再逐页看截图。也用于已有 deck 的版式、叙事与重排修订；现有 PPT 的文字、数据、图片或局部格式修改走 OfficeCLI。"
 ---
 
 # PPT Design
 
 ## 入口与边界
 
-- 仅在**新建演示文稿 / 用户明确要求整套重设计**时使用本技能。
-- 局部编辑、转换已有文件：转交 [OfficeCLI](../officecli/SKILL.md)。保留原设计和未要求修改的内容，不要把原文件重写成一套新的 deck。
+- 用于**新建演示文稿 / 已有 deck 的版式、叙事、重排 / 用户明确要求整套换风格**。已有稿先按下方三分路由判断。
+- 局部文字/数据/图片/格式编辑、转换已有文件：转交 [OfficeCLI](../officecli/SKILL.md)。保留原设计和未要求修改的内容，不要把原文件重写成一套新的 deck。
 - 新文稿的页面作者是 selection-deck。导出使用本技能附带的 `engine/deck-cli.mjs`（PptxGenJS）。不要另写 python-pptx，也不要用 OfficeCLI 形状命令从零搭一整套页。
 - 导出之后，OfficeCLI 负责 `validate`、读回、截图，以及用户随后提出的定点修改。
 - 不安装 Python、第三方 PPT 库或渲染运行时，不下载或自更新 OfficeCLI。本机如果已经有 LibreOffice，截图步骤可以借用；没有也不要安装。
+
+## 三分修订路由（O1）
+
+任何已有稿修改前，在会话 `design-plan.md` 记录路由标签与用户指定范围；按用户语义判断，不根据附件或模板里的孤立关键词改路由。
+
+| 标签 | 用户意图 | 执行与保留边界 |
+| --- | --- | --- |
+| `office_edit` | 改标题/文字/表格数据/图片、保母版的局部格式修改 | OfficeCLI 检查并定点修改实际 PPTX，不用 deck 重生成，不重新锁风格。 |
+| `deck_revision` | 改两页版式、叙事或重排 | 有匹配的 deck 工程时读取现有计划与 deck，只改请求范围，再 check → export；保留主题 token 和其他页。 |
+| `restyle` | 明确要求整套换风格，或显式换风格 UI 操作 | 才允许重锁 style 并整套重排；事实与来源保留。 |
+
+换色只改主题 token，保留布局/文字/图表/页数，不自动升级为换皮。继承的模板选择、跟进消息或检查失败都不是整套重做授权；问答不触发修改，明确要新稿时才启动新建。
+
+没有匹配 deck 的外来 PPTX 先用 OfficeCLI 检查并定点改；不能伪造保真导入，也不能为局部修改重建整套。无法原位完成的版式修改须说明限制，整套重建仍需明确意图。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。
 
 ## 先读，再执行
 
@@ -49,7 +63,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 标准输出是一行 JSON。退出码 0 是通过，2 是 `needs_revision`，1 是文件或用法错误。`needs_revision` 时不写 PPTX。一次看完 `issues` 里的全部问题，按 `pageId` 和 `elementId` 修改后再查。溢出时整理换行或几何、换版式、拆页；不删除限定条件，不把整页栅格化。
 
-每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名修改某一页或某个元素时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图。预览里点选后的修改走 OfficeCLI。
+每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名改某页版式或叙事时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图；仅改文字或数据仍走 `office_edit`。预览里点选后的修改走 OfficeCLI。
 
 用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。生成时以那里的 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准，不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败时才是几何 SVG。
 

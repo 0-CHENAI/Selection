@@ -9,7 +9,7 @@
 7. 打开每一页截图做视觉检查，并先看 `<session_state>` 的 `imageInput`。`enabled` 时用 Read 把该页图片交给当前模型，或用 `call_llm` 把图片放进 `attachments`。`unavailable` 或返回 `image_capability_mismatch` 时，写明 G4 未通过，不要改用 OCR 或名为 `OCR New Pages` 的步骤。预检通过不等于画面成立。
 
 Do not OCR or run a Swift/Vision/tesseract script in place of image input. For slide visual QA, report image_capability_mismatch and leave G4 blocked.
-8. 用户点名要改已有 PPTX 的某一处时，停止本流程，改用 OfficeCLI 编辑原文件。
+8. 已有稿按 SKILL 的三分标签路由：文字/数据/保母版定点改为 `office_edit`，停止本流程并用 OfficeCLI；版式/叙事/重排为 `deck_revision`，复用现有工程和主题；明确整套换风格才是 `restyle`。
 
 故事、选定的风格、字体平台、预检结果、视觉检查次数和最终路径记在 `dataFolderPath` 的 `design-plan.md`。那是会话材料，不是交付物。只有用户明确要求先看方案时才停在方案；否则规划完成后继续生成。恢复会话时读取磁盘上的计划和 deck，不重新选风格，也不把视觉检查次数清零。
 
