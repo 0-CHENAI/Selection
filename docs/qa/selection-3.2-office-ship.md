@@ -12,7 +12,7 @@
 | O3 #686 | [#694](https://github.com/0-CHENAI/Selection/pull/694) | [模板与按页 UI](selection-3.2-office-o3.md) | 阶段 CI 通过；22 个双语适配工程、264 页结构检查通过；预览与 UI 原生复核范围见阶段记录 |
 | O4 #687 | [#695](https://github.com/0-CHENAI/Selection/pull/695) | [外来稿 brief](selection-3.2-office-o4.md) | 阶段 CI 通过；真实摘要、hash 校验与模型完整读取后编辑通过 |
 | O5 #688 | [#696](https://github.com/0-CHENAI/Selection/pull/696) | [Word/Excel 案例](selection-3.2-office-o5.md) | Validate 41004874701、OfficeCLI 41004874522 成功；已纳入 Ship 组合基线 |
-| Ship #689 | [#697](https://github.com/0-CHENAI/Selection/pull/697) | 本页与两个验收脚本 | 未完成，详见下表 |
+| Ship #689 | [#697](https://github.com/0-CHENAI/Selection/pull/697) | 本页与两个验收脚本 | 实现与当前授权验收完成；test 发布门禁待批准 |
 
 O5 固定 DSH 来源未找到可移植的 Word/Excel 案例，采用明确标记的 Selection 原创虚构业务编排，未冒称搬运。仍使用 OfficeCLI 模板副本与定点修改；没有引入 PPTD、Harness、Cordis、Python office-runtime、LibreOffice Kit 或替换编辑器。
 
@@ -26,10 +26,10 @@ O5 固定 DSH 来源未找到可移植的 Word/Excel 案例，采用明确标记
 | 显式整套换风格 | 通过 | `261030-tall-pearl`，12 页页序/事实保留、主题改变；12 页原生复核，最终文件重截图散列一致、validate 通过 |
 | 外来稿先完整读 brief、verify 后编辑 | 通过 | `261030-ivory-delta`，完整连续读取 7886 行、写前 verify、只改标题、写后重建 brief；原文件逐部件对照与原生图通过 |
 | O4/O5 真实组合、类型检查 | 通过 | 7 tests / 82 assertions；typecheck:all 通过 |
-| 完整 validate:ci | 准备完整环境后运行中 | 首次缺 Electron；第二次网络 OAuth 超时；第三次缺随包 Bun；原失败项各自原样通过，细节见下 |
-| Ship PR 最新 CI | 运行中 | 必须按最终 head SHA 回读 Validate 与 OfficeCLI |
-| 双平台安装包 | 上传命名修复后待重跑 | [run 41006827680](https://github.com/0-CHENAI/Selection/actions/runs/41006827680) 两平台均成功构建并生成校验和，但带斜杠的分支名使上传失败；不计打包门禁通过 |
-| v3.2 最终组合 | 待上述门禁 | v3.2 当前含 O0–O4；O5/Ship 待最终验证后集成 |
+| 完整 validate:ci | 通过 | `/tmp/selection-3.2-ship-validate-prepared.log`，退出码 0；包括全量测试、typecheck、lint、i18n |
+| 实现提交 CI | 通过 | a76b483823053ae2172f68d5982e0232f1bd3231；[Validate 41008458729](https://github.com/0-CHENAI/Selection/actions/runs/41008458729)、[OfficeCLI 41008458731](https://github.com/0-CHENAI/Selection/actions/runs/41008458731) 成功；收尾文档提交不改实现，最新 PR 检查另行回读 |
+| 双平台安装包 | 通过 | [run 41008459694](https://github.com/0-CHENAI/Selection/actions/runs/41008459694)，macOS/Windows 构建、校验和与上传成功，publish-release 按条件 skipped |
+| v3.2 实现组合 | 已集成并推送 | e8eb83485c6f1d25eae046b45e37976138be11cd 含 O0–O5 与 Ship，跟已通过全部门禁的 a76b48382 文件树完全一致；后续仅同步收尾文档 |
 | test 合入后 Validate + Package | 待用户批准合入 | 功能分支结果不能代替发布门禁；不关闭 #689 或里程碑 |
 
 ## 复现方法
@@ -67,7 +67,7 @@ bun run validate:ci
 
 首次真实模型启动因缺 pi-agent-server 构建而失败，执行仓库 subprocess 构建后恢复；错误轮未记为通过。
 
-完整 validate:ci 首次在 deep-link-routing 导入 Electron 时因本机缺安装产物失败。补齐锁定版本 Electron 39.2.7 后，失败项原样通过，未改依赖版本。第二次在真实网络 GitHub OAuth metadata discovery 超过默认 5 秒时失败；该文件原样单独重跑 7 pass / 11 assertions，未跳过或延长超时，第三次遇到下述随包 Bun 缺失，补齐后重新执行。
+完整 validate:ci 首次在 deep-link-routing 导入 Electron 时因本机缺安装产物失败。补齐锁定版本 Electron 39.2.7 后，失败项原样通过，未改依赖版本。第二次在真实网络 GitHub OAuth metadata discovery 超过默认 5 秒时失败；该文件原样单独重跑 7 pass / 11 assertions，未跳过或延长超时，第三次遇到下述随包 Bun 缺失，补齐后重新执行，最终完整命令通过。
 
 双平台打包手动运行于功能分支；publish-release 只允许默认分支或 test，本次不会发布。test 合入后的门禁保留待批准，不能由本次打包替代。
 
@@ -79,6 +79,13 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 - **整套换风格**：`/var/folders/jr/49n0sbtj1h56v4zmy5v7rwzh0000gn/T/selection-3.2-route-restyle-kEPoe7/trace.json`。12 页 id/页序一致，主题变蓝；除旧风格标记 MONOCHROME 外，所有原文本/数值在相应页中保留（允许换行/合并标签）。最终 PPTX 文本与最终 deck 逐项一致，validate 零错误。独立原生读完 12 页，无明显溢出/遮挡；从最终交付重新截图到 `/tmp/selection-3.2-restyle-final-images`，12 张散列均与复核图一致。备注已随新布局改写，不声称备注字节不变。此用例启动于路径修复前，模型最后收敛副本为单一文件；路径修复的独立回归由标题/局部版式用例证明。
 - **外来稿**：`/var/folders/jr/49n0sbtj1h56v4zmy5v7rwzh0000gn/T/selection-3.2-route-external-15hmWd/trace.json`。编辑前 Read 原 brief，起始行依次 1/901/1801/2701/4001/5301/6601，工具实际回包连续覆盖 7886 行，无截断缺口；随后 --verify 再 OfficeCLI set，写后重建 brief。与保留原字节逐个 PPT 部件对照，仅第 2 页目标标题改变；无 deck 重建。原生读图、validate、脚本最终标题断言均通过。
 
-第三次完整 validate:ci 暴露工作树 `apps/electron/vendor/bun/bun` 未准备，导致 Word Heading/TOC 辅助器退出 127。按 CI 同样的受信任 Bun staging 方式补齐 gitignored 运行时，原失败文件 `officecli.test.ts` 26 pass / 199 assertions；完整命令再次执行中，仍未报全仓通过。
+第三次完整 validate:ci 暴露工作树 `apps/electron/vendor/bun/bun` 未准备，导致 Word Heading/TOC 辅助器退出 127。按 CI 同样的受信任 Bun staging 方式补齐 gitignored 运行时，原失败文件 `officecli.test.ts` 26 pass / 199 assertions；随后完整 validate:ci 退出码 0，成功通过。
 
-打包上传失败原因已定位为 artifact 名含功能分支的 `/`，上传/下载统一改用 `github.run_id`（只改命名，不改发布条件），下一次工作流需验证完整上传成功。
+打包上传失败原因已定位为 artifact 名含功能分支的 `/`，上传/下载统一改用 `github.run_id`（只改命名，不改发布条件），修复后 run 41008459694 已验证两个平台完整上传成功。
+
+
+## 授权范围内的交付回读
+
+2026-10-30 回读确认：PR #691–#697 全部 open/draft、base=test、milestone=Selection 3.2，对应 Closes #683–#689；没有 PR 合入 test。远端 test 仍为 `3ef1e6e7f4da1e8c6a45745f2fdaa96b74dc9d60`。本轮相对 test 的改动未涉及 effort/WebGL/Fast；既有模板原页未覆盖，新增适配与预览位于独立目录。
+
+已上传产物 `selection-macos-arm64-41008459694`（917058115 bytes）与 `selection-windows-x64-41008459694`（419756808 bytes），均未过期。没有发布 GitHub Release、关闭 issue/里程碑或制作面向用户的 PPT 成品；PPTX/Word/Excel 文件均为验收夹具。test 合入与后续发布门禁仍以用户另行批准为前提。
