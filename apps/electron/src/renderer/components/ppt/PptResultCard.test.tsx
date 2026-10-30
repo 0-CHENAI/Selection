@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
 import type { PptPageProgress, PptTemplate, PptTheme } from '@craft-agent/shared/protocol'
 import type { Session } from '../../../shared/types'
+import { issueRevision } from './PptIssueRevisionPanel'
 
 mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
 mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }))
@@ -224,4 +225,11 @@ test('the revision panel compares covers and applies to every page', () => {
   expect(html).toContain('应用到全部 11 页')
   expect(html).toContain('取消')
   expect(html).not.toContain('<pre')
+})
+
+
+test('issue repair is a targeted revision and preserves diagnostic scope', () => {
+  const issue = { code: 'overflow', message: '标题超出页面', elementId: 'title' }
+  expect(issueRevision(6, issue)).toMatchObject({ action: 'revise', targets: [{ page: 6, elementId: 'title' }] })
+  expect(issueRevision(2, { code: 'schema', message: '页面结构需修复' }).targets).toEqual([{ page: 2 }])
 })

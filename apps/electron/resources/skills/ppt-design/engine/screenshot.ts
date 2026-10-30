@@ -1,31 +1,39 @@
-import { mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ScreenshotResult } from './types.ts'
 
 export type CaptureOptions = {
+  /** 1-based affected pages; omitted means every page. */
+  pageNumbers?: number[]
   officecli?: string
   libreoffice?: string
   pdftoppm?: string
 }
 
 export async function captureSlides(pptx: string, outDir: string, pageCount: number, options: CaptureOptions = {}): Promise<ScreenshotResult> {
+  const selected = options.pageNumbers === undefined ? undefined : [...new Set(options.pageNumbers)].sort((a, b) => a - b)
+  if (selected && (!Number.isInteger(pageCount) || pageCount < 1 || selected.length === 0 || selected.some(page => !Number.isInteger(page) || page < 1 || page > pageCount))) {
+    return { available: false, files: [], reason: '受影响页必须是已知页数范围内的非空整数列表' }
+  }
+  const pages = selected ?? Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1)
   mkdirSync(outDir, { recursive: true })
   const officecli = options.officecli === '' ? null : (options.officecli ?? await commandOnPath('officecli'))
   if (officecli && pageCount > 0) {
     const files: string[] = []
     let failed = false
-    for (let page = 1; page <= pageCount; page++) {
+    for (const page of pages) {
       const target = join(outDir, `slide-${String(page).padStart(2, '0')}.png`)
+      rmSync(target, { force: true })
       const result = await run(officecli, ['view', pptx, 'screenshot', '--page', String(page), '-o', target], { OFFICECLI_SKIP_UPDATE: '1' })
-      if (result.code !== 0) {
+      if (result.code !== 0 || !existsSync(target)) {
         failed = true
         break
       }
       files.push(target)
     }
-    if (!failed && files.length === pageCount) return { available: true, renderer: 'officecli', files }
+    if (!failed && files.length === pages.length) return { available: true, renderer: 'officecli', files }
   }
   const soffice = options.libreoffice ?? await commandOnPath('soffice') ?? await commandOnPath('libreoffice')
   const pdftoppm = options.pdftoppm ?? await commandOnPath('pdftoppm')
@@ -48,6 +56,17 @@ export async function captureSlides(pptx: string, outDir: string, pageCount: num
   ])
   rmSync(profile, { recursive: true, force: true })
   if (pdf.code !== 0) return { available: false, files: [], renderer: 'libreoffice', reason: pdf.stderr || pdf.stdout || 'LibreOffice 转换失败' }
+  if (selected) {
+    const files: string[] = []
+    for (const page of selected) {
+      const prefix = join(outDir, `slide-${String(page).padStart(2, '0')}`)
+      rmSync(`${prefix}.png`, { force: true })
+      const png = await run(pdftoppm, ['-png', '-r', '108', '-f', String(page), '-l', String(page), '-singlefile', join(outDir, pptxBasename(pptx) + '.pdf'), prefix])
+      if (png.code !== 0 || !existsSync(`${prefix}.png`)) return { available: false, files, renderer: 'libreoffice', reason: png.stderr || 'pdftoppm 失败' }
+      files.push(`${prefix}.png`)
+    }
+    return { available: true, renderer: 'libreoffice', files }
+  }
   const prefix = join(outDir, 'slide')
   const png = await run(pdftoppm, ['-png', '-r', '108', join(outDir, pptxBasename(pptx) + '.pdf'), prefix])
   if (png.code !== 0) return { available: false, files: [], renderer: 'libreoffice', reason: png.stderr || 'pdftoppm 失败' }

@@ -34,8 +34,8 @@ function pages(done: boolean): PptPageProgress[] {
   }))
 }
 
-function previewSession(phase: 'generating' | 'completed'): Session {
-  const done = phase === 'completed'
+function previewSession(phase: 'generating' | 'completed' | 'attention'): Session {
+  const done = phase !== 'generating'
   return {
     id: SESSION_ID,
     workspaceId: 'playground-workspace',
@@ -53,13 +53,13 @@ function previewSession(phase: 'generating' | 'completed'): Session {
       artifactVersions: [{ path: PPTX, versionId: 'v1', ordinal: 1, change: 'created' as const }],
     }],
     pptProgress: done
-      ? { fileName: '项目介绍.pptx', pptxPath: PPTX, total: 15, completed: 15, generating: false, pages: pages(true) }
+      ? { fileName: '项目介绍.pptx', pptxPath: PPTX, total: 15, completed: 15, generating: false, pages: pages(true).map(page => phase === 'attention' && page.index === 6 ? { ...page, status: 'needs_revision', issueCount: 1, issues: [{ code: 'overflow', elementId: 'market-title', message: '市场机会标题超出页面边界' }] } : page) }
       : { fileName: '项目介绍.pptx', pptxPath: PPTX, total: 15, completed: 5, current: 6, currentTitle: '市场机会', generating: true, pages: pages(false) },
   } as Session
 }
 
 /** Real composer, Office button and deliverable row. Generation keeps the row out of the column. */
-export function PptOfficeProgressPreview({ phase = 'generating' }: { phase?: 'generating' | 'completed' }) {
+export function PptOfficeProgressPreview({ phase = 'generating' }: { phase?: 'generating' | 'completed' | 'attention' }) {
   const { t, i18n: instance } = useTranslation()
   const [languageReady, setLanguageReady] = React.useState(instance.resolvedLanguage === 'zh-Hans')
   const base = useAppShellContext()
@@ -144,6 +144,7 @@ export const pptOfficeProgressComponents: ComponentEntry[] = [{
   variants: [
     { name: 'generating', description: '生成中', props: { phase: 'generating' } },
     { name: 'completed', description: '已完成', props: { phase: 'completed' } },
+    { name: 'attention', description: '按诊断问题修订', props: { phase: 'attention' } },
   ],
   layout: 'full',
 }]

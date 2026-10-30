@@ -4,6 +4,12 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
+
+- **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
+
+- **Office 业务案例** — 新增会议纪要、工作通知和执行台账指引，采用模板副本与段落/单元格定点修改，保留页眉页脚、样式和公式；继续使用 OfficeCLI。（#688）
+
 - **Consistent session modes** — Conversations created by external clients now publish their actual mode to every window, avoiding a PRO task appearing under a NORM header. Genuine NORM sessions continue to reject delegation. Issue #466.
 
 - **Original-source navigation** — PRO research can freeze successfully fetched web originals and locate native PDF pages, Word paragraphs, Excel cells and PowerPoint slides by content version. Directory indexes remain navigation; only successfully returned original ranges count as read receipts. Existing Office/PDF Skills retain their full workflow. Issues #460 and #464.
@@ -29,6 +35,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Full Takeover risk warning** — Switching a workspace into Full Takeover now shows a confirmation that explains the reduced prompts and requires ticking "I understand the risk" before the mode is enabled. The acknowledgement is stored per workspace, so later switches in that workspace go through silently; other workspaces ask once. Approving a plan now elevates Explore to Smart Approval instead of silently enabling Full Takeover.
 
 ## Improvements
+
+- **模板与按页修订** — PPT 模板库补齐 11 套中英文 DSH 模板及逐页预览；成果文件可按页描述修改，或直接选择结构诊断问题修复，保留其余页与主题。（#686）
+
+- **先理解外来演示稿** — 编辑已有 PPTX 前先读取逐页结构摘要、定位原对象并核验文件版本，减少误改与无必要重建；摘要明确保真边界，不代表更换编辑器。（#687）
 
 - **Max 思考强度与 Fast** — 桌面模型菜单和紧凑选择器共用思考强度滑轨；仅 Max 显示圆角方格 WebGL 点燃、拖尾与辉光，其他档位保持普通轨道。方格轮廓在辉光合成后重新裁切，减少动态效果时显示静态画面，离开 Max 或关闭菜单即释放渲染资源。保留 GPT OAuth Fast 的独立会话持久化，并补齐 #681 的闪电开关、忙碌和不支持状态；Fast 不改变思考强度。
 
@@ -91,6 +101,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Unified work-chain header** — Thinking and numbered steps share one title row and enter or leave on the same height curve as the processing indicator. The collapsed title no longer appends an error count, and the chevron stays in document flow so the rounded chrome does not clip it. Fixes #405.
 
 ## Bug Fixes
+
+- **PPT 导出结构校验** — 修正备注母版列表的 OOXML 顺序，保留备注、母版和页面关系，避免生成的演示稿在 OfficeCLI 校验时报告结构错误。Issue #689。
+
+- **Office 整合修复** — 跟进修改不再用输入框残留参数回退已选风格或配色；打开已有 PPTX 时不再注入新建指令，按页文字修改保留 OfficeCLI 定点路径。补齐模板来源、完整 MIT/Apache 许可与随包 NOTICE，保留 Max WebGL 与独立 Fast 行为。（#698）
 
 - **PPT 视觉检查跟随读图能力** — 会话状态写明当前模型能否看图。能看图时，幻灯片截图用 Read 或带图片的 `call_llm`。不能看图时沿用原来的图像能力提示，G4 停在未通过，不再静默改走 OCR 或名为 “OCR New Pages” 的步骤。Fixes #671.
 
@@ -164,3 +178,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Ordinary chat folder controls** — Open the system folder picker directly and clear a selected working folder with a borderless close button. Hover and keyboard focus fade only the folder name; touch keeps the action visible. Project folder bindings remain fixed.
 
 - **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.
+
+

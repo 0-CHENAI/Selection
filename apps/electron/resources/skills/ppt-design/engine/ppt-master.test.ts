@@ -71,10 +71,18 @@ describe('ppt-master styles and themes', () => {
     }>
     const dsh = Object.keys(catalog).filter(id => id.startsWith('dsh-')).sort()
     expect(dsh).toEqual([
+      'dsh-blue-professional',
+      'dsh-broadside',
       'dsh-cartesian',
       'dsh-course-workshop',
+      'dsh-editorial-forest',
       'dsh-editorial-notebook',
       'dsh-engineering-blueprint',
+      'dsh-monochrome',
+      'dsh-neo-grid-bold',
+      'dsh-playful',
+      'dsh-sakura-chroma',
+      'dsh-signal',
       'dsh-soft-editorial',
     ])
     for (const id of styles) {

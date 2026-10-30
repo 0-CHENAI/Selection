@@ -1,0 +1,56 @@
+Third-party template notices for ppt-design
+
+These notices apply to the imported DSH template designs, bilingual reference
+pages and their Selection adaptations, not to the independently implemented
+Selection deck engine or to the repository as a whole. They are informational
+and do not modify any license. The applicable full license texts are bundled
+in licenses/dsh/LICENSE, licenses/dsh-ppt/LICENSE, licenses/zara/LICENSE and
+licenses/html-anything/LICENSE. The existing skill LICENSE retains the Hugo He
+MIT notice for the ppt-master material.
+
+DSH Desktop repository: Copyright (c) 2026 DataElement
+DSH PPT distribution: Copyright (c) 2026 DeepSeek and WorkBuddy PPT contributors
+
+Applicable excerpts retained verbatim from DSH Desktop
+packages/ppt-runtime/core/THIRD_PARTY_NOTICES.md at
+8dec631777c34fbbcc7d45af787bdd2c468d2cfb:
+
+## Retained native templates
+
+Modular Logistics System, Swiss Signal Grid, and Nordic Operating Report originated in DSH contribution `de281a1ceccadb00b92df53adb106a2e87ec0b4b` (PR #320). Their native PPTD files and source provenance statements are included. Package review verifies editable native objects, no external raster assets, and renderable source projects. These checks do not independently establish every underlying copyright fact.
+
+## HTML Anything adaptations
+
+Engineering Blueprint and Course Workshop adapt the design directions in `deck-blueprint` and `deck-course-module` from https://github.com/nexu-io/html-anything at `c31204544230578ac814026fecc153c6e36587ae`, licensed under Apache-2.0. Copyright and attribution to the HTML Anything / Nexu contributors are retained. The corresponding source Skill excerpts and license are included in licenses/html-anything.
+
+Modified 2026-09-06 by DSH Desktop contributors: added native PPTD layouts, original example text, editable vectors, previews and semantic indexes. Editorial Notebook is separately authored by DSH and does not reuse guizang-ppt-skill.
+
+Other runtime dependencies retain their own package licenses. No font binary is included in these template packs; font names request installed fonts or renderer fallback.
+
+## Zara template adaptations
+
+Copyright (c) 2026 Zara Zhang. Ten templates adapt beautiful-html-templates at e5e204fb1f3b06290846e7dcd7aceddabeceec8c under MIT. See licenses/zara/LICENSE and the pinned design/HTML source files. DSH rebuilt native editable layouts and expanded each of the ten templates to twelve layouts, added English and Chinese examples, replaced web-only typefaces with documented Office font pairs, and generated new previews.
+
+Selection scope and modifications (not part of the upstream excerpts above):
+
+The excerpt's references to included PPTD projects, source Skill excerpts,
+HTML files and runtime dependencies describe the DSH distribution. Selection
+ships converted selection-deck JSON, retained design.md text, local previews
+and the license texts; it does not ship the DSH runtime or those source
+projects. Fixed source paths and the complete imported-pack inventory are in
+ATTRIBUTION.md. Upstream HTML Anything has no separate NOTICE file at the
+pinned commit; its attribution above is retained from DSH's notices.
+
+Modified 2026-10-23 by Selection: converted Engineering Blueprint and Course
+Workshop PPTD pages and design documents to selection-deck reference pages.
+The deck engine is independently implemented.
+
+Modified 2026-10-30 by Selection: converted the remaining eight Zara packs
+and three retained-native packs from DSH snapshot
+8dec631777c34fbbcc7d45af787bdd2c468d2cfb. Preserved the imported designs and
+raw bilingual decks separately from adapted reference decks. Adaptations
+change explicit line breaks, capacity, contrast, decorative roles and limited
+conflicting geometry; they do not reduce font sizes or replace source facts.
+No withdrawn community templates, user-supplied presentation libraries,
+legacy Office template sources, downloaded third-party raster assets or font
+binaries are included in these eleven packs.

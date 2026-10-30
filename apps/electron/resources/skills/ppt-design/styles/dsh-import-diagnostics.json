@@ -1,0 +1,509 @@
+{
+  "sourceCommit": "8dec631777c34fbbcc7d45af787bdd2c468d2cfb",
+  "adaptations": [
+    {
+      "slug": "dsh-monochrome",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「刻」",
+          "pageId": "05",
+          "elementId": "t7"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-monochrome",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "over_capacity",
+          "message": "最宽一行约 250pt，文本框只有 232pt",
+          "pageId": "03",
+          "elementId": "t7"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-blue-professional",
+      "file": "deck.json",
+      "sourceIssues": [],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-blue-professional",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「t」",
+          "pageId": "05",
+          "elementId": "t26"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「s」",
+          "pageId": "06",
+          "elementId": "t37"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「t」",
+          "pageId": "08",
+          "elementId": "t6"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-neo-grid-bold",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「界」",
+          "pageId": "07",
+          "elementId": "t56"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-neo-grid-bold",
+      "file": "deck.en.json",
+      "sourceIssues": [],
+      "remainingIssues": []
+    },
+    {
+      "slug": "swiss-signal-grid",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「L」",
+          "pageId": "02",
+          "elementId": "summary-index"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「T」",
+          "pageId": "04",
+          "elementId": "export-index"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 4 行只剩「高」",
+          "pageId": "09",
+          "elementId": "entry-axis-y"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「E」",
+          "pageId": "12",
+          "elementId": "next-index"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "swiss-signal-grid",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「L」",
+          "pageId": "02",
+          "elementId": "summary-index"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「T」",
+          "pageId": "04",
+          "elementId": "export-index"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「E」",
+          "pageId": "12",
+          "elementId": "next-index"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-signal",
+      "file": "deck.json",
+      "sourceIssues": [],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-signal",
+      "file": "deck.en.json",
+      "sourceIssues": [],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-broadside",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，9pt）",
+          "pageId": "01",
+          "elementId": "t3"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，11pt）",
+          "pageId": "01",
+          "elementId": "t4"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 3.29 低于 4.5（#F0ECE5 在 #C9653E 上，16pt 粗体）",
+          "pageId": "06",
+          "elementId": "t10"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 4.41 低于 4.5（#F0ECE5 在 #995E46 上，16pt 粗体）",
+          "pageId": "06",
+          "elementId": "t14"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「点」",
+          "pageId": "06",
+          "elementId": "t23"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，9pt）",
+          "pageId": "12",
+          "elementId": "t2"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，11pt）",
+          "pageId": "12",
+          "elementId": "t3"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-broadside",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，9pt）",
+          "pageId": "01",
+          "elementId": "t3"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，11pt）",
+          "pageId": "01",
+          "elementId": "t4"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 3.29 低于 4.5（#F0ECE5 在 #C9653E 上，16pt 粗体）",
+          "pageId": "06",
+          "elementId": "t10"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 4.41 低于 4.5（#F0ECE5 在 #995E46 上，16pt 粗体）",
+          "pageId": "06",
+          "elementId": "t14"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，9pt）",
+          "pageId": "12",
+          "elementId": "t2"
+        },
+        {
+          "code": "contrast",
+          "message": "对比度 2.96 低于 4.5（#F0ECE5 在 #E85D26 上，11pt）",
+          "pageId": "12",
+          "elementId": "t3"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-playful",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "over_capacity",
+          "message": "最宽一行约 360pt，文本框只有 332pt",
+          "pageId": "02",
+          "elementId": "t8"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-playful",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "over_capacity",
+          "message": "最宽一行约 348pt，文本框只有 332pt",
+          "pageId": "02",
+          "elementId": "t8"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-sakura-chroma",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "overlap",
+          "message": "色块 s3 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s3"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 s4 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s4"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 s5 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s5"
+        },
+        {
+          "code": "overlap",
+          "message": "内容 t7 压在色块 s3 的边缘上",
+          "pageId": "12",
+          "elementId": "t7"
+        },
+        {
+          "code": "overlap",
+          "message": "内容 t7 压在色块 s4 的边缘上",
+          "pageId": "12",
+          "elementId": "t7"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-sakura-chroma",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "over_capacity",
+          "message": "最宽一行约 250pt，文本框只有 232pt",
+          "pageId": "05",
+          "elementId": "t10"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 s3 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s3"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 s4 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s4"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 s5 与 s6 相交，且没有互相包含",
+          "pageId": "12",
+          "elementId": "s5"
+        },
+        {
+          "code": "overlap",
+          "message": "内容 t7 压在色块 s3 的边缘上",
+          "pageId": "12",
+          "elementId": "t7"
+        },
+        {
+          "code": "overlap",
+          "message": "内容 t7 压在色块 s4 的边缘上",
+          "pageId": "12",
+          "elementId": "t7"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "modular-logistics-system",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "overlap",
+          "message": "线条 p01-route-line-04 穿过文字 p01-node-02-tag",
+          "pageId": "01",
+          "elementId": "p01-route-line-04"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 4 行只剩「高」",
+          "pageId": "09",
+          "elementId": "p09-y-label"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 p09-option-site 与 p09-option-warehouse 相交，且没有互相包含",
+          "pageId": "09",
+          "elementId": "p09-option-site"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 p09-option-warehouse 与 p09-option-local 相交，且没有互相包含",
+          "pageId": "09",
+          "elementId": "p09-option-warehouse"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 p09-grid-v 穿过文字 p09-option-site-t",
+          "pageId": "09",
+          "elementId": "p09-grid-v"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 p09-grid-h 穿过文字 p09-option-site-t",
+          "pageId": "09",
+          "elementId": "p09-grid-h"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 l19 穿过文字 t37",
+          "pageId": "10",
+          "elementId": "l19"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "modular-logistics-system",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "overlap",
+          "message": "线条 p01-route-line-04 穿过文字 p01-node-02-tag",
+          "pageId": "01",
+          "elementId": "p01-route-line-04"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「n」",
+          "pageId": "08",
+          "elementId": "p08-card-02-title"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 7 行只剩「H」",
+          "pageId": "09",
+          "elementId": "p09-y-label"
+        },
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「y」",
+          "pageId": "09",
+          "elementId": "p09-option-site-t"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 p09-option-site 与 p09-option-warehouse 相交，且没有互相包含",
+          "pageId": "09",
+          "elementId": "p09-option-site"
+        },
+        {
+          "code": "overlap",
+          "message": "色块 p09-option-warehouse 与 p09-option-local 相交，且没有互相包含",
+          "pageId": "09",
+          "elementId": "p09-option-warehouse"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 p09-grid-v 穿过文字 p09-option-site-t",
+          "pageId": "09",
+          "elementId": "p09-grid-v"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 p09-grid-h 穿过文字 p09-option-site-t",
+          "pageId": "09",
+          "elementId": "p09-grid-h"
+        },
+        {
+          "code": "overlap",
+          "message": "线条 l19 穿过文字 t37",
+          "pageId": "10",
+          "elementId": "l19"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "nordic-operating-report",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "contrast",
+          "message": "对比度 1.75 低于 3.0（#42C7E7 在 #F3F0EA 上，32pt 粗体）",
+          "pageId": "03",
+          "elementId": "scale-current"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "nordic-operating-report",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "contrast",
+          "message": "对比度 1.75 低于 3.0（#42C7E7 在 #F3F0EA 上，32pt 粗体）",
+          "pageId": "03",
+          "elementId": "scale-current"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-editorial-forest",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「界」",
+          "pageId": "09",
+          "elementId": "t51"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-editorial-forest",
+      "file": "deck.en.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 3 行只剩「t」",
+          "pageId": "09",
+          "elementId": "t51"
+        }
+      ],
+      "remainingIssues": []
+    }
+  ]
+}

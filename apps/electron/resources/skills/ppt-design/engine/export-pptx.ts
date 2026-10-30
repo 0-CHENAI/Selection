@@ -684,6 +684,17 @@ function resolveAsset(src: string): string {
 async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName): Promise<Buffer> {
   const zip = await JSZip.loadAsync(bytes)
   let changed = false
+  // PptxGenJS places notesMasterIdLst after sldIdLst. CT_Presentation requires
+  // master lists before the slide list; preserve their contents and relationships.
+  const presentation = zip.file('ppt/presentation.xml')
+  if (presentation) {
+    const xml = await presentation.async('string')
+    const next = xml.replace(/(<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>)(<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>)/, '$2$1')
+    if (next !== xml) {
+      zip.file('ppt/presentation.xml', next)
+      changed = true
+    }
+  }
   for (let index = 0; index < deck.pages.length; index++) {
     const page = deck.pages[index]!
     const faces = new Map<string, { latin: string; ea: string }>()
