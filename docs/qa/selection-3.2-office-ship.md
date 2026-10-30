@@ -60,3 +60,9 @@ O5 #696 的 Validate 41004874701 和 OfficeCLI 41004874522 均成功后，已引
 采集器增加 `external` 用例：只提供外来 PPTX，不放对应 deck，也不提示应调用哪一工具，检查真实模型是否先遵循 O4 brief。后续运行在验收目录保留 `before.pptx.bin` 原字节，避免宿主清理 scratch PPTX 时删除对照物；追加标题最终文字、office_edit 不改工程、局部修改不改其余页/主题、restyle 确实改变主题的硬断言。工具顺序、内容保留与原生视觉仍须人工复核，不能仅凭脚本退出码宣称全部通过。
 
 首次完整 validate:ci 在 deep-link-routing 测试导入 Electron 时遇到本工作树缺少二进制安装产物；通过当前锁定的 Electron 39.2.7 安装脚本补齐（未改依赖版本），失败项单独重跑通过，完整命令已重新启动。该环境失败不算通过，也未以定向结果代替全仓结果。
+
+### 标题案通过（修复后的真实模型）
+
+默认连接 pi-api-key / Laufry，隐藏会话 `261030-warm-dolphin`，证据 `/var/folders/jr/49n0sbtj1h56v4zmy5v7rwzh0000gn/T/selection-3.2-route-title-EMxng1/trace.json`。实际调用 `officecli set /slide[2]/shape[@name=t3]/paragraph[1]/run[1] --prop text=理解关键用户时刻`；deck.json 前后 SHA256 一致，无重锁或 deck 重导出，目录只有一份用户交付 PPTX。
+
+独立复核最终字节：用同版本导出器从 trace.before.deck 重建内容基线（该次采集尚未保留原始二进制，因此不声称 ZIP 字节相同），逐个比较全部 `ppt/` 部件的 XML 结构/属性/文字和媒体字节，仅忽略 XML 子节点间缩进。唯一实质差异为 slide2.xml 的指定标题文字；版式/母版 XML 只发生空白序列化变化。其余页面、备注、主题、媒体均一致。原生 OfficeCLI validate 零错误；原生读图 `data/qa/final-slide-2.png` 标题正确，无裁切/重叠/缺字。
