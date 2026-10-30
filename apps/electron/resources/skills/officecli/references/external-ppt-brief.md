@@ -20,8 +20,8 @@ bun "/absolute/path/to/officecli/scripts/ppt-brief.ts" "/absolute/source.pptx" -
 
 5. 在计划中记录意图和路线：
    - `office_edit`：保母版、改标题/字表/局部格式，先复制到用户授权目标，重新生成副本 brief，以其中稳定 `path` 读取目标节点并定点修改；读回检查。页码会因删页/重排变化，所以重新查询而不是盲目复用。
-   - `deck_revision`：仅有匹配且已核对的 selection-deck 工程才走 deck。只有摘要时，不得伪造可逆 deck；能用 OfficeCLI 局部调整的继续原位做，不能做到的说明限制。可讨论另建近似稿，但本阶段没有实现自动转换。
-   - `restyle`：仅用户明确整套换皮/重建时可用摘要作为素材另建稿；说明上面的不可 round-trip 对象，保留原文件。摘要或失败诊断不是重建授权。
+   - `deck_revision`：改版式、叙事或页序时，用 `deck-cli.mjs import` 把这份 PPTX 导入成新的 deck.json 工程（`ppt_import`），再只改请求的页。不要覆盖原件。带 `retained` 的对象留在原坐标，不能当可编辑元素改。
+   - `restyle`：仅用户明确整套换风格时，先导入成工程，再替换 `theme` 的颜色和字体。写成 token 的颜色跟着变，直接色值和保留层不跟着变。保留原文件。摘要本身不是重建授权。
 6. OfficeCLI 定点改后以保存的 PPTX 为准；验证→受影响页截图→原生读图→close/reopen。G4 仍遵循已有范围与证据要求，禁止 OCR。修改后重建 brief，以免下一轮误用旧状态。
 
 `source.sha256` 证明摘要对应磁盘字节，不证明视觉或语义已验证。`childrenIncomplete` 为真必须读原节点；为假也只说明 query 返回的直接 children 数量齐全，不代表母版、动画或复杂嵌入对象保真。

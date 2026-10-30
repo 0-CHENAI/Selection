@@ -31,6 +31,7 @@ const CJS_ENTRIES: Array<{ name: string; options: BuildOptions }> = [
 ]
 
 describe('Electron CJS import.meta boundary', () => {
+  // The assertion is the bundle warning, not a speed budget. CI can spend longer than the 5s default on these three graphs.
   it('does not emit empty-import-meta when bundling the desktop CJS entries', async () => {
     for (const entry of CJS_ENTRIES) {
       const result = await build({
@@ -47,5 +48,5 @@ describe('Electron CJS import.meta boundary', () => {
         `${entry.name} must not read import.meta in the CJS bundle`,
       ).toEqual([])
     }
-  })
+  }, { timeout: 30_000 })
 })
