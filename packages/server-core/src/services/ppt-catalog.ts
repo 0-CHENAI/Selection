@@ -10,10 +10,10 @@ type CatalogEntry = { name: string; design: string; deck: string; canvas?: strin
 type PickerTemplate = { title: string; category: PptCategory; previewId: string; tier?: 'default' | 'more' | 'archive'; variantOf?: string; mergedInto?: string; note?: string }
 type Picker = { homeOrder: string[]; moreOrder?: string[]; aliases?: Record<string, string>; templates: Record<string, PickerTemplate> }
 const CATEGORIES: Record<string, true> = { '商务': true, '咨询': true, '学术': true, '教学': true, '技术': true, '创意': true, '社媒': true }
-const ARCHIVE_PREVIEWS = 'styles/样例扩展/archive/previews'
+const ARCHIVE_PREVIEWS = 'styles/_archive/previews'
 
 /** Shown to the model and to preview callers when an old id survives but its files were left out of the installer. */
-export const PPT_ARCHIVED_ASSET_MESSAGE = '这份模板已归档，当前安装包没有对应的 deck、PDF 和逐页预览（样例在 styles/样例扩展/archive，打包时排除）。请改选选择器里仍展示的模板。这个 id 仍然接受，避免旧会话直接中断。'
+export const PPT_ARCHIVED_ASSET_MESSAGE = '这份模板已归档，当前安装包没有对应的 deck、PDF 和逐页预览（样例在 styles/_archive，打包时排除）。请改选选择器里仍展示的模板。这个 id 仍然接受，避免旧会话直接中断。'
 
 /** Check the canonical path, not just its spelling: symlinks may leave the bundled root. */
 export function readPptAsset(root: string, asset: string): Buffer {

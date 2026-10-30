@@ -1,6 +1,6 @@
 # Selection 参考页
 
-本目录由 DSH Desktop 固定快照 `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的页面源转成 selection-deck。中文示例是 `deck.json`，英文示例是 `deck.en.json`。原始转入页保存在本目录且未覆盖；可选参考页使用独立样例扩展 `styles/样例扩展/archive/imported/dsh-playful/deck.json` / `deck.en.json`。扩展仅修订断行、容量、对比度、装饰语义与少量冲突几何，完整记录见 `styles/dsh-import-diagnostics.json`。字号可以小到参考页里的图示标签，不要再统一放大。下面是 DSH 的设计说明。来源见 [ATTRIBUTION.md](../../ATTRIBUTION.md)，署名见 [NOTICE](../../NOTICE)，完整许可位于本技能根目录的 `licenses/`（下文保留的上游 `licenses/...` 路径也相对此根目录）。
+本目录由 DSH Desktop 固定快照 `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的页面源转成 selection-deck。中文示例是 `deck.json`，英文示例是 `deck.en.json`。原始转入页保存在本目录且未覆盖；可选参考页使用独立样例扩展 `styles/_archive/imported/dsh-playful/deck.json` / `deck.en.json`。扩展仅修订断行、容量、对比度、装饰语义与少量冲突几何，完整记录见 `styles/dsh-import-diagnostics.json`。字号可以小到参考页里的图示标签，不要再统一放大。下面是 DSH 的设计说明。来源见 [ATTRIBUTION.md](../../ATTRIBUTION.md)，署名见 [NOTICE](../../NOTICE)，完整许可位于本技能根目录的 `licenses/`（下文保留的上游 `licenses/...` 路径也相对此根目录）。
 
 ---
 

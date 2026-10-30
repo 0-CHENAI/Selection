@@ -29,7 +29,7 @@
 
 ## 归档与安装包体积
 
-归档成稿的 deck、PDF、逐页 WebP、卡片封面，以及只被这些成稿引用的图片，移到 `apps/electron/resources/skills/ppt-design/styles/样例扩展/archive/`。`copy-assets` 和 `electron-builder.yml` 都排除这个目录。deck 里的文字、版式和 `src` 没有改。图片对照表是 `asset-map.tsv`。
+归档成稿的 deck、PDF、逐页 WebP、卡片封面，以及只被这些成稿引用的图片，移到 `apps/electron/resources/skills/ppt-design/styles/_archive/`。`copy-assets` 和 `electron-builder.yml` 都排除这个目录。deck 里的文字、版式和 `src` 没有改。图片对照表是 `asset-map.tsv`。
 
 测量的是会进入安装包的 `ppt-design/styles` 字节（归档目录留在仓库，不计入打包）：
 

@@ -130,7 +130,7 @@ test('archived ids stay valid and explain a missing install without throwing', (
   expect(validatePptRequest({ templateId: 'ppt169_ev_market_priorities' }, root).templateId).toBe('ppt169_ev_market_priorities')
   const inside = temp()
   mkdirSync(join(inside, 'styles/themes'), { recursive: true })
-  writeFileSync(join(inside, 'styles/catalog.json'), JSON.stringify({ 'dsh-broadside': { name: '宣言', design: 'styles/dsh-broadside/design.md', deck: 'styles/样例扩展/archive/imported/dsh-broadside/deck.json' } }))
+  writeFileSync(join(inside, 'styles/catalog.json'), JSON.stringify({ 'dsh-broadside': { name: '宣言', design: 'styles/dsh-broadside/design.md', deck: 'styles/_archive/imported/dsh-broadside/deck.json' } }))
   writeFileSync(join(inside, 'styles/picker.json'), JSON.stringify({ homeOrder: [], moreOrder: [], templates: { 'dsh-broadside': { title: '宣言海报', category: '创意', previewId: 'dsh-broadside', tier: 'archive' } } }))
   writeFileSync(join(inside, 'styles/themes/catalog.json'), '{}')
   const session = temp()
