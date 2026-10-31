@@ -57,10 +57,13 @@ export async function verifyOfficeSelection(file: string, selection: OfficeSelec
   }
   if (digest(await readFile(file)) !== selection.hash) throw new Error('文件在核验期间发生变化，请重新选择')
 }
+export const OFFICE_SAMPLE_READ_ONLY = '案例样例仅供预览，不能选中或修改'
 interface Preview {
   id: string; sessionId: string; artifactId: string; baseVersion: string; path: string; hash: string
   directory: string; copy: string; process: ChildProcess; port: number; touched: number; captures: Set<string>
   isDraft: boolean
+  /** Bundled case sample: view only, no element selection or edit. */
+  readOnly?: boolean
   html: string; owners: Map<string, number>; stopping?: Promise<void>
   selectedElements?: OfficeSelection['elements']
   /** data-path values the preview painted, kept so a file swap can restore them. */
@@ -77,7 +80,8 @@ export class OfficePreviewService {
 
   // Serialize admission through startup/termination. Reserved and stopping processes
   // count toward the limit, including replacement renders at full capacity.
-  async open(sessionId: string, artifactId: string, baseVersion: string, path: string, bytes: Buffer, isDraft = false, _replaceExisting = true, ownerId = 'legacy', knownPreviewId?: string): Promise<OfficePreviewResult> {
+  async open(sessionId: string, artifactId: string, baseVersion: string, path: string, bytes: Buffer, isDraft = false, _replaceExisting = true, ownerId = 'legacy', knownPreviewId?: string, options: { readOnly?: boolean } = {}): Promise<OfficePreviewResult> {
+    const readOnly = !!options.readOnly
     if (!/\.(docx|xlsx|pptx)$/i.test(path)) throw new Error('请选择 Word、Excel 或 PowerPoint 文件')
     const key = JSON.stringify([sessionId, ownerId]), ticket = { sessionId }
     this.opening.set(key, ticket)
@@ -87,7 +91,7 @@ export class OfficePreviewService {
       await this.prune()
       const previous = [...this.previews.values()].find(p => p.sessionId === sessionId && p.path === path && !p.stopping)
       const hash = digest(bytes)
-      if (previous && previous.artifactId === artifactId && previous.baseVersion === baseVersion && previous.hash === hash && previous.isDraft === isDraft) {
+      if (previous && previous.artifactId === artifactId && previous.baseVersion === baseVersion && previous.hash === hash && previous.isDraft === isDraft && !!previous.readOnly === readOnly) {
         this.activate(previous, ownerId)
         await this.heartbeat(sessionId, previous.id, ownerId)
         if (!valid()) throw new Error('Office 预览请求已被替换或取消')
@@ -122,7 +126,7 @@ export class OfficePreviewService {
         const owners = new Map(previous?.owners)
         owners.set(ownerId, Date.now())
         preview = { id: randomUUID(), sessionId, artifactId, baseVersion, path, hash, directory, copy, process: child, port,
-          touched: Date.now(), captures: new Set(), isDraft, html: '', owners }
+          touched: Date.now(), captures: new Set(), isDraft, ...(readOnly ? { readOnly } : {}), html: '', owners }
         const registered = preview
         this.previews.set(preview.id, preview)
         this.activate(preview, ownerId)
@@ -192,7 +196,7 @@ export class OfficePreviewService {
     if (ownerId) preview.owners.set(ownerId, preview.touched)
     return preview
   }
-  private result(p: Preview): OfficePreviewResult { return { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, isDraft: p.isDraft } }
+  private result(p: Preview): OfficePreviewResult { return { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, isDraft: p.isDraft, ...(p.readOnly ? { readOnly: true } : {}) } }
   /** HTML a live preview already rendered for exactly these bytes (sha256), so office_render shows the model the same page. */
   htmlFor(path: string, hash: string): string | undefined {
     for (const preview of this.previews.values()) {
@@ -268,6 +272,7 @@ export class OfficePreviewService {
   }
   async select(sessionId: string, id: string, paths: string[], ownerId = 'legacy') {
     const p = this.get(sessionId, id, ownerId)
+    if (p.readOnly) throw new Error(OFFICE_SAMPLE_READ_ONLY)
     if (p.isDraft) throw new Error('修改中的临时副本仅供预览，请等待验证完成')
     if (!Array.isArray(paths) || paths.length > OFFICE_PREVIEW_MAX_SELECTION || paths.some(path => typeof path !== 'string' || path.length > 1024 || !path.startsWith('/') || /[\x00-\x1f]/.test(path))) {
       throw new Error(`最多选择 ${OFFICE_PREVIEW_MAX_SELECTION} 个元素；大表格请分批选择`)
@@ -283,6 +288,7 @@ export class OfficePreviewService {
   }
   async capture(sessionId: string, id: string, ownerId = 'legacy') {
     const p = this.get(sessionId, id, ownerId)
+    if (p.readOnly) throw new Error(OFFICE_SAMPLE_READ_ONLY)
     if (p.isDraft) throw new Error('修改中的临时副本仅供预览，请等待验证完成')
     const elements = p.selectedElements ?? (await officeNodes(p.copy, 'selected')).map(officeElement)
     if (!elements.length || elements.length > OFFICE_PREVIEW_MAX_SELECTION) throw new Error(`请先选择目标元素；最多选择 ${OFFICE_PREVIEW_MAX_SELECTION} 个`)

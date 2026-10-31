@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { PptHomeGallery } from '@/components/ppt/PptHomeGallery'
 import { OfficeCaseGallery } from '@/components/office/OfficeCaseGallery'
+import { OfficeSessionCase, officeSessionCase } from '@/components/office/OfficeSessionCase'
 import { OfficeModeSwitcher } from '@/components/office/OfficeModeSwitcher'
 import type { OfficeHomeSection } from '@/components/office/office-home'
 import { SentTemplateReference } from '@/components/ppt/SentTemplateReference'
@@ -2637,7 +2638,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             ) : undefined}
             className={officeHome ? 'max-w-[1000px] px-8 @xs/panel:px-8 pb-0' : compactMode ? 'px-3' : 'px-5 @xs/panel:px-5'}
             showOptionBadges={officeHome ? false : undefined}
-            {...(officeHome && homeSection && onOfficeSectionChange ? { beforeInput: <OfficeModeSwitcher section={homeSection} onChange={onOfficeSectionChange} /> } : {})}
+            {...(officeHome && homeSection && onOfficeSectionChange ? { beforeInput: <OfficeModeSwitcher section={homeSection} onChange={onOfficeSectionChange} /> }
+              : !officeHome && session && officeSessionCase(session.office) ? { beforeInput: <OfficeSessionCase sessionId={session.id} office={session.office} /> } : {})}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}

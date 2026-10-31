@@ -41,8 +41,12 @@ export interface OfficeSelection {
 }
 export type OfficePreviewOperation =
   | { type: 'open'; sessionId: string; path: string; previewId?: string }
+  /** Copy a bundled Word / Excel case sample to a private read-only file. Returns its path for `open`. */
+  | { type: 'prepareCase'; sessionId: string; caseId: string }
   | { type: 'select'; sessionId: string; previewId: string; paths: string[] }
   | { type: 'capture' | 'heartbeat' | 'refresh' | 'suspend' | 'close'; sessionId: string; previewId: string }
+/** Preview scope for the empty Office home, which has no chat yet. Only case samples open there. */
+export const OFFICE_CASE_PREVIEW_SESSION = '@office-case'
 export const OFFICE_PREVIEW_MAX_OPEN = 5
 export const OFFICE_PREVIEW_IDLE_TTL_MS = 6 * 60 * 60 * 1000
 export const OFFICE_PREVIEW_MAX_SELECTION = 256
@@ -50,4 +54,6 @@ export interface OfficePreviewResult {
   previewId: string; artifactId: string; baseVersion: string; path: string
   html?: string; selection?: OfficeSelection
   isDraft?: boolean
+  /** Bundled case sample: view only. */
+  readOnly?: boolean
 }

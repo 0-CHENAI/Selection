@@ -55,3 +55,22 @@ test('the preview document reveals a slide after restoring scroll', () => {
   expect(loadFit).toBeGreaterThan(restored)
   expect(source).toContain('officePreviewPageBridge')
 })
+
+test('a case card asks for its sample by id, never by path', async () => {
+  const { requestOfficeCasePreview, closeOfficeCasePreview } = await import('./office-preview-page')
+  const events: Event[] = []
+  const previous = globalThis.window
+  globalThis.window = { dispatchEvent(event: Event) { events.push(event); return true } } as Window & typeof globalThis
+  try {
+    requestOfficeCasePreview({ caseId: 'coffee-market' })
+    requestOfficeCasePreview({ caseId: 'port-cargo', sessionId: 's1' })
+    requestOfficeCasePreview({ caseId: '' })
+    closeOfficeCasePreview()
+  } finally {
+    if (previous === undefined) delete (globalThis as { window?: Window }).window
+    else globalThis.window = previous
+  }
+  expect(events.map(event => event.type)).toEqual(['selection-office-open-case', 'selection-office-open-case', 'selection-office-close-case'])
+  expect((events[0] as CustomEvent).detail).toEqual({ caseId: 'coffee-market' })
+  expect((events[1] as CustomEvent).detail).toEqual({ caseId: 'port-cargo', sessionId: 's1' })
+})

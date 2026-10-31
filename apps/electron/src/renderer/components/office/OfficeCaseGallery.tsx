@@ -1,10 +1,12 @@
 import { useAtom } from 'jotai'
-import { FileText, Sparkles, Table2 } from 'lucide-react'
+import * as React from 'react'
+import { Eye, FileText, Sparkles, Table2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import catalog from '../../../../resources/skills/office-business/catalog.json'
 import { officeComposerAtomFamily } from '@/atoms/office'
 import type { InsertTextEventDetail } from '@/components/app-shell/input/input-event-guards'
 import { cn } from '@/lib/utils'
+import { closeOfficeCasePreview, requestOfficeCasePreview } from '@/lib/office-preview-page'
 import { officeCaseCovers } from './office-covers'
 import { casesForOfficeHome, sameStyleDraft } from './office-home'
 
@@ -16,11 +18,23 @@ type OfficeCase = {
   description?: string
   category?: string
   prompt?: string
+  sampleFile?: string | null
   businessSkill?: string
   businessSkills?: string[]
 }
 
 const cases = (catalog as { cases?: OfficeCase[] }).cases ?? []
+
+const caseActionClass = cn(
+  'inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[7px] border border-border/60 bg-background/95 px-2 text-[12px] text-foreground shadow-minimal',
+  'transition-colors hover:bg-foreground/5 motion-reduce:transition-none',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+)
+
+/** Only Word / Excel samples the host can copy. Cases without a file have nothing to preview. */
+export function hasOfficeCaseSample(item: { sampleFile?: string | null }): boolean {
+  return typeof item.sampleFile === 'string' && /\.(docx|xlsx)$/i.test(item.sampleFile)
+}
 
 /** Select the case and put its catalog prompt in the composer with the first 【…】 selected. Never sends. */
 export function fillSameStylePrompt(item: Pick<OfficeCase, 'prompt'>, sessionId: string | undefined) {
@@ -33,13 +47,15 @@ export function OfficeCaseGallery({ mode, composerKey, sessionId }: { mode: 'wor
   const [request, setRequest] = useAtom(officeComposerAtomFamily(composerKey))
   const items = casesForOfficeHome(cases, mode)
   const Icon = mode === 'word' ? FileText : Table2
+  // A sample opened from the home closes with the home.
+  React.useEffect(() => () => closeOfficeCasePreview(), [])
   return (
     <div className="mx-auto mt-7 w-full max-w-[1000px] min-h-0 overflow-y-auto px-8 pb-8" data-testid={`office-case-gallery-${mode}`}>
       <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 xl:grid-cols-4">
         {items.map(item => {
           const selected = request?.mode === mode && request.templateId === item.id
           return (
-            <article key={item.id} className="group/case relative min-w-0">
+            <article key={item.id} className="group/case relative min-w-0 @container/case">
               <button
                 type="button"
                 data-testid={`office-case-${item.id}`}
@@ -56,23 +72,38 @@ export function OfficeCaseGallery({ mode, composerKey, sessionId }: { mode: 'wor
                   ? <img src={officeCaseCovers[item.id]} alt="" className="h-full w-full object-cover" />
                   : <span className="flex h-full items-center justify-center text-muted-foreground"><Icon className="size-6" aria-hidden /></span>}
               </button>
-              <button
-                type="button"
-                data-testid={`office-case-same-${item.id}`}
-                aria-label={t('office.case.useThisLabel', { title: item.title })}
-                onClick={() => {
-                  setRequest({ mode, templateId: item.id, revision: item.revision })
-                  fillSameStylePrompt(item, sessionId)
-                }}
-                className={cn(
-                  'absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-[7px] border border-border/60 bg-background/95 px-2 text-[12px] text-foreground shadow-minimal',
-                  'opacity-0 transition-opacity group-hover/case:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  'motion-reduce:transition-none [@media(hover:none)]:opacity-100',
+              <div className={cn(
+                'absolute right-2 top-2 flex items-center gap-1',
+                'opacity-0 transition-opacity group-hover/case:opacity-100 group-focus-within/case:opacity-100',
+                'motion-reduce:transition-none [@media(hover:none)]:opacity-100',
+              )}>
+                {hasOfficeCaseSample(item) && (
+                  <button
+                    type="button"
+                    data-testid={`office-case-preview-${item.id}`}
+                    aria-label={t('office.case.previewLabel', { title: item.title })}
+                    title={t('office.case.previewHint')}
+                    onClick={() => requestOfficeCasePreview({ caseId: item.id })}
+                    className={caseActionClass}
+                  >
+                    <Eye className="size-3.5 shrink-0" aria-hidden />
+                    <span className="hidden @[220px]/case:inline">{t('office.case.preview')}</span>
+                  </button>
                 )}
-              >
-                <Sparkles className="size-3.5" aria-hidden />
-                {t('office.case.useThis')}
-              </button>
+                <button
+                  type="button"
+                  data-testid={`office-case-same-${item.id}`}
+                  aria-label={t('office.case.useThisLabel', { title: item.title })}
+                  onClick={() => {
+                    setRequest({ mode, templateId: item.id, revision: item.revision })
+                    fillSameStylePrompt(item, sessionId)
+                  }}
+                  className={caseActionClass}
+                >
+                  <Sparkles className="size-3.5 shrink-0" aria-hidden />
+                  <span className="hidden @[220px]/case:inline">{t('office.case.useThis')}</span>
+                </button>
+              </div>
               <p title={item.title} className="mt-2 truncate text-[13px]">{item.title}</p>
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.category}</p>
             </article>
