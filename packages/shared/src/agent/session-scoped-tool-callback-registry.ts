@@ -25,6 +25,11 @@ export interface SessionScopedToolCallbacks {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
   }) => Promise<unknown>;
+  /** Render Office pages for office_render. Set by SessionManager in desktop builds that have a capture host. */
+  officeRenderFn?: (
+    request: import('@craft-agent/session-tools-core').OfficeRenderArgs,
+    signal?: AbortSignal,
+  ) => Promise<import('@craft-agent/session-tools-core').OfficeRenderOutcome>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.

@@ -12,10 +12,11 @@ test('isolated research permits native web reads and scoped result tools without
     mkdirSync(source)
     const state = prepareIsolatedWorkspace(source, join(root, 'store'))
     for (const name of ['WebSearch', 'web_search', 'WebFetch', 'web_fetch', 'Find', 'Ls',
-      'session_history', 'task_context', 'mcp__session__submit_task_node_verdict', 'session__task_help']) {
+      'session_history', 'task_context', 'mcp__session__submit_task_node_verdict', 'session__task_help',
+      'office_render', 'mcp__session__office_render']) {
       expect(() => assertIsolatedTool(state, name, { query: 'model generation speed' })).not.toThrow()
     }
-    for (const name of ['WebSearch_external', 'mcp__external__web_search', 'mcp__external__submit_task_node_verdict', 'Bash']) {
+    for (const name of ['WebSearch_external', 'mcp__external__web_search', 'mcp__external__submit_task_node_verdict', 'mcp__external__office_render', 'Bash']) {
       expect(() => assertIsolatedTool(state, name, {})).toThrow('sandbox')
     }
     expect(() => assertIsolatedTool(state, 'Write', { path: join(source, 'report.txt') })).toThrow('isolated work directory')
