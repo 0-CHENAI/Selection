@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { Provider } from 'jotai'
+import sharp from 'sharp'
 import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
 import catalog from '../../../../resources/skills/office-business/catalog.json'
+import { OfficeCaseGallery } from './OfficeCaseGallery'
 import { OfficeModeSwitcher } from './OfficeModeSwitcher'
 import {
   casesForOfficeHome,
@@ -90,5 +93,37 @@ describe('office home', () => {
     const source = readFileSync(join(import.meta.dir, 'OfficeModeSwitcher.tsx'), 'utf8')
     expect(source).toContain("role=\"radiogroup\"")
     expect(source).toContain('nextOfficeSection')
+  })
+
+  it('shows a static first-page or first-sheet cover on every home card', async () => {
+    const shell = readFileSync(join(import.meta.dir, '../app-shell/AppShell.tsx'), 'utf8')
+    expect(shell).toContain('icon: OfficeIcon')
+    expect(shell).not.toContain('icon: Presentation')
+    const covers = join(import.meta.dir, '../../assets/office-covers')
+    for (const mode of ['word', 'excel'] as const) {
+      const html = renderToStaticMarkup(
+        <Provider>
+          <I18nextProvider i18n={i18n}>
+            <OfficeCaseGallery mode={mode} composerKey="cover-test" />
+          </I18nextProvider>
+        </Provider>,
+      )
+      const items = casesForOfficeHome((catalog as { cases: Array<{ id: string; mode: string; category?: string }> }).cases, mode)
+      expect(html).toContain('aspect-video')
+      expect(html).toContain('rounded-[8px]')
+      expect(html).toContain('object-cover')
+      for (const item of items) {
+        expect(html).toContain(`data-testid="office-case-${item.id}"`)
+        expect(html).toContain(`${item.id}.webp`)
+        const file = join(covers, `${item.id}.webp`)
+        expect(existsSync(file)).toBe(true)
+        const { width, height } = await sharp(file).metadata()
+        expect(width).toBe(1280)
+        expect(height).toBe(720)
+        const stats = await sharp(file).stats()
+        const stddev = stats.channels.reduce((sum, channel) => sum + channel.stdev, 0) / stats.channels.length
+        expect(stddev).toBeGreaterThan(8)
+      }
+    }
   })
 })

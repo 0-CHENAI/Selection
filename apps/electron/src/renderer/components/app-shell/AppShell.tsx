@@ -25,8 +25,8 @@ import {
   Radio,
   Info,
   FolderKanban,
-  Presentation,
 } from "lucide-react"
+import { OfficeIcon } from "../icons/OfficeIcon"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
 import { TopBar } from "./TopBar"
@@ -2241,7 +2241,7 @@ function AppShellContent({
                       id: 'nav:office',
                       title: t('sidebar.office'),
                       label: String(pptSessionMetas.length + wordSessionMetas.length + excelSessionMetas.length),
-                      icon: Presentation,
+                      icon: OfficeIcon,
                       variant: isOfficeArea ? 'default' : 'ghost',
                       onClick: handleOfficeClick,
                     },

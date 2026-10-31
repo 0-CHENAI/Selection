@@ -4,6 +4,7 @@ import { FileText, Table2 } from 'lucide-react'
 import catalog from '../../../../resources/skills/office-business/catalog.json'
 import { officeComposerAtomFamily } from '@/atoms/office'
 import { cn } from '@/lib/utils'
+import { officeCaseCovers } from './office-covers'
 import { casesForOfficeHome } from './office-home'
 
 type OfficeCase = {
@@ -39,14 +40,14 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
                 aria-label={item.title}
                 onClick={() => setRequest(selected ? { mode } : { mode, templateId: item.id, revision: item.revision })}
                 className={cn(
-                  'block w-full overflow-hidden rounded-[8px] border border-border/50 bg-foreground/3 text-left shadow-minimal',
+                  'block aspect-video w-full overflow-hidden rounded-[8px] border border-border/50 bg-foreground/3 text-left shadow-minimal',
                   'transition-transform hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none',
                   selected && 'ring-2 ring-accent ring-offset-2 ring-offset-background',
                 )}
               >
-                <span className="flex aspect-video items-center justify-center text-muted-foreground">
-                  <Icon className="size-6" aria-hidden />
-                </span>
+                {officeCaseCovers[item.id]
+                  ? <img src={officeCaseCovers[item.id]} alt="" className="h-full w-full object-cover" />
+                  : <span className="flex h-full items-center justify-center text-muted-foreground"><Icon className="size-6" aria-hidden /></span>}
               </button>
               <p title={item.title} className="mt-2 truncate text-[13px]">{item.title}</p>
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{[item.category, skills].filter(Boolean).join(' · ')}</p>
