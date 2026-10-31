@@ -19,15 +19,15 @@ describe('PPT history session actions', () => {
     expect(list).not.toContain('confirmAction(')
   })
 
-  it('keeps a missing PPT session inside the PPT navigator', () => {
+  it('keeps a missing Office session inside the Office navigator', () => {
     const appShell = read('../AppShell.tsx')
     expect(appShell).toContain('nextPptHistoryId(')
-    expect(appShell).toContain('navigate(nextId ? routes.view.ppt(nextId) : routes.view.ppt(), nextId ? undefined : draftSessionNavigateOptions())')
-    expect(appShell).toContain('if (!isPptView)')
+    expect(appShell).toContain('if (!isOfficeArea)')
+    expect(appShell).toContain('navigate(next ? officeSessionRoute(next) : routes.view.office(officeHomeSection), next ? undefined : draftSessionNavigateOptions())')
   })
 
-  it('opens a PPT session in a new panel on the PPT route', () => {
+  it('opens an Office session in a new panel on its own route', () => {
     const actions = read('../../../hooks/useSessionMenuActions.ts')
-    expect(actions).toContain("item.ppt !== undefined ? routes.view.ppt(sessionId) : routes.view.allSessions(sessionId)")
+    expect(actions).toContain('officeSessionSection(item) ? officeSessionRoute(item) : routes.view.allSessions(sessionId)')
   })
 })

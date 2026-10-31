@@ -182,6 +182,7 @@ export async function createSession(
     handover?: SessionConfig['handover'];
     workMode?: SessionConfig['workMode'];
     ppt?: SessionConfig['ppt'];
+    office?: SessionConfig['office'];
     executionRootSessionId?: string;
     name?: string;
     workingDirectory?: string;
@@ -239,6 +240,7 @@ export async function createSession(
     id: sessionId,
     handover: options?.handover,
     ppt: options?.ppt,
+    office: options?.office,
     workMode: options?.ppt ? 'PRO' : options?.workMode ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM'),
     workModeNeedsReview: false,
     executionRootSessionId: options?.executionRootSessionId ?? sessionId,

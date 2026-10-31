@@ -232,7 +232,7 @@ function extractLastFinalMessageId(messages: StoredMessage[]): string | undefine
  * Returns first 150 chars.
  */
 function extractPreview(messages: StoredMessage[]): string | undefined {
-  const firstUserMessage = messages.find(m => m.type === 'user');
+  const firstUserMessage = messages.find(m => m.type === 'user' && !m.hidden && !m.officeInjection);
   if (!firstUserMessage?.content) return undefined;
 
   // Sanitize: strip special blocks, tags, and bracket mentions, normalize whitespace

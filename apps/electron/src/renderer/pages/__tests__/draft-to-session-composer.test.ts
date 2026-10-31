@@ -10,10 +10,11 @@ function read(relative: string): string {
 describe('draft to live session composer', () => {
   it('keeps inherited directories out of explicit creation overrides (#406)', () => {
     const chatPage = read('../ChatPage.tsx')
-    // Both the initial submission and draft-reset submission read this ref.
+    // Both the initial submission and draft-reset submission call the same factory.
     // Project drafts defer to the server so an inherited folder is not an explicit override.
     expect(chatPage.match(/workingDirectory: orchestrationProjectId \? 'user_default' : draftWorkingDirectoryOverride,/g)).toHaveLength(2)
-    expect(chatPage.match(/workingDirectory: ctx.workingDirectory \?\? 'user_default'/g)).toHaveLength(2)
+    expect(chatPage.match(/createCurrentDraftRef\.current\(\)/g)).toHaveLength(2)
+    expect(chatPage.match(/workingDirectory: ctx.workingDirectory \?\? 'user_default'/g)).toHaveLength(1)
     expect(chatPage).toContain('workspaceWorkingDirectory: settings?.workingDirectory')
     expect(chatPage).not.toContain('setDraftWorkingDirectory(settings.workingDirectory)')
     expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)')
@@ -31,7 +32,7 @@ describe('draft to live session composer', () => {
     const chatPage = read('../ChatPage.tsx')
     expect(chatPage).toContain('window.electronAPI.getDefaultThinkingLevel()')
     expect(chatPage).toContain('draftStore.get(draftComposerAtomFamily(optionsSessionId)).thinkingSelection')
-    expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(2)
+    expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(1)
     expect(chatPage).toContain('if (isDraft) setDraftComposer(previous => ({ ...previous, thinkingSelection: level }))')
     expect(chatPage).toContain('resolveSessionThinkingLevel(activeThinkingModel, sessionOpts.thinkingLevel)')
     expect(chatPage).not.toContain('draftCreateRef.current.thinkingLevel = activeThinkingLevel')

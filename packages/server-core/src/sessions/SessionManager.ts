@@ -177,6 +177,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
+import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -352,6 +353,7 @@ function snapshotTurnContext(managed: ManagedSession, options?: SendMessageOptio
     sourceSlugs: [...(managed.enabledSourceSlugs ?? [])],
     skillSlugs: options?.skillSlugs ? [...options.skillSlugs] : undefined,
     ppt: options?.ppt,
+    office: options?.office,
   }
 }
 
@@ -941,6 +943,7 @@ interface RunningBackgroundTask {
 
 interface ManagedSession extends WorkModeMetadata {
   ppt?: PptRequest
+  office?: import('@craft-agent/shared/protocol').OfficeDocumentState | null
   pptProgress?: PptProgress
   handover?: HandoverLink
   conversationArtifactVersions?: ConversationArtifactVersions
@@ -1386,6 +1389,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     id: managed.id,
     workMode: managed.workMode,
     ppt: managed.ppt,
+    office: managed.office,
     workModeNeedsReview: managed.workModeNeedsReview,
     executionRootSessionId: managed.executionRootSessionId,
     parentSessionId: managed.parentSessionId,
@@ -2811,6 +2815,7 @@ export class SessionManager implements ISessionManager {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
               ppt: msg.turnContext?.ppt as PptRequest | undefined,
+              office: msg.turnContext?.office as import('@craft-agent/shared/protocol').OfficeRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3418,6 +3423,7 @@ export class SessionManager implements ISessionManager {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
               ppt: msg.turnContext?.ppt as PptRequest | undefined,
+              office: msg.turnContext?.office as import('@craft-agent/shared/protocol').OfficeRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3456,7 +3462,9 @@ export class SessionManager implements ISessionManager {
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
+    if (options?.ppt !== undefined && options.office) throw new Error('同一会话不能同时选择 PPT 与 Word / Excel。')
     if (options?.ppt !== undefined) options = { ...options, ppt: validatePptRequest(options.ppt), workMode: 'PRO' }
+    if (options?.office) options = { ...options, office: selectOfficeRequest(undefined, options.office, listOfficeTemplates()) }
 
     if (internal?.reservedSessionId) {
       validateSessionId(internal.reservedSessionId)
@@ -3798,6 +3806,7 @@ export class SessionManager implements ISessionManager {
       name: options?.name,
       workMode,
       ppt: options?.ppt,
+      office: options?.office,
       executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -7330,7 +7339,28 @@ export class SessionManager implements ISessionManager {
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     const replayPpt = existingMessageId ? managed.messages.find(item => item.id === existingMessageId)?.turnContext?.ppt as PptRequest | undefined : undefined
     const installedSkills = loadAllSkills(managed.workspace.rootPath, managed.workingDirectory)
-    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills, message)
+    let officeModelNote: string | undefined
+    const pptRequested = options?.ppt !== undefined || replayPpt !== undefined
+    if (options?.office && pptRequested) throw new Error('同一会话不能同时选择 PPT 与 Word / Excel。')
+    if (pptRequested && managed.office && !options?.office) {
+      const cleared = reconcileOfficeInjection(managed.messages, '', () => '')
+      managed.messages = cleared.messages
+      officeModelNote = cleared.modelAddition
+      managed.office = null
+      this.persistSession(managed)
+      this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: null } }, managed.workspace.id)
+    }
+    if (options?.office) {
+      managed.office = selectOfficeRequest(managed.office, options.office, listOfficeTemplates())
+      managed.ppt = undefined
+      options = { ...options, ppt: undefined }
+      this.persistSession(managed)
+      this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: managed.office, ppt: undefined } }, managed.workspace.id)
+    }
+    if (managed.office) assertOfficeSelectionFresh(managed.office, listOfficeTemplates())
+    const pptDefaults = managed.office ? undefined : (replayPpt ?? managed.ppt)
+    const pptOptions = managed.office ? { ...options, ppt: undefined } : (replayPpt ? { ...options, ppt: replayPpt } : options)
+    options = pptSendOptions(managed.workMode, pptDefaults, pptOptions, getPptSkillRoot(), installedSkills, message)
     if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
     if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
       managed.ppt = options.ppt
@@ -8156,7 +8186,23 @@ export class SessionManager implements ISessionManager {
         this.ensurePptExportWatch(managed)
       }
       const pptContext = buildPptTurnPrompt(options, chatSessionDir, undefined, installedSkills, message, userMessage.officeDocumentPath)
-      const currentInput = [pptContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
+      if (managed.office) {
+        const templates = listOfficeTemplates()
+        const fingerprint = officeFingerprint(managed.office)
+        const planned = reconcileOfficeInjection(managed.messages, fingerprint, () => buildOfficeInjection(managed.office!, templates))
+        managed.messages = planned.messages
+        if (managed.office.injectionFingerprint !== fingerprint || planned.changed) {
+          managed.office = { ...managed.office, injectionFingerprint: fingerprint }
+          this.persistSession(managed)
+          this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: managed.office } }, managed.workspace.id)
+        }
+        const material = officeUserMaterialNote([
+          ...(attachments ?? []).map(item => item.name),
+          ...(storedAttachments ?? []).map(item => item.name),
+        ])
+        officeModelNote = [planned.modelAddition, material].filter(Boolean).join('\n\n') || undefined
+      }
+      const currentInput = [pptContext, officeModelNote, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
       if (preparedImages.ok && skippedImageCount > 0) {
         const modelName = messageBackendContext.resolvedModel || 'model'
@@ -12120,6 +12166,22 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: managed.swarmEnabled } }, managed.workspace.id)
   }
 
+  applyOfficeTemplates(sessionId: string, raw: string): import('@craft-agent/shared/protocol').OfficeTemplatesResult {
+    const managed = this.sessions.get(sessionId)
+    const executed = executeOfficeTemplates({ raw, office: managed?.office, sessionId: managed ? sessionId : undefined })
+    if (managed) {
+      if (executed.clearPpt) managed.ppt = undefined
+      managed.office = executed.clearPpt ? (executed.office ?? null) : (executed.office ?? managed.office)
+      this.persistSession(managed)
+      this.sendEvent({
+        type: 'session_metadata_changed',
+        sessionId,
+        changes: executed.clearPpt ? { office: managed.office ?? null, ppt: managed.ppt } : { office: managed.office ?? null },
+      }, managed.workspace.id)
+    }
+    return executed.result
+  }
+
   private updateOrchestrationMetadata(
     managed: ManagedSession,
     changes: Partial<Pick<ManagedSession,
@@ -14638,6 +14700,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             statusType: 'compaction_complete',
           }
           managed.messages.push(compactionMessage)
+          if (managed.office) {
+            const preserved = preserveOfficeInjection(managed.messages, managed.office, listOfficeTemplates())
+            managed.messages = preserved.messages
+            managed.office = preserved.office
+          }
 
           // Mark compaction complete in the session state.
           // This is done here (backend) rather than in the renderer so it's

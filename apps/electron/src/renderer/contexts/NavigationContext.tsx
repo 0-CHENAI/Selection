@@ -645,11 +645,13 @@ export function NavigationProvider({
   // Always excludes hidden sessions - they should never appear in navigation
   const filterSessionsByFilter = useCallback(
     (filter: SessionFilter): SessionMeta[] => {
-      const visibleSessions = sessionMetas.filter(s =>
-        isWorkModeRoot(s, filter.kind === 'ppt' ? 'PRO' : workModeView)
-        && (filter.kind === 'ppt' ? s.ppt !== undefined : s.ppt === undefined)
-        && (!workspaceId || s.workspaceId === workspaceId)
-      )
+      const visibleSessions = sessionMetas.filter(s => {
+        const inWorkspace = !workspaceId || s.workspaceId === workspaceId
+        if (!inWorkspace) return false
+        if (filter.kind === 'ppt') return s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
+        if (filter.kind === 'office') return s.office?.mode === filter.section
+        return s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView)
+      })
 
       return visibleSessions
     },
@@ -1368,8 +1370,13 @@ export function NavigationProvider({
   }, [navigationState, navigate])
 
   const navigateToSession = useCallback((sessionId: string) => {
-    if (store.get(sessionMetaMapAtom).get(sessionId)?.ppt !== undefined) {
+    const meta = store.get(sessionMetaMapAtom).get(sessionId)
+    if (meta?.ppt !== undefined) {
       navigate(routes.view.ppt(sessionId))
+      return
+    }
+    if (meta?.office?.mode === 'word' || meta?.office?.mode === 'excel') {
+      navigate(routes.view.office(meta.office.mode, sessionId))
       return
     }
     if (!isSessionsNavigation(navigationState)) {
@@ -1381,6 +1388,9 @@ export function NavigationProvider({
     switch (filter.kind) {
       case 'ppt':
         navigate(routes.view.ppt(sessionId))
+        break
+      case 'office':
+        navigate(routes.view.office(filter.section, sessionId))
         break
       case 'allSessions':
       case 'flagged':

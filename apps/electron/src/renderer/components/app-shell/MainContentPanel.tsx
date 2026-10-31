@@ -326,7 +326,11 @@ export function MainContentPanel({
 
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <ChatPage sessionId={navState.details?.sessionId ?? null} pptMode={navState.filter.kind === 'ppt'} />
+        <ChatPage
+          sessionId={navState.details?.sessionId ?? null}
+          pptMode={navState.filter.kind === 'ppt'}
+          officeSection={navState.filter.kind === 'ppt' ? 'ppt' : navState.filter.kind === 'office' ? navState.filter.section : undefined}
+        />
       </Panel>
     )
   }

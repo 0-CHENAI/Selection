@@ -47,6 +47,7 @@ export type {
   SourceReadProof,
   Message,
   StoredMessage,
+  OfficeInjectionMarker,
   ClarificationAmbiguity,
   ClarificationSelectionMode,
   ClarificationStatus,

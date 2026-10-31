@@ -90,6 +90,7 @@ export interface ISessionManager {
   resumeExecution?(sessionId: string): Promise<void>
   continueProgress?(sessionId: string): Promise<void>
   setSessionWorkMode?(sessionId: string, mode: 'NORM' | 'PRO'): Promise<void>
+  applyOfficeTemplates?(sessionId: string, raw: string): import('@craft-agent/shared/protocol').OfficeTemplatesResult
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionFastMode?(sessionId: string, enabled: boolean): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void

@@ -25,8 +25,8 @@ import {
   Radio,
   Info,
   FolderKanban,
-  Presentation,
 } from "lucide-react"
+import { OfficeIcon } from "../icons/OfficeIcon"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
 import { TopBar } from "./TopBar"
@@ -74,6 +74,7 @@ import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
 import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
 import { nextPptHistoryId } from '@/components/ppt/history'
+import { officeSessionRoute, readOfficeSection, type OfficeHomeSection } from '@/components/office/office-home'
 import { initialPptHistoryListChrome, pptHistoryListVisible, reducePptHistoryList, type PptHistoryListChrome } from '@/lib/ppt-history-list-chrome'
 import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
 import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
@@ -367,7 +368,9 @@ function AppShellContent({
 
   const sessionFilter = sessionsContext?.filter ?? null
   const isPptView = sessionFilter?.kind === 'ppt'
-  const officeOpensPptList = isPptView && hasTrailingPanel && !isAutoCompact
+  const isOfficeArea = isPptView || sessionFilter?.kind === 'office'
+  const officeHomeSection: OfficeHomeSection = sessionFilter?.kind === 'office' ? sessionFilter.section : 'ppt'
+  const officeOpensPptList = isOfficeArea && hasTrailingPanel && !isAutoCompact
   useLayoutEffect(() => {
     setPptHistoryChrome(current => {
       const next = reducePptHistoryList(current, { type: 'office', open: officeOpensPptList })
@@ -375,7 +378,7 @@ function AppShellContent({
     })
   }, [officeOpensPptList])
   const pptHistoryOpen = pptHistoryListVisible(pptHistoryChrome)
-  const pptHistoryToggleShown = isPptView && !isAutoCompact && !immersiveLayout && !isSidebarAndNavigatorHidden
+  const pptHistoryToggleShown = isOfficeArea && !isAutoCompact && !immersiveLayout && !isSidebarAndNavigatorHidden
   const hidePptHistoryList = pptHistoryToggleShown && !pptHistoryOpen
   const displayedNavigatorWidth = isAutoCompact ? sessionListWidth : (hidePptHistoryList ? 0 : collapsedWidths.navigator)
   const togglePptHistoryList = useCallback(() => {
@@ -391,10 +394,18 @@ function AppShellContent({
       onClick={togglePptHistoryList}
     />
   ) : null, [pptHistoryOpen, pptHistoryToggleShown, t, togglePptHistoryList])
-  const focusedPptSession = focusedSessionId ? sessionMetaMap.get(focusedSessionId)?.ppt !== undefined : false
   useEffect(() => {
-    if (focusedPptSession && !isPptView && isSessionsNavigation(navState) && navState.details) navigate(routes.view.ppt(navState.details.sessionId))
-  }, [focusedPptSession, isPptView, navState])
+    if (!isSessionsNavigation(navState) || !navState.details) return
+    const meta = sessionMetaMap.get(navState.details.sessionId)
+    if (!meta) return
+    const route = officeSessionRoute(meta)
+    const here = navState.filter.kind === 'ppt'
+      ? routes.view.ppt(meta.id)
+      : navState.filter.kind === 'office'
+        ? routes.view.office(navState.filter.section, meta.id)
+        : null
+    if ((meta.ppt !== undefined || meta.office?.mode === 'word' || meta.office?.mode === 'excel') && here !== route) navigate(route)
+  }, [navState, sessionMetaMap])
 
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
@@ -414,6 +425,7 @@ function AppShellContent({
     switch (sessionFilter.kind) {
       case 'allSessions': return 'allSessions'
       case 'ppt': return 'ppt'
+      case 'office': return `office/${sessionFilter.section}`
       case 'flagged': return 'flagged'
       case 'archived': return 'archived'
       case 'state': return `state:${sessionFilter.stateId}`
@@ -1156,9 +1168,9 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && isWorkModeRoot(s, workModeView))
+    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView))
     return metas.filter(s =>
-      s.ppt === undefined && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
 
@@ -1166,6 +1178,17 @@ function AppShellContent({
     s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
     && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
   ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  const officeSectionMetas = useCallback((section: 'word' | 'excel') => Array.from(sessionMetaMap.values()).filter(s =>
+    s.office?.mode === section
+    && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
+  ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
+  const wordSessionMetas = useMemo(() => officeSectionMetas('word'), [officeSectionMetas])
+  const excelSessionMetas = useMemo(() => officeSectionMetas('excel'), [officeSectionMetas])
+  const officeHistoryMetas = useMemo(() => {
+    const byId = new Map<string, SessionMeta>()
+    for (const item of [...pptSessionMetas, ...wordSessionMetas, ...excelSessionMetas]) byId.set(item.id, item)
+    return [...byId.values()].sort((a, b) => (b.lastMessageAt ?? b.createdAt ?? 0) - (a.lastMessageAt ?? a.createdAt ?? 0))
+  }, [pptSessionMetas, wordSessionMetas, excelSessionMetas])
 
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
@@ -1289,6 +1312,9 @@ function AppShellContent({
       case 'ppt':
         result = pptSessionMetas
         break
+      case 'office':
+        result = sessionFilter.section === 'word' ? wordSessionMetas : excelSessionMetas
+        break
       case 'allSessions':
         // Ordinary sessions include legacy archived/classified conversations.
         result = workspaceSessionMetas
@@ -1326,7 +1352,7 @@ function AppShellContent({
     result = filterSessionsBySidebarProjectScope(result, projectFilter)
 
     return result
-  }, [workspaceSessionMetas, activeSessionMetas, pptSessionMetas, sessionFilter, projectFilter])
+  }, [workspaceSessionMetas, activeSessionMetas, pptSessionMetas, wordSessionMetas, excelSessionMetas, sessionFilter, projectFilter])
 
   // Ensure session messages are loaded when selected
   React.useEffect(() => {
@@ -1360,7 +1386,7 @@ function AppShellContent({
     onSessionSourcesChange: handleSessionSourcesChange,
     onJumpToTaskSessions: handleJumpToTaskSessions,
     onJumpToProjectSessions: handleJumpToProjectSessions,
-    orchestrationProjectId: isPptView ? null : resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
+    orchestrationProjectId: isOfficeArea ? null : resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
     rightSidebarButton: null,
     leadingAction: hidePptHistoryList ? pptHistoryToggle ?? undefined : undefined,
     isCompactMode: isAutoCompact,
@@ -1377,7 +1403,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isPptView, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation, hidePptHistoryList, pptHistoryToggle])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isOfficeArea, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation, hidePptHistoryList, pptHistoryToggle])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1448,10 +1474,10 @@ function AppShellContent({
     navigate(routes.view.allSessions())
   }, [setHistoryScope])
 
-  const handlePptClick = useCallback(() => {
+  const handleOfficeClick = useCallback(() => {
     setSearchActive(false)
     setSearchQuery('')
-    navigate(routes.view.ppt(), draftSessionNavigateOptions())
+    navigate(routes.view.office(readOfficeSection()), draftSessionNavigateOptions())
   }, [])
 
   // Handler for sources view (all sources)
@@ -1753,11 +1779,11 @@ function AppShellContent({
     setSearchActive(false)
     setSearchQuery('')
 
-    navigate(isPptView ? routes.view.ppt() : routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
+    navigate(isOfficeArea ? routes.view.office(officeHomeSection) : routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, isPptView, t])
+  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, isOfficeArea, officeHomeSection, t])
 
   React.useEffect(() => {
     // Only recover an actual focused chat, never a stale selection behind a
@@ -1767,19 +1793,18 @@ function AppShellContent({
     return recoverMissingSession(
       () => window.electronAPI.getSessionMessages(focusedSessionId),
       () => {
-        if (!isPptView) {
+        if (!isOfficeArea) {
           navigate(routes.view.allSessions())
           return
         }
-        const nextId = nextPptHistoryId(
-          [...pptSessionMetas].sort((a, b) => (b.lastMessageAt ?? b.createdAt ?? 0) - (a.lastMessageAt ?? a.createdAt ?? 0)),
-          focusedSessionId,
-        )
-        navigate(nextId ? routes.view.ppt(nextId) : routes.view.ppt(), nextId ? undefined : draftSessionNavigateOptions())
+        const ordered = officeHistoryMetas
+        const nextId = nextPptHistoryId(ordered, focusedSessionId)
+        const next = ordered.find(item => item.id === nextId)
+        navigate(next ? officeSessionRoute(next) : routes.view.office(officeHomeSection), next ? undefined : draftSessionNavigateOptions())
       },
       error => console.error('[Chat] Failed to verify missing session:', error),
     )
-  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId, isPptView, pptSessionMetas])
+  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId, isOfficeArea, officeHomeSection, officeHistoryMetas])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {
@@ -1828,14 +1853,16 @@ function AppShellContent({
     // the same order as the visible #181 sidebar.
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
-    result.push({ id: 'nav:ppt', type: 'nav', action: handlePptClick })
+    result.push({ id: 'nav:office', type: 'nav', action: handleOfficeClick })
+    // `nav:ppt` is no longer a visible row. The route `ppt` and a legacy link
+    // id still open the Office page with PPT preselected.
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleProjectsClick, handlePptClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handleOfficeClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -1976,7 +2003,8 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
-      case 'ppt': return 'PPT'
+      case 'ppt':
+      case 'office': return t('sidebar.office')
       case 'allSessions':
         return getIncludedProjectName(projectFilter, projects) ?? t("sidebar.allSessions")
       case 'flagged':
@@ -2022,7 +2050,7 @@ function AppShellContent({
           onToggleSidebar={handleToggleImmersiveMode}
           onToggleFocusMode={handleToggleImmersiveMode}
           immersive={immersivePressed}
-          afterWorkspace={isSessionsNavigation(navState) && !isPptView ? (
+          afterWorkspace={isSessionsNavigation(navState) && !isOfficeArea ? (
             <BoardListToggle className={isAutoCompact ? '[&_svg]:hidden' : undefined} value={workModeView} onChange={mode => { void switchWorkModeView(mode) }} />
           ) : undefined}
           isCompact={isAutoCompact}
@@ -2034,7 +2062,7 @@ function AppShellContent({
         className="flex items-stretch relative"
         data-immersive={isImmersiveMode ? 'on' : 'off'}
         data-immersive-layout={immersiveLayout ? 'on' : 'off'}
-        data-ppt-history-list={isPptView ? (pptHistoryOpen ? 'open' : 'closed') : undefined}
+        data-ppt-history-list={isOfficeArea ? (pptHistoryOpen ? 'open' : 'closed') : undefined}
         style={{
           height: '100%',
           paddingRight: isAutoCompact || hasTrailingPanel ? 0 : PANEL_EDGE_INSET,
@@ -2067,8 +2095,8 @@ function AppShellContent({
                               className="w-full justify-start gap-2 py-[7px] px-2 text-[13px] font-normal rounded-[6px] shadow-minimal bg-background"
                               data-tutorial="new-chat-button"
                             >
-                              {isPptView ? <Plus className="h-3.5 w-3.5 shrink-0" /> : <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />}
-                              {isPptView ? t('ppt.new') : t("session.newSession")}
+                              {isOfficeArea ? <Plus className="h-3.5 w-3.5 shrink-0" /> : <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />}
+                              {isOfficeArea ? t('office.new') : t("session.newSession")}
                             </Button>
                       </div>
                     </TooltipTrigger>
@@ -2210,12 +2238,12 @@ function AppShellContent({
                       })),
                     },
                     {
-                      id: 'nav:ppt',
-                      title: 'PPT',
-                      label: String(pptSessionMetas.length),
-                      icon: Presentation,
-                      variant: isPptView ? 'default' : 'ghost',
-                      onClick: handlePptClick,
+                      id: 'nav:office',
+                      title: t('sidebar.office'),
+                      label: String(pptSessionMetas.length + wordSessionMetas.length + excelSessionMetas.length),
+                      icon: OfficeIcon,
+                      variant: isOfficeArea ? 'default' : 'ghost',
+                      onClick: handleOfficeClick,
                     },
                     {
                       id: "nav:automations",
@@ -2297,10 +2325,10 @@ function AppShellContent({
                 </Tooltip>
               ) : undefined}
               actions={
-                isPptView ? (
+                isOfficeArea ? (
                   <>
                     {!hidePptHistoryList && pptHistoryToggle}
-                    <HeaderIconButton icon={<Plus className="h-4 w-4" />} tooltip={t('ppt.new')} onClick={() => handleNewChat()} />
+                    <HeaderIconButton icon={<Plus className="h-4 w-4" />} tooltip={t('office.new')} onClick={() => handleNewChat()} />
                   </>
                 ) : isSessionsNavigation(navState) ? (
                   <HeaderIconButton
@@ -2460,11 +2488,14 @@ function AppShellContent({
                 onSelectSubpage={(subpage) => handleSettingsClick(subpage)}
               />
             )}
-            {isPptView && (
+            {isOfficeArea && (
               <PptHistoryList
-                items={pptSessionMetas}
+                items={officeHistoryMetas}
                 selectedSessionId={focusedSessionId}
-                onSelect={id => navigate(routes.view.ppt(id))}
+                onSelect={id => {
+                  const meta = officeHistoryMetas.find(item => item.id === id)
+                  navigate(meta ? officeSessionRoute(meta) : routes.view.ppt(id))
+                }}
                 onNew={() => handleNewChat()}
                 projects={projectMenuOptions}
                 onSetProjectId={handleSessionProjectChange}
@@ -2473,7 +2504,7 @@ function AppShellContent({
                 }}
               />
             )}
-            {isSessionsNavigation(navState) && !isPptView && (
+            {isSessionsNavigation(navState) && !isOfficeArea && (
               /* Sessions List */
               <>
                 {/* SessionList: Scrollable list of session cards */}

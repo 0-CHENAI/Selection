@@ -1,3 +1,4 @@
+import type { OfficeDocumentState } from '../protocol/office'
 import type { PptProgress, PptRequest } from '../protocol/ppt'
 import type { HandoverLink } from '../protocol/handover'
 /**
@@ -39,6 +40,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
   'workMode', 'workModeNeedsReview', 'executionRootSessionId', 'handover',
   'ppt',
+  'office',
   'pptProgress',
   'sharedProjectMemoryEnabled',
   // Model/Connection
@@ -220,6 +222,7 @@ export type { StoredMessage } from '@craft-agent/core/types';
  */
 export interface SessionConfig extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
   pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;
@@ -370,6 +373,7 @@ export interface StoredSession extends SessionConfig {
  */
 export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
   pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;
@@ -492,6 +496,7 @@ export interface SessionHeader extends SwarmSessionMetadata, WorkModeMetadata {
  */
 export interface SessionMetadata extends SwarmSessionMetadata, WorkModeMetadata {
   ppt?: PptRequest;
+  office?: OfficeDocumentState | null;
   pptProgress?: PptProgress;
   handover?: HandoverLink;
   id: string;

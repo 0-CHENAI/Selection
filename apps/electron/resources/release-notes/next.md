@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Office 案例封面与入口图标** — Word 案例卡片用文档首页缩略图，Excel 案例卡片用首个工作表缩略图，比例和圆角与 PPT 封面一致。侧栏 Office 入口改为同时表示文档、表格和幻灯片的线性图标。封面是提交进仓库的静态图，打开页面时不再渲染文档。
+
 - **Excel 案例与业务技能** — 搬入年度经营、青岚港和荧光酶三个案例，以及 SaaS 指标、数据体检和信息图技能。计算用 Bun，交付前重算并核对；图表优先用 OfficeCLI 原生图表。Issue #712。
 
 - **外来 PPTX 导入为可编辑工程** — 上传的 PPTX 可以导入成 deck.json：能映射的对象继续按页改版式、换主题；暂时写不进工程的对象按原位置保留并标成不可编辑。原件和模板不会被覆盖。预览仍等渲染路径确定后再接。Issue #713。

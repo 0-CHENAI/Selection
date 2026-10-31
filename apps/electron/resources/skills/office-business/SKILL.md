@@ -93,3 +93,9 @@ O0/O5 对照 DSH `8dec631777c34fbbcc7d45af787bdd2c468d2cfb` 的受版本控制�
 阶段 09 放进了 `annual-business`、`port-cargo`、`bio-assay`。原件 sha256 与阶段 01 清单一致，`example.xlsx` 只读。业务技能是 `saas-metrics-coach`、`dataset-health-audit`、`data-viz-gen`，计算用 Bun，不调用 Python。
 
 许可和来源见 [NOTICE](NOTICE) 与 [ATTRIBUTION.md](ATTRIBUTION.md)。
+
+阶段 02 随后定了渲染顺序：原生优先。Windows 且装了 Word 或 PowerPoint 时，预览用 OfficeCLI `view screenshot --render native`；否则用 Electron `capturePage`。PDF 先用已安装的 exporter，再在装了 Word 时用 Word 导出，再不行用 OfficeCLI HTML 加 Electron `printToPDF`。宿主还没接到本进程时，不要假装已经导出，也不要用 OCR。
+
+## 文档模式
+
+`catalog.json` 的 `cases` 同时是选择器和注入用的目录。Word 四条来自阶段 07。Excel 三条（`annual-business`、`port-cargo`、`bio-assay`）已在阶段 09 放入，`example.xlsx` 只读。选择结果写在会话元数据里，和 NORM / PRO 分开。同一会话同一时刻只有一种文档模式。中途上传的文件是用户材料，不替换所选案例。业务技能在 `business-skills/`，模型可以调用，用户也可以显式调用。侧边栏只有一个 Office 入口；空白页在输入框上方切换 PPT、Word、Excel。

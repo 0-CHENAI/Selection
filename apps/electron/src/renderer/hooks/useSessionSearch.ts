@@ -251,6 +251,8 @@ export function sessionMatchesCurrentFilter(
   switch (currentFilter.kind) {
     case 'ppt':
       return session.ppt !== undefined
+    case 'office':
+      return session.office?.mode === currentFilter.section
     case 'allSessions':
       return session.isArchived !== true
 

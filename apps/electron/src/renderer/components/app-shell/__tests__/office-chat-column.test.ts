@@ -26,9 +26,9 @@ describe('office chat column', () => {
   it('auto-collapses only the PPT history list and leaves a manual toggle', () => {
     const appShell = read('../AppShell.tsx')
     expect(appShell).toContain('reducePptHistoryList(current, { type: \'office\', open: officeOpensPptList })')
-    expect(appShell).toContain('const officeOpensPptList = isPptView && hasTrailingPanel && !isAutoCompact')
+    expect(appShell).toContain('const officeOpensPptList = isOfficeArea && hasTrailingPanel && !isAutoCompact')
     expect(appShell).toContain('data-testid="ppt-history-toggle"')
-    expect(appShell).toContain('data-ppt-history-list={isPptView ? (pptHistoryOpen ? \'open\' : \'closed\') : undefined}')
+    expect(appShell).toContain('data-ppt-history-list={isOfficeArea ? (pptHistoryOpen ? \'open\' : \'closed\') : undefined}')
     expect(appShell).toContain('leadingAction: hidePptHistoryList ? pptHistoryToggle ?? undefined : undefined')
     expect(appShell).toContain('leadingAction={null}')
     expect(read('../PanelHeader.tsx')).toContain('explicitLeadingAction !== undefined')
