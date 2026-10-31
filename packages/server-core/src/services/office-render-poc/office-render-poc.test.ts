@@ -24,13 +24,16 @@ const sampleHtml = `<!DOCTYPE html><html><head>
 <p>Second paragraph for pagination evidence.</p>
 </div></body></html>`
 
-test('PoC 默认关闭，且没有接到现有入口', () => {
+test('PoC 默认关闭；页图走 office_render，不走 PoC 门闩', () => {
   expect(() => recalculate({ ...guard(), env: {}, cells: [] })).toThrow(OfficeRenderPocError)
   try { recalculate({ ...guard(), env: {}, cells: [] }) }
   catch (error) { expect((error as OfficeRenderPocError).code).toBe('disabled') }
   expect(readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')).not.toContain('office-render-poc')
   expect(readFileSync(join(root, 'apps/electron/resources/skills/ppt-design/engine/screenshot.ts'), 'utf8')).toContain('libreoffice')
-  expect(readFileSync(join(root, 'packages/shared/src/prompts/system.ts'), 'utf8')).toContain('PDF export is not included')
+  // #709: the prompt now states the real capability (no PDF exporter, page images via office_render).
+  const prompt = readFileSync(join(root, 'packages/shared/src/prompts/system.ts'), 'utf8')
+  expect(prompt).toContain('No PDF export')
+  expect(prompt).toContain('office_render')
 })
 
 test('拒绝超限、源文件变化和取消', async () => {

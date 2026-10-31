@@ -97,7 +97,8 @@ import { bootstrapServer, releaseServerLock } from '@craft-agent/server-core/boo
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@craft-agent/messaging-gateway'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
-import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
+import { setSearchPlatform, setImageProcessor, setOfficePageCaptureHost } from '@craft-agent/server-core/services'
+import { createElectronOfficeCaptureHost } from './office-render-host'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
@@ -695,6 +696,8 @@ app.whenReady().then(async () => {
         createSessionManager: () => {
           const sm = new SessionManager()
           sm.setBrowserPaneManager(browserPaneManager!)
+          // office_render: same OfficeCLI HTML as the Office preview panel, captured offscreen.
+          setOfficePageCaptureHost(createElectronOfficeCaptureHost())
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),

@@ -11,6 +11,8 @@
 export { UpdateTaskListSchema, TaskListItemSchema, taskListAllowed } from './handlers/update-task-list.ts';
 export type { ClarificationAsk, ClarificationGate, ClarificationOption } from './clarification.ts';
 export type { TaskListItem } from './handlers/update-task-list.ts';
+export { OfficeRenderSchema, OFFICE_RENDER_MAX_PAGES, officeRenderResult } from './handlers/office-render.ts';
+export type { OfficeRenderArgs, OfficeRenderOutcome, OfficeRenderImage } from './handlers/office-render.ts';
 
 export type {
   // Credential types

@@ -1,4 +1,5 @@
 import { OfficePreviewService, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
+import { getOfficePageCaptureHost, renderOfficePages } from '../services/office-page-render'
 import { projectHistory } from './project-history'
 import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
 import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
@@ -749,6 +750,7 @@ async function resolveToolDisplayMeta(
           'update_user_preferences': 'Update Preferences',
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
+          'office_render': 'Render Office Pages',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -5359,6 +5361,16 @@ export class SessionManager implements ISessionManager {
           // directory, session status, worker or runtime is created here.
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
+        // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
+        ...(getOfficePageCaptureHost() ? {
+          officeRenderFn: (request, signal) => renderOfficePages({
+            ...request,
+            cwd: managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
+            outDir: join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'office-render'),
+            signal,
+            previewHtml: (path, sha256) => this.officePreviews.htmlFor(path, sha256),
+          }),
+        } : {}),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
         },
