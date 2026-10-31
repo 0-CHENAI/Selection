@@ -89,7 +89,7 @@ import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
 import { buildPlanApprovalMessage } from '../plan-approval-message'
-import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './input-event-guards'
+import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp, type InsertTextEventDetail } from './input-event-guards'
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
 import { keepComposerFocusOnPickerClose, restoreComposerFocus } from './restore-composer-focus'
 import { assessDelegateCommandSubmission, buildDelegateCommandDraft } from './delegate-command'
@@ -890,18 +890,27 @@ export function FreeFormInput({
   // Listen for craft:insert-text events (generic mechanism for inserting text into input)
   // Used by components that want to pre-fill the input with text
   React.useEffect(() => {
-    const handleInsertText = (e: CustomEvent<{ text: string; sessionId?: string }>) => {
+    const handleInsertText = (e: CustomEvent<InsertTextEventDetail>) => {
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
 
-      const text = coerceInputText(e.detail?.text)
+      const draft = e.detail?.compose ? e.detail.compose(inputRef.current) : undefined
+      // A composer that has nothing to add leaves the draft untouched.
+      if (draft === null) {
+        setTimeout(() => richInputRef.current?.focus(), 0)
+        return
+      }
+      const text = draft ? draft.text : coerceInputText(e.detail?.text)
+      const selection = draft?.selection ?? e.detail?.selection
       setInput(text)
       syncToParent(text)
       // Focus the input after inserting
       setTimeout(() => {
         richInputRef.current?.focus()
-        // Move cursor to end
-        richInputRef.current?.setSelectionRange(text.length, text.length)
+        // Select the requested range (e.g. the first 【…】 placeholder), else move the cursor to the end
+        const start = selection ? Math.max(0, Math.min(selection.start, text.length)) : text.length
+        const end = selection ? Math.max(start, Math.min(selection.end, text.length)) : text.length
+        richInputRef.current?.setSelectionRange(start, end)
       }, 0)
     }
 

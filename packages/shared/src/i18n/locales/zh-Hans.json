@@ -1116,6 +1116,8 @@
   "multiSelect.selected.source_other": "已选择 {{count}} 个数据源",
   "multiSelect.selectionHint": "使用 <cmdClick></cmdClick> 切换，使用 <shiftClick></shiftClick> 进行范围选择",
   "multiSelect.setLabels": "设置标签",
+  "office.case.useThis": "做同款",
+  "office.case.useThisLabel": "做同款：{{title}}",
   "office.hero.excelDescription": "写下指标、周期和读者，或上传表格。选一个已登记的案例做同款。",
   "office.hero.excelTitle": "今天想做一份什么样的 Excel？",
   "office.hero.wordDescription": "写下用途、读者和篇幅，或上传资料。选一个案例做同款。",
