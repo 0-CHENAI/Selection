@@ -17,6 +17,7 @@ import {
   readOfficeSection,
   rememberOfficeSection,
   resolveOfficeDraftRequest,
+  sameStyleDraft,
 } from './office-home'
 
 const i18n = i18next.createInstance()
@@ -125,5 +126,55 @@ describe('office home', () => {
         expect(stddev).toBeGreaterThan(8)
       }
     }
+  })
+
+  it('「做同款」 fills the catalog prompt and selects the first 【…】 placeholder without sending', () => {
+    const cases = (catalog as { cases: Array<{ id: string; prompt?: string }> }).cases
+    const research = cases.find(item => item.id === 'equity-research')!.prompt!
+    const draft = sameStyleDraft(research)!
+    expect(draft.text).toBe(research)
+    expect(draft.text.slice(draft.selection.start, draft.selection.end)).toBe('【公司或行业】')
+    // What the person already typed stays above the prompt.
+    const kept = sameStyleDraft(research, '先看 2025 年数据  ')!
+    expect(kept.text.startsWith('先看 2025 年数据\n\n')).toBe(true)
+    expect(kept.text.slice(kept.selection.start, kept.selection.end)).toBe('【公司或行业】')
+    // No placeholder: caret goes to the end.
+    const minutes = sameStyleDraft(cases.find(item => item.id === 'meeting-minutes')!.prompt)!
+    expect(minutes.selection).toEqual({ start: minutes.text.length, end: minutes.text.length })
+    // Cases without a catalog prompt leave the draft alone.
+    expect(sameStyleDraft(undefined, 'typed')).toBeNull()
+    expect(sameStyleDraft('  ')).toBeNull()
+  })
+
+  it('each case card has a keyboard-reachable 做同款 button that selects the case and inserts the prompt', async () => {
+    const html = renderToStaticMarkup(
+      <Provider>
+        <I18nextProvider i18n={i18n}>
+          <OfficeCaseGallery mode="word" composerKey="same-style" sessionId="s1" />
+        </I18nextProvider>
+      </Provider>,
+    )
+    expect(html).toContain('data-testid="office-case-same-equity-research"')
+    expect(html).toContain('aria-label="做同款：小米汽车研究报告"')
+    expect(html).toContain('focus-visible:opacity-100')
+    expect(html).toContain('[@media(hover:none)]:opacity-100')
+    const { fillSameStylePrompt } = await import('./OfficeCaseGallery')
+    const seen: unknown[] = []
+    const runtime = globalThis as { window?: unknown }
+    const hadWindow = 'window' in runtime
+    const target = new EventTarget()
+    if (!hadWindow) runtime.window = target
+    const bus = runtime.window as EventTarget
+    const listener = (event: Event) => seen.push((event as CustomEvent).detail)
+    bus.addEventListener('craft:insert-text', listener)
+    try {
+      fillSameStylePrompt({ prompt: '帮我研究【公司或行业】。' }, 's1')
+    } finally {
+      bus.removeEventListener('craft:insert-text', listener)
+      if (!hadWindow) delete runtime.window
+    }
+    const detail = seen[0] as { sessionId: string; compose: (current: string) => unknown }
+    expect(detail.sessionId).toBe('s1')
+    expect(detail.compose('')).toEqual({ text: '帮我研究【公司或行业】。', selection: { start: 4, end: 11 } })
   })
 })
