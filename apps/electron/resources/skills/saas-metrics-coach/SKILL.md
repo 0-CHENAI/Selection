@@ -155,7 +155,7 @@ bun packages/office-business-runtime/src/cli/unit-economics.ts --mrr 50000 --gro
 
 Excel 交付前按顺序执行，任何一步失败都回到修订，不能交付：
 
-1. `xlsx_recalculate`：先用 OfficeCLI 把 `computedValue` 写回 `cachedValue`。本机是 Windows 或 macOS 且装了 Excel 时，再跑 `CalculateFull` 复核。只有 OfficeCLI 没求出的格子才用 TypeScript 求值器补算。
+1. `xlsx_recalculate`：先用 OfficeCLI 把 `computedValue` 写回 `cachedValue`。本机是 Windows 或 macOS 且装了 Excel 时，再跑 `CalculateFull` 复核。只有 OfficeCLI 没求出的格子才用 TypeScript 求值器补算。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。
 2. 案例有 `checks.json` 时逐项核对。年度经营案例没有 `checks.json`，要声明关键单元格并双读公式与缓存值。
 3. 区域渲染关键表后，由模型原生读图。禁止 OCR。空白页立即停止。
 4. 不覆盖 `example.xlsx`。适配结果另存「样例扩展」。

@@ -47,3 +47,11 @@ python3 validate_minutes.py pass-basic.md
 | `infographic/` | `data-viz-gen/scripts/build_infographic.py` | `ff58f92a2d6c9d56274a1d0776cc28770c5c4a3fe672f72f048b59b402648dbf` |
 
 数值类对拍容差 1e-9。Quick Ratio、指标文本、单位经济文本和指名调色板的 SVG 用逐字节 stdout / HTML。`palette: auto` 不进入 golden，TypeScript 使用稳定哈希。
+
+## docx-layout
+
+阶段 08（#711）追加。来源脚本：`packages/dsh-desktop-office/lib/docx-layout.py`
+
+sha256：`52df231d9873b8de8ad8af246c267ded42eb5aba96a37a5625bcf5c96747c367`
+
+生成环境：Python 3.12.3 + lxml，只在开发机对四个 Word 案例运行 `inventory`、`normalize`、`edit`、`validate`。`goldens.json` 保存段落清单的 sha256、规范化后 XML 规范元组的 sha256、各案例的编辑计划与结果、三类篡改（删页脚、改页边距、换字体）的首条报错，以及删除受保护段落的报错。TypeScript 实现（`packages/server-core/src/services/office-template/`）在 `docx-layout.test.ts` 里逐项比对。不要提交 `.py`。

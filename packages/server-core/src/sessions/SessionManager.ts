@@ -178,7 +178,8 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
-import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
+import { formatDeliveryIssues, officecliExecutable, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from '../services/office-template/service'
+import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -5361,6 +5362,7 @@ export class SessionManager implements ISessionManager {
           // directory, session status, worker or runtime is created here.
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
+        officeToolsFn: (name, args) => this.runOfficeTool(managed, name, args),
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
         ...(getOfficePageCaptureHost() ? {
           officeRenderFn: (request, signal) => renderOfficePages({
@@ -9785,6 +9787,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
+    this.assertOfficeDeliveryReady(managed)
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -9849,6 +9852,45 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       state.accepting = false
     }
     this.publishCommittedAnswer(managed, answer)
+  }
+
+  /** Word / Excel host tools (#711). Selection, workspace and permissions come from the managed session. */
+  private officeToolSession(managed: ManagedSession): OfficeToolSession {
+    return {
+      workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
+      storageDir: getSessionStoragePath(managed.workspace.rootPath, managed.id),
+      office: () => managed.office,
+      templates: () => listOfficeTemplates(),
+      businessRoot: getOfficeBusinessRoot(),
+      canWrite: managed.permissionMode !== 'safe',
+      xlsx: { officecliBinary: officecliExecutable() },
+    }
+  }
+
+  private async runOfficeTool(managed: ManagedSession, name: 'office_template' | 'office_template_write' | 'xlsx_recalculate', args: Record<string, unknown>): Promise<unknown> {
+    const session = this.officeToolSession(managed)
+    if (name === 'office_template') return prepareOfficeTemplate(session, args)
+    if (name === 'office_template_write') return writeOfficeTemplate(session, args)
+    return recalculateWorkspaceXlsx(session, args as unknown as Parameters<typeof recalculateWorkspaceXlsx>[1])
+  }
+
+  /**
+   * Pre-delivery guard (#711). Files changed in this turn that came from the selected Word case must keep its
+   * layout; Excel workbooks with formulas must be recalculated. Failure denies the answer and returns the
+   * needs_revision list to the model for another round.
+   */
+  private assertOfficeDeliveryReady(managed: ManagedSession): void {
+    if (!managed.office) return
+    const changed = managed.artifactCandidateInventory?.changed() ?? []
+    if (!changed.length) return
+    let issues
+    try {
+      issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
+    } catch (error) {
+      sessionLog.warn('Office delivery guard failed to run', { sessionId: managed.id, error })
+      return
+    }
+    if (issues.length) throw new Error(formatDeliveryIssues(issues))
   }
 
   /** Finish file discovery before the answer is persisted and published. */

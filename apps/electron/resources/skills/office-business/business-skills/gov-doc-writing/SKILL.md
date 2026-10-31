@@ -35,4 +35,4 @@ description: 按机关、文种和现有材料起草通知、请示、报告、�
 
 ## Selection 文件交付
 
-用 OfficeCLI 写 DOCX，步骤见第 6 册。不使用 python-docx，不调用 Python，不调用 LibreOffice Kit。案例原件只读。`office_template` / `office_template_write` 和版式守卫在阶段 08 接入之前，用 OfficeCLI 在工作副本上写，并说明守卫尚未接入。PDF 与逐页渲染等 #705 选定路径，未选定前不依赖它们，也不用 OCR。
+用 OfficeCLI 写 DOCX，步骤见第 6 册。不使用 python-docx，不调用 Python，不调用 LibreOffice Kit。案例原件只读。Word 用 `office_template` 拿到段落 ID，再用 `office_template_write` 写出新的 DOCX；版头发文机关必须替换，受保护段落（版头、红线、绘图、分节、表格单元格）不能删除。宿主在写出和交付前自动跑版式守卫。PDF 与逐页渲染等 #705 选定路径，未选定前不依赖它们，也不用 OCR。

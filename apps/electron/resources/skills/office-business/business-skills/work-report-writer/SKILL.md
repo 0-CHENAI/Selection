@@ -30,7 +30,7 @@ license: MIT
 
 先读 [OfficeCLI 路由](../../officecli/SKILL.md)，执行 `officecli load_skill word`。没有现成 Word 案例时，按上一节的标题新建 DOCX；有用户模板时复制到工作区再改，不覆盖原件。参考模板的标题层级、正文样式和表格列宽，按用户实际记录替换全文。日报通常一页，较长总结按内容自然分页，表头重复、行高自动、标题与正文相邻。
 
-阶段 08 的 `office_template` / `office_template_write` 落地后，按段落 ID 填写并继承样式，交付前跑版式守卫。在此之前用 OfficeCLI `set` / `batch`，并说明守卫尚未接入。
+先调用 `office_template` 拿到段落 / run ID，再用 `office_template_write` 按段落 ID 填写并继承样式。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。
 
 核对周期、状态、数字、日期、责任人与交付依据。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit，也不为本步导出 PDF。渲染预览等 #705 选定后再做，未选定前不以缺页图冒充通过，不用 OCR。最终交付工作区中的可编辑 DOCX，由 Selection 的文件卡片呈现。
 
@@ -42,4 +42,4 @@ Selection 3.2 阶段 07 保留方法论和 LICENSE，把交付命令改为 Offic
 
 ## Selection 文件交付
 
-当前用户材料提供事实。未知字段写「待确认」。制作 Word 用 OfficeCLI，不用 python-docx。原件只读，只在工作区副本上写。成品由文件卡片交付。版式守卫属于阶段 08；PDF 与逐页渲染属于阶段 02，路径未定前不依赖它们。
+当前用户材料提供事实。未知字段写「待确认」。制作 Word 用 `office_template` + `office_template_write`，不用 python-docx。原件只读。宿主交付前自动跑版式守卫。成品由文件卡片交付。

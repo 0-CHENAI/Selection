@@ -25,6 +25,8 @@ export interface SessionScopedToolCallbacks {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
   }) => Promise<unknown>;
+  /** Host-side Word / Excel template tools (#711). */
+  officeToolsFn?: (name: import('@craft-agent/session-tools-core').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Render Office pages for office_render. Set by SessionManager in desktop builds that have a capture host. */
   officeRenderFn?: (
     request: import('@craft-agent/session-tools-core').OfficeRenderArgs,

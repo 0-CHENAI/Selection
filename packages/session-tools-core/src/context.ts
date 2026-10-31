@@ -164,6 +164,8 @@ export interface SessionToolContext {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
   }) => Promise<unknown>;
+  /** Host-side Word / Excel template tools (#711): office_template, office_template_write, xlsx_recalculate. */
+  officeTools?: (name: import('./handlers/office-template.ts').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
   /** Render Office pages to PNG through the host's Office preview pipeline (desktop only). */
