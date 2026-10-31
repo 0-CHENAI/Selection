@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
@@ -107,7 +107,7 @@ describe('delivery guard (needs_revision loop)', () => {
     const s = session({ mode: 'excel', templateId: 'port-cargo', revision: revision('port-cargo') })
     const prepared = await prepareOfficeTemplate(s, { template_id: 'port-cargo' })
     const path = prepared.workspace_path
-    expect(path.startsWith(s.workspaceRoot)).toBe(true)
+    expect(path.startsWith(realpathSync(s.workspaceRoot))).toBe(true)
     expect(officeDeliveryIssues(s, [path])[0]?.summary).toContain('xlsx_recalculate')
     const result = await recalculateWorkspaceXlsx(s, { path, visual_review: 'not-needed' })
     expect(result.ready).toBe(true)
