@@ -1,5 +1,4 @@
 import { useAtom } from 'jotai'
-import { useTranslation } from 'react-i18next'
 import { FileText, Table2 } from 'lucide-react'
 import catalog from '../../../../resources/skills/office-business/catalog.json'
 import { officeComposerAtomFamily } from '@/atoms/office'
@@ -21,7 +20,6 @@ type OfficeCase = {
 const cases = (catalog as { cases?: OfficeCase[] }).cases ?? []
 
 export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel'; composerKey: string }) {
-  const { t } = useTranslation()
   const [request, setRequest] = useAtom(officeComposerAtomFamily(composerKey))
   const items = casesForOfficeHome(cases, mode)
   const Icon = mode === 'word' ? FileText : Table2
@@ -55,7 +53,6 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
           )
         })}
       </div>
-      <p className="mt-4 text-[12px] text-muted-foreground">{t('office.case.pending')}</p>
     </div>
   )
 }

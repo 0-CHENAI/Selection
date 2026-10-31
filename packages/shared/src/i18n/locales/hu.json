@@ -1116,7 +1116,6 @@
   "multiSelect.selected.source_other": "{{count}} forrás kijelölve",
   "multiSelect.selectionHint": "Használd a <cmdClick></cmdClick> kombinációt a váltáshoz, a <shiftClick></shiftClick> kombinációt a tartomány kijelöléséhez",
   "multiSelect.setLabels": "Címkék beállítása",
-  "office.case.pending": "The chosen case is kept on the new session. example files stay read-only; edits go on a workspace copy.",
   "office.hero.excelDescription": "Describe the metrics, period, and reader, or attach a workbook. Pick a registered case to follow.",
   "office.hero.excelTitle": "What spreadsheet should we make?",
   "office.hero.wordDescription": "Describe the purpose, reader, and length, or attach source material. Pick a case to follow.",
