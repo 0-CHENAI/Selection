@@ -1116,6 +1116,8 @@
   "multiSelect.selected.source_other": "{{count}} fuentes seleccionadas",
   "multiSelect.selectionHint": "Usa <cmdClick></cmdClick> para alternar, <shiftClick></shiftClick> para seleccionar un rango",
   "multiSelect.setLabels": "Establecer etiquetas",
+  "office.case.useThis": "Use this case",
+  "office.case.useThisLabel": "Use this case: {{title}}",
   "office.hero.excelDescription": "Describe the metrics, period, and reader, or attach a workbook. Pick a registered case to follow.",
   "office.hero.excelTitle": "What spreadsheet should we make?",
   "office.hero.wordDescription": "Describe the purpose, reader, and length, or attach source material. Pick a case to follow.",

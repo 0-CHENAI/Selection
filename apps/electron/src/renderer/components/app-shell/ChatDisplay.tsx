@@ -2710,7 +2710,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </>
           )}
           {officeHome && homeSection === 'ppt' && <PptHomeGallery composerKey={pptComposerKey ?? session.id} />}
-          {officeHome && (homeSection === 'word' || homeSection === 'excel') && <OfficeCaseGallery mode={homeSection} composerKey={pptComposerKey ?? session.id} />}
+          {officeHome && (homeSection === 'word' || homeSection === 'excel') && <OfficeCaseGallery mode={homeSection} composerKey={pptComposerKey ?? session.id} sessionId={session.id} />}
           </div>
           </div>
           </div>
