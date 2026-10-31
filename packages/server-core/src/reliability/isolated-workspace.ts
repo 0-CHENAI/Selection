@@ -97,8 +97,9 @@ export function prepareIsolatedWorkspace(sourceRoot: string, storage: string, de
 export function assertIsolatedTool(state: IsolatedWorkspace, toolName: string, input: Record<string, unknown>, confinedShellDirectory?: string): void {
   if (isNativeReadOnlyTool(toolName) || ['WebSearch', 'WebFetch'].includes(PI_TOOL_NAME_MAP[toolName] ?? toolName)) return
   // These host-owned session tools validate their own run/attempt identity and
-  // cannot write project files. External tools with similar names stay blocked.
-  if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|task_help|get_session_info|get_task_results|session_history|task_context|update_task_list)$/.test(toolName)) return
+  // cannot write project files (office_render only writes PNGs to session storage).
+  // External tools with similar names stay blocked.
+  if (/^(?:mcp__session__|session__)?(?:submit_answer|submit_task_output|submit_task_node_verdict|task_help|get_session_info|get_task_results|session_history|task_context|update_task_list|office_render)$/.test(toolName)) return
   if (state.delivery || state.pendingDelivery) throw new Error('This candidate is frozen for delivery; create a new worker for further changes')
   if (['Bash', 'bash'].includes(toolName) && confinedShellDirectory === realpathSync(state.directory)) return
   if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit'].includes(toolName)) throw new Error('This isolated task requires a sandbox for shell or external write tools; the tool has not run.')

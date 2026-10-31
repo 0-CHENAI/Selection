@@ -168,6 +168,11 @@ export interface SessionToolContext {
   officeTools?: (name: import('./handlers/office-template.ts').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
+  /** Render Office pages to PNG through the host's Office preview pipeline (desktop only). */
+  officeRender?: (
+    request: import('./handlers/office-render.ts').OfficeRenderArgs,
+    signal?: AbortSignal,
+  ) => Promise<import('./handlers/office-render.ts').OfficeRenderOutcome>;
   /** Refresh host and current agent skill catalogs after a committed install. */
   refreshSkills?: () => void | Promise<void>;
   // ============================================================

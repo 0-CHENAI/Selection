@@ -1,0 +1,52 @@
+# 阶段 06 验收记录（第一部分）：模型侧页图 `office_render`
+
+对应 [#709](https://github.com/0-CHENAI/Selection/issues/709) 的「2026-10-31 核查补充」G1 / G14，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。对照基线是 dsh-desktop `588412b`：dsh 生成后用 LibreOffice 渲染、模型看图再修。Selection 对齐的是这条「生成 → 渲染 → 看图 → 修」的闭环，不复刻 dsh 的技术栈：不打包 LibreOffice Kit，不内置 Python，不用 OCR。
+
+## 代码入口
+
+| 能力 | 入口 |
+| --- | --- |
+| 工具定义与返回（文本 + 原生图片块） | `packages/session-tools-core/src/handlers/office-render.ts`，在 `tool-defs.ts` 注册为 `office_render` |
+| 渲染服务（页码解析、OfficeCLI HTML、净化、排队、超时 / 取消、存 PNG） | `packages/server-core/src/services/office-page-render.ts` |
+| 页内脚本（按页 / 按幻灯片 / 按 sheet+range 定位，缺字体检测） | `packages/server-core/src/services/office-page-render-script.ts` |
+| 桌面宿主（离屏 Electron 窗口 + `capturePage`，断网，用完即销毁） | `apps/electron/src/main/office-render-host.ts`，在 `main/index.ts` 启动时注册 |
+| 会话接线、与右侧面板共用 HTML | `SessionManager` 的 `officeRenderFn`；`OfficePreviewService.htmlFor(path, sha256)` |
+| 修订期策略 | `reliability/office-tool-policy.ts`（放行 `office_render`；拦截浏览器、裸 `officecli … screenshot/render`、OCR）；`isolated-workspace.ts` 放行 `office_render` |
+| 系统提示 | `packages/shared/src/prompts/system.ts`：原「PDF export is not included」改为「没有 PDF 导出，看页面调 office_render，禁止 OCR」 |
+
+## 同源说明
+
+右侧「Office 协同」面板显示的是 OfficeCLI `watch` 输出的 HTML。`office_render` 用同一引擎的 `officecli view html`。如果同一份字节（sha256 相同）正在面板里打开，直接复用面板手上那份 HTML，结果里标 `sharedWithPreviewPanel: true`。净化规则与面板一致：去掉外链脚本和网络字体脚本，加无网络 CSP。渲染顺序取自已批准的 `native-plan.ts` preview 步骤 `officecli-html-electron-capturePage`。
+
+Word：OfficeCLI 只在显式分页 / 分节处起新的 `.page`。没有分页符的长页按页面高度切成多张，结果附说明「页码可能与 Word 略有出入」。Excel：按 `sheet` + `range` 取区域，不给 range 时从表顶截到 2400 CSS 像素并标 `truncated`。
+
+## 验收命令
+
+```bash
+bun test packages/session-tools-core/src/handlers/office-render.test.ts \
+  packages/server-core/src/services/office-page-render.test.ts \
+  packages/server-core/src/reliability/office-tool-policy.test.ts \
+  packages/server-core/src/reliability/isolated-workspace.test.ts \
+  packages/server-core/src/services/office-render-poc/office-render-poc.test.ts \
+  packages/shared/src/agent/__tests__/session-self-management-bindings.test.ts \
+  packages/shared/src/prompts/__tests__/system.test.ts
+bun run typecheck:all
+```
+
+## 实机渲染（Linux x64，Electron 39.2.7 离屏窗口，OfficeCLI 1.0.158）
+
+| 文件 | 请求 | 结果 |
+| --- | --- | --- |
+| coffee-market `example.docx` | `pages: "1,last"` | 共 7 页，取第 1、7 页，1191×1684，约 2.8 秒；缺字体 `Noto Sans CJK SC` |
+| government-notice `example.docx` | `pages: "all"` | 无分页符，按页高切成 3 页；缺字体 `FangS-SC`、`HYKaiTiJ`、`HYZhongJianHeiJ`、`ShuS-SC` |
+| annual-business `example.xlsx` | `sheet: 经营总览, range: A1:P51` | 1254×2106，约 5.4 秒；6 个 sheet 名一并返回 |
+| port-cargo `example.xlsx` | 默认 | 第一个 sheet「港口总览」1323×1770 |
+| PPT 样例 `.pptx` | `pages: "1,3"` | 共 6 页，1395×785 |
+
+C5（模型取 Word 案例第 1 页和最后 1 页并看图）：上表第一行即这个调用；图片与面板同源。修订期策略单测覆盖「放行 office_render」和「仍拦截浏览器 / 裸 screenshot / OCR」。
+
+## 还没做
+
+- 原生高保真增强：macOS 用 AppleScript 让 Word / Excel / PowerPoint 导出、Windows 用 OfficeCLI `--render native`。这条与「模型看到的图和面板同源」有取舍，留作后续，由 LinNai 定先后。
+- PDF 导出仍未进入用户路径。
+- OfficeCLI HTML 对 Excel 浮动图表的定位与 Excel 本身有差异（面板里也一样），这是 HTML 引擎的限制。

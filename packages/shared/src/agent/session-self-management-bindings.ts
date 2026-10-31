@@ -48,6 +48,13 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+  Object.defineProperty(context, 'officeRender', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeRenderFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
   // Direct pass-through bindings — signatures match, no wrapping needed.
   // Each getter resolves fresh from the registry on every access.
 
