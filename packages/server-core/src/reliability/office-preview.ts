@@ -193,6 +193,13 @@ export class OfficePreviewService {
     return preview
   }
   private result(p: Preview): OfficePreviewResult { return { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, isDraft: p.isDraft } }
+  /** HTML a live preview already rendered for exactly these bytes (sha256), so office_render shows the model the same page. */
+  htmlFor(path: string, hash: string): string | undefined {
+    for (const preview of this.previews.values()) {
+      if (!preview.stopping && preview.hash === hash && preview.path === path && preview.html) return preview.html
+    }
+    return undefined
+  }
   describe(sessionId: string, id: string, ownerId?: string) { return this.result(this.get(sessionId, id, ownerId)) }
   suspend(sessionId: string, id: string, ownerId = 'legacy') {
     const p = this.previews.get(id)

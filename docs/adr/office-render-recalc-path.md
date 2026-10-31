@@ -2,7 +2,7 @@
 
 对应 [#705](https://github.com/0-CHENAI/Selection/issues/705)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。对照基线是阶段 01 冻结的 dsh-desktop `588412b`（见 [基线](../plans/selection-3.2-office-dsh-parity-baseline.md)）。
 
-**状态：LinNai 还没批准上一版 A1 / B2 / C1+C3。** 2026-10-30 的追问是「能否用原生方法解决？」。下文把原生入口和回退写在一起，仍待拍板。用户能看到的路径没有变。`screenshot.ts` 的 LibreOffice 回退、系统提示里「PDF export is not included」都还在。PoC 不从 `services/index.ts` 导出，环境变量不是 `SELECTION_OFFICE_RENDER_POC=1` 时调用会直接拒绝。
+**状态：已批准（2026-10-30）。** LinNai 在 #705 补充里同意下文「原生优先、没有原生再回退」的顺序。#709 已接入用户路径的第一步：`office_render` 工具（`services/office-page-render.ts`）按 `native-plan.ts` 的 preview 步骤 `officecli-html-electron-capturePage`，用与「Office 协同」面板同源的 OfficeCLI HTML 在离屏 Electron 窗口里按页截图，交给模型原生读图。系统提示改为写明「没有 PDF 导出，看页面用 office_render」。PDF 导出和 macOS / Windows 原生高保真（Word / Excel / PowerPoint 导出）还没接入用户路径。PoC 本身仍不从 `services/index.ts` 导出，环境变量不是 `SELECTION_OFFICE_RENDER_POC=1` 时调用会直接拒绝。
 
 实测数字在 [office-render-recalc-evidence.json](office-render-recalc-evidence.json)。测量环境是 Linux x64，OfficeCLI 1.0.157 / 1.0.159 的官方 linux-x64 二进制，系统 Chrome（HeadlessChrome/156）。没有把这些二进制放进仓库。
 

@@ -316,4 +316,19 @@ describe('Claude/Pi session self-management parity', () => {
     expect(result.isError).toBeFalsy();
     expect(calls).toHaveLength(1);
   });
+
+  it('resolves the office_render host callback late and passes the cancellation signal', async () => {
+    const ctx = createBaseContext(sessionId);
+    attachSessionSelfManagementBindings(ctx, sessionId);
+    expect(ctx.officeRender).toBeUndefined();
+    const signal = new AbortController().signal;
+    const seen: unknown[] = [];
+    mergeSessionScopedToolCallbacks(sessionId, { officeRenderFn: async (request, received) => {
+      seen.push(request, received);
+      return { file: '/w/a.docx', kind: 'docx', renderer: 'officecli-html-electron-capturePage', pageCount: 1, images: [], missingFonts: [] };
+    } });
+    const result = await SESSION_TOOL_REGISTRY.get('office_render')!.handler!({ ...ctx, officeRender: ctx.officeRender, signal } as typeof ctx, { path: '/w/a.docx', pages: '1' });
+    expect(result.isError).toBe(false);
+    expect(seen).toEqual([{ path: '/w/a.docx', pages: '1' }, signal]);
+  });
 });

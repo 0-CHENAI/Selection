@@ -992,7 +992,7 @@ ${formatBundledOfficecliSkillGuidance()}
 - Official skill Setup sections that mention curl-install do not apply.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
-- PDF export is not included in the bundled officecli binary
+- No PDF export. To see Office pages, call \`office_render\` and inspect the images; never OCR.
 
 ${toolMetadataRequired ? `## Tool Metadata
 
