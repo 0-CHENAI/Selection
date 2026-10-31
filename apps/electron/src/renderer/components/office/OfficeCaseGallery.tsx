@@ -28,7 +28,6 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
       <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 xl:grid-cols-4">
         {items.map(item => {
           const selected = request?.mode === mode && request.templateId === item.id
-          const skills = (item.businessSkills ?? (item.businessSkill ? [item.businessSkill] : [])).join('、')
           return (
             <article key={item.id} className="min-w-0">
               <button
@@ -48,7 +47,7 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
                   : <span className="flex h-full items-center justify-center text-muted-foreground"><Icon className="size-6" aria-hidden /></span>}
               </button>
               <p title={item.title} className="mt-2 truncate text-[13px]">{item.title}</p>
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{[item.category, skills].filter(Boolean).join(' · ')}</p>
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.category}</p>
             </article>
           )
         })}
