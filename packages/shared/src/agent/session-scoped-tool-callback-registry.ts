@@ -25,6 +25,8 @@ export interface SessionScopedToolCallbacks {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
   }) => Promise<unknown>;
+  /** Host-side Word / Excel template tools (#711). */
+  officeToolsFn?: (name: import('@craft-agent/session-tools-core').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.

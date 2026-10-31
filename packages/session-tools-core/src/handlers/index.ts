@@ -8,6 +8,8 @@
 // SubmitPlan
 export { handleArtifactVersions } from './artifact-versions.ts';
 export type { ArtifactVersionsArgs } from './artifact-versions.ts';
+export { handleOfficeTemplate, handleOfficeTemplateWrite, handleXlsxRecalculate } from './office-template.ts';
+export type { OfficeToolName } from './office-template.ts';
 export { handleSubmitPlan } from './submit-plan.ts';
 export type { SubmitPlanArgs } from './submit-plan.ts';
 

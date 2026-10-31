@@ -19,14 +19,12 @@
 
 ## 写入方式
 
-阶段 08 提供 `office_template` 与 `office_template_write` 之后，按段落 ID 替换、新增和删除，并让新段落继承原样式，交付前跑版式守卫。
+先调用 `office_template(template_id="government-notice")`，拿到 `editable_paragraphs`。再用 `office_template_write` 写出新的 DOCX：
 
-在此之前：
-
-- 用 `officecli query` / `get` 读出工作副本的段落。
-- 用 `set` / `batch` 只改需要替换的文字。
-- 在交付说明写明「版式守卫尚未接入」。
-- 写完后 `validate`，再读回标题、版头和版记。
+- replacements 按段落 ID 替换文字，版头发文机关必须在其中。
+- additions 用 `style_from` 让新段落继承原样式。
+- removals 只删 `can_remove=true` 的段落；版头、红线、绘图、分节和表格单元格受保护，宿主会拒绝。
+- 宿主写出时跑 7 项版式守卫，交付前再跑一次。未通过不写文件、不能完成，按返回的诊断修正后重写。
 
 页边距目标见 [05-layout.md](05-layout.md)。若 OfficeCLI 改动了节属性，读回 top/right/bottom/left，对照 2098/1474/1984/1587 twip。
 

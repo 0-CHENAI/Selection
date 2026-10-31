@@ -194,4 +194,4 @@ bun packages/office-business-runtime/src/cli/build-infographic.ts config.json --
 
 ## Selection 交付
 
-不要调用 Python，不要把图表导出成图片再贴回 Excel。交付前调用 `xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子），再核对 checks 或双读，然后区域渲染原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。
+不要调用 Python，不要把图表导出成图片再贴回 Excel。交付前调用 `xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子），再核对 checks 或双读，然后区域渲染原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。

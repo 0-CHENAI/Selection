@@ -31,7 +31,8 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 - OfficeCLI 负责打开、查询、定点修改、校验和读回。
 - 业务技能负责文种、结构、事实口径和缺项写法。
 - 纪要的结构校验是 `bun packages/office-business-runtime/src/cli/validate-minutes.ts`。它检查 Markdown 草稿，不证明事实正确。
-- `office_template` / `office_template_write` 与交付前版式守卫在阶段 08 接入。此前在工作副本上用 `set` / `batch`，并写明守卫尚未接入。
+- Word 案例：先调用 `office_template(template_id)` 拿到段落 / run ID，再用 `office_template_write` 写出新的 DOCX（替换、继承样式的新增、克隆表格行、只删可删段落）。宿主在写出时和交付前各跑一次 7 项版式守卫（字体与页眉页脚、样式与主题、页面几何、边框与绘图框、模板字体、段落与 run 样式、可编辑版头），未通过不能完成，按返回的 needs_revision 诊断修正后重写。
+- Excel 案例：`office_template` 在工作区写出可编辑工作簿（年度经营案例自动加上 A3、宽度一页、打印区域），用 OfficeCLI 修改后调用 `xlsx_recalculate`。返回里的 `font_warnings` 列出本机缺失的字体和替代字体。
 - PDF 与逐页渲染的路径尚未选定。不要为了验收去调用 PDF 后端，也不要用 OCR。缺页图就写「视觉检查未做」。
 
 ## 共同流程
