@@ -86,6 +86,7 @@ export interface ISessionManager {
   listArtifactFeedback?(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>
   officePreview?(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, ownerId?: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void>
   getOfficeFiles?(sessionId: string): Promise<string[]>
+  officeHomePreview?(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, ownerId?: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void>
   artifactFeedback?(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
   resumeExecution?(sessionId: string): Promise<void>
   continueProgress?(sessionId: string): Promise<void>

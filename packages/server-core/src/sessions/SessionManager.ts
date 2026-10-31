@@ -1,4 +1,5 @@
-import { OfficePreviewService, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
+import { OfficePreviewService, OFFICE_SAMPLE_READ_ONLY, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
+import { matchOfficeCasePreview, prepareOfficeCasePreview, removeOfficeCasePreviews } from '../services/office-case-preview'
 import { getOfficePageCaptureHost, renderOfficePages } from '../services/office-page-render'
 import { projectHistory } from './project-history'
 import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
@@ -181,7 +182,7 @@ import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services
 import { formatDeliveryIssues, officecliExecutable, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from '../services/office-template/service'
 import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath, resolveImageSendPolicy } from '@craft-agent/shared/utils'
@@ -7134,6 +7135,7 @@ export class SessionManager implements ISessionManager {
     await this.officePreviews.closeSession(sessionId)
     validateSessionId(sessionId)
     let managed = this.sessions.get(sessionId)
+    if (managed) await removeOfficeCasePreviews(managed.workspace.id, sessionId).catch(() => {})
     if (!managed) {
       const candidates = this.getWorkspaces().filter(workspace => existsSync(getSessionStoragePath(workspace.rootPath, sessionId)))
       if (candidates.length > 1) throw new Error(`Ambiguous session ID: ${sessionId}`)
@@ -8988,9 +8990,48 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Case samples: the client names a catalog case, the host copies its sample to a private
+   * read-only file for this workspace + chat. `open` accepts only that exact copy outside the
+   * workspace, and the preview stays view-only.
+   */
+  private async officeCasePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, scopeId: string, previewSessionId: string, ownerId: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void | null> {
+    if (operation.type === 'prepareCase') {
+      const sample = await prepareOfficeCasePreview(workspaceId, scopeId, operation.caseId)
+      return { previewId: '', artifactId: `office-case:${sample.caseId}`, baseVersion: sample.revision, path: sample.path, readOnly: true }
+    }
+    if (operation.type === 'open') {
+      const sample = await matchOfficeCasePreview(workspaceId, scopeId, operation.path)
+      if (!sample) return null
+      return this.officePreviews.open(previewSessionId, `office-case:${sample.caseId}`, sample.revision, sample.path, sample.bytes, false, true, ownerId, operation.previewId, { readOnly: true })
+    }
+    if (operation.type === 'refresh') {
+      // The sample never changes while open. Keep the process alive only.
+      const preview = this.officePreviews.describe(previewSessionId, operation.previewId, ownerId)
+      if (!preview.readOnly) return null
+      return this.officePreviews.heartbeat(previewSessionId, operation.previewId, ownerId)
+    }
+    return null
+  }
+
+  /** The empty Office home has no chat. It may only preview case samples. */
+  async officeHomePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, ownerId = 'legacy'): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void> {
+    const scope = `${OFFICE_CASE_PREVIEW_SESSION}:${workspaceId}`
+    const handled = await this.officeCasePreview(operation, workspaceId, OFFICE_CASE_PREVIEW_SESSION, scope, ownerId)
+    if (handled !== null) return handled
+    if (operation.type === 'open') throw new Error('首页只能预览案例样例')
+    if (operation.type === 'select' || operation.type === 'capture') throw new Error(OFFICE_SAMPLE_READ_ONLY)
+    if (operation.type === 'suspend') return this.officePreviews.suspend(scope, operation.previewId, ownerId)
+    if (operation.type === 'heartbeat') return this.officePreviews.heartbeat(scope, operation.previewId, ownerId)
+    if (operation.type === 'close') return this.officePreviews.close(scope, operation.previewId, ownerId)
+    throw new Error('Unknown Office preview operation')
+  }
+
   async officePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, ownerId = 'legacy'): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void> {
     const parent = this.sessions.get(operation.sessionId)
     if (!parent || parent.isolatedWorkspace) throw new Error('Office preview requires an active parent chat')
+    const casePreview = await this.officeCasePreview(operation, parent.workspace.id, parent.id, parent.id, ownerId)
+    if (casePreview !== null) return casePreview
     if (operation.type === 'open') {
       await this.ensureMessagesLoaded(parent)
       const resolvedPath = await this.authorizeOfficeDocumentPath(parent, operation.path)

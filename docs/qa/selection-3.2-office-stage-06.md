@@ -50,3 +50,12 @@ C5（模型取 Word 案例第 1 页和最后 1 页并看图）：上表第一行
 - 原生高保真增强：macOS 用 AppleScript 让 Word / Excel / PowerPoint 导出、Windows 用 OfficeCLI `--render native`。这条与「模型看到的图和面板同源」有取舍，留作后续，由 LinNai 定先后。
 - PDF 导出仍未进入用户路径。
 - OfficeCLI HTML 对 Excel 浮动图表的定位与 Excel 本身有差异（面板里也一样），这是 HTML 引擎的限制。
+
+## 案例样例预览（#709 补充，LinNai 2026-11-01 决定）
+
+- 入口：首页 Word / Excel 案例卡片悬停或键盘聚焦时出现「预览」；从案例开始的会话在输入框上方显示案例名和「预览」。
+- 行为：宿主按案例 id（不接受客户端路径）把样例复制到系统临时目录下按「工作区 + 会话（首页为 `@office-case`）」哈希隔离的只读文件，文件名为案例标题；在右侧 Office 协同面板打开。打开前按 catalog 的 `exampleSha256` 校验，被改动的副本会从内置样例恢复。
+- 只读：面板显示「案例样例 · 只读」，不显示选择计数，宿主拒绝选择与提交修改；首页面板不显示「切换文件」，首页范围只能打开案例样例。
+- 不做：构建期预览图、新的预览组件、PDF 导出与原生 Office 高保真渲染（后两项按 LinNai 决定延期）。
+- 代码：`packages/server-core/src/services/office-case-preview.ts`、`SessionManager.officeCasePreview / officeHomePreview`、`useOfficePreview` 的 `selection-office-open-case` 事件、`OfficeCaseGallery`、`OfficeSessionCase`，playground「Office 案例样例预览」。
+- 截图：`/workspace/sw709-shots/preview/`（浅色 / 深色 / PRO，首页 Word、首页 Excel、会话内）。

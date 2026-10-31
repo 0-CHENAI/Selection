@@ -156,7 +156,7 @@ describe('office home', () => {
     )
     expect(html).toContain('data-testid="office-case-same-equity-research"')
     expect(html).toContain('aria-label="做同款：小米汽车研究报告"')
-    expect(html).toContain('focus-visible:opacity-100')
+    expect(html).toContain('group-focus-within/case:opacity-100')
     expect(html).toContain('[@media(hover:none)]:opacity-100')
     const { fillSameStylePrompt } = await import('./OfficeCaseGallery')
     const seen: unknown[] = []
@@ -177,4 +177,42 @@ describe('office home', () => {
     expect(detail.sessionId).toBe('s1')
     expect(detail.compose('')).toEqual({ text: '帮我研究【公司或行业】。', selection: { start: 4, end: 11 } })
   })
+
+  it('Word / Excel cards with a sample file get a keyboard-reachable 「预览」 button; file-less cases do not', async () => {
+    const { hasOfficeCaseSample } = await import('./OfficeCaseGallery')
+    const render = (mode: 'word' | 'excel') => renderToStaticMarkup(
+      <Provider>
+        <I18nextProvider i18n={i18n}>
+          <OfficeCaseGallery mode={mode} composerKey={`preview-${mode}`} />
+        </I18nextProvider>
+      </Provider>,
+    )
+    const word = render('word'), excel = render('excel')
+    for (const id of ['meeting-minutes', 'coffee-market', 'equity-research', 'government-notice']) expect(word).toContain(`data-testid="office-case-preview-${id}"`)
+    for (const id of ['annual-business', 'port-cargo', 'bio-assay']) expect(excel).toContain(`data-testid="office-case-preview-${id}"`)
+    expect(excel).not.toContain('data-testid="office-case-preview-execution-tracker"')
+    expect(word).toContain('aria-label="预览样例：中国现制咖啡市场调研报告"')
+    expect(word).toContain('group-focus-within/case:opacity-100')
+    expect(hasOfficeCaseSample({ sampleFile: 'example.xlsx' })).toBe(true)
+    expect(hasOfficeCaseSample({ sampleFile: null })).toBe(false)
+    expect(hasOfficeCaseSample({ sampleFile: 'deck.pptx' })).toBe(false)
+  })
+
+  it('a chat started from a case keeps a preview entry above the composer', async () => {
+    const { OfficeSessionCase, officeSessionCase } = await import('./OfficeSessionCase')
+    expect(officeSessionCase({ mode: 'excel', templateId: 'port-cargo' })?.title).toBeTruthy()
+    expect(officeSessionCase({ mode: 'word', templateId: 'port-cargo' })).toBeUndefined()
+    expect(officeSessionCase({ mode: 'word', templateId: 'selection-work-notice' })).toBeUndefined()
+    expect(officeSessionCase({ mode: 'word' })).toBeUndefined()
+    expect(officeSessionCase(null)).toBeUndefined()
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <OfficeSessionCase sessionId="s1" office={{ mode: 'word', templateId: 'government-notice' }} />
+      </I18nextProvider>,
+    )
+    expect(html).toContain('data-testid="office-session-case-preview-government-notice"')
+    expect(html).toContain('>预览<')
+    expect(renderToStaticMarkup(<I18nextProvider i18n={i18n}><OfficeSessionCase sessionId="s1" office={{ mode: 'ppt' }} /></I18nextProvider>)).toBe('')
+  })
 })
+

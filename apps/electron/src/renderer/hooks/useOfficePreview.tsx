@@ -2,10 +2,10 @@ import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, formatAttachmentBytes, maxAttachmentBytes, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
+import { OFFICE_CASE_PREVIEW_SESSION, OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, formatAttachmentBytes, maxAttachmentBytes, type OfficePreviewResult, type OfficeSelection, type SendMessageOptions } from '@craft-agent/shared/protocol'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { officePreviewDocument } from '../lib/office-preview-document'
-import { OFFICE_PREVIEW_REVEAL, OFFICE_PREVIEW_SHOW_PAGE, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
+import { OFFICE_PREVIEW_CLOSE_CASE, OFFICE_PREVIEW_OPEN_CASE, OFFICE_PREVIEW_REVEAL, OFFICE_PREVIEW_SHOW_PAGE, type OfficeCasePreviewRequest, pinnedPageAfterScroll, previewDocumentPage, type OfficePreviewPageRequest, type PinnedOfficePage } from '../lib/office-preview-page'
 import { officePreviewFileName } from '../lib/office-preview-filename'
 import { officePreviewRefreshFailure } from '../lib/office-preview-refresh'
 import { decideOfficeSelection } from '../lib/office-selection'
@@ -188,7 +188,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       if (!preview) throw new Error('预览未返回内容')
       const same = reusable?.view.preview?.previewId === preview.previewId
       const page = previewDocumentPage(pinnedPage.current, preview.path || path)
-      const document = same && page == null ? reusable!.view.document : officePreviewDocument(preview.html ?? '', preview.previewId, { ...position, readOnly: preview.isDraft, ...(page ? { page } : {}) })
+      const document = same && page == null ? reusable!.view.document : officePreviewDocument(preview.html ?? '', preview.previewId, { ...position, readOnly: preview.isDraft || preview.readOnly, ...(page ? { page } : {}) })
       const next: PreviewView = { ...targetScope, path: preview.path, candidates: files, preview: { ...preview, html: undefined }, document,
         count: same ? reusable.view.count : 0 }
       if (ticket !== sequence.current) {
@@ -227,17 +227,37 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       if (!detail?.sessionId || detail.sessionId !== scope.current.sessionId) return
       awaitDocument(detail.sessionId)
     }
+    const onCase = (event: Event) => {
+      const detail = (event as CustomEvent<OfficeCasePreviewRequest>).detail
+      const sessionId = scope.current.sessionId
+      if (!detail || typeof detail.caseId !== 'string' || !/^[a-z0-9-]+$/.test(detail.caseId) || !sessionId) return
+      // A chat entry names its chat. The empty home names none and uses the home scope.
+      if ((detail.sessionId ?? OFFICE_CASE_PREVIEW_SESSION) !== sessionId) return
+      void window.electronAPI.officePreview({ type: 'prepareCase', sessionId, caseId: detail.caseId }).then(prepared => {
+        if (!prepared?.path || scope.current.sessionId !== sessionId) return
+        return open(sessionId, prepared.path, sessionId === OFFICE_CASE_PREVIEW_SESSION ? [prepared.path] : undefined)
+      }).catch(error => toast.error(t('office.case.previewFailed'), { description: error instanceof Error ? error.message : String(error) }))
+    }
+    const onCloseCase = () => {
+      if (scope.current.sessionId === OFFICE_CASE_PREVIEW_SESSION && current.current) close()
+    }
     window.addEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
     window.addEventListener(OFFICE_PREVIEW_REVEAL, onReveal)
+    window.addEventListener(OFFICE_PREVIEW_OPEN_CASE, onCase)
+    window.addEventListener(OFFICE_PREVIEW_CLOSE_CASE, onCloseCase)
     return () => {
       window.removeEventListener(OFFICE_PREVIEW_SHOW_PAGE, onShow)
       window.removeEventListener(OFFICE_PREVIEW_REVEAL, onReveal)
+      window.removeEventListener(OFFICE_PREVIEW_OPEN_CASE, onCase)
+      window.removeEventListener(OFFICE_PREVIEW_CLOSE_CASE, onCloseCase)
     }
-  }, [open, awaitDocument])
+  }, [open, awaitDocument, close, t])
   useLayoutEffect(() => {
     detach()
     pinnedPage.current = undefined
-    scope.current = { sessionId: activeSessionId ?? '', workspaceId: workspaceId ?? '' }
+    // The empty Office home has no chat. It gets its own scope that can only show case samples.
+    scope.current = { sessionId: activeSessionId || OFFICE_CASE_PREVIEW_SESSION, workspaceId: workspaceId ?? '' }
+    if (!activeSessionId) return
     const saved = readOfficePreviewState(scope.current)
     if (saved?.open) void open(scope.current.sessionId, saved.path)
   }, [activeSessionId, workspaceId, detach, open])
@@ -314,7 +334,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
             if (result.previewId !== previewId) selectionTickets.current.delete(previewId)
             const painted = paintRefresh(result, previewId)
             const cachedPage = previewDocumentPage(pinnedPage.current, entry.view.path)
-            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft, restorePaths: painted.restorePaths, ...(cachedPage ? { page: cachedPage } : {}) }), count: painted.count, busy: false }
+            entry.view = { ...entry.view, preview: { ...result, html: undefined }, document: officePreviewDocument(result.html, result.previewId, { ...entry.position, readOnly: result.isDraft || result.readOnly, restorePaths: painted.restorePaths, ...(cachedPage ? { page: cachedPage } : {}) }), count: painted.count, busy: false }
             entry.pending = Promise.resolve()
             releasePreview(entry.view, 'suspend'); syncCached()
           } else releasePreview({ sessionId, preview: result }, 'close')
@@ -323,7 +343,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
         const painted = paintRefresh(result, previewId)
         const livePage = previewDocumentPage(pinnedPage.current, current.current.path)
         const next = { ...current.current, preview: { ...result, html: undefined },
-          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft, restorePaths: painted.restorePaths, ...(livePage ? { page: livePage } : {}) }),
+          document: officePreviewDocument(result.html, result.previewId, { scrollY: scrollY.current, scrollX: scrollX.current, anchor: scrollAnchor.current, readOnly: result.isDraft || result.readOnly, restorePaths: painted.restorePaths, ...(livePage ? { page: livePage } : {}) }),
           count: painted.count, busy: false, error: undefined, refreshError: false }
         if (result.previewId !== previewId) pending.current = Promise.resolve()
         setSelectionOverflow(undefined)
@@ -386,7 +406,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       const decision = decideOfficeSelection({
         paths: event.data.paths,
         previewId,
-        isDraft: !!current.current?.preview?.isDraft,
+        isDraft: !!current.current?.preview?.isDraft || !!current.current?.preview?.readOnly,
         resuming: !!current.current?.resuming,
         refreshing: refreshing.current === previewId,
         activePreviewId: current.current?.preview?.previewId,
@@ -435,7 +455,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
     const target = current.current
     // Opening the panel is context, not a request to edit selected elements.
     // Picker/loading/draft states cannot have an editable selection either.
-    if (!target || target.sessionId !== sessionId || !target.preview || !target.count || target.preview.isDraft) return
+    if (!target || target.sessionId !== sessionId || !target.preview || !target.count || target.preview.isDraft || target.preview.readOnly) return
     if (target.count > OFFICE_PREVIEW_MAX_SELECTION) {
       setSelectionOverflow({ previewId: target.preview.previewId, count: target.count })
       throw new Error(t('chat.officePreview.selectionOverflow', { count: target.count, max: OFFICE_PREVIEW_MAX_SELECTION }))
@@ -482,10 +502,11 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
       onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}
       aria-label={t('chat.officePreview.title')} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-foreground-2 shadow-middle">
     <div className="flex h-[50px] shrink-0 items-center gap-2 px-3 text-sm">
-      <strong className="min-w-0 truncate" title={target.path}>{officePreviewFileName(target.path) || t('chat.officePreview.choose')}</strong>
-      <button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => void open(target.sessionId, '', target.candidates, true)}>
+      <strong className="min-w-0 truncate" title={target.preview?.readOnly ? undefined : target.path}>{officePreviewFileName(target.path) || t('chat.officePreview.choose')}</strong>
+      {target.preview?.readOnly && <span data-testid="office-preview-sample-badge" className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">{t('office.case.sampleBadge')}</span>}
+      {target.sessionId !== OFFICE_CASE_PREVIEW_SESSION && <button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => void open(target.sessionId, '', target.candidates, true)}>
         <ArrowLeftRight aria-hidden="true" className="size-3.5" />{t('chat.officePreview.switchFile')}
-      </button>
+      </button>}
       <div className="ml-auto shrink-0"><HeaderIconButton onClick={close} aria-label={t('chat.officePreview.closeLabel')} tooltip={t('chat.officePreview.closeLabel')} icon={<X className="size-4" />} /></div>
     </div>
     {target.error && <p role="alert" className="px-4 pb-3 text-xs text-destructive">{target.error}</p>}
@@ -499,7 +520,7 @@ export function useOfficePreview(activeSessionId: string | null | undefined, wor
           <div className="min-w-0"><p className="text-xs font-medium">{t('chat.officePreview.draft')}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{t('chat.officePreview.draftHint')}</p></div>
         </div>
       </div>}
-      {target.preview && <OfficeSelectionCapsule count={target.count} busy={!!target.busy} />}
+      {target.preview && !target.preview.readOnly && <OfficeSelectionCapsule count={target.count} busy={!!target.busy} />}
     </div>
   </aside>
   })
