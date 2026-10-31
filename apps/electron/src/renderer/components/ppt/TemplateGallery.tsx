@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Download, Eye, Pencil, Search, Trash2, Upload, X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { PptCategory, PptTemplate, PptTemplateVariant } from '@craft-agent/shared/protocol'
+import type { PptCategory, PptTemplate } from '@craft-agent/shared/protocol'
 import { refreshPptCatalog, usePptCatalog } from './usePptCatalog'
 import { PptTemplatePreview } from './PptTemplatePreview'
 
@@ -54,9 +54,9 @@ function CustomTemplateActions({ template, onChanged }: { template: PptTemplate;
   </div>
 }
 
-function TemplateGrid({ templates, compact, selectedId, onSelect, onPreview, onChanged }: { templates: PptTemplate[]; compact: boolean; selectedId?: string; onSelect: (template: PptTemplate, source: DOMRect) => void; onPreview: (template: PptTemplate) => void; onChanged?: () => void }) {
+/** Cards show only cover, title, and category · pages. Color variants are picked in TemplateOptions after the parent card is chosen. */
+export function TemplateGrid({ templates, compact, selectedId, onSelect, onPreview, onChanged }: { templates: PptTemplate[]; compact: boolean; selectedId?: string; onSelect: (template: PptTemplate, source: DOMRect) => void; onPreview: (template: PptTemplate) => void; onChanged?: () => void }) {
   const { t } = useTranslation()
-  const chooseVariant = (template: PptTemplate, variant: PptTemplateVariant, source: DOMRect) => onSelect({ ...template, id: variant.id, title: `${template.title} · ${variant.title}`, cover: variant.cover, referencePages: variant.referencePages }, source)
   return <div className={`grid gap-x-4 gap-y-5 ${compact ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 @xl/panel:grid-cols-4 sm:grid-cols-3 xl:grid-cols-4'}`}>
     {templates.map(template => {
       const selected = template.id === selectedId || !!template.variants?.some(variant => variant.id === selectedId)
@@ -69,9 +69,6 @@ function TemplateGrid({ templates, compact, selectedId, onSelect, onPreview, onC
         <p title={template.title} className="mt-2 truncate text-[13px]">{template.title}</p>
         {!compact && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.category === '自定义' ? t('ppt.custom') : t(`ppt.categories.${categories.find(([key]) => key === template.category)?.[1] ?? 'business'}`)} · {t('ppt.pages', { count: template.pages })}</p>}
         {template.note && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.note}</p>}
-        {!!template.variants?.length && <div className="mt-1.5 flex flex-wrap gap-1" data-testid="ppt-template-variants">
-          {template.variants.map(variant => <button key={variant.id} type="button" data-testid={`ppt-variant-${variant.id}`} aria-pressed={selectedId === variant.id} title={variant.title} onClick={event => chooseVariant(template, variant, event.currentTarget.getBoundingClientRect())} className={`rounded-full px-1.5 py-0.5 text-[10px] ${selectedId === variant.id ? 'bg-foreground/10 font-medium text-foreground' : 'bg-foreground/5 text-muted-foreground hover:bg-foreground/8'}`}>{variant.title}</button>)}
-        </div>}
         {template.category === '自定义' && onChanged && <CustomTemplateActions template={template} onChanged={onChanged} />}
       </article>
     })}
