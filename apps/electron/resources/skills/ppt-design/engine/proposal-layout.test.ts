@@ -129,6 +129,26 @@ describe('chart XML schema order', () => {
     expect(out.indexOf('<c:dPt>')).toBeLessThan(out.indexOf('<c:dLbls>'))
   })
 
+  it('keeps horizontal bar labels on one line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bar-labels-'))
+    try {
+      const deck = makeDeck('bars', fixtureTheme, [makePage('p1', 'free', 'p1', '$paper', [
+        chart('bars', 40, 40, 600, 240, { kind: 'bar', categories: ['South Cambridgeshire DC', 'UK 2022 pilot'], series: [{ name: 's', values: [37, 38] }] }),
+      ], '')])
+      const out = join(dir, 'bars.pptx')
+      await exportDeck(deck, out, { enforceCheck: false, platform: 'linux' })
+      const [, xml] = Object.entries(files(out)).find(([name]) => /charts\/chart\d+\.xml$/.test(name))!
+      const labels = xml.match(/<c:dLbls>[\s\S]*?<\/c:dLbls>/g) ?? []
+      expect(labels.length).toBeGreaterThan(0)
+      for (const block of labels) {
+        expect(block).toContain('<c:showCatName val="1"/>')
+        expect(block).toContain('<a:bodyPr wrap="none"/>')
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('exports the proposal charts without schema errors', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'chart-schema-'))
     try {
