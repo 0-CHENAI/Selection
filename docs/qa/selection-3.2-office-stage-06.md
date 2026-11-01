@@ -62,8 +62,15 @@ C5（模型取 Word 案例第 1 页和最后 1 页并看图）：上表第一行
 
 ## 点卡片附上案例（#709 收尾，LinNai 2026-11-01 决定）
 
-- 去掉 #731 的「做同款」按钮和预填提示词。卡片本身就是参考模板：点卡片（或聚焦后按 Enter / 空格）把案例附到输入框，显示为带封面的「参考案例」卡片；再点一次或点卡片右上角的 × 取消。输入框里已写的文字不变，不预填任何提示词。
+- 去掉 #731 的「做同款」按钮和预填提示词。卡片本身就是参考模板：点卡片（或聚焦后按 Enter / 空格）把案例附到输入框，显示为与 PPT 模板相同的倾斜封面卡片；再点一次或点卡片右上角的 × 取消。输入框里已写的文字不变，不预填任何提示词。
 - 「预览」仍在卡片右上角，点击只在协同面板打开样例，`stopPropagation`，不附上案例。
 - 发送时案例随草稿作为会话的 Office 案例（`office.templateId` + `revision`）传给宿主，宿主按指纹注入案例上下文、`office_template` 调用顺序和业务技能。catalog 的 `prompt` 字段不进入注入，也不再进入输入框。
 - 代码：`OfficeCaseGallery`（`toggleOfficeCase`、`previewOfficeCase`）、`OfficeSelectedCase`、`AttachmentPreview`；`FreeFormInput` 的 `craft:insert-text` 恢复到 #731 之前。playground「Office 案例样例预览」新增 `composer-word`。
 - 截图：`/workspace/sw709-shots/card-click/`（首页 Word 悬停、输入框里的案例卡片，浅色 / 深色）。
+
+## 输入框里的 Word / Excel 案例卡片与 PPT 模板卡片一致（#709，LinNai 2026-11-01）
+
+- PPT 的 `SelectedTemplate` 卡片抽成共用的 `AttachedCoverCard`：倾斜封面、两层叠页、紫色选中边框、右上角黑色 ×（悬停或菜单打开时出现）、右下角 ⋯ 菜单、从首页卡片飞入输入框的动画。PPT 与 Word / Excel 都用它，PPT 的 test id 与模板选项菜单不变。
+- Word / Excel：叠页用案例封面；⋯ 打开的菜单显示案例标题、「参考案例 · 类别」和「预览样例」（有样例文件时），点击在 Office 协同面板只读打开样例并关闭菜单。PPT 的 ⋯ 仍是主题、比例等模板选项。
+- 首页点卡片附上案例时，封面像 PPT 一样飞入输入框。
+- playground「Office 输入框里的模板 / 案例卡片」三个真实输入框并排；截图：`/workspace/sw709-shots/input-card/`（浅色 / 深色，另有 Word 悬停和 ⋯ 菜单）。

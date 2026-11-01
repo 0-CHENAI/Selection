@@ -37,7 +37,7 @@ export function AttachmentPreview({ attachments, onRemove, disabled, loadingCoun
   if (attachments.length === 0 && loadingCount === 0 && !hasPptTemplate && !hasOfficeCase) return null
 
   return (
-    <div data-testid="composer-attachment-row" className="flex items-end gap-2 border-b border-border/50 px-4 overflow-x-auto" style={{ paddingTop: hasPptTemplate ? Math.max(20, Math.ceil(centeredOverhangTop(CARD_WIDTH))) : 12, paddingBottom: hasPptTemplate ? Math.max(12, Math.ceil(centeredOverhangBottom(CARD_WIDTH)) + 2) : 12 }}>
+    <div data-testid="composer-attachment-row" className="flex items-end gap-2 border-b border-border/50 px-4 overflow-x-auto" style={{ paddingTop: hasPptTemplate || hasOfficeCase ? Math.max(20, Math.ceil(centeredOverhangTop(CARD_WIDTH))) : 12, paddingBottom: hasPptTemplate || hasOfficeCase ? Math.max(12, Math.ceil(centeredOverhangBottom(CARD_WIDTH)) + 2) : 12 }}>
       {hasPptTemplate && pptComposerKey !== undefined && <SelectedTemplate composerKey={pptComposerKey} disabled={disabled} />}
       {hasOfficeCase && pptComposerKey !== undefined && <OfficeSelectedCase composerKey={pptComposerKey} disabled={disabled} />}
       {attachments.map((attachment, index) => (
