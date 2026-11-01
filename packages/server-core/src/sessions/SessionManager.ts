@@ -180,6 +180,10 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
 import { formatDeliveryIssues, officecliExecutable, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from '../services/office-template/service'
+import { generatePresentationImage } from '../services/ppt-image-generate'
+import { pptRouteMismatch } from '../services/ppt-route'
+import { createTemplateTaskProject } from '../services/ppt-template-project'
+import { recordVisualInspection } from '../services/ppt-visual-record'
 import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
@@ -964,7 +968,7 @@ interface ManagedSession extends WorkModeMetadata {
   progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
   progressDisabled?: boolean
 
-  answerDelivery?: {
+    answerDelivery?: {
     answerRoutingVersion?: 1
     runId: string
     generation: number
@@ -973,6 +977,9 @@ interface ManagedSession extends WorkModeMetadata {
     accepting?: boolean
     persistenceFailed?: boolean
     committedMessageId?: string
+    /** Set when the streaming path hits the Office delivery guard. One continuation, then a visible error. */
+    officeDeliveryNote?: string
+    officeDeliveryRetried?: boolean
   }
 
   id: string
@@ -5083,6 +5090,8 @@ export class SessionManager implements ISessionManager {
         if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
         assertPptVisualQaTool(toolName, input, undefined, managed.agent?.currentModelSupportsImages?.())
+        const routeMismatch = pptRouteMismatch(getSessionStoragePath(managed.workspace.rootPath, managed.id), toolName, input && typeof input === 'object' ? input as Record<string, unknown> : {})
+        if (routeMismatch) throw new Error(routeMismatch)
         if (managed.isolatedWorkspace?.denyExternalBrowsers) assertOfficeRevisionTool(toolName, input)
         if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
         const checkpoint = managed.executionCheckpoint
@@ -5364,15 +5373,23 @@ export class SessionManager implements ISessionManager {
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         officeToolsFn: (name, args) => this.runOfficeTool(managed, name, args),
+        pptToolsFn: (name, args) => this.runPptTool(managed, name, args),
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
         ...(getOfficePageCaptureHost() ? {
-          officeRenderFn: (request, signal) => renderOfficePages({
-            ...request,
-            cwd: managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
-            outDir: join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'office-render'),
-            signal,
-            previewHtml: (path, sha256) => this.officePreviews.htmlFor(path, sha256),
-          }),
+          officeRenderFn: async (request, signal) => {
+            const outcome = await renderOfficePages({
+              ...request,
+              cwd: managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
+              outDir: join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'office-render'),
+              signal,
+              previewHtml: (path, sha256) => this.officePreviews.htmlFor(path, sha256),
+            })
+            try {
+              const recorded = recordVisualInspection(getSessionStoragePath(managed.workspace.rootPath, managed.id), outcome.file, outcome.renderer, outcome.images.map(image => ({ label: image.label, path: image.path })))
+              if (recorded.atLimit) outcome.notes = [...(outcome.notes ?? []), `这份文件的原生读图已有 ${recorded.rounds} 轮，上限是 3 轮。不要再开新的一轮，也不要改用 OCR。`]
+            } catch { /* A missing record must not hide the page images. */ }
+            return outcome
+          },
         } : {}),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
@@ -9915,23 +9932,50 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     return recalculateWorkspaceXlsx(session, args as unknown as Parameters<typeof recalculateWorkspaceXlsx>[1])
   }
 
+  /** Personal template copies and slot images (#714, #715). Originals stay in the library. */
+  private async runPptTool(managed: ManagedSession, name: 'ppt_template_create_project' | 'image_generate', args: Record<string, unknown>): Promise<unknown> {
+    const workspaceDir = managed.workingDirectory ?? managed.workspace.rootPath
+    const sessionDir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (name === 'ppt_template_create_project') {
+      return createTemplateTaskProject({
+        templateId: String(args.template_id),
+        workspaceDir,
+        pages: Array.isArray(args.pages) ? args.pages.filter((page): page is number => typeof page === 'number') : undefined,
+      })
+    }
+    return generatePresentationImage({
+      purpose: args.purpose as 'presentation' | 'document' | 'other',
+      aspect_ratio: String(args.aspect_ratio),
+      style_context: String(args.style_context ?? ''),
+      prompt: String(args.prompt ?? ''),
+      reuse_group: typeof args.reuse_group === 'string' ? args.reuse_group : undefined,
+      source_policy: args.source_policy as 'contextual-scene' | 'provided-portrait' | 'native-graphic' | undefined,
+      workspaceDir,
+      sessionDir,
+    })
+  }
+
   /**
    * Pre-delivery guard (#711). Files changed in this turn that came from the selected Word case must keep its
    * layout; Excel workbooks with formulas must be recalculated. Failure denies the answer and returns the
    * needs_revision list to the model for another round.
    */
-  private assertOfficeDeliveryReady(managed: ManagedSession): void {
-    if (!managed.office) return
+  private officeDeliveryBlock(managed: ManagedSession): string | undefined {
+    if (!managed.office) return undefined
     const changed = managed.artifactCandidateInventory?.changed() ?? []
-    if (!changed.length) return
-    let issues
+    if (!changed.length) return undefined
     try {
-      issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
+      const issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
+      return issues.length ? formatDeliveryIssues(issues) : undefined
     } catch (error) {
       sessionLog.warn('Office delivery guard failed to run', { sessionId: managed.id, error })
-      return
+      return undefined
     }
-    if (issues.length) throw new Error(formatDeliveryIssues(issues))
+  }
+
+  private assertOfficeDeliveryReady(managed: ManagedSession): void {
+    const block = this.officeDeliveryBlock(managed)
+    if (block) throw new Error(block)
   }
 
   /** Finish file discovery before the answer is persisted and published. */
@@ -10006,6 +10050,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
     catch { return undefined }
+    const officeBlock = this.officeDeliveryBlock(managed)
+    if (officeBlock) {
+      state.officeDeliveryNote = officeBlock
+      return undefined
+    }
     const regenerateTransaction = managed.regenerateTransaction
     const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     // A regenerated answer must retain a real SDK branch boundary.
@@ -10025,6 +10074,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, draft.content)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       this.assertAnswerReady(managed, state, draft.content)
+      this.assertOfficeDeliveryReady(managed)
       Object.assign(draft, { isIntermediate: false, hidden: undefined, phase: 'final' as const,
         answerCommitted: true, answerSalvaged: mode === 'salvage' ? true : undefined, artifactVersions })
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, draft,
@@ -10111,7 +10161,32 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       return !!answer
     }
     if (complete && !waiting && !managed.authRetryInProgress && !(await commitNatural())
-      && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !runHasError() && active()) {
+      && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !runHasError() && active()
+      && state.officeDeliveryNote && !state.officeDeliveryRetried) {
+      state.officeDeliveryRetried = true
+      const note = state.officeDeliveryNote
+      state.officeDeliveryNote = undefined
+      await this.processEvent(managed, complete)
+      if (active()) {
+        agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
+        complete = undefined
+        for await (const event of this.runProgressExecution(managed, agent, `${note}\n\n这是交付前检查，不是最终失败。请修正列出的文件后再给出最终答复。不要把未通过检查的文件说成已就绪。`, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+          if (event.type === 'complete') complete = event
+          else yield event
+        }
+        if (complete) await commitNatural()
+      }
+      if (!state.committedMessageId && active()) {
+        const blocked = state.officeDeliveryNote ?? note
+        state.officeDeliveryNote = undefined
+        this.revealHiddenDrafts(managed)
+        yield { type: 'typed_error', error: createTypedError('answer_delivery_missing', { message: blocked }) }
+        if (complete) yield complete
+        return
+      }
+    }
+    if (complete && !waiting && !managed.authRetryInProgress && !state.committedMessageId
+      && !state.persistenceFailed && !state.recovery && !runHasError() && active() && !state.officeDeliveryNote && !state.officeDeliveryRetried) {
       // The run ended without a final tool-free message. Close any refused
       // candidate as process text, then ask once for the answer as plain text.
       this.revealHiddenDrafts(managed)

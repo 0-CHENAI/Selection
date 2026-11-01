@@ -15,7 +15,7 @@ const FALLBACK_FILE = 'chart-fallback.json'
 const OUTPUT_FILE = 'ppt-output.json'
 const RUN_FILE = 'ppt-run.json'
 const CHOICE_FILE = 'ppt-choice.json'
-const HARD_ISSUE = new Set(['schema', 'out_of_bounds', 'over_capacity', 'literal_newline'])
+const HARD_ISSUE = new Set(['schema', 'out_of_bounds', 'over_capacity', 'literal_newline', 'chart_data', 'chart_series_color', 'image_fit', 'image_crop', 'remote_image', 'missing_asset'])
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const MAX_DEPTH = 3
@@ -25,7 +25,7 @@ const RESERVED_FILE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
 
 type RawPage = { id?: unknown; name?: unknown }
 type RawDeck = { title?: unknown; canvas?: { width?: unknown; height?: unknown }; theme?: { colors?: Record<string, unknown> }; pages?: unknown }
-type CheckIssue = { pageId?: string; elementId?: unknown; code?: unknown; message?: unknown }
+type CheckIssue = { pageId?: string; elementId?: unknown; code?: unknown; message?: unknown; severity?: unknown }
 type Checker = (deck: unknown) => CheckIssue[]
 interface SlideImage { stamp: string; name: string }
 interface PageIssues { count: number; issue?: string; failed: boolean; issues: PptPageIssue[] }
@@ -180,6 +180,8 @@ function listPptx(dir: string): PptxFile[] {
 interface PptOutputRecord {
   path: string
   stamp: string
+  /** False while deck_check still has errors. Omitted records stay deliverable. */
+  ready?: boolean
 }
 
 function located(path: string): string {
@@ -209,9 +211,9 @@ function readOutputRecord(sessionDir: string): PptOutputRecord | null {
   const file = join(sessionDir, 'data', OUTPUT_FILE)
   if (!existsSync(file)) return null
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { path?: unknown; stamp?: unknown }
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { path?: unknown; stamp?: unknown; ready?: unknown }
     if (typeof parsed.path !== 'string' || !parsed.path.toLowerCase().endsWith('.pptx') || parsed.path.includes('\0')) return null
-    return { path: located(parsed.path), stamp: typeof parsed.stamp === 'string' ? parsed.stamp : '' }
+    return { path: located(parsed.path), stamp: typeof parsed.stamp === 'string' ? parsed.stamp : '', ...(parsed.ready === false ? { ready: false } : {}) }
   } catch { return null }
 }
 
@@ -219,7 +221,7 @@ function writeOutputRecord(sessionDir: string, record: PptOutputRecord): void {
   const dir = join(sessionDir, 'data')
   mkdirSync(dir, { recursive: true })
   const tmp = join(dir, `.${OUTPUT_FILE}.${process.pid}.tmp`)
-  writeFileSync(tmp, JSON.stringify({ path: record.path, stamp: record.stamp }))
+  writeFileSync(tmp, JSON.stringify({ path: record.path, stamp: record.stamp, ...(record.ready === false ? { ready: false } : { ready: true }) }))
   renameSync(tmp, join(dir, OUTPUT_FILE))
 }
 
@@ -530,15 +532,16 @@ function pageIssues(deckPath: string, check?: Checker): Map<string, PageIssues> 
   for (const issue of issues ?? []) {
     if (!issue.pageId) continue
     const current = details.get(issue.pageId) ?? { count: 0, failed: false, issues: [] }
-    current.count += 1
+    const warning = issue.severity === 'warning'
+    if (!warning) current.count += 1
     const message = cleanIssue(issue.message)
     if (message && current.issues.length < 50) current.issues.push({
       code: typeof issue.code === 'string' ? issue.code.slice(0, 80) : 'unknown',
       message,
       ...(typeof issue.elementId === 'string' && issue.elementId.length > 0 && issue.elementId.length <= 200 ? { elementId: issue.elementId } : {}),
     })
-    if (!current.issue && message) current.issue = message
-    if (typeof issue.code === 'string' && HARD_ISSUE.has(issue.code)) current.failed = true
+    if (!warning && !current.issue && message) current.issue = message
+    if (!warning && typeof issue.code === 'string' && HARD_ISSUE.has(issue.code)) current.failed = true
     details.set(issue.pageId, current)
   }
   return details
@@ -766,13 +769,17 @@ export async function exportIncrementalPptx(sessionDir: string, options: { worki
   try {
     const result = await exporter.exportDeck(loaded.deck, tmp)
     checkCache.set(deckPath, { stamp, issues: result.issues })
-    if (result.status !== 'ok' || !result.pptx) return owned
+    writeDeckCheck(deckPath, stamp, result.status, result.issues)
+    if (result.status !== 'ok' || !result.pptx) {
+      if (record && record.stamp === stamp) writeOutputRecord(sessionDir, { ...record, ready: false })
+      return owned
+    }
     if (fileStamp(deckPath) !== stamp) {
       rmSync(tmp, { force: true })
       return owned
     }
     replaceFile(tmp, out)
-    writeOutputRecord(sessionDir, { path: out, stamp })
+    writeOutputRecord(sessionDir, { path: out, stamp, ready: true })
     const previous = owned && !sameFile(owned, out) ? [owned] : []
     removeFiles([...previous, ...scratchPptx(sessionDir, deckPath, out)])
     return out
@@ -865,7 +872,54 @@ export function pptTurnRun(options: Pick<SendMessageOptions, 'ppt' | 'pptRevisio
 
 /** A revision must never also receive generation instructions from persisted composer settings. */
 export function buildPptTurnPrompt(options: Pick<SendMessageOptions, 'ppt' | 'pptRevision'> | undefined, sessionPath: string, root?: string, skills: ChartSkillCandidate[] = [], message?: string, presentationPath?: string): string | undefined {
-  if (options?.pptRevision) return buildPptRevisionPrompt(options.pptRevision, sessionPath)
-  if (options?.ppt) return buildPptPrompt(options.ppt, sessionPath, root ?? getPptSkillRoot(), skills, message, presentationPath)
-  return undefined
+  const prompt = options?.pptRevision
+    ? buildPptRevisionPrompt(options.pptRevision, sessionPath)
+    : options?.ppt
+      ? buildPptPrompt(options.ppt, sessionPath, root ?? getPptSkillRoot(), skills, message, presentationPath)
+      : undefined
+  if (!prompt) return undefined
+  const note = readDeckDeliveryNote(sessionPath)
+  return note ? `${prompt}\n${note}` : prompt
+}
+
+function writeDeckCheck(deckPath: string, stamp: string, status: string, issues: CheckIssue[]): void {
+  const blocking = issues.filter(item => item.severity !== 'warning')
+  const ready = status === 'ok' && blocking.length === 0
+  const body = {
+    stamp,
+    status: ready ? 'ok' : 'needs_revision',
+    ready,
+    errorCount: blocking.length,
+    warningCount: issues.length - blocking.length,
+    issues,
+    ...(ready ? {} : { message: formatPptDelivery(deckPath, blocking) }),
+  }
+  writeFileSync(join(dirname(deckPath), CHECK_FILE), `${JSON.stringify(body, null, 2)}\n`)
+}
+
+function formatPptDelivery(file: string, issues: CheckIssue[]): string {
+  const lines = [`needs_revision：${issues.length} 项需要修正，不能以「就绪」交付。`]
+  issues.forEach((item, index) => {
+    const page = typeof item.pageId === 'string' && item.pageId ? `页 ${item.pageId}` : ''
+    const element = typeof item.elementId === 'string' && item.elementId ? `元素 ${item.elementId}` : ''
+    const code = typeof item.code === 'string' ? item.code : 'issue'
+    const message = typeof item.message === 'string' ? item.message : ''
+    lines.push(`[${index + 1}] ${[file, page, element].filter(Boolean).join(' · ')}\n${code}：${message}`)
+  })
+  return lines.join('\n')
+}
+
+/** Host reminder for the model. Absent when the latest check has no errors. */
+export function readDeckDeliveryNote(sessionDir: string): string | undefined {
+  const deckPath = discoverDeck(sessionDir)
+  if (!deckPath) return undefined
+  const path = join(dirname(deckPath), CHECK_FILE)
+  if (!existsSync(path)) return undefined
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { stamp?: unknown; ready?: unknown; message?: unknown }
+    if (parsed.stamp !== fileStamp(deckPath) || parsed.ready !== false || typeof parsed.message !== 'string' || !parsed.message.trim()) return undefined
+    return parsed.message
+  } catch {
+    return undefined
+  }
 }

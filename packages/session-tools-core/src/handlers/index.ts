@@ -11,6 +11,8 @@ export type { ArtifactVersionsArgs } from './artifact-versions.ts';
 export { handleOfficeTemplate, handleOfficeTemplateWrite, handleXlsxRecalculate } from './office-template.ts';
 export type { OfficeToolName } from './office-template.ts';
 export { handleOfficeRender, officeRenderResult, OfficeRenderSchema, OFFICE_RENDER_MAX_PAGES } from './office-render.ts';
+export { handlePptTemplateCreateProject, handleImageGenerate } from './ppt-tools.ts';
+export type { PptToolName } from './ppt-tools.ts';
 export type { OfficeRenderArgs, OfficeRenderOutcome, OfficeRenderImage } from './office-render.ts';
 export { handleSubmitPlan } from './submit-plan.ts';
 export type { SubmitPlanArgs } from './submit-plan.ts';

@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import sharp from 'sharp'
 import { homedir } from 'node:os'
-import { join, relative, resolve, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { strFromU8, unzipSync } from 'fflate'
 import { DEFAULT_MAX_MESSAGE_BYTES, type PptTemplate } from '@craft-agent/shared/protocol'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
@@ -42,6 +43,18 @@ export interface PptLibraryRecord {
   preview?: 'officecli' | 'geometry' | 'mixed'
   /** `deck` stores selection-deck JSON. Older records and PPTX uploads omit this. */
   sourceKind?: 'pptx' | 'deck'
+  /** Conversion summary for the editable project. Absent until the project is built. */
+  diagnostics?: TemplateProjectDiagnostics
+}
+
+export const TEMPLATE_PROJECT_MAX_PAGES = 40
+export const TEMPLATE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000
+
+export interface TemplateProjectDiagnostics {
+  faithful: number
+  approximate: number
+  retained: number
+  unsupported: number
 }
 
 interface ParsedDeck {
@@ -283,6 +296,7 @@ function recordMatchesDir(root: string, record: PptLibraryRecord | null, dirName
 }
 
 export function listPptCustomTemplates(root = pptTemplateLibraryRoot()): PptLibraryRecord[] {
+  try { cleanupTemplateDrafts(root) } catch { /* A locked draft must not hide the library. */ }
   let names: string[] = []
   try { names = readdirSync(root) } catch { return [] }
   const records: PptLibraryRecord[] = []
@@ -428,6 +442,7 @@ export function customTemplateCard(record: PptLibraryRecord, root = pptTemplateL
     pages: record.pageCount,
     cover,
     referencePages: references,
+    ...(record.diagnostics ? { diagnostics: record.diagnostics } : {}),
   }
 }
 
@@ -592,7 +607,14 @@ export function customTemplateReference(id: string, root = pptTemplateLibraryRoo
   ]
   if (existsSync(theme)) lines.push(`Theme JSON:\n${readFileSync(theme, 'utf8')}`)
   if (existsSync(slots)) lines.push(`Slots JSON:\n${readFileSync(slots, 'utf8')}`)
-  if (storedDeck) lines.push('Issue #714 will copy a personal template into the session project as an editable deck. This upload only stores and lists the file. Do not write this library copy over the session deck, and do not duplicate that project step.')
+  lines.push(`Call ppt_template_create_project with template_id ${record.id}. It copies an editable deck into the workspace. Do not edit this library copy, and do not write sample pages back into it.`)
+  const projectDeck = join(dir, 'project', 'deck.json')
+  if (existsSync(projectDeck)) lines.push(`Template project (still not the session deck): ${projectDeck}`)
+  if (record.diagnostics) {
+    const counts = record.diagnostics
+    lines.push(`Conversion counts: faithful ${counts.faithful}, approximate ${counts.approximate}, retained ${counts.retained}, unsupported ${counts.unsupported}.`)
+    if (counts.unsupported > 0) lines.push('Unsupported objects need a manual look. Say so before export. Consecutive identical layouts are a warning, not a block.')
+  }
   return lines.join('\n')
 }
 
@@ -682,6 +704,7 @@ function importDeckTemplate(bytes: Uint8Array, fileName: string, root: string): 
 }
 
 export function importPptTemplate(bytes: Uint8Array, fileName: string, root = pptTemplateLibraryRoot()): { record: PptLibraryRecord; duplicate: boolean } {
+  try { cleanupTemplateDrafts(root) } catch { /* listing still works if draft cleanup fails */ }
   if (isDeckUpload(fileName)) return importDeckTemplate(bytes, fileName, root)
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES) throw new Error('Invalid PPTX')
   const parsed = parsePptx(bytes)
@@ -741,4 +764,95 @@ export function exportPptTemplate(id: string, root = pptTemplateLibraryRoot()): 
   }
   const name = `${record.title.replace(/[\\/:*?"<>|]/g, ' ').trim() || 'template'}.pptx`
   return { name, bytes: new Uint8Array(readFileSync(join(dir, 'source.pptx'))) }
+}
+
+export function cleanupTemplateDrafts(root = pptTemplateLibraryRoot(), now = Date.now()): string[] {
+  const dir = join(root, 'drafts')
+  if (!existsSync(dir)) return []
+  const removed: string[] = []
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    let mtime = 0
+    try { mtime = statSync(path).mtimeMs } catch { continue }
+    if (now - mtime >= TEMPLATE_DRAFT_TTL_MS) {
+      rmSync(path, { recursive: true, force: true })
+      removed.push(name)
+    }
+  }
+  return removed
+}
+
+function writeRecord(dir: string, record: PptLibraryRecord): void {
+  writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(record, null, 2)}\n`)
+}
+
+/**
+ * Build the editable template project next to the library copy.
+ * The original PPTX or deck.json is not rewritten. Old libraries gain a project the first time this runs.
+ */
+export async function materializeTemplateProject(id: string, root = pptTemplateLibraryRoot()): Promise<PptLibraryRecord> {
+  cleanupTemplateDrafts(root)
+  const dir = templateDir(root, id)
+  const record = readRecord(dir)
+  if (!record || record.id !== id) throw new Error('Unknown PPT template')
+  const projectDir = join(dir, 'project')
+  const sourcePptx = join(dir, 'source.pptx')
+  const sourceDeck = join(dir, 'deck.json')
+  const sourceBytes = existsSync(sourcePptx) ? readFileSync(sourcePptx) : existsSync(sourceDeck) ? readFileSync(sourceDeck) : null
+  if (!sourceBytes) throw new Error('模板原件不存在')
+  const sourceSha = createHash('sha256').update(sourceBytes).digest('hex')
+  if (existsSync(join(projectDir, 'deck.json')) && record.diagnostics) {
+    if (createHash('sha256').update(sourceBytes).digest('hex') !== sourceSha) throw new Error('模板原件在读取时被改动')
+    return record
+  }
+  const draft = join(root, 'drafts', `${id}-${Date.now()}`)
+  mkdirSync(draft, { recursive: true })
+  let diagnostics: TemplateProjectDiagnostics
+  try {
+    if (existsSync(sourcePptx)) {
+      const { getPptSkillRoot } = await import('./ppt-catalog.ts')
+      const engine = await import(pathToFileURL(join(getPptSkillRoot(), 'engine/import/pptx-to-deck.ts')).href) as {
+        importPptx: (bytes: Uint8Array, options: { fileName?: string; assetDir?: string; maxSlides?: number }) => { deck: unknown; diagnostics: Array<{ level?: string }> }
+        coverageReport: (rows: Array<{ level?: string }>) => { counts: TemplateProjectDiagnostics }
+      }
+      const imported = engine.importPptx(new Uint8Array(sourceBytes), { fileName: `${record.title}.pptx`, assetDir: join(draft, 'assets'), maxSlides: TEMPLATE_PROJECT_MAX_PAGES })
+      diagnostics = engine.coverageReport(imported.diagnostics).counts
+      if (!imported.deck) throw new Error('没有生成可编辑工程')
+      writeFileSync(join(draft, 'deck.json'), `${JSON.stringify(imported.deck, null, 2)}\n`)
+      writeFileSync(join(draft, 'diagnostics.json'), `${JSON.stringify({ counts: diagnostics, rows: imported.diagnostics }, null, 2)}\n`)
+    } else {
+      const deck = JSON.parse(sourceBytes.toString('utf8')) as { pages?: unknown[] }
+      const pages = Array.isArray(deck.pages) ? deck.pages.slice(0, TEMPLATE_PROJECT_MAX_PAGES) : []
+      writeFileSync(join(draft, 'deck.json'), `${JSON.stringify({ ...deck, pages }, null, 2)}\n`)
+      diagnostics = { faithful: pages.length, approximate: 0, retained: 0, unsupported: Array.isArray(deck.pages) && deck.pages.length > TEMPLATE_PROJECT_MAX_PAGES ? 1 : 0 }
+      writeFileSync(join(draft, 'diagnostics.json'), `${JSON.stringify({ counts: diagnostics, rows: [] }, null, 2)}\n`)
+    }
+    if (createHash('sha256').update(readFileSync(existsSync(sourcePptx) ? sourcePptx : sourceDeck)).digest('hex') !== sourceSha) {
+      throw new Error('模板原件被改动，已放弃工程')
+    }
+    rmSync(projectDir, { recursive: true, force: true })
+    mkdirSync(dirname(projectDir), { recursive: true })
+    renameSync(draft, projectDir)
+  } catch (error) {
+    rmSync(draft, { recursive: true, force: true })
+    const message = error instanceof Error ? error.message : String(error)
+    diagnostics = { faithful: 0, approximate: 0, retained: 0, unsupported: 1 }
+    const updated = { ...record, diagnostics, updatedAt: Date.now() }
+    writeRecord(dir, updated)
+    if (createHash('sha256').update(readFileSync(existsSync(sourcePptx) ? sourcePptx : sourceDeck)).digest('hex') !== sourceSha) {
+      throw new Error('模板原件被改动')
+    }
+    if (!/页数上限/.test(message)) throw error
+    return updated
+  }
+  const updated = { ...record, diagnostics, updatedAt: Date.now() }
+  writeRecord(dir, updated)
+  return updated
+}
+
+export async function upgradePendingTemplateProjects(root = pptTemplateLibraryRoot()): Promise<void> {
+  for (const record of listPptCustomTemplates(root)) {
+    if (record.diagnostics) continue
+    try { await materializeTemplateProject(record.id, root) } catch { /* One bad template does not block the gallery. */ }
+  }
 }

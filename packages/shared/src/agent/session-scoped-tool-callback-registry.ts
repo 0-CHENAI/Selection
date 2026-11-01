@@ -27,6 +27,8 @@ export interface SessionScopedToolCallbacks {
   }) => Promise<unknown>;
   /** Host-side Word / Excel template tools (#711). */
   officeToolsFn?: (name: import('@craft-agent/session-tools-core').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** Personal PPT template projects and slot images (#714, #715). */
+  pptToolsFn?: (name: import('@craft-agent/session-tools-core').PptToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Render Office pages for office_render. Set by SessionManager in desktop builds that have a capture host. */
   officeRenderFn?: (
     request: import('@craft-agent/session-tools-core').OfficeRenderArgs,

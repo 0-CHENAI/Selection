@@ -37,8 +37,8 @@ const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const FONT_TOKEN = /^\$cjk$|^\$latin$/
 const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/
 
-export function issue(code: DeckIssue['code'], message: string, pageId?: string, elementId?: string): DeckIssue {
-  return { code, message, pageId, elementId }
+export function issue(code: DeckIssue['code'], message: string, pageId?: string, elementId?: string, severity: DeckIssue['severity'] = 'error'): DeckIssue {
+  return severity === 'warning' ? { code, message, pageId, elementId, severity } : { code, message, pageId, elementId }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

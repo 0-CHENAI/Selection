@@ -54,7 +54,7 @@ export const OFFICE_RENDER_DESCRIPTION = [
   'Uses the same OfficeCLI HTML rendering as the Office preview panel the user sees; no external browser, LibreOffice or OCR.',
   'Word/PowerPoint: pass pages ("1,last", "2-4"). Excel: pass sheet and range. At most 6 images per call.',
   'Before delivering a generated or revised Office file, render at least its first and last page (or each changed page / key sheet area).',
-  'Inspect the returned images yourself and fix what you see, then render the changed pages again. Never run OCR on these images. missingFonts lists fonts the document asks for that this computer does not have.',
+  'Inspect the returned images yourself and fix what you see, then render the changed pages again. For a PowerPoint, this is the generate, render, inspect, fix loop, at most 3 rounds for the task. Never run OCR on these images. missingFonts lists fonts the document asks for that this computer does not have.',
 ].join(' ');
 
 export async function handleOfficeRender(ctx: SessionToolContext, rawArgs: unknown): Promise<ToolResult> {

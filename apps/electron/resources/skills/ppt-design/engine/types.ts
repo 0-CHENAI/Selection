@@ -317,8 +317,9 @@ export type Deck = {
   theme: Theme
   pages: DeckPage[]
   /**
-   * `example` is a converted reference deck. Contrast and orphan checks are skipped
-   * because the pages were already published; schema, capacity, and bounds still run.
+   * `example` is a converted reference deck. Contrast, orphan and the advisory
+   * composition warnings are skipped because the pages were already published;
+   * schema, capacity, and bounds still run.
    */
   profile?: 'authored' | 'example'
 }
@@ -332,14 +333,28 @@ export type IssueCode =
   | 'orphan'
   | 'literal_newline'
   | 'adjacent_layout'
+  | 'layout_repetition'
+  | 'cover_focus'
+  | 'chart_data'
+  | 'chart_series_color'
+  | 'image_fit'
+  | 'image_crop'
+  | 'remote_image'
+  | 'missing_asset'
+  | 'text_drift'
+  | 'text_occlusion'
   | 'unreconciled'
   | 'font'
+
+export type IssueSeverity = 'error' | 'warning'
 
 export type DeckIssue = {
   code: IssueCode
   pageId?: string
   elementId?: string
   message: string
+  /** Omitted issues are errors. Warnings do not block export. */
+  severity?: IssueSeverity
 }
 
 export type RenderStatus = 'ok' | 'needs_revision' | 'error'

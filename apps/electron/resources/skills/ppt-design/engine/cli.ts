@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { argumentLayoutCatalog } from './argument-layouts.ts'
-import { checkDeck } from './check.ts'
+import { checkDeck, formatNeedsRevision, revisionStatus } from './check.ts'
 import { exportDeck, platformFromProcess } from './export-pptx.ts'
 import { importPptxFile, loadRetained } from './import/project.ts'
 import { mergeRetained } from './import/retained.ts'
@@ -68,15 +68,19 @@ if (flags.command === 'import') {
   try {
     const imported = await importPptxFile(resolve(flags.file), resolve(flags.out), { maxSlides: flags.maxSlides })
     const failed = !imported.deck
-    emit(failed ? 'error' : imported.issues.length ? 'needs_revision' : 'ok', {
+    const revision = revisionStatus(imported.issues)
+    emit(failed ? 'error' : revision.status, {
       project: imported.projectDir,
       deck: imported.deck ? resolve(imported.projectDir, 'deck.json') : undefined,
       source: imported.source,
       pages: imported.deck?.pages.length ?? 0,
       issues: imported.issues,
+      errorCount: revision.errorCount,
+      warningCount: revision.warningCount,
+      ...(revision.status === 'needs_revision' ? { message: formatNeedsRevision(resolve(flags.file!), imported.issues) } : {}),
       diagnostics: imported.diagnostics,
       preview: imported.preview,
-    }, failed ? 1 : imported.issues.length ? 2 : 0)
+    }, failed ? 1 : revision.code)
   } catch (error) {
     emit('error', { message: error instanceof Error ? error.message : String(error) }, 1)
   }
@@ -99,7 +103,14 @@ if (!loaded.deck) emit('error', { issues: loaded.issues }, 1)
 
 if (flags.command === 'check') {
   const issues = [...loaded.issues, ...checkDeck(loaded.deck)]
-  emit(issues.length ? 'needs_revision' : 'ok', { issues, pages: loaded.deck.pages.length }, issues.length ? 2 : 0)
+  const revision = revisionStatus(issues)
+  emit(revision.status, {
+    issues,
+    pages: loaded.deck.pages.length,
+    errorCount: revision.errorCount,
+    warningCount: revision.warningCount,
+    ...(revision.status === 'needs_revision' ? { message: formatNeedsRevision(file, issues) } : {}),
+  }, revision.code)
 }
 
 if (flags.command === 'render') {

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
-import { checkDeck } from './check.ts'
+import { blockingIssues, checkDeck } from './check.ts'
 import { contrastRatio, luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
@@ -59,7 +59,7 @@ export type ExportResult = {
 
 export async function exportDeck(deck: Deck, outFile: string, options: ExportOptions = {}): Promise<ExportResult> {
   const issues = options.enforceCheck === false ? [] : checkDeck(deck)
-  if (issues.length > 0) return { status: 'needs_revision', issues }
+  if (blockingIssues(issues).length > 0) return { status: 'needs_revision', issues }
   const platform = options.platform ?? platformFromProcess()
   const bytes = await buildPptx(deck, platform)
   mkdirSync(dirname(outFile), { recursive: true })
@@ -68,7 +68,7 @@ export async function exportDeck(deck: Deck, outFile: string, options: ExportOpt
   const screenshots = options.screenshotDir
     ? await captureSlides(pptx, options.screenshotDir, deck.pages.length, { officecli: options.officecli })
     : undefined
-  return { status: 'ok', issues: [], pptx, screenshots }
+  return { status: 'ok', issues, pptx, screenshots }
 }
 
 async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
