@@ -124,13 +124,12 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 
 ### 对齐度
 
-见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 96.2%，Word 100%，Excel 95.8%，共享底座 95%，总体 97.2%。计入分母的未对齐项是 0。草稿 PR #741（PPT 配图接 Seedream / OpenAI）合入后，PPT 到 100%，总体到 98.1%。
+见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 96.2%，Word 100%，Excel 95.8%，共享底座 100%，总体 98.1%。计入分母的未对齐项是 0。草稿 PR #741（PPT 配图接 Seedream / OpenAI）合入后，PPT 到 100%，总体到 99.1%。
 
-还剩三项部分对齐，需要 LinNai 书面确认能否带着发布：
+还剩两项部分对齐，需要 LinNai 书面确认能否带着发布：
 
 - PPT-IMAGE：图片槽合同和占位已经有了，但还没有内置生图提供方，等 #741。
 - XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
-- SHR-CHART-HTML：浮动图表已按锚点放置，但 HTML 列宽比 Excel 窄，宽图仍可能压住右侧的表。
 
 PDF 导出按阶段 06 排除在用户路径之外。
 

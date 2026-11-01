@@ -1,4 +1,5 @@
 import katexSource from 'katex/dist/katex.min.js?raw'
+import { XLSX_FLOAT_ANCHOR_SOURCE } from '@craft-agent/shared/utils/xlsx-float-anchor-script'
 import { officePreviewPageBridge } from './office-preview-page'
 
 /** The sandbox has no application origin, network, file access, or write API. */
@@ -45,30 +46,27 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     return true;
   };
   // OfficeCLI places Excel floating charts at 15pt per row; taller CJK rows push
-  // the cells down and the chart covers them. Snap each chart to its anchor row
-  // (same rule as office-page-render-script).
-  const anchorFloats = () => {
-    for (const el of document.querySelectorAll('.sheet-content.active [data-from-row]')) {
-      const content = el.closest('.sheet-content');
-      const row = parseInt(el.getAttribute('data-from-row') || '', 10) + 1;
-      const tr = content && content.querySelector('tr[data-row="' + content.getAttribute('data-sheet') + '-' + row + '"]');
-      const want = tr && tr.getBoundingClientRect();
-      if (!want || !want.height) continue;
-      const have = el.getBoundingClientRect();
-      const delta = want.top - have.top;
-      if (Math.abs(delta) > 0.5) el.style.top = ((parseFloat(getComputedStyle(el).top) || 0) + delta) + 'px';
-      let n = parseInt(el.getAttribute('data-from-col') || '', 10) + 1, letters = '';
-      while (n > 0) { letters = String.fromCharCode(65 + (n - 1) % 26) + letters; n = Math.floor((n - 1) / 26); }
-      const cell = letters && [...tr.querySelectorAll('td[data-path]')].find(td => (td.getAttribute('data-path') || '').endsWith('/' + letters + row));
-      const left = cell && cell.getBoundingClientRect();
-      const dx = left && left.width ? left.left - have.left : 0;
-      if (Math.abs(dx) > 0.5) el.style.left = ((parseFloat(getComputedStyle(el).left) || 0) + dx) + 'px';
-    }
+  // the cells down and the chart covers them. Lay each chart over the cells it
+  // covers in Excel (same script as office-page-render-script). Re-run whenever
+  // the sheet's layout changes: sheet switch, web fonts, row height changes.
+  const anchorXlsxFloats = ${XLSX_FLOAT_ANCHOR_SOURCE};
+  const anchorFloats = () => anchorXlsxFloats(document.querySelector('.sheet-content.active'));
+  let anchorQueued = false;
+  const queueAnchorFloats = () => {
+    if (anchorQueued) return;
+    anchorQueued = true;
+    requestAnimationFrame(() => { anchorQueued = false; anchorFloats(); });
   };
   document.addEventListener('DOMContentLoaded', () => {
     const switchSheet = window.switchSheet;
     if (typeof switchSheet === 'function') window.switchSheet = (index) => { switchSheet(index); anchorFloats(); };
     requestAnimationFrame(anchorFloats);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueAnchorFloats, () => {});
+    const tables = [...document.querySelectorAll('.sheet-content .table-wrapper > table')];
+    if (tables.length && typeof ResizeObserver === 'function' && document.querySelector('.sheet-content [data-from-row]')) {
+      const observer = new ResizeObserver(queueAnchorFloats);
+      for (const table of tables) observer.observe(table);
+    }
   });
   ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {

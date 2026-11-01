@@ -65,6 +65,7 @@
     "./colors": "./src/colors/index.ts",
     "./utils/icon-constants": "./src/utils/icon-constants.ts",
     "./utils/url-safety": "./src/utils/url-safety.ts",
+    "./utils/xlsx-float-anchor-script": "./src/utils/xlsx-float-anchor-script.ts",
     "./utils/workspace": "./src/utils/workspace.ts",
     "./utils/workspace-slug": "./src/utils/workspace-slug.ts",
     "./labels": "./src/labels/index.ts",

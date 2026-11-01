@@ -11,12 +11,12 @@
 | PPT | 12 | 1 | 0 | 3 | 13 | 96.2% |
 | Word | 19 | 0 | 0 | 2 | 19 | 100% |
 | Excel | 11 | 1 | 0 | 2 | 12 | 95.8% |
-| 共享底座 | 9 | 1 | 0 | 1 | 10 | 95% |
-| 总体 | 51 | 3 | 0 | 8 | 54 | 97.2% |
+| 共享底座 | 10 | 0 | 0 | 1 | 10 | 100% |
+| 总体 | 52 | 2 | 0 | 8 | 54 | 98.1% |
 
-总分是 52 / 54。四个领域都不低于 90%。这是能力行的分数，不是把 dsh 的 393 个文件逐个算进去，也不是模型成稿的审美分。文件清单仍以 [dsh-office-inventory.md](../plans/dsh-office-inventory.md) 为准。
+总分是 53 / 54。四个领域都不低于 90%。这是能力行的分数，不是把 dsh 的 393 个文件逐个算进去，也不是模型成稿的审美分。文件清单仍以 [dsh-office-inventory.md](../plans/dsh-office-inventory.md) 为准。
 
-#741 合入后，PPT-IMAGE 转为对齐，PPT 升到 96.2%，总体升到 97.2%。
+#741 合入后，PPT-IMAGE 转为对齐，PPT 升到 100%，总体升到 99.1%。
 
 ## 这次从严改了什么
 
@@ -26,6 +26,7 @@
 - **新增 PPT-TEMPLATE-READY，记部分。** 用 `deck-cli check --platform mac` 把 16 套 dsh 风格模板原样跑了一遍。dsh-signal、blue-professional、cartesian、editorial-notebook、soft-editorial 通过。其余 11 套被孤字、对比度、色块相交或文本框容量判成 needs_revision，在 Selection 里要模型先改一轮才能导出。dsh 用同一批模板直接出稿。
 - **PPT-TEMPLATE-READY 改为对齐（逐套修模板，不放宽检查）。** 复查发现上面那次跑的是 `styles/<id>/` 下按字节冻结的原导入页。其中 9 套 catalog 早已指向 `styles/examples/imported/` 或 `styles/_archive/imported/` 下修过的参考页，预检本来就干净。真正还会被交给模型的只剩两处：默认套 `dsh-course-workshop` 第 3 页 `t7`「从引导练习走向独立完成」和 `dsh-engineering-blueprint` 第 3 页 `t101`「明确每一层边界」，末行只剩一个字。现在这两套也走同一个适配脚本，参考页另存到 `styles/examples/imported/<id>/`，只改断行（「从引导练习／走向独立完成」「明确／每一层边界」），字号和框都不变，catalog 改指向新参考页。复测：16 套 32 份 catalog 参考页 `deck_check` 全部 0 问题，`render --platform mac` 和 `--platform win` 64 次全部 ok。
 - **SHR-CHART-HTML 仍是部分，但原因换了。** 原来的问题是 OfficeCLI 只认 `xdr:twoCellAnchor`。dsh 案例是 openpyxl 写的 `oneCellAnchor`，于是三张图都叠在 A1，按 400×250pt 画，盖住了指标。#742 按工作簿锚点改写浮动层，再按实际行高和列宽对齐。港口、荧光酶、家庭预算已经不挡指标。剩下的问题是 HTML 列宽比 Excel 窄，年度经营总览的日新增图会压住右侧季度表的两列。
+- **SHR-CHART-HTML 改为对齐。** 复查发现「HTML 列宽比 Excel 窄」不成立：OfficeCLI 写出的列宽（B 列 96.83pt、C 起 48.99pt）就是 Excel 按 Carlito 11 换算的 129px、65px。年度经营总览的日新增图在工作簿里是 609pt 宽的 oneCellAnchor，从 B12 起在 Excel 里也一直伸到 M 列一半，同样盖住 K–M 列的季度表；这是 dsh 样例本身的版式，样例按 sha256 锁定，不改。预览现在按 Excel 覆盖的单元格范围摆图：服务端从工作表的列宽、行高算出每张图的起止格（twoCellAnchor 取 from / to，oneCellAnchor 按 ext 推出），写成 `data-anchor-range`；协同面板和 office_render 共用同一段页面脚本，把图按这几格的实际位置移动并缩放，行被中文撑高时图跟着变高，和 Excel 一样。面板里字体加载完、行高变化、切换工作表都会重新对齐。另修了实时刷新的一个真问题：预览换入新文件后，缓存给 office_render 的 HTML 还是旧的，模型按新文件的 hash 会拿到旧页面（真实 OfficeCLI 用例先失败、修后通过）。复测：年度经营、港口、荧光酶、家庭预算 11 张图里，图框四边能落在已渲染格子上的，与对应格子的位置差都在 1px 以内；年度经营第三张图和家庭预算的图越过了已渲染的最后一列 / 一行，那一边保留 Excel 的绝对尺寸。
 - **新增 XLS-AUDIT-XLSX。** dsh 的 `data_quality_checker.py` 用 `pandas.read_excel` 直接读 xlsx，Selection 原来只收 CSV。现在 `office_business` 的 data-quality 可以直接读 xlsx，并能指定 sheet 和 range。
 - **新增 XLS-EDIT-RECALC。** 跑质量对比时发现一个真问题：OfficeCLI 1.0.157 每条命令都会自动起常驻进程，`set` 的改动几秒后才落盘。模型改完输入格马上调 `xlsx_recalculate`，读到的还是旧文件，重算结果没变，却报「已重算并通过核对」。现在重算前先 `officecli close` 落盘。复测：把年度经营 1 月基础版新增 MRR 从 10,560 改成 52,800，全年订阅收入从 1,404.71 万变成 1,406.82 万。
 - **新增 WORD-DRAFT-LAYOUT 和 WORD-GOV-FLOW。** 前者是下面质量对比里修好的草稿版式。后者是公文分册 14–18：起草、风险关、分维复核、统稿、交付门槛，定调句，指标写法，敏感提法，修改请求。正文都是 Selection 自写，测试禁止出现 dsh 技能里的专有栏目名。
@@ -117,7 +118,7 @@ dsh 的公文目录约 320KB，其中大部分是不能搬的范文、金句和�
 | SHR-HASH | 案例和模板原件在全流程后 sha256 不变 | 对齐 | `word-cases.test.ts` |
 | SHR-PERSONAL | 十一类个人办公文档的路由和技能注入 | 对齐 | `office-document-routing.test.ts`、`selection-3.2-office-personal-728.md` |
 | SHR-PACK | 安装包不含 LibreOffice Kit、Python 办公运行时和 PPTD | 对齐 | `no-python.test.ts`、`electron-builder.yml` |
-| SHR-CHART-HTML | Excel 浮动图表在 HTML 预览里的位置与 Excel 自身一致 | 部分 | `xlsx-float-anchors.ts`、`office-page-render-script.ts` |
+| SHR-CHART-HTML | Excel 浮动图表在 HTML 预览里的位置与 Excel 自身一致 | 对齐 | `xlsx-float-anchors.ts`、`xlsx-float-anchor-script.ts`、`office-preview-document.test.ts` |
 | SHR-PDF | 用户路径上的 PDF 导出 | 排除 | `system.ts`、`selection-3.2-office-stage-06.md` |
 
 导入入口是 `deck-cli import`，不是单独的会话工具名。dsh 的 `pptd_check` 还有一批工程语法码，Selection 用 deck.json 的 schema 一次报完，记在排除项 PPT-ENGINE。dsh 的案例画廊有单独的「做同款」和按工作表翻页。LinNai 定的是点卡片附上案例，预览进协同面板。功能在，交互不同，不扣分。
@@ -157,7 +158,7 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 
 ### Excel（4 张）
 
-- `excel-annual-business.png`：左边 dsh 样例的原始 OfficeCLI HTML，图叠在左上，挡住标题和全年订阅收入。右边是 Selection 改了一个输入格、`xlsx_recalculate` 双读通过后的副本，浮动图已按锚点放好。四个 KPI 都看得见：1,406.8、80.7%、843、2,100.3。日新增图仍压住右侧季度表的左两列。
+- `excel-annual-business.png`：左边 dsh 样例的原始 OfficeCLI HTML，图叠在左上，挡住标题和全年订阅收入。右边是 Selection 改了一个输入格、`xlsx_recalculate` 双读通过后的副本，浮动图已按锚点放好。四个 KPI 都看得见：1,406.8、80.7%、843、2,100.3。日新增图仍压住右侧季度表的 K–M 列，Excel 里也是这样（见上面 SHR-CHART-HTML）。`excel-chart-range-*.png` 是这次按单元格范围摆图前后的对照。
 - `excel-port-cargo.png`：重算后 checks 四项通过。右边三张图各回各位：日吞吐折线在 01 段，月度结构和货类两张柱图在 02 段。2,516.9、65.0%、2.7、2,190 都露出来了。左边原始 HTML 只看得到一张图，另两张叠在下面。
 - `excel-bio-assay.png`：checks 五项通过。剂量响应折线和两张 CV 柱图分开，288、3、8、10 四个指标都在。
 - `excel-household-budget.png`：修复前图例写着 Series 1，图从第 16 行起盖住了餐饮、交通两行。修复后系列名取「本期实际」，单系列不再显示图例，图从第 20 行开始，类别轴是房租、餐饮、交通。
@@ -172,11 +173,10 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 
 ## 还没对齐的
 
-计入分数的三项部分对齐：
+计入分数的两项部分对齐：
 
 - PPT-IMAGE：真出图的提供方和设置页在 #741，合入后转为对齐。
 - XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
-- SHR-CHART-HTML：HTML 列宽比 Excel 窄，宽图仍可能压住右侧的表。协同面板实时编辑时，OfficeCLI watch 推送的增量更新不经过这次的锚点改写，刷新后才对齐。
 
 另外记下、但不进百分比的：
 
