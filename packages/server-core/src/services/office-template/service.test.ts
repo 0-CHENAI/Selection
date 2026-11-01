@@ -7,7 +7,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import type { OfficeDocumentState } from '@craft-agent/shared/protocol/office'
 import { listOfficeTemplates } from '../office-catalog.ts'
 import { readPrintSetup } from '../excel-delivery/page-setup.ts'
-import { normalizeCaseChecks } from '../excel-delivery/cases.ts'
+import { normalizeCaseChecks } from '../excel-delivery/case-checks.ts'
 import { formatDeliveryIssues, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from './service.ts'
 import { diagnoseFonts, documentFonts, parseFcList, parseMacFonts, parseWindowsFontRegistry } from './font-diagnostics.ts'
 

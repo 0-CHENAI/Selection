@@ -16,7 +16,7 @@ import type { OfficeTemplate } from '../office-catalog.ts'
 import { applyPageSetupExtension, type PageSetupExtension } from '../excel-delivery/page-setup.ts'
 import { runXlsxRecalculateTool, workbookHasFormulas, type XlsxToolArgs, type XlsxToolDeps, type XlsxToolResult } from '../excel-delivery/xlsx-tool.ts'
 import type { CheckSpec } from '../office-render-poc/formula.ts'
-import { normalizeCaseChecks } from '../excel-delivery/cases.ts'
+import { normalizeCaseChecks } from '../excel-delivery/case-checks.ts'
 import {
   formatLayoutDiagnostics,
   prepareDocxSource,
