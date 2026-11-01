@@ -41,7 +41,7 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 
 - OfficeCLI 负责打开、查询、定点修改、校验和读回。
 - 业务技能负责文种、结构、事实口径和缺项写法。
-- 纪要的结构校验是 `bun packages/office-business-runtime/src/cli/validate-minutes.ts`。它检查 Markdown 草稿，不证明事实正确。
+- 纪要的结构校验调用会话工具 `office_business`（command 为 validate-minutes）。它检查 Markdown 草稿，不证明事实正确。仓库里的 bun CLI 只用于开发对拍。
 - Word 案例：先调用 `office_template(template_id)` 拿到段落 / run ID，再用 `office_template_write` 写出新的 DOCX（替换、继承样式的新增、克隆表格行、只删可删段落）。宿主在写出时和交付前各跑一次 7 项版式守卫（字体与页眉页脚、样式与主题、页面几何、边框与绘图框、模板字体、段落与 run 样式、可编辑版头），未通过不能完成，按返回的 needs_revision 诊断修正后重写。
 - Excel 案例：`office_template` 在工作区写出可编辑工作簿（年度经营案例自动加上 A3、宽度一页、打印区域），用 OfficeCLI 修改后调用 `xlsx_recalculate`。返回里的 `font_warnings` 列出本机缺失的字体和替代字体。
 - PDF 与逐页渲染的路径尚未选定。不要为了验收去调用 PDF 后端，也不要用 OCR。缺页图就写「视觉检查未做」。
@@ -76,7 +76,7 @@ Selection 样例 `selection-work-notice` 只把报送期限改至 11 月 6 日�
 - `dataset-health-audit`：12 个加权维度的数据体检。港口和实验案例在改明细后用它。
 - `data-viz-gen`：对比和趋势先写 OfficeCLI 原生图表，HTML/SVG 信息图只作补充。
 
-计算用 Bun CLI（`packages/office-business-runtime`），不调用 Python。Excel 交付前必须 `xlsx_recalculate`：OfficeCLI 把 `computedValue` 写回缓存；Windows 或 macOS 且装了 Excel 时再 `CalculateFull`；TypeScript 只补未求值的格子。有 `checks.json` 就逐项核对，否则双读关键单元格。区域渲染后原生读图，禁止 OCR，空白页立即停止。未重算不能交付。
+计算调用会话工具 `office_business`，不调用 Python。Excel 交付前必须 `xlsx_recalculate`：OfficeCLI 把 `computedValue` 写回缓存；Windows 或 macOS 且装了 Excel 时再 `CalculateFull`；TypeScript 只补未求值的格子。有 `checks.json` 就逐项核对，否则双读关键单元格。区域渲染后原生读图，禁止 OCR，空白页立即停止。未重算不能交付。
 
 dsh 案例在 `cases/annual-business`、`cases/port-cargo`、`cases/bio-assay`。`example.xlsx` 只读。用 `inputs/*.json` 在工作区副本上生成，不要覆盖原件。下面的执行台账仍是 Selection 虚构样例，与这三个案例无关。
 

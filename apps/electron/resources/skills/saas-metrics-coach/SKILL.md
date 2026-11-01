@@ -25,13 +25,13 @@ Work with partial data. Be explicit about what is missing and what assumptions a
 
 ## Step 2 — Calculate Metrics
 
-Run the Bun CLI `packages/office-business-runtime/src/cli/metrics.ts` with the user's inputs. If the script is unavailable, use the formulas in `references/formulas.md`.
+Call the session tool `office_business` with command `metrics`. It runs inside the app, so it works in the installed build without Python or a repository checkout. If the tool is unavailable, compute with the formulas in `references/formulas.md` and say the numbers were computed by hand.
 
 Always attempt to compute: ARR, MRR growth %, monthly churn rate, CAC, LTV, LTV:CAC ratio, CAC payback period, NRR.
 
 **Additional Analysis Tools:**
-- Use `packages/office-business-runtime/src/cli/quick-ratio.ts` when expansion/churn MRR data is available
-- Use `packages/office-business-runtime/src/cli/unit-economics.ts` for forward-looking projections
+- `office_business` command `quick-ratio` when expansion/churn MRR data is available
+- `office_business` command `unit-economics` for forward-looking projections
 
 ## Step 3 — Benchmark Each Metric
 
@@ -108,25 +108,24 @@ Expected output: Flags negative MoM growth (-6.4%), critical churn (11.25%), and
 - `references/formulas.md` — All metric formulas with worked examples
 - `references/benchmarks.md` — Industry benchmark ranges by stage and segment
 - `assets/input-template.md` — Blank input form to share with users
-- `src/cli/metrics.ts`（Bun） — Core metrics calculator (ARR, MRR, churn, CAC, LTV, NRR)
-- `src/cli/quick-ratio.ts`（Bun） — Growth efficiency metric (Quick Ratio)
-- `src/cli/unit-economics.ts`（Bun） — 12-month forward projection
+- `office_business`（会话工具）— metrics、quick-ratio、unit-economics 三个计算器，应用内运行
 
 ## Tools
 
-### 1. Metrics Calculator (`scripts/metrics_calculator.py`)
+All three calculators are commands of the session tool `office_business`. Numbers go in as JSON fields; output defaults to JSON (`format: "text"` for a readable table).
+
+### 1. Metrics Calculator
 Core SaaS metrics from raw business numbers.
 
-```bash
-bun packages/office-business-runtime/src/cli/metrics.ts --mrr 50000 --customers 100 --churned 5 --json
+```json
+{"command": "metrics", "mrr": 50000, "customers": 100, "churned": 5}
 ```
 
-### 2. Quick Ratio Calculator (`scripts/quick_ratio_calculator.py`)
+### 2. Quick Ratio Calculator
 Growth efficiency metric: (New MRR + Expansion) / (Churned + Contraction)
 
-```bash
-bun packages/office-business-runtime/src/cli/quick-ratio.ts --new-mrr 10000 --expansion 2000 --churned 3000 --contraction 500
-bun packages/office-business-runtime/src/cli/quick-ratio.ts --new-mrr 10000 --expansion 2000 --churned 3000 --json
+```json
+{"command": "quick-ratio", "new_mrr": 10000, "expansion": 2000, "churned": 3000, "contraction": 500}
 ```
 
 **Benchmarks:**
@@ -135,12 +134,11 @@ bun packages/office-business-runtime/src/cli/quick-ratio.ts --new-mrr 10000 --ex
 - 2-4 = HEALTHY (good efficiency)
 - \> 4 = EXCELLENT (strong growth)
 
-### 3. Unit Economics Simulator (`scripts/unit_economics_simulator.py`)
+### 3. Unit Economics Simulator
 Project metrics forward 12 months based on growth/churn assumptions.
 
-```bash
-bun packages/office-business-runtime/src/cli/unit-economics.ts --mrr 50000 --growth 10 --churn 3 --cac 2000
-bun packages/office-business-runtime/src/cli/unit-economics.ts --mrr 50000 --growth 10 --churn 3 --cac 2000 --json
+```json
+{"command": "unit-economics", "mrr": 50000, "growth": 10, "churn": 3, "cac": 2000}
 ```
 
 **Use for:**
@@ -151,7 +149,7 @@ bun packages/office-business-runtime/src/cli/unit-economics.ts --mrr 50000 --gro
 
 ## Selection 交付
 
-当前用户材料提供事实，所选案例提供结构和版式。不要调用 Python，不要使用 `load_workspace_dependencies`，不要打包 LibreOffice。
+当前用户材料提供事实，所选案例提供结构和版式。指标、Quick Ratio 和单位经济调用会话工具 `office_business`（command 为 metrics、quick-ratio 或 unit-economics）。不要调用 Python，不要使用 `load_workspace_dependencies`，不要打包 LibreOffice。上面的 bun 命令只在本仓库开发对拍时使用。
 
 Excel 交付前按顺序执行，任何一步失败都回到修订，不能交付：
 

@@ -8,6 +8,11 @@ import { join, extname } from 'node:path'
 import { unzipSync } from 'fflate'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 import { OFFICE_PREVIEW_MAX_OPEN, OFFICE_PREVIEW_IDLE_TTL_MS, OFFICE_PREVIEW_MAX_SELECTION, type OfficeSelection, type OfficePreviewResult } from '@craft-agent/shared/protocol'
+import { alignXlsxFloats } from '../services/xlsx-float-anchors.ts'
+
+/** Excel 浮动图表按工作簿锚点放置，见 xlsx-float-anchors.ts */
+const alignPreviewFloats = (html: string, path: string, bytes: Uint8Array): string =>
+  extname(path).toLowerCase() === '.xlsx' ? alignXlsxFloats(html, bytes) : html
 
 const exec = promisify(execFile)
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -139,7 +144,7 @@ export class OfficePreviewService {
         })
         const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(15_000) })
         if (!response.ok) throw new Error('Office 预览无法加载')
-        const html = await response.text()
+        const html = alignPreviewFloats(await response.text(), path, bytes)
         if (html.length > 16 * 1024 * 1024) throw new Error('Office 预览过大，请缩小文档后重试')
         if (!valid() || preview.stopping || child.exitCode !== null || child.signalCode !== null) throw new Error('Office 预览请求已被替换或取消')
         preview.html = html
@@ -258,7 +263,7 @@ export class OfficePreviewService {
     }
     const response = await fetch(`http://127.0.0.1:${p.port}/`, { signal: AbortSignal.timeout(15_000) })
     if (!response.ok) throw new Error('Office 预览无法加载')
-    const html = await response.text()
+    const html = alignPreviewFloats(await response.text(), p.path, bytes)
     if (html.length > 16 * 1024 * 1024) throw new Error('Office 预览过大，请缩小文档后重试')
     if (previous !== nextCopy) await rm(previous, { force: true }).catch(() => {})
     const selection = p.selectedElements ? { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, hash: p.hash, elements: p.selectedElements } : undefined

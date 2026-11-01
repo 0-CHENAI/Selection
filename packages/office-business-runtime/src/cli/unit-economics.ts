@@ -1,6 +1,7 @@
 /**
  * 单位经济 CLI。参数与 unit_economics_simulator.py 相同。
  */
+import { isDirectCli } from './direct.ts'
 import { unitEconomicsJson, unitEconomicsText, type UnitEconomicsArgs } from '../unit-economics.ts'
 import { hasFlag, parseFloatFlag, parseIntFlag, scalePercent, takeFlag, type CliResult } from './args.ts'
 
@@ -51,7 +52,7 @@ function read(argv: readonly string[], name: string, kind: 'float' | 'int'): { r
   return { rest: taken.rest, present: true, value }
 }
 
-if (import.meta.main) {
+if (isDirectCli('unit-economics.ts')) {
   const result = runUnitEconomicsCli(process.argv.slice(2))
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

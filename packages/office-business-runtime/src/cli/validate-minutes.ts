@@ -3,6 +3,7 @@
  * 用法行写的是本脚本，不把 Python 命令写进技能。
  */
 import { readFileSync } from 'node:fs'
+import { isDirectCli } from './direct.ts'
 import { validateMinutes } from '../validate-minutes.ts'
 
 export interface CliResult {
@@ -26,7 +27,7 @@ export function runValidateMinutesCli(argv: readonly string[]): CliResult {
   return { exitCode: report.exitCode, stdout: `${report.text}\n`, stderr: '' }
 }
 
-if (import.meta.main) {
+if (isDirectCli('validate-minutes.ts')) {
   const result = runValidateMinutesCli(process.argv.slice(2))
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

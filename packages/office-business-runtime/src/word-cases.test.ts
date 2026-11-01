@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
-import { mediaDigests, plainText, readMargins, readOutline, type OutlineBlock } from './docx-package.ts'
+import { documentXml, mediaDigests, plainText, readMargins, readOutline, type OutlineBlock } from './docx-package.ts'
 import { evaluatePreviewChecks } from './preview-checks.ts'
 import {
   caseSignature,
@@ -13,6 +13,7 @@ import {
   GBT_9704_MARGINS,
   loadEquityContent,
   reviewGovernmentNotice,
+  splitGovTitle,
   type MeetingRecord,
 } from './word-drafts.ts'
 
@@ -149,6 +150,24 @@ describe('word case drafts', () => {
     expect(text).not.toContain('质量安全月')
     expect(sha256(example)).toBe(before)
     expect(before).toBe('c763f627f09e543505b4cfaea34487a0b8cd724b549e4762633153da61ddf961')
+  })
+
+  test('W4 title breaks at a phrase boundary and the record block has rules', () => {
+    expect(splitGovTitle('滨江市城市管理局关于开展市容环境整治的通知')).toEqual(['滨江市城市管理局关于', '开展市容环境整治的通知'])
+    expect(splitGovTitle('某局关于做好冬季工作的通知')).toEqual(['某局关于做好冬季工作的通知'])
+    const xml = documentXml(draftGovernmentNotice({ issuerName: '滨江市城市管理局', subject: '开展市容环境整治', year: 2026 }))
+    expect(xml).toContain('滨江市城市管理局关于</w:t></w:r><w:r>')
+    expect(xml).toContain('<w:br/>')
+    expect(xml).toContain('w:color="FF0000"/></w:pBdr>')
+    expect(xml).toMatch(/<w:tblBorders><w:top w:val="single" w:sz="8"[^]*<w:insideH /)
+    expect(xml).toContain('<w:tab w:val="right"')
+  })
+
+  test('W1 action table has fixed widths and a header row', () => {
+    const xml = documentXml(draftMeetingMinutes(parkMeeting).docx)
+    expect(xml).toContain('<w:gridCol w:w="5638"/><w:gridCol w:w="2200"/><w:gridCol w:w="1800"/>')
+    expect(xml).toContain('<w:tblHeader/>')
+    expect(xml).not.toMatch(/<w:t xml:space="preserve">[^<]*\n/)
   })
 
   test('meeting-minutes preview checks stay deferred until a render path exists', () => {

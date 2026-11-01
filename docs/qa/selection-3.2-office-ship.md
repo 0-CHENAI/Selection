@@ -118,3 +118,37 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 
 三分路由是明确的模型工具合同，不是对任意模型行为的强制沙箱。外来复杂 PPTX 的母版继承、动画、SmartArt、OLE 等仍不保证无损往返；后续 deck 修改前必须对账 OfficeCLI 改过的成稿。新增三套 retained-native 的底层版权仍来自上游声明，不等于独立法律确权。部分 JSON 的 `v0.2.21` 是继承的导入器标签，以 ATTRIBUTION 固定提交为准。适配器只保证检查失败不写出，不保证磁盘错误/进程中断下跨文件事务性。本次未重打双平台安装包，历史功能分支包与 CI 不能冒充本整合提交的新验收。
 
+## #718 发布准备（尚未合入 test）
+
+这一节是 [#718](https://github.com/0-CHENAI/Selection/issues/718) 的清单和版本说明。它不代替桌面安装包上的全流程，也没有打开指向 `test` 的拉取请求。合入 `test` 仍要 LinNai 批准。
+
+对齐度见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)：PPT 100%，Word 100%，Excel 95%，共享底座 95%，总体 98%。计入分母的未对齐项是 0。两项部分对齐是图表缓存和 HTML 里浮动图表的位置。PDF 导出按阶段 06 排除在用户路径之外。
+
+### 版本
+
+根 `package.json` 和 `apps/electron/package.json` 仍是 `3.1.0`。这次不新建 `release-notes/3.2.0.md`，也不改版本号。用户可见的说明写在 `release-notes/next.md`。版本文件等批准合入 `test` 之后由发布流程汇总。
+
+### 许可
+
+- 公文写作是 Selection 自写。来源句在 `office-business/NOTICE`：能力参照 dsh-desktop gov-doc-writing，未复用其内容。
+- MIT / Apache-2.0 的案例和技能保留原 LICENSE。ppt-design 的 `ATTRIBUTION.md` 和 `THIRD_PARTY_NOTICES` 仍随模板。
+- `electron-builder.yml` 不列入 LibreOffice Kit、Python 办公运行时或 PPTD。`no-python.test.ts` 锁住这一点。`office_business` 把计算打进应用进程，不把 `office-business-runtime` 目录放进安装包文件列表。
+
+### 还没在安装包上走过的流程
+
+下面每条都还没有这次的 macOS arm64 / Windows x64 安装包证据。勾选留给真机，不要把本页前面的 O0–O5 记录当成这一轮的安装包验收。
+
+- [ ] 首页 Office → Word 案例 → 中途上传 → `office_template_write` → 守卫 → 交付
+- [ ] Excel 年度经营 → 改数 → `xlsx_recalculate` → 交付
+- [ ] PPT 外来稿 → 理解 → 导入 → 换风格 → 配图 → check → 导出
+- [ ] 个人模板生成一份稿件
+- [ ] 注入后、写入中、重算中、导入中分别刷新，状态不重放副作用
+- [ ] NORM / PRO、深色、PRO 金色主题下入口仍可用
+- [ ] 原始案例 sha256 在流程后不变
+- [ ] 安装包体积相对阶段 02 / 03 的预算
+- [ ] 冷启动，以及第一次渲染、重算、导入的耗时
+- [ ] 合入 `test` 之后的 Validate 和 Package
+
+`answer-delivery.test.ts` 里「linked OfficeCLI outputs」仍是已知偶发失败，这次没有改那个用例。
+
+
