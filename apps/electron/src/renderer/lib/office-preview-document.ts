@@ -70,7 +70,6 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     if (typeof switchSheet === 'function') window.switchSheet = (index) => { switchSheet(index); anchorFloats(); };
     requestAnimationFrame(anchorFloats);
   });
-  window.addEventListener('load', anchorFloats, { once: true });
   ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
     fitSlidesToViewport();
@@ -90,6 +89,7 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     // slide box was still zero. One later pass corrects that without moving the
     // scroll offset the reader already has.
     window.addEventListener('load', () => {
+      anchorFloats();
       const main = document.querySelector('.main');
       const slide = document.querySelector('.main > .slide-container .slide');
       if (!main || !slide || slide.getBoundingClientRect().width <= main.clientWidth + 1) return;
