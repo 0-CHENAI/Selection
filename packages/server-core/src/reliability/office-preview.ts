@@ -266,6 +266,9 @@ export class OfficePreviewService {
     const html = alignPreviewFloats(await response.text(), p.path, bytes)
     if (html.length > 16 * 1024 * 1024) throw new Error('Office 预览过大，请缩小文档后重试')
     if (previous !== nextCopy) await rm(previous, { force: true }).catch(() => {})
+    // office_render reuses this HTML by path + hash (htmlFor). Keep it in step with
+    // the swapped copy, or the model would see the old document under the new hash.
+    p.html = html
     const selection = p.selectedElements ? { previewId: p.id, artifactId: p.artifactId, baseVersion: p.baseVersion, path: p.path, hash: p.hash, elements: p.selectedElements } : undefined
     return { ...this.result(p), html, ...(selection ? { selection } : {}) }
   }

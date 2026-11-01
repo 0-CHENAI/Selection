@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -289,6 +290,8 @@ test.skipIf(!runtime)('a slide written during generation is in the same preview 
     console.log(`PPT_PREVIEW_LATENCY_MS first=${firstLatency} next=${nextLatency} selected=${selected ?? 'none'}`)
     expect(visible.previewId).toBe(preview.previewId)
     expect(visible.html).toContain('第2页正文')
+    // office_render reuses the panel HTML by hash; after a live refresh it must be the new page
+    expect(service.htmlFor(file, createHash('sha256').update(nextBytes).digest('hex'))).toBe(visible.html)
     expect(watched.process.pid).toBe(pid)
     expect(watched.process.exitCode).toBe(null)
     expect(watched.process.signalCode).toBe(null)

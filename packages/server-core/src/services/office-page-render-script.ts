@@ -10,6 +10,8 @@
  * - fonts    → requested font families this machine does not have
  */
 
+import { XLSX_FLOAT_ANCHOR_SOURCE } from '@craft-agent/shared/utils/xlsx-float-anchor-script'
+
 export type OfficePageScriptRequest =
   | { op: 'prepare'; kind: 'docx' | 'xlsx' | 'pptx' }
   | { op: 'measure' | 'locate'; kind: 'docx' | 'xlsx' | 'pptx'; page?: number; sheet?: string; range?: string; maxCssEdge: number }
@@ -52,26 +54,8 @@ const SOURCE = String.raw`(async function (req) {
     return { pageCount: names.length || document.querySelectorAll('.sheet-content').length, sheets: names };
   }
   // OfficeCLI 按每行 15pt 估算浮动图表的 top，表格行被中文字体和大字号撑高后，
-  // 图表会往上盖住指标。按 data-from-row 对到实际行的位置（与协同面板同一算法）。
-  const anchorFloats = (root) => {
-    for (const el of root.querySelectorAll('[data-from-row]')) {
-      const content = el.closest('.sheet-content');
-      if (!content) continue;
-      const row = parseInt(el.getAttribute('data-from-row') || '', 10) + 1;
-      const tr = content.querySelector('tr[data-row="' + content.getAttribute('data-sheet') + '-' + row + '"]');
-      const want = tr && tr.getBoundingClientRect();
-      if (!want || !want.height) continue;
-      const have = el.getBoundingClientRect();
-      const delta = want.top - have.top;
-      if (Math.abs(delta) > 0.5) el.style.top = ((parseFloat(getComputedStyle(el).top) || 0) + delta) + 'px';
-      let n = parseInt(el.getAttribute('data-from-col') || '', 10) + 1, letters = '';
-      while (n > 0) { letters = String.fromCharCode(65 + (n - 1) % 26) + letters; n = Math.floor((n - 1) / 26); }
-      const cell = letters && [...tr.querySelectorAll('td[data-path]')].find(td => (td.getAttribute('data-path') || '').endsWith('/' + letters + row));
-      const left = cell && cell.getBoundingClientRect();
-      const dx = left && left.width ? left.left - have.left : 0;
-      if (Math.abs(dx) > 0.5) el.style.left = ((parseFloat(getComputedStyle(el).left) || 0) + dx) + 'px';
-    }
-  };
+  // 图表会往上盖住指标。按 Excel 里覆盖的单元格范围摆放和缩放（与协同面板同一段脚本）。
+  const anchorFloats = ${XLSX_FLOAT_ANCHOR_SOURCE};
   const colIndex = (letters) => { let n = 0; for (const ch of letters) n = n * 26 + ch.charCodeAt(0) - 64; return n; };
   const activeSheet = () => {
     const names = sheetNames();
