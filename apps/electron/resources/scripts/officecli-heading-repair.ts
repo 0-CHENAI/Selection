@@ -94,6 +94,10 @@ function addStyleOperation(id: string, size: string, outlineLvl?: number): Batch
       type: 'paragraph',
       name: id,
       ...(outlineLvl === undefined ? {} : { outlineLvl: String(outlineLvl) }),
+      // New heading/title styles stay with the following paragraph so Word
+      // never leaves a heading alone at the bottom of a page.
+      keepNext: 'true',
+      keepLines: 'true',
       size,
       bold: 'true',
     },

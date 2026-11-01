@@ -10,7 +10,7 @@
  * 实现为 TS（fflate + 受限 XML 树），不调用 Python，不打包 LibreOffice。
  */
 import { createHash } from 'node:crypto'
-import { strFromU8 } from 'fflate'
+import { strFromU8, strToU8 } from 'fflate'
 import { cloneParts, readOoxmlPackage, sameBytes, readXmlPart, writeOoxmlPackage, writeXmlPart, type OoxmlParts } from './ooxml-package.ts'
 import {
   canonical,
@@ -199,7 +199,113 @@ function protectedReason(paragraph: XElement, profile: DocxProfile | null | unde
 
 // ── normalize / inventory ─────────────────────────────────────────────────
 
-export function normalizeDocx(parts: OoxmlParts, profile: DocxProfile | null | undefined): OoxmlParts {
+const PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
+const CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
+const SETTINGS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings'
+const SETTINGS_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'
+const WORD_URI = 'http://schemas.microsoft.com/office/word'
+/** Word 2013+ 版式。低于 15 或缺少 settings 时，Word 在标题栏显示「兼容性模式」 */
+export const WORD_COMPATIBILITY_MODE = 15
+/** w:settings 里排在 w:compat 之后的元素（ECMA-376 CT_Settings 顺序） */
+const AFTER_COMPAT = ['docVars', 'rsids', 'mathPr', 'attachedSchema', 'themeFontLang', 'clrSchemeMapping', 'doNotIncludeSubdocsInStats', 'doNotAutoCompressPictures', 'forceUpgrade', 'captions', 'readModeInkLockDown', 'smartTagType', 'schemaLibrary', 'shapeDefaults', 'doNotEmbedSmartTags', 'decimalSymbol', 'listSeparator']
+/** w:style 里排在 w:pPr 之后的元素 */
+const AFTER_STYLE_PPR = ['rPr', 'tblPr', 'trPr', 'tcPr', 'tblStylePr']
+
+function settingsWithCompat(): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:settings xmlns:w="${W}"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="${WORD_URI}" w:val="${WORD_COMPATIBILITY_MODE}"/></w:compat></w:settings>`
+}
+
+/** 确保 settings 声明 compatibilityMode ≥ 15；缺 settings 部件时补上部件、关系和内容类型。返回是否改动。 */
+function ensureCompatibilityMode(parts: OoxmlParts): boolean {
+  if (!parts['word/settings.xml']) {
+    parts['word/settings.xml'] = strToU8(settingsWithCompat())
+    const relsName = 'word/_rels/document.xml.rels'
+    const rels = parts[relsName] ? readXmlPart(parts, relsName) : parseXml(`<Relationships xmlns="${PKG_REL}"/>`)
+    if (!descendants(rels.root, PKG_REL, 'Relationship').some(rel => getAttr(rel, null, 'Type') === SETTINGS_REL)) {
+      const ids = new Set(descendants(rels.root, PKG_REL, 'Relationship').map(rel => getAttr(rel, null, 'Id')))
+      let id = 'rIdSettings'
+      for (let n = 1; ids.has(id); n += 1) id = `rIdSettings${n}`
+      const rel = subElement(rels.root, PKG_REL, 'Relationship')
+      rel.attrs.push(['Id', id], ['Type', SETTINGS_REL], ['Target', 'settings.xml'])
+      writeXmlPart(parts, relsName, rels)
+    }
+    const types = readXmlPart(parts, '[Content_Types].xml')
+    if (!descendants(types.root, CT, 'Override').some(item => getAttr(item, null, 'PartName') === '/word/settings.xml')) {
+      const override = subElement(types.root, CT, 'Override')
+      override.attrs.push(['PartName', '/word/settings.xml'], ['ContentType', SETTINGS_TYPE])
+      writeXmlPart(parts, '[Content_Types].xml', types)
+    }
+    return true
+  }
+  const settings = readXmlPart(parts, 'word/settings.xml')
+  let compat = firstChild(settings.root, W, 'compat')
+  if (!compat) {
+    compat = createElement(settings.root, W, 'compat')
+    const later = elementChildren(settings.root).find(child => AFTER_COMPAT.some(local => is(child, W, local)))
+    if (later) insertBefore(later, compat)
+    else { compat.parent = settings.root; settings.root.children.push(compat) }
+  }
+  const setting = childrenNamed(compat, W, 'compatSetting').find(item => getAttr(item, W, 'name') === 'compatibilityMode')
+  if (setting && Number(getAttr(setting, W, 'val')) >= WORD_COMPATIBILITY_MODE) return false
+  const target = setting ?? subElement(compat, W, 'compatSetting')
+  setAttr(target, W, 'name', 'compatibilityMode')
+  setAttr(target, W, 'uri', WORD_URI)
+  setAttr(target, W, 'val', String(WORD_COMPATIBILITY_MODE))
+  writeXmlPart(parts, 'word/settings.xml', settings)
+  return true
+}
+
+function isHeadingStyle(style: XElement): boolean {
+  if (getAttr(style, W, 'type') !== 'paragraph') return false
+  const id = getAttr(style, W, 'styleId') ?? ''
+  if (/^(?:Title|Heading[1-9])$/i.test(id)) return true
+  const pPr = firstChild(style, W, 'pPr')
+  const level = pPr ? firstChild(pPr, W, 'outlineLvl') : undefined
+  return !!level && Number(getAttr(level, W, 'val')) <= 8
+}
+
+/** 标题样式与下段同页、段中不分页，避免标题孤悬页底（Word「与下段同页」）。返回是否改动。 */
+function ensureHeadingsKeepWithNext(parts: OoxmlParts): boolean {
+  if (!parts['word/styles.xml']) return false
+  const styles = readXmlPart(parts, 'word/styles.xml')
+  let changed = false
+  for (const style of childrenNamed(styles.root, W, 'style').filter(isHeadingStyle)) {
+    let pPr = firstChild(style, W, 'pPr')
+    if (!pPr) {
+      pPr = createElement(style, W, 'pPr')
+      const later = elementChildren(style).find(child => AFTER_STYLE_PPR.some(local => is(child, W, local)))
+      if (later) insertBefore(later, pPr)
+      else { pPr.parent = style; style.children.push(pPr) }
+    }
+    let anchor: XElement | undefined = firstChild(pPr, W, 'pStyle')
+    for (const local of ['keepNext', 'keepLines']) {
+      const existing = firstChild(pPr, W, local)
+      if (existing) {
+        // 模板显式关闭的不覆盖
+        anchor = existing
+        continue
+      }
+      const element = createElement(pPr, W, local)
+      if (anchor) insertAfter(anchor, element)
+      else { element.parent = pPr; pPr.children.unshift(element) }
+      anchor = element
+      changed = true
+    }
+  }
+  if (changed) writeXmlPart(parts, 'word/styles.xml', styles)
+  return changed
+}
+
+/** 所有模板写出前的版式卫生：现代兼容模式、标题与下段同页。只改内存副本。 */
+export function modernizeDocx(parts: OoxmlParts): OoxmlParts {
+  const next = cloneParts(parts)
+  const compat = ensureCompatibilityMode(next)
+  const headings = ensureHeadingsKeepWithNext(next)
+  return compat || headings ? next : parts
+}
+
+export function normalizeDocx(raw: OoxmlParts, profile: DocxProfile | null | undefined): OoxmlParts {
+  const parts = modernizeDocx(raw)
   const header = profile?.issuerHeader
   if (!header) return parts
   const doc = readXmlPart(parts, 'word/document.xml')
@@ -522,7 +628,7 @@ export interface PreparedDocx { bytes: Uint8Array; parts: OoxmlParts; paragraphs
 export function prepareDocxSource(templateBytes: Uint8Array, profile: DocxProfile | null | undefined): PreparedDocx {
   const raw = readOoxmlPackage(templateBytes)
   const parts = normalizeDocx(raw, profile)
-  const bytes = profile?.issuerHeader ? writeOoxmlPackage(parts) : templateBytes
+  const bytes = parts !== raw ? writeOoxmlPackage(parts) : templateBytes
   return { bytes, parts, paragraphs: inventoryDocx(parts, profile) }
 }
 

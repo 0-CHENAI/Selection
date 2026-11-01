@@ -7,6 +7,7 @@ import {
   GBT_9704_MARGINS,
   type DocBlock,
   type DocOptions,
+  type DocParagraph,
   type OutlineBlock,
 } from './docx-package.ts'
 import { validateMinutes, type MinutesReport } from './validate-minutes.ts'
@@ -87,22 +88,41 @@ ${pending}
 ${suggestions}`
 }
 
+/** 纪要正文段后 4 磅：比 Word 默认的 8 磅紧凑，一页能放下常见的五节纪要 */
+const MINUTES_BODY = { spaceAfter: 80 } as const
+
+/**
+ * 末节不超过这么多段时整节同页：避免「整理建议」这类一两行的尾巴单独落到下一页。
+ * 标题本身已在样式里设了与下段同页、段中不分页。
+ */
+const KEEP_TAIL_PARAGRAPHS = 6
+
+/** 从 start 起到末尾的段落（不含最后一段）都设与下段同页，整段尾巴一起换页。 */
+export function keepTailTogether(blocks: DocBlock[], start: number, limit = KEEP_TAIL_PARAGRAPHS): void {
+  const tail = blocks.slice(start)
+  if (tail.length > limit || tail.some(block => block.kind !== 'p')) return
+  for (const block of tail.slice(0, -1)) if (block.kind === 'p') block.keepNext = true
+  for (const block of tail) if (block.kind === 'p') block.keepLines = true
+}
+
 export function draftMeetingMinutes(record: MeetingRecord): MeetingDraft {
   const markdown = meetingMarkdown(record)
   const report = validateMinutes(markdown)
+  const body = (text: string): DocParagraph => ({ kind: 'p', text, ...MINUTES_BODY })
   const blocks: DocBlock[] = [
-    { kind: 'p', style: 'Title', text: record.title, align: 'center', sizeHalfPoints: 46 },
+    { kind: 'p', style: 'Title', text: record.title, align: 'center', sizeHalfPoints: 46, spaceAfter: 240 },
     { kind: 'p', style: 'Heading1', text: '一、会议信息' },
-    { kind: 'p', text: record.info },
+    body(record.info),
     { kind: 'p', style: 'Heading1', text: '二、工作安排' },
-    { kind: 'p', text: record.arrangements },
+    body(record.arrangements),
     { kind: 'p', style: 'Heading1', text: '三、议题记录' },
   ]
   for (const topic of record.topics) {
     blocks.push(
       { kind: 'p', style: 'Heading2', text: topic.title },
-      { kind: 'p', text: `讨论：${topic.discussion}` },
-      { kind: 'p', text: `已定：${topic.decision}` },
+      // 讨论与已定是一组，不拆到两页
+      { ...body(`讨论：${topic.discussion}`), keepNext: true },
+      body(`已定：${topic.decision}`),
     )
   }
   blocks.push({ kind: 'p', style: 'Heading1', text: '四、行动项' })
@@ -121,13 +141,15 @@ export function draftMeetingMinutes(record: MeetingRecord): MeetingDraft {
       ]),
     ],
   })
+  const tailStart = blocks.length
   blocks.push({ kind: 'p', style: 'Heading1', text: '五、后续确认' })
   blocks.push({ kind: 'p', style: 'Heading2', text: '待确认事项' })
-  blocks.push({ kind: 'p', text: record.pending.join('；') || '无' })
+  blocks.push(body(record.pending.join('；') || '无'))
   if (record.suggestions) {
     blocks.push({ kind: 'p', style: 'Heading2', text: '整理建议' })
-    blocks.push({ kind: 'p', text: record.suggestions })
+    blocks.push(body(record.suggestions))
   }
+  keepTailTogether(blocks, tailStart)
   return { markdown, docx: buildDocx(blocks, CASE_MARGINS), report }
 }
 
@@ -392,21 +414,25 @@ export function draftGovernmentNotice(spec: GovNoticeSpec): Buffer {
     { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[2], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
     { kind: 'p', text: '牵头部门为【待补充：牵头部门】，配合部门为【待补充：配合部门】。', eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
     { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[3], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
-    { kind: 'p', text: `联系人为${contact}。报送期限为【待补充：报送期限】，报送渠道为【待补充：报送渠道】。`, eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
-    // 署名在成文日期之上；成文日期右空四字（16 磅字号一字 320 twip）
-    { kind: 'p', text: spec.issuerName, align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, spaceBefore: 640 },
-    { kind: 'p', text: '【待补充：成文日期】', align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, spaceAfter: 960 },
+    // 末段正文与落款同页（GB/T 9704 7.3.5：不得出现落款单独成页）：末段与下段同页、段中不分页
+    { kind: 'p', text: `联系人为${contact}。报送期限为【待补充：报送期限】，报送渠道为【待补充：报送渠道】。`, eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY, keepNext: true, keepLines: true },
+    // 署名在成文日期之上，空一行；成文日期右空四字（16 磅字号一字 320 twip）
+    { kind: 'p', text: spec.issuerName, align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, spaceBefore: 560, lineExact: 560, keepNext: true, keepLines: true },
+    { kind: 'p', text: '【待补充：成文日期】', align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, lineExact: 560, keepLines: true },
     {
-      // 版记：首末粗线、中间细线，左右各空一字；印发日期靠右
+      // 版记：首末粗线、中间细线，左右各空一字；印发日期靠右。浮动到末页版心底部（GB/T 9704 7.4）
       kind: 'table',
       widths: [8845],
       borders: 'record',
       rightTab: 8645,
+      anchorBottom: true,
       rows: [
         ['　抄送：【待补充：抄送机关】'],
         ['　【待补充：印发机关】\t【待补充：印发日期】印发　'],
       ],
     },
+    // 浮动版记的锚点段落：与版记同页
+    { kind: 'p', text: '', lineExact: 20, spaceBefore: 0, spaceAfter: 0 },
   ]
   return buildDocx(blocks, GBT_9704_MARGINS)
 }

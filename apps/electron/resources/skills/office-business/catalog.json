@@ -378,7 +378,7 @@
       "prompt": "参考这份房屋租赁合同的条款顺序，用我提供的双方、房屋和租金另写一份。缺的信息标待补充。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "合同协议",
       "businessSkill": "personal-contract",
       "source": "cases/house-lease",
@@ -387,7 +387,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/house-lease",
         "license": "Selection sample",
-        "exampleSha256": "d888866219706589071d7e95ec3360c103512e7b0d64fd5304bc9454c44c04e4",
+        "exampleSha256": "02635bd0baf3076ed0f52cf50a1bc3fc593c3cba028403058da3eaaf09e1c396",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },
@@ -399,7 +399,7 @@
       "prompt": "参考这份简历和求职信的版式，用我的经历重写。没有的公司、数字和日期标待补充。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "简历求职",
       "businessSkill": "personal-resume",
       "source": "cases/product-resume",
@@ -408,7 +408,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/product-resume",
         "license": "Selection sample",
-        "exampleSha256": "8f9b3313347e6cb450697ef5f16b0cb4323b9d1ad122b37d262bd95214fc4763",
+        "exampleSha256": "0b2eed1c900150dfc429f47041ed7b7b00eeaaf8f248bcc9e63c337c8250ba88",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },
@@ -420,7 +420,7 @@
       "prompt": "参考这张差旅报销申请表，用我的行程和金额另填一份。没给的栏标待补充，审批栏留空。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "申请表格",
       "businessSkill": "personal-application",
       "source": "cases/travel-claim",
@@ -429,7 +429,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/travel-claim",
         "license": "Selection sample",
-        "exampleSha256": "15b134ab448233153a1159a751e519144fdc210e0d8d900cc4a4f784f2090257",
+        "exampleSha256": "693412c60a298658f4a2562bd34fdd0198006b4759cc1d28d931b9f972eb25a1",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },
@@ -441,7 +441,7 @@
       "prompt": "参考这份邀请函的结构和正式语气，按我给的活动、时间和地点另写一封。没定的内容标待补充。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "议程邀请",
       "businessSkill": "personal-invitation",
       "source": "cases/annual-invitation",
@@ -450,7 +450,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/annual-invitation",
         "license": "Selection sample",
-        "exampleSha256": "6bc18747be0187c4abdbb6b9c3abd9bc1f8c31f9496a95398963e279df1583bb",
+        "exampleSha256": "570b9cf3cc2a9091205590a3f11609268a4f730b124bebcc7543ee68fdbcd2e0",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },
@@ -462,7 +462,7 @@
       "prompt": "参考这份需求说明的章节，为指定产品写一份 Word 需求文档。故事和验收用我的材料，没有的日期标待补充。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "产品需求",
       "businessSkill": "personal-prd",
       "source": "cases/miniapp-prd",
@@ -471,7 +471,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/miniapp-prd",
         "license": "Selection sample",
-        "exampleSha256": "3f5ae4ab916aae19a7203fb19da1cefb4bd25b2601574ebc80ccf00c76292304",
+        "exampleSha256": "e3296029685bcdf32d63bf82cb7c1122eb55044ef07c9d2a2ac657a5ee80927c",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },
@@ -483,7 +483,7 @@
       "prompt": "参考这封英文信的版式，用我的双方、事由和日期另写一封正式商务信。不知道的姓名和地址写 To be confirmed。",
       "mode": "word",
       "sampleFile": "example.docx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "商务信函",
       "businessSkill": "personal-letter",
       "source": "cases/partnership-letter",
@@ -492,7 +492,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/partnership-letter",
         "license": "Selection sample",
-        "exampleSha256": "6b5ee6b466e245b38ff8ed946fd7e304c12d484ba6573dbad881c6983323e78f",
+        "exampleSha256": "c073f5679d9ec4849319a742581f4c807f95c747ca5091dc37d8e8781711614e",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       }
     },

@@ -204,7 +204,7 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
     let workspacePathOut = sample
     if (template.mode === 'word') {
       const prepared = prepareDocxSource(source.bytes, source.profile)
-      if (source.profile?.issuerHeader) writeFileSync(sample, prepared.bytes)
+      if (prepared.bytes !== source.bytes) writeFileSync(sample, prepared.bytes)
       paragraphs = prepared.paragraphs
       files.find(file => file.workspace_path === sample)!.sha256 = sha256(readFileSync(sample))
     } else {
