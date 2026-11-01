@@ -12602,8 +12602,8 @@ function stringList(value) {
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
 var SHA256 = /^[0-9a-f]{64}$/;
-var ELEMENT_KEYS = ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"];
-var ELEMENT_V2_KEYS = [...ELEMENT_KEYS, "group", "crop", "mask", "link", "runs", "retained"];
+var ELEMENT_KEYS = ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit", "runs"];
+var ELEMENT_V2_KEYS = [...ELEMENT_KEYS, "group", "crop", "mask", "link", "retained"];
 var CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
 var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
@@ -13030,6 +13030,17 @@ function parseElement(value, pageId, issues, v2) {
     if (table)
       element.table = table;
   }
+  if (value.runs !== undefined) {
+    if (value.type !== "text")
+      issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 runs \u53EA\u7528\u4E8E\u6587\u672C`, pageId, id));
+    else {
+      const runs = parseRuns(value.runs, id, pageId, issues);
+      if (runs && runs.map((run) => run.text).join("") !== element.text)
+        issues.push(issue("schema", `\u5143\u7D20 ${id} \u7684 runs \u62FC\u8D77\u6765\u8981\u548C text \u4E00\u81F4`, pageId, id));
+      else if (runs)
+        element.runs = runs;
+    }
+  }
   if (v2)
     applyV2Element(value, element, pageId, issues);
   return element;
@@ -13056,11 +13067,6 @@ function applyV2Element(value, element, pageId, issues) {
       issues.push(issue("schema", `\u5143\u7D20 ${element.id} \u7684 link.href \u5FC5\u987B\u662F http(s) \u94FE\u63A5`, pageId, element.id));
     } else
       element.link = { href: value.link.href };
-  }
-  if (value.runs !== undefined) {
-    const runs = parseRuns(value.runs, element.id, pageId, issues);
-    if (runs)
-      element.runs = runs;
   }
   if (value.retained !== undefined) {
     if (!isObject2(value.retained) || typeof value.retained.feature !== "string" || !value.retained.feature.trim() || value.retained.feature.length > 80 || typeof value.retained.message !== "string" || !value.retained.message.trim() || value.retained.message.length > 500 || Object.keys(value.retained).some((key) => key !== "feature" && key !== "message")) {
@@ -13688,6 +13694,21 @@ function colorRef(value, theme, fallback) {
   return hex.toUpperCase();
 }
 
+// apps/electron/resources/skills/ppt-design/engine/picture-slots.ts
+var SAMPLE_PHOTO = /(?:^|[/\\])styles[/\\](?:_archive[/\\])?examples[/\\]_assets[/\\][^/\\]+\.jpe?g$/i;
+var PLACEHOLDER = /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i;
+function isPlaceholderImageSrc(src) {
+  if (!src)
+    return false;
+  return src.startsWith("placeholder:") || PLACEHOLDER.test(src);
+}
+function isSamplePhotoSrc(src) {
+  return !!src && SAMPLE_PHOTO.test(src);
+}
+function isPictureCarrier(element) {
+  return element.type === "shape" && /(?:^|-)picture(?:-[a-z0-9]+)*-carrier$/i.test(element.id);
+}
+
 // apps/electron/resources/skills/ppt-design/engine/check.ts
 var LAYOUT_REPETITION_RUN = 3;
 var COLOR_TOKEN = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$/;
@@ -13700,11 +13721,6 @@ var ASPECT = {
   "4:3": 4 / 3,
   "3:4": 3 / 4
 };
-function isPlaceholderImageSrc(src) {
-  if (!src)
-    return false;
-  return src.startsWith("placeholder:") || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src);
-}
 function blockingIssues(issues) {
   return issues.filter((item) => item.severity !== "warning");
 }
@@ -13892,15 +13908,16 @@ function checkPage(deck, page, options) {
     if (element.type === "chart")
       issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element));
     if (element.type === "image" && !element.chartImage)
-      issues.push(...checkImage(page, element, options));
+      issues.push(...checkImage(page, element, options, deck.profile === "example"));
     if (element.type === "table" && element.table) {
       issues.push(...checkTable(deck, page, element, background));
     }
   }
+  issues.push(...checkTextCollision(page));
   const editable = { ...page, elements: page.elements.filter((element) => !element.retained) };
   issues.push(...checkOverlap(editable, deck.profile === "example"));
   if (deck.profile !== "example")
-    issues.push(...checkTextLayer(page));
+    issues.push(...checkTextLayer(page), ...checkPictureCarriers(page));
   return issues;
 }
 function checkText(deck, page, element, pageBackground) {
@@ -14185,14 +14202,16 @@ function checkChartSeriesColor(page, element) {
 function slotFor(page, elementId) {
   return page.imageSlots?.slots.find((slot) => slot.elementId === elementId);
 }
-function checkImage(page, element, options) {
+function checkImage(page, element, options, example = false) {
   const issues = [];
   const src = element.src?.trim() ?? "";
   const slot = slotFor(page, element.id);
   if (/^https?:\/\//i.test(src)) {
     issues.push(issue("remote_image", `\u56FE\u7247 ${element.id} \u4F7F\u7528\u4E86\u7F51\u7EDC\u5730\u5740\u3002\u8BF7\u5148\u628A\u56FE\u7247\u653E\u8FDB\u5DE5\u4F5C\u533A\u518D\u5F15\u7528\u3002`, page.id, element.id));
   } else if (isPlaceholderImageSrc(src)) {
-    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u4ECD\u662F\u5360\u4F4D\u3002\u6CA1\u6709\u751F\u56FE\u63D0\u4F9B\u65B9\u65F6\u4FDD\u7559\u5360\u4F4D\u5E76\u63D0\u793A\uFF0C\u4E0D\u8981\u5F53\u6210\u5DF2\u914D\u56FE\u3002`, page.id, element.id, "warning"));
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u8FD8\u662F\u7A7A\u7684\u56FE\u7247\u4F4D\uFF0C\u4F1A\u5BFC\u51FA\u6210\u5360\u4F4D\u6846\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u653E\u8FDB\u6765\uFF1B\u6CA1\u6709\u5C31\u628A\u8FD9\u4E00\u9875\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u5360\u4F4D\u6846\u53EA\u4F5C\u6700\u540E\u624B\u6BB5\u3002`, page.id, element.id, "warning"));
+  } else if (!example && isSamplePhotoSrc(src)) {
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u8FD8\u662F\u6A21\u677F\u7684\u6837\u4F8B\u7167\u7247\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u6362\u6210\u7528\u6237\u7684\u56FE\uFF1B\u6CA1\u6709\u5C31\u628A\u8FD9\u4E00\u9875\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u5220\u6389\u8FD9\u5F20\u56FE\u3002`, page.id, element.id));
   } else if (!src && slot) {
     issues.push(issue("missing_asset", `\u56FE\u7247\u69FD ${element.id} \u6CA1\u6709\u7D20\u6750\u3002`, page.id, element.id));
   } else if (src && options.assetExists && !options.assetExists(src)) {
@@ -14218,6 +14237,58 @@ function checkImage(page, element, options) {
       issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u88C1\u526A\u6CA1\u6709\u7559\u4E0B\u6709\u6548\u753B\u9762\u3002`, page.id, element.id));
     } else if ((1 - l - r) * (1 - t - b) < 0.5) {
       issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u4E3B\u4F53\u88AB\u88C1\u6389\u592A\u591A\uFF0C\u8BF7\u4FDD\u7559\u81F3\u5C11\u4E00\u534A\u753B\u9762\u3002`, page.id, element.id));
+    }
+  }
+  return issues;
+}
+function checkPictureCarriers(page) {
+  const images = page.elements.filter((element) => element.type === "image" && element.src && !isPlaceholderImageSrc(element.src));
+  return page.elements.filter(isPictureCarrier).flatMap((carrier) => {
+    const area = carrier.bounds.w * carrier.bounds.h;
+    const filled = area > 0 && images.some((image) => areaOverlap(carrier.bounds, image.bounds).area / area >= 0.5);
+    return filled ? [] : [issue("empty_picture_slot", `\u56FE\u7247\u6846 ${carrier.id} \u6CA1\u6709\u653E\u56FE\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u653E\u8FDB\u6765\uFF1B\u6CA1\u6709\u5C31\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u4E0D\u8981\u7559\u7A7A\u6846\u3002`, page.id, carrier.id, "warning")];
+  });
+}
+function inkBox(element) {
+  const font = element.font;
+  const text = element.text ?? "";
+  const bold = font.weight === "bold";
+  const tracking = font.tracking ?? 0;
+  const leading = font.leading ?? defaultLeading(font.size);
+  const wrap = (element.textCapacity?.maxLines ?? 1) > 1;
+  const lines = wrap ? wrapText(text, element.bounds.w, font.size, bold, tracking) : text.split(`
+`);
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0);
+  const w = wrap ? Math.min(widest, element.bounds.w) : widest;
+  const h = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading;
+  const align = font.align ?? "left";
+  const valign = font.valign ?? "top";
+  const x = align === "center" ? element.bounds.x + (element.bounds.w - w) / 2 : align === "right" ? element.bounds.x + element.bounds.w - w : element.bounds.x;
+  const y = valign === "middle" ? element.bounds.y + (element.bounds.h - h) / 2 : valign === "bottom" ? element.bounds.y + element.bounds.h - h : element.bounds.y;
+  return { x, y, w, h };
+}
+function checkTextCollision(page) {
+  const issues = [];
+  const texts = page.elements.filter((element) => element.type === "text" && element.font && element.text?.trim() && !element.retained && !element.rotate && element.role !== "decoration");
+  for (let i = 0;i < texts.length; i++) {
+    for (let j = i + 1;j < texts.length; j++) {
+      const a = texts[i];
+      const b = texts[j];
+      const big = Math.max(a.font.size, b.font.size);
+      const small = Math.min(a.font.size, b.font.size);
+      if (big > 24 || big / small > 2)
+        continue;
+      if (a.text.trim() === b.text.trim())
+        continue;
+      if (Math.abs(a.bounds.y - b.bounds.y) < 0.5 * small)
+        continue;
+      const boxA = inkBox(a);
+      const boxB = inkBox(b);
+      const ix = Math.min(boxA.x + boxA.w, boxB.x + boxB.w) - Math.max(boxA.x, boxB.x);
+      const iy = Math.min(boxA.y + boxA.h, boxB.y + boxB.h) - Math.max(boxA.y, boxB.y);
+      if (ix > 0.3 * small && iy > 0.4 * small) {
+        issues.push(issue("text_collision", `\u6587\u5B57 ${a.id} \u548C ${b.id} \u6392\u5F00\u540E\u538B\u5728\u4E00\u8D77\uFF08\u91CD\u53E0\u7EA6 ${ix.toFixed(0)}\xD7${iy.toFixed(0)} pt\uFF09\u3002\u79FB\u5F00\u5176\u4E2D\u4E00\u6BB5\uFF0C\u6216\u7F29\u77ED\u6587\u5B57\u3002`, page.id, a.id, "warning"));
+      }
     }
   }
   return issues;
@@ -20358,6 +20429,191 @@ function run(command, args, extraEnv = {}) {
   });
 }
 
+// apps/electron/resources/skills/ppt-design/engine/chart-schema.ts
+var SERIES = {
+  barChart: ["idx", "order", "tx", "spPr", "invertIfNegative", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "shape", "extLst"],
+  bar3DChart: ["idx", "order", "tx", "spPr", "invertIfNegative", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "shape", "extLst"],
+  lineChart: ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "smooth", "extLst"],
+  areaChart: ["idx", "order", "tx", "spPr", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "extLst"],
+  pieChart: ["idx", "order", "tx", "spPr", "explosion", "dPt", "dLbls", "cat", "val", "extLst"],
+  doughnutChart: ["idx", "order", "tx", "spPr", "explosion", "dPt", "dLbls", "cat", "val", "extLst"],
+  scatterChart: ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "trendline", "errBars", "xVal", "yVal", "smooth", "extLst"],
+  radarChart: ["idx", "order", "tx", "spPr", "marker", "dPt", "dLbls", "cat", "val", "extLst"],
+  bubbleChart: ["idx", "order", "tx", "spPr", "invertIfNegative", "dPt", "dLbls", "trendline", "errBars", "xVal", "yVal", "bubbleSize", "bubble3D", "extLst"]
+};
+var CHART = {
+  barChart: { order: ["barDir", "grouping", "varyColors", "ser", "dLbls", "gapWidth", "overlap", "serLines", "axId", "extLst"], axes: 2 },
+  bar3DChart: { order: ["barDir", "grouping", "varyColors", "ser", "dLbls", "gapWidth", "gapDepth", "shape", "axId", "extLst"], axes: 3 },
+  lineChart: { order: ["grouping", "varyColors", "ser", "dLbls", "dropLines", "hiLowLines", "upDownBars", "marker", "smooth", "axId", "extLst"], axes: 2 },
+  areaChart: { order: ["grouping", "varyColors", "ser", "dLbls", "dropLines", "axId", "extLst"], axes: 2 },
+  pieChart: { order: ["varyColors", "ser", "dLbls", "firstSliceAng", "extLst"], axes: 0 },
+  doughnutChart: { order: ["varyColors", "ser", "dLbls", "firstSliceAng", "holeSize", "extLst"], axes: 0 },
+  scatterChart: { order: ["scatterStyle", "varyColors", "ser", "dLbls", "axId", "extLst"], axes: 2 },
+  radarChart: { order: ["radarStyle", "varyColors", "ser", "dLbls", "axId", "extLst"], axes: 2 },
+  bubbleChart: { order: ["varyColors", "ser", "dLbls", "bubble3D", "bubbleScale", "showNegBubbles", "sizeRepresents", "axId", "extLst"], axes: 2 }
+};
+function children(inner) {
+  const out = [];
+  const tag = /<(\/?)([\w:.-]+)[^>]*?(\/?)>/g;
+  let depth = 0;
+  let start = -1;
+  let name = "";
+  let match;
+  while (match = tag.exec(inner)) {
+    if (match[0].startsWith("<?") || match[0].startsWith("<!"))
+      continue;
+    const closing = match[1] === "/";
+    const selfClosing = match[3] === "/";
+    if (!closing && depth === 0) {
+      start = match.index;
+      name = match[2];
+    }
+    if (closing)
+      depth -= 1;
+    else if (!selfClosing)
+      depth += 1;
+    if (depth < 0)
+      return null;
+    if (depth === 0 && start >= 0) {
+      out.push({ name: name.replace(/^c:/, ""), xml: inner.slice(start, tag.lastIndex) });
+      start = -1;
+    }
+  }
+  return depth === 0 ? out : null;
+}
+var KNOWN = new Set([...Object.values(SERIES).flat(), ...Object.values(CHART).flatMap((spec) => spec.order), "ser"]);
+function reorder(items, order, limits = {}) {
+  const sorted = [];
+  for (const key of order) {
+    const matches = items.filter((item) => item.name === key);
+    sorted.push(...limits[key] !== undefined ? matches.slice(0, limits[key]) : matches);
+  }
+  sorted.push(...items.filter((item) => !KNOWN.has(item.name)));
+  return sorted;
+}
+function rewriteElement(xml, local, rewrite) {
+  const pattern = new RegExp(`(<c:${local}>)([\\s\\S]*?)(</c:${local}>)`, "g");
+  return xml.replace(pattern, (all, open, inner, close) => {
+    const next = rewrite(inner);
+    return next === null ? all : `${open}${next}${close}`;
+  });
+}
+function normalizeChartXml(xml) {
+  let next = xml;
+  for (const [kind, spec] of Object.entries(CHART)) {
+    if (!next.includes(`<c:${kind}>`))
+      continue;
+    next = rewriteElement(next, kind, (inner) => {
+      const items = children(inner);
+      if (!items)
+        return null;
+      const series = SERIES[kind];
+      const fixed = items.map((item) => {
+        if (item.name !== "ser")
+          return item;
+        const body = item.xml.slice("<c:ser>".length, -"</c:ser>".length);
+        const parts = children(body);
+        if (!parts)
+          return item;
+        return { name: "ser", xml: `<c:ser>${reorder(parts, series).map((part) => part.xml).join("")}</c:ser>` };
+      });
+      if ((kind === "lineChart" || kind === "areaChart") && !fixed.some((item) => item.name === "grouping")) {
+        fixed.unshift({ name: "grouping", xml: '<c:grouping val="standard"/>' });
+      }
+      return reorder(fixed, spec.order, { axId: spec.axes }).map((item) => item.xml).join("");
+    });
+  }
+  return next;
+}
+
+// apps/electron/resources/skills/ppt-design/engine/inline-runs.ts
+var NO_SPACE_BEFORE = /^[,.;:!?%)\]}\u2019\u201D\u3001\uFF0C\u3002\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u2026]/;
+var NO_SPACE_AFTER = /[(\[{\u2018\u201C\u300A\u300C\u300E\u3010\s/-]$/;
+function single(element) {
+  return element.type === "text" && !!element.font && typeof element.text === "string" && element.text.length > 0 && !element.text.includes(`
+`) && !element.rotate && !element.retained && !element.link && !element.group && (element.textCapacity?.maxLines ?? 1) <= 1 && (element.font.align ?? "left") === "left";
+}
+function sameLine(left, right) {
+  const a = left.font;
+  const b = right.font;
+  if (a.size !== b.size || a.family !== b.family || (a.tracking ?? 0) !== (b.tracking ?? 0))
+    return false;
+  if (JSON.stringify(a.face ?? null) !== JSON.stringify(b.face ?? null))
+    return false;
+  if (Math.abs(left.bounds.y - right.bounds.y) > 0.6 || Math.abs(left.bounds.h - right.bounds.h) > 0.6)
+    return false;
+  const gap = right.bounds.x - (left.bounds.x + left.bounds.w);
+  return gap > -1 && gap < 1.5;
+}
+function joinsWithSpace(left, right) {
+  if (!left || !right)
+    return false;
+  if (/\s$/.test(left) || /^\s/.test(right))
+    return false;
+  if (NO_SPACE_BEFORE.test(right) || NO_SPACE_AFTER.test(left))
+    return false;
+  const last = Array.from(left).at(-1);
+  const first = Array.from(right)[0];
+  if (containsCjk(last) || containsCjk(first))
+    return false;
+  return true;
+}
+function runOf(element, text) {
+  const font = element.font;
+  return {
+    text,
+    ...font.weight === "bold" ? { bold: true } : {},
+    ...font.italic ? { italic: true } : {},
+    color: font.color ?? "$ink"
+  };
+}
+function mergeInlineRuns(elements) {
+  const candidates = elements.filter(single);
+  const next = new Map;
+  const hasPrevious = new Set;
+  for (const left of candidates) {
+    const right = candidates.filter((item) => item !== left && !hasPrevious.has(item) && sameLine(left, item)).sort((a, b) => a.bounds.x - b.bounds.x)[0];
+    if (!right)
+      continue;
+    next.set(left, right);
+    hasPrevious.add(right);
+  }
+  if (next.size === 0)
+    return elements;
+  const merged = new Map;
+  const absorbed = new Set;
+  for (const head of candidates) {
+    if (hasPrevious.has(head) || !next.has(head))
+      continue;
+    const chain = [head];
+    let cursor = next.get(head);
+    while (cursor && !chain.includes(cursor)) {
+      chain.push(cursor);
+      cursor = next.get(cursor);
+    }
+    const runs = [];
+    let text = "";
+    chain.forEach((item, index) => {
+      const piece = index > 0 && joinsWithSpace(text, item.text) ? ` ${item.text}` : item.text;
+      runs.push(runOf(item, piece));
+      text += piece;
+    });
+    const last = chain.at(-1);
+    const baseFont = { ...head.font, weight: undefined, italic: undefined };
+    merged.set(head, {
+      ...head,
+      text,
+      runs,
+      font: baseFont,
+      bounds: { ...head.bounds, w: last.bounds.x + last.bounds.w - head.bounds.x },
+      textCapacity: head.textCapacity ? { maxChars: Array.from(text).length, maxLines: 1 } : undefined
+    });
+    for (const item of chain.slice(1))
+      absorbed.add(item);
+  }
+  return elements.flatMap((element) => absorbed.has(element) ? [] : [merged.get(element) ?? element]);
+}
+
 // apps/electron/resources/skills/ppt-design/engine/export-pptx.ts
 var PT = 72;
 function platformFromProcess(platform = process.platform) {
@@ -20410,7 +20666,7 @@ async function buildPptx(deck, platform) {
     const slide = pres.addSlide();
     const pageBackground = colorRef(page.background, deck.theme, "$paper");
     slide.background = { color: hex(pageBackground) };
-    for (const element of page.elements)
+    for (const element of mergeInlineRuns(page.elements))
       addElement(pres, slide, deck, element, platform, pageBackground);
     if (page.notes)
       slide.addNotes(page.notes);
@@ -20520,8 +20776,12 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
     addTable(pres, slide, deck, element, platform);
     return;
   }
+  if (element.type === "image" && element.src && isPlaceholderImageSrc(element.src)) {
+    addImagePlaceholder(slide, deck, element);
+    return;
+  }
   if (element.type === "image" && element.src) {
-    const fitted = fitImage(element);
+    const fitted = imagePlacement(element, deck);
     slide.addImage({
       path: resolveAsset(element.src),
       x: inches2(fitted.x),
@@ -20536,11 +20796,15 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
   if (element.type === "chart" && element.chart)
     addChart(pres, slide, deck, element, platform, pageBackground);
 }
-function fitImage(element) {
-  if (element.fit === "fill")
+function imagePlacement(element, deck) {
+  if (element.crop)
     return element.bounds;
-  const size = element.src ? readImageSize(resolveAsset(element.src)) : null;
-  if (!size)
+  if (!element.src)
+    return element.bounds;
+  if (element.fit === "fill" && deck?.version === 2 && isImportedAsset(element.src))
+    return element.bounds;
+  const size = readImageSize(resolveAsset(element.src));
+  if (!size || size.width <= 0 || size.height <= 0)
     return element.bounds;
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height);
   const w = size.width * scale;
@@ -20551,6 +20815,32 @@ function fitImage(element) {
     w,
     h
   };
+}
+function isImportedAsset(src) {
+  return /(?:^|[/\\])slide\d+-[^/\\]+\.(?:png|jpe?g)$/i.test(src);
+}
+function effectiveCrop(element) {
+  return element.type === "image" ? element.crop : undefined;
+}
+function addImagePlaceholder(slide, deck, element) {
+  const cjk = deck.pages.some((page) => page.elements.some((item) => typeof item.text === "string" && containsCjk(item.text)));
+  const label = cjk ? "\u56FE\u7247\u5360\u4F4D\uFF1A\u8BF7\u653E\u5165\u4F60\u7684\u56FE\u7247" : "Image placeholder: add your photo";
+  const fontSize = Math.max(8, Math.min(14, Math.round(Math.min(element.bounds.w, element.bounds.h) / 12)));
+  slide.addText(label, {
+    shape: "rect",
+    x: inches2(element.bounds.x),
+    y: inches2(element.bounds.y),
+    w: inches2(element.bounds.w),
+    h: inches2(element.bounds.h),
+    fill: { color: "EEF0F2" },
+    line: { color: "A9B0B8", width: 1, dashType: "dash" },
+    color: "7A828C",
+    fontSize,
+    align: "center",
+    valign: "middle",
+    altText: element.alt ? `${label} \xB7 ${element.alt}` : label,
+    objectName: element.id
+  });
 }
 function readImageSize(file) {
   try {
@@ -21021,7 +21311,6 @@ async function finishSlideXml(bytes, deck, platform) {
     const page = deck.pages[index];
     const faces = new Map;
     const fills = new Map;
-    const evenOdd = new Set;
     for (const element of page.elements) {
       const face = element.font?.face ?? element.table?.face;
       if (face)
@@ -21029,18 +21318,18 @@ async function finishSlideXml(bytes, deck, platform) {
       const fill = fillOverride(element);
       if (fill)
         fills.set(element.id, fill);
-      if (element.pathRule === "evenodd")
-        evenOdd.add(element.id);
     }
-    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0)
+    const multiRun = mergeInlineRuns(page.elements).some((element) => (element.runs?.length ?? 0) > 1);
+    if (faces.size === 0 && fills.size === 0 && !multiRun)
       continue;
     const path = `ppt/slides/slide${index + 1}.xml`;
     const file = zip.file(path);
     if (!file)
       continue;
-    const xml = await file.async("string");
-    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShape(block, faces, fills, evenOdd));
-    if (next !== xml) {
+    const original = await file.async("string");
+    const xml = multiRun ? singleParagraphProperties(original) : original;
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShape(block, faces, fills));
+    if (next !== original) {
       zip.file(path, next);
       changed = true;
     }
@@ -21049,11 +21338,34 @@ async function finishSlideXml(bytes, deck, platform) {
     changed = true;
   if (await shrinkBubbleScale(zip))
     changed = true;
+  if (await normalizeCharts(zip))
+    changed = true;
   if (await patchImportMarks(zip, deck))
     changed = true;
   if (!changed)
     return bytes;
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+function singleParagraphProperties(xml) {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (all, inner) => {
+    const first = inner.search(/<a:(?:r|br|fld)\b/);
+    if (first < 0)
+      return all;
+    const tail = inner.slice(first).replace(/<a:pPr\b[^>]*\/>|<a:pPr\b[^>]*>[\s\S]*?<\/a:pPr>/g, "");
+    return `<a:p>${inner.slice(0, first)}${tail}</a:p>`;
+  });
+}
+async function normalizeCharts(zip) {
+  let changed = false;
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    const xml = await file.async("string");
+    const next = normalizeChartXml(xml);
+    if (next === xml)
+      continue;
+    zip.file(file.name, next);
+    changed = true;
+  }
+  return changed;
 }
 async function shrinkBubbleScale(zip) {
   let changed = false;
@@ -21074,7 +21386,7 @@ async function shrinkBubbleScale(zip) {
 async function patchImportMarks(zip, deck) {
   let changed = false;
   for (let index = 0;index < deck.pages.length; index++) {
-    const marked = deck.pages[index].elements.filter((element) => !element.retained && (element.crop || element.link));
+    const marked = deck.pages[index].elements.filter((element) => !element.retained).map((element) => ({ element, crop: effectiveCrop(element) })).filter((item) => item.crop || item.element.link);
     if (marked.length === 0)
       continue;
     const path = `ppt/slides/slide${index + 1}.xml`;
@@ -21088,14 +21400,15 @@ async function patchImportMarks(zip, deck) {
     let nextId = 1;
     while (rels.includes(`Id="rIdImp${nextId}"`))
       nextId += 1;
-    for (const element of marked) {
-      if (element.crop && element.type === "image") {
-        const src = cropXml(element.crop);
+    for (const { element, crop } of marked) {
+      if (crop && element.type === "image") {
+        const src = cropXml(crop);
         xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, (block) => {
           if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes("<a:srcRect"))
             return block;
-          if (block.includes("<a:blipFill"))
-            return block.replace("</a:blipFill>", `${src}</a:blipFill>`);
+          if (block.includes("<a:stretch"))
+            return block.replace("<a:stretch", `${src}<a:stretch`);
+          return block.replace(/<\/(p|a):blipFill>/, (close) => `${src}${close}`);
           return block;
         });
         changed = true;
@@ -21126,7 +21439,7 @@ function cropXml(crop) {
   const part = (value) => Math.max(0, Math.min(1e5, Math.round(value * 1e5)));
   return `<a:srcRect l="${part(crop.l)}" t="${part(crop.t)}" r="${part(crop.r)}" b="${part(crop.b)}"/>`;
 }
-function rewriteShape(block, faces, fills, evenOdd) {
+function rewriteShape(block, faces, fills) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
   if (!name)
     return block;
@@ -21141,8 +21454,6 @@ function rewriteShape(block, faces, fills, evenOdd) {
   const fill = fills.get(id);
   if (fill)
     next = replaceShapeFill(next, fill);
-  if (evenOdd.has(id))
-    next = next.replace(/<a:path\b(?![^>]*\bfill=)/, '<a:path fill="evenOdd"');
   return next;
 }
 function replaceShapeFill(block, fillXml) {
@@ -21157,7 +21468,8 @@ function replaceShapeFill(block, fillXml) {
       next = body.replace("<a:noFill/>", fillXml);
     else
       next = `${body}${fillXml}`;
-    return `<p:spPr>${next}${line}</p:spPr>`;
+    const effect = next.search(/<a:(?:effectLst|effectDag|scene3d|sp3d|extLst)\b/);
+    return effect < 0 ? `<p:spPr>${next}${line}</p:spPr>` : `<p:spPr>${next.slice(0, effect)}${line}${next.slice(effect)}</p:spPr>`;
   });
 }
 function fillOverride(element) {
@@ -21908,6 +22220,7 @@ function polishPie(xml, accent, background, label) {
 }
 function polishBarLabels(xml) {
   let next = xml.replace(/<c:showCatName val="0"\/>/g, '<c:showCatName val="1"/>');
+  next = next.replace(/(<c:dLbls>\s*(?:<c:numFmt[^>]*\/>\s*)?<c:txPr>\s*)<a:bodyPr\/>/g, '$1<a:bodyPr wrap="none"/>');
   if (!next.includes("<c:separator>"))
     next = next.replace(/<c:showLeaderLines/g, "<c:separator> </c:separator><c:showLeaderLines");
   return next;

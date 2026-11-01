@@ -7,7 +7,18 @@
     "pages": 10,
     "when": "图片铺满画布，文字落在压暗的区域上。",
     "source": "ppt-master layout editorial_bleed, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      10
+    ]
   },
   "moments_square": {
     "name": "方寸 · Moments Square",
@@ -17,7 +28,11 @@
     "pages": 8,
     "when": "正方形画布，横竖都能分栏。",
     "source": "ppt-master layout moments_square, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      6,
+      7
+    ]
   },
   "presentation_core": {
     "name": "演示核心 · Presentation Core",
@@ -27,7 +42,14 @@
     "pages": 20,
     "when": "16:9 通用演示，含图表和表格页。",
     "source": "ppt-master layout presentation_core, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      9,
+      11,
+      16,
+      17,
+      18
+    ]
   },
   "presentation_core_43": {
     "name": "演示核心 4:3 · Presentation Core",
@@ -37,7 +59,10 @@
     "pages": 16,
     "when": "4:3 投影或教室。",
     "source": "ppt-master layout presentation_core_43, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      9
+    ]
   },
   "report_core": {
     "name": "报告核心 · Report Core",
@@ -47,7 +72,8 @@
     "pages": 13,
     "when": "带页眉页脚的报告页。",
     "source": "ppt-master layout report_core, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": []
   },
   "story_vertical": {
     "name": "竖屏故事 · Story Vertical",
@@ -57,7 +83,11 @@
     "pages": 9,
     "when": "9:16 竖屏故事，文字避开上下安全区。",
     "source": "ppt-master layout story_vertical, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      5,
+      6
+    ]
   },
   "xiaohongshu_post": {
     "name": "竖版图文 · Vertical Post",
@@ -67,6 +97,10 @@
     "pages": 10,
     "when": "3:4 竖版图文。只借用版式，不使用平台标志。",
     "source": "ppt-master layout xiaohongshu_post, MIT, Copyright (c) 2025-2026 Hugo He",
-    "license": "MIT"
+    "license": "MIT",
+    "pictureSlotPages": [
+      6,
+      7
+    ]
   }
 }

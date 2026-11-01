@@ -3,13 +3,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
-import { blockingIssues, checkDeck } from './check.ts'
+import { blockingIssues, checkDeck, isPlaceholderImageSrc } from './check.ts'
 import { contrastRatio, luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
 import { pathToDrawingPoints } from './svg-path.ts'
 import { comboSeriesRoles, type ChartKind, type ChartSpec, type Deck, type DeckElement, type DeckIssue, type FontFace, type GradientFill, type PatternFill, type PlatformName, type ScreenshotResult } from './types.ts'
 import { captureSlides } from './screenshot.ts'
+import { normalizeChartXml } from './chart-schema.ts'
+import { mergeInlineRuns } from './inline-runs.ts'
 
 const PT = 72
 
@@ -82,7 +84,8 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
     const slide = pres.addSlide()
     const pageBackground = colorRef(page.background, deck.theme, '$paper')
     slide.background = { color: hex(pageBackground) }
-    for (const element of page.elements) addElement(pres, slide, deck, element, platform, pageBackground)
+    // 同一行拆开的强调词合成一个文本框，避免字体宽度不同造成的空隙和重叠。
+    for (const element of mergeInlineRuns(page.elements)) addElement(pres, slide, deck, element, platform, pageBackground)
     if (page.notes) slide.addNotes(page.notes)
   }
   const raw = await pres.write({ outputType: 'nodebuffer' })
@@ -188,8 +191,12 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     addTable(pres, slide, deck, element, platform)
     return
   }
+  if (element.type === 'image' && element.src && isPlaceholderImageSrc(element.src)) {
+    addImagePlaceholder(slide, deck, element)
+    return
+  }
   if (element.type === 'image' && element.src) {
-    const fitted = fitImage(element)
+    const fitted = imagePlacement(element, deck)
     slide.addImage({
       path: resolveAsset(element.src),
       x: inches(fitted.x),
@@ -204,10 +211,17 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
   if (element.type === 'chart' && element.chart) addChart(pres, slide, deck, element, platform, pageBackground)
 }
 
-function fitImage(element: DeckElement): { x: number; y: number; w: number; h: number } {
-  if (element.fit === 'fill') return element.bounds
-  const size = element.src ? readImageSize(resolveAsset(element.src)) : null
-  if (!size) return element.bounds
+/**
+ * 图片放进图框时不裁、不改比例（LinNai，2026-11）：按原比例缩放到完全放进框里，居中，其余留白。
+ * 例外只有两种，都是原作者的选择：导入稿里写了 `crop` 的图，以及导入稿原样带来的图片
+ * （`ppt_import` 写出的 `slide<N>-<id>.png|jpg`，保持原稿的几何）。
+ */
+export function imagePlacement(element: DeckElement, deck?: Pick<Deck, 'version'>): { x: number; y: number; w: number; h: number } {
+  if (element.crop) return element.bounds
+  if (!element.src) return element.bounds
+  if (element.fit === 'fill' && deck?.version === 2 && isImportedAsset(element.src)) return element.bounds
+  const size = readImageSize(resolveAsset(element.src))
+  if (!size || size.width <= 0 || size.height <= 0) return element.bounds
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height)
   const w = size.width * scale
   const h = size.height * scale
@@ -216,6 +230,37 @@ function fitImage(element: DeckElement): { x: number; y: number; w: number; h: n
     y: element.bounds.y + (element.bounds.h - h) / 2,
     w, h,
   }
+}
+
+function isImportedAsset(src: string): boolean {
+  return /(?:^|[/\\])slide\d+-[^/\\]+\.(?:png|jpe?g)$/i.test(src)
+}
+
+/** 只有导入稿自带的 `crop` 会写成 srcRect。用户图片从不裁切。 */
+export function effectiveCrop(element: DeckElement): { l: number; t: number; r: number; b: number } | undefined {
+  return element.type === 'image' ? element.crop : undefined
+}
+
+/** 没有用户图片的槽位画成可见、可删的占位框，不放透明像素，也不当成配图。 */
+function addImagePlaceholder(slide: PptxGenJS.Slide, deck: Deck, element: DeckElement): void {
+  const cjk = deck.pages.some(page => page.elements.some(item => typeof item.text === 'string' && containsCjk(item.text)))
+  const label = cjk ? '图片占位：请放入你的图片' : 'Image placeholder: add your photo'
+  const fontSize = Math.max(8, Math.min(14, Math.round(Math.min(element.bounds.w, element.bounds.h) / 12)))
+  slide.addText(label, {
+    shape: 'rect',
+    x: inches(element.bounds.x),
+    y: inches(element.bounds.y),
+    w: inches(element.bounds.w),
+    h: inches(element.bounds.h),
+    fill: { color: 'EEF0F2' },
+    line: { color: 'A9B0B8', width: 1, dashType: 'dash' },
+    color: '7A828C',
+    fontSize,
+    align: 'center',
+    valign: 'middle',
+    altText: element.alt ? `${label} · ${element.alt}` : label,
+    objectName: element.id,
+  })
 }
 
 function readImageSize(file: string): { width: number; height: number } | null {
@@ -714,31 +759,58 @@ async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName)
     const page = deck.pages[index]!
     const faces = new Map<string, { latin: string; ea: string }>()
     const fills = new Map<string, string>()
-    const evenOdd = new Set<string>()
     for (const element of page.elements) {
       const face = element.font?.face ?? element.table?.face
       if (face) faces.set(element.id, { latin: face.latin, ea: face.cjk[platform] })
       const fill = fillOverride(element)
       if (fill) fills.set(element.id, fill)
-      if (element.pathRule === 'evenodd') evenOdd.add(element.id)
     }
-    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0) continue
+    const multiRun = mergeInlineRuns(page.elements).some(element => (element.runs?.length ?? 0) > 1)
+    if (faces.size === 0 && fills.size === 0 && !multiRun) continue
     const path = `ppt/slides/slide${index + 1}.xml`
     const file = zip.file(path)
     if (!file) continue
-    const xml = await file.async('string')
+    const original = await file.async('string')
+    const xml = multiRun ? singleParagraphProperties(original) : original
     // `<p:sp` is also the prefix of `<p:spTree>`. Require the tag to end so the tree is left intact.
-    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShape(block, faces, fills, evenOdd))
-    if (next !== xml) {
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShape(block, faces, fills))
+    if (next !== original) {
       zip.file(path, next)
       changed = true
     }
   }
   if (await polishCharts(zip, deck, platform)) changed = true
   if (await shrinkBubbleScale(zip)) changed = true
+  if (await normalizeCharts(zip)) changed = true
   if (await patchImportMarks(zip, deck)) changed = true
   if (!changed) return bytes
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+}
+
+/**
+ * PptxGenJS 给多段 runs 的每一段前面都写一个 a:pPr。架构里 a:pPr 只能是段落的第一个子元素，
+ * 多出来的会让严格校验报错。保留第一个，删掉 run 之间的。
+ */
+export function singleParagraphProperties(xml: string): string {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (all, inner: string) => {
+    const first = inner.search(/<a:(?:r|br|fld)\b/)
+    if (first < 0) return all
+    const tail = inner.slice(first).replace(/<a:pPr\b[^>]*\/>|<a:pPr\b[^>]*>[\s\S]*?<\/a:pPr>/g, '')
+    return `<a:p>${inner.slice(0, first)}${tail}</a:p>`
+  })
+}
+
+/** 图表 XML 按架构重排，见 chart-schema.ts。 */
+async function normalizeCharts(zip: JSZip): Promise<boolean> {
+  let changed = false
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    const xml = await file.async('string')
+    const next = normalizeChartXml(xml)
+    if (next === xml) continue
+    zip.file(file.name, next)
+    changed = true
+  }
+  return changed
 }
 
 /** PptxGenJS leaves bubbleScale at the PowerPoint default, which clips the largest bubble against the plot. */
@@ -761,7 +833,10 @@ async function shrinkBubbleScale(zip: JSZip): Promise<boolean> {
 async function patchImportMarks(zip: JSZip, deck: Deck): Promise<boolean> {
   let changed = false
   for (let index = 0; index < deck.pages.length; index++) {
-    const marked = deck.pages[index]!.elements.filter(element => !element.retained && (element.crop || element.link))
+    const marked = deck.pages[index]!.elements
+      .filter(element => !element.retained)
+      .map(element => ({ element, crop: effectiveCrop(element) }))
+      .filter(item => item.crop || item.element.link)
     if (marked.length === 0) continue
     const path = `ppt/slides/slide${index + 1}.xml`
     const file = zip.file(path)
@@ -772,12 +847,14 @@ async function patchImportMarks(zip: JSZip, deck: Deck): Promise<boolean> {
     let relChanged = false
     let nextId = 1
     while (rels.includes(`Id="rIdImp${nextId}"`)) nextId += 1
-    for (const element of marked) {
-      if (element.crop && element.type === 'image') {
-        const src = cropXml(element.crop)
+    for (const { element, crop } of marked) {
+      if (crop && element.type === 'image') {
+        const src = cropXml(crop)
         xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, block => {
           if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes('<a:srcRect')) return block
-          if (block.includes('<a:blipFill')) return block.replace('</a:blipFill>', `${src}</a:blipFill>`)
+          // PptxGenJS 写的是 <p:blipFill>；srcRect 必须在 blip 之后、stretch 之前。
+          if (block.includes('<a:stretch')) return block.replace('<a:stretch', `${src}<a:stretch`)
+          return block.replace(/<\/(p|a):blipFill>/, (close: string) => `${src}${close}`)
           return block
         })
         changed = true
@@ -807,7 +884,7 @@ function cropXml(crop: { l: number; t: number; r: number; b: number }): string {
   return `<a:srcRect l="${part(crop.l)}" t="${part(crop.t)}" r="${part(crop.r)}" b="${part(crop.b)}"/>`
 }
 
-function rewriteShape(block: string, faces: Map<string, { latin: string; ea: string }>, fills: Map<string, string>, evenOdd: Set<string>): string {
+function rewriteShape(block: string, faces: Map<string, { latin: string; ea: string }>, fills: Map<string, string>): string {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/)
   if (!name) return block
   const id = name[1]!
@@ -823,7 +900,6 @@ function rewriteShape(block: string, faces: Map<string, { latin: string; ea: str
   }
   const fill = fills.get(id)
   if (fill) next = replaceShapeFill(next, fill)
-  if (evenOdd.has(id)) next = next.replace(/<a:path\b(?![^>]*\bfill=)/, '<a:path fill="evenOdd"')
   return next
 }
 
@@ -837,7 +913,9 @@ function replaceShapeFill(block: string, fillXml: string): string {
     if (body.includes('<a:solidFill>')) next = body.replace(/<a:solidFill>[\s\S]*?<\/a:solidFill>/, fillXml)
     else if (body.includes('<a:noFill/>')) next = body.replace('<a:noFill/>', fillXml)
     else next = `${body}${fillXml}`
-    return `<p:spPr>${next}${line}</p:spPr>`
+    // DrawingML orders spPr as geometry, fill, line, then effects. The line goes back in front of any effect.
+    const effect = next.search(/<a:(?:effectLst|effectDag|scene3d|sp3d|extLst)\b/)
+    return effect < 0 ? `<p:spPr>${next}${line}</p:spPr>` : `<p:spPr>${next.slice(0, effect)}${line}${next.slice(effect)}</p:spPr>`
   })
 }
 
@@ -1654,7 +1732,9 @@ function polishPie(xml: string, accent: string, background: string, label: strin
 }
 
 function polishBarLabels(xml: string): string {
+  // "Category value" labels sit past the bar end. Office wraps them by default, which stacks a long name onto the next bar.
   let next = xml.replace(/<c:showCatName val="0"\/>/g, '<c:showCatName val="1"/>')
+  next = next.replace(/(<c:dLbls>\s*(?:<c:numFmt[^>]*\/>\s*)?<c:txPr>\s*)<a:bodyPr\/>/g, '$1<a:bodyPr wrap="none"/>')
   if (!next.includes('<c:separator>')) next = next.replace(/<c:showLeaderLines/g, '<c:separator> </c:separator><c:showLeaderLines')
   return next
 }

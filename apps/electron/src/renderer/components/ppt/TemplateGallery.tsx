@@ -69,11 +69,23 @@ export function TemplateGrid({ templates, compact, selectedId, onSelect, onPrevi
         <p title={template.title} className="mt-2 truncate text-[13px]">{template.title}</p>
         {!compact && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.category === '自定义' ? t('ppt.custom') : t(`ppt.categories.${categories.find(([key]) => key === template.category)?.[1] ?? 'business'}`)} · {t('ppt.pages', { count: template.pages })}</p>}
         {!compact && template.diagnostics && <p className="mt-0.5 text-[11px] text-muted-foreground">{t('ppt.templateDiagnostics', template.diagnostics)}{template.diagnostics.unsupported > 0 ? ` · ${t('ppt.templateReview')}` : ''}</p>}
-        {template.note && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.note}</p>}
         {template.category === '自定义' && onChanged && <CustomTemplateActions template={template} onChanged={onChanged} />}
       </article>
     })}
   </div>
+}
+
+/**
+ * Cards shown for a category tab and search. Every match is shown in one grid in catalog
+ * order (bundled defaults first, then the rest); nothing is folded away behind 更多模板.
+ */
+export function galleryTemplates(templates: readonly PptTemplate[], category: string, search: string): PptTemplate[] {
+  const query = search.trim().toLocaleLowerCase()
+  return templates.filter(template => {
+    const inCategory = category === 'all' || (category === 'custom' ? template.category === '自定义' : template.category === category)
+    const variantHit = template.variants?.some(variant => variant.title.toLocaleLowerCase().includes(query))
+    return inCategory && (template.title.toLocaleLowerCase().includes(query) || !!variantHit)
+  })
 }
 
 export function TemplateGallery({ onSelect, compact = false, selectedId }: { onSelect: (template: PptTemplate, source: DOMRect) => void; compact?: boolean; selectedId?: string }) {
@@ -87,15 +99,7 @@ export function TemplateGallery({ onSelect, compact = false, selectedId }: { onS
   const [importing, setImporting] = React.useState(false)
   const fileRef = React.useRef<HTMLInputElement>(null)
   const refresh = () => { refreshPptCatalog(); setRevision(value => value + 1) }
-  const query = search.trim().toLocaleLowerCase()
-  const matches = (template: PptTemplate) => {
-    const inCategory = category === 'all' || (category === 'custom' ? template.category === '自定义' : template.category === category)
-    const variantHit = template.variants?.some(variant => variant.title.toLocaleLowerCase().includes(query))
-    return inCategory && (template.title.toLocaleLowerCase().includes(query) || !!variantHit)
-  }
-  const templates = catalog?.templates.filter(matches) ?? []
-  const primary = templates.filter(template => template.tier !== 'more')
-  const more = templates.filter(template => template.tier === 'more')
+  const templates = galleryTemplates(catalog?.templates ?? [], category, search)
   const upload = async (file: File) => {
     setImporting(true)
     setNotice('')
@@ -130,11 +134,7 @@ export function TemplateGallery({ onSelect, compact = false, selectedId }: { onS
     </div>}
     {error ? <div className="py-8 text-center text-sm">{t('ppt.loadError')} <button type="button" onClick={retry} className="underline">{t('ppt.retry')}</button></div> : !catalog ? <p className="py-8 text-center text-sm text-muted-foreground">{t('ppt.loading')}</p> : <>
       {!templates.length && <p className="py-8 text-center text-sm text-muted-foreground">{t('ppt.noTemplates')}</p>}
-      {!!primary.length && <TemplateGrid templates={primary} compact={compact} selectedId={selectedId} onSelect={onSelect} onPreview={setPreview} onChanged={refresh} />}
-      {!!more.length && <details data-testid="ppt-more-templates" className="mt-6" open={query ? true : undefined}>
-        <summary className="cursor-pointer text-[13px] text-muted-foreground">{t('ppt.moreTemplates')} · {more.length}</summary>
-        <div className="mt-4"><TemplateGrid templates={more} compact={compact} selectedId={selectedId} onSelect={onSelect} onPreview={setPreview} onChanged={refresh} /></div>
-      </details>}
+      {!!templates.length && <TemplateGrid templates={templates} compact={compact} selectedId={selectedId} onSelect={onSelect} onPreview={setPreview} onChanged={refresh} />}
     </>}
     <Dialog.Root open={!!preview} onOpenChange={open => { if (!open) setPreview(undefined) }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-modal bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-modal flex max-h-[90vh] w-[min(900px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-background p-5 shadow-modal-small" data-testid="ppt-page-preview">

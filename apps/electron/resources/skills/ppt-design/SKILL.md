@@ -75,7 +75,15 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 ## 模板配图
 
-页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。`contextual-scene` 优先用户图片，没有再调用 `image_generate`（`purpose=presentation`，比例用槽位的 `aspectRatio`，`style_context` 写入六项原文，图片内文字数量为 0）。同一 `reuseGroup` 复用。`provided-portrait` 只用用户的人物照片。`native-graphic` 用已核实数据画原生图表。替换 `src` 时保持边界和遮罩。没有生图提供方时保留占位并说明，占位不是成品。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
+先看用户有没有图。Selection 不生成图片，不要调用 `image_generate`。
+
+- **用户给了图片**：选有图片位的模板页或版式放这些图。`styles/catalog.json` 和 `layouts/catalog.json` 的 `pictureSlotPages` 写着每套里哪几页有图片位（模板样例照片，或结构版式里 `*-picture-*-carrier` 虚线框）；所选模板一页都没有时，从 `layouts/` 借带图片位的版式，套用当前模板的颜色和字体。附件提示里有「Original full-resolution file」就用原图，没有再用「Stored at」；先复制到工作区 `images/`，再把 `src` 指过去，不要引用网络地址。
+- **用户没给图片**：只用 `pictureSlotPages` 以外的页和版式，带图片位的页一页都不用，成稿里不留空框、占位框或模板样例照片。封面和结尾也选没有图片位的那一页。
+- **不裁切、不改比例**：用户图片保持原比例完整放进图框，导出按比例缩到框内居中，多出的地方留白，不写 `crop`。挑形状最接近的槽：横图放宽槽，竖图放高槽，人物照片放 `provided-portrait`，让留白最少。圆形或其他遮罩会切掉画面时，改用矩形图片位，或换一个没有遮罩的版式。版式的虚线框放图后删掉。
+- 图片比图片位少时，多出的图片位所在页换成没有图片位的版式。实在换不了才把 `src` 写成 `placeholder:<这里该放什么>`，导出成带「图片占位」字样的灰框，交付时说明哪几页缺图；这只是最后手段，不要说成已配图。
+- 模板里描述原样例图的图注要改成用户图片的说明，或者删掉。图注条压在图片上时，把图片框缩到图注条上方，或把图注移到图片下方，不要盖住用户图片。同一 `reuseGroup` 用同一张图。`native-graphic` 用已核实数据画原生图表。
+
+页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。替换 `src` 时保持边界和遮罩。标题、正文和数据保持可编辑。配完用 `office_render` 看图片是否完整、留白和整稿风格，最多 3 轮。`deck_check` 对留在成稿里的模板样例照片报错，对空图片框和占位框给出提醒。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
 
 十六套随包模板的 `deck.json` 不覆盖。图片槽样例只在 `styles/image-slots.extension.json`。个人模板上的图片位由复制出的工程给出建议合同，等用户确认。
 

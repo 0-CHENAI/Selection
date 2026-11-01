@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { ChartSkillCandidate } from '@craft-agent/shared/skills'
-import { buildPptPrompt, getPptCatalog, getPptTemplatePages, getPptTemplatePreview, PPT_ARCHIVED_ASSET_MESSAGE, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
+import { buildPptPrompt, getPptCatalog, PPT_PICTURE_POLICY, getPptTemplatePages, getPptTemplatePreview, PPT_ARCHIVED_ASSET_MESSAGE, pptSendOptions, readPptAsset, validatePptRequest } from './ppt-catalog'
 import { coverQuality } from './ppt-cover-quality'
 
 const root = realpathSync(resolve(import.meta.dir, '../../../../apps/electron/resources/skills/ppt-design'))
@@ -216,4 +216,18 @@ test('an installed chart skill is named in the prompt only when the user names i
   expect(missing).not.toContain('[skill:lieflat-charts]')
   expect(pptSendOptions('PRO', request, undefined, root, [], '用 lieflat-charts 画图')?.skillSlugs).toEqual(['ppt-design'])
   expect(JSON.parse(readFileSync(join(missingSession, 'data', 'chart-fallback.json'), 'utf8')).fallbacks).toEqual([{ skill: 'lieflat-charts', reason: 'missing' }])
+})
+
+test('有图才用带图片位的页面：提示里写明图片位页码和没图时的做法', () => {
+  const catalog = JSON.parse(readFileSync(join(root, 'styles/catalog.json'), 'utf8')) as Record<string, { pictureSlotPages?: number[] }>
+  expect(catalog['solution-proposal']!.pictureSlotPages).toEqual([1, 6, 14])
+  expect(catalog['dsh-cartesian']!.pictureSlotPages).toEqual([])
+  const withSlots = buildPptPrompt({ templateId: 'solution-proposal' }, temp(), root)
+  expect(withSlots).toContain(PPT_PICTURE_POLICY)
+  expect(withSlots).toContain('reference pages 1, 6, 14 have picture slots')
+  expect(withSlots).toContain('do not use pages 1, 6, 14 at all')
+  const none = buildPptPrompt({ templateId: 'dsh-cartesian' }, temp(), root)
+  expect(none).toContain('this template has none')
+  expect(PPT_PICTURE_POLICY).toContain('never crop')
+  expect(PPT_PICTURE_POLICY).toContain('no empty picture frames')
 })

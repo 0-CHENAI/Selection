@@ -4,6 +4,7 @@ import { containsCjk, defaultLeading, fitSlack, literalNewline, orphanLines, tex
 import { colorRef } from './schema.ts'
 import type { Bounds, Deck, DeckElement, DeckIssue, DeckPage, ImageSlot } from './types.ts'
 import { issue } from './schema.ts'
+import { isPictureCarrier, isPlaceholderImageSrc, isSamplePhotoSrc } from './picture-slots.ts'
 
 /** dsh `layoutRepetitionIssues` warns when a run is at least this many pages (`end - start < 3` does not). */
 export const LAYOUT_REPETITION_RUN = 3
@@ -24,10 +25,7 @@ export type CheckOptions = {
   assetExists?: (src: string) => boolean
 }
 
-export function isPlaceholderImageSrc(src: string | undefined): boolean {
-  if (!src) return false
-  return src.startsWith('placeholder:') || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src)
-}
+export { isPlaceholderImageSrc } from './picture-slots.ts'
 
 export function blockingIssues(issues: DeckIssue[]): DeckIssue[] {
   return issues.filter(item => item.severity !== 'warning')
@@ -232,14 +230,15 @@ function checkPage(deck: Deck, page: DeckPage, options: CheckOptions): DeckIssue
       issues.push(...checkWaterfall(page, element))
     }
     if (element.type === 'chart') issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element))
-    if (element.type === 'image' && !element.chartImage) issues.push(...checkImage(page, element, options))
+    if (element.type === 'image' && !element.chartImage) issues.push(...checkImage(page, element, options, deck.profile === 'example'))
     if (element.type === 'table' && element.table) {
       issues.push(...checkTable(deck, page, element, background))
     }
   }
+  issues.push(...checkTextCollision(page))
   const editable = { ...page, elements: page.elements.filter(element => !element.retained) }
   issues.push(...checkOverlap(editable, deck.profile === 'example'))
-  if (deck.profile !== 'example') issues.push(...checkTextLayer(page))
+  if (deck.profile !== 'example') issues.push(...checkTextLayer(page), ...checkPictureCarriers(page))
   return issues
 }
 
@@ -513,14 +512,16 @@ function slotFor(page: DeckPage, elementId: string): ImageSlot | undefined {
   return page.imageSlots?.slots.find(slot => slot.elementId === elementId)
 }
 
-function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions): DeckIssue[] {
+function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions, example = false): DeckIssue[] {
   const issues: DeckIssue[] = []
   const src = element.src?.trim() ?? ''
   const slot = slotFor(page, element.id)
   if (/^https?:\/\//i.test(src)) {
     issues.push(issue('remote_image', `图片 ${element.id} 使用了网络地址。请先把图片放进工作区再引用。`, page.id, element.id))
   } else if (isPlaceholderImageSrc(src)) {
-    issues.push(issue('missing_asset', `图片 ${element.id} 仍是占位。没有生图提供方时保留占位并提示，不要当成已配图。`, page.id, element.id, 'warning'))
+    issues.push(issue('missing_asset', `图片 ${element.id} 还是空的图片位，会导出成占位框。有用户图片就放进来；没有就把这一页换成没有图片位的版式，占位框只作最后手段。`, page.id, element.id, 'warning'))
+  } else if (!example && isSamplePhotoSrc(src)) {
+    issues.push(issue('missing_asset', `图片 ${element.id} 还是模板的样例照片。有用户图片就换成用户的图；没有就把这一页换成没有图片位的版式，删掉这张图。`, page.id, element.id))
   } else if (!src && slot) {
     issues.push(issue('missing_asset', `图片槽 ${element.id} 没有素材。`, page.id, element.id))
   } else if (src && options.assetExists && !options.assetExists(src)) {
@@ -546,6 +547,64 @@ function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions)
       issues.push(issue('image_crop', `图片 ${element.id} 的裁剪没有留下有效画面。`, page.id, element.id))
     } else if ((1 - l - r) * (1 - t - b) < 0.5) {
       issues.push(issue('image_crop', `图片 ${element.id} 的主体被裁掉太多，请保留至少一半画面。`, page.id, element.id))
+    }
+  }
+  return issues
+}
+
+/** 结构版式的虚线图片框。没有一张图盖住它，就是成稿里的空占位。 */
+function checkPictureCarriers(page: DeckPage): DeckIssue[] {
+  const images = page.elements.filter(element => element.type === 'image' && element.src && !isPlaceholderImageSrc(element.src))
+  return page.elements.filter(isPictureCarrier).flatMap(carrier => {
+    const area = carrier.bounds.w * carrier.bounds.h
+    const filled = area > 0 && images.some(image => areaOverlap(carrier.bounds, image.bounds).area / area >= 0.5)
+    return filled ? [] : [issue('empty_picture_slot', `图片框 ${carrier.id} 没有放图。有用户图片就放进来；没有就换成没有图片位的版式，不要留空框。`, page.id, carrier.id, 'warning')]
+  })
+}
+
+/**
+ * 换行后的正文压到另一段正文上（例如段落末行盖住下面的小标签）。
+ * 按导出时的排法估计每段字的范围：单行框不换行，多行框按框宽换行，超出框高的行照样往下排。
+ * 只看正文字号（≤24 pt、两者相差不到一倍）、不同行、文字不同的两段，避开大号装饰数字、
+ * 叠字阴影和同一行并排的强调词，所以参考页里不会误报。
+ */
+function inkBox(element: DeckElement): Bounds {
+  const font = element.font!
+  const text = element.text ?? ''
+  const bold = font.weight === 'bold'
+  const tracking = font.tracking ?? 0
+  const leading = font.leading ?? defaultLeading(font.size)
+  const wrap = (element.textCapacity?.maxLines ?? 1) > 1
+  const lines = wrap ? wrapText(text, element.bounds.w, font.size, bold, tracking) : text.split('\n')
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0)
+  const w = wrap ? Math.min(widest, element.bounds.w) : widest
+  const h = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading
+  const align = font.align ?? 'left'
+  const valign = font.valign ?? 'top'
+  const x = align === 'center' ? element.bounds.x + (element.bounds.w - w) / 2 : align === 'right' ? element.bounds.x + element.bounds.w - w : element.bounds.x
+  const y = valign === 'middle' ? element.bounds.y + (element.bounds.h - h) / 2 : valign === 'bottom' ? element.bounds.y + element.bounds.h - h : element.bounds.y
+  return { x, y, w, h }
+}
+
+function checkTextCollision(page: DeckPage): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  const texts = page.elements.filter(element => element.type === 'text' && element.font && element.text?.trim() && !element.retained && !element.rotate && element.role !== 'decoration')
+  for (let i = 0; i < texts.length; i++) {
+    for (let j = i + 1; j < texts.length; j++) {
+      const a = texts[i]!
+      const b = texts[j]!
+      const big = Math.max(a.font!.size, b.font!.size)
+      const small = Math.min(a.font!.size, b.font!.size)
+      if (big > 24 || big / small > 2) continue
+      if (a.text!.trim() === b.text!.trim()) continue
+      if (Math.abs(a.bounds.y - b.bounds.y) < 0.5 * small) continue
+      const boxA = inkBox(a)
+      const boxB = inkBox(b)
+      const ix = Math.min(boxA.x + boxA.w, boxB.x + boxB.w) - Math.max(boxA.x, boxB.x)
+      const iy = Math.min(boxA.y + boxA.h, boxB.y + boxB.h) - Math.max(boxA.y, boxB.y)
+      if (ix > 0.3 * small && iy > 0.4 * small) {
+        issues.push(issue('text_collision', `文字 ${a.id} 和 ${b.id} 排开后压在一起（重叠约 ${ix.toFixed(0)}×${iy.toFixed(0)} pt）。移开其中一段，或缩短文字。`, page.id, a.id, 'warning'))
+      }
     }
   }
   return issues

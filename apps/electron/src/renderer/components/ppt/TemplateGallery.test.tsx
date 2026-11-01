@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactElement } from 'react'
 import type { PptTemplate } from '@craft-agent/shared/protocol'
 import i18next from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
-import { TemplateGrid } from './TemplateGallery'
+import { galleryTemplates, TemplateGrid } from './TemplateGallery'
 import { TemplateOptions } from './TemplateOptions'
 
 const i18n = i18next.createInstance()
@@ -62,4 +64,19 @@ test('variants stay selectable from the selected template options', () => {
   expect(html).toContain('理性简报')
   expect(html).toContain('信号简报')
   expect(html).toContain('极简研究')
+})
+
+test('every template in the tab is shown in the grid, none folded behind 更多模板', () => {
+  const card = (id: string, category: PptTemplate['category'], tier: 'default' | 'more') =>
+    ({ id, title: id, category, tier, canvas: '16:9', pages: 12, cover: 'data:cover', referencePages: [] }) as PptTemplate
+  const all = [card('a', '商务', 'default'), card('b', '技术', 'default'), card('c', '商务', 'more'), card('d', '咨询', 'more')]
+  expect(galleryTemplates(all, 'all', '').map(item => item.id)).toEqual(['a', 'b', 'c', 'd'])
+  expect(galleryTemplates(all, '商务', '').map(item => item.id)).toEqual(['a', 'c'])
+  expect(galleryTemplates(all, 'all', ' D ').map(item => item.id)).toEqual(['d'])
+  const html = render(<TemplateGrid templates={[{ ...all[2]!, note: '单独放在更多模板。' }]} compact={false} onSelect={() => {}} onPreview={() => {}} />)
+  expect(html).toContain('商务 · 12 页')
+  expect(html).not.toContain('单独放在更多模板')
+  const source = readFileSync(join(import.meta.dir, 'TemplateGallery.tsx'), 'utf8')
+  expect(source).not.toContain('ppt-more-templates')
+  expect(source).not.toContain('<details')
 })
