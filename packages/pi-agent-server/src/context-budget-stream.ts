@@ -39,6 +39,39 @@ export interface ContextBudgetDebugInfo {
 
 type DebugLogger = (info: ContextBudgetDebugInfo) => void;
 
+type CodexTextPhase = 'commentary' | 'final_answer';
+
+function rememberCodexTextPhase(data: unknown, pendingPhases: Array<CodexTextPhase | undefined>): void {
+  if (!data || typeof data !== 'object') return;
+  const event = data as { type?: unknown; item?: { type?: unknown; phase?: unknown } };
+  if (event.type !== 'response.output_item.added' || event.item?.type !== 'message') return;
+  pendingPhases.push(event.item.phase === 'commentary' || event.item.phase === 'final_answer'
+    ? event.item.phase
+    : undefined);
+}
+
+function annotateCodexTextPhase(
+  event: AssistantMessageEvent,
+  pendingPhases: Array<CodexTextPhase | undefined>,
+  phases: Map<number, CodexTextPhase>,
+): AssistantMessageEvent {
+  if (event.type !== 'text_start' && event.type !== 'text_delta' && event.type !== 'text_end') return event;
+  if (event.type === 'text_start') {
+    const phase = pendingPhases.shift();
+    if (phase) phases.set(event.contentIndex, phase);
+  }
+  const phase = phases.get(event.contentIndex);
+  const part = event.partial.content[event.contentIndex];
+  let annotated = event;
+  if (phase && part?.type === 'text' && !part.textSignature) {
+    const content = [...event.partial.content];
+    content[event.contentIndex] = { ...part, textSignature: JSON.stringify({ phase }) };
+    annotated = { ...event, partial: { ...event.partial, content } };
+  }
+  if (event.type === 'text_end') phases.delete(event.contentIndex);
+  return annotated;
+}
+
 const installedRuntimes = new WeakSet<PiModelRuntime>();
 
 function errorText(error: unknown): string {
@@ -157,6 +190,8 @@ export function createContextBudgetedStream(
 
     while (attempt < 2) {
       const buffered: AssistantMessageEvent[] = [];
+      const pendingCodexTextPhases: Array<CodexTextPhase | undefined> = [];
+      const codexTextPhases = new Map<number, CodexTextPhase>();
       let emittedIrreversibleOutput = false;
       let retryMaxTokens: number | undefined;
       let lastPartial: AssistantMessage | undefined;
@@ -173,6 +208,12 @@ export function createContextBudgetedStream(
         const stream = boundedModelStream(
           signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, {
             ...attemptOptions, signal,
+            onProviderStreamEvent: model.api === 'openai-codex-responses'
+              ? async (data, sourceModel) => {
+                  rememberCodexTextPhase(data, pendingCodexTextPhases);
+                  await attemptOptions.onProviderStreamEvent?.(data, sourceModel);
+                }
+              : attemptOptions.onProviderStreamEvent,
             // SDK wall clocks start before fetch, including host queueing. The
             // cancellable idle bound above owns the deadline once a slot exists.
             timeoutMs: hasModelRequestGate() ? 2_147_483_647 : attemptOptions.timeoutMs,
@@ -183,8 +224,11 @@ export function createContextBudgetedStream(
           attemptOptions.signal, timeoutMs, listener => subscribeModelRequestQueue(diagnosticScope, listener),
         );
         for await (const rawEvent of stream) {
-          if ('partial' in rawEvent) lastPartial = rawEvent.partial;
-          const event = rawEvent.type === 'error' ? { ...rawEvent, error: withDiagnostic(rawEvent.error) } : rawEvent;
+          const phasedEvent = model.api === 'openai-codex-responses'
+            ? annotateCodexTextPhase(rawEvent, pendingCodexTextPhases, codexTextPhases)
+            : rawEvent;
+          if ('partial' in phasedEvent) lastPartial = phasedEvent.partial;
+          const event = phasedEvent.type === 'error' ? { ...phasedEvent, error: withDiagnostic(phasedEvent.error) } : phasedEvent;
           if (attempt > 0 || emittedIrreversibleOutput) {
             output.push(event);
             if (event.type === 'done' || event.type === 'error') return;

@@ -1,7 +1,7 @@
 /**
  * ChatGPT OAuth with PKCE
  *
- * Implements PKCE-based OAuth for authenticating with ChatGPT Plus accounts
+ * Implements PKCE-based OAuth for authenticating with ChatGPT accounts
  * via the Codex app-server OAuth endpoint.
  *
  * Architecture: server-owned flow.
@@ -30,6 +30,53 @@ export interface ChatGptTokens {
   refreshToken?: string;
   /** Token expiration timestamp (Unix ms) */
   expiresAt?: number;
+}
+
+const CHATGPT_AUTH_CLAIM = 'https://api.openai.com/auth';
+
+const CHATGPT_PLAN_DISPLAY_NAMES: Record<string, string> = {
+  free: 'Free',
+  go: 'Go',
+  plus: 'Plus',
+  pro: 'Pro',
+  prolite: 'Pro',
+  promax: 'Pro Max',
+  team: 'Team',
+  self_serve_business_prolite: 'Business',
+  self_serve_business_usage_based: 'Business',
+  business: 'Business',
+  ent26: 'Enterprise',
+  enterprise_cbp_automation: 'Enterprise',
+  enterprise_cbp_usage_based: 'Enterprise',
+  enterprise: 'Enterprise',
+  hc: 'Enterprise',
+  education: 'Edu',
+  edu: 'Edu',
+  edu_plus: 'Edu Plus',
+  edu_pro: 'Edu Pro',
+};
+
+/**
+ * Read the ChatGPT plan claim used by official Codex clients for display.
+ * JWT claims are unverified here, so this must never gate authorization.
+ */
+export function readChatGptPlanDisplayName(jwt?: string): string | undefined {
+  if (!jwt) return undefined;
+  const parts = jwt.split('.');
+  if (parts.length !== 3 || parts.some(part => !part)) return undefined;
+  const payloadPart = parts[1];
+  if (!payloadPart) return undefined;
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const auth = payload[CHATGPT_AUTH_CLAIM];
+    if (!auth || typeof auth !== 'object') return undefined;
+    const plan = (auth as Record<string, unknown>).chatgpt_plan_type;
+    if (typeof plan !== 'string') return undefined;
+    return CHATGPT_PLAN_DISPLAY_NAMES[plan.trim().toLowerCase()];
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -93,6 +93,73 @@ function getModelIds(connection: any): string[] {
 }
 
 describe('startup migration (integration)', () => {
+  it('updates legacy ChatGPT OAuth labels without overwriting custom names', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const model = getPiModelsForAuthProvider('openai-codex')[0]?.id
+    if (!model) throw new Error('expected at least one ChatGPT OAuth model')
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'codex',
+        name: 'ChatGPT Plus (via Pi)',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'chatgpt-paid',
+        name: 'ChatGPT Plus / Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'chatgpt-pro',
+        name: 'ChatGPT Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+      {
+        slug: 'my-chatgpt',
+        name: 'My ChatGPT Pro',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        createdAt: Date.now(),
+        models: [model],
+        defaultModel: model,
+      },
+    ])
+
+    runMigration(configDir)
+
+    expect(findConnection(configPath, 'chatgpt-plus').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'codex').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'chatgpt-paid').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'chatgpt-pro').name).toBe('ChatGPT')
+    expect(findConnection(configPath, 'my-chatgpt').name).toBe('My ChatGPT Pro')
+  })
+
   it('repairs broken pi-api-key openai-codex provider on startup migration', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
 

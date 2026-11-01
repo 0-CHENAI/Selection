@@ -437,7 +437,7 @@ export class PiAgent extends BaseAgent {
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
 
-  // OAuth token refresh (ChatGPT Plus)
+  // OAuth token refresh (ChatGPT)
   /**
    * @deprecated Use onBackendAuthRequired (inherited from BaseAgent) instead.
    * Kept as a getter/setter alias for backward compatibility.
@@ -847,7 +847,7 @@ export class PiAgent extends BaseAgent {
    * Returns a provider-aware credential object for the subprocess,
    * or null if no piAuthProvider is configured (falls back to legacy getApiKey).
    *
-   * OAuth tokens from Craft (Claude Max, ChatGPT Plus, Copilot) are passed as
+   * OAuth tokens from Craft (Claude Max, ChatGPT, Copilot) are passed as
    * api_key type because they function as bearer tokens that the Pi SDK's provider
    * modules use directly. The OAuth exchange happens on the Craft side; by the time
    * it reaches Pi, it's just an access token.
@@ -1014,7 +1014,7 @@ export class PiAgent extends BaseAgent {
 
   /**
    * Refresh OAuth tokens and push updated credentials to the running subprocess.
-   * Handles Copilot and Kimi Code (Pi SDK) and ChatGPT Plus token refresh.
+   * Handles Copilot and Kimi Code (Pi SDK) and ChatGPT token refresh.
    */
   private async refreshAndPushTokens(): Promise<void> {
     if (this.config.authType !== 'oauth') return;
@@ -1071,7 +1071,7 @@ export class PiAgent extends BaseAgent {
             expiresAt: newCreds.expires,
           });
         } else {
-          // ChatGPT Plus: use existing refresh utility
+          // ChatGPT: use existing refresh utility
           const newTokens = await refreshChatGptTokens(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newTokens.accessToken,

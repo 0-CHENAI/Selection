@@ -2,19 +2,22 @@ import { Zap } from 'lucide-react'
 import { Item as MenuItem } from '@radix-ui/react-dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import type { FastServiceFamily } from '@craft-agent/shared/agent/fast-mode'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import './FastModeButton.css'
 
-export function fastModeDetailKey(supported: boolean, busy?: boolean) {
+export function fastModeDetailKey(supported: boolean, busy?: boolean, family?: FastServiceFamily) {
   if (!supported) return 'chat.fastMode.unsupported' as const
   if (busy) return 'chat.fastMode.busy' as const
+  if (family === 'grok') return 'chat.fastMode.grokDescription' as const
   return 'chat.fastMode.description' as const
 }
 
-/** Per-session OpenAI OAuth Fast flag, independent of reasoning effort. From PR #681. */
-export function FastModeButton({ enabled, supported, busy, onChange, inMenu = false, workMode }: {
+/** Per-session priority-processing flag, independent of reasoning effort. */
+export function FastModeButton({ enabled, supported, family, busy, onChange, inMenu = false, workMode }: {
   enabled: boolean
   supported: boolean
+  family?: FastServiceFamily
   busy?: boolean
   onChange: (enabled: boolean) => void
   inMenu?: boolean
@@ -23,7 +26,7 @@ export function FastModeButton({ enabled, supported, busy, onChange, inMenu = fa
   const { t } = useTranslation()
   const inactive = !supported || !!busy
   const active = enabled && supported
-  const description = t(fastModeDetailKey(supported, busy))
+  const description = t(fastModeDetailKey(supported, busy, family))
   const button = (
     <button
       type="button"

@@ -2,7 +2,11 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { Check, Key, Cpu } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
-import type { LlmAuthType, LlmProviderType } from "@craft-agent/shared/config/llm-connections"
+import {
+  CHATGPT_OAUTH_CONNECTION_NAME,
+  type LlmAuthType,
+  type LlmProviderType,
+} from "@config/llm-connections"
 
 const BetaBadge = ({ label }: { label: string }) => (
   <span className="inline px-1.5 pt-[2px] pb-[3px] text-[10px] font-accent font-bold rounded-[4px] bg-accent text-background ml-1 relative -top-[1px]">
@@ -133,7 +137,7 @@ export function APISetupStep({
   const API_SETUP_OPTIONS: ApiSetupOption[] = [
     {
       id: 'pi_chatgpt_oauth',
-      name: 'ChatGPT Plus',
+      name: CHATGPT_OAUTH_CONNECTION_NAME,
       description: t("onboarding.apiSetup.chatGPTPlusDesc"),
       icon: API_SETUP_ICONS.pi_chatgpt_oauth,
     },

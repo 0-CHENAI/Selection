@@ -176,22 +176,30 @@ describe('PiEventAdapter', () => {
       expect(events).toHaveLength(0);
     });
 
-    it('should stream Codex text only when its final-answer phase is explicit', () => {
+    it('should stream the current Codex final-answer block after commentary', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_update',
         assistantMessageEvent: {
           type: 'text_delta',
+          contentIndex: 1,
           delta: 'Verified result',
           partial: {
             role: 'assistant',
             api: 'openai-codex-responses',
             provider: 'openai-codex',
-            content: [{
-              type: 'text',
-              text: 'Verified result',
-              textSignature: JSON.stringify({ phase: 'final_answer' }),
-            }],
+            content: [
+              {
+                type: 'text',
+                text: 'I checked the files.',
+                textSignature: JSON.stringify({ phase: 'commentary' }),
+              },
+              {
+                type: 'text',
+                text: 'Verified result',
+                textSignature: JSON.stringify({ phase: 'final_answer' }),
+              },
+            ],
           },
         },
       } as any));

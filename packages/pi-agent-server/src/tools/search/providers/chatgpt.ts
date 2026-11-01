@@ -1,5 +1,5 @@
 /**
- * ChatGPT backend search provider — for ChatGPT Plus / OpenAI OAuth users.
+ * ChatGPT backend search provider — for ChatGPT OAuth users.
  *
  * Uses the same Responses API format as the public OpenAI API, but hits the
  * ChatGPT backend endpoint which accepts OAuth access tokens instead of API keys.

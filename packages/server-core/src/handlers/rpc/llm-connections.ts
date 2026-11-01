@@ -1,6 +1,28 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
-import { fetchCustomEndpointModels, type FetchCustomEndpointModelsInput } from '@craft-agent/shared/config'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE, getDefaultModelsForConnection, getDefaultModelForConnection, resolveSetupConnectionName, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
+import {
+  addLlmConnection,
+  deleteLlmConnection,
+  deriveBedrockRegionPrefix,
+  fetchCustomEndpointModels,
+  getDefaultLlmConnection,
+  getDefaultModelForConnection,
+  getDefaultModelsForConnection,
+  getLlmConnection,
+  getLlmConnections,
+  isDefaultChatGptOAuthConnectionName,
+  isCompatProvider,
+  isUnsupportedLlmConnection,
+  resolveSetupConnectionName,
+  setDefaultLlmConnection,
+  touchLlmConnection,
+  toBedrockNativeId,
+  UNSUPPORTED_LLM_CONNECTION_MESSAGE,
+  updateLlmConnection,
+  type FetchCustomEndpointModelsInput,
+  type LlmConnection,
+  type LlmConnectionWithStatus,
+} from '@craft-agent/shared/config'
+import { readChatGptPlanDisplayName } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -9,7 +31,17 @@ import {
   validateStoredBackendConnection,
 } from '@craft-agent/shared/agent/backend'
 import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup, persistableLlmSetupCredential } from '@craft-agent/server-core/domain'
+import {
+  createBuiltInConnection,
+  parseTestConnectionError,
+  persistableLlmSetupCredential,
+  resolveChatGptOAuthDisplayName,
+  resolveCustomEndpointSetup,
+  setupTestRequiresApiKey,
+  splitModelIdList,
+  validateModelList,
+  validateSetupTestInput,
+} from '@craft-agent/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -467,10 +499,19 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const defaultSlug = getDefaultLlmConnection()
 
     return Promise.all(connections.map(async (conn): Promise<LlmConnectionWithStatus> => {
-      // Check if credentials exist for this connection
-      const hasCredentials = await credentialManager.hasLlmCredentials(conn.slug, conn.authType)
+      const shouldResolveChatGptPlan = conn.providerType === 'pi'
+        && conn.authType === 'oauth'
+        && conn.piAuthProvider === 'openai-codex'
+        && isDefaultChatGptOAuthConnectionName(conn.name)
+      const [hasCredentials, oauth] = await Promise.all([
+        credentialManager.hasLlmCredentials(conn.slug, conn.authType),
+        shouldResolveChatGptPlan ? credentialManager.getLlmOAuth(conn.slug) : Promise.resolve(null),
+      ])
+      const plan = readChatGptPlanDisplayName(oauth?.accessToken)
+        ?? readChatGptPlanDisplayName(oauth?.idToken)
       return {
         ...conn,
+        name: resolveChatGptOAuthDisplayName(conn, plan),
         isAuthenticated: conn.authType === 'none' || hasCredentials,
         isDefault: conn.slug === defaultSlug,
       }

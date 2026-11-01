@@ -29,6 +29,31 @@ import {
 } from './model-context-window.ts';
 import type { CredentialManager } from '../credentials/manager.ts';
 import { isOrderGatewayUrl } from './order-gateway.ts';
+
+/** Stable fallback label when the OAuth token does not expose a known plan. */
+export const CHATGPT_OAUTH_CONNECTION_NAME = 'ChatGPT';
+
+const CHATGPT_OAUTH_GENERATED_NAMES = new Set([
+  CHATGPT_OAUTH_CONNECTION_NAME,
+  'ChatGPT Free',
+  'ChatGPT Go',
+  'ChatGPT Plus',
+  'ChatGPT Pro',
+  'ChatGPT Pro Max',
+  'ChatGPT Team',
+  'ChatGPT Business',
+  'ChatGPT Enterprise',
+  'ChatGPT Edu',
+  'ChatGPT Edu Plus',
+  'ChatGPT Edu Pro',
+]);
+
+export function isDefaultChatGptOAuthConnectionName(name: string): boolean {
+  return CHATGPT_OAUTH_GENERATED_NAMES.has(name)
+    || name === 'ChatGPT Plus / Pro'
+    || name === 'ChatGPT Plus (via Pi)';
+}
+
 export {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
   DEFAULT_CUSTOM_MAX_TOKENS,
@@ -301,7 +326,7 @@ export interface LlmConnectionWithStatus extends LlmConnection {
  * given the current auth flavor.
  *
  * - `codex-mini-latest` is always denied (Pi SDK rejects it outright).
- * - When `piAuthProvider === 'openai-codex'` (ChatGPT Plus/Pro OAuth or
+ * - When `piAuthProvider === 'openai-codex'` (ChatGPT OAuth or
  *   ChatGPT-JWT API key), all `*codex-mini*` variants (e.g. `gpt-5.1-codex-mini`)
  *   are denied — the ChatGPT backend refuses them with: "The '<model>' model is
  *   not supported when using Codex with a ChatGPT account."

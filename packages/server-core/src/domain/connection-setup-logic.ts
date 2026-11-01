@@ -12,10 +12,25 @@ import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
   defaultMidStreamBehavior,
+  CHATGPT_OAUTH_CONNECTION_NAME,
+  isDefaultChatGptOAuthConnectionName,
   isOrderGatewayUrl,
   ORDER_CONNECTION_NAME,
   providerConnectionLabel,
 } from '@craft-agent/shared/config'
+
+export function resolveChatGptOAuthDisplayName(
+  connection: Pick<LlmConnection, 'name' | 'providerType' | 'authType' | 'piAuthProvider'>,
+  plan?: string,
+): string {
+  const isChatGptOAuth = connection.providerType === 'pi'
+    && connection.authType === 'oauth'
+    && connection.piAuthProvider === 'openai-codex'
+  if (!plan || !isChatGptOAuth || !isDefaultChatGptOAuthConnectionName(connection.name)) {
+    return connection.name
+  }
+  return `ChatGPT ${plan}`
+}
 
 // ============================================================
 // Error Parsing
@@ -163,7 +178,7 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
   piAuthProvider?: string
 }> = {
   'chatgpt-plus': {
-    name: 'ChatGPT Plus',
+    name: CHATGPT_OAUTH_CONNECTION_NAME,
     providerType: 'pi',
     authType: 'oauth',
     piAuthProvider: 'openai-codex',

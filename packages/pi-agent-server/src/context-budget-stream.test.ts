@@ -13,6 +13,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { createContextBudgetedStream } from './context-budget-stream.ts';
 import { setModelRequestGate } from '../../shared/src/model-request-gate';
+import { PiEventAdapter } from '../../shared/src/agent/backend/pi/event-adapter.ts';
 
 const model = {
   id: 'test-model',
@@ -69,6 +70,78 @@ const overflowText =
   'This model maximum context length is 262144 tokens. However, you requested 214575 output tokens and your prompt contains at least 47570 input tokens. (context_length_exceeded)';
 
 describe('createContextBudgetedStream', () => {
+  it('preserves the early Codex response phase so text deltas can stream immediately', async () => {
+    const codexModel = {
+      ...model,
+      api: 'openai-codex-responses',
+      provider: 'openai-codex',
+    } as Model<'openai-codex-responses'>;
+    const partial: AssistantMessage = {
+      ...message('stop'),
+      api: codexModel.api,
+      provider: codexModel.provider,
+      content: [
+        { type: 'text', text: '' },
+        { type: 'text', text: 'Working', textSignature: JSON.stringify({ phase: 'commentary' }) },
+        { type: 'thinking', thinking: 'Reasoning' },
+        { type: 'text', text: 'Streaming answer' },
+      ],
+    };
+    let observed = false;
+
+    const events = await collect(createContextBudgetedStream((_model, _context, options) => {
+      const stream = createAssistantMessageEventStream();
+      void (async () => {
+        await options?.onProviderStreamEvent?.({
+          type: 'response.output_item.added',
+          output_index: 2,
+          item: { type: 'message' },
+        }, codexModel);
+        stream.push({ type: 'text_start', contentIndex: 0, partial });
+        await options?.onProviderStreamEvent?.({
+          type: 'response.output_item.added',
+          output_index: 3,
+          item: { type: 'message', phase: 'commentary' },
+        }, codexModel);
+        stream.push({ type: 'text_start', contentIndex: 1, partial });
+        await options?.onProviderStreamEvent?.({
+          type: 'response.output_item.added',
+          output_index: 7,
+          item: { type: 'message', phase: 'final_answer' },
+        }, codexModel);
+        stream.push({ type: 'text_start', contentIndex: 3, partial });
+        stream.push({ type: 'text_delta', contentIndex: 3, delta: 'Streaming answer', partial });
+        stream.push({ type: 'done', reason: 'stop', message: partial });
+      })();
+      return stream;
+    }, codexModel, emptyContext, {
+      onProviderStreamEvent: () => { observed = true; },
+    }));
+
+    const delta = events.find(event => event.type === 'text_delta');
+    const unclassifiedStart = events.find(event => event.type === 'text_start' && event.contentIndex === 0);
+    expect(unclassifiedStart?.type === 'text_start' && unclassifiedStart.partial.content[0]?.type === 'text'
+      ? unclassifiedStart.partial.content[0].textSignature
+      : undefined).toBeUndefined();
+    expect(delta?.type).toBe('text_delta');
+    if (delta?.type === 'text_delta') {
+      const part = delta.partial.content[delta.contentIndex];
+      expect(part?.type).toBe('text');
+      if (part?.type === 'text') expect(JSON.parse(part.textSignature ?? '{}').phase).toBe('final_answer');
+
+      const adapter = new PiEventAdapter();
+      adapter.startTurn();
+      const streamed = [...adapter.adaptEvent({ type: 'message_update', assistantMessageEvent: delta } as never)];
+      expect(streamed).toEqual([expect.objectContaining({
+        type: 'text_delta',
+        text: 'Streaming answer',
+        phase: 'final',
+      })]);
+    }
+    expect(partial.content[3]?.type === 'text' ? partial.content[3].textSignature : undefined).toBeUndefined();
+    expect(observed).toBe(true);
+  });
+
   it('uses the cancellable idle deadline and accounted SSE transport for gated Codex requests', async () => {
     setModelRequestGate(async () => ({ release() {} }));
     try {
