@@ -50,9 +50,9 @@ export const PPT_TEMPLATE_CREATE_DESCRIPTION = [
 ].join('');
 
 export const IMAGE_GENERATE_DESCRIPTION = [
-  '为演示文稿的图片槽生成无文字配图。purpose 用 presentation，aspect_ratio 用槽位比例。',
-  'style_context 写上全稿风格的六项原文，并写明图片内文字数量为 0。同一 reuse_group 复用，不要重复生图。',
-  'contextual-scene 优先用用户图片，没有才调用本工具。provided-portrait 和 native-graphic 不要调用。',
-  '没有提供方时返回占位图并说明，不要伪造图片。占位图只是提醒，不是成品。',
-  '替换 src 后保持槽位边界和遮罩，再用 office_render 看主体有没有被裁切。一份稿件最多 12 次生图。',
+  'Selection 不生成图片，演示文稿配图一般不要调用本工具。',
+  '图片槽先用用户在对话里附的图片：有原图路径用原图，复制到工作区 images/ 再引用。',
+  '没有用户图片时，把槽位 src 写成 placeholder:<该放什么>，保留占位并告诉用户哪几页缺图。',
+  '调用本工具也只会返回占位，不会得到真实配图。provided-portrait 和 native-graphic 不要调用。',
+  '占位只是提醒，不是成品，不要说成已配图。',
 ].join('');

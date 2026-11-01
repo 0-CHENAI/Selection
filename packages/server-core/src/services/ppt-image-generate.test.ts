@@ -6,36 +6,34 @@ import { generatePresentationImage, IMAGE_GENERATE_LIMIT } from './ppt-image-gen
 
 const style = 'medium 摄影；palette 纸色；lighting 日光；tone 克制；textTreatment 图片内文字数量为 0；continuity 同一机位'
 
-test('without a provider the slot stays a placeholder and the same reuse group is not generated twice', async () => {
+test('the app has no provider, so the slot stays a placeholder and the same reuse group is not generated twice', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'ppt-images-'))
   const session = mkdtempSync(join(tmpdir(), 'ppt-image-session-'))
-  const config = mkdtempSync(join(tmpdir(), 'ppt-image-config-'))
   try {
     const first = await generatePresentationImage({
       purpose: 'presentation', aspect_ratio: '16:9', style_context: style, prompt: '产品放在浅色桌面上',
-      reuse_group: 'product', workspaceDir: workspace, sessionDir: session, configDir: config,
+      reuse_group: 'product', workspaceDir: workspace, sessionDir: session,
     })
     expect(first.status).toBe('placeholder')
     expect(first.placeholder).toBe(true)
     expect(first.path).toContain('selection-placeholder-')
-    expect(first.message).toContain('没有可用的生图提供方')
+    expect(first.message).toContain('Selection 不生成图片')
     const again = await generatePresentationImage({
       purpose: 'presentation', aspect_ratio: '16:9', style_context: style, prompt: '另一句',
-      reuse_group: 'product', workspaceDir: workspace, sessionDir: session, configDir: config,
+      reuse_group: 'product', workspaceDir: workspace, sessionDir: session,
     })
     expect(again.status).toBe('reused')
     expect(again.path).toBe(first.path)
     expect(JSON.parse(readFileSync(join(session, 'data', 'image-generate.json'), 'utf8')).count).toBe(1)
     const portrait = await generatePresentationImage({
       purpose: 'presentation', aspect_ratio: '1:1', style_context: style, prompt: '人物',
-      source_policy: 'provided-portrait', workspaceDir: workspace, sessionDir: session, configDir: config,
+      source_policy: 'provided-portrait', workspaceDir: workspace, sessionDir: session,
     })
     expect(portrait.status).toBe('refused')
     expect(portrait.path).toBeUndefined()
   } finally {
     rmSync(workspace, { recursive: true, force: true })
     rmSync(session, { recursive: true, force: true })
-    rmSync(config, { recursive: true, force: true })
   }
 })
 
