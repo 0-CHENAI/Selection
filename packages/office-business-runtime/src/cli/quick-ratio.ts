@@ -1,6 +1,6 @@
 /**
  * 技能将来调用的入口：Bun 执行本文件，stdout 为文本报告或 JSON。
- * 拍板前只给测试和开发机使用，不注册为 agent 工具。
+ * 桌面会话走 office_business。本文件保留给开发对拍。
  */
 import { floatNum, quickRatioJson, quickRatioText, type PyNum, type QuickRatioArgs } from '../quick-ratio.ts'
 

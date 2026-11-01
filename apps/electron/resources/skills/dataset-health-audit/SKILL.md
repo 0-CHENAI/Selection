@@ -27,38 +27,30 @@ license: MIT
 
 ## Quick Start
 
-```bash
-# 基本质检
-bun packages/office-business-runtime/src/cli/data-quality.ts data.csv
+调用会话工具 `office_business`，command 为 `data-quality`。计算在应用内完成，安装包里也能用，不需要 Python 或仓库路径。
 
-# 保存报告到 JSON
-bun packages/office-business-runtime/src/cli/data-quality.ts data.csv --output report.json
-
-# 指定 ID 列（用于唯一性检查）
-bun packages/office-business-runtime/src/cli/data-quality.ts users.csv --id-columns "user_id,email"
-
-# 指定日期列（用于格式检查）
-bun packages/office-business-runtime/src/cli/data-quality.ts orders.csv --date-columns "created_at,updated_at"
+```json
+{"command": "data-quality", "path": "data.csv"}
+{"command": "data-quality", "path": "data.csv", "output": "report.json"}
+{"command": "data-quality", "path": "users.csv", "id_columns": "user_id,email"}
+{"command": "data-quality", "path": "经营数据.xlsx", "sheet": "月度经营数据"}
+{"command": "data-quality", "path": "经营数据.xlsx", "sheet": "明细", "range": "A3:H200"}
 ```
+
+XLSX 读的是一个工作表的单元格缓存值：有公式的表先用 `xlsx_recalculate` 重算再体检。表头默认取第一行至少两个非空单元格的行；标题行、合计行会干扰判断时，用 `range` 圈出纯数据区域，首行当表头。
 
 ## 详细用法
 
-### 基本调用
-
-```bash
-bun packages/office-business-runtime/src/cli/data-quality.ts <数据文件> [选项]
-```
-
 ### 参数说明
 
-| 参数 | 缩写 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `input` | — | 是 | — | 输入文件路径（CSV/TSV/Excel/JSON） |
-| `--output` | `-o` | 否 | 标准输出 | 输出 JSON 报告路径 |
-| `--id-columns` | `-id` | 否 | 自动检测 | 应唯一的列名，逗号分隔 |
-| `--date-columns` | `-dc` | 否 | 自动检测 | 日期类型的列名，逗号分隔 |
-| `--sample` | `-s` | 否 | 全量 | 采样行数（大文件时使用） |
-| `--encoding` | `-e` | 否 | utf-8 | 文件编码 |
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `path` | 是 | 工作区内的 CSV / TSV / JSON / XLSX |
+| `sheet` | 否 | XLSX 工作表名，省略时用第一个 |
+| `range` | 否 | XLSX 数据区域，如 `A3:H200`，首行当表头 |
+| `output` | 否 | 把 JSON 报告写到工作区内的 `.json`，省略时只返回正文 |
+| `id_columns` | 否 | 应唯一的列名，逗号分隔；省略时自动识别 |
+| `sample` | 否 | 抽样行数（大文件时使用）。抽样序列与 pandas 不同，复核时用全量 |
 
 ## 输出结构（JSON）
 
@@ -106,6 +98,6 @@ Bun。不安装 pandas、numpy 或 Python。xlsx 先用 OfficeCLI 导出成 CSV 
 
 ## Selection 交付
 
-不要调用 Python。12 个维度和加权总分由上面的 Bun CLI 计算。任意 pandas 表达式、透视和自定义 DataFrame 代码不在本技能里。
+不要调用 Python。12 个维度和加权总分调用会话工具 `office_business`（command 为 data-quality，path 指向工作区内的 CSV）。上面的 bun 命令只在本仓库开发对拍时使用。任意 pandas 表达式、透视和自定义 DataFrame 代码不在本技能里。
 
 Excel 交付前：`xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子）→ `checks.json` 逐项核对，没有 checks 就双读关键单元格 → 区域渲染后原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。

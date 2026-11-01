@@ -21,17 +21,14 @@ tags: ["infographic", "visualization", "svg", "html", "chart", "dashboard"]
 
 ### 基础用法
 
-```bash
-bun packages/office-business-runtime/src/cli/build-infographic.ts config.json
+调用会话工具 `office_business`，command 为 `infographic`。`output` 是工作区内的 `.html`；配置直接放在 `config`，或用 `config_path` 指向工作区里的 JSON。应用内运行，不需要 Python 或仓库路径。
+
+```json
+{"command": "infographic", "output": "图表/季度对比.html", "config": {"type": "comparison", "title": "季度营收", "data": {"chart_title": "季度营收对比", "categories": ["Q1", "Q2"], "series": [{"name": "2025", "values": [380, 490]}]}}}
+{"command": "infographic", "output": "图表/仪表盘.html", "config_path": "config.json"}
 ```
 
-也支持从 stdin 读取：
-
-```bash
-cat config.json | bun packages/office-business-runtime/src/cli/build-infographic.ts
-```
-
-脚本输出 JSON 状态到 stdout，生成的 HTML 写入 `output` 字段指定的路径。
+返回 JSON 状态，HTML 写到 `output`。
 
 ### JSON 配置格式
 
@@ -183,10 +180,10 @@ cat config.json | bun packages/office-business-runtime/src/cli/build-infographic
 
 ## 依赖
 
-Bun。Excel 里能用柱状图表达的对比和仪表盘趋势，先写单元格，再用 OfficeCLI 原生图表：
+无外部依赖。Excel 里能用柱状图表达的对比和仪表盘趋势，先写单元格，再用 OfficeCLI 原生图表。调用时加 `"native_chart": true`：
 
-```bash
-bun packages/office-business-runtime/src/cli/build-infographic.ts config.json --native-chart
+```json
+{"command": "infographic", "output": "图表/对比.html", "config_path": "config.json", "native_chart": true}
 ```
 
 命令 JSON 里的 `native_chart` 是 `officecli add ... type=column ... dataRange=...`。HTML/SVG 仍会写出，只作为补充，不能代替工作簿里的原生图表。`palette: auto` 使用稳定哈希，不使用 Python `hash()`。
@@ -194,4 +191,4 @@ bun packages/office-business-runtime/src/cli/build-infographic.ts config.json --
 
 ## Selection 交付
 
-不要调用 Python，不要把图表导出成图片再贴回 Excel。交付前调用 `xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子），再核对 checks 或双读，然后区域渲染原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。
+不要调用 Python，不要把图表导出成图片再贴回 Excel。信息图调用会话工具 `office_business`（command 为 infographic）。上面的 bun 命令只在本仓库开发对拍时使用。交付前调用 `xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子），再核对 checks 或双读，然后区域渲染原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。

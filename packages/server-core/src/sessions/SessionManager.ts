@@ -180,6 +180,8 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
 import { formatDeliveryIssues, officecliExecutable, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from '../services/office-template/service'
+import { runOfficeBusiness as executeOfficeBusiness, type OfficeBusinessSession } from '../services/office-business-tool'
+import type { OfficeBusinessArgs } from '@craft-agent/session-tools-core'
 import { generatePresentationImage } from '../services/ppt-image-generate'
 import { pptRouteMismatch } from '../services/ppt-route'
 import { createTemplateTaskProject } from '../services/ppt-template-project'
@@ -757,6 +759,7 @@ async function resolveToolDisplayMeta(
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
           'office_render': 'Render Office Pages',
+          'office_business': '办公计算',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -5373,6 +5376,7 @@ export class SessionManager implements ISessionManager {
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         officeToolsFn: (name, args) => this.runOfficeTool(managed, name, args),
+        officeBusinessFn: async args => this.runOfficeBusiness(managed, args),
         pptToolsFn: (name, args) => this.runPptTool(managed, name, args),
         // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
         ...(getOfficePageCaptureHost() ? {
@@ -9931,6 +9935,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       canWrite: managed.permissionMode !== 'safe',
       xlsx: { officecliBinary: officecliExecutable() },
     }
+  }
+
+  private runOfficeBusiness(managed: ManagedSession, args: OfficeBusinessArgs): ReturnType<typeof executeOfficeBusiness> {
+    const session: OfficeBusinessSession = {
+      workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
+      canWrite: managed.permissionMode !== 'safe',
+      officecliBinary: officecliExecutable(),
+    }
+    return executeOfficeBusiness(session, args)
   }
 
   private async runOfficeTool(managed: ManagedSession, name: 'office_template' | 'office_template_write' | 'xlsx_recalculate', args: Record<string, unknown>): Promise<unknown> {

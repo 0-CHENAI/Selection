@@ -115,6 +115,8 @@ function scoreGov(text: string): number {
   if (/情况报告/.test(text) && !/调研报告|研究报告/.test(text)) hits.push(10)
   if (!/通知一下|群通知|微信通知/.test(text) && text.includes('通知')) hits.push(4)
   if (!/工作报告|周报|月报|日报|调研报告|研究报告|述职/.test(text) && text.includes('报告')) hits.push(4)
+  if (/讲话稿|领导讲话|述职|对照检查|简报/.test(text)) hits.push(10)
+  if (/工作方案|实施方案|活动方案/.test(text)) hits.push(10)
   if (!/邀请函|请柬|商务函|商务信|求职信/.test(text) && /公函|来函|去函|函复|的函/.test(text)) hits.push(8)
   return hits.length ? Math.max(...hits) : 0
 }
@@ -137,6 +139,11 @@ const SCORERS: Array<{ id: OfficeRouteId; score: (text: string) => number }> = [
 ]
 
 const GOV_KINDS: Array<{ kind: string; test: (text: string) => boolean }> = [
+  { kind: '讲话稿', test: text => text.includes('讲话稿') || text.includes('领导讲话') },
+  { kind: '述职', test: text => text.includes('述职') },
+  { kind: '对照检查', test: text => text.includes('对照检查') },
+  { kind: '简报', test: text => text.includes('简报') },
+  { kind: '方案', test: text => /工作方案|实施方案|活动方案/.test(text) },
   { kind: '批复', test: text => text.includes('批复') },
   { kind: '请示', test: text => text.includes('请示') },
   { kind: '通报', test: text => text.includes('通报') },
