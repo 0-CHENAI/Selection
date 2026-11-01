@@ -16,6 +16,7 @@ import {
   planOfficeTurn,
   preserveOfficeInjection,
   projectOfficeModelContext,
+  routedOfficeSkillNote,
   type OfficeTranscriptMessage,
 } from './office-catalog'
 import { getOfficeRenderCapabilities, officeRenderPreview, officeRenderRecalc, resolveOfficeRenderPlan, setOfficeRenderCapabilities, setOfficeRenderHosts } from './office-render'
@@ -179,13 +180,15 @@ describe('office document mode', () => {
     expect(readFileSync(join(root, 'cases/selection-samples/meeting-minutes.json'), 'utf8')).toContain('11月3日')
     expect(catalog.cases.map(item => item.id)).toEqual([
       ...wordCaseIds, 'annual-business', 'port-cargo', 'bio-assay',
+      'house-lease', 'product-resume', 'travel-claim', 'annual-invitation', 'miniapp-prd', 'partnership-letter',
+      'equipment-quote', 'household-budget', 'vendor-statement', 'project-gantt', 'quarterly-okr',
     ])
     const preview = officeTemplatePreview('annual-business', '20260914.1', 20, listOfficeTemplates(), root)
     expect(preview.available).toBe(false)
     expect(preview.path).toBe('sources/legacy/annual-business/preview/20.png')
     expect(() => officeTemplatePreview('annual-business', '20260914.1', 21, listOfficeTemplates(), root)).toThrow('超出')
     const listed = executeOfficeTemplates({ raw: JSON.stringify({ endpoint: 'catalog' }) })
-    expect(listed.result.templates).toHaveLength(10)
+    expect(listed.result.templates).toHaveLength(21)
     expect(listed.result.mode).toBeNull()
   })
 
@@ -279,5 +282,40 @@ describe('office document mode', () => {
       expect(source, file).not.toContain('guidance')
     }
     expect(readFileSync(join(renderer, 'components/office/OfficeCaseGallery.tsx'), 'utf8')).not.toContain('craft:insert-text')
+  })
+
+  test('a natural-language request injects one full skill and leaves the others out', () => {
+    const contract = routedOfficeSkillNote('帮我写一份北京两居室的租房合同，月租 6500，押一付三')
+    expect(contract).toContain('<business_skill name="personal-contract">')
+    expect(contract).toContain('不构成法律意见')
+    expect(contract).not.toContain('personal-resume')
+    expect(contract).not.toContain('personal-quotation')
+    const again = routedOfficeSkillNote('把押金改成两个月', { already: contract, officeMode: true, history: ['帮我写一份北京两居室的租房合同，月租 6500，押一付三'] })
+    expect(again).toBeUndefined()
+    const follow = routedOfficeSkillNote('把押金改成两个月', { officeMode: true, history: ['帮我写一份北京两居室的租房合同，月租 6500，押一付三'] })
+    expect(follow).toContain('personal-contract')
+    const ask = routedOfficeSkillNote('写一份关于购置设备的请示')
+    expect(ask).toContain('<business_skill name="gov-doc-writing">')
+    expect(ask).toContain('本次识别的文种：请示')
+    expect(ask).toContain('未复用')
+    expect(ask).toContain('十五个文种')
+    expect(routedOfficeSkillNote('今天天气怎么样')).toBeUndefined()
+    const session = readFileSync(join(import.meta.dir, '../sessions/SessionManager.ts'), 'utf8')
+    expect(session).toContain('routedOfficeSkillNote(message')
+  })
+
+  test('personal office skills stay one catalog line and keep the full method on disk', () => {
+    const skills = loadAllSkills('/tmp/office-personal-skills')
+    const catalog = toSkillCatalogEntries(skills)
+    for (const slug of ['personal-contract', 'personal-resume', 'personal-quotation', 'personal-budget', 'personal-statement', 'personal-gantt', 'personal-application', 'personal-invitation', 'personal-okr', 'personal-prd', 'personal-letter']) {
+      const skill = skills.find(item => item.slug === slug && item.source === 'bundled')
+      const entry = catalog.find(item => item.slug === slug)
+      expect(skill?.content.length, slug).toBeGreaterThan(800)
+      expect(skill?.content, slug).toContain('待补充')
+      expect(skill?.content, slug).toContain('自检')
+      expect(entry?.description.includes('\n'), slug).toBe(false)
+      expect(entry!.description.length, slug).toBeLessThan(80)
+      expect(entry?.description, slug).not.toContain('第一条')
+    }
   })
 })

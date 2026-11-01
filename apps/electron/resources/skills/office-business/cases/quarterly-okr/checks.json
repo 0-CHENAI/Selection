@@ -1,0 +1,9 @@
+{
+  "fictional": true,
+  "sheet": "考核",
+  "expect": {
+    "C8": 1,
+    "E5": 1.6,
+    "E8": 3.9
+  }
+}

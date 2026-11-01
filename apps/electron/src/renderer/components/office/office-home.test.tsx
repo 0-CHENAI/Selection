@@ -36,20 +36,39 @@ describe('office home', () => {
     expect(nextOfficeSection('ppt', 'Enter')).toBeNull()
   })
 
-  it('shows the four curated Word cases and every registered Excel case', () => {
-    const cases = (catalog as { cases: Array<{ id: string; mode: string; category?: string }> }).cases
+  it('shows curated Word cases, personal office cases, and every registered Excel case', () => {
+    const cases = (catalog as { cases: Array<{ id: string; mode: string; category?: string; title?: string }> }).cases
     expect(casesForOfficeHome(cases, 'word').map(item => item.id)).toEqual([
       'meeting-minutes',
       'coffee-market',
       'equity-research',
       'government-notice',
+      'house-lease',
+      'product-resume',
+      'travel-claim',
+      'annual-invitation',
+      'miniapp-prd',
+      'partnership-letter',
     ])
     expect(casesForOfficeHome(cases, 'excel').map(item => item.id)).toEqual([
       'execution-tracker',
       'annual-business',
       'port-cargo',
       'bio-assay',
+      'equipment-quote',
+      'household-budget',
+      'vendor-statement',
+      'project-gantt',
+      'quarterly-okr',
     ])
+    const personal = new Set(['house-lease', 'product-resume', 'travel-claim', 'annual-invitation', 'miniapp-prd', 'partnership-letter', 'equipment-quote', 'household-budget', 'vendor-statement', 'project-gantt', 'quarterly-okr'])
+    for (const item of casesForOfficeHome(cases, 'word').concat(casesForOfficeHome(cases, 'excel'))) {
+      if (!personal.has(item.id)) continue
+      expect(item.title).toMatch(/[\u4e00-\u9fff]/)
+      expect(item.category).toMatch(/^[\u4e00-\u9fff]+$/)
+      expect(item.title).not.toContain(item.id)
+      expect(item.category).not.toContain(item.id)
+    }
   })
 
   it('carries the picked case into the draft and falls back to the section mode', () => {

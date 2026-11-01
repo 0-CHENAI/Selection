@@ -7,6 +7,7 @@ import {
   OFFICE_BUSINESS_SKILL_SLUGS,
   isOfficeBusinessSkill,
 } from '@craft-agent/shared/skills/office-business-skills'
+import { routeOfficeDocumentTurn } from '@craft-agent/shared/skills/office-document-routing'
 import { getBundledSkillsDir } from '@craft-agent/shared/skills'
 import { getBundledOfficecliSkillsDir } from '@craft-agent/shared/utils/officecli'
 import {
@@ -445,6 +446,23 @@ export function officeAttachmentsKeepTemplate(names: readonly string[], state: O
   // Names are intentionally unused for selection. Uploads never become the case.
   void names
   return { mode: state.mode, templateId: state.templateId, revision: state.revision, injectionFingerprint: state.injectionFingerprint }
+}
+
+/** 自然语言命中文种时注入全文。目录里仍只有一行描述。已随案例注入过的技能不重复贴。 */
+export function routedOfficeSkillNote(
+  message: string,
+  options?: { already?: string; history?: readonly string[]; officeMode?: boolean },
+): string | undefined {
+  const route = routeOfficeDocumentTurn({
+    message,
+    history: options?.history,
+    officeMode: options?.officeMode,
+  })
+  if (!route) return undefined
+  const tag = `<business_skill name="${route.slug}">`
+  if (options?.already?.includes(tag)) return undefined
+  const kind = route.docKind ? `\n本次识别的文种：${route.docKind}。只展开该文种，其他文种不要套用。` : ''
+  return `${tag}\n${readBusinessSkillText(route.slug)}${kind}\n</business_skill>`
 }
 
 export { OFFICE_BUSINESS_SKILL_SLUGS }

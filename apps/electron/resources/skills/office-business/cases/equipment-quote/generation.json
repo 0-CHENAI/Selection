@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这张报价单的公式结构，按我给的品名、数量、单价、折扣和税率另做一份。缺的客户和有效期标待补充。"
+}

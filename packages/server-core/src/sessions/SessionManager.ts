@@ -184,7 +184,7 @@ import { generatePresentationImage } from '../services/ppt-image-generate'
 import { pptRouteMismatch } from '../services/ppt-route'
 import { createTemplateTaskProject } from '../services/ppt-template-project'
 import { recordVisualInspection } from '../services/ppt-visual-record'
-import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, selectOfficeRequest } from '../services/office-catalog'
+import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, routedOfficeSkillNote, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -8235,6 +8235,14 @@ export class SessionManager implements ISessionManager {
         ])
         officeModelNote = [planned.modelAddition, material].filter(Boolean).join('\n\n') || undefined
       }
+      const routedSkill = options?.ppt || managed.ppt
+        ? undefined
+        : routedOfficeSkillNote(message, {
+            already: officeModelNote,
+            officeMode: !!managed.office,
+            history: managed.messages.filter(item => item.role === 'user' && !item.hidden).map(item => item.content).slice(-8),
+          })
+      if (routedSkill) officeModelNote = [officeModelNote, routedSkill].filter(Boolean).join('\n\n')
       const currentInput = [pptContext, officeModelNote, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
       if (preparedImages.ok && skippedImageCount > 0) {

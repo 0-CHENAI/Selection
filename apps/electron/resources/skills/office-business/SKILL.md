@@ -23,8 +23,19 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 | annual-business | 经营分析 | saas-metrics-coach | `cases/annual-business/` |
 | port-cargo | 物流分析 | dataset-health-audit、data-viz-gen | `cases/port-cargo/`，含 `inputs/port.json` |
 | bio-assay | 实验数据 | dataset-health-audit、data-viz-gen | `cases/bio-assay/`，含 `inputs/bio.json` |
+| house-lease | 合同协议 | personal-contract | `cases/house-lease/` |
+| product-resume | 简历求职 | personal-resume | `cases/product-resume/` |
+| travel-claim | 申请表格 | personal-application | `cases/travel-claim/` |
+| annual-invitation | 议程邀请 | personal-invitation | `cases/annual-invitation/` |
+| miniapp-prd | 产品需求 | personal-prd | `cases/miniapp-prd/` |
+| partnership-letter | 商务信函 | personal-letter | `cases/partnership-letter/` |
+| equipment-quote | 报价单据 | personal-quotation | `cases/equipment-quote/` |
+| household-budget | 家庭预算 | personal-budget | `cases/household-budget/` |
+| vendor-statement | 往来对账 | personal-statement | `cases/vendor-statement/` |
+| project-gantt | 项目计划 | personal-gantt | `cases/project-gantt/` |
+| quarterly-okr | 目标考核 | personal-okr | `cases/quarterly-okr/` |
 
-选中案例后读取 `businessSkill` 指向的 `business-skills/<name>/SKILL.md`。公文技能再按该文件的索引打开需要的分册，不要一次读完。
+选中案例后读取 `businessSkill` 指向的技能。个人办公技能在顶层技能目录，正文只在路由命中或选中案例时注入；目录里每人只有一行描述。公文技能再按索引打开需要的分册，不要一次读完。
 
 ## 与 OfficeCLI 的分工
 
