@@ -3,8 +3,10 @@
  * 读和写都限制在会话工作区。
  */
 
-import { readFileSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OfficeBusinessArgs } from '@craft-agent/session-tools-core'
 import {
   runDataQualityCli,
@@ -15,11 +17,13 @@ import {
   validateMinutes,
   type InfographicConfig,
 } from '@craft-agent/office-business-runtime'
-import { workspacePath } from './office-template/service.ts'
+import { flushOfficecliResident, workspacePath } from './office-template/service.ts'
 
 export interface OfficeBusinessSession {
   workspaceRoot: string
   canWrite: boolean
+  /** OfficeCLI 可执行文件。XLSX 数据体检用它读单元格缓存值 */
+  officecliBinary?: string
 }
 
 export interface OfficeBusinessResult {
@@ -61,15 +65,86 @@ function validate(session: OfficeBusinessSession, args: Extract<OfficeBusinessAr
 }
 
 function quality(session: OfficeBusinessSession, args: Extract<OfficeBusinessArgs, { command: 'data-quality' }>): OfficeBusinessResult {
-  const input = workspacePath(session.workspaceRoot, args.path, /\.(csv|tsv|json)$/i)
-  const argv = [input.absolute]
-  if (args.id_columns) argv.push('--id-columns', args.id_columns)
-  if (args.sample !== undefined) argv.push('--sample', String(args.sample))
-  if (args.output) {
-    if (!session.canWrite) throw new Error('当前是只读模式，数据体检不能把报告写到文件。去掉 output，只看返回正文。')
-    argv.push('--output', workspacePath(session.workspaceRoot, args.output, /\.json$/i, true).absolute)
+  const input = workspacePath(session.workspaceRoot, args.path, /\.(csv|tsv|json|xlsx)$/i)
+  let tempDir: string | undefined
+  let source = input.absolute
+  if (/\.xlsx$/i.test(input.absolute)) {
+    const csv = xlsxSheetToCsv(session.officecliBinary, input.absolute, args.sheet, args.range)
+    tempDir = mkdtempSync(join(tmpdir(), 'selection-data-quality-'))
+    source = join(tempDir, `${basename(input.absolute, extname(input.absolute))}${args.sheet ? `-${args.sheet.replace(/[\\/:*?"<>|]/g, '_')}` : ''}.csv`)
+    writeFileSync(source, csv)
+  } else if (args.sheet || args.range) {
+    throw new Error('sheet 和 range 只用于 XLSX。')
   }
-  return finish('data-quality', runDataQualityCli(argv))
+  try {
+    const argv = [source]
+    if (args.id_columns) argv.push('--id-columns', args.id_columns)
+    if (args.sample !== undefined) argv.push('--sample', String(args.sample))
+    if (args.output) {
+      if (!session.canWrite) throw new Error('当前是只读模式，数据体检不能把报告写到文件。去掉 output，只看返回正文。')
+      argv.push('--output', workspacePath(session.workspaceRoot, args.output, /\.json$/i, true).absolute)
+    }
+    return finish('data-quality', runDataQualityCli(argv))
+  } finally {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true })
+  }
+}
+
+/** 用 OfficeCLI 的 text 视图读一个工作表的缓存值，转成 CSV。不改原文件 */
+export function xlsxSheetToCsv(binary: string | undefined, file: string, sheet?: string, range?: string): string {
+  if (!binary) throw new Error('这个环境没有 OfficeCLI，不能直接读 XLSX。请先把数据表另存为 CSV 再体检。')
+  const argv = ['view', file, 'text']
+  if (range) argv.push('--range', sheet ? `${sheet}!${range}` : range)
+  flushOfficecliResident(binary, file)
+  const run = spawnSync(binary, argv, { encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' } })
+  if (run.error) throw new Error(`OfficeCLI 读取 XLSX 失败：${run.error.message}`)
+  if (run.status !== 0) throw new Error(`OfficeCLI 读取 XLSX 失败：${(run.stderr || run.stdout || '').trim().slice(0, 500)}`)
+  return officecliTextToCsv(run.stdout, sheet, Boolean(range))
+}
+
+const ROW_LINE = /^\[\/(.+)\/row\[(\d+)\]\]\s?(.*)$/
+const CELL = /^([A-Z]{1,3})(\d+)=(.*)$/
+
+function columnIndex(letters: string): number {
+  let index = 0
+  for (const char of letters) index = index * 26 + (char.charCodeAt(0) - 64)
+  return index - 1
+}
+
+/** 解析 `view text` 输出。表头取区域首行，或第一行至少两个非空单元格的行 */
+export function officecliTextToCsv(text: string, sheet?: string, firstRowIsHeader = false): string {
+  const rows = new Map<string, Array<string[]>>()
+  const order: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const match = ROW_LINE.exec(line)
+    if (!match) continue
+    const name = match[1]!
+    if (!rows.has(name)) { rows.set(name, []); order.push(name) }
+    const cells: string[] = []
+    for (const part of match[3]!.split('\t')) {
+      const cell = CELL.exec(part)
+      if (!cell) continue
+      cells[columnIndex(cell[1]!)] = cell[3]!
+    }
+    rows.get(name)!.push(Array.from(cells, value => value ?? ''))
+  }
+  const target = sheet ?? order[0]
+  if (!target || !rows.has(target)) {
+    throw new Error(sheet ? `XLSX 里没有工作表「${sheet}」。现有：${order.join('、') || '无'}` : 'XLSX 里没有读到单元格。')
+  }
+  const all = rows.get(target)!
+  const filled = (row: string[]) => row.filter(value => value.trim() !== '').length
+  const headerAt = firstRowIsHeader ? all.findIndex(row => filled(row) > 0) : all.findIndex(row => filled(row) >= 2)
+  if (headerAt < 0) throw new Error(`工作表「${target}」没有可当表头的行。请用 range 指定数据区域。`)
+  const header = all[headerAt]!
+  const first = header.findIndex(value => value.trim() !== '')
+  let last = header.length - 1
+  while (last > first && header[last]!.trim() === '') last--
+  const body = all.slice(headerAt + 1).filter(row => filled(row.slice(first, last + 1)) > 0)
+  const quote = (value: string) => /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  const line = (row: string[]) => Array.from({ length: last - first + 1 }, (_, i) => quote((row[first + i] ?? '').trim())).join(',')
+  const names = Array.from({ length: last - first + 1 }, (_, i) => header[first + i]!.trim() || `列${i + 1}`)
+  return [names.map(quote).join(','), ...body.map(line)].join('\n') + '\n'
 }
 
 function graphic(session: OfficeBusinessSession, args: Extract<OfficeBusinessArgs, { command: 'infographic' }>): OfficeBusinessResult {

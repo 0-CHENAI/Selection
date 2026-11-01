@@ -44,7 +44,7 @@ export interface XlsxToolResult {
 }
 
 const exec = (file: string, args: string[], timeout: number) => new Promise<string>((resolve, reject) => {
-  execFile(file, args, { timeout, maxBuffer: 256 * 1024 * 1024, env: { ...scrubbedEnv(), OFFICECLI_SKIP_UPDATE: '1' }, windowsHide: true }, (error, stdout, stderr) => {
+  execFile(file, args, { timeout, maxBuffer: 256 * 1024 * 1024, env: { ...scrubbedEnv(), OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' }, windowsHide: true }, (error, stdout, stderr) => {
     if (error) reject(new Error(String(stderr || error.message).slice(0, 500)))
     else resolve(String(stdout))
   })

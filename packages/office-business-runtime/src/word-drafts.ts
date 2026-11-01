@@ -108,6 +108,10 @@ export function draftMeetingMinutes(record: MeetingRecord): MeetingDraft {
   blocks.push({ kind: 'p', style: 'Heading1', text: '四、行动项' })
   blocks.push({
     kind: 'table',
+    // 正文宽 9638 twip：任务列放宽，负责人、期限两列够放四到六个字
+    widths: [5638, 2200, 1800],
+    borders: 'grid',
+    header: true,
     rows: [
       ['任务与交付要求', '责任分工', '期限'],
       ...record.actions.map(action => [
@@ -320,6 +324,38 @@ export interface GovReview {
 
 const NOTICE_HEADINGS = ['一、活动主题和时间', '二、重点工作', '三、组织实施', '四、信息报送'] as const
 
+/** 正文三号仿宋：首行缩进两字、固定行距 28 磅 */
+const BODY = { indentFirstLine: 640, lineExact: 560 } as const
+
+/** 二号小标宋在 GB/T 9704 版心里一行约 20 字 */
+const TITLE_LINE_CHARS = 20
+const TITLE_VERBS = ['开展', '印发', '做好', '加强', '进一步', '组织', '举办', '公布', '转发', '推进', '规范', '调整']
+
+/**
+ * 公文标题回行：词意完整、上下对称。候选断点只放在「关于」之后、「关于＋动词」之后、「的＋文种」之前，
+ * 取两行都不超过一行字数且长短最接近的一处；放得下就不折。
+ */
+export function splitGovTitle(title: string, docKind = '通知'): string[] {
+  if ([...title].length <= TITLE_LINE_CHARS) return [title]
+  const cuts = new Set<number>()
+  const about = title.indexOf('关于')
+  if (about > 0) {
+    cuts.add(about + 2)
+    for (const verb of TITLE_VERBS) if (title.startsWith(verb, about + 2)) cuts.add(about + 2 + verb.length)
+  }
+  const tail = title.lastIndexOf(`的${docKind}`)
+  if (tail > 0) cuts.add(tail)
+  let best: string[] | undefined
+  let score = Number.POSITIVE_INFINITY
+  for (const cut of cuts) {
+    const lines = [title.slice(0, cut), title.slice(cut)]
+    const [a, b] = lines.map(line => [...line].length) as [number, number]
+    const value = Math.abs(a - b) + (Math.max(a, b) > TITLE_LINE_CHARS ? 100 : 0)
+    if (value < score) { best = lines; score = value }
+  }
+  return best ?? [title]
+}
+
 export function draftGovernmentNotice(spec: GovNoticeSpec): Buffer {
   const docKind = spec.docKind ?? '通知'
   const title = `${spec.issuerName}关于${spec.subject}的${docKind}`
@@ -339,28 +375,37 @@ export function draftGovernmentNotice(spec: GovNoticeSpec): Buffer {
       sizeHalfPoints: 70,
       bold: true,
     },
-    { kind: 'p', text: docNumber, align: 'center', eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', style: 'Title', text: title, align: 'center', eastAsia: '方正小标宋简体', sizeHalfPoints: 44 },
+    { kind: 'p', text: docNumber, align: 'center', eastAsia: '仿宋', sizeHalfPoints: 32, ruleBelow: 'FF0000', spaceAfter: 480 },
+    { kind: 'p', style: 'Title', text: splitGovTitle(title, docKind).join('\n'), align: 'center', eastAsia: '方正小标宋简体', sizeHalfPoints: 44, spaceAfter: 480 },
     { kind: 'p', text: `${recipient}：`, eastAsia: '仿宋', sizeHalfPoints: 32 },
     {
       kind: 'p',
       text: `为做好${year}年${spec.subject}有关工作，现将事项通知如下。未提供的事实保留待补充，不编造文号、日期、印章和联系方式。`,
       eastAsia: '仿宋',
       sizeHalfPoints: 32,
+      ...BODY,
     },
-    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[0], eastAsia: '黑体', sizeHalfPoints: 32 },
-    { kind: 'p', text: `活动主题为${theme}。起止时间为${start}。`, eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[1], eastAsia: '黑体', sizeHalfPoints: 32 },
-    { kind: 'p', text: '重点工作、检查范围、责任单位和完成时限为【待补充：重点工作】。', eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[2], eastAsia: '黑体', sizeHalfPoints: 32 },
-    { kind: 'p', text: '牵头部门为【待补充：牵头部门】，配合部门为【待补充：配合部门】。', eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[3], eastAsia: '黑体', sizeHalfPoints: 32 },
-    { kind: 'p', text: `联系人为${contact}。报送期限为【待补充：报送期限】，报送渠道为【待补充：报送渠道】。`, eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', text: spec.issuerName, align: 'center', eastAsia: '仿宋', sizeHalfPoints: 32 },
-    { kind: 'p', text: '【待补充：成文日期】', align: 'center', eastAsia: '仿宋', sizeHalfPoints: 32 },
+    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[0], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', text: `活动主题为${theme}。起止时间为${start}。`, eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[1], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', text: '重点工作、检查范围、责任单位和完成时限为【待补充：重点工作】。', eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[2], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', text: '牵头部门为【待补充：牵头部门】，配合部门为【待补充：配合部门】。', eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', style: 'Heading1', text: NOTICE_HEADINGS[3], eastAsia: '黑体', sizeHalfPoints: 32, ...BODY },
+    { kind: 'p', text: `联系人为${contact}。报送期限为【待补充：报送期限】，报送渠道为【待补充：报送渠道】。`, eastAsia: '仿宋', sizeHalfPoints: 32, ...BODY },
+    // 署名在成文日期之上；成文日期右空四字（16 磅字号一字 320 twip）
+    { kind: 'p', text: spec.issuerName, align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, spaceBefore: 640 },
+    { kind: 'p', text: '【待补充：成文日期】', align: 'right', indentRight: 1280, eastAsia: '仿宋', sizeHalfPoints: 32, spaceAfter: 960 },
     {
+      // 版记：首末粗线、中间细线，左右各空一字；印发日期靠右
       kind: 'table',
-      rows: [[`抄送：【待补充：抄送机关】\n【待补充：印发机关】　【待补充：印发日期】印发`]],
+      widths: [8845],
+      borders: 'record',
+      rightTab: 8645,
+      rows: [
+        ['　抄送：【待补充：抄送机关】'],
+        ['　【待补充：印发机关】\t【待补充：印发日期】印发　'],
+      ],
     },
   ]
   return buildDocx(blocks, GBT_9704_MARGINS)
@@ -370,7 +415,9 @@ export function reviewGovernmentNotice(text: string, outline: readonly OutlineBl
   const errors: string[] = []
   const docKind = spec.docKind ?? '通知'
   if (!text.includes(`${spec.issuerName}文件`)) errors.push('版头未使用当前发文机关名称')
-  if (!text.includes(`${spec.issuerName}关于${spec.subject}的${docKind}`)) errors.push('标题未由机关、事由和文种组成')
+  const title = `${spec.issuerName}关于${spec.subject}的${docKind}`
+  const titleBlock = outline.find(block => block.kind === 'heading' && block.style === 'Title')
+  if (titleBlock?.text !== title && !text.includes(title)) errors.push('标题未由机关、事由和文种组成')
   if (!text.includes('待补充')) errors.push('缺失事实未保留待补充')
   if (!spec.docNumber && /〔\d{4}〕\d+号/.test(text)) errors.push('未提供文号时不应生成正式发文字号')
   for (const heading of NOTICE_HEADINGS) {

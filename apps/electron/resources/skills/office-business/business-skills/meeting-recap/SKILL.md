@@ -69,10 +69,10 @@ license: MIT
 
 用当前用户材料替换案例中的示例事实，保留标题样式、可编辑段落及表格。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。有 `office_render` 时导出 PDF 逐页复核：标题与后文是否同页、三列宽度、尾页密度、字体诊断；没有页图时写「视觉检查未做」，不以缺页图冒充通过，不用 OCR。
 
-结构检查调用会话工具 `office_business`，command 为 `validate-minutes`，传入纪要 Markdown 或工作区内的路径。退出码 0 表示章节、表格字段、日期和重复任务通过。该检查不证明事实与原文一致。安装包不带 Python；计算在应用进程内完成。仓库里的下面这条命令只用于开发对拍：
+结构检查调用会话工具 `office_business`，command 为 `validate-minutes`，传入纪要 Markdown 或工作区内的路径。退出码 0 表示章节、表格字段、日期和重复任务通过。该检查不证明事实与原文一致。安装包不带 Python；计算在应用进程内完成：
 
-```bash
-bun packages/office-business-runtime/src/cli/validate-minutes.ts 会议纪要.md
+```json
+{"command": "validate-minutes", "path": "会议纪要.md"}
 ```
 
 交付物是工作区中的 DOCX，由 Selection 的文件卡片呈现。

@@ -55,7 +55,9 @@ const unitEconomics = z.object({
 
 const dataQuality = z.object({
   command: z.literal('data-quality'),
-  path: z.string().min(1).max(1024).describe('工作区内的 CSV、TSV 或 JSON'),
+  path: z.string().min(1).max(1024).describe('工作区内的 CSV、TSV、JSON 或 XLSX'),
+  sheet: z.string().min(1).max(200).optional().describe('XLSX 的工作表名，省略时用第一个工作表'),
+  range: z.string().regex(/^[A-Za-z]{1,3}\d{1,7}:[A-Za-z]{1,3}\d{1,7}$/).optional().describe('XLSX 的单元格区域，如 A3:H200；首行当表头。省略时取第一行至少两个非空单元格的行作表头'),
   id_columns: z.string().max(500).optional(),
   output: z.string().min(1).max(1024).optional().describe('把报告写到工作区内的路径。省略则只返回正文'),
   sample: finite.optional().describe('抽样行数。不用 pandas 的随机种子，对拍不要依赖这个参数'),
@@ -84,7 +86,7 @@ export const OFFICE_BUSINESS_DESCRIPTION = [
   'Run Selection office calculations inside the app: meeting-minutes structure check, SaaS metrics, Quick Ratio, unit economics, dataset health audit, and HTML infographic.',
   'Use this instead of a repository path or Python. command is validate-minutes, metrics, quick-ratio, unit-economics, data-quality, or infographic.',
   'Numeric commands default to JSON. validate-minutes checks structure only, not whether facts match the source notes.',
-  'data-quality and infographic paths must stay inside the workspace. Do not pass a case original as the output.',
+  'data-quality reads CSV, TSV, JSON or XLSX (cached cell values of one sheet). Paths must stay inside the workspace. Do not pass a case original as the output.',
 ].join(' ');
 
 export async function handleOfficeBusiness(ctx: SessionToolContext, rawArgs: unknown): Promise<ToolResult> {

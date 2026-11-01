@@ -77,6 +77,7 @@ test('the in-page script is a self-contained expression with the request inlined
   expect(source.startsWith('(async function (req)')).toBe(true)
   expect(source).not.toContain('</script>')
   expect(() => new Function(`return ${source}`)).not.toThrow()
+  expect(source).toContain('if (content) anchorFloats(content);')
 })
 
 test('the capture step is part of the approved native-first preview order', () => {

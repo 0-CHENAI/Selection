@@ -94,6 +94,11 @@ description: 按机关、文种和现有材料起草通知、请示、报告、�
 | 安全编号、脱敏和公开度 | [11-safety.md](volumes/11-safety.md) |
 | 病文怎么改 | [13-corrections.md](volumes/13-corrections.md) |
 | 成稿后的版式勾选 | [07-review.md](volumes/07-review.md) |
+| 起草到交付分几道工序、何时简化、不过时退回哪里 | [14-workflow.md](volumes/14-workflow.md) |
+| 提纲句式、开头过渡结尾、按单位性质调语气 | [15-outline.md](volumes/15-outline.md) |
+| 目标和指标怎么写得可核对 | [16-indicators.md](volumes/16-indicators.md) |
+| 规范提法、机构名称、职务排序、禁用说法、涉港澳台和民族宗教 | [17-sensitive-wording.md](volumes/17-sensitive-wording.md) |
+| 去空话、补要素、压缩、扩写、换口径等改稿请求 | [18-revisions.md](volumes/18-revisions.md) |
 
 案例 `government-notice` 只提供版式参照。做另一单位的通知时，版头改成当前机关名称，原文里的「待补充」继续保留，不把示例机关和示例专题抄进新稿。
 

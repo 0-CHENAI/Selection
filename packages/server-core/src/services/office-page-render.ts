@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
+import { alignXlsxFloats } from './xlsx-float-anchors.ts'
 import { resolveOfficeRenderPlan } from './office-render'
 
 const exec = promisify(execFile)
@@ -253,6 +254,7 @@ async function renderNow(options: RenderOfficePagesOptions): Promise<OfficeRende
       html = await (options.loadHtml ?? officecliHtml)(copy, controller.signal)
     }
     if (html.length > OFFICE_PAGE_RENDER_LIMITS.maxHtmlBytes) throw new Error('文档渲染结果过大，请缩小范围')
+    if (kind === 'xlsx') html = alignXlsxFloats(html, bytes)
     let notRendered: string[] = []
     const captured = await abortable(host.capture({
       kind,

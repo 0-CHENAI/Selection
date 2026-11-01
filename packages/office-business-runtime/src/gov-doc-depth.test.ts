@@ -35,6 +35,12 @@ test('gov-doc covers the capability points without copying dsh text', () => {
     'GB/T 15834',
     'GB/T 15835',
     '文种速判',
+    '分维复核',
+    '定调句',
+    '牵头单位',
+    '台湾地区',
+    '去空话',
+    '收文处理',
   ]) {
     expect(all.includes(needle), needle).toBe(true)
   }

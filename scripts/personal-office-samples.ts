@@ -402,9 +402,11 @@ function budget(): void {
   })
   run(['add', file, `/${sheet}`, '--type', 'chart', ...props({
     chartType: 'column',
-    dataRange: '收支!A16:B18',
+    // 带上 A15:B15 表头：系列名取「本期实际」，类别轴取房租、餐饮、交通；单系列不显示图例
+    dataRange: '收支!A15:B18',
     anchor: 'A20:E34',
     title: '支出实际',
+    legend: 'none',
   })])
   run(['set', file, `/${sheet}`, '--prop', 'orientation=landscape', '--prop', 'fitToPage=1x1', '--prop', 'printArea=A1:E34'])
   finish(file)

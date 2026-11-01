@@ -17,12 +17,31 @@ export interface DocParagraph {
   sizeHalfPoints?: number
   eastAsia?: string
   bold?: boolean
-  align?: 'center' | 'left'
+  align?: 'center' | 'left' | 'right'
+  /** 右缩进，单位 twip。公文成文日期右空四字时用 */
+  indentRight?: number
+  /** 段后分隔线颜色，例如公文版头下的红色分隔线 */
+  ruleBelow?: string
+  /** 段前、段后间距，单位 twip */
+  spaceBefore?: number
+  spaceAfter?: number
+  /** 首行缩进，单位 twip */
+  indentFirstLine?: number
+  /** 固定行距，单位 twip；公文正文 28 磅即 560 */
+  lineExact?: number
 }
 
 export interface DocTable {
   kind: 'table'
   rows: string[][]
+  /** 各列宽度，单位 twip；不给时每列 2400 */
+  widths?: number[]
+  /** grid：全框线；record：公文版记，只有上下粗线和行间细线 */
+  borders?: 'grid' | 'record'
+  /** 首行作表头：加粗、浅灰底 */
+  header?: boolean
+  /** 单元格内右对齐制表位，单位 twip。文本里的 \t 跳到这里 */
+  rightTab?: number
 }
 
 export interface DocImage {
@@ -177,9 +196,23 @@ function escapeXml(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
+function runsXml(text: string, runProps: string): string {
+  return text.split('\n').map((line, index) => {
+    const parts = line.split('\t').map(part => `<w:t xml:space="preserve">${escapeXml(part)}</w:t>`).join('<w:tab/>')
+    return `<w:r>${runProps}${index ? '<w:br/>' : ''}${parts}</w:r>`
+  }).join('')
+}
+
 function paragraphXml(block: DocParagraph): string {
   const style = block.style ? `<w:pStyle w:val="${block.style}"/>` : ''
-  const align = block.align === 'center' ? '<w:jc w:val="center"/>' : ''
+  const rule = block.ruleBelow ? `<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="6" w:color="${block.ruleBelow}"/></w:pBdr>` : ''
+  const spacing = block.spaceBefore !== undefined || block.spaceAfter !== undefined || block.lineExact
+    ? `<w:spacing w:before="${block.spaceBefore ?? 0}" w:after="${block.spaceAfter ?? 0}"${block.lineExact ? ` w:line="${block.lineExact}" w:lineRule="exact"` : ''}/>`
+    : ''
+  const indent = block.indentRight || block.indentFirstLine
+    ? `<w:ind${block.indentRight ? ` w:right="${block.indentRight}"` : ''}${block.indentFirstLine ? ` w:firstLine="${block.indentFirstLine}"` : ''}/>`
+    : ''
+  const align = block.align === 'center' || block.align === 'right' ? `<w:jc w:val="${block.align}"/>` : ''
   const fonts = block.eastAsia
     ? `<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="${escapeXml(block.eastAsia)}"/>`
     : ''
@@ -189,17 +222,35 @@ function paragraphXml(block: DocParagraph): string {
   const color = block.color ? `<w:color w:val="${block.color}"/>` : ''
   const bold = block.bold ? '<w:b/>' : ''
   const runProps = fonts || size || color || bold ? `<w:rPr>${fonts}${bold}${size}${color}</w:rPr>` : ''
-  return `<w:p><w:pPr>${style}${align}</w:pPr><w:r>${runProps}<w:t xml:space="preserve">${escapeXml(block.text)}</w:t></w:r></w:p>`
+  return `<w:p><w:pPr>${style}${rule}${spacing}${indent}${align}</w:pPr>${runsXml(block.text, runProps)}</w:p>`
 }
 
 function tableXml(block: DocTable): string {
   const columns = block.rows[0]?.length ?? 1
-  const grid = Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')
-  const rows = block.rows.map(row => {
-    const cells = row.map(cell => `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeXml(cell)}</w:t></w:r></w:p></w:tc>`).join('')
-    return `<w:tr>${cells}</w:tr>`
+  const widths = Array.from({ length: columns }, (_, index) => block.widths?.[index] ?? 2400)
+  const grid = widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')
+  const line = (side: string, size: number) => `<w:${side} w:val="single" w:sz="${size}" w:space="0" w:color="000000"/>`
+  const borders = block.borders === 'grid'
+    ? `<w:tblBorders>${['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(side => line(side, 4)).join('')}</w:tblBorders>`
+    : block.borders === 'record'
+      ? `<w:tblBorders>${line('top', 8)}${line('bottom', 8)}${line('insideH', 4)}</w:tblBorders>`
+      : ''
+  const tblPr = block.widths || block.borders
+    ? `<w:tblPr><w:tblW w:w="${widths.reduce((sum, width) => sum + width, 0)}" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>`
+    : ''
+  const tabs = block.rightTab ? `<w:tabs><w:tab w:val="right" w:pos="${block.rightTab}"/></w:tabs>` : ''
+  const rows = block.rows.map((row, rowIndex) => {
+    const head = block.header && rowIndex === 0
+    const cells = row.map((cell, column) => {
+      const tcPr = block.widths || head
+        ? `<w:tcPr><w:tcW w:w="${widths[column]}" w:type="dxa"/>${head ? '<w:shd w:val="clear" w:color="auto" w:fill="EDEFF2"/>' : ''}</w:tcPr>`
+        : ''
+      const paragraphs = cell.split('\n').map(text => `<w:p>${tabs ? `<w:pPr>${tabs}</w:pPr>` : ''}${runsXml(text, head ? '<w:rPr><w:b/></w:rPr>' : '')}</w:p>`).join('')
+      return `<w:tc>${tcPr}${paragraphs}</w:tc>`
+    }).join('')
+    return `<w:tr>${block.header && rowIndex === 0 ? '<w:trPr><w:tblHeader/></w:trPr>' : ''}${cells}</w:tr>`
   }).join('')
-  return `<w:tbl><w:tblGrid>${grid}</w:tblGrid>${rows}</w:tbl>`
+  return `<w:tbl>${tblPr}<w:tblGrid>${grid}</w:tblGrid>${rows}</w:tbl>`
 }
 
 function imageXml(relId: string, name: string, docId: number): string {

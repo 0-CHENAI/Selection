@@ -44,6 +44,33 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     fittedWidth = width;
     return true;
   };
+  // OfficeCLI places Excel floating charts at 15pt per row; taller CJK rows push
+  // the cells down and the chart covers them. Snap each chart to its anchor row
+  // (same rule as office-page-render-script).
+  const anchorFloats = () => {
+    for (const el of document.querySelectorAll('.sheet-content.active [data-from-row]')) {
+      const content = el.closest('.sheet-content');
+      const row = parseInt(el.getAttribute('data-from-row') || '', 10) + 1;
+      const tr = content && content.querySelector('tr[data-row="' + content.getAttribute('data-sheet') + '-' + row + '"]');
+      const want = tr && tr.getBoundingClientRect();
+      if (!want || !want.height) continue;
+      const have = el.getBoundingClientRect();
+      const delta = want.top - have.top;
+      if (Math.abs(delta) > 0.5) el.style.top = ((parseFloat(getComputedStyle(el).top) || 0) + delta) + 'px';
+      let n = parseInt(el.getAttribute('data-from-col') || '', 10) + 1, letters = '';
+      while (n > 0) { letters = String.fromCharCode(65 + (n - 1) % 26) + letters; n = Math.floor((n - 1) / 26); }
+      const cell = letters && [...tr.querySelectorAll('td[data-path]')].find(td => (td.getAttribute('data-path') || '').endsWith('/' + letters + row));
+      const left = cell && cell.getBoundingClientRect();
+      const dx = left && left.width ? left.left - have.left : 0;
+      if (Math.abs(dx) > 0.5) el.style.left = ((parseFloat(getComputedStyle(el).left) || 0) + dx) + 'px';
+    }
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    const switchSheet = window.switchSheet;
+    if (typeof switchSheet === 'function') window.switchSheet = (index) => { switchSheet(index); anchorFloats(); };
+    requestAnimationFrame(anchorFloats);
+  });
+  window.addEventListener('load', anchorFloats, { once: true });
   ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
     fitSlidesToViewport();

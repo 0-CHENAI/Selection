@@ -9941,6 +9941,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const session: OfficeBusinessSession = {
       workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
       canWrite: managed.permissionMode !== 'safe',
+      officecliBinary: officecliExecutable(),
     }
     return executeOfficeBusiness(session, args)
   }
