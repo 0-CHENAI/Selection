@@ -6,6 +6,7 @@
  *   Excel 的可编辑工作簿另放工作区；原件只读、永不覆盖。
  * - 写入只产生新文件（O_EXCL），路径限制在工作区内，拒绝符号链接逃逸。
  */
+import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -284,11 +285,18 @@ function caseChecks(session: OfficeToolSession): CheckSpec[] | undefined {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as CheckSpec[] : undefined
 }
 
+/** OfficeCLI 1.0.157 会自动起常驻进程，set 后改动可能还没写盘；重算前先落盘并释放文件。 */
+export function flushOfficecliResident(binary: string | undefined, file: string): void {
+  if (!binary) return
+  spawnSync(binary, ['close', file], { timeout: 30_000, windowsHide: true, env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' } })
+}
+
 export async function recalculateWorkspaceXlsx(session: OfficeToolSession, args: XlsxToolArgs): Promise<XlsxToolResult & { font_warnings: FontWarning[] }> {
   if (!session.canWrite) throw new Error('xlsx_recalculate 需要工作区写权限，当前是只读模式。')
   const file = workspacePath(session.workspaceRoot, args.path, /\.xlsx$/i)
   if (!existsSync(file.absolute) || !statSync(file.absolute).isFile()) throw new Error(`文件不存在：${file.relative}`)
   if (statSync(file.absolute).size > OOXML_MAX_BYTES) throw new Error('工作簿超过 64 MB')
+  flushOfficecliResident(session.xlsx?.officecliBinary, file.absolute)
   const bytes = readFileSync(file.absolute)
   const { bytes: written, result } = await runXlsxRecalculateTool(bytes, args, { ...session.xlsx, checks: session.xlsx?.checks ?? caseChecks(session) })
   writeFileSync(file.absolute, written)

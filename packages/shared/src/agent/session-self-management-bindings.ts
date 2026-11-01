@@ -55,6 +55,13 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+  Object.defineProperty(context, 'officeBusiness', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeBusinessFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
   Object.defineProperty(context, 'officeRender', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.officeRenderFn;

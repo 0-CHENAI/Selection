@@ -528,7 +528,7 @@
       "prompt": "参考这张家用预算表的科目、偏差公式和图，用我的收支重做。没有的数标待补充，不要沿用样例金额。",
       "mode": "excel",
       "sampleFile": "example.xlsx",
-      "revision": "20261101.1",
+      "revision": "20261101.2",
       "category": "家庭预算",
       "businessSkill": "personal-budget",
       "source": "cases/household-budget",
@@ -537,7 +537,7 @@
         "namespace": "selection.office.v1",
         "assetDir": "cases/household-budget",
         "license": "Selection sample",
-        "exampleSha256": "283572ab0d9acbac7b360b75c9b64a6f29da48a7c38dff7e2007bb977086019a",
+        "exampleSha256": "dbcbc2349203eb575636b6d5d018a4575632e50082d91fb53f5c4e3ee3a9c8a6",
         "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
       },
       "format": "xlsx",

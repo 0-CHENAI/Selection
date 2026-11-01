@@ -284,3 +284,10 @@ interface CdpMessage {
   result?: { result?: { value?: unknown }; exceptionDetails?: unknown }
   error?: unknown
 }
+
+test('preview document snaps Excel floating charts to their anchor row and column', () => {
+  const html = officePreviewDocument('<html><head></head><body><div class="sheet-content active" data-sheet="0"></div></body></html>', 'p1')
+  expect(html).toContain("'.sheet-content.active [data-from-row]'")
+  expect(html).toContain("el.getAttribute('data-from-col')")
+  expect(html).toContain('window.switchSheet = (index) => { switchSheet(index); anchorFloats(); }')
+})

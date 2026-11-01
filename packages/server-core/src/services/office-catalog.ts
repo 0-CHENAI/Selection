@@ -338,8 +338,8 @@ export function buildOfficeInjection(state: OfficeDocumentState, templates: Offi
   const template = selectedOfficeTemplate(state, templates)
   if (template) {
     const toolOrder = template.mode === 'word'
-      ? `先调用 office_template(template_id="${template.id}")，再用 office_template_write 按返回的 editable_paragraphs 编排并替换内容，生成新的 DOCX。这两个工具在阶段 08 接入。接入前用 OfficeCLI 在工作区副本上按段落修改。`
-      : `先调用 office_template(template_id="${template.id}")，再用 office-xlsx 处理返回的原生工作副本。重算交给 officeRender.recalc；未接入时不要把缓存值当成已重算结果。`
+      ? `先调用 office_template(template_id="${template.id}")，再用 office_template_write 按返回的 editable_paragraphs 编排并替换内容，生成新的 DOCX。不要改案例原件。交付前版式守卫未通过就不能交。`
+      : `先调用 office_template(template_id="${template.id}")，再用 OfficeCLI 修改返回的工作区副本。交付前必须调用 xlsx_recalculate；未重算或核对不一致时，不要把缓存值当成结果。`
     parts.push([
       `当前界面所选 Office 案例：${template.title}。`,
       `selected_template_id: ${template.id}`,

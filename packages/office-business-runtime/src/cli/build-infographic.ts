@@ -2,6 +2,8 @@
  * 信息图 CLI。默认 stdout 与 build_infographic.py 的状态 JSON 一致。
  * `--native-chart` 额外给出 OfficeCLI 原生图表命令；HTML/SVG 仍会写出，作为补充。
  */
+import { readFileSync } from 'node:fs'
+import { isDirectCli } from './direct.ts'
 import { InfographicError, readInfographicConfig, renderInfographicFile, type InfographicConfig } from '../infographic.ts'
 import { hasFlag, type CliResult } from './args.ts'
 
@@ -32,9 +34,9 @@ export function runInfographicCli(argv: readonly string[], stdin?: string): CliR
   }
 }
 
-if (import.meta.main) {
+if (isDirectCli('build-infographic.ts')) {
   const argv = process.argv.slice(2)
-  const stdin = process.stdin.isTTY ? undefined : await new Response(process.stdin).text()
+  const stdin = process.stdin.isTTY ? undefined : readFileSync(0, 'utf8')
   const result = runInfographicCli(argv, stdin && stdin.trim() ? stdin : undefined)
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

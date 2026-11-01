@@ -170,6 +170,8 @@ export interface SessionToolContext {
   pptTools?: (name: import('./handlers/ppt-tools.ts').PptToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
+  /** In-process office calculations (#717): metrics, quick ratio, unit economics, data quality, infographic, minutes check. */
+  officeBusiness?: (args: import('./handlers/office-business.ts').OfficeBusinessArgs) => Promise<unknown>;
   /** Render Office pages to PNG through the host's Office preview pipeline (desktop only). */
   officeRender?: (
     request: import('./handlers/office-render.ts').OfficeRenderArgs,

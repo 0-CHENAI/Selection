@@ -17,6 +17,7 @@ describe('Excel business skills', () => {
       expect(skill?.metadata.description.length).toBeGreaterThan(20)
       expect(entry?.skillMdPath.endsWith(`${slug}/SKILL.md`)).toBe(true)
       expect(skill?.content.includes('xlsx_recalculate')).toBe(true)
+      expect(skill?.content.includes('office_business')).toBe(true)
       expect(skill?.content.includes('python3 scripts/')).toBe(false)
     }
   })
