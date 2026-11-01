@@ -169,7 +169,8 @@ describe('office home', () => {
     expect(html).not.toContain('做同款')
     expect(html).toContain('<button type="button" data-testid="office-case-equity-research" aria-pressed="false"')
     const source = readFileSync(join(import.meta.dir, 'OfficeCaseGallery.tsx'), 'utf8')
-    expect(source).toContain('onClick={() => setRequest(previous => toggleOfficeCase(previous, mode, item))}')
+    expect(source).toContain('setRequest(previous => toggleOfficeCase(previous, mode, item))')
+    expect(source).toContain('if (!selected) queueTemplateFlight(composerKey, event.currentTarget.getBoundingClientRect())')
     expect(source).not.toContain('craft:insert-text')
     const input = readFileSync(join(import.meta.dir, '../app-shell/input/FreeFormInput.tsx'), 'utf8')
     expect(input).toContain('hasOfficeCase={!!attachedOfficeCase(officeCase)}')
@@ -239,6 +240,49 @@ describe('office home', () => {
     expect(html).toContain('data-testid="office-session-case-preview-government-notice"')
     expect(html).toContain('>预览<')
     expect(renderToStaticMarkup(<I18nextProvider i18n={i18n}><OfficeSessionCase sessionId="s1" office={{ mode: 'ppt' }} /></I18nextProvider>)).toBe('')
+  })
+  it('the attached Word / Excel case in the input box is the same card as the attached PPT template', async () => {
+    const { OfficeSelectedCase, previewAttachedOfficeCase } = await import('./OfficeSelectedCase')
+    const { SelectedTemplate } = await import('../ppt/SelectedTemplate')
+    const ppt = readFileSync(join(import.meta.dir, '../ppt/SelectedTemplate.tsx'), 'utf8')
+    const office = readFileSync(join(import.meta.dir, 'OfficeSelectedCase.tsx'), 'utf8')
+    // Both render through one shared component; PPT keeps its test ids and options menu.
+    expect(ppt).toContain('export function AttachedCoverCard(')
+    expect(ppt).toContain("testIds={{ root: 'ppt-selected-template', remove: 'ppt-remove-template', menu: 'ppt-template-options', panel: 'ppt-options-panel' }}")
+    expect(ppt).toContain('menu={() => <TemplateOptions')
+    expect(office).toContain('<AttachedCoverCard')
+    expect(SelectedTemplate).toBeTypeOf('function')
+    for (const [id, mode, revision] of [['government-notice', 'word', '20260914.2'], ['port-cargo', 'excel', '20260911.6']] as const) {
+      const store = createStore()
+      store.set(officeComposerAtomFamily(`card-${id}`), { mode, templateId: id, revision })
+      const html = renderToStaticMarkup(<Provider store={store}><I18nextProvider i18n={i18n}><OfficeSelectedCase composerKey={`card-${id}`} /></I18nextProvider></Provider>)
+      expect(html).toContain('data-testid="office-selected-case"')
+      // Tilted cover with a purple selected border over two fanned pages, × top-right, ⋯ bottom-right.
+      expect(html).toContain('ppt-template-cover absolute inset-0 overflow-hidden rounded-[9px] border-2 border-accent')
+      expect(html.match(new RegExp(`${id}\\.webp`, 'g'))?.length).toBe(3)
+      expect(html).toContain('data-testid="office-remove-case"')
+      expect(html).toContain('ppt-template-remove')
+      expect(html).toContain('data-testid="office-case-options"')
+      expect(html).not.toContain('参考案例')
+    }
+    const seen: unknown[] = []
+    let closed = false
+    const runtime = globalThis as { window?: unknown }
+    const hadWindow = 'window' in runtime
+    if (!hadWindow) runtime.window = new EventTarget()
+    const bus = runtime.window as EventTarget
+    const { OFFICE_PREVIEW_OPEN_CASE } = await import('@/lib/office-preview-page')
+    const listener = (event: Event) => seen.push((event as CustomEvent).detail)
+    bus.addEventListener(OFFICE_PREVIEW_OPEN_CASE, listener)
+    try {
+      previewAttachedOfficeCase('port-cargo', () => { closed = true })
+    } finally {
+      bus.removeEventListener(OFFICE_PREVIEW_OPEN_CASE, listener)
+      if (!hadWindow) delete runtime.window
+    }
+    expect(seen).toEqual([{ caseId: 'port-cargo' }])
+    expect(closed).toBe(true)
+    expect(office).toContain('onClick={() => previewAttachedOfficeCase(item.id, close)}')
   })
 })
 

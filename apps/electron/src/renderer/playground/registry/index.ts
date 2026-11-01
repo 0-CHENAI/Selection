@@ -29,6 +29,7 @@ import { handoverComponents } from './handover'
 import { workModeComponents } from './work-mode'
 import { officeCollaborationComponents } from './office-collaboration'
 import { officeCasePreviewComponents } from './office-case-preview'
+import { officeInputCaseComponents } from './office-input-case'
 import { pptOfficeProgressComponents } from './ppt-office-progress'
 import { taskEditorComponents } from './task-editor'
 import { taskEditorLiveComponents } from './task-editor-live'
@@ -59,6 +60,7 @@ export const componentRegistry: ComponentEntry[] = [
   ...workModeComponents,
   ...officeCollaborationComponents,
   ...officeCasePreviewComponents,
+  ...officeInputCaseComponents,
   ...pptOfficeProgressComponents,
   ...handoverComponents,
   ...taskEditorComponents,

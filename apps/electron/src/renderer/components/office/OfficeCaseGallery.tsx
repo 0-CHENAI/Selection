@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { closeOfficeCasePreview, requestOfficeCasePreview } from '@/lib/office-preview-page'
 import { officeCaseCovers } from './office-covers'
 import { casesForOfficeHome } from './office-home'
+import { queueTemplateFlight } from '@/components/ppt/SelectedTemplate'
 
 type OfficeCase = {
   id: string
@@ -71,7 +72,11 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
                 data-testid={`office-case-${item.id}`}
                 aria-pressed={selected}
                 aria-label={item.title}
-                onClick={() => setRequest(previous => toggleOfficeCase(previous, mode, item))}
+                onClick={event => {
+                  // Attaching flies the cover into the input box, as with a PPT template.
+                  if (!selected) queueTemplateFlight(composerKey, event.currentTarget.getBoundingClientRect())
+                  setRequest(previous => toggleOfficeCase(previous, mode, item))
+                }}
                 className={cn(
                   'block aspect-video w-full overflow-hidden rounded-[8px] border border-border/50 bg-foreground/3 text-left shadow-minimal',
                   'transition-transform hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none',
