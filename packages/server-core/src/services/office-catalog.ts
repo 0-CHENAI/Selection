@@ -23,6 +23,8 @@ import {
 
 export interface OfficeTemplate extends OfficeTemplateSummary {
   prompt?: string
+  /** Hidden note for the model: what to learn from the sample and what the person's material replaces. Never shown in the composer. */
+  guidance?: string
 }
 
 export interface OfficeTranscriptMessage {
@@ -88,6 +90,7 @@ function parseTemplate(value: unknown): OfficeTemplate {
     category: typeof item.category === 'string' ? item.category : undefined,
     description: typeof item.description === 'string' ? item.description : undefined,
     prompt: typeof item.prompt === 'string' ? item.prompt : undefined,
+    guidance: typeof item.guidance === 'string' && item.guidance.trim() ? item.guidance.trim() : undefined,
     businessSkills: asSkills(item.businessSkills ?? item.businessSkill),
     source,
     sampleFile,
@@ -342,6 +345,7 @@ export function buildOfficeInjection(state: OfficeDocumentState, templates: Offi
       `selected_template_revision: ${template.revision}`,
       `${template.id}@${template.revision}`,
       toolOrder,
+      template.guidance ? `案例参考要点：${template.guidance}` : '',
       '案例提供版式、章节、工作表与图表结构。当前用户材料提供全部事实、数值和结论；模板中的示例数据属于参考材料。本轮以及中途上传的文件是用户材料，不是新的案例模板。',
       template.businessSkills.length ? `业务方法使用 ${template.businessSkills.join('、')}。` : '',
     ].filter(Boolean).join('\n'))
