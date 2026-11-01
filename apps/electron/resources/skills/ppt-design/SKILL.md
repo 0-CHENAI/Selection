@@ -75,7 +75,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 ## 模板配图
 
-页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。`contextual-scene` 优先用户图片，没有再调用 `image_generate`（`purpose=presentation`，比例用槽位的 `aspectRatio`，`style_context` 写入六项原文，图片内文字数量为 0）。同一 `reuseGroup` 复用。`provided-portrait` 只用用户的人物照片。`native-graphic` 用已核实数据画原生图表。替换 `src` 时保持边界和遮罩。没有生图提供方时保留占位，告诉用户可以在「设置 › 高级 › PPT 配图」里填火山方舟 Seedream 或 OpenAI 的密钥。占位不是成品。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
+页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。`contextual-scene` 优先用户图片，没有再调用 `image_generate`（`purpose=presentation`，比例用槽位的 `aspectRatio`，`style_context` 写入六项原文，图片内文字数量为 0）。同一 `reuseGroup` 复用。`provided-portrait` 只用用户的人物照片。`native-graphic` 用已核实数据画原生图表。替换 `src` 时保持边界和遮罩。没有生图提供方时保留占位并说明，占位不是成品。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
 
 十六套随包模板的 `deck.json` 不覆盖。图片槽样例只在 `styles/image-slots.extension.json`。个人模板上的图片位由复制出的工程给出建议合同，等用户确认。
 

@@ -124,10 +124,11 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 
 ### 对齐度
 
-见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 96.2%，Word 100%，Excel 95.8%，共享底座 95%，总体 97.2%。计入分母的未对齐项是 0。
+见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 92.3%，Word 100%，Excel 95.8%，共享底座 95%，总体 96.3%。计入分母的未对齐项是 0。草稿 PR #741（PPT 配图接 Seedream / OpenAI）合入后，PPT 到 96.2%，总体到 97.2%。
 
-还剩三项部分对齐，需要 LinNai 书面确认能否带着发布：
+还剩四项部分对齐，需要 LinNai 书面确认能否带着发布：
 
+- PPT-IMAGE：图片槽合同和占位已经有了，但还没有内置生图提供方，等 #741。
 - PPT-TEMPLATE-READY：16 套 dsh 风格模板里有 11 套原样过不了 Selection 自己的预检，要模型先改一轮才能导出。可以逐套修模板，也可以给随包模板放宽装饰性检查。
 - XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
 - SHR-CHART-HTML：浮动图表已按锚点放置，但 HTML 列宽比 Excel 窄，宽图仍可能压住右侧的表。
@@ -139,9 +140,8 @@ PDF 导出按阶段 06 排除在用户路径之外。
 | PR | 内容 | 合入提交 |
 | --- | --- | --- |
 | #742 | 办公计算会话工具、公文分册、xlsx 体检、重算落盘、草稿版式、Excel 浮动图表锚点、对齐报告 | MERGE_742 |
-| #741 | PPT 配图接火山方舟 Seedream 与 OpenAI，设置页「高级 › PPT 配图」 | MERGE_741 |
 
-#740 已并入 #742 后关闭。
+#740 已并入 #742 后关闭。#741（PPT 配图提供方）还是草稿，没有合入，要等 LinNai 看过设置页和密钥存储。
 
 ### 版本
 
@@ -150,7 +150,6 @@ PDF 导出按阶段 06 排除在用户路径之外。
 ### 文档
 
 - `office-business/SKILL.md`：重算前先落盘，数据体检可以直接给 xlsx。
-- `ppt-design/SKILL.md`：生图提供方在「设置 › 高级 › PPT 配图」里配置。
 - 新增用户文档 `apps/electron/resources/docs/office.md`（Office 使用说明）。随 `resources/docs` 自动进包，没有加进系统提示，`system.ts` 只剩约 7 个 token。
 
 ### 许可
