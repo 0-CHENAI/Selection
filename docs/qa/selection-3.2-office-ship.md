@@ -144,7 +144,7 @@ PDF 导出按阶段 06 排除在用户路径之外。
 
 ### 版本
 
-根 `package.json` 和 `apps/electron/package.json` 仍是 `3.1.0`。这次不新建 `release-notes/3.2.0.md`，也不改版本号。用户可见的说明写在 `release-notes/next.md`。版本文件等批准合入 `test` 之后由发布流程汇总。
+版本号已从 `3.1.0` 改为 `3.2.0`：根 `package.json`、`apps/electron/package.json`、`packages/` 下原为 `3.1.0` 的十个工作区包，以及 `bun.lock` 里对应的工作区条目。electron-builder 的安装包名不带版本号，应用内「关于」读取 `package.json`，没有另写版本字符串。`release-notes/next.md` 的说明表明带版本号的 `X.Y.Z.md` 归发布流程，所以这次仍不新建 `release-notes/3.2.0.md`；用户可见的说明继续写在 `next.md`，等批准合入 `test` 后由发布流程改名。
 
 ### 文档
 
