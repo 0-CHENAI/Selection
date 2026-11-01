@@ -59,3 +59,11 @@ C5（模型取 Word 案例第 1 页和最后 1 页并看图）：上表第一行
 - 不做：构建期预览图、新的预览组件、PDF 导出与原生 Office 高保真渲染（后两项按 LinNai 决定延期）。
 - 代码：`packages/server-core/src/services/office-case-preview.ts`、`SessionManager.officeCasePreview / officeHomePreview`、`useOfficePreview` 的 `selection-office-open-case` 事件、`OfficeCaseGallery`、`OfficeSessionCase`，playground「Office 案例样例预览」。
 - 截图：`/workspace/sw709-shots/preview/`（浅色 / 深色 / PRO，首页 Word、首页 Excel、会话内）。
+
+## 点卡片附上案例（#709 收尾，LinNai 2026-11-01 决定）
+
+- 去掉 #731 的「做同款」按钮和预填提示词。卡片本身就是参考模板：点卡片（或聚焦后按 Enter / 空格）把案例附到输入框，显示为带封面的「参考案例」卡片；再点一次或点卡片右上角的 × 取消。输入框里已写的文字不变，不预填任何提示词。
+- 「预览」仍在卡片右上角，点击只在协同面板打开样例，`stopPropagation`，不附上案例。
+- 发送时案例随草稿作为会话的 Office 案例（`office.templateId` + `revision`）传给宿主，宿主按指纹注入案例上下文、`office_template` 调用顺序和业务技能。catalog 的 `prompt` 字段不进入注入，也不再进入输入框。
+- 代码：`OfficeCaseGallery`（`toggleOfficeCase`、`previewOfficeCase`）、`OfficeSelectedCase`、`AttachmentPreview`；`FreeFormInput` 的 `craft:insert-text` 恢复到 #731 之前。playground「Office 案例样例预览」新增 `composer-word`。
+- 截图：`/workspace/sw709-shots/card-click/`（首页 Word 悬停、输入框里的案例卡片，浅色 / 深色）。

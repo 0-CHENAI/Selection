@@ -1,14 +1,13 @@
 import { useAtom } from 'jotai'
 import * as React from 'react'
-import { Eye, FileText, Sparkles, Table2 } from 'lucide-react'
+import { Eye, FileText, Table2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import catalog from '../../../../resources/skills/office-business/catalog.json'
 import { officeComposerAtomFamily } from '@/atoms/office'
-import type { InsertTextEventDetail } from '@/components/app-shell/input/input-event-guards'
 import { cn } from '@/lib/utils'
 import { closeOfficeCasePreview, requestOfficeCasePreview } from '@/lib/office-preview-page'
 import { officeCaseCovers } from './office-covers'
-import { casesForOfficeHome, sameStyleDraft } from './office-home'
+import { casesForOfficeHome } from './office-home'
 
 type OfficeCase = {
   id: string
@@ -17,7 +16,6 @@ type OfficeCase = {
   revision: string
   description?: string
   category?: string
-  prompt?: string
   sampleFile?: string | null
   businessSkill?: string
   businessSkills?: string[]
@@ -36,13 +34,25 @@ export function hasOfficeCaseSample(item: { sampleFile?: string | null }): boole
   return typeof item.sampleFile === 'string' && /\.(docx|xlsx)$/i.test(item.sampleFile)
 }
 
-/** Select the case and put its catalog prompt in the composer with the first 【…】 selected. Never sends. */
-export function fillSameStylePrompt(item: Pick<OfficeCase, 'prompt'>, sessionId: string | undefined) {
-  const detail: InsertTextEventDetail = { sessionId, compose: current => sameStyleDraft(item.prompt, current) }
-  window.dispatchEvent(new CustomEvent<InsertTextEventDetail>('craft:insert-text', { detail }))
+/**
+ * Card click: attach the case to the composer (shown as a chip in the input box), or detach it
+ * when it is already attached. The text the person typed is left alone; nothing is prefilled.
+ */
+export function toggleOfficeCase(
+  current: { mode?: string; templateId?: string } | null | undefined,
+  mode: 'word' | 'excel',
+  item: Pick<OfficeCase, 'id' | 'revision'>,
+): { mode: 'word' | 'excel'; templateId?: string; revision?: string } {
+  return current?.mode === mode && current.templateId === item.id ? { mode } : { mode, templateId: item.id, revision: item.revision }
 }
 
-export function OfficeCaseGallery({ mode, composerKey, sessionId }: { mode: 'word' | 'excel'; composerKey: string; sessionId?: string }) {
+/** 「预览」 sits on top of the card; it opens the sample and never counts as a card click. */
+export function previewOfficeCase(event: { stopPropagation: () => void }, caseId: string) {
+  event.stopPropagation()
+  requestOfficeCasePreview({ caseId })
+}
+
+export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel'; composerKey: string }) {
   const { t } = useTranslation()
   const [request, setRequest] = useAtom(officeComposerAtomFamily(composerKey))
   const items = casesForOfficeHome(cases, mode)
@@ -61,7 +71,7 @@ export function OfficeCaseGallery({ mode, composerKey, sessionId }: { mode: 'wor
                 data-testid={`office-case-${item.id}`}
                 aria-pressed={selected}
                 aria-label={item.title}
-                onClick={() => setRequest(selected ? { mode } : { mode, templateId: item.id, revision: item.revision })}
+                onClick={() => setRequest(previous => toggleOfficeCase(previous, mode, item))}
                 className={cn(
                   'block aspect-video w-full overflow-hidden rounded-[8px] border border-border/50 bg-foreground/3 text-left shadow-minimal',
                   'transition-transform hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none',
@@ -83,26 +93,13 @@ export function OfficeCaseGallery({ mode, composerKey, sessionId }: { mode: 'wor
                     data-testid={`office-case-preview-${item.id}`}
                     aria-label={t('office.case.previewLabel', { title: item.title })}
                     title={t('office.case.previewHint')}
-                    onClick={() => requestOfficeCasePreview({ caseId: item.id })}
+                    onClick={event => previewOfficeCase(event, item.id)}
                     className={caseActionClass}
                   >
                     <Eye className="size-3.5 shrink-0" aria-hidden />
                     <span className="hidden @[220px]/case:inline">{t('office.case.preview')}</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  data-testid={`office-case-same-${item.id}`}
-                  aria-label={t('office.case.useThisLabel', { title: item.title })}
-                  onClick={() => {
-                    setRequest({ mode, templateId: item.id, revision: item.revision })
-                    fillSameStylePrompt(item, sessionId)
-                  }}
-                  className={caseActionClass}
-                >
-                  <Sparkles className="size-3.5 shrink-0" aria-hidden />
-                  <span className="hidden @[220px]/case:inline">{t('office.case.useThis')}</span>
-                </button>
               </div>
               <p title={item.title} className="mt-2 truncate text-[13px]">{item.title}</p>
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.category}</p>

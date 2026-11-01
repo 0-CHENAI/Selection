@@ -101,7 +101,7 @@ export function workspacePath(rootInput: string, raw: unknown, extension: RegExp
 
 function selected(session: OfficeToolSession, templateId: unknown): { state: OfficeDocumentState; template: OfficeTemplate } {
   const state = session.office()
-  if (!state?.templateId || !state.revision) throw new Error('当前会话没有选中 Word / Excel 案例。先在输入框选中案例（做同款），再调用 office_template。')
+  if (!state?.templateId || !state.revision) throw new Error('当前会话没有选中 Word / Excel 案例。先在 Office 首页点击案例卡片，把案例附到输入框，再调用 office_template。')
   if (typeof templateId === 'string' && templateId !== state.templateId) throw new Error(`当前选中的案例是 ${state.templateId}，不是 ${templateId}。`)
   const template = session.templates().find(item => item.id === state.templateId)
   if (!template || template.revision !== state.revision || template.mode !== state.mode) throw new Error('所选案例已更新，需要重新选择。')

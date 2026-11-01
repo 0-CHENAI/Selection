@@ -1,15 +1,3 @@
-/**
- * Detail of the window `craft:insert-text` event. `text` replaces the draft.
- * `compose` instead builds the draft from the current text (so a caller can
- * keep what the person already typed) and may choose the selected range.
- */
-export interface InsertTextEventDetail {
-  text?: string
-  sessionId?: string
-  selection?: { start: number; end: number }
-  compose?: (current: string) => { text: string; selection?: { start: number; end: number } } | null
-}
-
 export interface ScopedInputEventTarget {
   sessionId?: string | null
   isFocusedPanel: boolean

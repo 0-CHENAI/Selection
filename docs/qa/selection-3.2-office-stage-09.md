@@ -48,7 +48,7 @@ Quick Ratio、三组 SaaS 指标和单位经济示例的文本与 JSON stdout �
 
 - 不把 LibreOffice Kit、Python 或 PPTD 打进安装包。`office-business-runtime` 不进 `electron-builder.yml`。
 - 不在 Linux CI 里调用 Excel COM 或 Word 原生渲染。
-- 不实现 #708 的会话注入和 #709 的选择器「做同款」按钮。技能已在 bundled catalog 里，模型可以 Read。
+- 不实现 #708 的会话注入和 #709 的选择器按钮（#709 后来定为点卡片把案例附到输入框，没有单独的「做同款」按钮）。技能已在 bundled catalog 里，模型可以 Read。
 - 不重算图表缓存。原生图表部件保留；缓存是否与 Excel `CalculateFull` 一致，留到装了 Excel 的真机。
 - 数据体检的 `--sample` 不用 pandas `RandomState`，对拍不使用这个参数。
 - `palette: auto` 使用稳定哈希，不用 Python `hash()`。

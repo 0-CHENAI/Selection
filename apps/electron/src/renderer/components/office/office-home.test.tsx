@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, it } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Provider } from 'jotai'
+import { Provider, createStore } from 'jotai'
+import { officeComposerAtomFamily } from '@/atoms/office'
 import sharp from 'sharp'
 import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
@@ -17,7 +18,6 @@ import {
   readOfficeSection,
   rememberOfficeSection,
   resolveOfficeDraftRequest,
-  sameStyleDraft,
 } from './office-home'
 
 const i18n = i18next.createInstance()
@@ -128,54 +128,80 @@ describe('office home', () => {
     }
   })
 
-  it('「做同款」 fills the catalog prompt and selects the first 【…】 placeholder without sending', () => {
-    const cases = (catalog as { cases: Array<{ id: string; prompt?: string }> }).cases
-    const research = cases.find(item => item.id === 'equity-research')!.prompt!
-    const draft = sameStyleDraft(research)!
-    expect(draft.text).toBe(research)
-    expect(draft.text.slice(draft.selection.start, draft.selection.end)).toBe('【公司或行业】')
-    // What the person already typed stays above the prompt.
-    const kept = sameStyleDraft(research, '先看 2025 年数据  ')!
-    expect(kept.text.startsWith('先看 2025 年数据\n\n')).toBe(true)
-    expect(kept.text.slice(kept.selection.start, kept.selection.end)).toBe('【公司或行业】')
-    // No placeholder: caret goes to the end.
-    const minutes = sameStyleDraft(cases.find(item => item.id === 'meeting-minutes')!.prompt)!
-    expect(minutes.selection).toEqual({ start: minutes.text.length, end: minutes.text.length })
-    // Cases without a catalog prompt leave the draft alone.
-    expect(sameStyleDraft(undefined, 'typed')).toBeNull()
-    expect(sameStyleDraft('  ')).toBeNull()
-  })
+  it('clicking a case card attaches it to the composer as a chip and clicking again detaches it; nothing is prefilled', async () => {
+    const { toggleOfficeCase } = await import('./OfficeCaseGallery')
+    const research = { id: 'equity-research', revision: '1' }
+    const attached = toggleOfficeCase(null, 'word', research)
+    expect(attached).toEqual({ mode: 'word', templateId: 'equity-research', revision: '1' })
+    expect(toggleOfficeCase({ mode: 'word', templateId: 'meeting-minutes' }, 'word', research)).toEqual(attached)
+    expect(toggleOfficeCase(attached, 'word', research)).toEqual({ mode: 'word' })
+    // The picked case goes out with the draft as the session's Office case.
+    expect(resolveOfficeDraftRequest('word', attached)).toEqual(attached)
 
-  it('each case card has a keyboard-reachable 做同款 button that selects the case and inserts the prompt', async () => {
-    const html = renderToStaticMarkup(
-      <Provider>
+    const { OfficeSelectedCase, attachedOfficeCase } = await import('./OfficeSelectedCase')
+    expect(attachedOfficeCase(attached)?.title).toBe('小米汽车研究报告')
+    expect(attachedOfficeCase({ mode: 'word' })).toBeUndefined()
+    expect(attachedOfficeCase({ mode: 'excel', templateId: 'equity-research' })).toBeUndefined()
+    const store = createStore()
+    store.set(officeComposerAtomFamily('chip-test'), attached)
+    const chip = renderToStaticMarkup(
+      <Provider store={store}>
         <I18nextProvider i18n={i18n}>
-          <OfficeCaseGallery mode="word" composerKey="same-style" sessionId="s1" />
+          <OfficeSelectedCase composerKey="chip-test" />
         </I18nextProvider>
       </Provider>,
     )
-    expect(html).toContain('data-testid="office-case-same-equity-research"')
-    expect(html).toContain('aria-label="做同款：小米汽车研究报告"')
-    expect(html).toContain('group-focus-within/case:opacity-100')
-    expect(html).toContain('[@media(hover:none)]:opacity-100')
-    const { fillSameStylePrompt } = await import('./OfficeCaseGallery')
-    const seen: unknown[] = []
+    expect(chip).toContain('data-testid="office-selected-case"')
+    expect(chip).toContain('aria-label="已附上案例：小米汽车研究报告"')
+    expect(chip).toContain('equity-research.webp')
+    expect(chip).toContain('aria-label="移除案例：小米汽车研究报告"')
+    expect(renderToStaticMarkup(<Provider><I18nextProvider i18n={i18n}><OfficeSelectedCase composerKey="empty" /></I18nextProvider></Provider>)).toBe('')
+
+    // No 做同款 button and no prompt prefill left anywhere on the card or in the composer.
+    const html = renderToStaticMarkup(
+      <Provider>
+        <I18nextProvider i18n={i18n}>
+          <OfficeCaseGallery mode="word" composerKey="card-click" />
+        </I18nextProvider>
+      </Provider>,
+    )
+    expect(html).not.toContain('office-case-same-')
+    expect(html).not.toContain('做同款')
+    expect(html).toContain('<button type="button" data-testid="office-case-equity-research" aria-pressed="false"')
+    const source = readFileSync(join(import.meta.dir, 'OfficeCaseGallery.tsx'), 'utf8')
+    expect(source).toContain('onClick={() => setRequest(previous => toggleOfficeCase(previous, mode, item))}')
+    expect(source).not.toContain('craft:insert-text')
+    const input = readFileSync(join(import.meta.dir, '../app-shell/input/FreeFormInput.tsx'), 'utf8')
+    expect(input).toContain('hasOfficeCase={!!attachedOfficeCase(officeCase)}')
+    expect(input).not.toContain('e.detail.compose')
+  })
+
+  it('「预览」 opens the sample without counting as a card click', async () => {
+    const { previewOfficeCase } = await import('./OfficeCaseGallery')
+    const { OFFICE_PREVIEW_OPEN_CASE } = await import('@/lib/office-preview-page')
+    const opened: unknown[] = []
+    const inserted: unknown[] = []
+    let stopped = false
     const runtime = globalThis as { window?: unknown }
     const hadWindow = 'window' in runtime
-    const target = new EventTarget()
-    if (!hadWindow) runtime.window = target
+    if (!hadWindow) runtime.window = new EventTarget()
     const bus = runtime.window as EventTarget
-    const listener = (event: Event) => seen.push((event as CustomEvent).detail)
-    bus.addEventListener('craft:insert-text', listener)
+    const onOpen = (event: Event) => opened.push((event as CustomEvent).detail)
+    const onInsert = (event: Event) => inserted.push((event as CustomEvent).detail)
+    bus.addEventListener(OFFICE_PREVIEW_OPEN_CASE, onOpen)
+    bus.addEventListener('craft:insert-text', onInsert)
     try {
-      fillSameStylePrompt({ prompt: '帮我研究【公司或行业】。' }, 's1')
+      previewOfficeCase({ stopPropagation: () => { stopped = true } }, 'coffee-market')
     } finally {
-      bus.removeEventListener('craft:insert-text', listener)
+      bus.removeEventListener(OFFICE_PREVIEW_OPEN_CASE, onOpen)
+      bus.removeEventListener('craft:insert-text', onInsert)
       if (!hadWindow) delete runtime.window
     }
-    const detail = seen[0] as { sessionId: string; compose: (current: string) => unknown }
-    expect(detail.sessionId).toBe('s1')
-    expect(detail.compose('')).toEqual({ text: '帮我研究【公司或行业】。', selection: { start: 4, end: 11 } })
+    expect(inserted).toEqual([])
+    expect(stopped).toBe(true)
+    expect(opened).toEqual([{ caseId: 'coffee-market' }])
+    const source = readFileSync(join(import.meta.dir, 'OfficeCaseGallery.tsx'), 'utf8')
+    expect(source).toContain('onClick={event => previewOfficeCase(event, item.id)}')
   })
 
   it('Word / Excel cards with a sample file get a keyboard-reachable 「预览」 button; file-less cases do not', async () => {

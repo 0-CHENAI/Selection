@@ -7,6 +7,8 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { useAtom, useAtomValue } from 'jotai'
 import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
+import { officeComposerAtomFamily } from '@/atoms/office'
+import { attachedOfficeCase } from '@/components/office/OfficeSelectedCase'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
@@ -89,7 +91,7 @@ import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
 import { buildPlanApprovalMessage } from '../plan-approval-message'
-import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp, type InsertTextEventDetail } from './input-event-guards'
+import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './input-event-guards'
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
 import { keepComposerFocusOnPickerClose, restoreComposerFocus } from './restore-composer-focus'
 import { assessDelegateCommandSubmission, buildDelegateCommandDraft } from './delegate-command'
@@ -501,6 +503,7 @@ export function FreeFormInput({
   const pptComposerKey = sourceSelectionKey ?? sessionId ?? ''
   const [, setPptRequest] = useAtom(pptComposerAtomFamily(pptComposerKey))
   const pptOverride = useAtomValue(pptComposerOverrideAtomFamily(pptComposerKey))
+  const officeCase = useAtomValue(officeComposerAtomFamily(pptComposerKey))
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
@@ -890,27 +893,18 @@ export function FreeFormInput({
   // Listen for craft:insert-text events (generic mechanism for inserting text into input)
   // Used by components that want to pre-fill the input with text
   React.useEffect(() => {
-    const handleInsertText = (e: CustomEvent<InsertTextEventDetail>) => {
+    const handleInsertText = (e: CustomEvent<{ text: string; sessionId?: string }>) => {
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
 
-      const draft = e.detail?.compose ? e.detail.compose(inputRef.current) : undefined
-      // A composer that has nothing to add leaves the draft untouched.
-      if (draft === null) {
-        setTimeout(() => richInputRef.current?.focus(), 0)
-        return
-      }
-      const text = draft ? draft.text : coerceInputText(e.detail?.text)
-      const selection = draft?.selection ?? e.detail?.selection
+      const text = coerceInputText(e.detail?.text)
       setInput(text)
       syncToParent(text)
       // Focus the input after inserting
       setTimeout(() => {
         richInputRef.current?.focus()
-        // Select the requested range (e.g. the first 【…】 placeholder), else move the cursor to the end
-        const start = selection ? Math.max(0, Math.min(selection.start, text.length)) : text.length
-        const end = selection ? Math.max(start, Math.min(selection.end, text.length)) : text.length
-        richInputRef.current?.setSelectionRange(start, end)
+        // Move cursor to end
+        richInputRef.current?.setSelectionRange(text.length, text.length)
       }, 0)
     }
 
@@ -1998,6 +1992,7 @@ export function FreeFormInput({
         <AttachmentPreview
           pptComposerKey={pptComposerKey}
           hasPptTemplate={!!pptOverride?.templateId}
+          hasOfficeCase={!!attachedOfficeCase(officeCase)}
           attachments={attachments}
           onRemove={handleRemoveAttachment}
           disabled={disabled}
