@@ -1124,6 +1124,7 @@
   "office.case.previewHint": "Abrir el ejemplo en solo lectura en el panel de Office",
   "office.case.previewLabel": "Ver ejemplo: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Ejemplo · solo lectura",
   "office.hero.excelDescription": "Describe the metrics, period, and reader, or attach a workbook. Pick a registered case to follow.",

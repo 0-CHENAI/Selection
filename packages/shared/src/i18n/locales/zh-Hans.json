@@ -1124,6 +1124,7 @@
   "office.case.previewHint": "在右侧 Office 协同面板只读打开样例",
   "office.case.previewLabel": "预览样例：{{title}}",
   "office.case.previewSample": "预览样例",
+  "office.case.referenceCase": "参考案例：{{title}}",
   "office.case.remove": "移除案例：{{title}}",
   "office.case.sampleBadge": "案例样例 · 只读",
   "office.hero.excelDescription": "写下指标、周期和读者，或上传表格。点一个已登记的案例作参考。",
