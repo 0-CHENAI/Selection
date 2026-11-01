@@ -51,8 +51,8 @@ export const PPT_TEMPLATE_CREATE_DESCRIPTION = [
 
 export const IMAGE_GENERATE_DESCRIPTION = [
   'Selection 不生成图片，演示文稿配图一般不要调用本工具。',
-  '图片槽先用用户在对话里附的图片：有原图路径用原图，复制到工作区 images/ 再引用。',
-  '没有用户图片时，把槽位 src 写成 placeholder:<该放什么>，保留占位并告诉用户哪几页缺图。',
+  '图片槽先用用户在对话里附的图片：有原图路径用原图，复制到工作区 images/ 再引用；保持原比例，不裁切。',
+  '没有用户图片时选没有图片位的页面和版式，不留空框；实在换不了才把 src 写成 placeholder:<该放什么>，并告诉用户哪几页缺图。',
   '调用本工具也只会返回占位，不会得到真实配图。provided-portrait 和 native-graphic 不要调用。',
   '占位只是提醒，不是成品，不要说成已配图。',
 ].join('');

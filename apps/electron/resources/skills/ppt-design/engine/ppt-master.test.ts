@@ -40,7 +40,8 @@ describe('ppt-master layouts', () => {
       expect(deck.pages).toHaveLength(expectCanvas.pages)
       expect(catalog[id]?.pages).toBe(expectCanvas.pages)
       expect(deck.canvas).toEqual({ width: expectCanvas.width, height: expectCanvas.height })
-      expect(checkDeck(deck)).toEqual([])
+      // 结构版式本身就带空图片框（参考页），成稿用不用由图片规则决定。
+      expect(checkDeck(deck).filter(item => item.code !== 'empty_picture_slot')).toEqual([])
       expect(read(`layouts/${id}/design.md`)).toContain('960')
       expect(read(`layouts/${id}/design.md`)).toContain('Hugo He')
     }
@@ -165,7 +166,7 @@ describe('ppt-master styles and themes', () => {
     })
     expect(checkTheme(candy)).toEqual([])
     const deck = parseDeckSource(read('layouts/editorial_bleed/deck.json')).deck!
-    expect(checkDeck(applyTheme(deck, JSON.parse(read('styles/themes/night-circuit.json')) as Theme))).toEqual([])
+    expect(checkDeck(applyTheme(deck, JSON.parse(read('styles/themes/night-circuit.json')) as Theme)).filter(item => item.code !== 'empty_picture_slot')).toEqual([])
     const report = parseDeckSource(read('layouts/report_core/deck.json')).deck!
     expect(checkDeck(applyTheme(report, JSON.parse(read('styles/themes/jiangshan.json')) as Theme))).toEqual([])
   })

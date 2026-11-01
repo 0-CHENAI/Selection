@@ -6,7 +6,7 @@ import { DEFAULT_MAX_MESSAGE_BYTES } from '@craft-agent/shared/protocol'
 import type { PptCatalog, PptCategory, PptChartFallback, PptRequest, PptTheme, SendMessageOptions } from '@craft-agent/shared/protocol'
 import { customTemplateReference, listCustomCatalogTemplates, thumbnailPptTemplateCard } from './ppt-library'
 
-type CatalogEntry = { name: string; design: string; deck: string; canvas?: string }
+type CatalogEntry = { name: string; design: string; deck: string; canvas?: string; pictureSlotPages?: number[] }
 type PickerTemplate = { title: string; category: PptCategory; previewId: string; tier?: 'default' | 'more' | 'archive'; variantOf?: string; mergedInto?: string; note?: string }
 type Picker = { homeOrder: string[]; moreOrder?: string[]; aliases?: Record<string, string>; templates: Record<string, PickerTemplate> }
 const CATEGORIES: Record<string, true> = { '商务': true, '咨询': true, '学术': true, '教学': true, '技术': true, '创意': true, '社媒': true }
@@ -228,6 +228,15 @@ export function hasPptContext(sessionPath: string, presentationPath?: string): b
   return !!presentationPath?.toLowerCase().endsWith('.pptx') || existsSync(join(sessionPath, 'data', 'deck.json')) || existsSync(join(sessionPath, 'data', 'ppt-output.json'))
 }
 
+/** LinNai，2026-11：有图才用带图片位的页面，没图就用没有图片位的页面；用户图片不裁、不改比例。 */
+export const PPT_PICTURE_POLICY = 'Pictures: Selection never generates images. If the user attached photos, use pages with picture slots and put the photos there whole: keep the original aspect ratio, never crop, pick the slot whose shape is closest to the photo. If the user attached no photos, choose only pages and layouts without picture slots, so the deck has no empty picture frames, placeholder boxes or template sample photos. See the ppt-design skill, section 模板配图.'
+
+function pictureSlotNotice(pages: number[] | undefined): string {
+  if (!pages) return 'Picture slots: not recorded for this template. Treat sample photos and dashed picture frames as picture slots.'
+  if (pages.length === 0) return 'Picture slots: this template has none. With user photos, borrow a picture layout from layouts/ (catalog pictureSlotPages) in this template\'s style; without photos, use the reference pages as they are.'
+  return `Picture slots: reference pages ${pages.join(', ')} have picture slots; the other pages have none. With user photos, use those pages for them. Without user photos, do not use pages ${pages.join(', ')} at all.`
+}
+
 export function buildPptPrompt(request: PptRequest, sessionPath: string, root = getPptSkillRoot(), skills: ChartSkillCandidate[] = [], message?: string, presentationPath?: string): string {
   request = validatePptRequest(request, root)
   const followUp = hasPptContext(sessionPath, presentationPath)
@@ -291,11 +300,13 @@ export function buildPptPrompt(request: PptRequest, sessionPath: string, root = 
     })
     parts.push(`Selected template: ${request.templateId} (${display.title}). Use the design and real reference deck/pages as visual layout references, NOT a rigid form to fill. Adapt structure, page count, narrative and content to the user.`,
       `Reference deck: ${realpathSync(join(root, deckAsset))}`,
+      pictureSlotNotice(entry.pictureSlotPages),
       ...pages,
       `Selected design.md:\n${design}`)
     }
     }
   }
+  parts.push(PPT_PICTURE_POLICY)
   if (request.themeId) {
     const theme = json<{ name: string; colors: Record<string, string>; fonts: unknown }>(root, `styles/themes/${request.themeId}.json`)
     parts.push(`Apply selected theme ${request.themeId}: ${JSON.stringify(theme)}`)

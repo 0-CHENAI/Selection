@@ -13688,6 +13688,21 @@ function colorRef(value, theme, fallback) {
   return hex.toUpperCase();
 }
 
+// apps/electron/resources/skills/ppt-design/engine/picture-slots.ts
+var SAMPLE_PHOTO = /(?:^|[/\\])styles[/\\](?:_archive[/\\])?examples[/\\]_assets[/\\][^/\\]+\.jpe?g$/i;
+var PLACEHOLDER = /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i;
+function isPlaceholderImageSrc(src) {
+  if (!src)
+    return false;
+  return src.startsWith("placeholder:") || PLACEHOLDER.test(src);
+}
+function isSamplePhotoSrc(src) {
+  return !!src && SAMPLE_PHOTO.test(src);
+}
+function isPictureCarrier(element) {
+  return element.type === "shape" && /(?:^|-)picture(?:-[a-z0-9]+)*-carrier$/i.test(element.id);
+}
+
 // apps/electron/resources/skills/ppt-design/engine/check.ts
 var LAYOUT_REPETITION_RUN = 3;
 var COLOR_TOKEN = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$/;
@@ -13700,11 +13715,6 @@ var ASPECT = {
   "4:3": 4 / 3,
   "3:4": 3 / 4
 };
-function isPlaceholderImageSrc(src) {
-  if (!src)
-    return false;
-  return src.startsWith("placeholder:") || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src);
-}
 function blockingIssues(issues) {
   return issues.filter((item) => item.severity !== "warning");
 }
@@ -13892,7 +13902,7 @@ function checkPage(deck, page, options) {
     if (element.type === "chart")
       issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element));
     if (element.type === "image" && !element.chartImage)
-      issues.push(...checkImage(page, element, options));
+      issues.push(...checkImage(page, element, options, deck.profile === "example"));
     if (element.type === "table" && element.table) {
       issues.push(...checkTable(deck, page, element, background));
     }
@@ -13900,7 +13910,7 @@ function checkPage(deck, page, options) {
   const editable = { ...page, elements: page.elements.filter((element) => !element.retained) };
   issues.push(...checkOverlap(editable, deck.profile === "example"));
   if (deck.profile !== "example")
-    issues.push(...checkTextLayer(page));
+    issues.push(...checkTextLayer(page), ...checkPictureCarriers(page));
   return issues;
 }
 function checkText(deck, page, element, pageBackground) {
@@ -14185,14 +14195,16 @@ function checkChartSeriesColor(page, element) {
 function slotFor(page, elementId) {
   return page.imageSlots?.slots.find((slot) => slot.elementId === elementId);
 }
-function checkImage(page, element, options) {
+function checkImage(page, element, options, example = false) {
   const issues = [];
   const src = element.src?.trim() ?? "";
   const slot = slotFor(page, element.id);
   if (/^https?:\/\//i.test(src)) {
     issues.push(issue("remote_image", `\u56FE\u7247 ${element.id} \u4F7F\u7528\u4E86\u7F51\u7EDC\u5730\u5740\u3002\u8BF7\u5148\u628A\u56FE\u7247\u653E\u8FDB\u5DE5\u4F5C\u533A\u518D\u5F15\u7528\u3002`, page.id, element.id));
   } else if (isPlaceholderImageSrc(src)) {
-    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u4ECD\u662F\u5360\u4F4D\u3002\u6CA1\u6709\u751F\u56FE\u63D0\u4F9B\u65B9\u65F6\u4FDD\u7559\u5360\u4F4D\u5E76\u63D0\u793A\uFF0C\u4E0D\u8981\u5F53\u6210\u5DF2\u914D\u56FE\u3002`, page.id, element.id, "warning"));
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u8FD8\u662F\u7A7A\u7684\u56FE\u7247\u4F4D\uFF0C\u4F1A\u5BFC\u51FA\u6210\u5360\u4F4D\u6846\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u653E\u8FDB\u6765\uFF1B\u6CA1\u6709\u5C31\u628A\u8FD9\u4E00\u9875\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u5360\u4F4D\u6846\u53EA\u4F5C\u6700\u540E\u624B\u6BB5\u3002`, page.id, element.id, "warning"));
+  } else if (!example && isSamplePhotoSrc(src)) {
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u8FD8\u662F\u6A21\u677F\u7684\u6837\u4F8B\u7167\u7247\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u6362\u6210\u7528\u6237\u7684\u56FE\uFF1B\u6CA1\u6709\u5C31\u628A\u8FD9\u4E00\u9875\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u5220\u6389\u8FD9\u5F20\u56FE\u3002`, page.id, element.id));
   } else if (!src && slot) {
     issues.push(issue("missing_asset", `\u56FE\u7247\u69FD ${element.id} \u6CA1\u6709\u7D20\u6750\u3002`, page.id, element.id));
   } else if (src && options.assetExists && !options.assetExists(src)) {
@@ -14221,6 +14233,14 @@ function checkImage(page, element, options) {
     }
   }
   return issues;
+}
+function checkPictureCarriers(page) {
+  const images = page.elements.filter((element) => element.type === "image" && element.src && !isPlaceholderImageSrc(element.src));
+  return page.elements.filter(isPictureCarrier).flatMap((carrier) => {
+    const area = carrier.bounds.w * carrier.bounds.h;
+    const filled = area > 0 && images.some((image) => areaOverlap(carrier.bounds, image.bounds).area / area >= 0.5);
+    return filled ? [] : [issue("empty_picture_slot", `\u56FE\u7247\u6846 ${carrier.id} \u6CA1\u6709\u653E\u56FE\u3002\u6709\u7528\u6237\u56FE\u7247\u5C31\u653E\u8FDB\u6765\uFF1B\u6CA1\u6709\u5C31\u6362\u6210\u6CA1\u6709\u56FE\u7247\u4F4D\u7684\u7248\u5F0F\uFF0C\u4E0D\u8981\u7559\u7A7A\u6846\u3002`, page.id, carrier.id, "warning")];
+  });
 }
 function areaOverlap(left, right) {
   const width = Math.max(0, Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x));
@@ -20520,8 +20540,12 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
     addTable(pres, slide, deck, element, platform);
     return;
   }
+  if (element.type === "image" && element.src && isPlaceholderImageSrc(element.src)) {
+    addImagePlaceholder(slide, deck, element);
+    return;
+  }
   if (element.type === "image" && element.src) {
-    const fitted = fitImage(element);
+    const fitted = imagePlacement(element, deck);
     slide.addImage({
       path: resolveAsset(element.src),
       x: inches2(fitted.x),
@@ -20536,11 +20560,15 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
   if (element.type === "chart" && element.chart)
     addChart(pres, slide, deck, element, platform, pageBackground);
 }
-function fitImage(element) {
-  if (element.fit === "fill")
+function imagePlacement(element, deck) {
+  if (element.crop)
     return element.bounds;
-  const size = element.src ? readImageSize(resolveAsset(element.src)) : null;
-  if (!size)
+  if (!element.src)
+    return element.bounds;
+  if (element.fit === "fill" && deck?.version === 2 && isImportedAsset(element.src))
+    return element.bounds;
+  const size = readImageSize(resolveAsset(element.src));
+  if (!size || size.width <= 0 || size.height <= 0)
     return element.bounds;
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height);
   const w = size.width * scale;
@@ -20551,6 +20579,32 @@ function fitImage(element) {
     w,
     h
   };
+}
+function isImportedAsset(src) {
+  return /(?:^|[/\\])slide\d+-[^/\\]+\.(?:png|jpe?g)$/i.test(src);
+}
+function effectiveCrop(element) {
+  return element.type === "image" ? element.crop : undefined;
+}
+function addImagePlaceholder(slide, deck, element) {
+  const cjk = deck.pages.some((page) => page.elements.some((item) => typeof item.text === "string" && containsCjk(item.text)));
+  const label = cjk ? "\u56FE\u7247\u5360\u4F4D\uFF1A\u8BF7\u653E\u5165\u4F60\u7684\u56FE\u7247" : "Image placeholder: add your photo";
+  const fontSize = Math.max(8, Math.min(14, Math.round(Math.min(element.bounds.w, element.bounds.h) / 12)));
+  slide.addText(label, {
+    shape: "rect",
+    x: inches2(element.bounds.x),
+    y: inches2(element.bounds.y),
+    w: inches2(element.bounds.w),
+    h: inches2(element.bounds.h),
+    fill: { color: "EEF0F2" },
+    line: { color: "A9B0B8", width: 1, dashType: "dash" },
+    color: "7A828C",
+    fontSize,
+    align: "center",
+    valign: "middle",
+    altText: element.alt ? `${label} \xB7 ${element.alt}` : label,
+    objectName: element.id
+  });
 }
 function readImageSize(file) {
   try {
@@ -21074,7 +21128,7 @@ async function shrinkBubbleScale(zip) {
 async function patchImportMarks(zip, deck) {
   let changed = false;
   for (let index = 0;index < deck.pages.length; index++) {
-    const marked = deck.pages[index].elements.filter((element) => !element.retained && (element.crop || element.link));
+    const marked = deck.pages[index].elements.filter((element) => !element.retained).map((element) => ({ element, crop: effectiveCrop(element) })).filter((item) => item.crop || item.element.link);
     if (marked.length === 0)
       continue;
     const path = `ppt/slides/slide${index + 1}.xml`;
@@ -21088,14 +21142,15 @@ async function patchImportMarks(zip, deck) {
     let nextId = 1;
     while (rels.includes(`Id="rIdImp${nextId}"`))
       nextId += 1;
-    for (const element of marked) {
-      if (element.crop && element.type === "image") {
-        const src = cropXml(element.crop);
+    for (const { element, crop } of marked) {
+      if (crop && element.type === "image") {
+        const src = cropXml(crop);
         xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, (block) => {
           if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes("<a:srcRect"))
             return block;
-          if (block.includes("<a:blipFill"))
-            return block.replace("</a:blipFill>", `${src}</a:blipFill>`);
+          if (block.includes("<a:stretch"))
+            return block.replace("<a:stretch", `${src}<a:stretch`);
+          return block.replace(/<\/(p|a):blipFill>/, (close) => `${src}${close}`);
           return block;
         });
         changed = true;
