@@ -1,7 +1,7 @@
 /**
  * AdvancedSettingsPage
  *
- * Optional AnySearch credentials. PRO owns orchestration capabilities.
+ * Optional AnySearch credentials and the PPT image provider. PRO owns orchestration capabilities.
  */
 
 import { useCallback, useState } from 'react'
@@ -17,6 +17,7 @@ import {
   SettingsSection,
 } from '@/components/settings'
 import { notifyAdvancedSettingsChanged, useAdvancedSettings } from '@/hooks/useAdvancedSettings'
+import { ImageGenerationSettingsCard } from './ImageGenerationSettingsCard'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -107,6 +108,7 @@ export default function AdvancedSettingsPage() {
                   </div>
                 </SettingsCard>
               </SettingsSection>
+              <ImageGenerationSettingsCard />
             </div>
           </div>
         </ScrollArea>

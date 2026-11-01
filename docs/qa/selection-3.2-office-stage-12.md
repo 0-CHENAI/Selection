@@ -12,7 +12,7 @@
 | 生图 | 会话工具 `image_generate`，实现 `services/ppt-image-generate.ts` |
 | 预检 | `image_fit`、`image_crop`、`remote_image`、`missing_asset` |
 
-没有 `image-generation.json` 里的 https 端点时，工具写入 `selection-placeholder-*.png`，预检只给 warning，不给 error。同一 `reuse_group` 复用。一份稿件最多 12 次。`provided-portrait` 和 `native-graphic` 直接拒绝生图。
+生图提供方按顺序取：「设置 › 高级 › PPT 配图」保存的火山方舟 Seedream 或 OpenAI（#717 补齐，对应 dsh-image-generation 的两个内置提供方，Key 存在本机凭据库，保存前做一次不生图的连通检查），其次是旧的 `image-generation.json` 自定义端点。两者都没有时，工具写入 `selection-placeholder-*.png`，预检只给 warning，不给 error。同一 `reuse_group` 复用。一份稿件最多 12 次。`provided-portrait` 和 `native-graphic` 直接拒绝生图。
 
 人物照片只用用户提供的文件。图片内文字要求为 0。看整页用 `office_render`，最多 3 轮，不用 OCR。
 

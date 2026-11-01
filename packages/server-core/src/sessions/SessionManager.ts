@@ -9960,6 +9960,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       source_policy: args.source_policy as 'contextual-scene' | 'provided-portrait' | 'native-graphic' | undefined,
       workspaceDir,
       sessionDir,
+      providerConfig: await getCredentialManager().getImageGenerationConfig().catch(() => null),
     })
   }
 

@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { generateProviderImage, isImageProviderId, type ImageProviderConfig } from './image-provider'
 
 export const IMAGE_GENERATE_LIMIT = 12
 const PLACEHOLDER_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
@@ -21,6 +22,8 @@ export interface ImageGenerateRequest {
   workspaceDir: string
   sessionDir: string
   configDir?: string
+  /** 设置页保存的内置提供方（火山方舟 Seedream 或 OpenAI） */
+  providerConfig?: { provider: string; baseUrl: string; model: string; key: string } | null
   generate?: (request: ImageGenerateRequest) => Promise<{ bytes: Uint8Array; provider: string; width: number; height: number }>
 }
 
@@ -119,14 +122,17 @@ export async function generatePresentationImage(request: ImageGenerateRequest): 
   }
   const configDir = request.configDir ?? process.env.CRAFT_CONFIG_DIR ?? join(homedir(), '.selection')
   const configured = configProvider(configDir)
-  const generator = request.generate ?? (configured ? (input: ImageGenerateRequest) => callEndpoint(configured.endpoint, configured.provider, input) : undefined)
+  const saved = request.providerConfig && isImageProviderId(request.providerConfig.provider) ? request.providerConfig as ImageProviderConfig : undefined
+  const generator = request.generate
+    ?? (saved ? (input: ImageGenerateRequest) => generateProviderImage(saved, input) : undefined)
+    ?? (configured ? (input: ImageGenerateRequest) => callEndpoint(configured.endpoint, configured.provider, input) : undefined)
   mkdirSync(join(request.workspaceDir, 'images'), { recursive: true })
   let bytes = PLACEHOLDER_PNG
   let provider = 'placeholder'
   let width = 1
   let height = 1
   let placeholder = true
-  let message = '没有可用的生图提供方。槽位保留占位图，请配置 image-generation.json，或改用用户图片。不要把占位说成已配图。'
+  let message = '没有可用的生图提供方。槽位保留占位图。请告诉用户可在「设置 › 高级 › PPT 配图」填写火山方舟 Seedream 或 OpenAI 的 Key，或改用用户图片。不要把占位说成已配图。'
   if (generator) {
     const generated = await generator(request)
     if (!generated.bytes.byteLength) throw new Error('生图提供方返回了空文件')

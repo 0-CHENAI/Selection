@@ -371,6 +371,31 @@ export class CredentialManager {
   }
 
   /**
+   * Image generation provider for PPT image slots. One record keeps provider, endpoint, model and key together.
+   * Returns null when nothing usable is stored.
+   */
+  async getImageGenerationConfig(): Promise<{ provider: string; baseUrl: string; model: string; key: string } | null> {
+    const cred = await this.get({ type: 'image_generation' });
+    if (!cred?.value) return null;
+    try {
+      const parsed = JSON.parse(cred.value) as { provider?: unknown; baseUrl?: unknown; model?: unknown; key?: unknown };
+      if (typeof parsed.provider !== 'string' || typeof parsed.baseUrl !== 'string' || typeof parsed.model !== 'string' || typeof parsed.key !== 'string' || !parsed.key.trim()) return null;
+      return { provider: parsed.provider, baseUrl: parsed.baseUrl, model: parsed.model, key: parsed.key };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Store or clear the image generation provider. null deletes it. */
+  async setImageGenerationConfig(config: { provider: string; baseUrl: string; model: string; key: string } | null): Promise<void> {
+    if (!config) {
+      await this.delete({ type: 'image_generation' });
+      return;
+    }
+    await this.set({ type: 'image_generation' }, { value: JSON.stringify(config) });
+  }
+
+  /**
    * Get OAuth token for an LLM connection.
    * @param connectionSlug - The connection slug
    * @returns OAuth credentials or null if not found

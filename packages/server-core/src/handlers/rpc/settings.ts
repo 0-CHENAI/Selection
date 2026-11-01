@@ -44,6 +44,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED,
   RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED,
   RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY,
+  RPC_CHANNELS.settings.GET_IMAGE_GENERATION,
+  RPC_CHANNELS.settings.SET_IMAGE_GENERATION,
   RPC_CHANNELS.dialog.OPEN_FOLDER,
 ] as const
 
@@ -369,5 +371,41 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')
     await getCredentialManager().setAnySearchApiKey(apiKey)
     return { configured: apiKey.trim().length > 0 }
+  })
+
+  // PPT image slots. The key is write-only: reads return provider, endpoint and model, never the key.
+  server.handle(RPC_CHANNELS.settings.GET_IMAGE_GENERATION, async () => {
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    const { IMAGE_PROVIDER_DEFAULTS, IMAGE_PROVIDER_MODELS, isImageProviderId } = await import('../../services/image-provider')
+    const saved = await getCredentialManager().getImageGenerationConfig()
+    const provider = saved && isImageProviderId(saved.provider) ? saved.provider : 'bytedance'
+    return {
+      configured: Boolean(saved && isImageProviderId(saved.provider)),
+      provider,
+      baseUrl: saved?.baseUrl ?? IMAGE_PROVIDER_DEFAULTS[provider].baseUrl,
+      model: saved?.model ?? IMAGE_PROVIDER_DEFAULTS[provider].model,
+      defaults: IMAGE_PROVIDER_DEFAULTS,
+      models: IMAGE_PROVIDER_MODELS,
+    }
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_IMAGE_GENERATION, async (_ctx, input: { provider?: unknown; baseUrl?: unknown; model?: unknown; apiKey?: unknown } | null) => {
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    const manager = getCredentialManager()
+    if (input === null) {
+      await manager.setImageGenerationConfig(null)
+      return { configured: false }
+    }
+    if (!input || typeof input !== 'object') throw new Error('生图设置无效')
+    const { normalizeImageProvider, validateImageProvider } = await import('../../services/image-provider')
+    const spec = normalizeImageProvider(input.provider, { baseUrl: input.baseUrl, model: input.model })
+    const typed = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
+    const previous = await manager.getImageGenerationConfig()
+    // Keep the stored key when only the model or endpoint changes for the same provider.
+    const key = typed || (previous?.provider === spec.provider ? previous.key : '')
+    if (!key) throw new Error('请填写 API Key。')
+    const check = await validateImageProvider({ ...spec, key })
+    await manager.setImageGenerationConfig({ ...spec, key })
+    return { configured: true, check }
   })
 }

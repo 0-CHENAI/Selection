@@ -229,6 +229,17 @@ import type {
   ImportRemoteSessionTransferResult,
 } from '@craft-agent/shared/protocol'
 
+export type ImageGenerationProvider = 'bytedance' | 'openai'
+
+export interface ImageGenerationSettings {
+  configured: boolean
+  provider: ImageGenerationProvider
+  baseUrl: string
+  model: string
+  defaults: Record<ImageGenerationProvider, { baseUrl: string; model: string }>
+  models: Record<ImageGenerationProvider, readonly string[]>
+}
+
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
@@ -641,6 +652,9 @@ export interface ElectronAPI {
   setDagOrchestrationEnabled(enabled: boolean): Promise<void>
   setSwarmAgentsEnabled(enabled: boolean): Promise<void>
   setAnySearchApiKey(apiKey: string): Promise<{ configured: boolean }>
+  // PPT image generation provider. The key is write-only.
+  getImageGenerationSettings(): Promise<ImageGenerationSettings>
+  setImageGenerationSettings(input: { provider: ImageGenerationProvider; baseUrl: string; model: string; apiKey: string } | null): Promise<{ configured: boolean; check?: 'model' | 'connection' }>
 
   refreshBadge(): Promise<void>
   setDockIconWithBadge(dataUrl: string): Promise<void>
