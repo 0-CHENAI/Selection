@@ -6,10 +6,9 @@
  * model connection's credential to a different provider.
  */
 
-import type { WebSearchProvider, WebSearchResult } from '../types.ts';
+import { createSearchSignal, normalizeSearchUrl, type WebSearchProvider, type WebSearchResult } from '../types.ts';
 
 const ANYSEARCH_API_URL = 'https://api.anysearch.com/v1/search';
-const SEARCH_TIMEOUT_MS = 30_000;
 const CLIENT_HEADER = 'selection/web_search';
 
 interface AnySearchEnvelope {
@@ -51,15 +50,8 @@ export function parseAnySearchResults(value: unknown, query: string, count: numb
     const url = asNonEmptyString(record.url);
     if (!url) continue;
 
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      continue;
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
-
-    const normalizedUrl = parsed.toString();
+    const normalizedUrl = normalizeSearchUrl(url);
+    if (!normalizedUrl) continue;
     if (seenUrls.has(normalizedUrl)) continue;
 
     const title = asNonEmptyString(record.title) ?? normalizedUrl;
@@ -81,11 +73,13 @@ export class AnySearchSearchProvider implements WebSearchProvider {
 
   constructor(
     private readonly apiKey?: string,
-    private readonly resolveApiKey?: () => Promise<string | null | undefined>,
+    private readonly resolveApiKey?: (signal?: AbortSignal) => Promise<string | null | undefined>,
   ) {}
 
-  async search(query: string, count: number): Promise<WebSearchResult[]> {
-    const configured = this.resolveApiKey ? (await this.resolveApiKey())?.trim() ?? '' : undefined;
+  async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
+    signal?.throwIfAborted();
+    const configured = this.resolveApiKey ? (await this.resolveApiKey(signal))?.trim() ?? '' : undefined;
+    signal?.throwIfAborted();
     const key = configured !== undefined
       ? configured
       : (this.apiKey?.trim() || process.env.ANYSEARCH_API_KEY?.trim());
@@ -99,7 +93,7 @@ export class AnySearchSearchProvider implements WebSearchProvider {
       method: 'POST',
       headers,
       body: JSON.stringify({ query, max_results: count }),
-      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+      signal: createSearchSignal(signal),
     });
 
     if (!response.ok) {

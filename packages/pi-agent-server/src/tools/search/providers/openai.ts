@@ -8,7 +8,7 @@
  *   - Any future Responses API-compatible endpoint
  */
 
-import type { WebSearchProvider, WebSearchResult } from '../types.ts';
+import { createSearchSignal, type WebSearchProvider, type WebSearchResult } from '../types.ts';
 import { parseResponsesApiResults, type ResponsesApiResponse } from './responses-api-parser.ts';
 
 const DEFAULT_SEARCH_MODEL = 'gpt-4o-mini';
@@ -33,7 +33,7 @@ export class ResponsesApiSearchProvider implements WebSearchProvider {
     this.name = config.displayName || deriveDisplayName(config.apiBase);
   }
 
-  async search(query: string, count: number): Promise<WebSearchResult[]> {
+  async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
     const response = await fetch(`${this.config.apiBase}/responses`, {
       method: 'POST',
       headers: {
@@ -44,9 +44,10 @@ export class ResponsesApiSearchProvider implements WebSearchProvider {
       body: JSON.stringify({
         model: this.config.model || DEFAULT_SEARCH_MODEL,
         tools: [{ type: 'web_search' }],
+        tool_choice: 'required',
         input: `Search the web for: ${query}\n\nReturn the top ${count} results with title, URL, and a brief description.`,
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: createSearchSignal(signal),
     });
 
     if (!response.ok) {

@@ -10,13 +10,13 @@ afterEach(() => {
 
 /** Build a minimal JWT with the given claims payload. */
 function makeJwt(claims: Record<string, unknown>): string {
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = btoa(JSON.stringify(claims));
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
   return `${header}.${payload}.fakesignature`;
 }
 
 describe('extractChatGptAccountId', () => {
-  it('extracts accountId from a valid ChatGPT JWT', () => {
+  it('extracts accountId from a base64url ChatGPT JWT', () => {
     const token = makeJwt({
       'https://api.openai.com/auth': {
         chatgpt_account_id: 'acc_12345',
@@ -98,7 +98,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledBody.stream).toBe(true);
     expect(calledBody.instructions).toContain('web search assistant');
     expect(calledBody.tools).toEqual([{ type: 'web_search' }]);
-    expect(calledBody.tool_choice).toBe('auto');
+    expect(calledBody.tool_choice).toBe('required');
     expect(calledBody.parallel_tool_calls).toBe(true);
     expect(calledBody.text).toEqual({ verbosity: 'medium' });
     expect(Array.isArray(calledBody.input)).toBe(true);
@@ -107,7 +107,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledBody.input[0]?.content?.[0]?.text).toContain('Search the web for: test query');
     expect(calledHeaders['OpenAI-Beta']).toBe('responses=experimental');
     expect(results).toHaveLength(1);
-    expect(results[0]?.url).toBe('https://example.com');
+    expect(results[0]?.url).toBe('https://example.com/');
   });
 
   it('parses SSE payload even when content-type is not event-stream', async () => {
@@ -193,7 +193,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(attempts[0]?.instructions).toContain('web search assistant');
     expect(attempts[0]?.store).toBe(false);
     expect(attempts[0]?.stream).toBe(true);
-    expect(attempts[0]?.tool_choice).toBe('auto');
+    expect(attempts[0]?.tool_choice).toBe('required');
     expect(attempts[0]?.parallel_tool_calls).toBe(true);
     expect(attempts[0]?.text).toEqual({ verbosity: 'medium' });
     expect(Array.isArray(attempts[0]?.input)).toBe(true);
@@ -203,13 +203,13 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(attempts[1]?.instructions).toContain('web search assistant');
     expect(attempts[1]?.store).toBe(false);
     expect(attempts[1]?.stream).toBe(true);
-    expect(attempts[1]?.tool_choice).toBe('auto');
+    expect(attempts[1]?.tool_choice).toBe('required');
     expect(attempts[1]?.parallel_tool_calls).toBe(true);
     expect(attempts[1]?.text).toEqual({ verbosity: 'medium' });
     expect(Array.isArray(attempts[1]?.input)).toBe(true);
     expect((attempts[1]?.input as any[])[0]?.role).toBe('user');
     expect((attempts[1]?.input as any[])[0]?.content?.[0]?.type).toBe('input_text');
-    expect(results[0]?.url).toBe('https://retry.example');
+    expect(results[0]?.url).toBe('https://retry.example/');
   });
 
   it('retries with web_search_preview when first attempt returns 200 with non-JSON body', async () => {
@@ -253,7 +253,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(attempts).toHaveLength(2);
     expect(attempts[0]?.tools).toEqual([{ type: 'web_search' }]);
     expect(attempts[1]?.tools).toEqual([{ type: 'web_search_preview' }]);
-    expect(results[0]?.url).toBe('https://parse-retry.example');
+    expect(results[0]?.url).toBe('https://parse-retry.example/');
   });
 
   it('retries with web_search_preview when first attempt returns invalid SSE payload', async () => {
@@ -306,7 +306,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(attempts).toHaveLength(2);
     expect(attempts[0]?.tools).toEqual([{ type: 'web_search' }]);
     expect(attempts[1]?.tools).toEqual([{ type: 'web_search_preview' }]);
-    expect(results[0]?.url).toBe('https://sse-retry.example');
+    expect(results[0]?.url).toBe('https://sse-retry.example/');
   });
 
   it('aggregates parse failures when both attempts fail to parse', async () => {
@@ -405,7 +405,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(attempts).toHaveLength(2);
     expect(attempts[1]?.model).not.toBe(attempts[0]?.model);
     expect(attempts[1]?.tool).toBe('web_search');
-    expect(results[0]?.url).toBe('https://recovered.example');
+    expect(results[0]?.url).toBe('https://recovered.example/');
   });
 
   it('retries the tool type without changing model for a hosted-tool refusal', async () => {

@@ -51,11 +51,12 @@ describe('ResponsesApiSearchProvider', () => {
     expect(calledUrl).toBe('https://api.openai.com/v1/responses');
     expect(calledBody.model).toBe('gpt-4o-mini');
     expect(calledBody.tools).toEqual([{ type: 'web_search' }]);
+    expect(calledBody.tool_choice).toBe('required');
     expect(calledHeaders['Authorization']).toBe('Bearer sk-test');
 
     expect(results).toHaveLength(2);
-    expect(results[0]?.url).toBe('https://a.com');
-    expect(results[1]?.url).toBe('https://b.com');
+    expect(results[0]?.url).toBe('https://a.com/');
+    expect(results[1]?.url).toBe('https://b.com/');
   });
 
   it('uses custom apiBase and model for OpenRouter', async () => {
@@ -134,7 +135,7 @@ describe('ResponsesApiSearchProvider', () => {
     const results = await provider.search('craft', 2);
 
     expect(results).toHaveLength(2);
-    expect(results.map((r) => r.url)).toEqual(['https://1.com', 'https://2.com']);
+    expect(results.map((r) => r.url)).toEqual(['https://1.com/', 'https://2.com/']);
   });
 
   it('falls back to summary result when no citations are present', async () => {

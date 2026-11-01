@@ -6,7 +6,7 @@
  * calling in the same request, so this runs as a side-call.
  */
 
-import type { WebSearchProvider, WebSearchResult } from '../types.ts';
+import { createSearchSignal, normalizeSearchUrl, type WebSearchProvider, type WebSearchResult } from '../types.ts';
 
 const GROUNDING_MODEL = 'gemini-2.5-flash';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -26,7 +26,7 @@ export class GoogleSearchProvider implements WebSearchProvider {
 
   constructor(private apiKey: string) {}
 
-  async search(query: string, count: number): Promise<WebSearchResult[]> {
+  async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
     const url = `${API_BASE}/${GROUNDING_MODEL}:generateContent`;
     const response = await fetch(url, {
       method: 'POST',
@@ -38,7 +38,7 @@ export class GoogleSearchProvider implements WebSearchProvider {
         contents: [{ role: 'user', parts: [{ text: query }] }],
         tools: [{ googleSearch: {} }],
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: createSearchSignal(signal),
     });
 
     if (!response.ok) {
@@ -60,16 +60,19 @@ export class GoogleSearchProvider implements WebSearchProvider {
 
     // Extract source citations from grounding metadata
     const metadata: GroundingMetadata | undefined = candidate.groundingMetadata;
-    const chunks = metadata?.groundingChunks?.filter(
-      (c: GroundingChunk) => c.web?.uri,
-    ) || [];
+    const chunks = metadata?.groundingChunks || [];
 
     if (chunks.length > 0) {
-      return chunks.slice(0, count).map((c) => ({
-        title: c.web!.title || c.web!.uri!,
-        url: c.web!.uri!,
-        description: '',
-      }));
+      const results: WebSearchResult[] = [];
+      const seen = new Set<string>();
+      for (const chunk of chunks) {
+        const url = normalizeSearchUrl(chunk.web?.uri);
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        results.push({ title: chunk.web?.title || url, url, description: '' });
+        if (results.length >= count) break;
+      }
+      if (results.length > 0) return results;
     }
 
     // Fallback: return the grounded text as a single result

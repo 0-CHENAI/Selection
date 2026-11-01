@@ -9,7 +9,7 @@
  *   - chatgpt-account-id: extracted from the JWT's claims
  */
 
-import type { WebSearchProvider, WebSearchResult } from '../types.ts';
+import { createSearchSignal, type WebSearchProvider, type WebSearchResult } from '../types.ts';
 import { parseResponsesApiResults, type ResponsesApiResponse } from './responses-api-parser.ts';
 import { isModelRejectionError } from '../../../model-resolution.ts';
 import { stripPiPrefix } from '../../../custom-endpoint-models.ts';
@@ -59,7 +59,7 @@ export function extractChatGptAccountId(accessToken: string): string | null {
     const parts = accessToken.split('.');
     if (parts.length !== 3) return null;
 
-    const payload = JSON.parse(atob(parts[1]!));
+    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
     const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
 
     return typeof accountId === 'string' && accountId.length > 0 ? accountId : null;
@@ -77,7 +77,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
     private options?: { model?: string },
   ) {}
 
-  async search(query: string, count: number): Promise<WebSearchResult[]> {
+  async search(query: string, count: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
     const attemptErrors: string[] = [];
     const models = this.candidateModels();
 
@@ -95,7 +95,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
           stream: true,
           instructions: SEARCH_INSTRUCTIONS,
           tools: [{ type: attempt.toolType }],
-          tool_choice: 'auto',
+          tool_choice: 'required',
           parallel_tool_calls: true,
           text: { verbosity: SEARCH_TEXT_VERBOSITY },
           input: [{
@@ -118,7 +118,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
             'OpenAI-Beta': 'responses=experimental',
           },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(30_000),
+          signal: createSearchSignal(signal),
         });
         const contentType = response.headers.get('content-type') || 'unknown';
 
