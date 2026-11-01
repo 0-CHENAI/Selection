@@ -240,4 +240,44 @@ describe('office document mode', () => {
       setOfficeRenderCapabilities(null)
     }
   })
+  test('every Word / Excel case carries compact hidden guidance', () => {
+    const templates = listOfficeTemplates()
+    expect(templates.length).toBeGreaterThanOrEqual(10)
+    for (const template of templates) {
+      const guidance = template.guidance ?? ''
+      expect(guidance.length, template.id).toBeGreaterThanOrEqual(80)
+      expect(guidance.length, template.id).toBeLessThanOrEqual(150)
+      expect(guidance, template.id).toContain('待补充')
+      expect(guidance, template.id).toContain('用户这次的要求优先')
+      expect(guidance, template.id).toMatch(/不照搬|不沿用|不把/)
+    }
+  })
+
+  test('the selected case guidance is injected next to the case id, tool order and skills; no case, no guidance', () => {
+    const templates = listOfficeTemplates()
+    for (const template of templates) {
+      const injection = buildOfficeInjection({ mode: template.mode, templateId: template.id, revision: template.revision }, templates)
+      const head = injection.slice(injection.indexOf('当前界面所选 Office 案例'))
+      expect(head, template.id).toContain(`selected_template_id: ${template.id}`)
+      expect(head, template.id).toContain(`office_template(template_id="${template.id}")`)
+      expect(head, template.id).toContain(`案例参考要点：${template.guidance}`)
+      expect(head.indexOf('案例参考要点'), template.id).toBeGreaterThan(head.indexOf('office_template(template_id='))
+    }
+    const planned = planOfficeTurn({ messages: [], templates, request: { mode: 'word', templateId: 'coffee-market', revision: templates.find(item => item.id === 'coffee-market')!.revision } })
+    expect(planned.modelAddition).toContain(`案例参考要点：${templates.find(item => item.id === 'coffee-market')!.guidance}`)
+    for (const mode of ['word', 'excel'] as const) {
+      const bare = buildOfficeInjection({ mode }, templates)
+      expect(bare).not.toContain('案例参考要点')
+      for (const template of templates) expect(bare).not.toContain(template.guidance!)
+    }
+  })
+
+  test('case guidance never reaches the composer', () => {
+    const renderer = join(import.meta.dir, '../../../../apps/electron/src/renderer')
+    for (const file of ['components/office/OfficeCaseGallery.tsx', 'components/office/OfficeSelectedCase.tsx', 'components/office/OfficeSessionCase.tsx']) {
+      const source = readFileSync(join(renderer, file), 'utf8')
+      expect(source, file).not.toContain('guidance')
+    }
+    expect(readFileSync(join(renderer, 'components/office/OfficeCaseGallery.tsx'), 'utf8')).not.toContain('craft:insert-text')
+  })
 })

@@ -284,5 +284,22 @@ describe('office home', () => {
     expect(closed).toBe(true)
     expect(office).toContain('onClick={() => previewAttachedOfficeCase(item.id, close)}')
   })
+
+  it('an attached case shows only its cover and title; the hidden guidance stays out of the gallery and the input box', async () => {
+    const { OfficeSelectedCase } = await import('./OfficeSelectedCase')
+    const all = (catalog as { cases: Array<{ id: string; mode: 'word' | 'excel'; revision: string; guidance?: string }> }).cases
+    for (const mode of ['word', 'excel'] as const) {
+      const gallery = renderToStaticMarkup(<Provider><I18nextProvider i18n={i18n}><OfficeCaseGallery mode={mode} composerKey={`guidance-${mode}`} /></I18nextProvider></Provider>)
+      for (const item of all) {
+        expect(item.guidance, item.id).toBeTruthy()
+        expect(gallery).not.toContain(item.guidance!)
+        const store = createStore()
+        store.set(officeComposerAtomFamily(`guidance-chip-${item.id}`), { mode: item.mode, templateId: item.id, revision: item.revision })
+        const chip = renderToStaticMarkup(<Provider store={store}><I18nextProvider i18n={i18n}><OfficeSelectedCase composerKey={`guidance-chip-${item.id}`} /></I18nextProvider></Provider>)
+        expect(chip).toContain('data-testid="office-selected-case"')
+        expect(chip).not.toContain(item.guidance!)
+      }
+    }
+  })
 })
 
