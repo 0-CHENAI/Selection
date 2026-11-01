@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "origin": "dsh-desktop 588412b 的 Word 与 Excel 案例，加上 Selection 虚构样例（分类「Selection 样例」）。虚构样例不覆盖 dsh 原件。",
+  "origin": "dsh-desktop 588412b 的 Word 与 Excel 案例，Selection 虚构样例，以及个人办公样例。虚构样例不覆盖 dsh 原件。",
   "baseline": "588412b9002fcb3ac88751fab7915e050c965563",
   "cases": [
     {
@@ -369,6 +369,252 @@
         "assetDir": "cases/bio-assay",
         "license": "MIT"
       }
+    },
+    {
+      "id": "house-lease",
+      "title": "房屋租赁合同",
+      "description": "编号条款写清当事人、房屋、租期、租金押金、违约和争议解决。虚构样例，账户和违约金比例留待补充。",
+      "guidance": "学样例的合同骨架：当事人、标的、价款、期限、违约和争议解决，条款要编号。双方、地址、金额和日期都换成用户的，不照搬样例事实；没有的写「待补充」。这不是法律意见。用户这次的要求优先。",
+      "prompt": "参考这份房屋租赁合同的条款顺序，用我提供的双方、房屋和租金另写一份。缺的信息标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "合同协议",
+      "businessSkill": "personal-contract",
+      "source": "cases/house-lease",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/house-lease",
+        "license": "Selection sample",
+        "exampleSha256": "d888866219706589071d7e95ec3360c103512e7b0d64fd5304bc9454c44c04e4",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "product-resume",
+      "title": "产品经理简历与求职信",
+      "description": "一页简历加一页求职信。经历按情境、任务、行动、结果来写。样例公司和数字都是虚构的。",
+      "guidance": "学样例的简历和求职信：抬头、经历按结果来写、一页简历加另页求职信。姓名、公司和经历都换成用户的，不照搬样例事实；没有的写「待补充」。证件和住址不要写进正文。用户这次的要求优先。",
+      "prompt": "参考这份简历和求职信的版式，用我的经历重写。没有的公司、数字和日期标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "简历求职",
+      "businessSkill": "personal-resume",
+      "source": "cases/product-resume",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/product-resume",
+        "license": "Selection sample",
+        "exampleSha256": "8f9b3313347e6cb450697ef5f16b0cb4323b9d1ad122b37d262bd95214fc4763",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "travel-claim",
+      "title": "差旅报销申请表",
+      "description": "申请人、行程和金额在上，审批栏在下并且留空。未提供的部门标待补充。",
+      "guidance": "学样例的申请表：事由、行程、金额、审批栏，必填项空着就标出来。出差人、日期和费用换成用户的，不照搬样例；没有的写「待补充」。这不是报销审批。用户这次的要求优先。",
+      "prompt": "参考这张差旅报销申请表，用我的行程和金额另填一份。没给的栏标待补充，审批栏留空。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "申请表格",
+      "businessSkill": "personal-application",
+      "source": "cases/travel-claim",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/travel-claim",
+        "license": "Selection sample",
+        "exampleSha256": "15b134ab448233153a1159a751e519144fdc210e0d8d900cc4a4f784f2090257",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "annual-invitation",
+      "title": "年会邀请函",
+      "description": "正式邀请：称呼、时间地点、议程表和回复方式。主讲人未知时标待补充。",
+      "guidance": "学样例的邀请函：称呼、时间地点、议程表和回复方式，语气正式。活动、对象和日期换成用户的，不照搬样例事实；没有的写「待补充」。不要写成会议纪要。用户这次的要求优先。",
+      "prompt": "参考这份邀请函的结构和正式语气，按我给的活动、时间和地点另写一封。没定的内容标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "议程邀请",
+      "businessSkill": "personal-invitation",
+      "source": "cases/annual-invitation",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/annual-invitation",
+        "license": "Selection sample",
+        "exampleSha256": "6bc18747be0187c4abdbb6b9c3abd9bc1f8c31f9496a95398963e279df1583bb",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "miniapp-prd",
+      "title": "邻里取件需求说明",
+      "description": "背景、目标与非目标、可判定的验收标准、里程碑和待定问题。日期未知就标待补充。",
+      "guidance": "学样例的需求文档：背景、目标、非目标、用户故事、验收标准和里程碑。产品、用户和范围换成用户的，不照搬样例功能；没有的日期和决策人写「待补充」。用户这次的要求优先。",
+      "prompt": "参考这份需求说明的章节，为指定产品写一份 Word 需求文档。故事和验收用我的材料，没有的日期标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "产品需求",
+      "businessSkill": "personal-prd",
+      "source": "cases/miniapp-prd",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/miniapp-prd",
+        "license": "Selection sample",
+        "exampleSha256": "3f5ae4ab916aae19a7203fb19da1cefb4bd25b2601574ebc80ccf00c76292304",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "partnership-letter",
+      "title": "合作邀约信",
+      "description": "英文正式信函：发信人、日期、收信人、称呼、正文和结尾敬语。未知地址写 To be confirmed。",
+      "guidance": "学样例的英文信：信头、日期、称呼、分段正文和结尾敬语，语气正式。双方、事由和日期换成用户的，不照搬样例事实；不知姓名就写明，没有的写「待补充」。用户这次的要求优先。",
+      "prompt": "参考这封英文信的版式，用我的双方、事由和日期另写一封正式商务信。不知道的姓名和地址写 To be confirmed。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.1",
+      "category": "商务信函",
+      "businessSkill": "personal-letter",
+      "source": "cases/partnership-letter",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/partnership-letter",
+        "license": "Selection sample",
+        "exampleSha256": "6b5ee6b466e245b38ff8ed946fd7e304c12d484ba6573dbad881c6983323e78f",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "equipment-quote",
+      "title": "设备采购报价单",
+      "description": "数量乘单价，再乘折扣和税率，价税合计用公式。客户、有效期和付款条件留待补充。",
+      "guidance": "学样例的报价表：数量、单价、折扣、税率都用公式，另有有效期和付款条件。品名、单价和客户换成用户的，不沿用样例数字；没有的标「待补充」。大写金额要和合计核对。用户这次的要求优先。",
+      "prompt": "参考这张报价单的公式结构，按我给的品名、数量、单价、折扣和税率另做一份。缺的客户和有效期标待补充。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "报价单据",
+      "businessSkill": "personal-quotation",
+      "source": "cases/equipment-quote",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/equipment-quote",
+        "license": "Selection sample",
+        "exampleSha256": "6891d360420fdc3753af026c3f4807f3ccdcd728782073a995c249c7b8dc1dd2",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "household-budget",
+      "title": "家庭年度预算",
+      "description": "收入与支出分列预算、实际和偏差。结余用公式，支出实际配有柱形图。数字虚构。",
+      "guidance": "学样例的收支表：分类、月预算、实际、偏差公式和汇总图。收入、支出和月份换成用户的，样例是虚构数，不沿用它的数字；缺的标「待补充」。改数字后要重算。用户这次的要求优先。",
+      "prompt": "参考这张家用预算表的科目、偏差公式和图，用我的收支重做。没有的数标待补充，不要沿用样例金额。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "家庭预算",
+      "businessSkill": "personal-budget",
+      "source": "cases/household-budget",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/household-budget",
+        "license": "Selection sample",
+        "exampleSha256": "283572ab0d9acbac7b360b75c9b64a6f29da48a7c38dff7e2007bb977086019a",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "vendor-statement",
+      "title": "供应商月度对账单",
+      "description": "价税合计减已付得到差异，未结清的一行用底色标出。发票号和期初留待补充。",
+      "guidance": "学样例的对账表：发票、税额、已付和差异公式，差异要能看出来。供应商、票号、币种和金额换成用户的，不沿用样例数字；缺的标「待补充」。改完要重算。用户这次的要求优先。",
+      "prompt": "参考这张对账单的列和差异公式，用我的发票和付款重做。缺票号就标待补充，不要沿用样例金额。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "往来对账",
+      "businessSkill": "personal-statement",
+      "source": "cases/vendor-statement",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/vendor-statement",
+        "license": "Selection sample",
+        "exampleSha256": "7b5990d869a0b3fa43a45eff49dc837ffd4c751a372db6ecc656056ea0a05416",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "project-gantt",
+      "title": "三个月项目计划",
+      "description": "开始日和工期是输入，结束日以及每一周是否落在任务里都由公式计算。任务为虚构。",
+      "guidance": "学样例的计划表：任务、工期、结束日公式和按周展开的条。项目名、日期、负责人和依赖换成用户的，不照搬样例安排；没有的写「待补充」。改工期后要重算。用户这次的要求优先。",
+      "prompt": "参考这份项目计划的工期公式和周视图，用我的任务、开始日和工期另做一张表。不知道的负责人标待补充。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "项目计划",
+      "businessSkill": "personal-gantt",
+      "source": "cases/project-gantt",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/project-gantt",
+        "license": "Selection sample",
+        "exampleSha256": "dd440cab2e7feb5c9f991d1f029654712b722271f5781155374330aa4b34efaf",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "quarterly-okr",
+      "title": "季度目标考核表",
+      "description": "权重乘评分得到加权，权重合计用公式核对是否为 100%。目标和分数是虚构的。",
+      "guidance": "学样例的考核表：目标、关键结果、权重、评分和加权公式，权重要校验。期间、目标和分数换成用户的，不沿用样例数字；没有的标「待补充」。改完要重算。用户这次的要求优先。",
+      "prompt": "参考这张考核表的权重、评分和加权公式，用我的目标和分数重做。没给的评分留空，不要沿用样例分数。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "目标考核",
+      "businessSkill": "personal-okr",
+      "source": "cases/quarterly-okr",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/quarterly-okr",
+        "license": "Selection sample",
+        "exampleSha256": "ee394b534912ccf02145c2cb757ac287f979da1e206aa25ee83b7b3594a2f641",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
     }
   ]
 }

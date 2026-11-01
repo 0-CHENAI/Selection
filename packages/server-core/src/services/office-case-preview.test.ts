@@ -32,7 +32,12 @@ async function tempRoot() {
 
 test('every Word / Excel case that ships a file has a verified sample', () => {
   const samples = officeCaseSamples(root)
-  expect(samples.map(item => item.id).sort()).toEqual(['annual-business', 'bio-assay', 'coffee-market', 'equity-research', 'government-notice', 'meeting-minutes', 'port-cargo'])
+  expect(samples.map(item => item.id).sort()).toEqual([
+    'annual-business', 'annual-invitation', 'bio-assay', 'coffee-market', 'equipment-quote',
+    'equity-research', 'government-notice', 'house-lease', 'household-budget', 'meeting-minutes',
+    'miniapp-prd', 'partnership-letter', 'port-cargo', 'product-resume', 'project-gantt',
+    'quarterly-okr', 'travel-claim', 'vendor-statement',
+  ])
   for (const item of samples) {
     const bytes = readFileSync(join(root, item.dir, item.sampleFile))
     if (item.sha256) expect(createHash('sha256').update(bytes).digest('hex')).toBe(item.sha256)

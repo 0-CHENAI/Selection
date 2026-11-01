@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这份需求说明的章节，为【产品】写一份 Word 需求文档。故事和验收用我的材料，没有的日期标待补充。"
+}

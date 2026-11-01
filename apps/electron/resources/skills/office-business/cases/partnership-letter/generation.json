@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这封英文信的版式，用我的双方、事由和日期另写一封正式商务信。不知道的姓名和地址写 To be confirmed。"
+}

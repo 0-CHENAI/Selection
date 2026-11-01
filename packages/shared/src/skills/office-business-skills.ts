@@ -11,6 +11,17 @@ export const OFFICE_BUSINESS_SKILL_SLUGS = [
   'saas-metrics-coach',
   'dataset-health-audit',
   'data-viz-gen',
+  'personal-contract',
+  'personal-resume',
+  'personal-quotation',
+  'personal-budget',
+  'personal-statement',
+  'personal-gantt',
+  'personal-application',
+  'personal-invitation',
+  'personal-okr',
+  'personal-prd',
+  'personal-letter',
 ] as const
 
 export type OfficeBusinessSkillSlug = typeof OFFICE_BUSINESS_SKILL_SLUGS[number]

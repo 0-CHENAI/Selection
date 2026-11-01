@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这份邀请函的结构和正式语气，按我给的活动、时间和地点另写一封。没定的主讲人或链接标待补充。"
+}
