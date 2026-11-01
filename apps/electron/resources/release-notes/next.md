@@ -52,6 +52,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **优先使用供应商原生搜索信源** — OpenAI、ChatGPT OAuth、Anthropic、DeepSeek、Google 与 Kimi 连接会优先调用各自官方搜索能力并保留来源链接，失败时再回退 AnySearch；自定义端点、订阅型 OAuth 与其他供应商的凭据不会跨端点发送。停止回答会同时取消搜索，不会在取消后继续回退或产生额外调用。
+
 - **Excel 预览里的图表位置** — 浮动图表按它在 Excel 里覆盖的单元格摆放和缩放，盖住的格子与 Excel 一致；行被中文撑高时图表跟着变高。协同面板刷新后，模型截图看到的也是最新的表格。
 
 - **PPT 模板选择器收束** — 默认只留六套：理性简报、数据简报、战略备忘、经营复盘、工程蓝图、课程培训。其余收进折叠的「更多模板」，理性简报可换五套配色，重复卡片不再出现，归档成稿移出安装包。自定义页可以上传 PPTX 或 deck.json。后加的 DSH 卡片封面已按整页预览重做，中文不再是空框。

@@ -118,4 +118,40 @@ describe('createSearchTool', () => {
     expect((result.content[0] as any).text).toContain('Search failed');
     expect((result.content[0] as any).text).toContain('provider-native search unavailable');
   });
+
+  it('propagates user cancellation without invoking the fallback', async () => {
+    let fallbackCalls = 0;
+    const provider: WebSearchProvider = {
+      name: 'Native',
+      async search(_query, _count, signal) {
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    };
+    const fallback: WebSearchProvider = {
+      name: 'AnySearch',
+      async search() {
+        fallbackCalls += 1;
+        return [];
+      },
+    };
+    const controller = new AbortController();
+    const pending = createSearchTool(provider, fallback).execute(
+      'tool-abort',
+      { query: 'cancel me' },
+      controller.signal,
+    );
+
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    let rejected = false;
+    try {
+      await pending;
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+    expect(fallbackCalls).toBe(0);
+  });
 });

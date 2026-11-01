@@ -120,7 +120,7 @@ import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/s
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
 import { createDocumentTools } from './tools/documents.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
-import { requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
+import { createDynamicSearchProvider, requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
@@ -840,14 +840,25 @@ async function ensureSession(): Promise<AgentSession> {
   const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
-  // Built-in web search uses AnySearch independently from the active LLM
-  // connection. This keeps custom OpenAI-compatible credentials scoped to
-  // their configured model endpoint instead of forwarding them to a search
-  // provider. The optional key comes from the current init payload, then the
-  // process environment. An empty configured value stays anonymous.
-  const searchTool = createSearchTool(resolveSearchProvider(() =>
-    requestAnySearchApiKey(send, pendingAnySearchApiKeys),
-  ));
+  // Exact built-in providers use their official native search and citations
+  // first. Resolve per call so token refreshes and model/connection changes
+  // apply without recreating the session. AnySearch remains the isolated
+  // default and explicit fallback; custom endpoint credentials never leave
+  // their configured endpoint.
+  const resolveAnySearchApiKey = (signal?: AbortSignal) =>
+    requestAnySearchApiKey(send, pendingAnySearchApiKeys, 5_000, signal);
+  const searchProvider = createDynamicSearchProvider(
+    () => initConfig?.piAuth,
+    () => initConfig?.model,
+    resolveAnySearchApiKey,
+    () => ({
+      customEndpoint: !!initConfig?.customEndpoint,
+      authType: initConfig?.authType,
+      baseUrl: initConfig?.baseUrl,
+    }),
+  );
+  const anySearchFallback = resolveSearchProvider(undefined, undefined, resolveAnySearchApiKey);
+  const searchTool = createSearchTool(searchProvider, anySearchFallback);
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null,
     () => cwd,

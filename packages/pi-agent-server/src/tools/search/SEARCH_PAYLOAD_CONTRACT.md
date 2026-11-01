@@ -1,8 +1,23 @@
 # Search Payload Contract
 
-Last updated: 2026-10-24
+Last updated: 2026-11-01
 
 This file documents the **known-good request shape** for provider-native web search calls in `pi-agent-server`.
+
+## Routing and credential boundary
+
+Native search is selected only for exact built-in provider ids and official endpoints:
+
+| Provider id | Native search |
+| --- | --- |
+| `openai-codex` | ChatGPT Codex Responses backend |
+| `openai` | OpenAI Responses API with `web_search` |
+| `anthropic` | Anthropic Messages API server-side web search |
+| `deepseek` | DeepSeek Search API (`/v1/tools/search`) |
+| `google` | Gemini Google Search grounding |
+| `moonshotai`, `moonshotai-cn` | Kimi Web Search Basic (`/v1/tools/search`) |
+
+User-defined endpoints, Kimi Coding OAuth, Claude subscription OAuth, malformed ChatGPT tokens, and unknown providers stay on AnySearch. A failure from a selected native provider falls back to AnySearch, except when the user cancelled the call.
 
 ## ChatGPT backend (openai-codex)
 
@@ -25,7 +40,7 @@ Known-good body fields for search:
 - `stream: true`
 - `instructions: string`
 - `tools: [{ type: "web_search" }]` (fallback retry: `web_search_preview`)
-- `tool_choice: "auto"`
+- `tool_choice: "required"` (the `web_search` tool must run; source citations are not optional)
 - `parallel_tool_calls: true`
 - `text: { verbosity: "medium" }`
 - `input: [{ role, content: [{ type: "input_text", text }] }]`

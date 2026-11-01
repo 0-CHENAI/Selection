@@ -65,32 +65,36 @@ export function createSearchTool(
     promptSnippet:
       'Use web_search for up-to-date information, documentation lookups, or fact-checking. Returns titles, URLs, and snippets. Accepts a query string and optional count (1-10).',
     parameters: schema,
-    async execute(toolCallId, params) {
+    async execute(toolCallId, params, signal) {
       const { query } = params;
       const count = Math.max(1, Math.min(10, params.count ?? 5));
+      const providerName = provider.name;
 
       try {
-        const results = await provider.search(query, count);
-        return formatResults(query, provider.name, results);
+        signal?.throwIfAborted();
+        const results = await provider.search(query, count, signal);
+        return formatResults(query, providerName, results);
       } catch (err) {
+        if (signal?.aborted) throw err;
         const primaryMsg = err instanceof Error ? err.message : String(err);
 
-        if (fallbackProvider && provider.name !== fallbackProvider.name) {
+        if (fallbackProvider && providerName !== fallbackProvider.name) {
           try {
-            const fallbackResults = await fallbackProvider.search(query, count);
+            const fallbackResults = await fallbackProvider.search(query, count, signal);
             return formatResults(
               query,
               fallbackProvider.name,
               fallbackResults,
-              `Primary search provider (${provider.name}) failed (${formatErrorSnippet(primaryMsg)}), automatically fell back to ${fallbackProvider.name}.`,
+              `Primary search provider (${providerName}) failed (${formatErrorSnippet(primaryMsg)}), automatically fell back to ${fallbackProvider.name}.`,
             );
           } catch (fallbackErr) {
+            if (signal?.aborted) throw fallbackErr;
             const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
             return {
               content: [
                 {
                   type: 'text' as const,
-                  text: `Search failed for "${query}": primary (${provider.name}) failed with "${primaryMsg}"; fallback (${fallbackProvider.name}) failed with "${fallbackMsg}"`,
+                  text: `Search failed for "${query}": primary (${providerName}) failed with "${primaryMsg}"; fallback (${fallbackProvider.name}) failed with "${fallbackMsg}"`,
                 },
               ],
               details: { isError: true },

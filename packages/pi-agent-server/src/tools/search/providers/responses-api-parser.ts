@@ -6,7 +6,7 @@
  * OpenRouter also mirrors this format at `openrouter.ai/api/v1/responses`.
  */
 
-import type { WebSearchResult } from '../types.ts';
+import { normalizeSearchUrl, type WebSearchResult } from '../types.ts';
 
 interface UrlCitation {
   type?: string;
@@ -49,8 +49,13 @@ export function collectOutputText(data: ResponsesApiResponse): string {
   return typeof data.output_text === 'string' ? data.output_text.trim() : '';
 }
 
-export function collectUrlCitations(data: ResponsesApiResponse): UrlCitation[] {
-  const citations: UrlCitation[] = [];
+interface CitationWithText {
+  citation: UrlCitation;
+  text: string;
+}
+
+function collectUrlCitations(data: ResponsesApiResponse): CitationWithText[] {
+  const citations: CitationWithText[] = [];
 
   for (const item of data.output || []) {
     if (!Array.isArray(item.content)) continue;
@@ -60,7 +65,7 @@ export function collectUrlCitations(data: ResponsesApiResponse): UrlCitation[] {
 
       for (const ann of part.annotations) {
         if (ann?.type === 'url_citation' && ann.url) {
-          citations.push(ann);
+          citations.push({ citation: ann, text: typeof part.text === 'string' ? part.text : '' });
         }
       }
     }
@@ -81,25 +86,30 @@ export function parseResponsesApiResults(
   count: number,
 ): WebSearchResult[] {
   const text = collectOutputText(data);
-  const annotations = collectUrlCitations(data);
+  const citations = collectUrlCitations(data);
 
-  if (annotations.length > 0) {
+  if (citations.length > 0) {
     const seen = new Set<string>();
     const results: WebSearchResult[] = [];
 
-    for (const ann of annotations) {
+    for (const { citation: ann, text: citationText } of citations) {
       if (results.length >= count) break;
-      if (!ann.url || seen.has(ann.url)) continue;
-      seen.add(ann.url);
+      const url = normalizeSearchUrl(ann.url);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
 
       const description =
-        typeof ann.start_index === 'number' && typeof ann.end_index === 'number' && text
-          ? text.slice(ann.start_index, ann.end_index).slice(0, 280)
+        typeof ann.start_index === 'number' &&
+        typeof ann.end_index === 'number' &&
+        ann.start_index >= 0 &&
+        ann.end_index > ann.start_index &&
+        ann.end_index <= citationText.length
+          ? citationText.slice(ann.start_index, ann.end_index).slice(0, 280)
           : '';
 
       results.push({
-        title: ann.title || ann.url,
-        url: ann.url,
+        title: ann.title || url,
+        url,
         description,
       });
     }
