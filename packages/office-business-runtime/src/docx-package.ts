@@ -29,6 +29,10 @@ export interface DocParagraph {
   indentFirstLine?: number
   /** 固定行距，单位 twip；公文正文 28 磅即 560 */
   lineExact?: number
+  /** 与下段同页（Word「与下段同页」）。标题、末段正文接落款时用 */
+  keepNext?: boolean
+  /** 段中不分页（Word「段中不分页」） */
+  keepLines?: boolean
 }
 
 export interface DocTable {
@@ -42,6 +46,8 @@ export interface DocTable {
   header?: boolean
   /** 单元格内右对齐制表位，单位 twip。文本里的 \t 跳到这里 */
   rightTab?: number
+  /** 浮动到所在页版心底部，例如公文版记置于末页下端（GB/T 9704 7.4） */
+  anchorBottom?: boolean
 }
 
 export interface DocImage {
@@ -58,6 +64,15 @@ export interface DocOptions {
   marginBottom: number
   marginLeft: number
 }
+
+/** Word 2013+ 的兼容性设置（与 OfficeCLI create 的默认值一致） */
+export const WORD_COMPAT_SETTINGS = [
+  ['compatibilityMode', '15'],
+  ['overrideTableStyleFontSizeAndJustification', '1'],
+  ['enableOpenTypeFeatures', '1'],
+  ['doNotFlipMirrorIndents', '1'],
+  ['differentiateMultirowTableHeaders', '1'],
+].map(([name, value]) => `<w:compatSetting w:name="${name}" w:uri="http://schemas.microsoft.com/office/word" w:val="${value}"/>`).join('')
 
 export const A4_PAGE = { width: 11906, height: 16838 } as const
 
@@ -221,9 +236,12 @@ function paragraphXml(block: DocParagraph): string {
     : ''
   const color = block.color ? `<w:color w:val="${block.color}"/>` : ''
   const bold = block.bold ? '<w:b/>' : ''
-  const runProps = fonts || size || color || bold ? `<w:rPr>${fonts}${bold}${size}${color}</w:rPr>` : ''
-  return `<w:p><w:pPr>${style}${rule}${spacing}${indent}${align}</w:pPr>${runsXml(block.text, runProps)}</w:p>`
+  const runProps = fonts || size || color || bold ? `<w:rPr>${fonts}${bold}${color}${size}</w:rPr>` : ''
+  const keep = `${block.keepNext ? '<w:keepNext/>' : ''}${block.keepLines ? '<w:keepLines/>' : ''}`
+  return `<w:p><w:pPr>${style}${keep}${rule}${spacing}${indent}${align}</w:pPr>${runsXml(block.text, runProps)}</w:p>`
 }
+
+const CELL_SPACING = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>'
 
 function tableXml(block: DocTable): string {
   const columns = block.rows[0]?.length ?? 1
@@ -235,8 +253,11 @@ function tableXml(block: DocTable): string {
     : block.borders === 'record'
       ? `<w:tblBorders>${line('top', 8)}${line('bottom', 8)}${line('insideH', 4)}</w:tblBorders>`
       : ''
-  const tblPr = block.widths || block.borders
-    ? `<w:tblPr><w:tblW w:w="${widths.reduce((sum, width) => sum + width, 0)}" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>`
+  const floating = block.anchorBottom
+    ? '<w:tblpPr w:leftFromText="0" w:rightFromText="0" w:vertAnchor="margin" w:horzAnchor="margin" w:tblpXSpec="center" w:tblpYSpec="bottom"/><w:tblOverlap w:val="never"/>'
+    : ''
+  const tblPr = block.widths || block.borders || floating
+    ? `<w:tblPr>${floating}<w:tblW w:w="${widths.reduce((sum, width) => sum + width, 0)}" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>`
     : ''
   const tabs = block.rightTab ? `<w:tabs><w:tab w:val="right" w:pos="${block.rightTab}"/></w:tabs>` : ''
   const rows = block.rows.map((row, rowIndex) => {
@@ -245,7 +266,8 @@ function tableXml(block: DocTable): string {
       const tcPr = block.widths || head
         ? `<w:tcPr><w:tcW w:w="${widths[column]}" w:type="dxa"/>${head ? '<w:shd w:val="clear" w:color="auto" w:fill="EDEFF2"/>' : ''}</w:tcPr>`
         : ''
-      const paragraphs = cell.split('\n').map(text => `<w:p>${tabs ? `<w:pPr>${tabs}</w:pPr>` : ''}${runsXml(text, head ? '<w:rPr><w:b/></w:rPr>' : '')}</w:p>`).join('')
+      // 单元格段落不继承正文段后距：行高只由文字和单元格边距决定，Word 与其他渲染器分页一致
+      const paragraphs = cell.split('\n').map(text => `<w:p><w:pPr>${tabs}${CELL_SPACING}</w:pPr>${runsXml(text, head ? '<w:rPr><w:b/></w:rPr>' : '')}</w:p>`).join('')
       return `<w:tc>${tcPr}${paragraphs}</w:tc>`
     }).join('')
     return `<w:tr>${block.header && rowIndex === 0 ? '<w:trPr><w:tblHeader/></w:trPr>' : ''}${cells}</w:tr>`
@@ -278,11 +300,15 @@ export function buildDocx(blocks: readonly DocBlock[], options: DocOptions): Buf
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${body.join('')}<w:sectPr><w:pgSz w:w="${A4_PAGE.width}" w:h="${A4_PAGE.height}"/><w:pgMar w:top="${options.marginTop}" w:right="${options.marginRight}" w:bottom="${options.marginBottom}" w:left="${options.marginLeft}" w:header="850" w:footer="850" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:widowControl/><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
   <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:sz w:val="21"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:rPr><w:sz w:val="44"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:rPr><w:sz w:val="28"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:keepNext/><w:keepLines/></w:pPr><w:rPr><w:sz w:val="44"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:sz w:val="28"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="120" w:after="60"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
 </w:styles>`
+  // compatibilityMode 15：Word 2013 及以后的版式。缺少 settings 部件时 Word 按旧版本打开并在标题栏显示「兼容性模式」
+  const settings = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:defaultTabStop w:val="420"/><w:characterSpacingControl w:val="doNotCompress"/><w:compat>${WORD_COMPAT_SETTINGS}</w:compat></w:settings>`
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -290,6 +316,7 @@ export function buildDocx(blocks: readonly DocBlock[], options: DocOptions): Buf
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
 </Types>`
   const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -300,6 +327,7 @@ export function buildDocx(blocks: readonly DocBlock[], options: DocOptions): Buf
   const documentRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rIdSettings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>
   ${rels.join('')}
 </Relationships>`
   const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -310,6 +338,7 @@ export function buildDocx(blocks: readonly DocBlock[], options: DocOptions): Buf
     { name: 'docProps/core.xml', data: Buffer.from(core) },
     { name: 'word/document.xml', data: Buffer.from(document) },
     { name: 'word/styles.xml', data: Buffer.from(styles) },
+    { name: 'word/settings.xml', data: Buffer.from(settings) },
     { name: 'word/_rels/document.xml.rels', data: Buffer.from(documentRels) },
   ]
   for (const item of media) entries.push({ name: `word/media/${item.name}`, data: item.data })

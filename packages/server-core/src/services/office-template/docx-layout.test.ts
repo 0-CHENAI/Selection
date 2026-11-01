@@ -8,6 +8,7 @@ import {
   editDocx,
   formatLayoutDiagnostics,
   inventoryDocx,
+  modernizeDocx,
   normalizeDocx,
   validateDocx,
   validateDocxAgainstTemplate,
@@ -190,5 +191,60 @@ describe('package and XML safety limits', () => {
   test('rejects packages that inflate beyond 64 MB', () => {
     const big = new Uint8Array(65 * 1024 * 1024)
     expect(() => readOoxmlPackage(zipSync({ 'word/document.xml': big }, { level: 9 }))).toThrow(/64 MB/)
+  })
+})
+
+describe('Word 模板写出的兼容模式与标题分页', () => {
+  const ALL_WORD_CASES = [...WORD_CASES, 'house-lease', 'product-resume', 'travel-claim', 'annual-invitation', 'miniapp-prd', 'partnership-letter'] as const
+  const compatMode = (parts: OoxmlParts) => Number(/w:name="compatibilityMode"[^>]*w:val="(\d+)"|w:val="(\d+)"[^>]*w:name="compatibilityMode"/.exec(strFromU8(parts['word/settings.xml']!))?.slice(1).find(Boolean))
+
+  for (const id of ALL_WORD_CASES) {
+    test(`${id}: office_template_write 输出 compatibilityMode ≥ 15，守卫仍通过`, () => {
+      const { bytes, profile } = load(id)
+      const { bytes: output, report } = writeDocxFromTemplate(bytes, profile, goldens.cases[id]?.plan ?? {})
+      expect(report.ok).toBe(true)
+      const parts = readOoxmlPackage(output)
+      expect(compatMode(parts)).toBeGreaterThanOrEqual(15)
+      expect(validateDocxAgainstTemplate(bytes, profile, output).ok).toBe(true)
+    })
+  }
+
+  test('dsh 纪要与公文模板原为 Word 2010（14），写出时升到 15，标题样式补与下段同页', () => {
+    for (const id of ['meeting-minutes', 'government-notice']) {
+      const raw = readOoxmlPackage(load(id).bytes)
+      expect(compatMode(raw)).toBe(14)
+      const parts = modernizeDocx(raw)
+      expect(compatMode(parts)).toBe(15)
+      const styles = strFromU8(parts['word/styles.xml']!)
+      expect(styles).toMatch(/w:styleId="Heading1"[^]*?<w:pPr><w:keepNext\/><w:keepLines\/>/)
+      // 正文不动：dsh 段落 ID 与金标准一致
+      expect(parts['word/document.xml']).toBe(raw['word/document.xml'])
+    }
+  })
+
+  test('已是 15 且标题已同页的模板不改动', () => {
+    const raw = readOoxmlPackage(load('house-lease').bytes)
+    expect(modernizeDocx(raw)).toBe(raw)
+  })
+
+  test('缺少 settings 部件时补上部件、关系和内容类型', () => {
+    const raw = readOoxmlPackage(load('house-lease').bytes)
+    const stripped: OoxmlParts = { ...raw }
+    delete stripped['word/settings.xml']
+    stripped['word/_rels/document.xml.rels'] = strToU8(strFromU8(raw['word/_rels/document.xml.rels']!).replace(/<Relationship [^>]*relationships\/settings"[^>]*\/>/, ''))
+    stripped['[Content_Types].xml'] = strToU8(strFromU8(raw['[Content_Types].xml']!).replace(/<Override PartName="\/word\/settings.xml"[^>]*\/>/, ''))
+    const parts = modernizeDocx(stripped)
+    expect(compatMode(parts)).toBe(15)
+    expect(strFromU8(parts['word/_rels/document.xml.rels']!)).toMatch(/relationships\/settings" Target="settings.xml"/)
+    expect(strFromU8(parts['[Content_Types].xml']!)).toContain('PartName="/word/settings.xml"')
+  })
+
+  test('个人办公样例的标题段与签字栏带与下段同页', () => {
+    const xml = strFromU8(readOoxmlPackage(load('house-lease').bytes)['word/document.xml']!)
+    for (const text of ['第一条  房屋', '甲方签字：____________    日期：待补充']) {
+      const index = xml.indexOf(text)
+      const start = xml.lastIndexOf('<w:p>', index) >= 0 ? xml.lastIndexOf('<w:p', index) : 0
+      expect(xml.slice(start, index)).toContain('<w:keepNext')
+    }
   })
 })

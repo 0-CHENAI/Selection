@@ -49,8 +49,10 @@ function footer(file: string, label: string): void {
 }
 
 const body = { 'font.ea': '宋体', 'font.latin': 'Calibri', size: '12pt', spaceAfter: '6pt' }
-const h1 = { 'font.ea': '黑体', 'font.latin': 'Calibri', size: '16pt', bold: 'true', color: '1F4E79', spaceBefore: '12pt', spaceAfter: '6pt' }
-const title = { 'font.ea': '黑体', 'font.latin': 'Calibri', size: '22pt', bold: 'true', color: '1F4E79', align: 'center', spaceAfter: '4pt' }
+/** 与下段同页、段中不分页：标题不孤悬页底，末段正文和落款、签字不拆页 */
+const keep = { keepNext: 'true', keepLines: 'true' }
+const h1 = { 'font.ea': '黑体', 'font.latin': 'Calibri', size: '16pt', bold: 'true', color: '1F4E79', spaceBefore: '12pt', spaceAfter: '6pt', ...keep }
+const title = { 'font.ea': '黑体', 'font.latin': 'Calibri', size: '22pt', bold: 'true', color: '1F4E79', align: 'center', spaceAfter: '4pt', ...keep }
 const note = { 'font.ea': '宋体', 'font.latin': 'Calibri', size: '10.5pt', color: '666666', align: 'center', spaceAfter: '10pt' }
 
 function heading(file: string, text: string): void {
@@ -59,6 +61,11 @@ function heading(file: string, text: string): void {
 
 function line(file: string, text: string): void {
   paragraph(file, text, body)
+}
+
+/** 末段正文、签字等要和下一段留在同一页的行 */
+function lineWithNext(file: string, text: string): void {
+  paragraph(file, text, { ...body, ...keep })
 }
 
 function table(file: string, rows: string[][], headerFill = '1F4E79'): void {
@@ -140,8 +147,8 @@ function houseLease(): void {
   heading(file, '第五条  违约')
   line(file, '逾期支付租金超过五日的，按用户日后确认的方式计收违约金。本样例不填写比例，写「待补充：违约金计算方式」。')
   heading(file, '第六条  解除、争议与签署')
-  line(file, '提前解除的通知期待补充。争议解决方式待补充：诉讼或仲裁，不在样例中预设城市。本合同一式两份，双方各执一份，自签字之日起生效。')
-  line(file, '甲方签字：____________    日期：待补充')
+  lineWithNext(file, '提前解除的通知期待补充。争议解决方式待补充：诉讼或仲裁，不在样例中预设城市。本合同一式两份，双方各执一份，自签字之日起生效。')
+  lineWithNext(file, '甲方签字：____________    日期：待补充')
   line(file, '乙方签字：____________    日期：待补充')
   footer(file, '房屋租赁合同 · 虚构样例')
   finish(file)
@@ -173,7 +180,7 @@ function resume(): void {
   paragraph(file, '2026 年 11 月 1 日', note)
   line(file, '招聘负责人：')
   line(file, '我申请贵司产品经理岗位。北窗科技期间，我把会员开通从三个页面收成一条路径，首月留存由 18% 到 27%。这次希望把同样的收口方法用到贵司正在改的下单流程上。')
-  line(file, '方便的话，我可以按贵司指定的时间做一次 30 分钟的说明。薪资期望：待补充。')
+  lineWithNext(file, '方便的话，我可以按贵司指定的时间做一次 30 分钟的说明。薪资期望：待补充。')
   line(file, '陈可')
   footer(file, '简历与求职信 · 虚构样例')
   finish(file)
@@ -238,8 +245,8 @@ function invitation(): void {
     ['20:30', '自由交流', '待补充'],
   ])
   heading(file, '回复')
-  line(file, '请于 2026 年 12 月 10 日前回复是否出席。回复邮箱待补充。')
-  line(file, '北窗科技')
+  lineWithNext(file, '请于 2026 年 12 月 10 日前回复是否出席。回复邮箱待补充。')
+  lineWithNext(file, '北窗科技')
   line(file, '2026 年 11 月 1 日')
   footer(file, '年会邀请函 · 虚构样例')
   finish(file)
@@ -293,9 +300,9 @@ function letter(): void {
   line(file, 'Dear Ms Zhou,')
   line(file, 'I am writing to ask whether Hehu Trading would join a one-quarter pilot to share pickup-point capacity in Chaoyang. The figures in this letter are sample figures, not a commitment.')
   line(file, 'We can offer two cabinet locations from 18 November 2026. We would need your written list of participating stores before 20 November 2026. Pricing for the pilot is to be confirmed.')
-  line(file, 'Please reply if a short call in the week of 10 November 2026 would be useful.')
-  line(file, 'Yours sincerely,')
-  line(file, 'Lin Mou')
+  lineWithNext(file, 'Please reply if a short call in the week of 10 November 2026 would be useful.')
+  lineWithNext(file, 'Yours sincerely,')
+  lineWithNext(file, 'Lin Mou')
   line(file, 'Partnerships')
   footer(file, 'Sample business letter')
   finish(file)
