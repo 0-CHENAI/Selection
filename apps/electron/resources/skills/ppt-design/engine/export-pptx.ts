@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
-import { blockingIssues, checkDeck } from './check.ts'
+import { blockingIssues, checkDeck, isPlaceholderImageSrc } from './check.ts'
 import { contrastRatio, luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
@@ -188,6 +188,10 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     addTable(pres, slide, deck, element, platform)
     return
   }
+  if (element.type === 'image' && element.src && isPlaceholderImageSrc(element.src)) {
+    addImagePlaceholder(slide, deck, element)
+    return
+  }
   if (element.type === 'image' && element.src) {
     const fitted = fitImage(element)
     slide.addImage({
@@ -216,6 +220,50 @@ function fitImage(element: DeckElement): { x: number; y: number; w: number; h: n
     y: element.bounds.y + (element.bounds.h - h) / 2,
     w, h,
   }
+}
+
+/**
+ * `fill` 填满图框但不拉伸：图片比例和框不一致时按中心裁掉多出的部分。
+ * 用户换进模板槽位的照片比例常与模板不同，直接拉伸会变形。显式 `crop` 优先。
+ */
+export function effectiveCrop(element: DeckElement): { l: number; t: number; r: number; b: number } | undefined {
+  if (element.type !== 'image') return undefined
+  if (element.crop) return element.crop
+  if (element.fit !== 'fill' || !element.src || isPlaceholderImageSrc(element.src)) return undefined
+  if (element.bounds.w <= 0 || element.bounds.h <= 0) return undefined
+  const size = readImageSize(resolveAsset(element.src))
+  if (!size || size.width <= 0 || size.height <= 0) return undefined
+  const image = size.width / size.height
+  const box = element.bounds.w / element.bounds.h
+  if (Math.abs(image - box) / box <= 0.01) return undefined
+  if (image > box) {
+    const side = (1 - box / image) / 2
+    return { l: side, t: 0, r: side, b: 0 }
+  }
+  const side = (1 - image / box) / 2
+  return { l: 0, t: side, r: 0, b: side }
+}
+
+/** 没有用户图片的槽位画成可见、可删的占位框，不放透明像素，也不当成配图。 */
+function addImagePlaceholder(slide: PptxGenJS.Slide, deck: Deck, element: DeckElement): void {
+  const cjk = deck.pages.some(page => page.elements.some(item => typeof item.text === 'string' && containsCjk(item.text)))
+  const label = cjk ? '图片占位：请放入你的图片' : 'Image placeholder: add your photo'
+  const fontSize = Math.max(8, Math.min(14, Math.round(Math.min(element.bounds.w, element.bounds.h) / 12)))
+  slide.addText(label, {
+    shape: 'rect',
+    x: inches(element.bounds.x),
+    y: inches(element.bounds.y),
+    w: inches(element.bounds.w),
+    h: inches(element.bounds.h),
+    fill: { color: 'EEF0F2' },
+    line: { color: 'A9B0B8', width: 1, dashType: 'dash' },
+    color: '7A828C',
+    fontSize,
+    align: 'center',
+    valign: 'middle',
+    altText: element.alt ? `${label} · ${element.alt}` : label,
+    objectName: element.id,
+  })
 }
 
 function readImageSize(file: string): { width: number; height: number } | null {
@@ -761,7 +809,10 @@ async function shrinkBubbleScale(zip: JSZip): Promise<boolean> {
 async function patchImportMarks(zip: JSZip, deck: Deck): Promise<boolean> {
   let changed = false
   for (let index = 0; index < deck.pages.length; index++) {
-    const marked = deck.pages[index]!.elements.filter(element => !element.retained && (element.crop || element.link))
+    const marked = deck.pages[index]!.elements
+      .filter(element => !element.retained)
+      .map(element => ({ element, crop: effectiveCrop(element) }))
+      .filter(item => item.crop || item.element.link)
     if (marked.length === 0) continue
     const path = `ppt/slides/slide${index + 1}.xml`
     const file = zip.file(path)
@@ -772,12 +823,14 @@ async function patchImportMarks(zip: JSZip, deck: Deck): Promise<boolean> {
     let relChanged = false
     let nextId = 1
     while (rels.includes(`Id="rIdImp${nextId}"`)) nextId += 1
-    for (const element of marked) {
-      if (element.crop && element.type === 'image') {
-        const src = cropXml(element.crop)
+    for (const { element, crop } of marked) {
+      if (crop && element.type === 'image') {
+        const src = cropXml(crop)
         xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, block => {
           if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes('<a:srcRect')) return block
-          if (block.includes('<a:blipFill')) return block.replace('</a:blipFill>', `${src}</a:blipFill>`)
+          // PptxGenJS 写的是 <p:blipFill>；srcRect 必须在 blip 之后、stretch 之前。
+          if (block.includes('<a:stretch')) return block.replace('<a:stretch', `${src}<a:stretch`)
+          return block.replace(/<\/(p|a):blipFill>/, (close: string) => `${src}${close}`)
           return block
         })
         changed = true

@@ -520,7 +520,7 @@ function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions)
   if (/^https?:\/\//i.test(src)) {
     issues.push(issue('remote_image', `图片 ${element.id} 使用了网络地址。请先把图片放进工作区再引用。`, page.id, element.id))
   } else if (isPlaceholderImageSrc(src)) {
-    issues.push(issue('missing_asset', `图片 ${element.id} 仍是占位。没有生图提供方时保留占位并提示，不要当成已配图。`, page.id, element.id, 'warning'))
+    issues.push(issue('missing_asset', `图片 ${element.id} 还没有图片，导出为占位框。请用用户的图片替换，或告诉用户这一页缺图；不要当成已配图。`, page.id, element.id, 'warning'))
   } else if (!src && slot) {
     issues.push(issue('missing_asset', `图片槽 ${element.id} 没有素材。`, page.id, element.id))
   } else if (src && options.assetExists && !options.assetExists(src)) {

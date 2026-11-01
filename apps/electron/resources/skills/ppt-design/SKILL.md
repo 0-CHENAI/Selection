@@ -75,7 +75,7 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 ## 模板配图
 
-页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。`contextual-scene` 优先用户图片，没有再调用 `image_generate`（`purpose=presentation`，比例用槽位的 `aspectRatio`，`style_context` 写入六项原文，图片内文字数量为 0）。同一 `reuseGroup` 复用。`provided-portrait` 只用用户的人物照片。`native-graphic` 用已核实数据画原生图表。替换 `src` 时保持边界和遮罩。没有生图提供方时保留占位并说明，占位不是成品。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
+页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。Selection 不生成图片，不要调用 `image_generate`。用户在对话里附了图片时，图片槽一律先用用户的图：附件提示里有「Original full-resolution file」就用原图，没有再用「Stored at」的路径；先复制到工作区 `images/` 再把 `src` 指过去，不要引用网络地址。按画面内容挑槽位：横图放宽槽，竖图放窄槽，人物照片放 `provided-portrait`。照片槽保持 `fit` 为 `fill`：比例不同时导出会按中心裁满图框，不会拉伸；主体偏在边上会被裁掉时，换比例相近的槽位，或改用 `contain`。logo、截图这类不能裁的图用 `contain`。同一 `reuseGroup` 用同一张图。`native-graphic` 用已核实数据画原生图表。图片不够时，剩下的槽把 `src` 写成 `placeholder:<这里该放什么>`，导出成带「图片占位」字样的灰框；交付时告诉用户哪几页还缺图，请他补图。占位不是成品，不要说成已配图。模板里描述原示例图的图注要改成用户图片的说明或删掉。替换 `src` 时保持边界和遮罩。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
 
 十六套随包模板的 `deck.json` 不覆盖。图片槽样例只在 `styles/image-slots.extension.json`。个人模板上的图片位由复制出的工程给出建议合同，等用户确认。
 
