@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/office-business-runtime",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "license": "Apache-2.0",
   "private": true,
   "description": "Office 业务计算运行时。纪要校验、Word 草稿和 Excel 业务 CLI 供技能调用；本包不进入安装包，也不带 Python。",
