@@ -23,6 +23,7 @@ import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer
 import { handleArtifactVersions } from './handlers/artifact-versions.ts';
 import { handleOfficeTemplate, handleOfficeTemplateWrite, handleXlsxRecalculate, OfficeTemplateSchema, OfficeTemplateWriteSchema, XlsxRecalculateSchema } from './handlers/office-template.ts';
 import { OFFICE_RENDER_DESCRIPTION, OfficeRenderSchema, handleOfficeRender } from './handlers/office-render.ts';
+import { IMAGE_GENERATE_DESCRIPTION, ImageGenerateSchema, PPT_TEMPLATE_CREATE_DESCRIPTION, PptTemplateCreateProjectSchema, handleImageGenerate, handlePptTemplateCreateProject } from './handlers/ppt-tools.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillInstall, handleSkillInspect } from './handlers/skill-install.ts';
@@ -799,6 +800,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'skill_install', description: 'Install a public GitHub or local skill into this workspace. One call snapshots, validates, publishes and confirms loading. Use for explicit installation requests instead of WebFetch/Bash. Never replace without user intent and expectedTargetFingerprint. Do not run skill_validate afterward; installation already validates the exact content. Runtime dependencies are not tested.', inputSchema: SkillInstallSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleSkillInstall },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },
   { name: 'office_render', description: OFFICE_RENDER_DESCRIPTION, inputSchema: OfficeRenderSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeRender },
+  { name: 'ppt_template_create_project', description: PPT_TEMPLATE_CREATE_DESCRIPTION, inputSchema: PptTemplateCreateProjectSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handlePptTemplateCreateProject },
+  { name: 'image_generate', description: IMAGE_GENERATE_DESCRIPTION, inputSchema: ImageGenerateSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleImageGenerate },
   { name: 'mermaid_validate', description: TOOL_DESCRIPTIONS.mermaid_validate, inputSchema: MermaidValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleMermaidValidate },
   { name: 'source_test', description: TOOL_DESCRIPTIONS.source_test, inputSchema: SourceTestSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSourceTest },
   { name: 'source_oauth_trigger', description: TOOL_DESCRIPTIONS.source_oauth_trigger, inputSchema: SourceOAuthTriggerSchema, executionMode: 'registry', safeMode: 'block', handler: handleSourceOAuthTrigger },

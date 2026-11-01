@@ -12607,8 +12607,8 @@ var ELEMENT_V2_KEYS = [...ELEMENT_KEYS, "group", "crop", "mask", "link", "runs",
 var CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
 var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
-function issue(code, message, pageId, elementId) {
-  return { code, message, pageId, elementId };
+function issue(code, message, pageId, elementId, severity = "error") {
+  return severity === "warning" ? { code, message, pageId, elementId, severity } : { code, message, pageId, elementId };
 }
 function isObject2(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -13689,6 +13689,46 @@ function colorRef(value, theme, fallback) {
 }
 
 // apps/electron/resources/skills/ppt-design/engine/check.ts
+var LAYOUT_REPETITION_RUN = 3;
+var COLOR_TOKEN = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$/;
+var BOOKEND_LAYOUT = /^(?:cover|title|opening|section|closing|final|blank)$/i;
+var COVER_LAYOUT = /^(?:cover|title|opening)$/i;
+var ASPECT = {
+  "1:1": 1,
+  "16:9": 16 / 9,
+  "9:16": 9 / 16,
+  "4:3": 4 / 3,
+  "3:4": 3 / 4
+};
+function isPlaceholderImageSrc(src) {
+  if (!src)
+    return false;
+  return src.startsWith("placeholder:") || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src);
+}
+function blockingIssues(issues) {
+  return issues.filter((item) => item.severity !== "warning");
+}
+function revisionStatus(issues) {
+  const errorCount = blockingIssues(issues).length;
+  return { status: errorCount ? "needs_revision" : "ok", code: errorCount ? 2 : 0, errorCount, warningCount: issues.length - errorCount };
+}
+function formatNeedsRevision(file, issues) {
+  const blocking = blockingIssues(issues);
+  const warnings = issues.filter((item) => item.severity === "warning");
+  const lines = [`needs_revision\uFF1A${blocking.length} \u9879\u9700\u8981\u4FEE\u6B63\uFF0C\u4E0D\u80FD\u4EE5\u300C\u5C31\u7EEA\u300D\u4EA4\u4ED8\u3002`];
+  blocking.forEach((item, index) => {
+    const where = [file, item.pageId ? `\u9875 ${item.pageId}` : "", item.elementId ? `\u5143\u7D20 ${item.elementId}` : ""].filter(Boolean).join(" \xB7 ");
+    lines.push(`[${index + 1}] ${where}
+${item.code}\uFF1A${item.message}`);
+  });
+  if (warnings.length) {
+    lines.push(`\u53E6\u6709 ${warnings.length} \u9879\u63D0\u9192\uFF0C\u4E0D\u963B\u6B62\u5BFC\u51FA\uFF1A`);
+    for (const item of warnings)
+      lines.push(`- ${[item.pageId ? `\u9875 ${item.pageId}` : "", item.code, item.message].filter(Boolean).join(" \xB7 ")}`);
+  }
+  return lines.join(`
+`);
+}
 function overlaps(a, b) {
   const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
@@ -13762,11 +13802,15 @@ function roleOf(element) {
 function pointIn(box, x, y) {
   return x >= box.x - 0.25 && y >= box.y - 0.25 && x <= box.x + box.w + 0.25 && y <= box.y + box.h + 0.25;
 }
-function checkDeck(deck) {
+function checkDeck(deck, options = {}) {
   const issues = [];
   deck.pages.forEach((page) => {
-    issues.push(...checkPage(deck, page));
+    issues.push(...checkPage(deck, page, options));
   });
+  if (deck.profile !== "example") {
+    issues.push(...checkLayoutRepetition(deck));
+    issues.push(...checkCoverFocus(deck));
+  }
   return issues;
 }
 function checkArgumentLayout(page) {
@@ -13818,7 +13862,7 @@ function checkChartImage(deck, page, element) {
   }
   return issues;
 }
-function checkPage(deck, page) {
+function checkPage(deck, page, options) {
   const issues = [...checkArgumentLayout(page)];
   const { width, height } = deck.canvas;
   let background = "#FFFFFF";
@@ -13845,12 +13889,18 @@ function checkPage(deck, page) {
     if (element.type === "chart" && element.chart?.kind === "waterfall") {
       issues.push(...checkWaterfall(page, element));
     }
+    if (element.type === "chart")
+      issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element));
+    if (element.type === "image" && !element.chartImage)
+      issues.push(...checkImage(page, element, options));
     if (element.type === "table" && element.table) {
       issues.push(...checkTable(deck, page, element, background));
     }
   }
   const editable = { ...page, elements: page.elements.filter((element) => !element.retained) };
   issues.push(...checkOverlap(editable, deck.profile === "example"));
+  if (deck.profile !== "example")
+    issues.push(...checkTextLayer(page));
   return issues;
 }
 function checkText(deck, page, element, pageBackground) {
@@ -14046,6 +14096,166 @@ function checkTable(deck, page, element, pageBackground) {
           issues.push(issue("schema", error instanceof Error ? error.message : String(error), page.id, element.id));
         }
     });
+  });
+  return issues;
+}
+function checkLayoutRepetition(deck) {
+  const issues = [];
+  let runStart = 0;
+  let runLayout;
+  const finish = (end) => {
+    if (!runLayout || end - runStart < LAYOUT_REPETITION_RUN)
+      return;
+    const first = deck.pages[runStart];
+    if (!first)
+      return;
+    issues.push(issue("layout_repetition", `\u7B2C ${runStart + 1}\u2013${end} \u9875\u8FDE\u7EED\u4F7F\u7528\u7248\u5F0F ${runLayout}\u3002\u8C03\u6574\u4E3B\u89C6\u89C9\u6216\u5728 design-plan \u91CC\u5199\u660E\u8FDE\u7EED\u5BF9\u6BD4\u7684\u7406\u7531\u3002`, first.id, undefined, "warning"));
+  };
+  deck.pages.forEach((page, index) => {
+    const layout = page.layout?.trim() ?? "";
+    const counted = layout.length > 0 && layout !== "free" && !BOOKEND_LAYOUT.test(layout);
+    if (!counted) {
+      finish(index);
+      runStart = index + 1;
+      runLayout = undefined;
+      return;
+    }
+    if (layout === runLayout)
+      return;
+    finish(index);
+    runStart = index;
+    runLayout = layout;
+  });
+  finish(deck.pages.length);
+  return issues;
+}
+function checkCoverFocus(deck) {
+  const canvas = deck.canvas.width * deck.canvas.height;
+  const issues = [];
+  for (const page of deck.pages) {
+    if (!COVER_LAYOUT.test(page.layout?.trim() ?? ""))
+      continue;
+    const visual = page.elements.reduce((largest, element) => {
+      if (element.type !== "image" && element.type !== "chart" && element.type !== "table")
+        return largest;
+      if (canvas <= 0)
+        return largest;
+      return Math.max(largest, element.bounds.w * element.bounds.h / canvas);
+    }, 0);
+    if (visual >= 0.25)
+      continue;
+    const sizes = page.elements.flatMap((element) => {
+      if (element.type !== "text" || !element.text?.trim() || !element.font)
+        return [];
+      return [element.font.size];
+    }).sort((left, right) => left - right);
+    if (sizes.length < 3)
+      continue;
+    const middle = Math.floor(sizes.length / 2);
+    const median = sizes.length % 2 === 1 ? sizes[middle] : ((sizes[middle - 1] ?? 0) + (sizes[middle] ?? 0)) / 2;
+    const largest = sizes.at(-1) ?? 0;
+    if (median > 0 && largest / median >= 3)
+      continue;
+    issues.push(issue("cover_focus", "\u5C01\u9762\u9700\u8981\u66F4\u660E\u786E\u7684\u9996\u8BFB\u7126\u70B9\uFF1A\u8BA9\u4E00\u5F20\u56FE\u7247\u3001\u56FE\u8868\u6216\u8868\u683C\u5360\u636E\u81F3\u5C11 25% \u753B\u5E03\uFF0C\u6216\u8BA9\u6700\u5927\u6807\u9898\u8FBE\u5230\u53EF\u89C1\u6587\u5B57\u4E2D\u4F4D\u5B57\u53F7\u7684 3 \u500D\u3002", page.id, undefined, "warning"));
+  }
+  return issues;
+}
+function checkChartData(page, element) {
+  const chart = element.chart;
+  if (!chart || chart.categories.length < 1 || chart.series.length < 1) {
+    return [issue("chart_data", `\u56FE\u8868 ${element.id} \u7F3A\u5C11\u7C7B\u522B\u6216\u5E8F\u5217`, page.id, element.id)];
+  }
+  for (const series of chart.series) {
+    if (series.values.length !== chart.categories.length || series.values.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
+      return [issue("chart_data", `\u56FE\u8868 ${element.id} \u7684\u5E8F\u5217\u300C${series.name}\u300D\u4E0E\u7C7B\u522B\u5217\u6570\u4E0D\u4E00\u81F4\uFF0C\u6216\u542B\u6709\u975E\u6570\u5B57`, page.id, element.id)];
+    }
+  }
+  return [];
+}
+function checkChartSeriesColor(page, element) {
+  const chart = element.chart;
+  const colors = chart?.colors;
+  if (!chart || !colors?.length)
+    return [];
+  if (colors.some((color) => !COLOR_TOKEN.test(color))) {
+    return [issue("chart_series_color", `\u56FE\u8868 ${element.id} \u7684\u989C\u8272\u9700\u8981\u662F #RRGGBB\u3001#RRGGBBAA \u6216\u4E3B\u9898\u8272\u5F15\u7528`, page.id, element.id)];
+  }
+  return [];
+}
+function slotFor(page, elementId) {
+  return page.imageSlots?.slots.find((slot) => slot.elementId === elementId);
+}
+function checkImage(page, element, options) {
+  const issues = [];
+  const src = element.src?.trim() ?? "";
+  const slot = slotFor(page, element.id);
+  if (/^https?:\/\//i.test(src)) {
+    issues.push(issue("remote_image", `\u56FE\u7247 ${element.id} \u4F7F\u7528\u4E86\u7F51\u7EDC\u5730\u5740\u3002\u8BF7\u5148\u628A\u56FE\u7247\u653E\u8FDB\u5DE5\u4F5C\u533A\u518D\u5F15\u7528\u3002`, page.id, element.id));
+  } else if (isPlaceholderImageSrc(src)) {
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u4ECD\u662F\u5360\u4F4D\u3002\u6CA1\u6709\u751F\u56FE\u63D0\u4F9B\u65B9\u65F6\u4FDD\u7559\u5360\u4F4D\u5E76\u63D0\u793A\uFF0C\u4E0D\u8981\u5F53\u6210\u5DF2\u914D\u56FE\u3002`, page.id, element.id, "warning"));
+  } else if (!src && slot) {
+    issues.push(issue("missing_asset", `\u56FE\u7247\u69FD ${element.id} \u6CA1\u6709\u7D20\u6750\u3002`, page.id, element.id));
+  } else if (src && options.assetExists && !options.assetExists(src)) {
+    issues.push(issue("missing_asset", `\u627E\u4E0D\u5230\u56FE\u7247\u8D44\u6E90 ${src}\u3002`, page.id, element.id));
+  }
+  const fit = element.fit;
+  if (fit && fit !== "fill" && fit !== "contain" && fit !== "cover") {
+    issues.push(issue("image_fit", `\u56FE\u7247 ${element.id} \u7684 fit \u53EA\u80FD\u662F fill\u3001contain \u6216 cover\u3002`, page.id, element.id));
+  }
+  if (slot && element.bounds.w > 0 && element.bounds.h > 0) {
+    const actual = element.bounds.w / element.bounds.h;
+    const expected = ASPECT[slot.aspectRatio];
+    if (expected && Math.abs(actual - expected) / expected > 0.08) {
+      issues.push(issue("image_fit", `\u56FE\u7247\u69FD ${element.id} \u7684\u753B\u9762\u6BD4\u4F8B\u662F ${slot.aspectRatio}\uFF0C\u5F53\u524D\u6846\u662F ${element.bounds.w.toFixed(0)}\xD7${element.bounds.h.toFixed(0)}\uFF0C\u6BD4\u4F8B\u4E0D\u7B26\u3002`, page.id, element.id));
+    }
+  }
+  if (element.crop) {
+    const { l, t, r, b } = element.crop;
+    const values = [l, t, r, b];
+    if (values.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u88C1\u526A\u5E94\u662F\u56DB\u8FB9\u7684\u975E\u8D1F\u6BD4\u4F8B\u3002`, page.id, element.id));
+    } else if (l + r >= 1 || t + b >= 1) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u88C1\u526A\u6CA1\u6709\u7559\u4E0B\u6709\u6548\u753B\u9762\u3002`, page.id, element.id));
+    } else if ((1 - l - r) * (1 - t - b) < 0.5) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u4E3B\u4F53\u88AB\u88C1\u6389\u592A\u591A\uFF0C\u8BF7\u4FDD\u7559\u81F3\u5C11\u4E00\u534A\u753B\u9762\u3002`, page.id, element.id));
+    }
+  }
+  return issues;
+}
+function areaOverlap(left, right) {
+  const width = Math.max(0, Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x));
+  const height = Math.max(0, Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y));
+  return { area: width * height, width };
+}
+function checkTextLayer(page) {
+  const issues = [];
+  page.elements.forEach((element, index) => {
+    if (element.type !== "text" || element.bounds.w <= 0 || element.bounds.h <= 0)
+      return;
+    const textArea = element.bounds.w * element.bounds.h;
+    for (const earlier of page.elements.slice(0, index)) {
+      if (earlier.type !== "table" && earlier.type !== "chart")
+        continue;
+      if (areaOverlap(element.bounds, earlier.bounds).area / textArea >= 0.15) {
+        issues.push(issue("text_occlusion", `\u6587\u672C ${element.id} \u4E0E ${earlier.id} \u7684\u5185\u5BB9\u533A\u57DF\u91CD\u53E0\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+    }
+    for (const later of page.elements.slice(index + 1)) {
+      if (later.type === "shape" && (later.shape === "line" || later.bounds.h <= 2 || later.bounds.w <= 2))
+        continue;
+      if (later.type !== "table" && later.type !== "chart" && later.type !== "image" && later.type !== "shape")
+        continue;
+      const intersection = areaOverlap(element.bounds, later.bounds);
+      if (intersection.area / textArea >= 0.15 && later.type !== "shape") {
+        issues.push(issue("text_occlusion", `\u6587\u672C ${element.id} \u53EF\u80FD\u88AB\u540E\u7ED8\u5236\u7684 ${later.id} \u906E\u6321\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+      if (later.bounds.y > element.bounds.y && later.bounds.y < element.bounds.y + element.bounds.h && intersection.width / element.bounds.w >= 0.3 && later.type !== "shape") {
+        issues.push(issue("text_drift", `\u6587\u672C ${element.id} \u53EF\u80FD\u8DE8\u5165\u4E0B\u65B9 ${later.id} \u7684\u8FB9\u754C\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+    }
   });
   return issues;
 }
@@ -20179,7 +20389,7 @@ function paint(value) {
 }
 async function exportDeck(deck, outFile, options = {}) {
   const issues = options.enforceCheck === false ? [] : checkDeck(deck);
-  if (issues.length > 0)
+  if (blockingIssues(issues).length > 0)
     return { status: "needs_revision", issues };
   const platform = options.platform ?? platformFromProcess();
   const bytes = await buildPptx(deck, platform);
@@ -20187,7 +20397,7 @@ async function exportDeck(deck, outFile, options = {}) {
   writeFileSync(outFile, bytes);
   const pptx = realpathSync(outFile);
   const screenshots = options.screenshotDir ? await captureSlides(pptx, options.screenshotDir, deck.pages.length, { officecli: options.officecli }) : undefined;
-  return { status: "ok", issues: [], pptx, screenshots };
+  return { status: "ok", issues, pptx, screenshots };
 }
 async function buildPptx(deck, platform) {
   const pres = new PptxGenJS;
@@ -23787,15 +23997,19 @@ if (flags.command === "import") {
   try {
     const imported = await importPptxFile(resolve2(flags.file), resolve2(flags.out), { maxSlides: flags.maxSlides });
     const failed = !imported.deck;
-    emit(failed ? "error" : imported.issues.length ? "needs_revision" : "ok", {
+    const revision = revisionStatus(imported.issues);
+    emit(failed ? "error" : revision.status, {
       project: imported.projectDir,
       deck: imported.deck ? resolve2(imported.projectDir, "deck.json") : undefined,
       source: imported.source,
       pages: imported.deck?.pages.length ?? 0,
       issues: imported.issues,
+      errorCount: revision.errorCount,
+      warningCount: revision.warningCount,
+      ...revision.status === "needs_revision" ? { message: formatNeedsRevision(resolve2(flags.file), imported.issues) } : {},
       diagnostics: imported.diagnostics,
       preview: imported.preview
-    }, failed ? 1 : imported.issues.length ? 2 : 0);
+    }, failed ? 1 : revision.code);
   } catch (error) {
     emit("error", { message: error instanceof Error ? error.message : String(error) }, 1);
   }
@@ -23818,7 +24032,14 @@ if (!loaded.deck)
   emit("error", { issues: loaded.issues }, 1);
 if (flags.command === "check") {
   const issues = [...loaded.issues, ...checkDeck(loaded.deck)];
-  emit(issues.length ? "needs_revision" : "ok", { issues, pages: loaded.deck.pages.length }, issues.length ? 2 : 0);
+  const revision = revisionStatus(issues);
+  emit(revision.status, {
+    issues,
+    pages: loaded.deck.pages.length,
+    errorCount: revision.errorCount,
+    warningCount: revision.warningCount,
+    ...revision.status === "needs_revision" ? { message: formatNeedsRevision(file, issues) } : {}
+  }, revision.code);
 }
 if (flags.command === "render") {
   if (!flags.out)

@@ -25,7 +25,7 @@
 
 「自定义」页可以上传 PPTX 或 selection-deck 的 `deck.json`。文件存在用户目录 `ppt-templates/custom-…/`：PPTX 仍写 `source.pptx`，deck 写 `deck.json`，并生成主题、槽位和预览，供列表、选用、重命名、删除和导出。同内容按哈希去重。
 
-#714 要做的是把个人模板复制成会话里的可编辑工程。这次没有做那一步，提示里也写明库里的副本不是会话工程。
+个人模板复制成会话里的可编辑工程由 `ppt_template_create_project` 完成。模板库里的原件仍然不是会话工程，复制出去之后才能改。
 
 ## 归档与安装包体积
 

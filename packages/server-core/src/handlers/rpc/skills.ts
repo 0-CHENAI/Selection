@@ -6,7 +6,7 @@ import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { getPptCatalogWithLibrary, getPptTemplatePages, getPptTemplatePreview } from '../../services/ppt-catalog'
-import { customTemplateCard, customTemplatePages, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, renamePptTemplate, thumbnailPptTemplateCard } from '../../services/ppt-library'
+import { customTemplateCard, customTemplatePages, customTemplatePreview, deletePptTemplate, exportPptTemplate, importPptTemplate, materializeTemplateProject, renamePptTemplate, thumbnailPptTemplateCard, upgradePendingTemplateProjects } from '../../services/ppt-library'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
@@ -25,7 +25,10 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
-  server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, () => getPptCatalogWithLibrary())
+  server.handle(RPC_CHANNELS.skills.GET_PPT_CATALOG, async () => {
+    await upgradePendingTemplateProjects().catch(() => undefined)
+    return getPptCatalogWithLibrary()
+  })
   server.handle(RPC_CHANNELS.skills.GET_PPT_TEMPLATE_PREVIEW, (_ctx, templateId: string, page?: number) => {
     if (typeof templateId !== 'string') throw new Error('Unknown PPT template')
     return templateId.startsWith('custom-') ? customTemplatePreview(templateId, page) : getPptTemplatePreview(templateId)
@@ -38,8 +41,9 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 255 || typeof input.base64 !== 'string') throw new Error('Invalid PPT template')
     if (!/\.(pptx|json)$/i.test(input.name)) throw new Error('Invalid PPT template')
     if (input.base64.length === 0 || input.base64.length > 12_000_000 || input.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw new Error('Invalid PPT template')
-    const { record, duplicate } = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
-    return { template: await thumbnailPptTemplateCard(customTemplateCard(record)), duplicate }
+    const imported = importPptTemplate(new Uint8Array(Buffer.from(input.base64, 'base64')), input.name)
+    const record = imported.duplicate ? imported.record : await materializeTemplateProject(imported.record.id).catch(() => imported.record)
+    return { template: await thumbnailPptTemplateCard(customTemplateCard(record)), duplicate: imported.duplicate }
   })
   server.handle(RPC_CHANNELS.skills.RENAME_PPT_TEMPLATE, (_ctx, id: string, title: string) => thumbnailPptTemplateCard(customTemplateCard(renamePptTemplate(id, title))))
   server.handle(RPC_CHANNELS.skills.DELETE_PPT_TEMPLATE, (_ctx, id: string) => { deletePptTemplate(id) })

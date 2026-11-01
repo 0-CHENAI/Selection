@@ -29,9 +29,9 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 
 ## 先读，再执行
 
-1. 规划时读 [工作流](references/workflow.md)。选定风格前只读 [风格索引](references/styles.md)，然后只读那一套的 `design.md`。中文参考页是 `deck.json`，英文参考页是 `deck.en.json`。
-2. 写页面时读 [叙事组合](references/composition.md)、[版式](references/layouts.md)、[排版](references/typography.md) 和 [格式](references/schema.md)。
-3. 看截图前读 [逐页视觉检查](references/visual-review.md)。
+1. 规划时读 [工作流](references/workflow.md)。选定风格前读 [怎么选模板](references/template-picking.md)，再只读 [风格索引](references/styles.md) 里那一套的 `design.md`。中文参考页是 `deck.json`，英文参考页是 `deck.en.json`。每次最多读 12 页参考，参考页不能当输出背景。
+2. 写页面时读 [叙事组合](references/composition.md)、[版式](references/layouts.md)、[排版](references/typography.md) 和 [格式](references/schema.md)。个人模板和配图槽按下面两节，细则在 [对齐对照](references/dsh-ppt-parity.md)。
+3. 看页面前读 [逐页视觉检查](references/visual-review.md)。用 `office_render` 把导出的 PPTX 交给模型自己看，整项任务最多 3 轮，禁止 OCR。
 4. 先读 [OfficeCLI 路由](../officecli/SKILL.md)。导出后的检查执行 `officecli load_skill pptx`；仅当用户要求募资叙事或跨页动画时，再追加 pitch-deck / morph-ppt / morph-ppt-3d。
 5. **所有指南加载后**读 [Selection 覆盖规则](../officecli/ppt-selection-override.md)，再做文档操作。后来又加载指南时，重新应用覆盖规则。
 
@@ -40,7 +40,7 @@ description: "制作新的 PPT、PowerPoint、presentation、幻灯片或整套�
 ## 从故事线到页面
 
 - 从用户材料提取受众、目的、核心结论、事实和假设、来源、页数。不捏造数据、日期、讲者或标志。
-- 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻页允许同一 `layout`，按论证关系安排节奏。
+- 一页一个主张。先写有顺序的故事，再为每页选择一个 `layout`。相邻两页可以同一 `layout`；连续三页及以上会得到 `layout_repetition` 提醒，不拦截导出。确需连续对比时写进 design-plan。
 - 只锁定目录里的一套。选择器默认只展示六套：`dsh-cartesian`（理性简报）、`ppt169_china_economy_2025_briefing`（数据简报）、`mbb-consulting`（战略备忘）、`operating-review`（经营复盘）、`dsh-engineering-blueprint`（工程蓝图）、`dsh-course-workshop`（课程培训）。`styles/picker.json` 的 `tier` 为 `default` 或 `more` 才会出现在选择器里；`more` 收在「更多模板」。理性简报上的配色变体是 `dsh-signal`、`dsh-monochrome`、`dsh-editorial-forest`、`dsh-soft-editorial`、`dsh-editorial-notebook`，选中后按该变体的参考页来，不另开卡片。`dsh-blue-professional` 版式和示例与理性简报差得较多，留在更多模板。`workshop-teaching` 并入课程培训，不单列。`tier: archive` 和与可见模板重复的别名不进选择器。完整目录仍在 `styles/catalog.json`，说明见 `references/styles.md`。保留锁定主题 token，允许借用论证版式槽并适配当前画布；不直接拼贴另一套主题和绝对坐标。
 - 颜色和字体可以整套换成 `styles/themes` 里的主题，或换成用户品牌主题。主题只提供 token，不改页面结构。用户给出主色、辅色和可选标志路径时，生成对比度安全的 token，把路径记在 `theme.logo`；要出现标志时再放一个 `src` 相同的图片。不要写入第三方公司的品牌色或标志。
 - 论证版式库有 14 个 960×540 页面（结论、证据树、矩阵、瀑布、趋势、计分、甘特、架构、对照、漏斗、流程、时间线、收束、取舍）。`deck-cli.mjs layouts` 打印每个槽位的 `bounds` 和 `textCapacity`。`deck_check` 会认出这些 `layout` id。它们可在锁定主题 token 下提供结构槽位，适配后必须预检。
@@ -65,9 +65,19 @@ DSH 参考页和多数 16:9 成稿的画布是 **960×540 pt**，也就是 13.33
 
 每写完一页就保存 `data/deck.json`（可只含已完成页）。应用会按已保存的页增量导出唯一一份用户可见的 PPTX，并用平时的 Office 协同预览打开这份真实文件。没有工作目录时，文件写在会话文件夹，出现在会话文件里；指定了工作目录时，只写在该目录。文件名来自 deck 标题，不叫 `deck.pptx`。绝对路径记在 `data/ppt-output.json` 的 `path`。不要自己再写或复制第二份 PPTX，也不要把 PPTX 放进 `dataFolderPath`。第一页写出之前预览保持加载。元素 `id` 会写成 PPTX 形状名，OfficeCLI 用 `/slide[n]/shape[@name=元素id]` 点到同一元素。截图仍写 `data/slides/slide-01.png` 起（页码从 1 开始，两位数字），用上面的 `screenshot` 命令打到已导出的那一份文件，供逐页视觉检查。用户点名改某页版式或叙事时，只重写点名的页，其余页保持不变，然后再 `deck_check` 和截图；仅改文字或数据仍走 `office_edit`。预览里点选后的修改走 OfficeCLI。
 
-用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。PPTX 以 `source.pptx`、`theme.json`、`slots.json` 和 `previews/` 为准。`deck.json` 以同目录的 `deck.json` 和几何预览为准。两者都不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败或上传的是 deck.json 时才是几何 SVG。上传只负责存入模板库并在「自定义」里列出。把个人模板复制成会话里可编辑的工程（#714）还没做，不要在这一步把库里的文件覆盖进会话 `deck.json`。
+用户上传的自定义模板存在用户数据目录的 `ppt-templates/custom-…/`。PPTX 以 `source.pptx`、`theme.json`、`slots.json`、`previews/` 和 `project/` 为准。`deck.json` 上传以同目录的 `deck.json`、`project/` 和几何预览为准。不要再去找临时上传路径。`previews/` 里优先是逐页真实画面（PNG）；渲染失败或上传的是 deck.json 时才是几何 SVG。选中个人模板后调用 `ppt_template_create_project`，把 `project/` 复制到工作区新目录。源模板和原 PPTX 的 sha256 必须保持不变。在副本上按内容关系选页、用用户材料重写，然后 `deck_check` 和 `office_render`。每次最多读 12 页参考，参考页不能当输出背景。样例页只写返回的 `sampleExtensionDir`。诊断里的「不支持」要告诉用户人工复核。母版连续使用同一版式只提醒，不拦截。
 
-截图失败但 PPTX 已写出时，`screenshots.available` 为 `false`。这时 G4 不能通过。
+截图失败但 PPTX 已写出时，`screenshots.available` 为 `false`。这时 G4 不能通过。看页优先用 `office_render`，不要改用 OCR。
+
+## 外来稿先理解，再动手
+
+任何外来稿在改版式、换风格或「把逻辑理顺」之前，先把这些写进 `design-plan.md`：每页主张、叙事哪里断了、对象清单、母版或品牌元素（logo、页脚、装饰）、可编辑性诊断。然后把路由写成 `import_rebuild`，用 `ppt_import` 得到新工程。只改几个字仍是 `office_edit`，其他页字节不变。路由写在 design-plan 的 `路由:` 一行。宿主发现定点修改路由下又去整套导入时，会提醒而不是把会话判失败。
+
+## 模板配图
+
+页面备注或 `imageSlots` 里的 `dsh.template-images/v1` 是声明式合同：`style` 必须有 medium、palette、lighting、tone、textTreatment、continuity 六项；每页最多 16 个槽。`contextual-scene` 优先用户图片，没有再调用 `image_generate`（`purpose=presentation`，比例用槽位的 `aspectRatio`，`style_context` 写入六项原文，图片内文字数量为 0）。同一 `reuseGroup` 复用。`provided-portrait` 只用用户的人物照片。`native-graphic` 用已核实数据画原生图表。替换 `src` 时保持边界和遮罩。没有生图提供方时保留占位并说明，占位不是成品。标题、正文和数据保持可编辑。配完用 `office_render` 看主体是否被裁、留白和整稿风格，最多 3 轮。建议稿在 `image-slots.proposed.json`，`confirmed` 仍是 false 时不要写回模板。
+
+十六套随包模板的 `deck.json` 不覆盖。图片槽样例只在 `styles/image-slots.extension.json`。个人模板上的图片位由复制出的工程给出建议合同，等用户确认。
 
 ## 外部图表技能
 

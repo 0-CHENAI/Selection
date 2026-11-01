@@ -25,6 +25,13 @@ export interface PptTemplate {
   variants?: PptTemplateVariant[]
   /** Short reason a card stays in 更多模板 instead of folding into a default. */
   note?: string
+  /** Personal-template conversion counts. Omitted on bundled cards. */
+  diagnostics?: {
+    faithful: number
+    approximate: number
+    retained: number
+    unsupported: number
+  }
 }
 
 export interface PptTheme {

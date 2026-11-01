@@ -369,6 +369,32 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(stored.find(message => message.content === '我先检查报告。')).toMatchObject({ isIntermediate: true })
   })
 
+  it('holds a streamed answer until the Office delivery guard passes', async () => {
+    const { listOfficeTemplates } = await import('../services/office-catalog')
+    const template = listOfficeTemplates().find(item => item.id === 'meeting-minutes')
+    expect(template?.revision).toBeTruthy()
+    const bad = join(root, '坏.docx')
+    managed.office = { mode: 'word', templateId: template!.id, revision: template!.revision }
+    const blocked = '纪要已写好，请查收。'
+    const fixed = '已按版式检查修正后交付。'
+    install(async function* (index) {
+      const body = index === 1 ? blocked : fixed
+      if (index === 1) writeFileSync(bad, 'not a docx')
+      else {
+        expect(prompts[1]).toContain('needs_revision')
+        rmSync(bad, { force: true })
+      }
+      yield { type: 'text_delta', text: body, phase: 'final', presentationProtocol: 'native', turnId: `answer-${index}` }
+      yield { type: 'text_complete', text: body, isIntermediate: false, phase: 'final', presentationProtocol: 'native', turnId: `answer-${index}`, sdkMessageId: `answer-sdk-${index}` }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '写一份纪要')
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain('needs_revision')
+    expect(managed.messages.filter(message => message.answerCommitted).map(message => message.content)).toEqual([fixed])
+    expect(managed.messages.some(message => message.answerCommitted && message.content === blocked)).toBe(false)
+  })
+
   it('commits an unmarked final message without a recovery call', async () => {
     const body = '交付完成：[新报告](report.docx)'
     install(async function* () {

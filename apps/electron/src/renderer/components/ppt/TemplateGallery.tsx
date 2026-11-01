@@ -68,6 +68,7 @@ export function TemplateGrid({ templates, compact, selectedId, onSelect, onPrevi
         </div>
         <p title={template.title} className="mt-2 truncate text-[13px]">{template.title}</p>
         {!compact && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.category === '自定义' ? t('ppt.custom') : t(`ppt.categories.${categories.find(([key]) => key === template.category)?.[1] ?? 'business'}`)} · {t('ppt.pages', { count: template.pages })}</p>}
+        {!compact && template.diagnostics && <p className="mt-0.5 text-[11px] text-muted-foreground">{t('ppt.templateDiagnostics', template.diagnostics)}{template.diagnostics.unsupported > 0 ? ` · ${t('ppt.templateReview')}` : ''}</p>}
         {template.note && <p className="mt-0.5 text-[11px] text-muted-foreground">{template.note}</p>}
         {template.category === '自定义' && onChanged && <CustomTemplateActions template={template} onChanged={onChanged} />}
       </article>
