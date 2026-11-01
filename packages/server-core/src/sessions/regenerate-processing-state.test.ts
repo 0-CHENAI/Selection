@@ -72,6 +72,35 @@ describe('regenerate processing state (#17)', () => {
     expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a2'])
   })
 
+  it('retries an error on the existing user turn without appending the question again', async () => {
+    const sessionId = 'regen-error-in-place'
+    const managed = buildSession(sessionId)
+    managed.messages = [
+      { id: 'u1', role: 'user', content: 'original question', timestamp: 1 },
+      { id: 'error1', role: 'error', content: 'provider failed', timestamp: 2 },
+    ]
+
+    let replayedMessageId: string | undefined
+    const smInternal = sm as unknown as {
+      sendMessage: SessionManager['sendMessage']
+      announceRegenerateReplacement: (session: typeof managed) => void
+      onProcessingStopped: (id: string, reason: 'complete') => Promise<void>
+    }
+    smInternal.sendMessage = (async (_id, _content, _attachments, _stored, _options, messageId) => {
+      replayedMessageId = messageId
+      smInternal.announceRegenerateReplacement(managed)
+      managed.messages.push({ id: 'a1', role: 'assistant', content: 'answer', timestamp: 3 })
+      await smInternal.onProcessingStopped(sessionId, 'complete')
+    }) as SessionManager['sendMessage']
+
+    await sm.regenerateLastResponse(sessionId)
+    await flushImmediate()
+
+    expect(replayedMessageId).toBe('u1')
+    expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a1'])
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+  })
+
   it('claims running state and keeps the old transcript as a rollback snapshot', async () => {
     const sessionId = 'regen-claim'
     const managed = buildSession(sessionId)

@@ -40,7 +40,7 @@ export const CHATGPT_OAUTH_CONFIG = {
 
   /**
    * OAuth scopes requested during authentication
-   * These scopes provide access to ChatGPT Plus features via Codex
+   * These scopes provide access to ChatGPT subscription features via Codex
    */
   SCOPES: 'openid profile email offline_access',
 

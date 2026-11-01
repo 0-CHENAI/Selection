@@ -118,6 +118,7 @@ import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
 import { resolveBranchNewPanelOption } from "./branching"
 import { NewSessionBrand, shouldShowNewSessionBrand } from "./NewSessionBrand"
 import { ErrorMessage } from "./ChatErrorMessage"
+import { canRetryErrorInPlace } from './error-message-actions'
 import {
   forceStickToBottomState,
   isAtBottom,
@@ -893,6 +894,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     taskSlug: sessionTaskSlug, nodeId: sessionTaskNodeId, title: sessionName,
   })) ?? [], [sessionMessages, sessionTaskSlug, sessionTaskNodeId, sessionName])
   const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
+  const regeneratingSessionRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!sessionBusy || regeneratingSessionRef.current !== session?.id) regeneratingSessionRef.current = null
+  }, [session?.id, sessionBusy])
   const stableTurnsRef = React.useRef<{ sessionId: string | null; turns: Turn[] }>({ sessionId: null, turns: [] })
   // Group once for rendering, search and the outline; only visible turns mount cards.
   const allTurns = React.useMemo(() => {
@@ -1906,6 +1911,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       toast.error(t('chat.regenerateFailed'), { description: detail || undefined })
     })
   }
+  const handleRegenerate = async () => {
+    if (!session || regeneratingSessionRef.current === session.id) return
+    const sessionId = session.id
+    const processingStartedAt = Date.now()
+    regeneratingSessionRef.current = sessionId
+    updateSession(sessionId, (current) => current
+      ? { ...current, isProcessing: true, processingStartedAt }
+      : current)
+    try {
+      await window.electronAPI.sessionCommand(sessionId, { type: 'regenerate' })
+    } catch (error) {
+      regeneratingSessionRef.current = null
+      updateSession(sessionId, (current) => current?.processingStartedAt === processingStartedAt
+        ? { ...current, isProcessing: false, processingStartedAt: undefined }
+        : current)
+      const detail = error instanceof Error ? error.message : String(error)
+      toast.error(t('chat.regenerateFailed'), { description: detail || undefined })
+    }
+  }
   const renderWorkStatus = (index: number) => {
     if (clarificationLayout && (index === clarificationLayout.statusTurnIndex || clarificationLayout.hiddenTurnIndexes.has(index))) return null
     const timing = displayWorkTimings.get(index)
@@ -2158,15 +2182,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                                   if (sessionIdRef.current === session.id) navigate(routes.view.allSessions(child.id))
                                 } : undefined,
                               } : undefined}
-                            onRetry={turn.message.role === 'error' ? () => {
-                              const msgs = session?.messages
-                              if (!msgs) return
-                              const errorIdx = msgs.findIndex(m => m.id === turn.message.id)
-                              const lastUserMsg = msgs.slice(0, errorIdx).findLast(m => m.role === 'user')
-                              if (lastUserMsg) {
-                                onSendMessage(lastUserMsg.content)
-                              }
-                            } : undefined}
+                            onRetry={turn.message.role === 'error' && session && !sessionBusy && !disableSend
+                              && canRetryErrorInPlace(session.messages, turn.message.id)
+                              ? handleRegenerate
+                              : undefined}
                           />
                           {showsCancelledRetry(index) && (
                             <ResponseActionRow compact={compactMode}>
@@ -2342,39 +2361,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         resolveAnnotationResult={resolveAnnotationResult}
                         onRetry={showsCancelledRetry(index) ? handleRetryCancelled : undefined}
                         onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy && !disableSend
-                          ? async () => {
-                            if (!session) return
-                            const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
-                            updateSession(session.id, (current) => current
-                              ? {
-                                  ...current,
-                                  isProcessing: true,
-                                  processingStartedAt: Date.now(),
-                                }
-                              : current)
-                            try {
-                              await window.electronAPI.sessionCommand(session.id, { type: 'regenerate' })
-                            } catch (error) {
-                              updateSession(session.id, (current) => current
-                                ? {
-                                    ...current,
-                                    isProcessing: false,
-                                    processingStartedAt: undefined,
-                                  }
-                                : current)
-                              const detail = error instanceof Error ? error.message : String(error)
-                              // Vite/HMR can refresh the UI while the main process
-                              // is still on an older handler without `regenerate`.
-                              // Text-only resend would drop images, so skip it.
-                              if (lastUser && !lastUser.attachments?.length && /unknown session command/i.test(detail)) {
-                                onSendMessage(lastUser.content)
-                                return
-                              }
-                              toast.error(t('chat.regenerateFailed'), {
-                                description: detail || undefined,
-                              })
-                            }
-                          }
+                          ? handleRegenerate
                           : undefined}
                         onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return

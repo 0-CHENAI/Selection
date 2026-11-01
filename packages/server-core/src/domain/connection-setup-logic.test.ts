@@ -9,7 +9,29 @@ import {
   validateModelList,
   splitModelIdList,
   piAuthProviderDisplayName,
+  resolveChatGptOAuthDisplayName,
 } from './connection-setup-logic'
+
+describe('resolveChatGptOAuthDisplayName', () => {
+  const connection = {
+    name: 'ChatGPT',
+    providerType: 'pi' as const,
+    authType: 'oauth' as const,
+    piAuthProvider: 'openai-codex',
+  }
+
+  it('shows the plan from ChatGPT OAuth claims', () => {
+    expect(resolveChatGptOAuthDisplayName(connection, 'Pro')).toBe('ChatGPT Pro')
+    expect(resolveChatGptOAuthDisplayName(connection, 'Plus')).toBe('ChatGPT Plus')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'ChatGPT Plus / Pro' }, 'Pro')).toBe('ChatGPT Pro')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'ChatGPT Pro' }, 'Plus')).toBe('ChatGPT Plus')
+  })
+
+  it('keeps fallback and user-defined connection names intact', () => {
+    expect(resolveChatGptOAuthDisplayName(connection)).toBe('ChatGPT')
+    expect(resolveChatGptOAuthDisplayName({ ...connection, name: 'Work account' }, 'Pro')).toBe('Work account')
+  })
+})
 
 describe('piAuthProviderDisplayName', () => {
   it('labels both Moonshot API regions', () => {
@@ -179,8 +201,9 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(() => createBuiltInConnection('claude-max')).toThrow('Unknown built-in connection slug')
   })
 
-  it("ChatGPT Plus → 'queue' so composer Enter does not interrupt", () => {
+  it("ChatGPT OAuth → 'queue' so composer Enter does not interrupt", () => {
     const conn = createBuiltInConnection('chatgpt-plus')
+    expect(conn.name).toBe('ChatGPT')
     expect(conn.providerType).toBe('pi')
     expect(conn.midStreamBehavior).toBe('queue')
   })

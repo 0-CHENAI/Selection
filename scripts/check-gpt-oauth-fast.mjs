@@ -49,9 +49,8 @@ try {
   await page.evaluate(() => window.pptFixture.setProcessing('created-1', true))
   assert.equal(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.disabled), true)
   await page.evaluate(() => { window.pptFixture.setProcessing('created-1', false); window.pptFixture.setModel('created-1', 'gpt-4o') })
-  assert.equal(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.disabled), true)
-  assert.match(await page.evaluate(() => document.querySelector('[data-testid="gpt-oauth-fast"]')?.getAttribute('aria-description')), /不支持 Fast/)
-  console.log('PASS: lightning switch, effort independence, default off, draft creation, session isolation, compact picker, busy and unsupported states')
+  assert.equal(await checked(), undefined, 'Unsupported models must not show the Fast control')
+  console.log('PASS: lightning switch, effort independence, default off, draft creation, session isolation, compact picker, busy and eligibility visibility')
 } finally {
   await task.finish({ keep: [] })
 }

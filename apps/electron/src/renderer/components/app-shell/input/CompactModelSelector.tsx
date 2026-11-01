@@ -1,4 +1,4 @@
-import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
+import { fastServiceFamily } from '@craft-agent/shared/agent/fast-mode'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { FastModeButton, fastModeDetailKey } from './FastModeButton'
 import { PromptThinkingSettings } from './PromptBarEffects'
@@ -206,7 +206,8 @@ export function CompactModelSelector({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-  const fastSupported = supportsGptOAuthFast(currentModel, effectiveConnectionDetails?.piAuthProvider)
+  const fastFamily = fastServiceFamily(currentModel, effectiveConnectionDetails?.piAuthProvider)
+  const fastSupported = fastFamily !== undefined
 
   const pickerMode = derivePickerMode({
     connectionUnavailable,
@@ -510,10 +511,10 @@ export function CompactModelSelector({
             </>
           )}
         </div>
-        {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
+        {onFastModeChange && fastSupported && (
           <div className="flex items-center justify-between gap-3 border-t border-border/40 px-3 py-2">
-            <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
-            <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
+            <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing, fastFamily))}</p>
+            <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
           </div>
         )}
       </DrawerContent>

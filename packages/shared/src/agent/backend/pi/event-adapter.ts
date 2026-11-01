@@ -111,8 +111,17 @@ function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean
   return message?.api === 'openai-codex-responses' || message?.provider === 'openai-codex';
 }
 
-function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase | undefined {
+function getStreamingTextPhase(
+  message: AssistantMessage | undefined,
+  contentIndex?: number,
+): TextPhase | undefined {
   if (!Array.isArray(message?.content)) return undefined;
+  if (contentIndex !== undefined) {
+    const part = message.content[contentIndex];
+    return part?.type === 'text'
+      ? getTextPhase((part as { textSignature?: unknown }).textSignature)
+      : undefined;
+  }
   const phases = message.content
     .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
     .map((part) => getTextPhase((part as { textSignature?: unknown }).textSignature));
@@ -575,7 +584,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           // finishes. Hold only phase-less Codex deltas; other providers emit
           // an explicit unclassified stream that the UI keeps in the work chain
           // until message_end proves it is the final answer (#87).
-          const textPhase = getStreamingTextPhase(amEvent.partial);
+          const textPhase = getStreamingTextPhase(amEvent.partial, amEvent.contentIndex);
           if (isCodexResponsesMessage(amEvent.partial) && !textPhase) break;
 
           yield* this.emitTextPieces(this.thinkLeak.push(amEvent.delta), textPhase);

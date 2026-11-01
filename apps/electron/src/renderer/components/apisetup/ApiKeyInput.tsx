@@ -134,7 +134,7 @@ export type OAuthSetupMethod = 'pi_chatgpt_oauth' | 'pi_copilot_oauth' | 'pi_kim
 
 /** Account sign-in providers shown in the endpoint dropdown's OAuth section. */
 export const OAUTH_PROVIDER_OPTIONS: ReadonlyArray<{ method: OAuthSetupMethod; label: string }> = [
-  { method: 'pi_chatgpt_oauth', label: 'ChatGPT Plus / Pro' },
+  { method: 'pi_chatgpt_oauth', label: 'ChatGPT' },
   { method: 'pi_copilot_oauth', label: 'GitHub Copilot' },
   { method: 'pi_kimi_oauth', label: 'Kimi Code' },
 ]

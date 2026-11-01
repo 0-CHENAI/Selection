@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { installGptOAuthFast } from './gpt-oauth-fast.ts';
+import { installFastServiceTier } from './gpt-oauth-fast.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
@@ -979,7 +979,7 @@ async function ensureSession(): Promise<AgentSession> {
   installUnknownToolGuard(session);
   applyContextMeterConnection();
   installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
-  installGptOAuthFast(session, () => initConfig?.fastMode);
+  installFastServiceTier(session, () => initConfig?.fastMode);
   applyCompactionPolicy(session.model, true);
   piSession = session;
 

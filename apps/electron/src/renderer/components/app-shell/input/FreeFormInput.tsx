@@ -1,4 +1,4 @@
-import { supportsGptOAuthFast } from '@craft-agent/shared/agent/fast-mode'
+import { fastServiceFamily } from '@craft-agent/shared/agent/fast-mode'
 import { FastModeButton, fastModeDetailKey } from './FastModeButton'
 import { createPendingDraftSync } from './pending-draft-sync'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
@@ -534,7 +534,8 @@ export function FreeFormInput({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-  const fastSupported = supportsGptOAuthFast(currentModel, effectiveConnectionDetails?.piAuthProvider)
+  const fastFamily = fastServiceFamily(currentModel, effectiveConnectionDetails?.piAuthProvider)
+  const fastSupported = fastFamily !== undefined
 
   const liveOpenRouterModels = useLiveOpenRouterModels(
     !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
@@ -2611,12 +2612,12 @@ export function FreeFormInput({
                 )}
 
                 </div>
-                {onFastModeChange && (effectiveConnectionDetails?.piAuthProvider === 'openai-codex' || fastMode) && (
+                {onFastModeChange && fastSupported && (
                   <div className="shrink-0">
                     <StyledDropdownMenuSeparator className="my-1" />
                     <div className="flex items-center justify-between gap-3 px-3 py-2">
-                      <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing))}</p>
-                      <FastModeButton enabled={fastMode} supported={fastSupported} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu />
+                      <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing, fastFamily))}</p>
+                      <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu />
                     </div>
                   </div>
                 )}
