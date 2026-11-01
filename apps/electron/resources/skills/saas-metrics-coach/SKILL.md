@@ -25,7 +25,7 @@ Work with partial data. Be explicit about what is missing and what assumptions a
 
 ## Step 2 — Calculate Metrics
 
-Run the Bun CLI `packages/office-business-runtime/src/cli/metrics.ts` with the user's inputs. If the script is unavailable, use the formulas in `references/formulas.md`.
+Call the session tool `office_business` with command `metrics`. If it is unavailable, use the formulas in `references/formulas.md`. The Bun CLI under `packages/office-business-runtime` is only for repository parity checks.
 
 Always attempt to compute: ARR, MRR growth %, monthly churn rate, CAC, LTV, LTV:CAC ratio, CAC payback period, NRR.
 
@@ -151,7 +151,7 @@ bun packages/office-business-runtime/src/cli/unit-economics.ts --mrr 50000 --gro
 
 ## Selection 交付
 
-当前用户材料提供事实，所选案例提供结构和版式。不要调用 Python，不要使用 `load_workspace_dependencies`，不要打包 LibreOffice。
+当前用户材料提供事实，所选案例提供结构和版式。指标、Quick Ratio 和单位经济调用会话工具 `office_business`（command 为 metrics、quick-ratio 或 unit-economics）。不要调用 Python，不要使用 `load_workspace_dependencies`，不要打包 LibreOffice。上面的 bun 命令只在本仓库开发对拍时使用。
 
 Excel 交付前按顺序执行，任何一步失败都回到修订，不能交付：
 

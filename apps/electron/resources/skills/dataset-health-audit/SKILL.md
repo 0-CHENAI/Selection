@@ -106,6 +106,6 @@ Bun。不安装 pandas、numpy 或 Python。xlsx 先用 OfficeCLI 导出成 CSV 
 
 ## Selection 交付
 
-不要调用 Python。12 个维度和加权总分由上面的 Bun CLI 计算。任意 pandas 表达式、透视和自定义 DataFrame 代码不在本技能里。
+不要调用 Python。12 个维度和加权总分调用会话工具 `office_business`（command 为 data-quality，path 指向工作区内的 CSV）。上面的 bun 命令只在本仓库开发对拍时使用。任意 pandas 表达式、透视和自定义 DataFrame 代码不在本技能里。
 
 Excel 交付前：`xlsx_recalculate`（OfficeCLI `computedValue` 写回缓存；装了 Excel 的 Windows/macOS 再 `CalculateFull`；TypeScript 只补未求值格子）→ `checks.json` 逐项核对，没有 checks 就双读关键单元格 → 区域渲染后原生读图。禁止 OCR。空白页立即停止。不覆盖案例原件。调用时 `visual_review` 必填：纯数据 / 公式任务填 `not-needed`；改了格式、图表或打印设置，先区域渲染并原生读图，再填 `reviewed`。

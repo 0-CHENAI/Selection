@@ -308,6 +308,7 @@
       "version": "3.1.0",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
+        "@craft-agent/office-business-runtime": "workspace:*",
         "@craft-agent/shared": "workspace:*",
         "@earendil-works/pi-ai": "1.4.0",
         "fast-xml-parser": "5.2.5",

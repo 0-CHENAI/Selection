@@ -169,7 +169,7 @@ describe('office document mode', () => {
       request: { mode: 'excel', templateId: 'annual-business', revision: '20260914.1' },
     })
     expect(planned.office?.mode).toBe('excel')
-    expect(buildOfficeInjection(planned.office!, templates)).toContain('officeRender.recalc')
+    expect(buildOfficeInjection(planned.office!, templates)).toContain('xlsx_recalculate')
   })
 
   test('catalog lists the contract and leaves the fictional recipes alone', () => {

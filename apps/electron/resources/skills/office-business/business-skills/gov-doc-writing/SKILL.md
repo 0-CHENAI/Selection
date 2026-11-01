@@ -42,6 +42,26 @@ description: 按机关、文种和现有材料起草通知、请示、报告、�
 
 每种的标题、主送、层次、结尾和易错点在 [03-structures.md](volumes/03-structures.md)。只读对应的一节。
 
+## 文种速判
+
+先看目的，再对文种。拿不准时停在这一张表，不要同时写成两种。
+
+| 用户要的结果 | 用 | 快捷入口 |
+| --- | --- | --- |
+| 请上级批准一件事 | 请示 | 结构册「请示」，六个参数问主送 |
+| 只汇报、不要批复 | 报告 | 结构册「报告」 |
+| 布置或转发 | 通知 | 结构册「通知」 |
+| 表彰、批评或传情况 | 通报 | 结构册「通报」；不发文时用事务册 |
+| 不相隶属机关商洽 | 函 | 结构册「函」 |
+| 记下已经议定的事 | 纪要 | 结构册「纪要」 |
+| 会上讲、不发文 | 讲话稿 | 事务册「讲话稿」 |
+| 个人向考核人说明履职 | 述职 | 事务册「述职」 |
+| 安排工作和责任时间 | 方案 | 事务册「方案」 |
+| 短篇幅报告一件已发生的事 | 简报 | 事务册「简报」 |
+| 对着某份文件找差距 | 对照检查 | 事务册「对照检查」 |
+
+用户说「你看着写」时，先读参数册的追问，不直接成稿。
+
 ## 版式要点
 
 细目、字号和特定格式在 [05-layout.md](volumes/05-layout.md)。起草时先守住这些：
@@ -61,13 +81,19 @@ description: 按机关、文种和现有材料起草通知、请示、报告、�
 
 | 何时 | 文件 |
 | --- | --- |
+| 六个参数、单位性质、角色，以及「你看着写」 | [08-parameters.md](volumes/08-parameters.md) |
 | 动笔前核对材料、缺口和公开范围 | [01-before-writing.md](volumes/01-before-writing.md) |
 | 行文方向、18 项格式要素、请示和报告如何分开、涉密和隐私 | [02-rules.md](volumes/02-rules.md) |
-| 已经选定文种，要列提纲 | [03-structures.md](volumes/03-structures.md) |
-| 上行、下行、平行的说法，以及数字和标点 | [04-wording.md](volumes/04-wording.md) |
+| 已经选定法定文种，要列提纲 | [03-structures.md](volumes/03-structures.md) |
+| 讲话稿、述职、方案、简报、通报材料、对照检查 | [09-transactions.md](volumes/09-transactions.md) |
+| 上行、下行、平行的说法 | [04-wording.md](volumes/04-wording.md) |
+| 标点和数字的国标口径 | [12-standards.md](volumes/12-standards.md) |
 | 版头、主体、版记、字体字号、信函令纪要的特定版式 | [05-layout.md](volumes/05-layout.md) |
 | 写入 Word | [06-delivery.md](volumes/06-delivery.md) |
-| 成稿后逐项自检 | [07-review.md](volumes/07-review.md) |
+| 六维和权重 | [10-quality.md](volumes/10-quality.md) |
+| 安全编号、脱敏和公开度 | [11-safety.md](volumes/11-safety.md) |
+| 病文怎么改 | [13-corrections.md](volumes/13-corrections.md) |
+| 成稿后的版式勾选 | [07-review.md](volumes/07-review.md) |
 
 案例 `government-notice` 只提供版式参照。做另一单位的通知时，版头改成当前机关名称，原文里的「待补充」继续保留，不把示例机关和示例专题抄进新稿。
 

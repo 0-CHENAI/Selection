@@ -69,13 +69,11 @@ license: MIT
 
 用当前用户材料替换案例中的示例事实，保留标题样式、可编辑段落及表格。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。有 `office_render` 时导出 PDF 逐页复核：标题与后文是否同页、三列宽度、尾页密度、字体诊断；没有页图时写「视觉检查未做」，不以缺页图冒充通过，不用 OCR。
 
-结构检查在仓库内运行：
+结构检查调用会话工具 `office_business`，command 为 `validate-minutes`，传入纪要 Markdown 或工作区内的路径。退出码 0 表示章节、表格字段、日期和重复任务通过。该检查不证明事实与原文一致。安装包不带 Python；计算在应用进程内完成。仓库里的下面这条命令只用于开发对拍：
 
 ```bash
 bun packages/office-business-runtime/src/cli/validate-minutes.ts 会议纪要.md
 ```
-
-退出码 0 表示 Markdown 草稿的章节、表格字段、日期和重复任务通过。该检查不证明事实与原文一致。安装包尚未打入这个运行时；宿主接入留到后续阶段，规则以本节为准。
 
 交付物是工作区中的 DOCX，由 Selection 的文件卡片呈现。
 
@@ -89,7 +87,7 @@ bun packages/office-business-runtime/src/cli/validate-minutes.ts 会议纪要.md
 - 行动项覆盖原文明确工作，负责人和期限保留材料口径，缺失字段标为待确认。
 - 每项任务只在行动项表中登记一次，议题和汇总之间的信息一致。
 - 当前 DOCX 的示例内容已由本次会议事实完整替换，案例原件的 sha256 未变。
-- `validate-minutes` 已通过（在仓库环境可运行时）。
+- `office_business` 的 validate-minutes 已通过。
 - 版式守卫已通过；逐页页图检查已做，或明确记为未做。
 
 可选运行上面的校验命令。脚本验证结构；事实准确性由原文逐项核对。
