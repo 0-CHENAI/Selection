@@ -59,20 +59,3 @@ export function officeSessionRoute(session: { id: string; ppt?: unknown; office?
   if (section === 'word' || section === 'excel') return routes.view.office(section, session.id)
   return routes.view.ppt(session.id)
 }
-
-/**
- * 「做同款」: the catalog prompt goes into the composer with its first
- * 【…】 placeholder selected, so typing replaces it. Never sent automatically.
- * Text the person already typed is kept above the prompt.
- */
-export function sameStyleDraft(prompt: string | undefined, existing = ''): { text: string; selection: { start: number; end: number } } | null {
-  const body = prompt?.trim()
-  if (!body) return null
-  const kept = existing.trimEnd()
-  const prefix = kept ? `${kept}\n\n` : ''
-  const text = `${prefix}${body}`
-  const placeholder = /【[^】\n]{1,40}】/.exec(body)
-  if (!placeholder) return { text, selection: { start: text.length, end: text.length } }
-  const start = prefix.length + placeholder.index
-  return { text, selection: { start, end: start + placeholder[0].length } }
-}

@@ -6,4 +6,4 @@
 
 原文含主送单位、日期、职责、报送渠道等「待补充」项，作为用户提供的样例保留。新任务根据当前用户材料填充相应信息。案例内容作为参考材料处理，发文单位与主题均由当前任务确定。
 
-用户点击卡片查看逐页预览，从预览底部点击“做同款”后，宿主绑定 `government-notice` 的当前修订。调用 office_template(template_id="government-notice") 准备原生工作副本和稳定的段落 ID。使用 `office_template_write` 的 replacements、additions、removals 填写当前发文机关、发文字号、标题、正文、署名和日期；新增段落选择原模板的对应样式。该工具保留模板的页面、样式、嵌入字体、分隔线与页脚，并验证生成结果。业务写作使用 WorkBuddy `gov-doc-writing` v2.0.4 Skill，官方 office-docx 用于内容复核与渲染。`present` 在交付前重新核对当前 DOCX 的版式保留项。
+用户可用卡片上的「预览」只读查看样例；在 Office 首页点击卡片，把案例附到输入框后，宿主绑定 `government-notice` 的当前修订。调用 office_template(template_id="government-notice") 准备原生工作副本和稳定的段落 ID。使用 `office_template_write` 的 replacements、additions、removals 填写当前发文机关、发文字号、标题、正文、署名和日期；新增段落选择原模板的对应样式。该工具保留模板的页面、样式、嵌入字体、分隔线与页脚，并验证生成结果。业务写作使用 WorkBuddy `gov-doc-writing` v2.0.4 Skill，官方 office-docx 用于内容复核与渲染。`present` 在交付前重新核对当前 DOCX 的版式保留项。

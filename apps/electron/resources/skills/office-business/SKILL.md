@@ -7,7 +7,7 @@ description: "Word 与 Excel 业务案例。dsh 的会议纪要、调研报告�
 
 先读 [OfficeCLI 路由](../officecli/SKILL.md)，再按格式加载 `officecli load_skill word` 或 `excel`。这里补案例、业务方法和修改范围，不替换 OfficeCLI 的命令语法。不使用 python-docx、openpyxl，不调用 Python，不引入 LibreOffice Kit。
 
-案例目录见 [catalog.json](catalog.json)。dsh 案例的 `prompt`、`inputs/` 和 `example.docx` 是做同款的材料；`example.docx` 只读。Selection 自编小样在「Selection 样例」分类，recipe 可以用 OfficeCLI batch 执行，固定路径只对该样例成立。实际文件必须先 query/get，优先用稳定 paraId 或单元格地址，不要照抄示例段落序号。
+案例目录见 [catalog.json](catalog.json)。dsh 案例的 `prompt`、`inputs/` 和 `example.docx` 是套用案例的材料；`example.docx` 只读。Selection 自编小样在「Selection 样例」分类，recipe 可以用 OfficeCLI batch 执行，固定路径只对该样例成立。实际文件必须先 query/get，优先用稳定 paraId 或单元格地址，不要照抄示例段落序号。
 
 ## 案例
 

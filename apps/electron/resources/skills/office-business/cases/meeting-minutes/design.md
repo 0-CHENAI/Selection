@@ -18,7 +18,7 @@
 - 行动表三列：任务与交付要求 / 责任分工 / 期限，宽度 10.2 / 3.1 / 3.7cm。任务单元格分层显示任务、交付与来源，来源小字；责任与期限居中。自动行高、完整表格行、重复表头与浅色交替行。
 - 修改列宽时同步原生 tblGrid 与单元格宽度；表格使用精确 14pt 行距。文档网格关闭，段落保持实际行距。页脚使用可编辑 PAGE / NUMPAGES 字段。
 
-## 做同款流程
+## 套用案例流程
 
 所选案例 ID 为 `meeting-minutes`。先调用 `office_template(template_id="meeting-minutes")` 准备当前修订的原生工作副本；使用 `meeting-recap` 组织用户当前材料，配合官方 `office-docx` 与 `load_workspace_dependencies` 提供的安装级 Python 更新工作副本。保持原生段落、标题、表格与页码。
 
