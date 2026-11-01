@@ -3,6 +3,7 @@
  * 进度写到 stderr，报告 JSON 写到 stdout 或 --output。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { isDirectCli } from './direct.ts'
 import { dirname } from 'node:path'
 import { auditFile } from '../data-quality.ts'
 import { parseIntFlag, takeFlag, type CliResult } from './args.ts'
@@ -54,7 +55,7 @@ export function runDataQualityCli(argv: readonly string[]): CliResult {
   return { exitCode: 0, stdout: destination ? '' : json, stderr: stderr.join('') }
 }
 
-if (import.meta.main) {
+if (isDirectCli('data-quality.ts')) {
   const result = runDataQualityCli(process.argv.slice(2))
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

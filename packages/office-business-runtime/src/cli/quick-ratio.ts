@@ -2,6 +2,7 @@
  * 技能将来调用的入口：Bun 执行本文件，stdout 为文本报告或 JSON。
  * 桌面会话走 office_business。本文件保留给开发对拍。
  */
+import { isDirectCli } from './direct.ts'
 import { floatNum, quickRatioJson, quickRatioText, type PyNum, type QuickRatioArgs } from '../quick-ratio.ts'
 
 export interface CliResult {
@@ -80,7 +81,7 @@ function parseFloatArg(raw: string): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-if (import.meta.main) {
+if (isDirectCli('quick-ratio.ts')) {
   const result = runQuickRatioCli(process.argv.slice(2))
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)

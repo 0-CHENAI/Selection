@@ -1,6 +1,7 @@
 /**
  * SaaS 指标 CLI。参数与 metrics_calculator.py 相同，由 Bun 执行。
  */
+import { isDirectCli } from './direct.ts'
 import { metricsJson, metricsText, type MetricsArgs } from '../metrics.ts'
 import { hasFlag, parseFloatFlag, parseIntFlag, scalePercent, takeFlag, type CliResult } from './args.ts'
 
@@ -75,7 +76,7 @@ function readInt(argv: readonly string[], name: string): { rest: string[]; prese
   return { rest: taken.rest, present: true, value }
 }
 
-if (import.meta.main) {
+if (isDirectCli('metrics.ts')) {
   const result = runMetricsCli(process.argv.slice(2))
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)
