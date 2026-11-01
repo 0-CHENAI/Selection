@@ -23,7 +23,7 @@ export interface PptTemplate {
   tier?: PptTier
   /** Color variants selectable on this card, currently only 理性简报. */
   variants?: PptTemplateVariant[]
-  /** Short reason a card stays in 更多模板 instead of folding into a default. */
+  /** Maintainer note on why a bundled card is kept separate. Not shown on the card. */
   note?: string
   /** Personal-template conversion counts. Omitted on bundled cards. */
   diagnostics?: {

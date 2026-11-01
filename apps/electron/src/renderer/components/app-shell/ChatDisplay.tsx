@@ -1959,11 +1959,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailGrid : "flex flex-1 min-h-0 min-w-0 flex-col"}>
           <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailContent : "flex min-h-0 min-w-0 flex-col"}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
-          <div className={cn('relative min-h-0', officeHome ? 'shrink-0' : 'flex-1')} style={officeHome ? { height: 126 } : undefined}>
+          <div className={cn('relative min-h-0', officeHome ? 'shrink-0 overflow-hidden' : 'flex-1')} style={officeHome ? { height: 126 } : undefined}>
             {officeHome ? <div data-testid={homeSection === 'ppt' ? 'ppt-home-hero' : 'office-home-hero'} className="px-5 pt-10 text-center"><h1 className="text-[23px] font-semibold">{homeCopy.title}</h1><p className="mt-2 text-[13px] text-muted-foreground">{homeCopy.description}</p></div> : showNewSessionBrand && <NewSessionBrand />}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
+            {/* The Office home hero already fills this box. Keep the empty message list
+                out of layout there: otherwise it overflows the fixed-height box and
+                sits on top of the PPT | Word | Excel switch, swallowing its clicks. */}
             <div
-              className="h-full"
+              className={cn('h-full', officeHome && 'hidden')}
               style={{
                 maskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)'
