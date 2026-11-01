@@ -9170,7 +9170,7 @@ var require_lib3 = __commonJS(function(exports, module) {
 
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
 import { realpathSync as realpathSync2 } from "fs";
-import { resolve } from "path";
+import { resolve as resolve2 } from "path";
 
 // apps/electron/resources/skills/ppt-design/engine/metrics.ts
 var NO_LINE_START = new Set(Array.from("\uFF0C\u3002\u3001\uFF1B\uFF1A\uFF01\uFF1F\uFF09\u300B\u300D\u300F\u3011\u3009\u300D,.!?;:)]}%"));
@@ -12492,13 +12492,123 @@ var jsYaml = {
   safeDump
 };
 
+// apps/electron/resources/skills/ppt-design/engine/schema-v2-draft.ts
+var STYLE_KEYS = ["medium", "palette", "lighting", "tone", "textTreatment", "continuity"];
+var SLOT_KEYS = ["elementId", "role", "contentSources", "sourcePolicy", "subject", "composition", "aspectRatio", "reuseGroup", "maskElementIds"];
+var CONTRACT_KEYS = ["schema", "layoutId", "pageRole", "style", "slots", "contentPolicy"];
+var ASPECTS = new Set(["1:1", "16:9", "9:16", "4:3", "3:4"]);
+var SOURCE_POLICIES = new Set(["contextual-scene", "provided-portrait", "native-graphic"]);
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function knownKeys(value, allowed) {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+function plainText(value) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 500 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
+}
+function parseImageContract(notes, elements) {
+  if (typeof notes !== "string" || !notes.trim().startsWith("{"))
+    return { status: "absent" };
+  if (Buffer.byteLength(notes) > 64 * 1024)
+    return { status: "invalid", message: "\u5355\u9875\u56FE\u7247\u69FD\u5408\u540C\u8D85\u8FC7 64 KB" };
+  let value;
+  try {
+    value = JSON.parse(notes);
+  } catch {
+    return notes.includes("dsh.template-images/v1") ? { status: "invalid", message: "\u56FE\u7247\u69FD\u5408\u540C\u4E0D\u662F\u5408\u6CD5 JSON" } : { status: "absent" };
+  }
+  if (!isRecord(value) || value.schema !== "dsh.template-images/v1")
+    return { status: "absent" };
+  if (!knownKeys(value, CONTRACT_KEYS))
+    return { status: "invalid", message: "\u56FE\u7247\u69FD\u5408\u540C\u542B\u6709\u672A\u652F\u6301\u5B57\u6BB5" };
+  if (value.contentPolicy !== undefined && value.contentPolicy !== "provided-facts-or-qualitative")
+    return { status: "invalid", message: "\u56FE\u7247\u69FD\u5185\u5BB9\u6765\u6E90\u7B56\u7565\u65E0\u6548" };
+  if (!plainText(value.layoutId) || !plainText(value.pageRole))
+    return { status: "invalid", message: "\u56FE\u7247\u69FD\u5408\u540C\u7F3A\u5C11\u7248\u5F0F\u6216\u9875\u9762\u89D2\u8272" };
+  if (!isRecord(value.style) || !knownKeys(value.style, STYLE_KEYS) || STYLE_KEYS.some((key) => !plainText(value.style?.[key]))) {
+    return { status: "invalid", message: "\u56FE\u7247\u69FD\u5168\u5C40\u98CE\u683C\u9700\u8981\u516D\u9879\u63CF\u8FF0" };
+  }
+  if (!Array.isArray(value.slots) || value.slots.length > 16)
+    return { status: "invalid", message: "\u5355\u9875\u6700\u591A 16 \u4E2A\u56FE\u7247\u69FD" };
+  const seen = new Set;
+  const slots = [];
+  for (const slot of value.slots) {
+    if (!isRecord(slot) || !knownKeys(slot, SLOT_KEYS))
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u5B57\u6BB5\u65E0\u6548" };
+    if (!plainText(slot.elementId) || !plainText(slot.role) || !plainText(slot.subject) || !plainText(slot.composition) || !plainText(slot.reuseGroup)) {
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u6587\u5B57\u65E0\u6548" };
+    }
+    if (typeof slot.sourcePolicy !== "string" || !SOURCE_POLICIES.has(slot.sourcePolicy))
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u7D20\u6750\u6765\u6E90\u7B56\u7565\u65E0\u6548" };
+    if (typeof slot.aspectRatio !== "string" || !ASPECTS.has(slot.aspectRatio))
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u6BD4\u4F8B\u65E0\u6548" };
+    if (!stringList(slot.contentSources) || !stringList(slot.maskElementIds))
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u5F15\u7528\u5217\u8868\u65E0\u6548" };
+    if (seen.has(slot.elementId))
+      return { status: "invalid", message: "\u56FE\u7247\u69FD\u91CD\u590D" };
+    seen.add(slot.elementId);
+    if (elements) {
+      const picture = elements.find((item) => item.id === slot.elementId);
+      if (!picture || picture.type !== "image")
+        return { status: "invalid", message: `\u627E\u4E0D\u5230\u56FE\u7247\u69FD ${slot.elementId}` };
+      for (const id of slot.contentSources) {
+        const source = elements.find((item) => item.id === id);
+        if (!source || source.type !== "text")
+          return { status: "invalid", message: `\u56FE\u7247\u69FD\u6587\u5B57\u6765\u6E90 ${id} \u4E0D\u662F\u6587\u672C` };
+      }
+      for (const id of slot.maskElementIds) {
+        const mask = elements.find((item) => item.id === id);
+        if (!mask || mask.type !== "shape")
+          return { status: "invalid", message: `\u56FE\u7247\u69FD\u906E\u7F69 ${id} \u4E0D\u662F\u5F62\u72B6` };
+      }
+    }
+    slots.push({
+      elementId: slot.elementId,
+      role: slot.role,
+      contentSources: [...slot.contentSources],
+      sourcePolicy: slot.sourcePolicy,
+      subject: slot.subject,
+      composition: slot.composition,
+      aspectRatio: slot.aspectRatio,
+      reuseGroup: slot.reuseGroup,
+      maskElementIds: [...slot.maskElementIds]
+    });
+  }
+  const style = value.style;
+  return {
+    status: "ok",
+    contract: {
+      schema: "dsh.template-images/v1",
+      layoutId: value.layoutId,
+      pageRole: value.pageRole,
+      style: {
+        medium: style.medium,
+        palette: style.palette,
+        lighting: style.lighting,
+        tone: style.tone,
+        textTreatment: style.textTreatment,
+        continuity: style.continuity
+      },
+      contentPolicy: value.contentPolicy === "provided-facts-or-qualitative" ? value.contentPolicy : undefined,
+      slots
+    }
+  };
+}
+function stringList(value) {
+  return Array.isArray(value) && value.length <= 24 && value.every((item) => plainText(item));
+}
+
 // apps/electron/resources/skills/ppt-design/engine/schema.ts
 var HEX = /^#[0-9A-Fa-f]{6}$/;
+var SHA256 = /^[0-9a-f]{64}$/;
+var ELEMENT_KEYS = ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"];
+var ELEMENT_V2_KEYS = [...ELEMENT_KEYS, "group", "crop", "mask", "link", "runs", "retained"];
 var CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var FONT_TOKEN = /^\$cjk$|^\$latin$/;
 var COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/;
-function issue(code, message, pageId, elementId) {
-  return { code, message, pageId, elementId };
+function issue(code, message, pageId, elementId, severity = "error") {
+  return severity === "warning" ? { code, message, pageId, elementId, severity } : { code, message, pageId, elementId };
 }
 function isObject2(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -12839,14 +12949,14 @@ function parseChartImage(value, id, issues, pageId) {
     return;
   return { skill, format, data: data.trim() };
 }
-function parseElement(value, pageId, issues) {
+function parseElement(value, pageId, issues, v2) {
   if (!isObject2(value)) {
     issues.push(issue("schema", "\u5143\u7D20\u5FC5\u987B\u662F\u5BF9\u8C61", pageId));
     return null;
   }
   const id = value.id;
   const elementId = typeof id === "string" ? id : undefined;
-  rejectUnknown(value, ["id", "type", "bounds", "role", "rotate", "text", "textCapacity", "font", "shape", "fill", "line", "radius", "arrow", "src", "alt", "chart", "chartImage", "table", "path", "pathRule", "gradient", "pattern", "shadow", "fit"], `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
+  rejectUnknown(value, v2 ? ELEMENT_V2_KEYS : ELEMENT_KEYS, `\u5143\u7D20 ${elementId ?? "?"}`, issues, pageId, elementId);
   if (typeof id !== "string" || !id.trim()) {
     issues.push(issue("schema", "\u5143\u7D20\u7F3A\u5C11 id", pageId));
     return null;
@@ -12920,7 +13030,112 @@ function parseElement(value, pageId, issues) {
     if (table)
       element.table = table;
   }
+  if (v2)
+    applyV2Element(value, element, pageId, issues);
   return element;
+}
+function applyV2Element(value, element, pageId, issues) {
+  if (value.group !== undefined) {
+    if (!isObject2(value.group) || typeof value.group.id !== "string" || !value.group.id.trim() || value.group.id.length > 80 || Object.keys(value.group).some((key) => key !== "id")) {
+      issues.push(issue("schema", `\u5143\u7D20 ${element.id} \u7684 group \u5FC5\u987B\u662F {id}`, pageId, element.id));
+    } else
+      element.group = { id: value.group.id };
+  }
+  if (value.crop !== undefined) {
+    const crop = parseCrop(value.crop, element.id, pageId, issues);
+    if (crop)
+      element.crop = crop;
+  }
+  if (value.mask !== undefined) {
+    const mask = parseMask(value.mask, element.id, pageId, issues);
+    if (mask)
+      element.mask = mask;
+  }
+  if (value.link !== undefined) {
+    if (!isObject2(value.link) || typeof value.link.href !== "string" || !safeHref(value.link.href) || Object.keys(value.link).some((key) => key !== "href")) {
+      issues.push(issue("schema", `\u5143\u7D20 ${element.id} \u7684 link.href \u5FC5\u987B\u662F http(s) \u94FE\u63A5`, pageId, element.id));
+    } else
+      element.link = { href: value.link.href };
+  }
+  if (value.runs !== undefined) {
+    const runs = parseRuns(value.runs, element.id, pageId, issues);
+    if (runs)
+      element.runs = runs;
+  }
+  if (value.retained !== undefined) {
+    if (!isObject2(value.retained) || typeof value.retained.feature !== "string" || !value.retained.feature.trim() || value.retained.feature.length > 80 || typeof value.retained.message !== "string" || !value.retained.message.trim() || value.retained.message.length > 500 || Object.keys(value.retained).some((key) => key !== "feature" && key !== "message")) {
+      issues.push(issue("schema", `\u5143\u7D20 ${element.id} \u7684 retained \u5FC5\u987B\u662F {feature, message}`, pageId, element.id));
+    } else
+      element.retained = { feature: value.retained.feature, message: value.retained.message };
+  }
+}
+function parseCrop(value, elementId, pageId, issues) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 crop \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["l", "t", "r", "b"], `${elementId}.crop`, issues, pageId, elementId);
+  const crop = { l: value.l, t: value.t, r: value.r, b: value.b };
+  for (const key of ["l", "t", "r", "b"]) {
+    if (typeof crop[key] !== "number" || crop[key] < 0 || crop[key] > 1) {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 crop.${key} \u5FC5\u987B\u5728 0 \u5230 1 \u4E4B\u95F4`, pageId, elementId));
+      return;
+    }
+  }
+  return crop;
+}
+function parseMask(value, elementId, pageId, issues) {
+  if (!isObject2(value)) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 mask \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+    return;
+  }
+  rejectUnknown(value, ["shape", "path"], `${elementId}.mask`, issues, pageId, elementId);
+  if (value.shape !== "rect" && value.shape !== "roundRect" && value.shape !== "ellipse" && value.shape !== "path") {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 mask.shape \u4E0D\u652F\u6301`, pageId, elementId));
+    return;
+  }
+  if (value.shape === "path" && (typeof value.path !== "string" || !value.path.trim())) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 mask.path \u7F3A\u5C11\u8DEF\u5F84`, pageId, elementId));
+    return;
+  }
+  return { shape: value.shape, path: typeof value.path === "string" ? value.path : undefined };
+}
+function parseRuns(value, elementId, pageId, issues) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 runs \u5FC5\u987B\u662F 1 \u5230 64 \u6BB5`, pageId, elementId));
+    return;
+  }
+  const runs = [];
+  for (const entry of value) {
+    if (!isObject2(entry)) {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 run \u5FC5\u987B\u662F\u5BF9\u8C61`, pageId, elementId));
+      return;
+    }
+    rejectUnknown(entry, ["text", "size", "bold", "italic", "color"], `${elementId}.runs`, issues, pageId, elementId);
+    if (typeof entry.text !== "string") {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 run \u7F3A\u5C11 text`, pageId, elementId));
+      return;
+    }
+    if (entry.size !== undefined && (typeof entry.size !== "number" || entry.size < 6 || entry.size > 240)) {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 run \u5B57\u53F7\u65E0\u6548`, pageId, elementId));
+      return;
+    }
+    if (entry.color !== undefined && (typeof entry.color !== "string" || !COLOR_REF.test(entry.color))) {
+      issues.push(issue("schema", `\u5143\u7D20 ${elementId} \u7684 run \u989C\u8272\u65E0\u6548`, pageId, elementId));
+      return;
+    }
+    runs.push({
+      text: entry.text,
+      size: typeof entry.size === "number" ? entry.size : undefined,
+      bold: entry.bold === true ? true : undefined,
+      italic: entry.italic === true ? true : undefined,
+      color: typeof entry.color === "string" ? entry.color : undefined
+    });
+  }
+  return runs;
+}
+function safeHref(value) {
+  return /^https?:\/\/[^\s]+$/i.test(value) && value.length <= 2000 && !/[\u0000-\u001f]/.test(value);
 }
 function parseText(value, element, pageId, issues) {
   if (typeof value.text !== "string" || value.text.length === 0)
@@ -13288,13 +13503,13 @@ function parseTable(value, path, issues, pageId, elementId) {
     header
   };
 }
-function parsePage(value, issues) {
+function parsePage(value, issues, v2) {
   if (!isObject2(value)) {
     issues.push(issue("schema", "\u9875\u9762\u5FC5\u987B\u662F\u5BF9\u8C61"));
     return null;
   }
   const id = typeof value.id === "string" ? value.id : undefined;
-  rejectUnknown(value, ["id", "layout", "name", "background", "elements", "notes"], `\u9875\u9762 ${id ?? "?"}`, issues, id);
+  rejectUnknown(value, v2 ? ["id", "layout", "name", "background", "elements", "notes", "layoutRef", "imageSlots"] : ["id", "layout", "name", "background", "elements", "notes"], `\u9875\u9762 ${id ?? "?"}`, issues, id);
   if (!id || !id.trim()) {
     issues.push(issue("schema", "\u9875\u9762\u7F3A\u5C11 id"));
     return null;
@@ -13314,7 +13529,7 @@ function parsePage(value, issues) {
   const elements = [];
   const seen = new Set;
   for (const entry of value.elements) {
-    const element = parseElement(entry, id, issues);
+    const element = parseElement(entry, id, issues, v2);
     if (!element)
       continue;
     if (seen.has(element.id))
@@ -13324,7 +13539,7 @@ function parsePage(value, issues) {
   }
   if (typeof value.layout !== "string" || typeof value.background !== "string")
     return null;
-  return {
+  const page = {
     id,
     layout: value.layout,
     name: typeof value.name === "string" ? value.name : undefined,
@@ -13332,16 +13547,44 @@ function parsePage(value, issues) {
     elements,
     notes: typeof value.notes === "string" ? value.notes : undefined
   };
+  if (v2 && value.layoutRef !== undefined) {
+    if (!isObject2(value.layoutRef) || Object.keys(value.layoutRef).some((key) => key !== "master" && key !== "layout")) {
+      issues.push(issue("schema", "\u9875\u9762 layoutRef \u53EA\u542B master \u548C layout", id));
+    } else {
+      const master = optionalName(value.layoutRef.master, "layoutRef.master", id, issues);
+      const layout = optionalName(value.layoutRef.layout, "layoutRef.layout", id, issues);
+      if (master || layout)
+        page.layoutRef = { master, layout };
+    }
+  }
+  if (v2 && value.imageSlots !== undefined) {
+    const parsed = parseImageContract(JSON.stringify(value.imageSlots), elements.map((item) => ({ id: item.id, type: item.type })));
+    if (parsed.status !== "ok")
+      issues.push(issue("schema", parsed.status === "invalid" ? parsed.message : "\u9875\u9762 imageSlots \u65E0\u6548", id));
+    else
+      page.imageSlots = parsed.contract;
+  }
+  return page;
+}
+function optionalName(value, path, pageId, issues) {
+  if (value === undefined)
+    return;
+  if (typeof value !== "string" || !value.trim() || value.length > 200) {
+    issues.push(issue("schema", `\u9875\u9762 ${path} \u5FC5\u987B\u662F\u77ED\u5B57\u7B26\u4E32`, pageId));
+    return;
+  }
+  return value;
 }
 function parseDeckDocument(value) {
   const issues = [];
   if (!isObject2(value))
     return { deck: null, issues: [issue("schema", "deck \u5FC5\u987B\u662F\u5BF9\u8C61")] };
-  rejectUnknown(value, ["format", "version", "title", "canvas", "theme", "pages", "profile"], "deck", issues);
+  const v2 = value.version === 2;
+  rejectUnknown(value, v2 ? ["format", "version", "title", "canvas", "theme", "pages", "profile", "source"] : ["format", "version", "title", "canvas", "theme", "pages", "profile"], "deck", issues);
   if (value.format !== DECK_FORMAT)
     issues.push(issue("schema", `format \u5FC5\u987B\u662F ${DECK_FORMAT}`));
-  if (value.version !== DECK_VERSION)
-    issues.push(issue("schema", `version \u5FC5\u987B\u662F ${DECK_VERSION}`));
+  if (value.version !== DECK_VERSION && value.version !== 2)
+    issues.push(issue("schema", `version \u5FC5\u987B\u662F ${DECK_VERSION} \u6216 2`));
   if (typeof value.title !== "string" || !value.title.trim())
     issues.push(issue("schema", "title \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32"));
   if (!isObject2(value.canvas))
@@ -13365,7 +13608,7 @@ function parseDeckDocument(value) {
   const pages = [];
   const seen = new Set;
   for (const entry of value.pages) {
-    const page = parsePage(entry, issues);
+    const page = parsePage(entry, issues, v2);
     if (!page)
       continue;
     if (seen.has(page.id))
@@ -13373,12 +13616,14 @@ function parseDeckDocument(value) {
     seen.add(page.id);
     pages.push(page);
   }
+  const source = v2 ? parseSource(value.source, issues) : undefined;
   if (issues.length > 0 || !theme || typeof value.title !== "string")
     return { deck: null, issues };
   return {
     deck: {
       format: DECK_FORMAT,
-      version: DECK_VERSION,
+      version: v2 ? 2 : DECK_VERSION,
+      source,
       title: value.title,
       canvas: { width: Number(value.canvas.width), height: Number(value.canvas.height) },
       theme,
@@ -13386,6 +13631,30 @@ function parseDeckDocument(value) {
       profile: value.profile === "example" || value.profile === "authored" ? value.profile : undefined
     },
     issues
+  };
+}
+function parseSource(value, issues) {
+  if (value === undefined)
+    return;
+  if (!isObject2(value)) {
+    issues.push(issue("schema", "source \u5FC5\u987B\u662F\u5BF9\u8C61"));
+    return;
+  }
+  rejectUnknown(value, ["kind", "fileName", "sha256"], "source", issues);
+  if (value.kind !== "import" && value.kind !== "template-project" && value.kind !== "authored") {
+    issues.push(issue("schema", "source.kind \u53EA\u652F\u6301 import\u3001template-project \u6216 authored"));
+    return;
+  }
+  if (value.fileName !== undefined && (typeof value.fileName !== "string" || !value.fileName.trim() || value.fileName.length > 240)) {
+    issues.push(issue("schema", "source.fileName \u65E0\u6548"));
+  }
+  if (value.sha256 !== undefined && (typeof value.sha256 !== "string" || !SHA256.test(value.sha256))) {
+    issues.push(issue("schema", "source.sha256 \u5FC5\u987B\u662F 64 \u4F4D\u5341\u516D\u8FDB\u5236"));
+  }
+  return {
+    kind: value.kind,
+    fileName: typeof value.fileName === "string" ? value.fileName : undefined,
+    sha256: typeof value.sha256 === "string" ? value.sha256 : undefined
   };
 }
 function parseDeckSource(text) {
@@ -13420,6 +13689,46 @@ function colorRef(value, theme, fallback) {
 }
 
 // apps/electron/resources/skills/ppt-design/engine/check.ts
+var LAYOUT_REPETITION_RUN = 3;
+var COLOR_TOKEN = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$/;
+var BOOKEND_LAYOUT = /^(?:cover|title|opening|section|closing|final|blank)$/i;
+var COVER_LAYOUT = /^(?:cover|title|opening)$/i;
+var ASPECT = {
+  "1:1": 1,
+  "16:9": 16 / 9,
+  "9:16": 9 / 16,
+  "4:3": 4 / 3,
+  "3:4": 3 / 4
+};
+function isPlaceholderImageSrc(src) {
+  if (!src)
+    return false;
+  return src.startsWith("placeholder:") || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src);
+}
+function blockingIssues(issues) {
+  return issues.filter((item) => item.severity !== "warning");
+}
+function revisionStatus(issues) {
+  const errorCount = blockingIssues(issues).length;
+  return { status: errorCount ? "needs_revision" : "ok", code: errorCount ? 2 : 0, errorCount, warningCount: issues.length - errorCount };
+}
+function formatNeedsRevision(file, issues) {
+  const blocking = blockingIssues(issues);
+  const warnings = issues.filter((item) => item.severity === "warning");
+  const lines = [`needs_revision\uFF1A${blocking.length} \u9879\u9700\u8981\u4FEE\u6B63\uFF0C\u4E0D\u80FD\u4EE5\u300C\u5C31\u7EEA\u300D\u4EA4\u4ED8\u3002`];
+  blocking.forEach((item, index) => {
+    const where = [file, item.pageId ? `\u9875 ${item.pageId}` : "", item.elementId ? `\u5143\u7D20 ${item.elementId}` : ""].filter(Boolean).join(" \xB7 ");
+    lines.push(`[${index + 1}] ${where}
+${item.code}\uFF1A${item.message}`);
+  });
+  if (warnings.length) {
+    lines.push(`\u53E6\u6709 ${warnings.length} \u9879\u63D0\u9192\uFF0C\u4E0D\u963B\u6B62\u5BFC\u51FA\uFF1A`);
+    for (const item of warnings)
+      lines.push(`- ${[item.pageId ? `\u9875 ${item.pageId}` : "", item.code, item.message].filter(Boolean).join(" \xB7 ")}`);
+  }
+  return lines.join(`
+`);
+}
 function overlaps(a, b) {
   const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
@@ -13493,11 +13802,15 @@ function roleOf(element) {
 function pointIn(box, x, y) {
   return x >= box.x - 0.25 && y >= box.y - 0.25 && x <= box.x + box.w + 0.25 && y <= box.y + box.h + 0.25;
 }
-function checkDeck(deck) {
+function checkDeck(deck, options = {}) {
   const issues = [];
   deck.pages.forEach((page) => {
-    issues.push(...checkPage(deck, page));
+    issues.push(...checkPage(deck, page, options));
   });
+  if (deck.profile !== "example") {
+    issues.push(...checkLayoutRepetition(deck));
+    issues.push(...checkCoverFocus(deck));
+  }
   return issues;
 }
 function checkArgumentLayout(page) {
@@ -13549,7 +13862,7 @@ function checkChartImage(deck, page, element) {
   }
   return issues;
 }
-function checkPage(deck, page) {
+function checkPage(deck, page, options) {
   const issues = [...checkArgumentLayout(page)];
   const { width, height } = deck.canvas;
   let background = "#FFFFFF";
@@ -13566,6 +13879,8 @@ function checkPage(deck, page) {
     if (off && !chartPicture) {
       issues.push(issue("out_of_bounds", `\u5143\u7D20\u8D85\u51FA ${width}\xD7${height} \u753B\u5E03\uFF08x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}\uFF09`, page.id, element.id));
     }
+    if (element.retained)
+      continue;
     if (chartPicture)
       issues.push(...checkChartImage(deck, page, element));
     if (element.type === "text" && element.text && element.font && element.textCapacity) {
@@ -13574,11 +13889,18 @@ function checkPage(deck, page) {
     if (element.type === "chart" && element.chart?.kind === "waterfall") {
       issues.push(...checkWaterfall(page, element));
     }
+    if (element.type === "chart")
+      issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element));
+    if (element.type === "image" && !element.chartImage)
+      issues.push(...checkImage(page, element, options));
     if (element.type === "table" && element.table) {
       issues.push(...checkTable(deck, page, element, background));
     }
   }
-  issues.push(...checkOverlap(page, deck.profile === "example"));
+  const editable = { ...page, elements: page.elements.filter((element) => !element.retained) };
+  issues.push(...checkOverlap(editable, deck.profile === "example"));
+  if (deck.profile !== "example")
+    issues.push(...checkTextLayer(page));
   return issues;
 }
 function checkText(deck, page, element, pageBackground) {
@@ -13774,6 +14096,166 @@ function checkTable(deck, page, element, pageBackground) {
           issues.push(issue("schema", error instanceof Error ? error.message : String(error), page.id, element.id));
         }
     });
+  });
+  return issues;
+}
+function checkLayoutRepetition(deck) {
+  const issues = [];
+  let runStart = 0;
+  let runLayout;
+  const finish = (end) => {
+    if (!runLayout || end - runStart < LAYOUT_REPETITION_RUN)
+      return;
+    const first = deck.pages[runStart];
+    if (!first)
+      return;
+    issues.push(issue("layout_repetition", `\u7B2C ${runStart + 1}\u2013${end} \u9875\u8FDE\u7EED\u4F7F\u7528\u7248\u5F0F ${runLayout}\u3002\u8C03\u6574\u4E3B\u89C6\u89C9\u6216\u5728 design-plan \u91CC\u5199\u660E\u8FDE\u7EED\u5BF9\u6BD4\u7684\u7406\u7531\u3002`, first.id, undefined, "warning"));
+  };
+  deck.pages.forEach((page, index) => {
+    const layout = page.layout?.trim() ?? "";
+    const counted = layout.length > 0 && layout !== "free" && !BOOKEND_LAYOUT.test(layout);
+    if (!counted) {
+      finish(index);
+      runStart = index + 1;
+      runLayout = undefined;
+      return;
+    }
+    if (layout === runLayout)
+      return;
+    finish(index);
+    runStart = index;
+    runLayout = layout;
+  });
+  finish(deck.pages.length);
+  return issues;
+}
+function checkCoverFocus(deck) {
+  const canvas = deck.canvas.width * deck.canvas.height;
+  const issues = [];
+  for (const page of deck.pages) {
+    if (!COVER_LAYOUT.test(page.layout?.trim() ?? ""))
+      continue;
+    const visual = page.elements.reduce((largest, element) => {
+      if (element.type !== "image" && element.type !== "chart" && element.type !== "table")
+        return largest;
+      if (canvas <= 0)
+        return largest;
+      return Math.max(largest, element.bounds.w * element.bounds.h / canvas);
+    }, 0);
+    if (visual >= 0.25)
+      continue;
+    const sizes = page.elements.flatMap((element) => {
+      if (element.type !== "text" || !element.text?.trim() || !element.font)
+        return [];
+      return [element.font.size];
+    }).sort((left, right) => left - right);
+    if (sizes.length < 3)
+      continue;
+    const middle = Math.floor(sizes.length / 2);
+    const median = sizes.length % 2 === 1 ? sizes[middle] : ((sizes[middle - 1] ?? 0) + (sizes[middle] ?? 0)) / 2;
+    const largest = sizes.at(-1) ?? 0;
+    if (median > 0 && largest / median >= 3)
+      continue;
+    issues.push(issue("cover_focus", "\u5C01\u9762\u9700\u8981\u66F4\u660E\u786E\u7684\u9996\u8BFB\u7126\u70B9\uFF1A\u8BA9\u4E00\u5F20\u56FE\u7247\u3001\u56FE\u8868\u6216\u8868\u683C\u5360\u636E\u81F3\u5C11 25% \u753B\u5E03\uFF0C\u6216\u8BA9\u6700\u5927\u6807\u9898\u8FBE\u5230\u53EF\u89C1\u6587\u5B57\u4E2D\u4F4D\u5B57\u53F7\u7684 3 \u500D\u3002", page.id, undefined, "warning"));
+  }
+  return issues;
+}
+function checkChartData(page, element) {
+  const chart = element.chart;
+  if (!chart || chart.categories.length < 1 || chart.series.length < 1) {
+    return [issue("chart_data", `\u56FE\u8868 ${element.id} \u7F3A\u5C11\u7C7B\u522B\u6216\u5E8F\u5217`, page.id, element.id)];
+  }
+  for (const series of chart.series) {
+    if (series.values.length !== chart.categories.length || series.values.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
+      return [issue("chart_data", `\u56FE\u8868 ${element.id} \u7684\u5E8F\u5217\u300C${series.name}\u300D\u4E0E\u7C7B\u522B\u5217\u6570\u4E0D\u4E00\u81F4\uFF0C\u6216\u542B\u6709\u975E\u6570\u5B57`, page.id, element.id)];
+    }
+  }
+  return [];
+}
+function checkChartSeriesColor(page, element) {
+  const chart = element.chart;
+  const colors = chart?.colors;
+  if (!chart || !colors?.length)
+    return [];
+  if (colors.some((color) => !COLOR_TOKEN.test(color))) {
+    return [issue("chart_series_color", `\u56FE\u8868 ${element.id} \u7684\u989C\u8272\u9700\u8981\u662F #RRGGBB\u3001#RRGGBBAA \u6216\u4E3B\u9898\u8272\u5F15\u7528`, page.id, element.id)];
+  }
+  return [];
+}
+function slotFor(page, elementId) {
+  return page.imageSlots?.slots.find((slot) => slot.elementId === elementId);
+}
+function checkImage(page, element, options) {
+  const issues = [];
+  const src = element.src?.trim() ?? "";
+  const slot = slotFor(page, element.id);
+  if (/^https?:\/\//i.test(src)) {
+    issues.push(issue("remote_image", `\u56FE\u7247 ${element.id} \u4F7F\u7528\u4E86\u7F51\u7EDC\u5730\u5740\u3002\u8BF7\u5148\u628A\u56FE\u7247\u653E\u8FDB\u5DE5\u4F5C\u533A\u518D\u5F15\u7528\u3002`, page.id, element.id));
+  } else if (isPlaceholderImageSrc(src)) {
+    issues.push(issue("missing_asset", `\u56FE\u7247 ${element.id} \u4ECD\u662F\u5360\u4F4D\u3002\u6CA1\u6709\u751F\u56FE\u63D0\u4F9B\u65B9\u65F6\u4FDD\u7559\u5360\u4F4D\u5E76\u63D0\u793A\uFF0C\u4E0D\u8981\u5F53\u6210\u5DF2\u914D\u56FE\u3002`, page.id, element.id, "warning"));
+  } else if (!src && slot) {
+    issues.push(issue("missing_asset", `\u56FE\u7247\u69FD ${element.id} \u6CA1\u6709\u7D20\u6750\u3002`, page.id, element.id));
+  } else if (src && options.assetExists && !options.assetExists(src)) {
+    issues.push(issue("missing_asset", `\u627E\u4E0D\u5230\u56FE\u7247\u8D44\u6E90 ${src}\u3002`, page.id, element.id));
+  }
+  const fit = element.fit;
+  if (fit && fit !== "fill" && fit !== "contain" && fit !== "cover") {
+    issues.push(issue("image_fit", `\u56FE\u7247 ${element.id} \u7684 fit \u53EA\u80FD\u662F fill\u3001contain \u6216 cover\u3002`, page.id, element.id));
+  }
+  if (slot && element.bounds.w > 0 && element.bounds.h > 0) {
+    const actual = element.bounds.w / element.bounds.h;
+    const expected = ASPECT[slot.aspectRatio];
+    if (expected && Math.abs(actual - expected) / expected > 0.08) {
+      issues.push(issue("image_fit", `\u56FE\u7247\u69FD ${element.id} \u7684\u753B\u9762\u6BD4\u4F8B\u662F ${slot.aspectRatio}\uFF0C\u5F53\u524D\u6846\u662F ${element.bounds.w.toFixed(0)}\xD7${element.bounds.h.toFixed(0)}\uFF0C\u6BD4\u4F8B\u4E0D\u7B26\u3002`, page.id, element.id));
+    }
+  }
+  if (element.crop) {
+    const { l, t, r, b } = element.crop;
+    const values = [l, t, r, b];
+    if (values.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u88C1\u526A\u5E94\u662F\u56DB\u8FB9\u7684\u975E\u8D1F\u6BD4\u4F8B\u3002`, page.id, element.id));
+    } else if (l + r >= 1 || t + b >= 1) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u88C1\u526A\u6CA1\u6709\u7559\u4E0B\u6709\u6548\u753B\u9762\u3002`, page.id, element.id));
+    } else if ((1 - l - r) * (1 - t - b) < 0.5) {
+      issues.push(issue("image_crop", `\u56FE\u7247 ${element.id} \u7684\u4E3B\u4F53\u88AB\u88C1\u6389\u592A\u591A\uFF0C\u8BF7\u4FDD\u7559\u81F3\u5C11\u4E00\u534A\u753B\u9762\u3002`, page.id, element.id));
+    }
+  }
+  return issues;
+}
+function areaOverlap(left, right) {
+  const width = Math.max(0, Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x));
+  const height = Math.max(0, Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y));
+  return { area: width * height, width };
+}
+function checkTextLayer(page) {
+  const issues = [];
+  page.elements.forEach((element, index) => {
+    if (element.type !== "text" || element.bounds.w <= 0 || element.bounds.h <= 0)
+      return;
+    const textArea = element.bounds.w * element.bounds.h;
+    for (const earlier of page.elements.slice(0, index)) {
+      if (earlier.type !== "table" && earlier.type !== "chart")
+        continue;
+      if (areaOverlap(element.bounds, earlier.bounds).area / textArea >= 0.15) {
+        issues.push(issue("text_occlusion", `\u6587\u672C ${element.id} \u4E0E ${earlier.id} \u7684\u5185\u5BB9\u533A\u57DF\u91CD\u53E0\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+    }
+    for (const later of page.elements.slice(index + 1)) {
+      if (later.type === "shape" && (later.shape === "line" || later.bounds.h <= 2 || later.bounds.w <= 2))
+        continue;
+      if (later.type !== "table" && later.type !== "chart" && later.type !== "image" && later.type !== "shape")
+        continue;
+      const intersection = areaOverlap(element.bounds, later.bounds);
+      if (intersection.area / textArea >= 0.15 && later.type !== "shape") {
+        issues.push(issue("text_occlusion", `\u6587\u672C ${element.id} \u53EF\u80FD\u88AB\u540E\u7ED8\u5236\u7684 ${later.id} \u906E\u6321\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+      if (later.bounds.y > element.bounds.y && later.bounds.y < element.bounds.y + element.bounds.h && intersection.width / element.bounds.w >= 0.3 && later.type !== "shape") {
+        issues.push(issue("text_drift", `\u6587\u672C ${element.id} \u53EF\u80FD\u8DE8\u5165\u4E0B\u65B9 ${later.id} \u7684\u8FB9\u754C\u3002`, page.id, element.id, "warning"));
+        break;
+      }
+    }
   });
   return issues;
 }
@@ -19907,7 +20389,7 @@ function paint(value) {
 }
 async function exportDeck(deck, outFile, options = {}) {
   const issues = options.enforceCheck === false ? [] : checkDeck(deck);
-  if (issues.length > 0)
+  if (blockingIssues(issues).length > 0)
     return { status: "needs_revision", issues };
   const platform = options.platform ?? platformFromProcess();
   const bytes = await buildPptx(deck, platform);
@@ -19915,7 +20397,7 @@ async function exportDeck(deck, outFile, options = {}) {
   writeFileSync(outFile, bytes);
   const pptx = realpathSync(outFile);
   const screenshots = options.screenshotDir ? await captureSlides(pptx, options.screenshotDir, deck.pages.length, { officecli: options.officecli }) : undefined;
-  return { status: "ok", issues: [], pptx, screenshots };
+  return { status: "ok", issues, pptx, screenshots };
 }
 async function buildPptx(deck, platform) {
   const pres = new PptxGenJS;
@@ -19937,6 +20419,8 @@ async function buildPptx(deck, platform) {
   return finishSlideXml(Buffer.from(raw), deck, platform);
 }
 function addElement(pres, slide, deck, element, platform, pageBackground) {
+  if (element.retained)
+    return;
   const x = inches2(element.bounds.x);
   const y = inches2(element.bounds.y);
   const w = inches2(element.bounds.w);
@@ -19946,7 +20430,7 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
     const leading = element.font.leading ?? defaultLeading(element.font.size);
     const face = resolveFontFace(deck, element.font.family, platform, element.font.face);
     const ink = paint(colorRef(element.font.color, deck.theme, "$ink"));
-    slide.addText(element.text, {
+    const textOptions = {
       x,
       y,
       w,
@@ -19969,7 +20453,22 @@ function addElement(pres, slide, deck, element, platform, pageBackground) {
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === "$cjk" ? "zh-CN" : "en-US",
       objectName: element.id
-    });
+    };
+    if (element.runs && element.runs.length > 1) {
+      slide.addText(element.runs.map((run) => {
+        const runInk = paint(colorRef(run.color ?? element.font?.color, deck.theme, "$ink"));
+        return {
+          text: run.text,
+          options: {
+            fontSize: run.size ?? element.font.size,
+            bold: run.bold ?? bold,
+            italic: run.italic === true ? true : undefined,
+            color: runInk.color
+          }
+        };
+      }), textOptions);
+    } else
+      slide.addText(element.text, textOptions);
     return;
   }
   if (element.type === "shape") {
@@ -20550,6 +21049,8 @@ async function finishSlideXml(bytes, deck, platform) {
     changed = true;
   if (await shrinkBubbleScale(zip))
     changed = true;
+  if (await patchImportMarks(zip, deck))
+    changed = true;
   if (!changed)
     return bytes;
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
@@ -20569,6 +21070,61 @@ async function shrinkBubbleScale(zip) {
     changed = true;
   }
   return changed;
+}
+async function patchImportMarks(zip, deck) {
+  let changed = false;
+  for (let index = 0;index < deck.pages.length; index++) {
+    const marked = deck.pages[index].elements.filter((element) => !element.retained && (element.crop || element.link));
+    if (marked.length === 0)
+      continue;
+    const path = `ppt/slides/slide${index + 1}.xml`;
+    const file = zip.file(path);
+    if (!file)
+      continue;
+    let xml = await file.async("string");
+    const relPath = `ppt/slides/_rels/slide${index + 1}.xml.rels`;
+    let rels = await zip.file(relPath)?.async("string") ?? "";
+    let relChanged = false;
+    let nextId = 1;
+    while (rels.includes(`Id="rIdImp${nextId}"`))
+      nextId += 1;
+    for (const element of marked) {
+      if (element.crop && element.type === "image") {
+        const src = cropXml(element.crop);
+        xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, (block) => {
+          if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes("<a:srcRect"))
+            return block;
+          if (block.includes("<a:blipFill"))
+            return block.replace("</a:blipFill>", `${src}</a:blipFill>`);
+          return block;
+        });
+        changed = true;
+      }
+      if (element.link && /^https?:\/\//i.test(element.link.href)) {
+        const relId = `rIdImp${nextId++}`;
+        xml = xml.replace(/<p:(?:sp|pic|cxnSp)\b[\s\S]*?<\/p:(?:sp|pic|cxnSp)>/g, (block) => {
+          if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes("<a:hlinkClick"))
+            return block;
+          return block.replace(/(<p:cNvPr\b[^>]*?)\/>/, `$1><a:hlinkClick r:id="${relId}"/></p:cNvPr>`);
+        });
+        if (!rels) {
+          rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+        }
+        rels = rels.replace("</Relationships>", `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${escapeXml(element.link.href)}" TargetMode="External"/></Relationships>`);
+        relChanged = true;
+        changed = true;
+      }
+    }
+    zip.file(path, xml);
+    if (relChanged)
+      zip.file(relPath, rels);
+  }
+  return changed;
+}
+function cropXml(crop) {
+  const part = (value) => Math.max(0, Math.min(1e5, Math.round(value * 1e5)));
+  return `<a:srcRect l="${part(crop.l)}" t="${part(crop.t)}" r="${part(crop.r)}" b="${part(crop.b)}"/>`;
 }
 function rewriteShape(block, faces, fills, evenOdd) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
@@ -21456,11 +22012,1940 @@ function waterfallColumns(values) {
   };
 }
 
+// apps/electron/resources/skills/ppt-design/engine/import/project.ts
+import { createHash as createHash2 } from "crypto";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync4, statSync, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname2, join as join4, resolve, sep } from "path";
+
+// apps/electron/resources/skills/ppt-design/engine/import/preview-port.ts
+var RENDER_PATH_UNDECIDED = "\u9636\u6BB5 02\uFF08#705\uFF09\u5C1A\u672A\u9009\u5B9A\u6E32\u67D3\u8DEF\u5F84\u3002\u9884\u89C8\u548C PDF \u4ECD\u901A\u8FC7\u8FD9\u4E2A\u63A5\u53E3\u63A5\u5165\uFF0C\u5BFC\u5165\u672C\u8EAB\u4E0D\u751F\u6210\u753B\u9762\u3002";
+async function previewImportedSlides(request, port) {
+  if (!port)
+    return { status: "unavailable", reason: RENDER_PATH_UNDECIDED };
+  return port(request);
+}
+
+// apps/electron/resources/skills/ppt-design/engine/import/pptx-to-deck.ts
+import { createHash } from "crypto";
+import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
+import { join as join3 } from "path";
+
+// node_modules/fflate/esm/index.mjs
+import { createRequire } from "module";
+var require2 = createRequire("/");
+var Worker;
+try {
+  Worker = require2("worker_threads").Worker;
+} catch (e) {}
+var u8 = Uint8Array;
+var u16 = Uint16Array;
+var i32 = Int32Array;
+var fleb = new u8([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 0, 0, 0]);
+var fdeb = new u8([0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 0, 0]);
+var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+var freb = function(eb, start) {
+  var b = new u16(31);
+  for (var i = 0;i < 31; ++i) {
+    b[i] = start += 1 << eb[i - 1];
+  }
+  var r = new i32(b[30]);
+  for (var i = 1;i < 30; ++i) {
+    for (var j = b[i];j < b[i + 1]; ++j) {
+      r[j] = j - b[i] << 5 | i;
+    }
+  }
+  return { b, r };
+};
+var _a = freb(fleb, 2);
+var fl = _a.b;
+var revfl = _a.r;
+fl[28] = 258, revfl[258] = 28;
+var _b = freb(fdeb, 0);
+var fd = _b.b;
+var revfd = _b.r;
+var rev = new u16(32768);
+for (i2 = 0;i2 < 32768; ++i2) {
+  x = (i2 & 43690) >> 1 | (i2 & 21845) << 1;
+  x = (x & 52428) >> 2 | (x & 13107) << 2;
+  x = (x & 61680) >> 4 | (x & 3855) << 4;
+  rev[i2] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
+}
+var x;
+var i2;
+var hMap = function(cd, mb, r) {
+  var s = cd.length;
+  var i = 0;
+  var l = new u16(mb);
+  for (;i < s; ++i) {
+    if (cd[i])
+      ++l[cd[i] - 1];
+  }
+  var le = new u16(mb);
+  for (i = 1;i < mb; ++i) {
+    le[i] = le[i - 1] + l[i - 1] << 1;
+  }
+  var co;
+  if (r) {
+    co = new u16(1 << mb);
+    var rvb = 15 - mb;
+    for (i = 0;i < s; ++i) {
+      if (cd[i]) {
+        var sv = i << 4 | cd[i];
+        var r_1 = mb - cd[i];
+        var v = le[cd[i] - 1]++ << r_1;
+        for (var m = v | (1 << r_1) - 1;v <= m; ++v) {
+          co[rev[v] >> rvb] = sv;
+        }
+      }
+    }
+  } else {
+    co = new u16(s);
+    for (i = 0;i < s; ++i) {
+      if (cd[i]) {
+        co[i] = rev[le[cd[i] - 1]++] >> 15 - cd[i];
+      }
+    }
+  }
+  return co;
+};
+var flt = new u8(288);
+for (i2 = 0;i2 < 144; ++i2)
+  flt[i2] = 8;
+var i2;
+for (i2 = 144;i2 < 256; ++i2)
+  flt[i2] = 9;
+var i2;
+for (i2 = 256;i2 < 280; ++i2)
+  flt[i2] = 7;
+var i2;
+for (i2 = 280;i2 < 288; ++i2)
+  flt[i2] = 8;
+var i2;
+var fdt = new u8(32);
+for (i2 = 0;i2 < 32; ++i2)
+  fdt[i2] = 5;
+var i2;
+var flrm = /* @__PURE__ */ hMap(flt, 9, 1);
+var fdrm = /* @__PURE__ */ hMap(fdt, 5, 1);
+var max = function(a) {
+  var m = a[0];
+  for (var i = 1;i < a.length; ++i) {
+    if (a[i] > m)
+      m = a[i];
+  }
+  return m;
+};
+var bits = function(d, p, m) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8) >> (p & 7) & m;
+};
+var bits16 = function(d, p) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8 | d[o + 2] << 16) >> (p & 7);
+};
+var shft = function(p) {
+  return (p + 7) / 8 | 0;
+};
+var slc = function(v, s, e) {
+  if (s == null || s < 0)
+    s = 0;
+  if (e == null || e > v.length)
+    e = v.length;
+  return new u8(v.subarray(s, e));
+};
+var ec = [
+  "unexpected EOF",
+  "invalid block type",
+  "invalid length/literal",
+  "invalid distance",
+  "stream finished",
+  "no stream handler",
+  ,
+  "no callback",
+  "invalid UTF-8 data",
+  "extra field too long",
+  "date not in range 1980-2099",
+  "filename too long",
+  "stream finishing",
+  "invalid zip data"
+];
+var err = function(ind, msg, nt) {
+  var e = new Error(msg || ec[ind]);
+  e.code = ind;
+  if (Error.captureStackTrace)
+    Error.captureStackTrace(e, err);
+  if (!nt)
+    throw e;
+  return e;
+};
+var inflt = function(dat, st, buf, dict) {
+  var sl = dat.length, dl = dict ? dict.length : 0;
+  if (!sl || st.f && !st.l)
+    return buf || new u8(0);
+  var noBuf = !buf;
+  var resize = noBuf || st.i != 2;
+  var noSt = st.i;
+  if (noBuf)
+    buf = new u8(sl * 3);
+  var cbuf = function(l) {
+    var bl = buf.length;
+    if (l > bl) {
+      var nbuf = new u8(Math.max(bl * 2, l));
+      nbuf.set(buf);
+      buf = nbuf;
+    }
+  };
+  var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, { l: lm, d: dm, m: lbt, n: dbt } = st;
+  var tbts = sl * 8;
+  do {
+    if (!lm) {
+      final = bits(dat, pos, 1);
+      var type = bits(dat, pos + 1, 3);
+      pos += 3;
+      if (!type) {
+        var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
+        if (t > sl) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + l);
+        buf.set(dat.subarray(s, t), bt);
+        st.b = bt += l, st.p = pos = t * 8, st.f = final;
+        continue;
+      } else if (type == 1)
+        lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
+      else if (type == 2) {
+        var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
+        var tl = hLit + bits(dat, pos + 5, 31) + 1;
+        pos += 14;
+        var ldt = new u8(tl);
+        var clt = new u8(19);
+        for (var i = 0;i < hcLen; ++i) {
+          clt[clim[i]] = bits(dat, pos + i * 3, 7);
+        }
+        pos += hcLen * 3;
+        var clb = max(clt), clbmsk = (1 << clb) - 1;
+        var clm = hMap(clt, clb, 1);
+        for (var i = 0;i < tl; ) {
+          var r = clm[bits(dat, pos, clbmsk)];
+          pos += r & 15;
+          var s = r >> 4;
+          if (s < 16) {
+            ldt[i++] = s;
+          } else {
+            var c = 0, n = 0;
+            if (s == 16)
+              n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i - 1];
+            else if (s == 17)
+              n = 3 + bits(dat, pos, 7), pos += 3;
+            else if (s == 18)
+              n = 11 + bits(dat, pos, 127), pos += 7;
+            while (n--)
+              ldt[i++] = c;
+          }
+        }
+        var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
+        lbt = max(lt);
+        dbt = max(dt);
+        lm = hMap(lt, lbt, 1);
+        dm = hMap(dt, dbt, 1);
+      } else
+        err(1);
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+    }
+    if (resize)
+      cbuf(bt + 131072);
+    var lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
+    var lpos = pos;
+    for (;; lpos = pos) {
+      var c = lm[bits16(dat, pos) & lms], sym = c >> 4;
+      pos += c & 15;
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+      if (!c)
+        err(2);
+      if (sym < 256)
+        buf[bt++] = sym;
+      else if (sym == 256) {
+        lpos = pos, lm = null;
+        break;
+      } else {
+        var add = sym - 254;
+        if (sym > 264) {
+          var i = sym - 257, b = fleb[i];
+          add = bits(dat, pos, (1 << b) - 1) + fl[i];
+          pos += b;
+        }
+        var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
+        if (!d)
+          err(3);
+        pos += d & 15;
+        var dt = fd[dsym];
+        if (dsym > 3) {
+          var b = fdeb[dsym];
+          dt += bits16(dat, pos) & (1 << b) - 1, pos += b;
+        }
+        if (pos > tbts) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + 131072);
+        var end = bt + add;
+        if (bt < dt) {
+          var shift = dl - dt, dend = Math.min(dt, end);
+          if (shift + bt < 0)
+            err(3);
+          for (;bt < dend; ++bt)
+            buf[bt] = dict[shift + bt];
+        }
+        for (;bt < end; ++bt)
+          buf[bt] = buf[bt - dt];
+      }
+    }
+    st.l = lm, st.p = lpos, st.b = bt, st.f = final;
+    if (lm)
+      final = 1, st.m = lbt, st.d = dm, st.n = dbt;
+  } while (!final);
+  return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
+};
+var et = /* @__PURE__ */ new u8(0);
+var b2 = function(d, b) {
+  return d[b] | d[b + 1] << 8;
+};
+var b4 = function(d, b) {
+  return (d[b] | d[b + 1] << 8 | d[b + 2] << 16 | d[b + 3] << 24) >>> 0;
+};
+var b8 = function(d, b) {
+  return b4(d, b) + b4(d, b + 4) * 4294967296;
+};
+function inflateSync(data, opts) {
+  return inflt(data, { i: 2 }, opts && opts.out, opts && opts.dictionary);
+}
+var td = typeof TextDecoder != "undefined" && /* @__PURE__ */ new TextDecoder;
+var tds = 0;
+try {
+  td.decode(et, { stream: true });
+  tds = 1;
+} catch (e) {}
+var dutf8 = function(d) {
+  for (var r = "", i = 0;; ) {
+    var c = d[i++];
+    var eb = (c > 127) + (c > 223) + (c > 239);
+    if (i + eb > d.length)
+      return { s: r, r: slc(d, i - 1) };
+    if (!eb)
+      r += String.fromCharCode(c);
+    else if (eb == 3) {
+      c = ((c & 15) << 18 | (d[i++] & 63) << 12 | (d[i++] & 63) << 6 | d[i++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
+    } else if (eb & 1)
+      r += String.fromCharCode((c & 31) << 6 | d[i++] & 63);
+    else
+      r += String.fromCharCode((c & 15) << 12 | (d[i++] & 63) << 6 | d[i++] & 63);
+  }
+};
+function strFromU8(dat, latin1) {
+  if (latin1) {
+    var r = "";
+    for (var i = 0;i < dat.length; i += 16384)
+      r += String.fromCharCode.apply(null, dat.subarray(i, i + 16384));
+    return r;
+  } else if (td) {
+    return td.decode(dat);
+  } else {
+    var _a = dutf8(dat), { s, r } = _a;
+    if (r.length)
+      err(8);
+    return s;
+  }
+}
+var slzh = function(d, b) {
+  return b + 30 + b2(d, b + 26) + b2(d, b + 28);
+};
+var zh = function(d, b, z) {
+  var fnl = b2(d, b + 28), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl, bs = b4(d, b + 20);
+  var _a = z && bs == 4294967295 ? z64e(d, es) : [bs, b4(d, b + 24), b4(d, b + 42)], sc = _a[0], su = _a[1], off = _a[2];
+  return [b2(d, b + 10), sc, su, fn, es + b2(d, b + 30) + b2(d, b + 32), off];
+};
+var z64e = function(d, b) {
+  for (;b2(d, b) != 1; b += 4 + b2(d, b + 2))
+    ;
+  return [b8(d, b + 12), b8(d, b + 4), b8(d, b + 20)];
+};
+function unzipSync(data, opts) {
+  var files = {};
+  var e = data.length - 22;
+  for (;b4(data, e) != 101010256; --e) {
+    if (!e || data.length - e > 65558)
+      err(13);
+  }
+  var c = b2(data, e + 8);
+  if (!c)
+    return {};
+  var o = b4(data, e + 16);
+  var z = o == 4294967295 || c == 65535;
+  if (z) {
+    var ze = b4(data, e - 12);
+    z = b4(data, ze) == 101075792;
+    if (z) {
+      c = b4(data, ze + 32);
+      o = b4(data, ze + 48);
+    }
+  }
+  var fltr = opts && opts.filter;
+  for (var i = 0;i < c; ++i) {
+    var _a = zh(data, o, z), c_2 = _a[0], sc = _a[1], su = _a[2], fn = _a[3], no = _a[4], off = _a[5], b = slzh(data, off);
+    o = no;
+    if (!fltr || fltr({
+      name: fn,
+      size: sc,
+      originalSize: su,
+      compression: c_2
+    })) {
+      if (!c_2)
+        files[fn] = slc(data, b, b + sc);
+      else if (c_2 == 8)
+        files[fn] = inflateSync(data.subarray(b, b + sc), { out: new u8(su) });
+      else
+        err(14, "unknown compression type " + c_2);
+    }
+  }
+  return files;
+}
+
+// apps/electron/resources/skills/ppt-design/engine/pptx-import-poc.ts
+var MAX_BYTES = 8 * 1024 * 1024;
+var MAX_UNCOMPRESSED = 32 * 1024 * 1024;
+var IMPORT_USER_MESSAGES = {
+  smartart: "\u8FD9\u662F SmartArt\u3002\u5F53\u524D\u4E0D\u80FD\u6539\u91CC\u9762\u7684\u6587\u5B57\u548C\u7ED3\u6784\u3002\u8BF7\u5728\u6E90\u6587\u4EF6\u91CC\u62C6\u6210\u5F62\u72B6\u540E\u518D\u5BFC\u5165\u3002",
+  "embedded-object": "\u8FD9\u91CC\u5D4C\u7740\u4E00\u4E2A\u5916\u90E8\u5BF9\u8C61\u3002\u5DE5\u7A0B\u91CC\u4E0D\u80FD\u7F16\u8F91\u5B83\u3002",
+  audio: "\u97F3\u9891\u4E0D\u4F1A\u8FDB\u5165\u53EF\u7F16\u8F91\u5DE5\u7A0B\u3002",
+  video: "\u89C6\u9891\u4E0D\u4F1A\u8FDB\u5165\u53EF\u7F16\u8F91\u5DE5\u7A0B\u3002",
+  emf: "\u8FD9\u5F20\u56FE\u662F EMF \u56FE\u5143\u3002\u4E0D\u80FD\u6539\u6210\u53EF\u7F16\u8F91\u56FE\u7247\u3002\u4EE5\u540E\u5BFC\u51FA\u4F1A\u628A\u5B83\u7559\u5728\u539F\u4F4D\uFF0C\u6539\u7248\u5F0F\u65F6\u5B83\u4E0D\u4F1A\u8DDF\u7740\u52A8\u3002",
+  wmf: "\u8FD9\u5F20\u56FE\u662F WMF \u56FE\u5143\u3002\u4E0D\u80FD\u6539\u6210\u53EF\u7F16\u8F91\u56FE\u7247\u3002\u4EE5\u540E\u5BFC\u51FA\u4F1A\u628A\u5B83\u7559\u5728\u539F\u4F4D\uFF0C\u6539\u7248\u5F0F\u65F6\u5B83\u4E0D\u4F1A\u8DDF\u7740\u52A8\u3002",
+  animation: "\u52A8\u753B\u4E0D\u4F1A\u4FDD\u7559\u3002",
+  group: "\u8FD9\u4E00\u7EC4\u8FD8\u6CA1\u6709\u62C6\u5F00\u3002\u7EC4\u91CC\u7684\u5F62\u72B6\u6682\u65F6\u4E0D\u80FD\u5355\u72EC\u6539\u3002",
+  table: "\u8868\u683C\u8FD8\u6CA1\u6709\u62C6\u8FDB\u5DE5\u7A0B\u3002\u5355\u5143\u683C\u6682\u65F6\u4E0D\u80FD\u6539\u3002",
+  chart: "\u56FE\u8868\u8FD8\u6CA1\u6709\u62C6\u6210\u53EF\u7F16\u8F91\u6570\u636E\u3002",
+  hyperlink: "\u8D85\u94FE\u63A5\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002\u6587\u5B57\u8FD8\u5728\u3002",
+  "custom-geometry": "\u81EA\u5B9A\u4E49\u5F62\u72B6\u8FD8\u6CA1\u6709\u8F6C\u6210\u8DEF\u5F84\u3002",
+  "picture-crop": "\u56FE\u7247\u88C1\u526A\u8FD8\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002\u9636\u6BB5 10 \u4F1A\u7528 crop \u5B57\u6BB5\u4FDD\u4F4F\u88C1\u526A\u3002",
+  retained: "\u8FD9\u4E2A\u5BF9\u8C61\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\uFF0C\u4F46\u4E0D\u80FD\u5728\u5DE5\u7A0B\u91CC\u6539\u7248\u5F0F\u3002\u6539\u7248\u5F0F\u6216\u6362\u98CE\u683C\u65F6\u5B83\u4E0D\u4F1A\u8DDF\u7740\u52A8\u3002"
+};
+
+// apps/electron/resources/skills/ppt-design/engine/import/ooxml.ts
+var EMU_PER_POINT = 12700;
+var IMPORT_LIMITS = {
+  maxBytes: 32 * 1024 * 1024,
+  maxUncompressed: 80 * 1024 * 1024,
+  maxEntries: 4000,
+  maxSlides: 40,
+  maxNodes: 400
+};
+function unzipPackage(bytes, limits = {}) {
+  const maxBytes = limits.maxBytes ?? IMPORT_LIMITS.maxBytes;
+  const maxUncompressed = limits.maxUncompressed ?? IMPORT_LIMITS.maxUncompressed;
+  const maxEntries = limits.maxEntries ?? IMPORT_LIMITS.maxEntries;
+  if (bytes.byteLength < 4 || bytes[0] !== 80 || bytes[1] !== 75)
+    throw new Error("\u4E0D\u662F\u6709\u6548\u7684 PPTX");
+  if (bytes.byteLength > maxBytes)
+    throw new Error(`PPTX \u8D85\u8FC7 ${Math.round(maxBytes / (1024 * 1024))}MB\uFF0C\u5DF2\u505C\u6B62\u5BFC\u5165`);
+  let files;
+  try {
+    files = unzipSync(bytes);
+  } catch {
+    throw new Error("\u4E0D\u662F\u6709\u6548\u7684 PPTX");
+  }
+  const names = Object.keys(files);
+  if (names.length > maxEntries)
+    throw new Error(`PPTX \u6761\u76EE\u8D85\u8FC7 ${maxEntries}\uFF0C\u5DF2\u505C\u6B62\u5BFC\u5165`);
+  let total = 0;
+  for (const [name, value] of Object.entries(files)) {
+    if (name.split("/").includes("..") || name.startsWith("/") || name.includes("\\"))
+      throw new Error("PPTX \u8DEF\u5F84\u65E0\u6548");
+    total += value.byteLength;
+    if (total > maxUncompressed)
+      throw new Error("PPTX \u89E3\u538B\u540E\u8D85\u8FC7\u4E0A\u9650\uFF0C\u5DF2\u505C\u6B62\u5BFC\u5165");
+  }
+  return files;
+}
+function textOf(files, path) {
+  const bytes = files[path];
+  if (!bytes)
+    return "";
+  if (bytes.byteLength > 8 * 1024 * 1024)
+    throw new Error("PPTX \u91CC\u6709\u5355\u4EFD XML \u8D85\u8FC7 8MB");
+  return new TextDecoder("utf-8").decode(bytes);
+}
+function rejectUnsafeXml(xml) {
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml))
+    throw new Error("PPTX \u542B\u6709\u4E0D\u53D7\u652F\u6301\u7684 XML \u58F0\u660E");
+  if (/<\s*script\b/i.test(xml))
+    throw new Error("PPTX \u542B\u6709\u811A\u672C\uFF0C\u5DF2\u505C\u6B62\u5BFC\u5165");
+}
+function attr(source, name) {
+  if (!source)
+    return;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}="([^"]*)"`).exec(source)?.[1];
+}
+function firstLocal(xml, local) {
+  const marker = new RegExp(`<(?:[A-Za-z0-9]+:)?${local}\\b`);
+  const found = marker.exec(xml);
+  if (!found || found.index === undefined)
+    return null;
+  return readNode(xml, found.index)?.node ?? null;
+}
+function firstLocalIn(node, local) {
+  return topLevel(node.inner).find((item) => item.local === local);
+}
+function topLevel(inner) {
+  const nodes = [];
+  let index = 0;
+  while (index < inner.length) {
+    const start = inner.indexOf("<", index);
+    if (start < 0)
+      break;
+    if (inner.startsWith("</", start) || inner.startsWith("<?", start) || inner.startsWith("<!", start)) {
+      const end = inner.indexOf(">", start);
+      index = end < 0 ? inner.length : end + 1;
+      continue;
+    }
+    const read = readNode(inner, start);
+    if (!read)
+      break;
+    nodes.push(read.node);
+    index = read.end;
+  }
+  return nodes;
+}
+function readNode(xml, start) {
+  if (xml[start] !== "<" || xml.startsWith("</", start))
+    return null;
+  const gt = xml.indexOf(">", start);
+  if (gt < 0)
+    return null;
+  let open = xml.slice(start + 1, gt).trim();
+  const selfClosing = open.endsWith("/");
+  if (selfClosing)
+    open = open.slice(0, -1).trim();
+  const name = /^([A-Za-z0-9:]+)/.exec(open)?.[1];
+  if (!name)
+    return null;
+  const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+  const attrs = open.slice(name.length);
+  if (selfClosing)
+    return { node: { local, attrs, inner: "", raw: xml.slice(start, gt + 1) }, end: gt + 1 };
+  let depth = 1;
+  const token = /<(\/?)([A-Za-z0-9:]+)([^>]*)>/g;
+  token.lastIndex = gt + 1;
+  let match;
+  while (match = token.exec(xml)) {
+    const closing = match[1] === "/";
+    const self2 = !closing && /\/\s*$/.test(match[3] ?? "");
+    if (self2)
+      continue;
+    depth += closing ? -1 : 1;
+    if (depth === 0) {
+      return { node: { local, attrs, inner: xml.slice(gt + 1, match.index), raw: xml.slice(start, token.lastIndex) }, end: token.lastIndex };
+    }
+  }
+  return null;
+}
+function decodeXml(value) {
+  return value.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (all, token) => {
+    if (token === "amp")
+      return "&";
+    if (token === "lt")
+      return "<";
+    if (token === "gt")
+      return ">";
+    if (token === "quot")
+      return '"';
+    if (token === "apos")
+      return "'";
+    if (token.startsWith("#x"))
+      return String.fromCodePoint(Number.parseInt(token.slice(2), 16));
+    if (token.startsWith("#"))
+      return String.fromCodePoint(Number.parseInt(token.slice(1), 10));
+    return all;
+  });
+}
+function points(emu) {
+  if (!Number.isFinite(emu))
+    return null;
+  return Math.round(emu / EMU_PER_POINT * 100) / 100;
+}
+function readRels(xml) {
+  if (!xml)
+    return [];
+  rejectUnsafeXml(xml);
+  return [...xml.matchAll(/<Relationship\b[^>]*>/g)].map((match) => ({
+    id: attr(match[0], "Id") ?? "",
+    type: attr(match[0], "Type") ?? "",
+    target: attr(match[0], "Target") ?? "",
+    external: attr(match[0], "TargetMode") === "External"
+  })).filter((item) => item.id && item.target);
+}
+function resolveRel(sourcePart, target) {
+  if (/^(https?:|mailto:)/i.test(target))
+    return null;
+  const raw = target.startsWith("/") ? target.slice(1) : joinPosix(sourcePart.split("/").slice(0, -1).join("/"), target);
+  const parts = [];
+  for (const part of raw.split("/")) {
+    if (!part || part === ".")
+      continue;
+    if (part === "..")
+      parts.pop();
+    else
+      parts.push(part);
+  }
+  const path = parts.join("/");
+  if (!path.startsWith("ppt/") || path.split("/").includes(".."))
+    return null;
+  return path;
+}
+function joinPosix(dir, target) {
+  return `${dir}/${target}`.replaceAll(/\/+/g, "/");
+}
+function relsPath(part) {
+  const name = part.split("/").pop() ?? "";
+  return `${part.split("/").slice(0, -1).join("/")}/_rels/${name}.rels`;
+}
+function themePath(files) {
+  return Object.keys(files).find((name) => /^ppt\/theme\/theme\d+\.xml$/.test(name)) ?? "";
+}
+function slideParts(files, presentation) {
+  const rels = readRels(textOf(files, "ppt/_rels/presentation.xml.rels"));
+  const ids = [...presentation.matchAll(/<p:sldId\b[^>]*>/g)].map((match) => attr(match[0], "r:id")).filter((id) => !!id);
+  return ids.map((id) => {
+    const rel = rels.find((item) => item.id === id);
+    if (!rel || rel.external)
+      throw new Error("PPTX \u9875\u9762\u5173\u7CFB\u65E0\u6548");
+    const path = resolveRel("ppt/presentation.xml", rel.target);
+    if (!path || !files[path])
+      throw new Error("PPTX \u9875\u9762\u5173\u7CFB\u65E0\u6548");
+    return path;
+  });
+}
+
+// apps/electron/resources/skills/ppt-design/engine/import/retained.ts
+var import_jszip3 = __toESM(require_lib3(), 1);
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "fs";
+function emptyManifest() {
+  return { version: 1, slides: [] };
+}
+async function mergeRetained(pptxPath, manifest) {
+  if (!manifest.slides.some((slide) => slide.fragments.length > 0 || slide.backgroundXml))
+    return;
+  const zip = await import_jszip3.default.loadAsync(readFileSync3(pptxPath));
+  let contentTypes = await zip.file("[Content_Types].xml")?.async("string") ?? "";
+  for (let index = 0;index < manifest.slides.length; index++) {
+    const slide = manifest.slides[index];
+    if (slide.fragments.length === 0 && !slide.backgroundXml)
+      continue;
+    const path = `ppt/slides/slide${index + 1}.xml`;
+    const file = zip.file(path);
+    if (!file)
+      continue;
+    let xml = await file.async("string");
+    const relPath = `ppt/slides/_rels/slide${index + 1}.xml.rels`;
+    let rels = await zip.file(relPath)?.async("string") ?? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+    if (slide.backgroundXml && slide.backgroundXml.includes("<p:bg")) {
+      if (xml.includes("<p:bg"))
+        xml = xml.replace(/<p:bg\b[\s\S]*?<\/p:bg>/, slide.backgroundXml);
+      else
+        xml = xml.replace(/<p:spTree\b/, `${slide.backgroundXml}<p:spTree`);
+    }
+    let serial = 1;
+    const blocks = [];
+    for (const fragment of slide.fragments) {
+      if (/<!DOCTYPE|<!ENTITY|<\s*script\b|javascript:/i.test(fragment.xml))
+        continue;
+      let piece = fragment.xml;
+      for (const media of fragment.media) {
+        if (media.target.split("/").includes("..") || media.relId.includes('"'))
+          continue;
+        const relId = `rIdKeep${index + 1}${serial++}`;
+        const safeName = media.target.split("/").pop()?.replace(/[^\w.-]+/g, "") || `part${serial}`;
+        const stored = `ppt/media/retained-${index + 1}-${safeName}`;
+        zip.file(stored, Buffer.from(media.base64, "base64"));
+        piece = piece.split(media.relId).join(relId);
+        const type = media.type || "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+        rels = rels.replace("</Relationships>", `<Relationship Id="${relId}" Type="${escapeAttr(type)}" Target="../media/${stored.split("/").pop()}"/></Relationships>`);
+        contentTypes = addContentType(contentTypes, safeName);
+      }
+      blocks.push(piece);
+    }
+    if (blocks.length > 0)
+      xml = xml.replace("</p:spTree>", `${blocks.join("")}</p:spTree>`);
+    zip.file(path, xml);
+    zip.file(relPath, rels);
+  }
+  if (contentTypes)
+    zip.file("[Content_Types].xml", contentTypes);
+  writeFileSync2(pptxPath, Buffer.from(await zip.generateAsync({ type: "nodebuffer" })));
+}
+function escapeAttr(value) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+function addContentType(xml, fileName) {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  if (!extension || !xml || xml.includes(`Extension="${extension}"`))
+    return xml;
+  const types = {
+    emf: "image/x-emf",
+    wmf: "image/x-wmf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    xml: "application/xml"
+  };
+  const content = types[extension];
+  if (!content)
+    return xml;
+  return xml.replace("</Types>", `<Default Extension="${extension}" ContentType="${content}"/></Types>`);
+}
+
+// apps/electron/resources/skills/ppt-design/engine/import/pptx-to-deck.ts
+var PRESET_SHAPE = {
+  rect: "rect",
+  roundRect: "roundRect",
+  ellipse: "ellipse",
+  line: "line",
+  straightConnector1: "line"
+};
+var SKIP_PLACEHOLDER = new Set(["title", "ctrTitle", "subTitle", "body", "pic"]);
+function importPptx(bytes, options = {}) {
+  const started = Date.now();
+  const fileName = options.fileName?.trim() || "imported.pptx";
+  const source = { kind: "import", fileName, sha256: createHash("sha256").update(bytes).digest("hex") };
+  const diagnostics = [];
+  const assets = {};
+  const retained = emptyManifest();
+  const files = unzipPackage(bytes, options);
+  const presentation = textOf(files, "ppt/presentation.xml");
+  if (!presentation)
+    throw new Error("\u4E0D\u662F\u6709\u6548\u7684 PPTX");
+  rejectUnsafeXml(presentation);
+  const size = attrBlock(presentation, "sldSz");
+  const width = points(Number(attr(size, "cx")));
+  const height = points(Number(attr(size, "cy")));
+  if (width === null || height === null || width < 200 || height < 200 || width > 2000 || height > 2000) {
+    diagnostics.push({ level: "unsupported", feature: "slide-size", message: "\u9875\u9762\u5C3A\u5BF8\u4E0D\u5728 deck.json \u53EF\u63A5\u53D7\u7684\u8303\u56F4\u5185\uFF0C\u6CA1\u6709\u751F\u6210\u5DE5\u7A0B\u3002" });
+    return { deck: null, diagnostics, assets, retained, source };
+  }
+  const themeXml = textOf(files, themePath(files));
+  const scheme = readScheme(themeXml);
+  const fonts = readFonts(themeXml);
+  const theme = buildTheme(fileName, scheme, fonts, diagnostics);
+  const slides = slideParts(files, presentation);
+  if (slides.length === 0)
+    throw new Error("PPTX \u91CC\u6CA1\u6709\u9875\u9762");
+  const maxSlides = options.maxSlides ?? IMPORT_LIMITS.maxSlides;
+  if (slides.length > maxSlides)
+    throw new Error(`PPTX \u8D85\u8FC7\u9875\u6570\u4E0A\u9650\uFF08${maxSlides}\uFF09`);
+  const pages = [];
+  for (const [index, part] of slides.entries()) {
+    if (options.signal?.aborted)
+      throw new Error("\u5BFC\u5165\u5DF2\u53D6\u6D88");
+    if (options.deadlineMs !== undefined && Date.now() - started > options.deadlineMs)
+      throw new Error("\u5BFC\u5165\u8D85\u65F6");
+    const page = importSlide(files, part, index + 1, theme, diagnostics, assets, retained, options);
+    pages.push(page);
+  }
+  const candidate = {
+    format: DECK_FORMAT,
+    version: 2,
+    source,
+    title: titleFrom(fileName),
+    canvas: { width, height },
+    theme,
+    pages
+  };
+  const parsed = parseDeckDocument(candidate);
+  if (!parsed.deck) {
+    for (const item of parsed.issues)
+      diagnostics.push({ level: "unsupported", feature: "schema", message: item.message, elementId: item.elementId });
+    return { deck: null, diagnostics, assets, retained, source };
+  }
+  return { deck: parsed.deck, diagnostics, assets, retained, source };
+}
+function coverageReport(diagnostics) {
+  const counts = { faithful: 0, approximate: 0, retained: 0, unsupported: 0 };
+  for (const item of diagnostics)
+    counts[item.level] += 1;
+  return { counts, rows: diagnostics };
+}
+function importSlide(files, part, slide, theme, diagnostics, assets, retained, options) {
+  const xml = textOf(files, part);
+  rejectUnsafeXml(xml);
+  const rels = readRels(textOf(files, relsPath(part)));
+  const state = blankState(files, part, rels, slide, theme, diagnostics, assets, options);
+  const inherited = inheritedNodes(state);
+  const tree = firstLocal(xml, "spTree");
+  const nodes = visualNodes(tree?.inner ?? "").slice(0, state.maxNodes);
+  if (visualNodes(tree?.inner ?? "").length > state.maxNodes) {
+    diagnostics.push({ level: "unsupported", slide, feature: "object-budget", message: `\u672C\u9875\u5BF9\u8C61\u8D85\u8FC7 ${state.maxNodes} \u4E2A\uFF0C\u591A\u51FA\u6765\u7684\u6CA1\u6709\u8BFB\u3002` });
+  }
+  for (const [index, node] of nodes.entries())
+    expandNode(state, node, index + 1);
+  const background = backgroundOf(state, xml);
+  if (/<p:timing\b/.test(xml))
+    diagnostics.push({ level: "unsupported", slide, feature: "animation", message: IMPORT_USER_MESSAGES.animation, sourceKind: "sp" });
+  if (/<p:transition\b/.test(xml))
+    diagnostics.push({ level: "unsupported", slide, feature: "transition", message: "\u5207\u6362\u4E0D\u4F1A\u4FDD\u7559\u3002" });
+  const notes = notesOf(files, part, rels);
+  const page = {
+    id: `p${slide}`,
+    layout: "free",
+    name: attr(attrBlock(xml, "cSld"), "name") || undefined,
+    background: background.color,
+    elements: [...inherited.elements, ...state.elements],
+    notes,
+    layoutRef: inherited.layoutRef
+  };
+  const contract = parseImageContract(notes, page.elements.map((item) => ({ id: item.id, type: item.type })));
+  if (contract.status === "ok")
+    page.imageSlots = contract.contract;
+  if (contract.status === "invalid")
+    diagnostics.push({ level: "unsupported", slide, feature: "image-slots", message: contract.message });
+  if (contract.status === "ok")
+    diagnostics.push({ level: "faithful", slide, feature: "image-slots", message: "\u5907\u6CE8\u91CC\u7684\u56FE\u7247\u69FD\u5408\u540C\u5DF2\u590D\u5236\u5230\u9875\u7EA7 imageSlots\uFF0C\u5907\u6CE8\u539F\u6587\u4ECD\u4FDD\u7559\u3002" });
+  retained.slides.push({ pageId: page.id, backgroundXml: background.retainedXml, fragments: state.fragments });
+  return page;
+}
+function blankState(files, part, rels, slide, theme, diagnostics, assets, options) {
+  return {
+    files,
+    part,
+    rels,
+    slide,
+    theme,
+    diagnostics,
+    assets,
+    assetDir: options.assetDir,
+    elements: [],
+    used: new Set,
+    fragments: [],
+    frame: null,
+    decoration: false,
+    idPrefix: "",
+    maxNodes: options.maxNodes ?? IMPORT_LIMITS.maxNodes
+  };
+}
+function inheritedNodes(state) {
+  const layoutRel = state.rels.find((item) => item.type.endsWith("/slideLayout") && !item.external);
+  if (!layoutRel)
+    return { elements: [] };
+  const layoutPart = resolveRel(state.part, layoutRel.target);
+  if (!layoutPart)
+    return { elements: [] };
+  state.diagnostics.push({
+    level: "approximate",
+    slide: state.slide,
+    feature: "layout-inheritance",
+    message: "\u6BCD\u7248\u548C\u7248\u5F0F\u4E0A\u7684\u88C5\u9970\u5DF2\u6284\u8FDB\u672C\u9875\uFF0C\u4E4B\u540E\u4E0D\u518D\u8DDF\u7740\u6BCD\u7248\u66F4\u65B0\u3002\u5360\u4F4D\u7B26\u6B63\u6587\u4ECD\u53EA\u7528\u672C\u9875\u76F4\u63A5\u683C\u5F0F\u3002"
+  });
+  const layoutXml = textOf(state.files, layoutPart);
+  rejectUnsafeXml(layoutXml);
+  const layoutRels = readRels(textOf(state.files, relsPath(layoutPart)));
+  const masterRel = layoutRels.find((item) => item.type.endsWith("/slideMaster") && !item.external);
+  const masterPart = masterRel ? resolveRel(layoutPart, masterRel.target) : null;
+  const elements = [];
+  if (masterPart)
+    elements.push(...copyDecorations(state, masterPart, "m-"));
+  elements.push(...copyDecorations(state, layoutPart, "l-", layoutXml, layoutRels));
+  return {
+    elements,
+    layoutRef: {
+      master: masterPart ? attr(attrBlock(textOf(state.files, masterPart), "cSld"), "name") : undefined,
+      layout: attr(attrBlock(layoutXml, "cSld"), "name") || undefined
+    }
+  };
+}
+function copyDecorations(state, part, prefix, xml = textOf(state.files, part), rels = readRels(textOf(state.files, relsPath(part)))) {
+  rejectUnsafeXml(xml);
+  const child = { ...state, part, rels, elements: [], used: new Set(state.used), fragments: state.fragments, decoration: true, idPrefix: prefix, frame: null };
+  const nodes = visualNodes(firstLocal(xml, "spTree")?.inner ?? "");
+  nodes.forEach((node, index) => expandNode(child, node, index + 1));
+  for (const id of child.used)
+    state.used.add(id);
+  return child.elements.map((element) => ({ ...element, role: "decoration" }));
+}
+function expandNode(state, node, index) {
+  if (node.local === "AlternateContent") {
+    state.diagnostics.push({ level: "approximate", slide: state.slide, feature: "alternate-content", message: "\u517C\u5BB9\u5206\u652F\u5DF2\u6539\u8BFB\u5907\u7528\u8868\u793A\u3002" });
+    const branch = topLevel(node.inner).find((item) => item.local === "Fallback") ?? topLevel(node.inner).find((item) => item.local === "Choice");
+    if (!branch)
+      return;
+    topLevel(branch.inner).forEach((child, childIndex) => expandNode(state, child, index * 100 + childIndex));
+    return;
+  }
+  const sourceKind = sourceKindOf(node.local);
+  if (state.decoration && skippedPlaceholder(node))
+    return;
+  if (node.local === "grpSp") {
+    importGroup(state, node, index, sourceKind);
+    return;
+  }
+  if (node.local === "graphicFrame") {
+    importFrame(state, node, index, sourceKind);
+    return;
+  }
+  if (node.local === "pic") {
+    importPicture(state, node, index, sourceKind);
+    return;
+  }
+  if (node.local === "sp" || node.local === "cxnSp") {
+    importShape(state, node, index, sourceKind);
+    return;
+  }
+  if (node.local === "contentPart") {
+    retain(state, node, index, "content-part", IMPORT_USER_MESSAGES.retained, sourceKind ?? "contentPart");
+    return;
+  }
+  state.diagnostics.push({ level: "unsupported", slide: state.slide, feature: node.local || "unknown", elementId: shapeName(node), message: IMPORT_USER_MESSAGES.retained, sourceKind });
+}
+function importGroup(state, node, index, sourceKind) {
+  const id = elementId(state, shapeName(node) || `group-${index}`, index);
+  const children = visualNodes(node.inner);
+  const frame = compose(state.frame, groupFrame(node));
+  if (children.length === 0 || !frame) {
+    retain(state, node, index, "group", IMPORT_USER_MESSAGES.group, sourceKind, id);
+    return;
+  }
+  const before = state.elements.length;
+  const child = { ...state, frame };
+  children.forEach((item, childIndex) => expandNode(child, item, index * 100 + childIndex));
+  const added = state.elements.slice(before);
+  if (added.length === 0) {
+    retain(state, node, index, "group", IMPORT_USER_MESSAGES.group, sourceKind, id);
+    return;
+  }
+  for (const element of added)
+    element.group = { id };
+  state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "group", sourceKind, message: "\u7EC4\u5408\u5DF2\u62C6\u5F00\u3002\u5B50\u5F62\u72B6\u53EF\u4EE5\u5355\u72EC\u6539\uFF0Cgroup \u5B57\u6BB5\u4ECD\u8BB0\u4E0B\u539F\u6765\u7684\u7EC4\u3002" });
+}
+function importFrame(state, node, index, sourceKind) {
+  const uri = attr(/<a:graphicData\b[^>]*>/.exec(node.inner)?.[0] ?? "", "uri") ?? "";
+  if (uri.includes("diagram")) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: shapeName(node), feature: "smartart", sourceKind, message: IMPORT_USER_MESSAGES.smartart });
+    return;
+  }
+  if (uri.includes("ole")) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: shapeName(node), feature: "embedded-object", sourceKind, message: IMPORT_USER_MESSAGES["embedded-object"] });
+    return;
+  }
+  if (uri.includes("table") || /<a:tbl\b/.test(node.inner)) {
+    const table = tableOf(state, node);
+    if (table === "merged") {
+      retain(state, node, index, "table-merge", "\u8868\u683C\u542B\u6709\u5408\u5E76\u5355\u5143\u683C\uFF0C\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\uFF0C\u5355\u5143\u683C\u4E0D\u80FD\u5728\u5DE5\u7A0B\u91CC\u6539\u3002", sourceKind);
+      return;
+    }
+    if (table) {
+      state.elements.push(table);
+      state.diagnostics.push({ level: "faithful", slide: state.slide, elementId: table.id, feature: "table", sourceKind, message: "\u89C4\u5219\u8868\u683C\u5DF2\u62C6\u6210\u53EF\u7F16\u8F91\u5355\u5143\u683C\u3002" });
+      return;
+    }
+    retain(state, node, index, "table", IMPORT_USER_MESSAGES.table, sourceKind);
+    return;
+  }
+  if (uri.includes("chart")) {
+    const chart = chartOf(state, node);
+    if (chart) {
+      state.elements.push(chart);
+      state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: chart.id, feature: "chart", sourceKind, message: "\u56FE\u8868\u5DF2\u6309\u7F13\u5B58\u6570\u636E\u91CD\u5EFA\u3002\u6837\u5F0F\u6536\u8FDB\u4E3B\u9898\uFF0C\u4E0D\u4FDD\u7559\u539F\u56FE\u8868\u7684\u5168\u90E8\u88C5\u9970\u3002" });
+      return;
+    }
+    retain(state, node, index, "chart", IMPORT_USER_MESSAGES.chart, sourceKind);
+    return;
+  }
+  state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: shapeName(node), feature: "graphic", sourceKind, message: IMPORT_USER_MESSAGES.retained });
+}
+function importShape(state, node, index, sourceKind) {
+  const rawBounds = boundsOf(node);
+  const bounds = rawBounds ? place(rawBounds, state.frame) : null;
+  const id = elementId(state, shapeName(node) || `shape-${index}`, index);
+  if (!bounds) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "bounds", sourceKind, message: "\u8FD9\u4E2A\u5BF9\u8C61\u6CA1\u6709\u53EF\u7528\u7684\u4E8C\u7EF4\u8FB9\u754C\uFF0C\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002" });
+    return;
+  }
+  noteEffects(state, node, id);
+  const placeholder = /<p:ph\b[^>]*>/.exec(node.inner)?.[0];
+  if (placeholder && !state.decoration) {
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "placeholder", sourceKind, message: `\u5360\u4F4D\u7B26\uFF08${attr(placeholder, "type") || "body"}\uFF09\u7684\u6BCD\u7248\u6837\u5F0F\u6CA1\u6709\u5C55\u5F00\uFF0C\u6587\u672C\u6309\u672C\u9875\u76F4\u63A5\u683C\u5F0F\u5199\u5165\u3002` });
+  }
+  const txBody = firstLocalIn(node, "txBody");
+  const text = txBody ? readText(state, txBody.inner, id) : undefined;
+  const preset = presetOf(node);
+  const fillKind = fillKindOf(node);
+  if (preset === "custom") {
+    const path = pathFromGeom(node, bounds);
+    if (!path) {
+      retain(state, node, index, "custom-geometry", IMPORT_USER_MESSAGES["custom-geometry"], sourceKind);
+      return;
+    }
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "custom-geometry", sourceKind, message: "\u81EA\u5B9A\u4E49\u5F62\u72B6\u5DF2\u8F6C\u6210\u8DEF\u5F84\u3002" });
+    pushShape(state, node, text?.value ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
+  } else if (preset && PRESET_SHAPE[preset]) {
+    pushShape(state, node, text ? elementId(state, `${id}-shape`, index) : id, bounds, PRESET_SHAPE[preset], undefined, fillKind, sourceKind);
+  } else if (preset && presetPath(preset, bounds)) {
+    const path = presetPath(preset, bounds);
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "preset-shape", sourceKind, message: `\u9884\u8BBE\u5F62\u72B6\u300C${preset}\u300D\u5DF2\u6536\u6210\u8DEF\u5F84\u3002` });
+    pushShape(state, node, text ? elementId(state, `${id}-shape`, index) : id, bounds, "path", path, fillKind, sourceKind);
+  } else if (preset) {
+    retain(state, node, index, "preset-shape", `\u9884\u8BBE\u5F62\u72B6\u300C${preset}\u300D\u8FD8\u4E0D\u80FD\u6620\u5C04\uFF0C\u5DF2\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\u3002`, sourceKind);
+    return;
+  }
+  if (fillKind === "picture")
+    importPictureFill(state, node, id, bounds, preset, sourceKind);
+  if (text?.value) {
+    state.elements.push(textElement(state, id, text.value, bounds, txBody?.inner ?? "", text.runs));
+    state.diagnostics.push({ level: text.runs ? "approximate" : "faithful", slide: state.slide, elementId: id, feature: "text", sourceKind, message: "\u6587\u672C\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
+  }
+}
+function pushShape(state, node, id, bounds, shape, path, fillKind, sourceKind) {
+  const solid = fillKind === "solid" ? paintOf(shapePaintXml(node), state.theme) : undefined;
+  const gradient = fillKind === "gradient" ? gradientOf(shapePaintXml(node), state.theme, state) : undefined;
+  const pattern = fillKind === "pattern" ? patternOf(shapePaintXml(node), state.theme, state) : undefined;
+  const line = lineOf(state, node);
+  const visible = Boolean(solid || gradient || pattern || line || shape === "line" || path);
+  if (!visible)
+    return;
+  const element = { id, type: "shape", shape, bounds, role: state.decoration ? "decoration" : shape === "line" ? "rule" : "panel" };
+  if (path)
+    element.path = path;
+  if (solid)
+    element.fill = bindColor(state, solid);
+  if (gradient)
+    element.gradient = gradient;
+  if (pattern)
+    element.pattern = pattern;
+  if (line)
+    element.line = line;
+  const shadow = shadowOf(state, node);
+  if (shadow)
+    element.shadow = shadow;
+  const arrow = arrowOf(node);
+  if (arrow === "other")
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "arrow", sourceKind, message: "\u7BAD\u5934\u5DF2\u8BB0\u6210\u7EBF\u6BB5\uFF0C\u7BAD\u5934\u6837\u5F0F\u6CA1\u6709\u5199\u5165\u3002" });
+  else if (arrow)
+    element.arrow = arrow;
+  if (shape === "roundRect")
+    element.radius = radiusOf(node, bounds);
+  const link = linkOf(state, node);
+  if (link)
+    element.link = { href: link };
+  if (!element.fill && !element.gradient && !element.pattern && shape !== "line")
+    element.fill = "$paper";
+  state.elements.push(element);
+  state.diagnostics.push({ level: gradient || pattern || path ? "approximate" : "faithful", slide: state.slide, elementId: id, feature: "shape", sourceKind, message: "\u5F62\u72B6\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
+}
+function importPicture(state, node, index, sourceKind) {
+  const id = elementId(state, shapeName(node) || `picture-${index}`, index);
+  const raw = boundsOf(node);
+  const bounds = raw ? place(raw, state.frame) : null;
+  if (!bounds) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "bounds", sourceKind, message: "\u8FD9\u5F20\u56FE\u7247\u6CA1\u6709\u53EF\u7528\u7684\u8FB9\u754C\uFF0C\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002" });
+    return;
+  }
+  if (/<a:videoFile\b|<p:video\b/.test(node.inner) || mediaKind(embedTarget(state, node), state.files) === "video") {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "video", sourceKind, message: IMPORT_USER_MESSAGES.video });
+    return;
+  }
+  if (mediaKind(embedTarget(state, node), state.files) === "audio") {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "audio", sourceKind, message: IMPORT_USER_MESSAGES.audio });
+    return;
+  }
+  const kind = mediaKind(embedTarget(state, node), state.files);
+  if (kind === "emf" || kind === "wmf") {
+    retain(state, node, index, kind, IMPORT_USER_MESSAGES[kind], sourceKind, id);
+    return;
+  }
+  const image = takeImage(state, node, id, bounds, sourceKind);
+  if (image) {
+    state.elements.push(image);
+    return;
+  }
+  if (kind !== "png" && kind !== "jpeg" && kind !== "video" && kind !== "audio") {
+    retain(state, node, index, "picture", IMPORT_USER_MESSAGES.retained, sourceKind, id);
+  }
+}
+function importPictureFill(state, node, id, bounds, preset, sourceKind) {
+  const image = takeImage(state, node, elementId(state, `${id}-fill`, 0), bounds, sourceKind);
+  if (!image) {
+    retain(state, node, 0, "picture-fill", "\u5F62\u72B6\u4E0A\u7684\u56FE\u7247\u586B\u5145\u5DF2\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\u3002", sourceKind);
+    return;
+  }
+  const mask = maskOf(preset);
+  if (mask)
+    image.mask = mask;
+  state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: image.id, feature: "picture-fill", sourceKind, message: "\u5F62\u72B6\u4E0A\u7684\u56FE\u7247\u586B\u5145\u5DF2\u62C6\u6210\u56FE\u7247\u3002\u906E\u7F69\u8BB0\u5728 mask \u4E0A\u3002" });
+  state.elements.push(image);
+}
+function takeImage(state, node, id, bounds, sourceKind) {
+  const embed = attr(/<a:blip\b[^>]*>/.exec(node.inner)?.[0] ?? "", "r:embed");
+  const rel = state.rels.find((item) => item.id === embed);
+  if (!rel || rel.external) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "external-media", sourceKind, message: "\u5916\u90E8\u56FE\u7247\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002" });
+    return null;
+  }
+  const target = resolveRel(state.part, rel.target);
+  const kind = mediaKind(target, state.files);
+  if (kind !== "png" && kind !== "jpeg")
+    return null;
+  const bytes = target ? state.files[target] : undefined;
+  if (!bytes) {
+    state.diagnostics.push({ level: "unsupported", slide: state.slide, elementId: id, feature: "picture", sourceKind, message: "\u56FE\u7247\u6570\u636E\u4E0D\u5728\u6587\u4EF6\u91CC\uFF0C\u6CA1\u6709\u5199\u5165\u5DE5\u7A0B\u3002" });
+    return null;
+  }
+  const assetName = `slide${state.slide}-${id}.${kind === "png" ? "png" : "jpg"}`;
+  state.assets[assetName] = bytes;
+  const src = state.assetDir ? writeAsset(state.assetDir, assetName, bytes) : assetName;
+  const element = { id, type: "image", bounds, src, alt: shapeName(node) || "\u5BFC\u5165\u56FE\u7247", fit: "fill", role: state.decoration ? "decoration" : "content" };
+  const crop = cropOf(node);
+  if (crop) {
+    element.crop = crop;
+    state.diagnostics.push({ level: "faithful", slide: state.slide, elementId: id, feature: "picture-crop", sourceKind, message: "\u56FE\u7247\u88C1\u526A\u5DF2\u5199\u5165 crop\u3002" });
+  }
+  const geom = presetOf(node);
+  if (geom && geom !== "rect")
+    element.mask = maskOf(geom);
+  const link = linkOf(state, node);
+  if (link)
+    element.link = { href: link };
+  state.diagnostics.push({ level: "faithful", slide: state.slide, elementId: id, feature: "picture", sourceKind, message: "\u56FE\u7247\u5DF2\u5199\u5165\u5DE5\u7A0B\u3002" });
+  return element;
+}
+function cellFill(state, cell) {
+  const tcPr = /<a:tcPr\b[\s\S]*?<\/a:tcPr>/.exec(cell)?.[0] ?? "";
+  const color = tcPr ? paintOf(tcPr, state.theme) : undefined;
+  return color ? bindColor(state, color) : undefined;
+}
+function retain(state, node, index, feature, message, sourceKind, existingId) {
+  const id = existingId ?? elementId(state, shapeName(node) || feature, index);
+  const raw = boundsOf(node);
+  const bounds = raw ? place(raw, state.frame) : null;
+  state.diagnostics.push({ level: bounds ? "retained" : "unsupported", slide: state.slide, elementId: id, feature, sourceKind, message });
+  if (!bounds)
+    return;
+  state.fragments.push({ elementId: id, feature, xml: node.raw, media: collectMedia(state, node.raw) });
+  state.elements.push({
+    id,
+    type: "shape",
+    shape: "rect",
+    bounds,
+    role: "decoration",
+    fill: "$paper",
+    retained: { feature, message }
+  });
+}
+function tableOf(state, node) {
+  if (/gridSpan="[2-9]|rowSpan="[2-9]|hMerge="1"|vMerge="1"/.test(node.inner))
+    return "merged";
+  const grid = [...node.inner.matchAll(/<a:gridCol\b[^>]*\bw="(\d+)"/g)].map((match) => Number(match[1]));
+  const rowsXml = [...node.inner.matchAll(/<a:tr\b([^>]*)>([\s\S]*?)<\/a:tr>/g)];
+  if (grid.length === 0 || rowsXml.length === 0)
+    return null;
+  const bounds = place(boundsOf(node) ?? { x: 48, y: 48, w: 400, h: 120 }, state.frame);
+  const rows = rowsXml.map((match) => {
+    const cells = [...match[2].matchAll(/<a:tc\b[\s\S]*?<\/a:tc>/g)].map((cell) => cell[0] ?? "");
+    if (cells.length !== grid.length)
+      return null;
+    return cells.map((cell) => ({
+      text: paragraphText(firstLocal(cell, "txBody")?.inner ?? ""),
+      bold: /\bb="(?:1|true)"/.test(cell) ? true : undefined,
+      fill: cellFill(state, cell)
+    }));
+  });
+  if (rows.some((row) => !row))
+    return null;
+  const sum = grid.reduce((total, value) => total + value, 0) || 1;
+  const id = elementId(state, shapeName(node) || "table", 1);
+  const fontSize = Math.min(32, Math.max(12, fontSizeOf(node.inner)));
+  return {
+    id,
+    type: "table",
+    bounds,
+    role: "content",
+    table: {
+      columns: grid.map((value) => value / sum),
+      rowHeights: rowsXml.map((match) => Math.max(fontSize + 8, points(Number(attr(match[1] ?? "", "h"))) ?? fontSize + 10)),
+      rows,
+      fontSize,
+      fontFamily: containsCjk2(rows.flat().map((cell) => cell?.text ?? "").join("")) ? "$cjk" : "$latin",
+      color: "$ink",
+      fill: "$paper",
+      border: { color: "$line", width: 0.75 },
+      header: rows[0]?.some((cell) => cell?.bold) ? { bold: true, fill: "$surface", color: "$ink" } : undefined
+    }
+  };
+}
+function chartOf(state, node) {
+  const relId = attr(/<c:chart\b[^>]*>/.exec(node.inner)?.[0] ?? "", "r:id");
+  const rel = state.rels.find((item) => item.id === relId && !item.external);
+  const target = rel ? resolveRel(state.part, rel.target) : null;
+  const xml = target ? textOf(state.files, target) : "";
+  if (!xml)
+    return null;
+  rejectUnsafeXml(xml);
+  const kind = chartKind(xml);
+  if (!kind)
+    return null;
+  const seriesXml = [...xml.matchAll(/<c:ser\b[\s\S]*?<\/c:ser>/g)].map((match) => match[0] ?? "");
+  if (seriesXml.length === 0)
+    return null;
+  const categories = categoriesOf(seriesXml[0]);
+  const series = seriesXml.map((block) => {
+    const values = numbersOf(block, "c:val").concat(kind === "scatter" || kind === "bubble" ? [] : numbersOf(block, "c:yVal"));
+    const ys = values.length > 0 ? values : numbersOf(block, "c:yVal");
+    return { name: decodeXml(/<c:tx\b[\s\S]*?<c:v>([^<]*)<\/c:v>/.exec(block)?.[1] ?? "\u7CFB\u5217"), values: ys };
+  }).filter((item) => item.values.length > 0);
+  if (series.length === 0)
+    return null;
+  const count = Math.max(categories.length, ...series.map((item) => item.values.length));
+  const cats = categories.length === count ? categories : Array.from({ length: count }, (_, item) => categories[item] ?? String(item + 1));
+  const bounds = place(boundsOf(node) ?? { x: 48, y: 120, w: 480, h: 280 }, state.frame);
+  const id = elementId(state, shapeName(node) || "chart", 1);
+  const chart = {
+    kind,
+    categories: cats,
+    series: series.map((item) => ({ name: item.name || "\u7CFB\u5217", values: pad(item.values, count) })),
+    showLegend: series.length > 1,
+    showValues: false
+  };
+  return { id, type: "chart", bounds, role: "content", chart };
+}
+function chartKind(xml) {
+  if (/<c:barChart\b/.test(xml)) {
+    const grouping = /<c:grouping\b[^>]*\bval="([^"]+)"/.exec(xml)?.[1];
+    if (grouping === "stacked")
+      return "stacked";
+    if (grouping === "percentStacked")
+      return "stackedPercent";
+    return /<c:barDir\b[^>]*\bval="bar"/.test(xml) ? "bar" : "column";
+  }
+  if (/<c:lineChart\b/.test(xml))
+    return "line";
+  if (/<c:pieChart\b/.test(xml))
+    return "pie";
+  if (/<c:doughnutChart\b/.test(xml))
+    return "doughnut";
+  if (/<c:areaChart\b/.test(xml))
+    return "area";
+  if (/<c:scatterChart\b/.test(xml))
+    return "scatter";
+  if (/<c:bubbleChart\b/.test(xml))
+    return "bubble";
+  if (/<c:radarChart\b/.test(xml))
+    return "radar";
+  return null;
+}
+function categoriesOf(block) {
+  const cat = /<c:cat\b[\s\S]*?<\/c:cat>/.exec(block)?.[0] ?? "";
+  const values = [...cat.matchAll(/<c:v>([^<]*)<\/c:v>/g)].map((match) => decodeXml(match[1] ?? ""));
+  return values.filter((item) => item.trim().length > 0);
+}
+function numbersOf(block, tag) {
+  const section = new RegExp(`<${tag}\\b[\\s\\S]*?<\\/${tag}>`).exec(block)?.[0] ?? "";
+  return [...section.matchAll(/<c:v>([^<]*)<\/c:v>/g)].map((match) => Number(match[1])).filter((value) => Number.isFinite(value));
+}
+function pad(values, count) {
+  return Array.from({ length: count }, (_, index) => values[index] ?? 0);
+}
+function readText(state, txBody, id) {
+  const paragraphs = [...txBody.matchAll(/<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g)].map((match) => match[1] ?? "");
+  const source = paragraphs.length > 0 ? paragraphs : [txBody];
+  const runs = [];
+  let bullets = false;
+  source.forEach((paragraph, paragraphIndex) => {
+    const bullet = bulletPrefix(paragraph, paragraphIndex);
+    if (bullet)
+      bullets = true;
+    const pieces = [...paragraph.matchAll(/<a:r\b[^>]*>([\s\S]*?)<\/a:r>/g)].map((match) => match[1] ?? "");
+    if (pieces.length === 0 && bullet)
+      runs.push({ text: bullet.trim() });
+    pieces.forEach((piece, pieceIndex) => {
+      const text = `${pieceIndex === 0 ? bullet : ""}${decodeXml(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/.exec(piece)?.[1] ?? "")}`;
+      if (!text)
+        return;
+      runs.push({
+        text,
+        size: fontSizeOf(piece),
+        bold: /\bb="(?:1|true)"/.test(piece) ? true : undefined,
+        italic: /\bi="(?:1|true)"/.test(piece) ? true : undefined,
+        color: paintOf(piece, state.theme) ? bindColor(state, paintOf(piece, state.theme)) : undefined
+      });
+    });
+    if (paragraphIndex < source.length - 1 && runs.length > 0)
+      runs[runs.length - 1].text += `
+`;
+  });
+  const value = runs.map((run) => run.text).join("").trim();
+  if (!value)
+    return;
+  if (/<a:hlinkClick\b/.test(txBody)) {
+    const href = linkOf(state, { local: "tx", attrs: "", inner: txBody, raw: txBody });
+    if (href)
+      state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "hyperlink", message: "\u8D85\u94FE\u63A5\u5DF2\u5199\u5165 link.href\u3002" });
+    else
+      state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "hyperlink", message: IMPORT_USER_MESSAGES.hyperlink });
+  }
+  if (bullets)
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "bullets", message: "\u9879\u76EE\u7B26\u53F7\u5DF2\u5199\u8FDB\u6B63\u6587\u3002" });
+  if (/<a:spAutoFit\b|<a:normAutofit\b/.test(txBody))
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "autofit", message: "\u5DF2\u6309\u6587\u672C\u6846\u8BA1\u7B97\u5BB9\u91CF\uFF0C\u6CA1\u6709\u6539\u5B57\u53F7\u3002" });
+  const mixed = runs.length > 1 && new Set(runs.map((run) => `${run.size}|${run.bold}|${run.color}`)).size > 1;
+  if (mixed)
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "rich-text", message: "\u540C\u4E00\u6587\u672C\u6846\u91CC\u7684\u4E0D\u540C\u6837\u5F0F\u5DF2\u5199\u5165 runs\u3002" });
+  return { value, runs: mixed ? runs : undefined };
+}
+function textElement(state, id, value, bounds, txBody, runs) {
+  const size = fontSizeOf(txBody);
+  const leading = leadingOf(txBody, size) ?? defaultLeading(size);
+  const family = containsCjk2(value) ? "$cjk" : "$latin";
+  const color = paintOf(runPaintXml(txBody), state.theme) ?? state.theme.colors.ink;
+  const maxLines = Math.max(1, Math.floor((bounds.h + 0.5) / (size * leading)));
+  const perLine = Math.max(1, Math.floor(bounds.w / Math.max(size, 1)));
+  const glyphs = Array.from(value.replaceAll(`
+`, "")).length;
+  const link = linkOf(state, { local: "tx", attrs: "", inner: txBody, raw: txBody });
+  return {
+    id,
+    type: "text",
+    bounds,
+    role: state.decoration ? "decoration" : "content",
+    text: value,
+    textCapacity: { maxChars: Math.max(glyphs, perLine * maxLines, 8), maxLines: Math.max(maxLines, value.split(`
+`).length) },
+    font: {
+      family,
+      size,
+      weight: /\bb="(?:1|true)"/.test(txBody) ? "bold" : "regular",
+      italic: /\bi="(?:1|true)"/.test(txBody) ? true : undefined,
+      color: bindColor(state, color),
+      align: alignOf(txBody),
+      valign: valignOf(txBody),
+      leading,
+      face: faceOf(txBody, state.theme)
+    },
+    runs,
+    link: link ? { href: link } : undefined
+  };
+}
+function backgroundOf(state, xml) {
+  const bg = firstLocal(xml, "bg");
+  if (!bg)
+    return { color: "$paper" };
+  if (/<a:blipFill\b/.test(bg.inner) && /<a:tile\b/.test(bg.inner)) {
+    state.diagnostics.push({ level: "approximate", slide: state.slide, feature: "background-tile", message: "\u5E73\u94FA\u80CC\u666F\u5DF2\u6309\u9875\u9762\u8FB9\u754C\u94FA\u6EE1\u3002" });
+    const size = attrBlock(textOf(state.files, "ppt/presentation.xml"), "sldSz");
+    const width = points(Number(attr(size, "cx"))) ?? 960;
+    const height = points(Number(attr(size, "cy"))) ?? 540;
+    const image = takeImage(state, bg, elementId(state, "background-tile", 1), { x: 0, y: 0, w: width, h: height }, undefined);
+    if (image) {
+      image.role = "decoration";
+      state.elements.unshift(image);
+    }
+    return { color: "$paper" };
+  }
+  if (/<a:blipFill\b/.test(bg.inner)) {
+    state.diagnostics.push({ level: "retained", slide: state.slide, feature: "background-picture", message: "\u80CC\u666F\u56FE\u7247\u6309\u539F\u4F4D\u7F6E\u4FDD\u7559\uFF0C\u4E0D\u80FD\u5728\u5DE5\u7A0B\u91CC\u6539\u3002\u5BFC\u51FA\u65F6\u8D34\u56DE\uFF0C\u6539\u7248\u5F0F\u65F6\u5B83\u4E0D\u4F1A\u8DDF\u7740\u52A8\u3002" });
+    return { color: "$paper", retainedXml: bg.raw };
+  }
+  const color = paintOf(bg.inner, state.theme);
+  return { color: color ? bindColor(state, color, "paper") : "$paper" };
+}
+function notesOf(files, part, rels) {
+  const rel = rels.find((item) => item.type.endsWith("/notesSlide") && !item.external);
+  if (!rel)
+    return;
+  const target = resolveRel(part, rel.target);
+  if (!target)
+    return;
+  const xml = textOf(files, target);
+  rejectUnsafeXml(xml);
+  const bodies = topLevel(firstLocal(xml, "spTree")?.inner ?? "").filter((node) => node.local === "sp" && /<p:ph\b[^>]*\btype="body"/.test(node.inner));
+  const notes = bodies.map((node) => paragraphText(firstLocalIn(node, "txBody")?.inner ?? "")).filter(Boolean).join(`
+`);
+  return notes || undefined;
+}
+function buildTheme(fileName, scheme, fonts, diagnostics) {
+  const ink = scheme.dk1 ?? "#111111";
+  const paper = scheme.lt1 ?? "#FFFFFF";
+  const muted = scheme.dk2 ?? "#5C5A55";
+  const accent = scheme.accent1 ?? "#C41628";
+  const surface = scheme.lt2 ?? "#F5F3EE";
+  if (!scheme.dk1)
+    diagnostics.push({ level: "approximate", feature: "theme", message: "\u6587\u4EF6\u6CA1\u6709\u53EF\u7528\u7684\u4E3B\u9898\u8272\uFF0C\u5DF2\u7528\u4E2D\u6027\u56DE\u9000\u8272\u3002\u6362\u98CE\u683C\u524D\u9700\u8981\u6362\u6210\u4E00\u5957 theme\u3002" });
+  if (fonts.latin || fonts.ea)
+    diagnostics.push({ level: "approximate", feature: "theme-font", message: "\u4E3B\u9898\u5B57\u4F53\u5DF2\u5199\u5230 mac\u3001win\u3001linux \u4E09\u7AEF\uFF0C\u4F7F\u7528\u6587\u4EF6\u91CC\u7684\u540C\u4E00\u4E2A\u5B57\u4F53\u540D\u3002" });
+  const latin = fonts.latin || "Arial";
+  const ea = fonts.ea || "Microsoft YaHei";
+  return {
+    id: "imported",
+    name: titleFrom(fileName),
+    margin: 48,
+    colors: { ink, paper, muted, accent, line: "#CBC8C0", surface, inverse: "#FFFFFF" },
+    fonts: { cjk: { mac: ea, win: ea, linux: ea }, latin: { mac: latin, win: latin, linux: latin } },
+    type: { display: { min: 44, max: 84 }, title: { min: 28, max: 36 }, body: { min: 16, max: 22 }, caption: { min: 11, max: 14 } },
+    source: "\u7531\u5916\u6765 PPTX \u5BFC\u5165\u3002\u914D\u8272\u6765\u81EA\u6587\u4EF6\u4E3B\u9898\u6216\u56DE\u9000\u8272\uFF0C\u4E0D\u662F\u5DF2\u53D1\u5E03\u6A21\u677F\u3002"
+  };
+}
+function bindColor(state, hex, prefer) {
+  const upper = hex.toUpperCase();
+  if (prefer === "paper" && state.theme.colors.paper.toUpperCase() === upper)
+    return "$paper";
+  for (const key of ["ink", "accent", "muted", "line", "paper", "surface", "inverse"]) {
+    if (state.theme.colors[key]?.toUpperCase() === upper)
+      return `$${key}`;
+  }
+  if (!state.diagnostics.some((item) => item.feature === "direct-color")) {
+    state.diagnostics.push({ level: "approximate", feature: "direct-color", message: "\u6709\u989C\u8272\u5199\u6210\u4E86\u76F4\u63A5\u8272\u503C\u3002\u548C\u4E3B\u9898\u76F8\u540C\u7684\u989C\u8272\u624D\u4F1A\u6536\u6210 token\uFF1B\u8FD9\u4E9B\u76F4\u63A5\u8272\u5728\u6574\u5957\u6362\u98CE\u683C\u65F6\u4E0D\u4F1A\u8DDF\u7740\u53D8\u3002" });
+  }
+  return upper.startsWith("#") ? upper : `#${upper}`;
+}
+function paintOf(xml, scheme) {
+  const colors = "colors" in scheme ? schemeMap(scheme) : scheme;
+  const srgb = /<a:srgbClr\b([^>]*?)(?:\/>|>([\s\S]*?)<\/a:srgbClr>)/.exec(xml);
+  if (srgb && attr(srgb[1] ?? "", "val"))
+    return modulate(`#${attr(srgb[1] ?? "", "val")}`, srgb[2] ?? "");
+  const schemeClr = /<a:schemeClr\b([^>]*?)(?:\/>|>([\s\S]*?)<\/a:schemeClr>)/.exec(xml);
+  if (schemeClr) {
+    const token = attr(schemeClr[1] ?? "", "val") ?? "";
+    const mapped = colors[token];
+    if (mapped)
+      return modulate(mapped, schemeClr[2] ?? "");
+  }
+  const sys = /<a:sysClr\b[^>]*\blastClr="([0-9A-Fa-f]{6})"/.exec(xml);
+  if (sys)
+    return `#${sys[1].toUpperCase()}`;
+  return;
+}
+function schemeMap(theme) {
+  return { dk1: theme.colors.ink, lt1: theme.colors.paper, dk2: theme.colors.muted, lt2: theme.colors.surface, accent1: theme.colors.accent, ...theme.colors };
+}
+function modulate(hex, inner) {
+  if (!inner || !/<a:(?:shade|tint|lumMod)\b/.test(inner))
+    return hex.toUpperCase();
+  let [r, g, b] = rgb(hex);
+  const shade = numberAttr(inner, "shade");
+  const tint = numberAttr(inner, "tint");
+  const lumMod = numberAttr(inner, "lumMod");
+  if (shade !== undefined) {
+    r *= shade;
+    g *= shade;
+    b *= shade;
+  }
+  if (tint !== undefined) {
+    r = r * tint + 255 * (1 - tint);
+    g = g * tint + 255 * (1 - tint);
+    b = b * tint + 255 * (1 - tint);
+  }
+  if (lumMod !== undefined) {
+    r *= lumMod;
+    g *= lumMod;
+    b *= lumMod;
+  }
+  return `#${[r, g, b].map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+function rgb(hex) {
+  const raw = hex.replace("#", "");
+  return [Number.parseInt(raw.slice(0, 2), 16), Number.parseInt(raw.slice(2, 4), 16), Number.parseInt(raw.slice(4, 6), 16)];
+}
+function numberAttr(xml, name) {
+  const value = Number(attr(new RegExp(`<a:${name}\\b[^>]*>`).exec(xml)?.[0] ?? "", "val"));
+  return Number.isFinite(value) ? value / 1e5 : undefined;
+}
+function gradientOf(xml, theme, state) {
+  const block = firstLocal(xml, "gradFill");
+  if (!block)
+    return;
+  const stops = topLevel(firstLocalIn(block, "gsLst")?.inner ?? "").filter((node) => node.local === "gs").map((node) => ({
+    offset: Math.max(0, Math.min(1, Number(attr(node.attrs, "pos") ?? "0") / 1e5)),
+    color: bindColor(state, paintOf(node.inner, theme) ?? theme.colors.ink)
+  }));
+  if (stops.length < 2)
+    return;
+  const radial = /<a:path\b[^>]*\bpath="circle"/.test(block.inner);
+  if (!radial && !/<a:lin\b/.test(block.inner)) {
+    state.diagnostics.push({ level: "approximate", slide: state.slide, feature: "gradient", message: "\u8FD9\u79CD\u6E10\u53D8\u5DF2\u6536\u6210\u7EBF\u6027\u6E10\u53D8\u3002" });
+  }
+  const ang = Number(attr(/<a:lin\b[^>]*>/.exec(block.inner)?.[0] ?? "", "ang"));
+  return { kind: radial ? "radial" : "linear", angle: Number.isFinite(ang) ? ang / 60000 : 0, stops };
+}
+function patternOf(xml, theme, state) {
+  const block = firstLocal(xml, "pattFill");
+  if (!block)
+    return;
+  const preset = attr(block.attrs, "prst") ?? "";
+  if (!/^[A-Za-z][A-Za-z0-9]{0,20}$/.test(preset))
+    return;
+  const foreground = paintOf(firstLocalIn(block, "fgClr")?.inner ?? "", theme) ?? theme.colors.ink;
+  const background = paintOf(firstLocalIn(block, "bgClr")?.inner ?? "", theme) ?? theme.colors.paper;
+  return { preset, foreground: bindColor(state, foreground), background: bindColor(state, background) };
+}
+function shadowOf(state, node) {
+  const shadow = firstLocal(node.inner, "outerShdw");
+  if (!shadow)
+    return;
+  const color = paintOf(shadow.inner || shadow.raw, state.theme);
+  if (!color)
+    return;
+  const blur = points(Number(attr(shadow.attrs, "blurRad"))) ?? undefined;
+  const offset = points(Number(attr(shadow.attrs, "dist"))) ?? undefined;
+  const angle = Number(attr(shadow.attrs, "dir"));
+  const alpha = numberAttr(shadow.inner, "alpha");
+  return {
+    color: bindColor(state, color),
+    blur,
+    offset,
+    angle: Number.isFinite(angle) ? angle / 60000 : undefined,
+    opacity: alpha
+  };
+}
+function lineOf(state, node) {
+  const ln = /<a:ln\b([^>]*)>([\s\S]*?)<\/a:ln>/.exec(firstLocalIn(node, "spPr")?.inner ?? "");
+  if (!ln || /<a:noFill\s*\/>/.test(ln[2] ?? ""))
+    return;
+  const color = paintOf(ln[2] ?? "", state.theme);
+  if (!color)
+    return;
+  const widthEmu = Number(attr(ln[1] ?? "", "w"));
+  const width = Number.isFinite(widthEmu) && widthEmu > 0 ? Math.max(0.25, points(widthEmu) ?? 1) : 1;
+  const dash = /prstDash\b[^>]*\bval="(dash|sysDash|dot|sysDot)"/.exec(ln[2] ?? "")?.[1];
+  return { color: bindColor(state, color), width, style: dash?.includes("dot") ? "dot" : dash ? "dash" : undefined };
+}
+function arrowOf(node) {
+  const spPr = firstLocalIn(node, "spPr")?.inner ?? "";
+  const head = /<a:headEnd\b[^>]*\btype="([^"]+)"/.exec(spPr)?.[1];
+  const tail = /<a:tailEnd\b[^>]*\btype="([^"]+)"/.exec(spPr)?.[1];
+  const known = (value) => !!value && value !== "none" && ["triangle", "stealth", "arrow"].includes(value);
+  const other = (value) => !!value && value !== "none" && !known(value);
+  if (other(head) || other(tail))
+    return "other";
+  if (known(head) && known(tail))
+    return "both";
+  if (known(head))
+    return "end";
+  if (known(tail))
+    return "start";
+  return;
+}
+function presetOf(node) {
+  const spPr = firstLocalIn(node, "spPr") ?? firstLocalIn(node, "grpSpPr");
+  if (!spPr)
+    return node.local === "cxnSp" ? "straightConnector1" : undefined;
+  if (firstLocalIn(spPr, "custGeom"))
+    return "custom";
+  return attr(firstLocalIn(spPr, "prstGeom")?.attrs ?? "", "prst") ?? (node.local === "cxnSp" ? "straightConnector1" : undefined);
+}
+function boundsOf(node) {
+  const xfrm = firstLocalIn(firstLocalIn(node, "spPr") ?? node, "xfrm") ?? firstLocalIn(node, "xfrm");
+  if (!xfrm)
+    return null;
+  const off = firstLocalIn(xfrm, "off");
+  const ext = firstLocalIn(xfrm, "ext");
+  const x = points(Number(attr(off?.attrs ?? "", "x")));
+  const y = points(Number(attr(off?.attrs ?? "", "y")));
+  const w = points(Number(attr(ext?.attrs ?? "", "cx")));
+  const h = points(Number(attr(ext?.attrs ?? "", "cy")));
+  if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0)
+    return null;
+  return { x, y, w, h };
+}
+function groupFrame(node) {
+  const xfrm = firstLocalIn(firstLocalIn(node, "grpSpPr") ?? node, "xfrm");
+  if (!xfrm)
+    return null;
+  const off = firstLocalIn(xfrm, "off");
+  const ext = firstLocalIn(xfrm, "ext");
+  const chOff = firstLocalIn(xfrm, "chOff");
+  const chExt = firstLocalIn(xfrm, "chExt");
+  const ox = points(Number(attr(off?.attrs ?? "", "x"))) ?? 0;
+  const oy = points(Number(attr(off?.attrs ?? "", "y"))) ?? 0;
+  const cx = points(Number(attr(ext?.attrs ?? "", "cx"))) ?? 0;
+  const cy = points(Number(attr(ext?.attrs ?? "", "cy"))) ?? 0;
+  const chx = points(Number(attr(chOff?.attrs ?? "", "x"))) ?? 0;
+  const chy = points(Number(attr(chOff?.attrs ?? "", "y"))) ?? 0;
+  const chw = points(Number(attr(chExt?.attrs ?? "", "cx"))) ?? cx;
+  const chh = points(Number(attr(chExt?.attrs ?? "", "cy"))) ?? cy;
+  if (cx <= 0 || cy <= 0)
+    return null;
+  return { ox, oy, sx: chw > 0 ? cx / chw : 1, sy: chh > 0 ? cy / chh : 1, chx, chy };
+}
+function compose(parent, child) {
+  if (!child)
+    return parent;
+  if (!parent)
+    return child;
+  return {
+    ox: parent.ox + (child.ox - parent.chx) * parent.sx,
+    oy: parent.oy + (child.oy - parent.chy) * parent.sy,
+    sx: parent.sx * child.sx,
+    sy: parent.sy * child.sy,
+    chx: child.chx,
+    chy: child.chy
+  };
+}
+function place(bounds, frame) {
+  if (!frame)
+    return bounds;
+  return {
+    x: round(frame.ox + (bounds.x - frame.chx) * frame.sx),
+    y: round(frame.oy + (bounds.y - frame.chy) * frame.sy),
+    w: Math.max(0.25, round(bounds.w * frame.sx)),
+    h: Math.max(0.25, round(bounds.h * frame.sy))
+  };
+}
+function pathFromGeom(node, bounds) {
+  const path = firstLocal(firstLocal(node.inner, "pathLst")?.inner ?? "", "path");
+  if (!path)
+    return null;
+  const width = Number(attr(path.attrs, "w")) || bounds.w;
+  const height = Number(attr(path.attrs, "h")) || bounds.h;
+  const sx = bounds.w / width;
+  const sy = bounds.h / height;
+  const commands = [];
+  for (const step of topLevel(path.inner)) {
+    const point = (source) => {
+      const x = Number(attr(source?.attrs ?? "", "x"));
+      const y = Number(attr(source?.attrs ?? "", "y"));
+      if (!Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+      return `${round(x * sx)} ${round(y * sy)}`;
+    };
+    if (step.local === "moveTo")
+      commands.push(`M ${point(firstLocalIn(step, "pt"))}`);
+    else if (step.local === "lnTo")
+      commands.push(`L ${point(firstLocalIn(step, "pt"))}`);
+    else if (step.local === "cubicBezTo") {
+      const pts = topLevel(step.inner).filter((item) => item.local === "pt").map((item) => point(item));
+      if (pts.length === 3 && pts.every(Boolean))
+        commands.push(`C ${pts.join(" ")}`);
+    } else if (step.local === "close")
+      commands.push("Z");
+    else
+      return null;
+  }
+  const pathText = commands.join(" ");
+  return pathText.includes("null") || !pathText.trim() ? null : pathText;
+}
+function presetPath(preset, bounds) {
+  const { w, h } = bounds;
+  const s = round(Math.min(w, h) * 0.25);
+  if (preset === "triangle")
+    return `M ${round(w / 2)} 0 L ${w} ${h} L 0 ${h} Z`;
+  if (preset === "rtTriangle")
+    return `M 0 0 L ${w} ${h} L 0 ${h} Z`;
+  if (preset === "diamond")
+    return `M ${round(w / 2)} 0 L ${w} ${round(h / 2)} L ${round(w / 2)} ${h} L 0 ${round(h / 2)} Z`;
+  if (preset === "parallelogram")
+    return `M ${s} 0 L ${w} 0 L ${round(w - s)} ${h} L 0 ${h} Z`;
+  if (preset === "trapezoid")
+    return `M ${s} 0 L ${round(w - s)} 0 L ${w} ${h} L 0 ${h} Z`;
+  if (preset === "hexagon")
+    return `M ${s} 0 L ${round(w - s)} 0 L ${w} ${round(h / 2)} L ${round(w - s)} ${h} L ${s} ${h} L 0 ${round(h / 2)} Z`;
+  if (preset === "chevron" || preset === "homePlate")
+    return `M 0 0 L ${round(w - s)} 0 L ${w} ${round(h / 2)} L ${round(w - s)} ${h} L 0 ${h} Z`;
+  if (preset === "pentagon")
+    return `M ${round(w / 2)} 0 L ${w} ${round(h * 0.38)} L ${round(w * 0.8)} ${h} L ${round(w * 0.2)} ${h} L 0 ${round(h * 0.38)} Z`;
+  return null;
+}
+function maskOf(preset) {
+  if (!preset || preset === "rect")
+    return;
+  if (preset === "roundRect" || preset === "ellipse")
+    return { shape: preset };
+  return;
+}
+function radiusOf(node, bounds) {
+  const fmla = attr(/<a:gd\b[^>]*\bname="adj"[^>]*>/.exec(node.inner)?.[0] ?? "", "fmla");
+  const raw = Number(fmla?.replace(/^val\s+/, ""));
+  const ratio = Number.isFinite(raw) ? raw / 1e5 : 16667 / 1e5;
+  return round(ratio * Math.min(bounds.w, bounds.h) / 2);
+}
+function cropOf(node) {
+  const rect = /<a:srcRect\b[^>]*>/.exec(node.inner)?.[0];
+  if (!rect)
+    return;
+  const part = (name) => {
+    const value = Number(attr(rect, name) ?? "0");
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value / 1e5)) : 0;
+  };
+  return { l: part("l"), t: part("t"), r: part("r"), b: part("b") };
+}
+function linkOf(state, node) {
+  const relId = attr(/<a:hlinkClick\b[^>]*>/.exec(node.inner)?.[0] ?? "", "r:id");
+  if (!relId)
+    return;
+  const rel = state.rels.find((item) => item.id === relId);
+  if (!rel?.external)
+    return;
+  const href = decodeXml(rel.target);
+  return /^https?:\/\/\S+$/i.test(href) ? href : undefined;
+}
+function collectMedia(state, xml) {
+  const media = [];
+  for (const match of xml.matchAll(/\br:(?:embed|link|id)="([^"]+)"/g)) {
+    const rel = state.rels.find((item) => item.id === match[1] && !item.external);
+    if (!rel)
+      continue;
+    const target = resolveRel(state.part, rel.target);
+    const bytes = target ? state.files[target] : undefined;
+    if (!target || !bytes)
+      continue;
+    media.push({ relId: rel.id, type: rel.type, target, base64: Buffer.from(bytes).toString("base64") });
+  }
+  return media;
+}
+function noteEffects(state, node, id) {
+  if (/<a:effectLst\b|<a:effectDag\b|<a:scene3d\b|<a:sp3d\b|<a:prstTxWarp\b/.test(node.inner)) {
+    state.diagnostics.push({ level: "approximate", slide: state.slide, elementId: id, feature: "effects", message: "\u53D1\u5149\u3001\u4E09\u7EF4\u548C\u827A\u672F\u5B57\u53D8\u5F62\u6CA1\u6709\u5199\u5165\u3002\u51E0\u4F55\u548C\u6587\u672C\u4ECD\u6309\u672C\u9875\u683C\u5F0F\u4FDD\u7559\u3002" });
+  }
+}
+function fillKindOf(node) {
+  const xml = shapePaintXml(node);
+  if (/<a:noFill\s*\/>/.test(xml))
+    return "none";
+  if (/<a:gradFill\b/.test(xml))
+    return "gradient";
+  if (/<a:blipFill\b/.test(xml))
+    return "picture";
+  if (/<a:pattFill\b/.test(xml))
+    return "pattern";
+  return /<a:srgbClr\b|<a:schemeClr\b|<a:sysClr\b/.test(xml) ? "solid" : "none";
+}
+function shapePaintXml(node) {
+  const spPr = firstLocalIn(node, "spPr");
+  if (!spPr)
+    return "";
+  return spPr.inner.replace(/<a:ln\b[\s\S]*<\/a:ln>/, "");
+}
+function runPaintXml(txBody) {
+  return /<a:rPr\b[\s\S]*?<\/a:rPr>/.exec(txBody)?.[0] ?? txBody;
+}
+function fontSizeOf(txBody) {
+  const hundredths = Number(/<a:(?:rPr|defRPr)\b[^>]*\bsz="(\d+)"/.exec(txBody)?.[1] ?? 1800);
+  const size = hundredths / 100;
+  if (!Number.isFinite(size))
+    return 18;
+  return Math.min(240, Math.max(6, size));
+}
+function leadingOf(txBody, size) {
+  const pct = Number(/<a:spcPct\b[^>]*\bval="(\d+)"/.exec(txBody)?.[1]);
+  const pts = Number(/<a:spcPts\b[^>]*\bval="(\d+)"/.exec(txBody)?.[1]);
+  const value = Number.isFinite(pct) && pct > 0 ? pct / 1e5 : Number.isFinite(pts) && pts > 0 && size > 0 ? pts / 100 / size : undefined;
+  if (value === undefined)
+    return;
+  const rounded = Math.round(value * 100) / 100;
+  return rounded >= 0.9 && rounded <= 2 ? rounded : undefined;
+}
+function alignOf(txBody) {
+  const value = attr(/<a:pPr\b[^>]*>/.exec(txBody)?.[0] ?? "", "algn");
+  if (value === "ctr")
+    return "center";
+  if (value === "r")
+    return "right";
+  return "left";
+}
+function valignOf(txBody) {
+  const value = attr(/<a:bodyPr\b[^>]*>/.exec(txBody)?.[0] ?? "", "anchor");
+  if (value === "ctr")
+    return "middle";
+  if (value === "b")
+    return "bottom";
+  return "top";
+}
+function bulletPrefix(paragraph, index) {
+  const symbol = attr(/<a:buChar\b[^>]*>/.exec(paragraph)?.[0] ?? "", "char");
+  if (symbol)
+    return `${decodeXml(symbol)} `;
+  if (/<a:buAutoNum\b/.test(paragraph))
+    return `${index + 1}. `;
+  return "";
+}
+function paragraphText(txBody) {
+  return [...txBody.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)].map((match) => decodeXml(match[1] ?? "")).join("").trim();
+}
+function faceOf(txBody, theme) {
+  const latin = concreteFace(attr(/<a:latin\b[^>]*>/.exec(txBody)?.[0] ?? "", "typeface")) ?? theme.fonts.latin.win;
+  const ea = concreteFace(attr(/<a:ea\b[^>]*>/.exec(txBody)?.[0] ?? "", "typeface")) ?? theme.fonts.cjk.win;
+  if (!latin && !ea)
+    return;
+  const cjk = ea || latin;
+  const west = latin || ea;
+  return { latin: west, cjk: { mac: cjk, win: cjk, linux: cjk } };
+}
+function readScheme(xml) {
+  const map = {};
+  if (!xml)
+    return map;
+  for (const name of ["dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6"]) {
+    const block = new RegExp(`<a:${name}\\b[^>]*>([\\s\\S]*?)</a:${name}>`).exec(xml)?.[1] ?? "";
+    const color = paintOf(block, {});
+    if (color)
+      map[name] = color;
+  }
+  return map;
+}
+function readFonts(xml) {
+  if (!xml)
+    return {};
+  const minor = /<a:minorFont\b[^>]*>([\s\S]*?)<\/a:minorFont>/.exec(xml)?.[1] ?? xml;
+  return {
+    latin: concreteFace(attr(/<a:latin\b[^>]*>/.exec(minor)?.[0] ?? "", "typeface")),
+    ea: concreteFace(attr(/<a:ea\b[^>]*>/.exec(minor)?.[0] ?? "", "typeface"))
+  };
+}
+function concreteFace(value) {
+  if (!value || value.startsWith("+"))
+    return;
+  return value;
+}
+function shapeName(node) {
+  return attr(/<p:cNvPr\b[^>]*>/.exec(node.inner)?.[0] ?? "", "name") ?? "";
+}
+function elementId(state, name, index) {
+  const cleaned = `${state.idPrefix}${name}`.trim().replace(/\s+/g, "-");
+  const base = /^[\w\u4e00-\u9fff.-]{1,80}$/.test(cleaned) ? cleaned : `${state.idPrefix}s${state.slide}-e${index}`;
+  let id = base;
+  let n = 2;
+  while (state.used.has(id))
+    id = `${base}-${n++}`;
+  state.used.add(id);
+  return id;
+}
+function skippedPlaceholder(node) {
+  const ph = /<p:ph\b[^>]*>/.exec(node.inner)?.[0];
+  if (!ph)
+    return false;
+  return SKIP_PLACEHOLDER.has(attr(ph, "type") || "body");
+}
+function visualNodes(inner) {
+  return topLevel(inner).filter((node) => !["nvGrpSpPr", "grpSpPr", "extLst", "nvSpPr", "spPr"].includes(node.local));
+}
+function sourceKindOf(local) {
+  if (local === "sp" || local === "pic" || local === "cxnSp" || local === "grpSp" || local === "graphicFrame" || local === "contentPart")
+    return local;
+  return;
+}
+function embedTarget(state, node) {
+  const embed = attr(/<a:blip\b[^>]*>/.exec(node.inner)?.[0] ?? "", "r:embed");
+  const rel = state.rels.find((item) => item.id === embed);
+  return rel && !rel.external ? resolveRel(state.part, rel.target) : null;
+}
+function mediaKind(target, files) {
+  const name = (target ?? "").toLowerCase();
+  if (name.endsWith(".emf"))
+    return "emf";
+  if (name.endsWith(".wmf"))
+    return "wmf";
+  if (name.endsWith(".png"))
+    return "png";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg"))
+    return "jpeg";
+  if (/\.(mp3|wav|m4a)$/.test(name))
+    return "audio";
+  if (/\.(mp4|mov|wmv|m4v)$/.test(name))
+    return "video";
+  const types = textOf(files, "[Content_Types].xml");
+  const part = target ? `/${target}` : "";
+  const content = new RegExp(`PartName="${part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*ContentType="([^"]+)"`).exec(types)?.[1] ?? "";
+  if (content.includes("emf"))
+    return "emf";
+  if (content.includes("wmf"))
+    return "wmf";
+  if (content.includes("png"))
+    return "png";
+  if (content.includes("jpeg"))
+    return "jpeg";
+  return "other";
+}
+function attrBlock(xml, local) {
+  return firstLocal(xml, local)?.attrs ?? "";
+}
+function containsCjk2(value) {
+  return /[\u3400-\u9fff]/.test(value);
+}
+function titleFrom(fileName) {
+  const base = fileName.split(/[/\\]/).pop() ?? fileName;
+  const title = base.replace(/\.pptx$/i, "").trim();
+  return title || "\u5BFC\u5165\u7684\u6F14\u793A\u6587\u7A3F";
+}
+function writeAsset(dir, name, bytes) {
+  mkdirSync3(dir, { recursive: true });
+  const path = join3(dir, name.replace(/[^\w.\u4e00-\u9fff-]+/g, "_"));
+  writeFileSync3(path, bytes);
+  return path;
+}
+function round(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// apps/electron/resources/skills/ppt-design/engine/import/project.ts
+async function importPptxFile(sourcePath, outDir, options = {}) {
+  const source = resolve(sourcePath);
+  const projectDir = resolve(outDir);
+  assertSafeOutput(source, projectDir);
+  const before = statSync(source);
+  const bytes = new Uint8Array(readFileSync4(source));
+  const hash = createHash2("sha256").update(bytes).digest("hex");
+  const imported = importPptx(bytes, { fileName: options.fileName ?? source.split(/[/\\]/).pop(), maxSlides: options.maxSlides, assetDir: join4(projectDir, "assets") });
+  if (statSync(source).mtimeMs !== before.mtimeMs || createHash2("sha256").update(readFileSync4(source)).digest("hex") !== hash) {
+    throw new Error("\u5BFC\u5165\u6539\u52A8\u4E86\u539F\u4EF6");
+  }
+  mkdirSync4(projectDir, { recursive: true });
+  const issues = imported.deck ? checkDeck(imported.deck) : [];
+  const preview = await previewImportedSlides({ title: imported.deck?.title ?? imported.source.fileName, pageCount: imported.deck?.pages.length ?? 0, outDir: projectDir }, options.preview);
+  if (imported.deck)
+    writeFileSync4(join4(projectDir, "deck.json"), `${JSON.stringify(imported.deck, null, 2)}
+`);
+  writeFileSync4(join4(projectDir, "diagnostics.json"), `${JSON.stringify({ source: imported.source, preview, ...coverageReport(imported.diagnostics) }, null, 2)}
+`);
+  writeFileSync4(join4(projectDir, "retained.json"), `${JSON.stringify(imported.retained, null, 2)}
+`);
+  return { deck: imported.deck, diagnostics: imported.diagnostics, issues, preview, source: imported.source, projectDir };
+}
+function loadRetained(deckPath) {
+  const file = join4(dirname2(deckPath), "retained.json");
+  try {
+    const parsed = JSON.parse(readFileSync4(file, "utf8"));
+    if (parsed?.version !== 1 || !Array.isArray(parsed.slides))
+      return;
+    return parsed;
+  } catch {
+    return;
+  }
+}
+function assertSafeOutput(source, outDir) {
+  if (source === outDir)
+    throw new Error("\u4E0D\u80FD\u628A\u5DE5\u7A0B\u5199\u5230\u539F\u4EF6\u4E0A");
+  const prefix = outDir.endsWith(sep) ? outDir : outDir + sep;
+  if (source.startsWith(prefix))
+    throw new Error("\u5DE5\u7A0B\u76EE\u5F55\u4E0D\u80FD\u5305\u4F4F\u539F\u4EF6");
+  if (outDir.includes(`${sep}ppt-design${sep}styles${sep}`) || outDir.includes(`${sep}ppt-templates${sep}`)) {
+    throw new Error("\u4E0D\u80FD\u628A\u5BFC\u5165\u5DE5\u7A0B\u5199\u8FDB\u6A21\u677F\u76EE\u5F55");
+  }
+}
+
 // apps/electron/resources/skills/ppt-design/engine/cli.ts
 function usage() {
   console.log(JSON.stringify({
     status: "error",
-    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4]"
+    message: "\u7528\u6CD5\uFF1Adeck-cli.mjs layouts | check <deck.json> | render <deck.json> --out <file.pptx> [--screenshot <dir>] [--platform mac|win|linux] | screenshot <file.pptx> --out <dir> [--pages N] [--only-pages 2,4] | import <file.pptx> --out <\u5DE5\u7A0B\u76EE\u5F55> [--max-slides N]"
   }));
   process.exit(1);
 }
@@ -21485,6 +23970,8 @@ function parseArgs(argv) {
       flags.officecli = rest[++i];
     else if (token === "--pages")
       flags.pages = Number(rest[++i]);
+    else if (token === "--max-slides")
+      flags.maxSlides = Number(rest[++i]);
     else if (token === "--only-pages") {
       const value = rest[++i];
       if (!value || !/^\d+(,\d+)*$/.test(value))
@@ -21504,17 +23991,40 @@ function emit(status, body, code) {
 var flags = parseArgs(process.argv.slice(2));
 if (flags.pageNumbers && flags.command !== "screenshot")
   usage();
+if (flags.command === "import") {
+  if (!flags.file || !flags.out)
+    usage();
+  try {
+    const imported = await importPptxFile(resolve2(flags.file), resolve2(flags.out), { maxSlides: flags.maxSlides });
+    const failed = !imported.deck;
+    const revision = revisionStatus(imported.issues);
+    emit(failed ? "error" : revision.status, {
+      project: imported.projectDir,
+      deck: imported.deck ? resolve2(imported.projectDir, "deck.json") : undefined,
+      source: imported.source,
+      pages: imported.deck?.pages.length ?? 0,
+      issues: imported.issues,
+      errorCount: revision.errorCount,
+      warningCount: revision.warningCount,
+      ...revision.status === "needs_revision" ? { message: formatNeedsRevision(resolve2(flags.file), imported.issues) } : {},
+      diagnostics: imported.diagnostics,
+      preview: imported.preview
+    }, failed ? 1 : revision.code);
+  } catch (error) {
+    emit("error", { message: error instanceof Error ? error.message : String(error) }, 1);
+  }
+}
 if (flags.command === "layouts") {
   console.log(JSON.stringify({ status: "ok", layouts: argumentLayoutCatalog() }));
   process.exit(0);
 }
 if (!flags.file)
   usage();
-var file = resolve(flags.file);
+var file = resolve2(flags.file);
 if (flags.command === "screenshot") {
   if (!flags.out)
     usage();
-  const result = await captureSlides(file, resolve(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
+  const result = await captureSlides(file, resolve2(flags.out), flags.pages && flags.pages > 0 ? flags.pages : 0, { officecli: flags.officecli, pageNumbers: flags.pageNumbers });
   emit(result.available ? "ok" : "error", { screenshots: result }, result.available ? 0 : 1);
 }
 var loaded = loadDeckFile(file);
@@ -21522,16 +24032,26 @@ if (!loaded.deck)
   emit("error", { issues: loaded.issues }, 1);
 if (flags.command === "check") {
   const issues = [...loaded.issues, ...checkDeck(loaded.deck)];
-  emit(issues.length ? "needs_revision" : "ok", { issues, pages: loaded.deck.pages.length }, issues.length ? 2 : 0);
+  const revision = revisionStatus(issues);
+  emit(revision.status, {
+    issues,
+    pages: loaded.deck.pages.length,
+    errorCount: revision.errorCount,
+    warningCount: revision.warningCount,
+    ...revision.status === "needs_revision" ? { message: formatNeedsRevision(file, issues) } : {}
+  }, revision.code);
 }
 if (flags.command === "render") {
   if (!flags.out)
     usage();
-  const result = await exportDeck(loaded.deck, resolve(flags.out), {
+  const result = await exportDeck(loaded.deck, resolve2(flags.out), {
     platform: flags.platform ?? platformFromProcess(),
-    screenshotDir: flags.screenshot ? resolve(flags.screenshot) : undefined,
+    screenshotDir: flags.screenshot ? resolve2(flags.screenshot) : undefined,
     officecli: flags.officecli
   });
+  const retained = result.pptx ? loadRetained(file) : undefined;
+  if (result.pptx && retained)
+    await mergeRetained(result.pptx, retained);
   emit(result.status, {
     issues: result.issues,
     pptx: result.pptx ? realpathSync2(result.pptx) : undefined,

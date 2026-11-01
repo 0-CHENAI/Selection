@@ -1,9 +1,620 @@
 {
-  "version": 1,
-  "origin": "Selection original fictional business cases; no DSH Word/Excel source pack located",
+  "version": 2,
+  "origin": "dsh-desktop 588412b 的 Word 与 Excel 案例，Selection 虚构样例，以及个人办公样例。虚构样例不覆盖 dsh 原件。",
+  "baseline": "588412b9002fcb3ac88751fab7915e050c965563",
   "cases": [
-    { "id": "meeting-minutes", "title": "会议纪要", "format": "docx", "guide": "word", "recipe": "cases/meeting-minutes.json", "editScope": "one paragraph text fragment" },
-    { "id": "work-notice", "title": "工作通知草稿", "format": "docx", "guide": "word", "recipe": "cases/work-notice.json", "editScope": "one paragraph text fragment" },
-    { "id": "execution-tracker", "title": "执行台账", "format": "xlsx", "guide": "excel", "recipe": "cases/execution-tracker.json", "editScope": "one input cell and dependent recalculation" }
+    {
+      "id": "meeting-minutes",
+      "title": "会议纪要 · 发布会筹备",
+      "titleEn": "Launch preparation meeting minutes",
+      "description": "发布会筹备会议的三页纪要：五个议题、十五项行动记录及后续确认，保留责任、相对期限和原文依据。",
+      "guidance": "学样例的纪要结构：会议信息、分议题讨论、已定事项、待确认事项和行动表（任务、负责人、期限、交付要求），以及它的版式和简洁书面语。会议名称、时间、参会人、议题与任务全部换成用户材料，不照搬样例的事实和数字；材料里没有的写「待补充」。用户这次的要求优先。",
+      "prompt": "参考「会议纪要 · 发布会筹备」的结构和版式，将我提供的会议记录整理成可编辑 Word 纪要，保留关键讨论、已定安排、待确认事项，以及任务、负责人、期限和交付要求。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261012.1",
+      "category": "会议纪要",
+      "businessSkill": "meeting-recap",
+      "source": "curated/meeting-minutes",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/meeting-minutes",
+        "license": "MIT",
+        "exampleSha256": "b301c5e5801c62887a44f26379bc71f6c60cbdd21f45db13d63543f88abe6575"
+      }
+    },
+    {
+      "id": "coffee-market",
+      "title": "中国现制咖啡市场调研报告",
+      "titleEn": "Coffee market research",
+      "description": "以公开披露为基础的 2024 年市场研究：品牌网络、同店表现、消费场景与门店贡献，7 页报告及来源索引。",
+      "guidance": "学样例的调研报告结构：摘要、市场规模、品牌与门店网络、经营表现、消费场景、结论和来源索引，以及图表、表格类型、客观研究文风和逐条标注来源的做法。研究对象、年份、数据和来源换成用户材料或可核实的公开资料，不照搬样例的事实和数字；查不到的写「待补充」。用户这次的要求优先。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.6",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/coffee-market",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/coffee-market",
+        "license": "MIT",
+        "exampleSha256": "8cd61c57b0be98534ec361e7a4dfb38486ddc1547ac8c05426fc4f32680e958a",
+        "note": "dsh catalog 没有 prompt 字段，做同款时读 design.md 与 inputs/。"
+      }
+    },
+    {
+      "id": "equity-research",
+      "title": "小米汽车研究报告",
+      "titleEn": "Company research report",
+      "description": "投资逻辑、经营数据与风险分析，配合图表和来源标注。示例文稿。",
+      "guidance": "学样例的研报结构：核心观点、投资逻辑、经营数据、财务与估值、风险提示，以及图表搭配、数据表格式和来源标注。公司、行业、日期和全部数据换成用户材料或可核实的公开资料，不照搬样例的事实、数字和结论；缺的信息写「待补充」。用户这次的要求优先。",
+      "prompt": "参考「小米汽车研究报告」的章节结构与研报样式，帮我研究【公司或行业】。面向【读者】，重点分析【核心问题】，生成含图表与来源标注的 Word 报告。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260911.5",
+      "category": "调研分析",
+      "businessSkill": "research-writer",
+      "source": "legacy/equity-research",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/equity-research",
+        "license": "MIT",
+        "exampleSha256": "377a91187d9e295c9a3a492a803599b3757e887a878a85f41eb03eea42809418"
+      }
+    },
+    {
+      "id": "government-notice",
+      "title": "中国中车质量安全月活动通知",
+      "titleEn": "Official notice",
+      "description": "用户提供的 2025 年公文生成样例：活动主题、重点工作、组织实施与信息报送。保留原文待补充项。",
+      "guidance": "学样例的通知版式：红色版头、发文字号、标题、主送机关、分条正文（目标、重点工作、组织实施、报送要求）和落款，以及公文语体和层次序号。发文机关、事由、日期、联系人和具体任务换成用户材料，不照搬样例的机关名称、活动和句子；没提供的写「待补充」。用户这次的要求优先。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20260914.2",
+      "category": "公文写作",
+      "businessSkill": "gov-doc-writing",
+      "source": "legacy/government-notice",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/government-notice",
+        "license": "LinNai sample",
+        "exampleSha256": "c763f627f09e543505b4cfaea34487a0b8cd724b549e4762633153da61ddf961",
+        "note": "LinNai 2026-10-30 22:52 确认该样例可以原样搬入。技能正文仍自写。"
+      }
+    },
+    {
+      "id": "selection-meeting-minutes",
+      "title": "会议纪要",
+      "titleEn": "Selection fictional minutes",
+      "description": "Selection 自编虚构小样，只演示把一条提交期限从 11 月 3 日改为 11 月 5 日。",
+      "guidance": "这是 Selection 虚构小样，只演示在工作副本上精确改一处文字并保留格式。学它的纪要结构和改法：定位目标段落，只改需要改的片段，改完核对版式没变。日期和事项以用户材料为准，不把小样里的虚构内容写进用户文档；缺的信息写「待补充」。用户这次的要求优先。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/meeting-minutes.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "selection-work-notice",
+      "title": "工作通知草稿",
+      "titleEn": "Selection fictional notice",
+      "description": "Selection 自编虚构小样，只演示把报送期限改为 11 月 6 日。不宣称符合公文标准。",
+      "guidance": "这是 Selection 虚构的工作通知小样，不代表正式公文标准，只演示改一处期限并保留格式。学它的通知结构和改法：定位段落，只改目标片段，改完核对版式。机关、事项和日期以用户材料为准，不照搬小样内容；缺的信息写「待补充」。用户这次的要求优先。",
+      "mode": "word",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/selection-samples/work-notice.json",
+        "format": "docx",
+        "guide": "word",
+        "editScope": "one paragraph text fragment",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "execution-tracker",
+      "title": "执行台账",
+      "titleEn": "Selection fictional tracker",
+      "description": "Selection 自编虚构 Excel 小样，只演示改一个输入格并保留公式。",
+      "guidance": "这是 Selection 虚构的执行台账小样，演示只改输入格、保留公式并重算。学它的表头、状态与进度列，以及公式联动和改后核对依赖单元格的做法。任务、负责人、日期和数值全部换成用户材料，不照搬小样数据；缺的写「待补充」。用户这次的要求优先。",
+      "mode": "excel",
+      "sampleFile": null,
+      "revision": "selection-o5",
+      "category": "Selection 样例",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "kind": "fictional-recipe",
+        "recipe": "cases/execution-tracker.json",
+        "format": "xlsx",
+        "guide": "excel",
+        "editScope": "one input cell and dependent recalculation",
+        "keptPendingConfirmation": true
+      }
+    },
+    {
+      "id": "annual-business",
+      "title": "年度经营与客户分析",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "六张工作表联动年度经营、增长测算、收入质量与客户留存；包含日度波动、原生图表及计算明细。模拟数据。",
+      "guidance": "学样例的工作表结构：经营总览、增长测算、增长质量、客户留存和底层数据表，以及指标口径、公式联动、原生图表类型和逐表核对方法。公司、期间和指标数据全部换成用户材料；样例是模拟数据，不沿用它的数字和结论，缺的数据标「待补充」。改完重算公式。用户这次的要求优先。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260914.1",
+      "category": "经营分析",
+      "source": "legacy/annual-business",
+      "previewPages": [
+        {
+          "sheet": "经营总览",
+          "range": "A1:P51",
+          "aspectRatio": 0.7821946169772257
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A52:P101",
+          "aspectRatio": 0.9797717842323651
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A102:P149",
+          "aspectRatio": 0.94214463840399
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A150:P197",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A198:P245",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A246:P293",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A294:P341",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A342:P389",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A390:P437",
+          "aspectRatio": 0.9449724862431216
+        },
+        {
+          "sheet": "经营总览",
+          "range": "A438:P468",
+          "aspectRatio": 1.4519600307455802
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A1:P44",
+          "aspectRatio": 0.9319190922545634
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A45:P94",
+          "aspectRatio": 0.8259728902492348
+        },
+        {
+          "sheet": "增长测算",
+          "range": "A95:P138",
+          "aspectRatio": 0.9310004928536225
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A1:P44",
+          "aspectRatio": 0.9319190922545634
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A45:P95",
+          "aspectRatio": 0.8103818103818103
+        },
+        {
+          "sheet": "增长质量",
+          "range": "A96:P134",
+          "aspectRatio": 1.0529542920847268
+        },
+        {
+          "sheet": "客户留存",
+          "range": "A1:P42",
+          "aspectRatio": 0.9692149820420729
+        },
+        {
+          "sheet": "客户留存",
+          "range": "A43:P88",
+          "aspectRatio": 0.9603457041179461
+        },
+        {
+          "sheet": "月度经营数据",
+          "range": "A1:P48",
+          "aspectRatio": 0.9386834986474302
+        },
+        {
+          "sheet": "客户批次数据",
+          "range": "A1:P29",
+          "aspectRatio": 1.3708272859216255
+        }
+      ],
+      "titleEn": "Annual business and customers",
+      "businessSkill": "saas-metrics-coach",
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/annual-business",
+        "license": "MIT"
+      }
+    },
+    {
+      "id": "port-cargo",
+      "title": "青岚港货物流向与作业效率",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "365 天、2,190 条模拟装卸记录；吞吐波动、进出港结构、航线与作业效率。5 张工作表。",
+      "guidance": "学样例的工作表结构：港口总览、货类与航线、作业效率、日度汇总和作业明细，以及吞吐趋势、结构占比、效率对比的图表类型和先体检数据再出图的做法。港口、期间、货类和记录全部换成用户数据；样例是模拟数据，不沿用它的数字和结论，缺的字段标「待补充」。用户这次的要求优先。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260911.6",
+      "category": "物流分析",
+      "source": "legacy/port-cargo",
+      "previewPages": [
+        {
+          "sheet": "港口总览",
+          "range": "A1:P54",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "货类与航线",
+          "range": "A1:L52",
+          "aspectRatio": 1.414703110273327
+        },
+        {
+          "sheet": "作业效率",
+          "range": "A1:L52",
+          "aspectRatio": 1.414703110273327
+        },
+        {
+          "sheet": "日度汇总",
+          "range": "A1:H46",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "作业明细",
+          "range": "A1:L46",
+          "aspectRatio": 0.7068620919387075
+        }
+      ],
+      "titleEn": "Port cargo and operations",
+      "businessSkills": [
+        "dataset-health-audit",
+        "data-viz-gen"
+      ],
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/port-cargo",
+        "license": "MIT"
+      }
+    },
+    {
+      "id": "bio-assay",
+      "title": "荧光酶活性筛选与批次质控",
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx",
+      "description": "3 批次、288 个模拟孔位；剂量响应、技术重复 CV、跨批次统计与三板热力图。4 张工作表。",
+      "guidance": "学样例的工作表结构：实验总览、剂量响应、板内质控和原始读数，以及剂量曲线、热力图、技术重复 CV 和跨批次比较的质控方法。实验名称、批次、孔位和读数全部换成用户数据；样例是模拟数据，不沿用它的数字和结论，缺的信息标「待补充」。先做数据体检，改完重算。用户这次的要求优先。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20260911.6",
+      "category": "实验数据",
+      "source": "legacy/bio-assay",
+      "previewPages": [
+        {
+          "sheet": "实验总览",
+          "range": "A1:P54",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "剂量响应",
+          "range": "A1:H52",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "板内质控",
+          "range": "A1:M57",
+          "aspectRatio": 0.7068620919387075
+        },
+        {
+          "sheet": "原始读数",
+          "range": "A1:G46",
+          "aspectRatio": 0.7068620919387075
+        }
+      ],
+      "titleEn": "Bioassay and batch quality",
+      "businessSkills": [
+        "dataset-health-audit",
+        "data-viz-gen"
+      ],
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/bio-assay",
+        "license": "MIT"
+      }
+    },
+    {
+      "id": "house-lease",
+      "title": "房屋租赁合同",
+      "description": "编号条款写清当事人、房屋、租期、租金押金、违约和争议解决。虚构样例，账户和违约金比例留待补充。",
+      "guidance": "学样例的合同骨架：当事人、标的、价款、期限、违约和争议解决，条款要编号。双方、地址、金额和日期都换成用户的，不照搬样例事实；没有的写「待补充」。这不是法律意见。用户这次的要求优先。",
+      "prompt": "参考这份房屋租赁合同的条款顺序，用我提供的双方、房屋和租金另写一份。缺的信息标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "合同协议",
+      "businessSkill": "personal-contract",
+      "source": "cases/house-lease",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/house-lease",
+        "license": "Selection sample",
+        "exampleSha256": "02635bd0baf3076ed0f52cf50a1bc3fc593c3cba028403058da3eaaf09e1c396",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "product-resume",
+      "title": "产品经理简历与求职信",
+      "description": "一页简历加一页求职信。经历按情境、任务、行动、结果来写。样例公司和数字都是虚构的。",
+      "guidance": "学样例的简历和求职信：抬头、经历按结果来写、一页简历加另页求职信。姓名、公司和经历都换成用户的，不照搬样例事实；没有的写「待补充」。证件和住址不要写进正文。用户这次的要求优先。",
+      "prompt": "参考这份简历和求职信的版式，用我的经历重写。没有的公司、数字和日期标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "简历求职",
+      "businessSkill": "personal-resume",
+      "source": "cases/product-resume",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/product-resume",
+        "license": "Selection sample",
+        "exampleSha256": "0b2eed1c900150dfc429f47041ed7b7b00eeaaf8f248bcc9e63c337c8250ba88",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "travel-claim",
+      "title": "差旅报销申请表",
+      "description": "申请人、行程和金额在上，审批栏在下并且留空。未提供的部门标待补充。",
+      "guidance": "学样例的申请表：事由、行程、金额、审批栏，必填项空着就标出来。出差人、日期和费用换成用户的，不照搬样例；没有的写「待补充」。这不是报销审批。用户这次的要求优先。",
+      "prompt": "参考这张差旅报销申请表，用我的行程和金额另填一份。没给的栏标待补充，审批栏留空。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "申请表格",
+      "businessSkill": "personal-application",
+      "source": "cases/travel-claim",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/travel-claim",
+        "license": "Selection sample",
+        "exampleSha256": "693412c60a298658f4a2562bd34fdd0198006b4759cc1d28d931b9f972eb25a1",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "annual-invitation",
+      "title": "年会邀请函",
+      "description": "正式邀请：称呼、时间地点、议程表和回复方式。主讲人未知时标待补充。",
+      "guidance": "学样例的邀请函：称呼、时间地点、议程表和回复方式，语气正式。活动、对象和日期换成用户的，不照搬样例事实；没有的写「待补充」。不要写成会议纪要。用户这次的要求优先。",
+      "prompt": "参考这份邀请函的结构和正式语气，按我给的活动、时间和地点另写一封。没定的内容标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "议程邀请",
+      "businessSkill": "personal-invitation",
+      "source": "cases/annual-invitation",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/annual-invitation",
+        "license": "Selection sample",
+        "exampleSha256": "570b9cf3cc2a9091205590a3f11609268a4f730b124bebcc7543ee68fdbcd2e0",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "miniapp-prd",
+      "title": "邻里取件需求说明",
+      "description": "背景、目标与非目标、可判定的验收标准、里程碑和待定问题。日期未知就标待补充。",
+      "guidance": "学样例的需求文档：背景、目标、非目标、用户故事、验收标准和里程碑。产品、用户和范围换成用户的，不照搬样例功能；没有的日期和决策人写「待补充」。用户这次的要求优先。",
+      "prompt": "参考这份需求说明的章节，为指定产品写一份 Word 需求文档。故事和验收用我的材料，没有的日期标待补充。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "产品需求",
+      "businessSkill": "personal-prd",
+      "source": "cases/miniapp-prd",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/miniapp-prd",
+        "license": "Selection sample",
+        "exampleSha256": "e3296029685bcdf32d63bf82cb7c1122eb55044ef07c9d2a2ac657a5ee80927c",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "partnership-letter",
+      "title": "合作邀约信",
+      "description": "英文正式信函：发信人、日期、收信人、称呼、正文和结尾敬语。未知地址写 To be confirmed。",
+      "guidance": "学样例的英文信：信头、日期、称呼、分段正文和结尾敬语，语气正式。双方、事由和日期换成用户的，不照搬样例事实；不知姓名就写明，没有的写「待补充」。用户这次的要求优先。",
+      "prompt": "参考这封英文信的版式，用我的双方、事由和日期另写一封正式商务信。不知道的姓名和地址写 To be confirmed。",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261101.2",
+      "category": "商务信函",
+      "businessSkill": "personal-letter",
+      "source": "cases/partnership-letter",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/partnership-letter",
+        "license": "Selection sample",
+        "exampleSha256": "c073f5679d9ec4849319a742581f4c807f95c747ca5091dc37d8e8781711614e",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      }
+    },
+    {
+      "id": "equipment-quote",
+      "title": "设备采购报价单",
+      "description": "数量乘单价，再乘折扣和税率，价税合计用公式。客户、有效期和付款条件留待补充。",
+      "guidance": "学样例的报价表：数量、单价、折扣、税率都用公式，另有有效期和付款条件。品名、单价和客户换成用户的，不沿用样例数字；没有的标「待补充」。大写金额要和合计核对。用户这次的要求优先。",
+      "prompt": "参考这张报价单的公式结构，按我给的品名、数量、单价、折扣和税率另做一份。缺的客户和有效期标待补充。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "报价单据",
+      "businessSkill": "personal-quotation",
+      "source": "cases/equipment-quote",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/equipment-quote",
+        "license": "Selection sample",
+        "exampleSha256": "6891d360420fdc3753af026c3f4807f3ccdcd728782073a995c249c7b8dc1dd2",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "household-budget",
+      "title": "家庭年度预算",
+      "description": "收入与支出分列预算、实际和偏差。结余用公式，支出实际配有柱形图。数字虚构。",
+      "guidance": "学样例的收支表：分类、月预算、实际、偏差公式和汇总图。收入、支出和月份换成用户的，样例是虚构数，不沿用它的数字；缺的标「待补充」。改数字后要重算。用户这次的要求优先。",
+      "prompt": "参考这张家用预算表的科目、偏差公式和图，用我的收支重做。没有的数标待补充，不要沿用样例金额。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.2",
+      "category": "家庭预算",
+      "businessSkill": "personal-budget",
+      "source": "cases/household-budget",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/household-budget",
+        "license": "Selection sample",
+        "exampleSha256": "dbcbc2349203eb575636b6d5d018a4575632e50082d91fb53f5c4e3ee3a9c8a6",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "vendor-statement",
+      "title": "供应商月度对账单",
+      "description": "价税合计减已付得到差异，未结清的一行用底色标出。发票号和期初留待补充。",
+      "guidance": "学样例的对账表：发票、税额、已付和差异公式，差异要能看出来。供应商、票号、币种和金额换成用户的，不沿用样例数字；缺的标「待补充」。改完要重算。用户这次的要求优先。",
+      "prompt": "参考这张对账单的列和差异公式，用我的发票和付款重做。缺票号就标待补充，不要沿用样例金额。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "往来对账",
+      "businessSkill": "personal-statement",
+      "source": "cases/vendor-statement",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/vendor-statement",
+        "license": "Selection sample",
+        "exampleSha256": "7b5990d869a0b3fa43a45eff49dc837ffd4c751a372db6ecc656056ea0a05416",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "project-gantt",
+      "title": "三个月项目计划",
+      "description": "开始日和工期是输入，结束日以及每一周是否落在任务里都由公式计算。任务为虚构。",
+      "guidance": "学样例的计划表：任务、工期、结束日公式和按周展开的条。项目名、日期、负责人和依赖换成用户的，不照搬样例安排；没有的写「待补充」。改工期后要重算。用户这次的要求优先。",
+      "prompt": "参考这份项目计划的工期公式和周视图，用我的任务、开始日和工期另做一张表。不知道的负责人标待补充。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "项目计划",
+      "businessSkill": "personal-gantt",
+      "source": "cases/project-gantt",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/project-gantt",
+        "license": "Selection sample",
+        "exampleSha256": "dd440cab2e7feb5c9f991d1f029654712b722271f5781155374330aa4b34efaf",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "quarterly-okr",
+      "title": "季度目标考核表",
+      "description": "权重乘评分得到加权，权重合计用公式核对是否为 100%。目标和分数是虚构的。",
+      "guidance": "学样例的考核表：目标、关键结果、权重、评分和加权公式，权重要校验。期间、目标和分数换成用户的，不沿用样例数字；没有的标「待补充」。改完要重算。用户这次的要求优先。",
+      "prompt": "参考这张考核表的权重、评分和加权公式，用我的目标和分数重做。没给的评分留空，不要沿用样例分数。",
+      "mode": "excel",
+      "sampleFile": "example.xlsx",
+      "revision": "20261101.1",
+      "category": "目标考核",
+      "businessSkill": "personal-okr",
+      "source": "cases/quarterly-okr",
+      "previewPages": null,
+      "selection": {
+        "namespace": "selection.office.v1",
+        "assetDir": "cases/quarterly-okr",
+        "license": "Selection sample",
+        "exampleSha256": "ee394b534912ccf02145c2cb757ac287f979da1e206aa25ee83b7b3594a2f641",
+        "note": "Selection 虚构样例，用 OfficeCLI 生成。只学结构和版式。"
+      },
+      "format": "xlsx",
+      "guide": "excel",
+      "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    }
   ]
 }

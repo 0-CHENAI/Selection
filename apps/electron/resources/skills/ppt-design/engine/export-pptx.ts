@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import JSZip from 'jszip'
 import PptxGenJS from 'pptxgenjs'
-import { checkDeck } from './check.ts'
+import { blockingIssues, checkDeck } from './check.ts'
 import { contrastRatio, luminance } from './contrast.ts'
 import { colorRef } from './schema.ts'
 import { containsCjk, defaultLeading } from './metrics.ts'
@@ -59,7 +59,7 @@ export type ExportResult = {
 
 export async function exportDeck(deck: Deck, outFile: string, options: ExportOptions = {}): Promise<ExportResult> {
   const issues = options.enforceCheck === false ? [] : checkDeck(deck)
-  if (issues.length > 0) return { status: 'needs_revision', issues }
+  if (blockingIssues(issues).length > 0) return { status: 'needs_revision', issues }
   const platform = options.platform ?? platformFromProcess()
   const bytes = await buildPptx(deck, platform)
   mkdirSync(dirname(outFile), { recursive: true })
@@ -68,7 +68,7 @@ export async function exportDeck(deck: Deck, outFile: string, options: ExportOpt
   const screenshots = options.screenshotDir
     ? await captureSlides(pptx, options.screenshotDir, deck.pages.length, { officecli: options.officecli })
     : undefined
-  return { status: 'ok', issues: [], pptx, screenshots }
+  return { status: 'ok', issues, pptx, screenshots }
 }
 
 async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
@@ -91,6 +91,7 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
 
 /** Shape name is the deck element id. OfficeCLI addresses it as `/slide[n]/shape[@name=<id>]`. Chart decorations use `${id}-…`. */
 function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element: DeckElement, platform: PlatformName, pageBackground: string): void {
+  if (element.retained) return
   const x = inches(element.bounds.x)
   const y = inches(element.bounds.y)
   const w = inches(element.bounds.w)
@@ -100,7 +101,7 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     const leading = element.font.leading ?? defaultLeading(element.font.size)
     const face = resolveFontFace(deck, element.font.family, platform, element.font.face)
     const ink = paint(colorRef(element.font.color, deck.theme, '$ink'))
-    slide.addText(element.text, {
+    const textOptions = {
       x, y, w, h,
       fontFace: face,
       fontSize: element.font.size,
@@ -112,7 +113,7 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
       margin: 0,
       // SVG runs are one line. A box that only fits one line must not wrap the last word onto the next title.
       wrap: (element.textCapacity?.maxLines ?? 1) > 1,
-      fit: 'none',
+      fit: 'none' as const,
       italic: element.font.italic === true ? true : undefined,
       rtlMode: element.font.rtl === true ? true : undefined,
       rotate: element.rotate,
@@ -121,7 +122,21 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
       charSpacing: element.font.tracking,
       lang: containsCjk(element.text) || element.font.family === '$cjk' ? 'zh-CN' : 'en-US',
       objectName: element.id,
-    })
+    }
+    if (element.runs && element.runs.length > 1) {
+      slide.addText(element.runs.map(run => {
+        const runInk = paint(colorRef(run.color ?? element.font?.color, deck.theme, '$ink'))
+        return {
+          text: run.text,
+          options: {
+            fontSize: run.size ?? element.font!.size,
+            bold: run.bold ?? bold,
+            italic: run.italic === true ? true : undefined,
+            color: runInk.color,
+          },
+        }
+      }), textOptions)
+    } else slide.addText(element.text, textOptions)
     return
   }
   if (element.type === 'shape') {
@@ -721,6 +736,7 @@ async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName)
   }
   if (await polishCharts(zip, deck, platform)) changed = true
   if (await shrinkBubbleScale(zip)) changed = true
+  if (await patchImportMarks(zip, deck)) changed = true
   if (!changed) return bytes
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
 }
@@ -739,6 +755,56 @@ async function shrinkBubbleScale(zip: JSZip): Promise<boolean> {
     changed = true
   }
   return changed
+}
+
+/** Crop and hyperlink live on the imported element. PptxGenJS does not write srcRect or hlinkClick for them. */
+async function patchImportMarks(zip: JSZip, deck: Deck): Promise<boolean> {
+  let changed = false
+  for (let index = 0; index < deck.pages.length; index++) {
+    const marked = deck.pages[index]!.elements.filter(element => !element.retained && (element.crop || element.link))
+    if (marked.length === 0) continue
+    const path = `ppt/slides/slide${index + 1}.xml`
+    const file = zip.file(path)
+    if (!file) continue
+    let xml = await file.async('string')
+    const relPath = `ppt/slides/_rels/slide${index + 1}.xml.rels`
+    let rels = (await zip.file(relPath)?.async('string')) ?? ''
+    let relChanged = false
+    let nextId = 1
+    while (rels.includes(`Id="rIdImp${nextId}"`)) nextId += 1
+    for (const element of marked) {
+      if (element.crop && element.type === 'image') {
+        const src = cropXml(element.crop)
+        xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, block => {
+          if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes('<a:srcRect')) return block
+          if (block.includes('<a:blipFill')) return block.replace('</a:blipFill>', `${src}</a:blipFill>`)
+          return block
+        })
+        changed = true
+      }
+      if (element.link && /^https?:\/\//i.test(element.link.href)) {
+        const relId = `rIdImp${nextId++}`
+        xml = xml.replace(/<p:(?:sp|pic|cxnSp)\b[\s\S]*?<\/p:(?:sp|pic|cxnSp)>/g, block => {
+          if (!block.includes(`name="${escapeXml(element.id)}"`) || block.includes('<a:hlinkClick')) return block
+          return block.replace(/(<p:cNvPr\b[^>]*?)\/>/, `$1><a:hlinkClick r:id="${relId}"/></p:cNvPr>`)
+        })
+        if (!rels) {
+          rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
+        }
+        rels = rels.replace('</Relationships>', `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${escapeXml(element.link.href)}" TargetMode="External"/></Relationships>`)
+        relChanged = true
+        changed = true
+      }
+    }
+    zip.file(path, xml)
+    if (relChanged) zip.file(relPath, rels)
+  }
+  return changed
+}
+
+function cropXml(crop: { l: number; t: number; r: number; b: number }): string {
+  const part = (value: number) => Math.max(0, Math.min(100000, Math.round(value * 100000)))
+  return `<a:srcRect l="${part(crop.l)}" t="${part(crop.t)}" r="${part(crop.r)}" b="${part(crop.b)}"/>`
 }
 
 function rewriteShape(block: string, faces: Map<string, { latin: string; ea: string }>, fills: Map<string, string>, evenOdd: Set<string>): string {

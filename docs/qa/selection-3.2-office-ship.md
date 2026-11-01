@@ -118,3 +118,67 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 
 三分路由是明确的模型工具合同，不是对任意模型行为的强制沙箱。外来复杂 PPTX 的母版继承、动画、SmartArt、OLE 等仍不保证无损往返；后续 deck 修改前必须对账 OfficeCLI 改过的成稿。新增三套 retained-native 的底层版权仍来自上游声明，不等于独立法律确权。部分 JSON 的 `v0.2.21` 是继承的导入器标签，以 ATTRIBUTION 固定提交为准。适配器只保证检查失败不写出，不保证磁盘错误/进程中断下跨文件事务性。本次未重打双平台安装包，历史功能分支包与 CI 不能冒充本整合提交的新验收。
 
+## #718 发布准备（尚未合入 test）
+
+这一节是 [#718](https://github.com/0-CHENAI/Selection/issues/718) 的清单和版本说明。它不代替桌面安装包上的全流程，也没有打开指向 `test` 的拉取请求。合入 `test` 仍要 LinNai 批准。
+
+### 对齐度
+
+见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 96.2%，Word 100%，Excel 95.8%，共享底座 100%，总体 98.1%。计入分母的未对齐项是 0。草稿 PR #741（PPT 配图接 Seedream / OpenAI）合入后，PPT 到 100%，总体到 99.1%。
+
+还剩两项部分对齐，需要 LinNai 书面确认能否带着发布：
+
+- PPT-IMAGE：图片槽合同和占位已经有了，但还没有内置生图提供方，等 #741。
+- XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
+
+PDF 导出按阶段 06 排除在用户路径之外。
+
+### 本轮合入 office-align-3.2 的 PR
+
+| PR | 内容 | 合入提交 |
+| --- | --- | --- |
+| #742 | 办公计算会话工具、公文分册、xlsx 体检、重算落盘、草稿版式、Excel 浮动图表锚点、对齐报告 | 997829cb8 |
+
+#740 已并入 #742 后关闭。#741（PPT 配图提供方）还是草稿，没有合入，要等 LinNai 看过设置页和密钥存储。
+
+### 版本
+
+版本号已从 `3.1.0` 改为 `3.2.0`：根 `package.json`、`apps/electron/package.json`、`packages/` 下原为 `3.1.0` 的十个工作区包，以及 `bun.lock` 里对应的工作区条目。electron-builder 的安装包名不带版本号，应用内「关于」读取 `package.json`，没有另写版本字符串。`release-notes/next.md` 的说明表明带版本号的 `X.Y.Z.md` 归发布流程，所以这次仍不新建 `release-notes/3.2.0.md`；用户可见的说明继续写在 `next.md`，等批准合入 `test` 后由发布流程改名。
+
+### 文档
+
+- `office-business/SKILL.md`：重算前先落盘，数据体检可以直接给 xlsx。
+- 新增用户文档 `apps/electron/resources/docs/office.md`（Office 使用说明）。随 `resources/docs` 自动进包，没有加进系统提示，`system.ts` 只剩约 7 个 token。
+
+### 许可
+
+- 公文写作是 Selection 自写。来源句在 `office-business/NOTICE`：能力参照 dsh-desktop gov-doc-writing，未复用其内容。分册 08–18 都是自写，测试禁止出现对方的专有栏目名。
+- MIT / Apache-2.0 的案例和技能保留原 LICENSE。ppt-design 的 `ATTRIBUTION.md` 和 `THIRD_PARTY_NOTICES` 仍随模板。
+- 安装包里不含 LibreOffice Kit、Python 办公运行时或 PPTD，没有 MPL-2.0 分发义务。`no-python.test.ts` 现在断言两件事：`electron-builder.yml` 里没有 libreoffice、soffice、lokit、pptd；`office-business`、`ppt-design` 和 `resources/bin` 下没有 .py / .pyc，也没有这几类引擎文件。
+- `office_business` 把 `office-business-runtime` 打进主进程的 JS 包，但这个目录不在 electron-builder 的文件列表里。
+
+### 体积与性能
+
+这一轮没有重打安装包，体积、冷启动和第一次渲染 / 重算 / 导入的耗时都没有新数据。需要在 macOS arm64 和 Windows x64 安装包上测，再和阶段 02 / 03 的预算比。
+
+box 上能给的参考（Linux，OfficeCLI 1.0.157，不代表安装包）：12 页 PPT 用 OfficeCLI 出 HTML 并截四宫格约 4 秒；一份 Word 首页截图约 4 秒；三个 Excel 案例各跑一次 `xlsx_recalculate`（含核对或双读），每个都在 10 秒内。
+
+### 还没在安装包上走过的流程
+
+下面每条都还没有这次的 macOS arm64 / Windows x64 安装包证据。勾选留给真机，不要把本页前面的 O0–O5 记录当成这一轮的安装包验收。
+
+- [ ] 首页 Office → Word 案例 → 中途上传 → `office_template_write` → 守卫 → 交付
+- [ ] Excel 年度经营 → 改数 → `xlsx_recalculate` → 交付
+- [ ] PPT 外来稿 → 理解 → 导入 → 换风格 → 配图 → check → 导出
+- [ ] 个人模板生成一份稿件
+- [ ] 注入后、写入中、重算中、导入中分别刷新，状态不重放副作用
+- [ ] NORM / PRO、深色、PRO 金色主题下入口仍可用
+- [ ] 原始案例 sha256 在流程后不变
+- [ ] 安装包体积相对阶段 02 / 03 的预算
+- [ ] 冷启动，以及第一次渲染、重算、导入的耗时
+- [ ] 在装了 Word / Excel / PowerPoint 的机器上打开成稿（Lola 的真机检查）
+- [ ] 合入 `test` 之后的 Validate 和 Package
+
+box 上已经跑过的是确定性层：对齐脚本、单元测试、质量对比页图（`/workspace/sw717-shots/`）。没有真实模型回合，box 上没有模型和出图密钥。
+
+`answer-delivery.test.ts` 里「linked OfficeCLI outputs」仍是已知偶发失败，这次没有改那个用例。

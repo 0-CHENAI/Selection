@@ -1,4 +1,6 @@
-import { OfficePreviewService, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
+import { OfficePreviewService, OFFICE_SAMPLE_READ_ONLY, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
+import { matchOfficeCasePreview, prepareOfficeCasePreview, removeOfficeCasePreviews } from '../services/office-case-preview'
+import { getOfficePageCaptureHost, renderOfficePages } from '../services/office-page-render'
 import { projectHistory } from './project-history'
 import { buildChatPlan, chatInputHash, chatRequestKey } from '../tasks/chat-plan'
 import { loadTaskDocument, saveTaskDocument, serializeTaskYaml, planValueKey } from '@craft-agent/shared/tasks'
@@ -177,8 +179,16 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 import { getPptSkillRoot, pptSendOptions, validatePptRequest } from '../services/ppt-catalog'
+import { formatDeliveryIssues, officecliExecutable, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from '../services/office-template/service'
+import { runOfficeBusiness as executeOfficeBusiness, type OfficeBusinessSession } from '../services/office-business-tool'
+import type { OfficeBusinessArgs } from '@craft-agent/session-tools-core'
+import { generatePresentationImage } from '../services/ppt-image-generate'
+import { pptRouteMismatch } from '../services/ppt-route'
+import { createTemplateTaskProject } from '../services/ppt-template-project'
+import { recordVisualInspection } from '../services/ppt-visual-record'
+import { assertOfficeSelectionFresh, buildOfficeInjection, executeOfficeTemplates, getOfficeBusinessRoot, listOfficeTemplates, officeFingerprint, officeUserMaterialNote, preserveOfficeInjection, reconcileOfficeInjection, routedOfficeSkillNote, selectOfficeRequest } from '../services/office-catalog'
 import { buildPptTurnPrompt, clearStalePptGenerating, ensurePptChecks, exportIncrementalPptx, isPptGenerating, markPptGenerating, pptTurnRun, readPptProgress, validatePptRevision, watchPptDeck, writePptRun } from '../services/ppt-live'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId, OFFICE_FOLLOW_UP_ATTACHMENT_CONFLICT, directedOfficeElements, officeSelectionAttachmentConflict, OFFICE_CASE_PREVIEW_SESSION } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, isAnswerDeliveryReceipt, isThinkingText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, expandPath, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, fileAttachmentsFromStored, resolveRegenerateAttachments, selectSpreadMessages, normalizePath, resolveImageSendPolicy } from '@craft-agent/shared/utils'
@@ -352,6 +362,7 @@ function snapshotTurnContext(managed: ManagedSession, options?: SendMessageOptio
     sourceSlugs: [...(managed.enabledSourceSlugs ?? [])],
     skillSlugs: options?.skillSlugs ? [...options.skillSlugs] : undefined,
     ppt: options?.ppt,
+    office: options?.office,
   }
 }
 
@@ -747,6 +758,8 @@ async function resolveToolDisplayMeta(
           'update_user_preferences': 'Update Preferences',
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
+          'office_render': 'Render Office Pages',
+          'office_business': '办公计算',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -941,6 +954,7 @@ interface RunningBackgroundTask {
 
 interface ManagedSession extends WorkModeMetadata {
   ppt?: PptRequest
+  office?: import('@craft-agent/shared/protocol').OfficeDocumentState | null
   pptProgress?: PptProgress
   handover?: HandoverLink
   conversationArtifactVersions?: ConversationArtifactVersions
@@ -957,7 +971,7 @@ interface ManagedSession extends WorkModeMetadata {
   progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
   progressDisabled?: boolean
 
-  answerDelivery?: {
+    answerDelivery?: {
     answerRoutingVersion?: 1
     runId: string
     generation: number
@@ -966,6 +980,9 @@ interface ManagedSession extends WorkModeMetadata {
     accepting?: boolean
     persistenceFailed?: boolean
     committedMessageId?: string
+    /** Set when the streaming path hits the Office delivery guard. One continuation, then a visible error. */
+    officeDeliveryNote?: string
+    officeDeliveryRetried?: boolean
   }
 
   id: string
@@ -1386,6 +1403,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     id: managed.id,
     workMode: managed.workMode,
     ppt: managed.ppt,
+    office: managed.office,
     workModeNeedsReview: managed.workModeNeedsReview,
     executionRootSessionId: managed.executionRootSessionId,
     parentSessionId: managed.parentSessionId,
@@ -2811,6 +2829,7 @@ export class SessionManager implements ISessionManager {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
               ppt: msg.turnContext?.ppt as PptRequest | undefined,
+              office: msg.turnContext?.office as import('@craft-agent/shared/protocol').OfficeRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3418,6 +3437,7 @@ export class SessionManager implements ISessionManager {
               badges: msg.badges,
               skillSlugs: msg.queuedSkillSlugs,
               ppt: msg.turnContext?.ppt as PptRequest | undefined,
+              office: msg.turnContext?.office as import('@craft-agent/shared/protocol').OfficeRequest | undefined,
               queueContext: msg.queuedContext,
             },
           })
@@ -3456,7 +3476,9 @@ export class SessionManager implements ISessionManager {
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
+    if (options?.ppt !== undefined && options.office) throw new Error('同一会话不能同时选择 PPT 与 Word / Excel。')
     if (options?.ppt !== undefined) options = { ...options, ppt: validatePptRequest(options.ppt), workMode: 'PRO' }
+    if (options?.office) options = { ...options, office: selectOfficeRequest(undefined, options.office, listOfficeTemplates()) }
 
     if (internal?.reservedSessionId) {
       validateSessionId(internal.reservedSessionId)
@@ -3798,6 +3820,7 @@ export class SessionManager implements ISessionManager {
       name: options?.name,
       workMode,
       ppt: options?.ppt,
+      office: options?.office,
       executionRootSessionId: parentMode?.executionRootSessionId ?? parentMode?.id,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -5070,6 +5093,8 @@ export class SessionManager implements ISessionManager {
         if (capability) assertComplexCapability(managed, capability)
         if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
         assertPptVisualQaTool(toolName, input, undefined, managed.agent?.currentModelSupportsImages?.())
+        const routeMismatch = pptRouteMismatch(getSessionStoragePath(managed.workspace.rootPath, managed.id), toolName, input && typeof input === 'object' ? input as Record<string, unknown> : {})
+        if (routeMismatch) throw new Error(routeMismatch)
         if (managed.isolatedWorkspace?.denyExternalBrowsers) assertOfficeRevisionTool(toolName, input)
         if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
         const checkpoint = managed.executionCheckpoint
@@ -5350,6 +5375,26 @@ export class SessionManager implements ISessionManager {
           // directory, session status, worker or runtime is created here.
         },
         artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
+        officeToolsFn: (name, args) => this.runOfficeTool(managed, name, args),
+        officeBusinessFn: async args => this.runOfficeBusiness(managed, args),
+        pptToolsFn: (name, args) => this.runPptTool(managed, name, args),
+        // #709 office_render: page images from the same OfficeCLI HTML as the Office preview panel.
+        ...(getOfficePageCaptureHost() ? {
+          officeRenderFn: async (request, signal) => {
+            const outcome = await renderOfficePages({
+              ...request,
+              cwd: managed.isolatedWorkspace?.directory ?? managed.workingDirectory ?? managed.workspace.rootPath,
+              outDir: join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'office-render'),
+              signal,
+              previewHtml: (path, sha256) => this.officePreviews.htmlFor(path, sha256),
+            })
+            try {
+              const recorded = recordVisualInspection(getSessionStoragePath(managed.workspace.rootPath, managed.id), outcome.file, outcome.renderer, outcome.images.map(image => ({ label: image.label, path: image.path })))
+              if (recorded.atLimit) outcome.notes = [...(outcome.notes ?? []), `这份文件的原生读图已有 ${recorded.rounds} 轮，上限是 3 轮。不要再开新的一轮，也不要改用 OCR。`]
+            } catch { /* A missing record must not hide the page images. */ }
+            return outcome
+          },
+        } : {}),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
         },
@@ -7111,6 +7156,7 @@ export class SessionManager implements ISessionManager {
     await this.officePreviews.closeSession(sessionId)
     validateSessionId(sessionId)
     let managed = this.sessions.get(sessionId)
+    if (managed) await removeOfficeCasePreviews(managed.workspace.id, sessionId).catch(() => {})
     if (!managed) {
       const candidates = this.getWorkspaces().filter(workspace => existsSync(getSessionStoragePath(workspace.rootPath, sessionId)))
       if (candidates.length > 1) throw new Error(`Ambiguous session ID: ${sessionId}`)
@@ -7330,7 +7376,28 @@ export class SessionManager implements ISessionManager {
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     const replayPpt = existingMessageId ? managed.messages.find(item => item.id === existingMessageId)?.turnContext?.ppt as PptRequest | undefined : undefined
     const installedSkills = loadAllSkills(managed.workspace.rootPath, managed.workingDirectory)
-    options = pptSendOptions(managed.workMode, replayPpt ?? managed.ppt, replayPpt ? { ...options, ppt: replayPpt } : options, getPptSkillRoot(), installedSkills, message)
+    let officeModelNote: string | undefined
+    const pptRequested = options?.ppt !== undefined || replayPpt !== undefined
+    if (options?.office && pptRequested) throw new Error('同一会话不能同时选择 PPT 与 Word / Excel。')
+    if (pptRequested && managed.office && !options?.office) {
+      const cleared = reconcileOfficeInjection(managed.messages, '', () => '')
+      managed.messages = cleared.messages
+      officeModelNote = cleared.modelAddition
+      managed.office = null
+      this.persistSession(managed)
+      this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: null } }, managed.workspace.id)
+    }
+    if (options?.office) {
+      managed.office = selectOfficeRequest(managed.office, options.office, listOfficeTemplates())
+      managed.ppt = undefined
+      options = { ...options, ppt: undefined }
+      this.persistSession(managed)
+      this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: managed.office, ppt: undefined } }, managed.workspace.id)
+    }
+    if (managed.office) assertOfficeSelectionFresh(managed.office, listOfficeTemplates())
+    const pptDefaults = managed.office ? undefined : (replayPpt ?? managed.ppt)
+    const pptOptions = managed.office ? { ...options, ppt: undefined } : (replayPpt ? { ...options, ppt: replayPpt } : options)
+    options = pptSendOptions(managed.workMode, pptDefaults, pptOptions, getPptSkillRoot(), installedSkills, message)
     if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
     if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
       managed.ppt = options.ppt
@@ -8156,7 +8223,31 @@ export class SessionManager implements ISessionManager {
         this.ensurePptExportWatch(managed)
       }
       const pptContext = buildPptTurnPrompt(options, chatSessionDir, undefined, installedSkills, message, userMessage.officeDocumentPath)
-      const currentInput = [pptContext, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
+      if (managed.office) {
+        const templates = listOfficeTemplates()
+        const fingerprint = officeFingerprint(managed.office)
+        const planned = reconcileOfficeInjection(managed.messages, fingerprint, () => buildOfficeInjection(managed.office!, templates))
+        managed.messages = planned.messages
+        if (managed.office.injectionFingerprint !== fingerprint || planned.changed) {
+          managed.office = { ...managed.office, injectionFingerprint: fingerprint }
+          this.persistSession(managed)
+          this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { office: managed.office } }, managed.workspace.id)
+        }
+        const material = officeUserMaterialNote([
+          ...(attachments ?? []).map(item => item.name),
+          ...(storedAttachments ?? []).map(item => item.name),
+        ])
+        officeModelNote = [planned.modelAddition, material].filter(Boolean).join('\n\n') || undefined
+      }
+      const routedSkill = options?.ppt || managed.ppt
+        ? undefined
+        : routedOfficeSkillNote(message, {
+            already: officeModelNote,
+            officeMode: !!managed.office,
+            history: managed.messages.filter(item => item.role === 'user' && !item.hidden).map(item => item.content).slice(-8),
+          })
+      if (routedSkill) officeModelNote = [officeModelNote, routedSkill].filter(Boolean).join('\n\n')
+      const currentInput = [pptContext, officeModelNote, handoverContext ? `<handover_context>\n${handoverContext}\n</handover_context>\n\nCurrent user request:\n${modelMessage}` : modelMessage].filter(Boolean).join('\n\n')
       const skippedImageCount = preparedImages.ok ? preparedImages.skippedImages?.length ?? 0 : 0
       if (preparedImages.ok && skippedImageCount > 0) {
         const modelName = messageBackendContext.resolvedModel || 'model'
@@ -8928,9 +9019,48 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Case samples: the client names a catalog case, the host copies its sample to a private
+   * read-only file for this workspace + chat. `open` accepts only that exact copy outside the
+   * workspace, and the preview stays view-only.
+   */
+  private async officeCasePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, scopeId: string, previewSessionId: string, ownerId: string): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void | null> {
+    if (operation.type === 'prepareCase') {
+      const sample = await prepareOfficeCasePreview(workspaceId, scopeId, operation.caseId)
+      return { previewId: '', artifactId: `office-case:${sample.caseId}`, baseVersion: sample.revision, path: sample.path, readOnly: true }
+    }
+    if (operation.type === 'open') {
+      const sample = await matchOfficeCasePreview(workspaceId, scopeId, operation.path)
+      if (!sample) return null
+      return this.officePreviews.open(previewSessionId, `office-case:${sample.caseId}`, sample.revision, sample.path, sample.bytes, false, true, ownerId, operation.previewId, { readOnly: true })
+    }
+    if (operation.type === 'refresh') {
+      // The sample never changes while open. Keep the process alive only.
+      const preview = this.officePreviews.describe(previewSessionId, operation.previewId, ownerId)
+      if (!preview.readOnly) return null
+      return this.officePreviews.heartbeat(previewSessionId, operation.previewId, ownerId)
+    }
+    return null
+  }
+
+  /** The empty Office home has no chat. It may only preview case samples. */
+  async officeHomePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, workspaceId: string, ownerId = 'legacy'): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void> {
+    const scope = `${OFFICE_CASE_PREVIEW_SESSION}:${workspaceId}`
+    const handled = await this.officeCasePreview(operation, workspaceId, OFFICE_CASE_PREVIEW_SESSION, scope, ownerId)
+    if (handled !== null) return handled
+    if (operation.type === 'open') throw new Error('首页只能预览案例样例')
+    if (operation.type === 'select' || operation.type === 'capture') throw new Error(OFFICE_SAMPLE_READ_ONLY)
+    if (operation.type === 'suspend') return this.officePreviews.suspend(scope, operation.previewId, ownerId)
+    if (operation.type === 'heartbeat') return this.officePreviews.heartbeat(scope, operation.previewId, ownerId)
+    if (operation.type === 'close') return this.officePreviews.close(scope, operation.previewId, ownerId)
+    throw new Error('Unknown Office preview operation')
+  }
+
   async officePreview(operation: import('@craft-agent/shared/protocol').OfficePreviewOperation, ownerId = 'legacy'): Promise<import('@craft-agent/shared/protocol').OfficePreviewResult | void> {
     const parent = this.sessions.get(operation.sessionId)
     if (!parent || parent.isolatedWorkspace) throw new Error('Office preview requires an active parent chat')
+    const casePreview = await this.officeCasePreview(operation, parent.workspace.id, parent.id, parent.id, ownerId)
+    if (casePreview !== null) return casePreview
     if (operation.type === 'open') {
       await this.ensureMessagesLoaded(parent)
       const resolvedPath = await this.authorizeOfficeDocumentPath(parent, operation.path)
@@ -9727,6 +9857,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
+    this.assertOfficeDeliveryReady(managed)
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -9791,6 +9922,81 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       state.accepting = false
     }
     this.publishCommittedAnswer(managed, answer)
+  }
+
+  /** Word / Excel host tools (#711). Selection, workspace and permissions come from the managed session. */
+  private officeToolSession(managed: ManagedSession): OfficeToolSession {
+    return {
+      workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
+      storageDir: getSessionStoragePath(managed.workspace.rootPath, managed.id),
+      office: () => managed.office,
+      templates: () => listOfficeTemplates(),
+      businessRoot: getOfficeBusinessRoot(),
+      canWrite: managed.permissionMode !== 'safe',
+      xlsx: { officecliBinary: officecliExecutable() },
+    }
+  }
+
+  private runOfficeBusiness(managed: ManagedSession, args: OfficeBusinessArgs): ReturnType<typeof executeOfficeBusiness> {
+    const session: OfficeBusinessSession = {
+      workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
+      canWrite: managed.permissionMode !== 'safe',
+      officecliBinary: officecliExecutable(),
+    }
+    return executeOfficeBusiness(session, args)
+  }
+
+  private async runOfficeTool(managed: ManagedSession, name: 'office_template' | 'office_template_write' | 'xlsx_recalculate', args: Record<string, unknown>): Promise<unknown> {
+    const session = this.officeToolSession(managed)
+    if (name === 'office_template') return prepareOfficeTemplate(session, args)
+    if (name === 'office_template_write') return writeOfficeTemplate(session, args)
+    return recalculateWorkspaceXlsx(session, args as unknown as Parameters<typeof recalculateWorkspaceXlsx>[1])
+  }
+
+  /** Personal template copies and slot images (#714, #715). Originals stay in the library. */
+  private async runPptTool(managed: ManagedSession, name: 'ppt_template_create_project' | 'image_generate', args: Record<string, unknown>): Promise<unknown> {
+    const workspaceDir = managed.workingDirectory ?? managed.workspace.rootPath
+    const sessionDir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (name === 'ppt_template_create_project') {
+      return createTemplateTaskProject({
+        templateId: String(args.template_id),
+        workspaceDir,
+        pages: Array.isArray(args.pages) ? args.pages.filter((page): page is number => typeof page === 'number') : undefined,
+      })
+    }
+    return generatePresentationImage({
+      purpose: args.purpose as 'presentation' | 'document' | 'other',
+      aspect_ratio: String(args.aspect_ratio),
+      style_context: String(args.style_context ?? ''),
+      prompt: String(args.prompt ?? ''),
+      reuse_group: typeof args.reuse_group === 'string' ? args.reuse_group : undefined,
+      source_policy: args.source_policy as 'contextual-scene' | 'provided-portrait' | 'native-graphic' | undefined,
+      workspaceDir,
+      sessionDir,
+    })
+  }
+
+  /**
+   * Pre-delivery guard (#711). Files changed in this turn that came from the selected Word case must keep its
+   * layout; Excel workbooks with formulas must be recalculated. Failure denies the answer and returns the
+   * needs_revision list to the model for another round.
+   */
+  private officeDeliveryBlock(managed: ManagedSession): string | undefined {
+    if (!managed.office) return undefined
+    const changed = managed.artifactCandidateInventory?.changed() ?? []
+    if (!changed.length) return undefined
+    try {
+      const issues = officeDeliveryIssues(this.officeToolSession(managed), changed)
+      return issues.length ? formatDeliveryIssues(issues) : undefined
+    } catch (error) {
+      sessionLog.warn('Office delivery guard failed to run', { sessionId: managed.id, error })
+      return undefined
+    }
+  }
+
+  private assertOfficeDeliveryReady(managed: ManagedSession): void {
+    const block = this.officeDeliveryBlock(managed)
+    if (block) throw new Error(block)
   }
 
   /** Finish file discovery before the answer is persisted and published. */
@@ -9865,6 +10071,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
     catch { return undefined }
+    const officeBlock = this.officeDeliveryBlock(managed)
+    if (officeBlock) {
+      state.officeDeliveryNote = officeBlock
+      return undefined
+    }
     const regenerateTransaction = managed.regenerateTransaction
     const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     // A regenerated answer must retain a real SDK branch boundary.
@@ -9884,6 +10095,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const artifactVersions = await this.captureChangedArtifacts(managed, state.userMessageId, undefined, draft.content)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       this.assertAnswerReady(managed, state, draft.content)
+      this.assertOfficeDeliveryReady(managed)
       Object.assign(draft, { isIntermediate: false, hidden: undefined, phase: 'final' as const,
         answerCommitted: true, answerSalvaged: mode === 'salvage' ? true : undefined, artifactVersions })
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, draft,
@@ -9970,7 +10182,32 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       return !!answer
     }
     if (complete && !waiting && !managed.authRetryInProgress && !(await commitNatural())
-      && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !runHasError() && active()) {
+      && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !runHasError() && active()
+      && state.officeDeliveryNote && !state.officeDeliveryRetried) {
+      state.officeDeliveryRetried = true
+      const note = state.officeDeliveryNote
+      state.officeDeliveryNote = undefined
+      await this.processEvent(managed, complete)
+      if (active()) {
+        agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
+        complete = undefined
+        for await (const event of this.runProgressExecution(managed, agent, `${note}\n\n这是交付前检查，不是最终失败。请修正列出的文件后再给出最终答复。不要把未通过检查的文件说成已就绪。`, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+          if (event.type === 'complete') complete = event
+          else yield event
+        }
+        if (complete) await commitNatural()
+      }
+      if (!state.committedMessageId && active()) {
+        const blocked = state.officeDeliveryNote ?? note
+        state.officeDeliveryNote = undefined
+        this.revealHiddenDrafts(managed)
+        yield { type: 'typed_error', error: createTypedError('answer_delivery_missing', { message: blocked }) }
+        if (complete) yield complete
+        return
+      }
+    }
+    if (complete && !waiting && !managed.authRetryInProgress && !state.committedMessageId
+      && !state.persistenceFailed && !state.recovery && !runHasError() && active() && !state.officeDeliveryNote && !state.officeDeliveryRetried) {
       // The run ended without a final tool-free message. Close any refused
       // candidate as process text, then ask once for the answer as plain text.
       this.revealHiddenDrafts(managed)
@@ -12118,6 +12355,22 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     this.persistSession(managed)
     await this.flushSession(sessionId)
     this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: managed.swarmEnabled } }, managed.workspace.id)
+  }
+
+  applyOfficeTemplates(sessionId: string, raw: string): import('@craft-agent/shared/protocol').OfficeTemplatesResult {
+    const managed = this.sessions.get(sessionId)
+    const executed = executeOfficeTemplates({ raw, office: managed?.office, sessionId: managed ? sessionId : undefined })
+    if (managed) {
+      if (executed.clearPpt) managed.ppt = undefined
+      managed.office = executed.clearPpt ? (executed.office ?? null) : (executed.office ?? managed.office)
+      this.persistSession(managed)
+      this.sendEvent({
+        type: 'session_metadata_changed',
+        sessionId,
+        changes: executed.clearPpt ? { office: managed.office ?? null, ppt: managed.ppt } : { office: managed.office ?? null },
+      }, managed.workspace.id)
+    }
+    return executed.result
   }
 
   private updateOrchestrationMetadata(
@@ -14638,6 +14891,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             statusType: 'compaction_complete',
           }
           managed.messages.push(compactionMessage)
+          if (managed.office) {
+            const preserved = preserveOfficeInjection(managed.messages, managed.office, listOfficeTemplates())
+            managed.messages = preserved.messages
+            managed.office = preserved.office
+          }
 
           // Mark compaction complete in the session state.
           // This is done here (backend) rather than in the renderer so it's

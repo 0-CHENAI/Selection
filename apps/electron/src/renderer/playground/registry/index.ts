@@ -28,6 +28,9 @@ import { mobileWebUIComponents } from './mobile-webui'
 import { handoverComponents } from './handover'
 import { workModeComponents } from './work-mode'
 import { officeCollaborationComponents } from './office-collaboration'
+import { officeCasePreviewComponents } from './office-case-preview'
+import { officeInputCaseComponents } from './office-input-case'
+import { officeSentCaseComponents } from './office-sent-case'
 import { pptOfficeProgressComponents } from './ppt-office-progress'
 import { taskEditorComponents } from './task-editor'
 import { taskEditorLiveComponents } from './task-editor-live'
@@ -57,6 +60,9 @@ export const componentRegistry: ComponentEntry[] = [
   ...sessionListComponents,
   ...workModeComponents,
   ...officeCollaborationComponents,
+  ...officeCasePreviewComponents,
+  ...officeInputCaseComponents,
+  ...officeSentCaseComponents,
   ...pptOfficeProgressComponents,
   ...handoverComponents,
   ...taskEditorComponents,

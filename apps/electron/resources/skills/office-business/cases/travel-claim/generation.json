@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这张差旅报销申请表，用我的行程和票据金额另填一份。没给的栏标待补充，审批栏留空。"
+}

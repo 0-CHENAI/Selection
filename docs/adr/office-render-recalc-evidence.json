@@ -1,0 +1,74 @@
+{
+  "issue": 705,
+  "epic": 703,
+  "measuredAt": "2026-10-30",
+  "host": "linux-x64",
+  "bundlesLibreOffice": false,
+  "newRuntimeDependencies": [],
+  "pocImplementationBytes": 61086,
+  "installerDeltaBytesUntilWired": 0,
+  "libreOfficeKitWinX64Bytes": 71374248,
+  "recommendation": {
+    "pdf": "A1",
+    "preview": "B2",
+    "formula": "C1+C3",
+    "nativeFirst": {
+      "pdf": ["officecli-view-pdf-plugin", "word-export-pdf", "officecli-html-electron-printToPDF", "selection-html-paginator"],
+      "preview": ["officecli-screenshot-native", "officecli-html-electron-capturePage"],
+      "formula": ["officecli-computed-writeback", "excel-calculate-full", "selection-formula-fallback"]
+    }
+  },
+  "nativeMethods": {
+    "officecli160Tag": "v1.0.160",
+    "officecli160Published": "2026-10-30T07:27:11Z",
+    "pluginAssetsInRelease": false,
+    "pluginsDirectory": ["plugins/plugin-protocol.md"],
+    "pluginsList157": "No plugins installed.",
+    "exporterPublished": false,
+    "exporterLicense": null,
+    "exporterBytes": null,
+    "wordPdfBackend": "Windows-only temp PDF via Word.SaveAs2 format 17, then deleted",
+    "linuxCannotRun": ["qlmanage", "QLThumbnailGenerator", "PDFKit", "NSPrintOperation", "IThumbnailProvider", "Microsoft Print to PDF", "ExportAsFixedFormat", "CalculateFull"]
+  },
+  "officecli": {
+    "bundled": "1.0.157",
+    "probed159": "1.0.159",
+    "linuxX64Bytes157": 35448677,
+    "linuxX64Bytes159": 35502949,
+    "sha256_157": "f8eefe88dbfa7464bee421e5421efe57fc26bc3180b30e56eef58594c8245c94",
+    "sha256_159": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
+    "viewPdf": "No exporter plugin found",
+    "pr673": "https://github.com/0-CHENAI/Selection/pull/673"
+  },
+  "pdfProbe": {
+    "rawChromePages": 2,
+    "rawChromeMediaBox": [612, 792],
+    "rawChromeBytes": 25059,
+    "preparedPages": 1,
+    "preparedMediaBox": [594.95996, 841.91998],
+    "preparedBytes": 15987,
+    "pageWidthMicrons": 210009,
+    "pageHeightMicrons": 297004,
+    "sourceHtmlBytes": 49594
+  },
+  "screenshotProbe": {
+    "officecliWithoutBrowser": { "bytes": 8672, "width": 1600, "height": 1200, "textVisible": false },
+    "chromeHtml": { "bytes": 19945, "width": 1200, "height": 1600, "textVisible": true }
+  },
+  "formulaProbe": {
+    "portCargoFormulas": 4877,
+    "portCargoMatched": 4877,
+    "portCargoMilliseconds": 6760,
+    "bioAssayFormulas": 397,
+    "bioAssayMatched": 397,
+    "bioAssayMilliseconds": 12,
+    "tolerance": 1e-6,
+    "annualBusinessCellFormulas": 0,
+    "crossSheet": {
+      "before": { "B6": 100, "J6": 200 },
+      "afterSourceChangeCached": { "B6": 100, "J6": 200 },
+      "afterSourceChangeComputed": { "B6": 150, "J6": 300 },
+      "afterRetouch": { "B6": 150, "J6": 300, "N6": 300 }
+    }
+  }
+}

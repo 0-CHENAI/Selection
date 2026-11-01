@@ -41,6 +41,34 @@ export function attachSessionSelfManagementBindings(
     configurable: true,
     enumerable: true,
   });
+  Object.defineProperty(context, 'officeTools', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeToolsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'pptTools', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.pptToolsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'officeBusiness', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeBusinessFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  Object.defineProperty(context, 'officeRender', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.officeRenderFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
   // Direct pass-through bindings — signatures match, no wrapping needed.
   // Each getter resolves fresh from the registry on every access.
 

@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { handoverReviewSessionAtom } from '@/atoms/handover'
 import { navigate, routes } from '@/lib/navigate'
+import { officeSessionRoute, officeSessionSection } from '@/components/office/office-home'
 import { extractLabelId, toggleLabelInList } from '@craft-agent/shared/labels'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 
@@ -146,9 +147,9 @@ export function useSessionMenuActions({
   }, [sessionId, t])
 
   const openInNewPanel = React.useCallback(() => {
-    // PPT sessions stay on the PPT route. Ordinary sessions stay on All Sessions.
-    navigate(item.ppt !== undefined ? routes.view.ppt(sessionId) : routes.view.allSessions(sessionId), { newPanel: true })
-  }, [item.ppt, sessionId])
+    // Office sessions stay on their PPT / Word / Excel route. Ordinary sessions stay on All Sessions.
+    navigate(officeSessionSection(item) ? officeSessionRoute(item) : routes.view.allSessions(sessionId), { newPanel: true })
+  }, [item, sessionId])
 
   const viewHandover = () => {
     navigate(routes.view.allSessions(sessionId))

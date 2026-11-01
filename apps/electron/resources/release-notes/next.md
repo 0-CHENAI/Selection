@@ -4,6 +4,18 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **办公计算与公文覆盖** — 纪要校验、SaaS 指标、Quick Ratio、单位经济、数据体检和信息图改为会话工具 `office_business`，安装后的应用不再依赖仓库路径，也不调用 Python。公文写作补上六个参数、事务文种、六维质检、安全分级和标点数字口径，仍是 Selection 自写，不搬无许可原文。（#717）
+
+- **个人办公文档** — Word / Excel 增加合同、简历与求职信、报价单、家庭预算、对账单、项目计划、申请表、邀请函、目标考核、产品需求和英文商务信。说出用途就会载入对应写法；案例卡片用中文标题，样例里的事实不会直接套用。公文写作补齐十五个文种和版式自检。（#728）
+
+- **Office 案例封面与入口图标** — Word 案例卡片用文档首页缩略图，Excel 案例卡片用首个工作表缩略图，比例和圆角与 PPT 封面一致。侧栏 Office 入口改为同时表示文档、表格和幻灯片的线性图标。封面是提交进仓库的静态图，打开页面时不再渲染文档。
+
+- **Excel 案例与业务技能** — 搬入年度经营、青岚港和荧光酶三个案例，以及 SaaS 指标、数据体检和信息图技能。计算用 Bun，交付前重算并核对；图表优先用 OfficeCLI 原生图表。Issue #712。
+
+- **外来 PPTX 导入为可编辑工程** — 上传的 PPTX 可以导入成 deck.json：能映射的对象继续按页改版式、换主题；暂时写不进工程的对象按原位置保留并标成不可编辑。原件和模板不会被覆盖。预览仍等渲染路径确定后再接。Issue #713。
+
+- **Word 案例与业务技能** — 接入会议纪要、咖啡市场调研、公司研报和政府通知四份案例，以及会议纪要、工作汇报、研究写作三份许可技能。公文写作由 Selection 自写，对齐文种、版式和待补充规则，不复用无许可原文。纪要结构校验改为 Bun 命令。政府通知样例按确认原样收入。（#710）
+
 - **PPT 局部修订闭环** — 实时导出也先做 deck 检查，失败保留上次可用文件；支持受影响页截图与局部 G4，允许连续同版式并补充叙事组合指引。Issue #685。
 
 - **PPT 跟进修订路由** — 已有工程的跟进消息使用独立修订上下文，不再重复注入新建指令；明确文字/数据定点编辑、deck 版式修订与显式整套换风格的边界。Issue #684。
@@ -35,6 +47,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Full Takeover risk warning** — Switching a workspace into Full Takeover now shows a confirmation that explains the reduced prompts and requires ticking "I understand the risk" before the mode is enabled. The acknowledgement is stored per workspace, so later switches in that workspace go through silently; other workspaces ask once. Approving a plan now elevates Explore to Smart Approval instead of silently enabling Full Takeover.
 
 ## Improvements
+
+- **Excel 预览里的图表位置** — 浮动图表按它在 Excel 里覆盖的单元格摆放和缩放，盖住的格子与 Excel 一致；行被中文撑高时图表跟着变高。协同面板刷新后，模型截图看到的也是最新的表格。
+
+- **PPT 模板选择器收束** — 默认只留六套：理性简报、数据简报、战略备忘、经营复盘、工程蓝图、课程培训。其余收进折叠的「更多模板」，理性简报可换五套配色，重复卡片不再出现，归档成稿移出安装包。自定义页可以上传 PPTX 或 deck.json。后加的 DSH 卡片封面已按整页预览重做，中文不再是空框。
 
 - **模板与按页修订** — PPT 模板库补齐 11 套中英文 DSH 模板及逐页预览；成果文件可按页描述修改，或直接选择结构诊断问题修复，保留其余页与主题。（#686）
 

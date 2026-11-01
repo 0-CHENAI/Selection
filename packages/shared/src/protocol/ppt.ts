@@ -1,5 +1,15 @@
 export type PptCategory = '商务' | '咨询' | '学术' | '教学' | '技术' | '创意' | '社媒' | '自定义'
 
+export type PptTier = 'default' | 'more'
+
+/** A color variant of one visible template. It is not its own picker card. */
+export interface PptTemplateVariant {
+  id: string
+  title: string
+  cover: string
+  referencePages: string[]
+}
+
 export interface PptTemplate {
   id: string
   title: string
@@ -9,6 +19,19 @@ export interface PptTemplate {
   /** Compact bundled rendered image, safe to use in Electron and browsers. */
   cover: string
   referencePages: string[]
+  /** Present on bundled cards. Custom uploads omit it. */
+  tier?: PptTier
+  /** Color variants selectable on this card, currently only 理性简报. */
+  variants?: PptTemplateVariant[]
+  /** Short reason a card stays in 更多模板 instead of folding into a default. */
+  note?: string
+  /** Personal-template conversion counts. Omitted on bundled cards. */
+  diagnostics?: {
+    faithful: number
+    approximate: number
+    retained: number
+    unsupported: number
+  }
 }
 
 export interface PptTheme {

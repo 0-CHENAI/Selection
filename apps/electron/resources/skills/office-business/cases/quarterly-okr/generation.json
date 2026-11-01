@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这张考核表的权重、评分和加权公式，用我的目标和分数重做。没给的评分留空，不要沿用样例分数。"
+}

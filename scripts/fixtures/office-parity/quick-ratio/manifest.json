@@ -1,0 +1,214 @@
+{
+  "feature": "quick-ratio",
+  "dshRepo": "https://github.com/0-CHENAI/dsh-desktop",
+  "dshCommit": "588412b9002fcb3ac88751fab7915e050c965563",
+  "scriptPath": "packages/dsh-desktop-office/business-skills/saas-metrics-coach/scripts/quick_ratio_calculator.py",
+  "scriptSha256": "51cd1e8c7742e741b76472e47aeb5ebf508a3367cf8b7190cd80735016313b5d",
+  "generator": {
+    "python": "3.12.3",
+    "command": "python3 quick_ratio_calculator.py <argv> [--json]",
+    "note": "开发机一次性生成 stdout。仓库只保留这些输出，不提交 Python 脚本。CI 不得运行 Python。"
+  },
+  "cases": [
+    {
+      "id": "input-template-example",
+      "argv": [
+        "--new-mrr",
+        "10000",
+        "--expansion",
+        "2000",
+        "--churned",
+        "3000",
+        "--contraction",
+        "500"
+      ],
+      "textStdout": "input-template-example.text.stdout",
+      "jsonStdout": "input-template-example.json.stdout",
+      "textSha256": "264b3224fb8b16026b9feef4846101de506f358147093e286372be5229b6a5d0",
+      "jsonSha256": "169726e67afaba9c204b1d400b52b6c4b00c6581c0d4f6a1f48bb6afdf0a0799"
+    },
+    {
+      "id": "no-loss",
+      "argv": [
+        "--new-mrr",
+        "1000",
+        "--churned",
+        "0"
+      ],
+      "textStdout": "no-loss.text.stdout",
+      "jsonStdout": "no-loss.json.stdout",
+      "textSha256": "f9d47a9471e0890147f6db6bd5ba270e9fdcc492ffaa047da5012fb442d22965",
+      "jsonSha256": "37a15ac9d7c9b905cbe09ddb935622e2fddb56cf74c3489f4eb32aef7a27a391"
+    },
+    {
+      "id": "no-data",
+      "argv": [
+        "--new-mrr",
+        "0",
+        "--churned",
+        "0"
+      ],
+      "textStdout": "no-data.text.stdout",
+      "jsonStdout": "no-data.json.stdout",
+      "textSha256": "d047f25ed48ba38c118ceed4ad30a4d3b255644a7317496c3e8a99dd3a2cbf37",
+      "jsonSha256": "9e741369560e36748e0cbe926842adb2ef3b4c7d45b2022537ecfd4b7450a1e6"
+    },
+    {
+      "id": "critical",
+      "argv": [
+        "--new-mrr",
+        "1000",
+        "--expansion",
+        "0",
+        "--churned",
+        "2500",
+        "--contraction",
+        "500"
+      ],
+      "textStdout": "critical.text.stdout",
+      "jsonStdout": "critical.json.stdout",
+      "textSha256": "243c808e1064b3195fed26955c27a9d8c3f501abd7d8df59a3f0228f5de7e84b",
+      "jsonSha256": "12630eb6f664c9921cb879f75e444b6ced4ee4cc7419558528590019556b2ae5"
+    },
+    {
+      "id": "watch-boundary",
+      "argv": [
+        "--new-mrr",
+        "1000",
+        "--churned",
+        "1000"
+      ],
+      "textStdout": "watch-boundary.text.stdout",
+      "jsonStdout": "watch-boundary.json.stdout",
+      "textSha256": "4e27cc36c38a86056ad6db37fbb695096d0c26d7cd2d73f1eeb24f68f3c0a2a2",
+      "jsonSha256": "14541dc24e5607f250c5204a8a9adadbff20c8ea2d688fce6f578de82d57abd9"
+    },
+    {
+      "id": "healthy-boundary",
+      "argv": [
+        "--new-mrr",
+        "2000",
+        "--churned",
+        "1000"
+      ],
+      "textStdout": "healthy-boundary.text.stdout",
+      "jsonStdout": "healthy-boundary.json.stdout",
+      "textSha256": "8daf98ada2019ee2bd4cba7fef416d6d9a239a631750d29028285eeaa37f387c",
+      "jsonSha256": "1c784ef149ac2e768c236b96130360bdd31f3d521e7cb1f28cf0ba9f6b0426fc"
+    },
+    {
+      "id": "excellent-boundary",
+      "argv": [
+        "--new-mrr",
+        "4000",
+        "--churned",
+        "1000"
+      ],
+      "textStdout": "excellent-boundary.text.stdout",
+      "jsonStdout": "excellent-boundary.json.stdout",
+      "textSha256": "fd670f4d74dbe156e80ca8290f5deeed14c3666bb657e148e00d3be251933a95",
+      "jsonSha256": "42b6667ca5c60fc14f55bc4f163a1273a140dfda530066c9edd5f1d0e108667c"
+    },
+    {
+      "id": "display-rounds-above-status",
+      "argv": [
+        "--new-mrr",
+        "3999",
+        "--churned",
+        "1000"
+      ],
+      "textStdout": "display-rounds-above-status.text.stdout",
+      "jsonStdout": "display-rounds-above-status.json.stdout",
+      "textSha256": "f189dcdaf5fa6a1693e584b5316b235d5b7eb7d65fc35c2643bc363295d5a880",
+      "jsonSha256": "e32a2a1f9ea31908109ca4ca702c58d496f67c6cbfd1d02191d8339011365f8c"
+    },
+    {
+      "id": "fractional",
+      "argv": [
+        "--new-mrr",
+        "10000.125",
+        "--expansion",
+        "2000.335",
+        "--churned",
+        "3000.445",
+        "--contraction",
+        "500.555"
+      ],
+      "textStdout": "fractional.text.stdout",
+      "jsonStdout": "fractional.json.stdout",
+      "textSha256": "1bde1fe2d9870db512deab6d855390bb726cfea4fcc961a9a6d1bd6d3a377b14",
+      "jsonSha256": "d2c5bdd3da08907e2491001a9393bba442fe4d0fc7adcbc3518f65fac58559f0"
+    },
+    {
+      "id": "binary-rounding",
+      "argv": [
+        "--new-mrr",
+        "1.005",
+        "--churned",
+        "2.675"
+      ],
+      "textStdout": "binary-rounding.text.stdout",
+      "jsonStdout": "binary-rounding.json.stdout",
+      "textSha256": "9262b62742c182300574e47322bc887a154c2f9aaf0f01ab71f39276fa3101f2",
+      "jsonSha256": "ed0b563b28ae26d25d293fe1b3caff40f0055271d06d7ce1051339ef181c36da"
+    },
+    {
+      "id": "expansion-only",
+      "argv": [
+        "--new-mrr",
+        "0",
+        "--expansion",
+        "500",
+        "--churned",
+        "100"
+      ],
+      "textStdout": "expansion-only.text.stdout",
+      "jsonStdout": "expansion-only.json.stdout",
+      "textSha256": "4a3f27cc8d8fed252f349057134f482e85355a94d25d3f94c1d77f5b9f1882fe",
+      "jsonSha256": "8d05fea19dd576b8be4a3520b5ce89ab902076e99a84a9a27e2168a2a72b9415"
+    },
+    {
+      "id": "large-amounts",
+      "argv": [
+        "--new-mrr",
+        "1234567.89",
+        "--expansion",
+        "98765.43",
+        "--churned",
+        "12345.67",
+        "--contraction",
+        "890.12"
+      ],
+      "textStdout": "large-amounts.text.stdout",
+      "jsonStdout": "large-amounts.json.stdout",
+      "textSha256": "560f6cfcb80fe37d85ae22927ef95f6486bf0bfcd5b731a7655619063f82752b",
+      "jsonSha256": "18a1975af5da0f9c4dc9095b184fd68b8da882a3de2185660c3d5e905ca554c4"
+    },
+    {
+      "id": "negative-growth",
+      "argv": [
+        "--new-mrr",
+        "-100",
+        "--churned",
+        "50"
+      ],
+      "textStdout": "negative-growth.text.stdout",
+      "jsonStdout": "negative-growth.json.stdout",
+      "textSha256": "9d661627aba7a76a8ef47e62ae5d84e38ef4af07ca54f51a95db3ee34e98a99e",
+      "jsonSha256": "c1f520125458744b58285a5f815997b925d7210bd0e9e6c242c68f55673e35c2"
+    },
+    {
+      "id": "defaults-omitted",
+      "argv": [
+        "--new-mrr",
+        "8000",
+        "--churned",
+        "2000"
+      ],
+      "textStdout": "defaults-omitted.text.stdout",
+      "jsonStdout": "defaults-omitted.json.stdout",
+      "textSha256": "6f130d9d85335b19911605064f9a4567a44e3f09a34386f258518699c7296279",
+      "jsonSha256": "9017d2e0245f01dcf71900b87d01635e756a9a5ccdc61997b7f2568086e81e02"
+    }
+  ]
+}

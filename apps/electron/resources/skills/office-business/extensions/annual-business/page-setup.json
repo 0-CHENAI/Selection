@@ -1,0 +1,8 @@
+{
+  "note": "Selection 样例扩展（#711，Lola 实测：原件无页面设置，导出 64 页，图表与表格被分页切断）。只在 office_template 准备的工作副本上应用，不改 cases/annual-business/example.xlsx。",
+  "paperSize": 8,
+  "orientation": "portrait",
+  "fitToWidth": 1,
+  "fitToHeight": 0,
+  "printArea": "used-range"
+}

@@ -12,7 +12,7 @@ import { atom } from 'jotai'
 import type { Getter, Setter } from 'jotai/vanilla'
 import { atomFamily } from 'jotai-family'
 import type { Session, Message } from '../../shared/types'
-import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
+import type { OfficeDocumentState, PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 
 /**
  * Session metadata for list display (lightweight, no messages)
@@ -21,6 +21,8 @@ import type { PptProgress, PptRequest } from '@craft-agent/shared/protocol'
 export interface SessionMeta {
   /** PPT requests classify history independently of the PRO execution mode. */
   ppt?: PptRequest
+  /** Word / Excel document mode. Null means the Office selection was cleared. */
+  office?: OfficeDocumentState | null
   pptProgress?: PptProgress
   handover?: import('@craft-agent/shared/protocol').HandoverLink
 

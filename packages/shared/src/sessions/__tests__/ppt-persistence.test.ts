@@ -38,3 +38,17 @@ test('PPT settings including large brand logo survive create, full save/load, li
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('the Word / Excel case on a sent message survives save and reload', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'office-turn-')))
+  try {
+    const created = await createSession(root, {})
+    const stored = loadSession(root, created.id)!
+    const office = { mode: 'word' as const, templateId: 'government-notice', revision: '20260914.2' }
+    stored.messages.push({ id: 'first', type: 'user', content: '写一份通知', timestamp: Date.now(), turnContext: { office } })
+    await saveSession(stored)
+    expect(loadSession(root, created.id)!.messages[0]?.turnContext?.office).toEqual(office)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

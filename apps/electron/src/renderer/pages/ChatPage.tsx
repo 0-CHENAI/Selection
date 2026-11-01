@@ -29,15 +29,17 @@ import { useAppShellContext, usePendingPermission, usePendingCredential, useSess
 import { rendererPerf } from '@/lib/perf'
 import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
-import { navigate, routes } from '@/lib/navigate'
+import { draftSessionNavigateOptions, navigate, routes } from '@/lib/navigate'
 import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, draftSessionOptionsId } from '@/lib/draft-session'
 import { isProjectConversation } from '@craft-agent/shared/projects/working-directory'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
-import type { PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
+import type { OfficeRequest, PptRequest, SendMessageOptions } from '@craft-agent/shared/protocol'
 import type { FileAttachment } from '../../shared/types'
 import { pptComposerAtomFamily } from '@/atoms/ppt'
+import { officeComposerAtomFamily } from '@/atoms/office'
+import { rememberOfficeSection, resolveOfficeDraftRequest, type OfficeHomeSection } from '@/components/office/office-home'
 import { ensurePptProSession } from '@/lib/ppt-handover'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import {
@@ -67,9 +69,11 @@ function SourcesResizeHandle(props: React.HTMLAttributes<HTMLDivElement>) {
 export interface ChatPageProps {
   sessionId: string | null
   pptMode?: boolean
+  /** Preselects the Office home. Routes `ppt` and `office/ppt|word|excel` set this. */
+  officeSection?: OfficeHomeSection
 }
 
-const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: ChatPageProps) {
+const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, officeSection: officeSectionProp }: ChatPageProps) {
   const { t } = useTranslation()
   const isDraft = sessionId == null
   // Diagnostic: mark when component runs
@@ -114,9 +118,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
   } = useAppShellContext()
 
   const draftStore = useStore()
+  const officeSection = officeSectionProp ?? (pptMode ? 'ppt' : undefined)
+  const isPptHome = officeSection === 'ppt'
+  React.useEffect(() => {
+    if (officeSection) rememberOfficeSection(officeSection)
+  }, [officeSection])
   const selectedDraftWorkMode = useAtomValue(workModeViewAtom)
-  const draftWorkMode = pptMode ? 'PRO' : selectedDraftWorkMode
-  const optionsSessionId = sessionId ?? `${draftSessionOptionsId(activeWorkspaceId ?? '', pptMode ? undefined : orchestrationProjectId ?? undefined, draftWorkMode)}${pptMode ? ':ppt' : ''}`
+  const draftWorkMode = isPptHome ? 'PRO' : selectedDraftWorkMode
+  const draftSuffix = officeSection === 'word' || officeSection === 'excel' ? `:office:${officeSection}` : isPptHome ? ':ppt' : ''
+  const optionsSessionId = sessionId ?? `${draftSessionOptionsId(activeWorkspaceId ?? '', isPptHome ? undefined : orchestrationProjectId ?? undefined, draftWorkMode)}${draftSuffix}`
   const [draftComposer, setDraftComposer] = useAtom(draftComposerAtomFamily(optionsSessionId))
 
   // Use the unified session options hook for clean access
@@ -313,11 +323,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
   }
-  const submitDraftRef = React.useRef(createDraftSubmission<Session>(() => {
+  const createCurrentDraft = () => {
     const ctx = draftCreateRef.current
+    const office = officeSection === 'word' || officeSection === 'excel'
+      ? resolveOfficeDraftRequest(officeSection, draftStore.get(officeComposerAtomFamily(optionsSessionId)))
+      : undefined
+    const ppt = office ? undefined : draftStore.get(pptComposerAtomFamily(optionsSessionId)) ?? (isPptHome ? {} : undefined)
     return ctx.onCreateSession(ctx.activeWorkspaceId!, {
-      workMode: pptMode || draftStore.get(pptComposerAtomFamily(optionsSessionId)) ? 'PRO' : ctx.workMode,
-      ppt: draftStore.get(pptComposerAtomFamily(optionsSessionId)) ?? (pptMode ? {} : undefined),
+      workMode: isPptHome || ppt ? 'PRO' : ctx.workMode,
+      ppt,
+      office,
       projectId: ctx.projectId,
       model: ctx.model || undefined,
       llmConnection: ctx.connection,
@@ -328,27 +343,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
       swarmEnabled: ctx.swarmEnabled,
       enabledSourceSlugs: ctx.sourceSlugs,
     })
-  }))
+  }
+  const createCurrentDraftRef = React.useRef(createCurrentDraft)
+  createCurrentDraftRef.current = createCurrentDraft
+  const submitDraftRef = React.useRef(createDraftSubmission<Session>(() => createCurrentDraftRef.current()))
   React.useEffect(() => {
     if (!isDraft) return
-    submitDraftRef.current = createDraftSubmission<Session>(() => {
-      const ctx = draftCreateRef.current
-      return ctx.onCreateSession(ctx.activeWorkspaceId!, {
-        workMode: pptMode || draftStore.get(pptComposerAtomFamily(optionsSessionId)) ? 'PRO' : ctx.workMode,
-        ppt: draftStore.get(pptComposerAtomFamily(optionsSessionId)) ?? (pptMode ? {} : undefined),
-        projectId: ctx.projectId,
-        model: ctx.model || undefined,
-        llmConnection: ctx.connection,
-        permissionMode: ctx.permissionMode,
-        thinkingLevel: ctx.thinkingLevel,
-        fastMode: ctx.fastMode,
-        workingDirectory: ctx.workingDirectory ?? 'user_default',
-        swarmEnabled: ctx.swarmEnabled,
-        enabledSourceSlugs: ctx.sourceSlugs,
-      })
-    })
+    submitDraftRef.current = createDraftSubmission<Session>(() => createCurrentDraftRef.current())
     setDraftBusy(false)
-  }, [isDraft, optionsSessionId, draftStore, pptMode])
+  }, [isDraft, optionsSessionId])
 
   React.useEffect(() => {
     if (isDraft && draftComposer.initialized && !draftComposer.model && initialDraftConnection) {
@@ -614,7 +617,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
   // Get display title for header - use getSessionTitle for consistent fallback logic with SessionList
   // Priority: name > first user message > preview > "New chat"
   const displayTitle = isDraft
-    ? t(pptMode ? 'ppt.new' : 'session.newSession')
+    ? t(officeSection ? 'office.new' : 'session.newSession')
     : session ? getSessionTitle(session) : (sessionMeta ? getSessionTitle(sessionMeta) : t('chat.session'))
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
@@ -824,8 +827,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
   const pendingCreatedSessionRef = React.useRef<Session | null>(null)
   const pptHandoverRef = React.useRef<{ sourceId: string; handoverId: string }>()
   const handleSendMessage = React.useCallback(async (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: SendMessageOptions['annotationFollowUps']) => {
+    const office: OfficeRequest | undefined = (officeSection === 'word' || officeSection === 'excel') && (isDraft || (session?.messages.length ?? 0) === 0)
+      ? resolveOfficeDraftRequest(officeSection, draftStore.get(officeComposerAtomFamily(optionsSessionId)))
+      : undefined
     const chosen = draftStore.get(pptComposerAtomFamily(optionsSessionId))
-    const ppt: PptRequest | undefined = chosen === null ? (isPptSession ? {} : undefined) : chosen ?? session?.ppt ?? sessionMeta?.ppt ?? (pptMode ? {} : undefined)
+    const ppt: PptRequest | undefined = office ? undefined : chosen === null ? (isPptSession ? {} : undefined) : chosen ?? session?.ppt ?? sessionMeta?.ppt ?? (isPptHome ? {} : undefined)
     const outgoingSkills = ppt ? [...new Set([...(skillSlugs ?? []), 'ppt-design'])] : skillSlugs
     if (draftBusy) return false
     setDraftBusy(true)
@@ -838,12 +844,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
         await submitDraftRef.current(async created => {
           pendingCreatedSessionRef.current = created
           abort.signal.throwIfAborted()
-          accepted = await onSendMessage(created.id, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt) === true
+          accepted = await onSendMessage(created.id, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt, office) === true
           if (!accepted) return
           onInputChange(optionsSessionId, '')
           onAttachmentsChange(optionsSessionId, [])
           setDraftComposer(previous => prepareNextDraft(previous, created.projectId))
-          if (!abort.signal.aborted) navigate(ppt ? routes.view.ppt(created.id) : routes.view.allSessions(created.id))
+          if (!abort.signal.aborted) navigate(office ? routes.view.office(office.mode, created.id) : ppt ? routes.view.ppt(created.id) : routes.view.allSessions(created.id))
         })
         return accepted
       }
@@ -855,7 +861,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
         await draftStore.set(ensureSessionMessagesLoadedAtom, targetId)
       }
       abort.signal.throwIfAborted()
-      const accepted = await onSendMessage(targetId, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt) === true
+      const accepted = await onSendMessage(targetId, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt, office) === true
       if (accepted && ppt && !abort.signal.aborted) navigate(routes.view.ppt(targetId))
       return accepted
     } catch (error) {
@@ -864,7 +870,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
     } finally {
       if (pptSendAbort.current === abort) setDraftBusy(false)
     }
-  }, [draftStore, optionsSessionId, session, sessionMeta?.ppt, pptMode, isPptSession, draftBusy, isDraft, activeWorkspaceId, onSendMessage, onInputChange, onAttachmentsChange, setDraftComposer])
+  }, [draftStore, optionsSessionId, session, sessionMeta?.ppt, isPptHome, officeSection, isPptSession, draftBusy, isDraft, activeWorkspaceId, onSendMessage, onInputChange, onAttachmentsChange, setDraftComposer])
 
   if (session && pendingCreatedSessionRef.current?.id === session.id) {
     pendingCreatedSessionRef.current = null
@@ -1023,6 +1029,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false }: Ch
               session={displaySession ?? draftSession}
               pptMode={isPptSession}
               pptComposerKey={optionsSessionId}
+              officeSection={officeSection}
+              onOfficeSectionChange={officeSection ? section => {
+                rememberOfficeSection(section)
+                navigate(routes.view.office(section), draftSessionNavigateOptions())
+              } : undefined}
               onSendMessage={handleSendMessage}
               onOpenFile={handleOpenFile}
               onOpenArtifact={handleOpenArtifact}

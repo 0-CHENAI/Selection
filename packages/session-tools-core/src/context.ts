@@ -164,8 +164,19 @@ export interface SessionToolContext {
     action: 'list' | 'restore'; path?: string; artifactId?: string;
     versionId?: string; expectedVersion?: string;
   }) => Promise<unknown>;
+  /** Host-side Word / Excel template tools (#711): office_template, office_template_write, xlsx_recalculate. */
+  officeTools?: (name: import('./handlers/office-template.ts').OfficeToolName, args: Record<string, unknown>) => Promise<unknown>;
+  /** Personal PPT template projects and slot images (#714, #715). */
+  pptTools?: (name: import('./handlers/ppt-tools.ts').PptToolName, args: Record<string, unknown>) => Promise<unknown>;
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
+  /** In-process office calculations (#717): metrics, quick ratio, unit economics, data quality, infographic, minutes check. */
+  officeBusiness?: (args: import('./handlers/office-business.ts').OfficeBusinessArgs) => Promise<unknown>;
+  /** Render Office pages to PNG through the host's Office preview pipeline (desktop only). */
+  officeRender?: (
+    request: import('./handlers/office-render.ts').OfficeRenderArgs,
+    signal?: AbortSignal,
+  ) => Promise<import('./handlers/office-render.ts').OfficeRenderOutcome>;
   /** Refresh host and current agent skill catalogs after a committed install. */
   refreshSkills?: () => void | Promise<void>;
   // ============================================================

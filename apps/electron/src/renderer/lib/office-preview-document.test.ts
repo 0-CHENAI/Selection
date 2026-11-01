@@ -284,3 +284,102 @@ interface CdpMessage {
   result?: { result?: { value?: unknown }; exceptionDetails?: unknown }
   error?: unknown
 }
+
+test('preview document lays Excel floating charts over their anchor range', () => {
+  const html = officePreviewDocument('<html><head></head><body><div class="sheet-content active" data-sheet="0"></div></body></html>', 'p1')
+  expect(html).toContain("anchorXlsxFloats(document.querySelector('.sheet-content.active'))")
+  expect(html).toContain("el.getAttribute('data-anchor-range')")
+  expect(html).toContain('window.switchSheet = (index) => { switchSheet(index); anchorFloats(); }')
+  expect(html).toContain('new ResizeObserver(queueAnchorFloats)')
+})
+
+const SHEET_FIXTURE = (() => {
+  const letters = ['A', 'B', 'C', 'D', 'E', 'F']
+  const widths = [20, 100, 50, 50, 50, 50]
+  const heights = [24, 24, 60, 24, 24, 40, 24, 24]
+  const head = `<thead><tr><th class="corner-cell"></th>${letters.map(c => `<th class="col-header" data-path="/S/col[${c}]">${c}</th>`).join('')}</tr></thead>`
+  const body = heights.map((h, i) => `<tr data-row="0-${i + 1}" style="height:${h}pt"><th class="row-header" data-path="/S/row[${i + 1}]">${i + 1}</th>${letters.map(c => `<td data-path="/S/${c}${i + 1}"></td>`).join('')}</tr>`).join('')
+  return `<style>table{border-collapse:collapse;table-layout:fixed}td,th{padding:0}</style><div class="sheet-content active" data-sheet="0"><div class="table-wrapper" style="position:relative"><table><colgroup><col style="width:30pt">${widths.map(w => `<col style="width:${w}pt">`).join('')}</colgroup>${head}<tbody>${body}</tbody></table>
+<div style="position:absolute;left:30pt;top:18pt;width:400pt;height:250pt;z-index:10;display:flex" data-from-col="1" data-from-row="1" data-anchor-range="1.5 1 4 5.5"><div style="flex:1;background:#38f"></div></div></div></div>
+<script>window.__chartGeometry = () => {
+  const r = el => el.getBoundingClientRect();
+  const chart = r(document.querySelector('[data-anchor-range]'));
+  const b = r(document.querySelector('th.col-header[data-path="/S/col[B]"]'));
+  const e = r(document.querySelector('th.col-header[data-path="/S/col[E]"]'));
+  const row2 = r(document.querySelector('tr[data-row="0-2"]'));
+  const row6 = r(document.querySelector('tr[data-row="0-6"]'));
+  return { chart: [chart.left, chart.top, chart.right, chart.bottom], want: [b.left + b.width / 2, row2.top, e.left, row6.top + row6.height / 2] };
+};</script>`
+})()
+
+test.skipIf(!chromeBinary())('Excel floating charts cover exactly their Excel cells and follow row height changes', async () => {
+  const html = officePreviewDocument(SHEET_FIXTURE, 'preview-chart')
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    response.end(html)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as { port: number }).port
+  const debugPort = 9300 + Math.floor(Math.random() * 500)
+  const chrome = spawn(chromeBinary()!, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=/tmp/selection-xlsx-chart-${debugPort}`,
+    '--window-size=1280,900', 'about:blank',
+  ], { stdio: 'ignore' })
+  try {
+    await waitForChrome(debugPort)
+    const targets = await fetch(`http://127.0.0.1:${debugPort}/json`).then(response => response.json()) as Array<{ type: string; webSocketDebuggerUrl: string }>
+    const page = targets.find(target => target.type === 'page')
+    const frames = 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'
+    const [first, grown] = await withEvaluate(page!.webSocketDebuggerUrl, `http://127.0.0.1:${port}/`, [
+      `${frames}.then(() => window.__chartGeometry())`,
+      `(document.querySelector('tr[data-row="0-3"]').style.height = '120pt', ${frames}.then(() => ${frames}).then(() => window.__chartGeometry()))`,
+    ]) as Array<{ chart: number[]; want: number[] }>
+    for (const geometry of [first!, grown!]) geometry.chart.forEach((value, index) => expect(Math.abs(value - geometry.want[index]!)).toBeLessThan(1))
+    // the taller row 3 pushes rows 4–6 down; the chart grows with them, like Excel's twoCell range
+    expect(grown!.chart[3]! - grown!.chart[1]!).toBeGreaterThan(first!.chart[3]! - first!.chart[1]! + 70)
+  } finally {
+    chrome.kill('SIGKILL')
+    await new Promise(resolve => server.close(resolve))
+  }
+}, 30_000)
+
+async function withEvaluate(webSocketUrl: string, url: string, expressions: string[]): Promise<unknown[]> {
+  const socket = new WebSocket(webSocketUrl)
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve())
+    socket.addEventListener('error', () => reject(new Error('Chrome debugging socket failed')))
+  })
+  let id = 0
+  const pending = new Map<number, (message: CdpMessage) => void>()
+  let onLoad: (() => void) | undefined
+  socket.addEventListener('message', event => {
+    const message = JSON.parse(String(event.data)) as CdpMessage
+    if (message.id && pending.has(message.id)) pending.get(message.id)!(message)
+    if (message.method === 'Page.loadEventFired') onLoad?.()
+  })
+  const send = (method: string, params: Record<string, unknown> = {}) => new Promise<CdpMessage>((resolve, reject) => {
+    const msgId = ++id
+    pending.set(msgId, resolve)
+    socket.send(JSON.stringify({ id: msgId, method, params }))
+    setTimeout(() => { if (pending.delete(msgId)) reject(new Error(`${method} timed out`)) }, 8_000)
+  })
+  try {
+    await send('Page.enable')
+    const loaded = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('preview page did not load')), 8_000)
+      onLoad = () => { clearTimeout(timer); resolve() }
+    })
+    await send('Page.navigate', { url })
+    await loaded
+    const results: unknown[] = []
+    for (const expression of expressions) {
+      const message = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+      if (message.error || message.result?.exceptionDetails) throw new Error(JSON.stringify(message.error ?? message.result?.exceptionDetails))
+      results.push(message.result?.result?.value)
+    }
+    return results
+  } finally {
+    socket.close()
+  }
+}

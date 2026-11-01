@@ -504,6 +504,44 @@
         }
       ],
       "remainingIssues": []
+    },
+    {
+      "slug": "dsh-course-workshop",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「成」",
+          "pageId": "03",
+          "elementId": "t7"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-course-workshop",
+      "file": "deck.en.json",
+      "sourceIssues": [],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-engineering-blueprint",
+      "file": "deck.json",
+      "sourceIssues": [
+        {
+          "code": "orphan",
+          "message": "孤字或行首禁则：第 2 行只剩「界」",
+          "pageId": "03",
+          "elementId": "t101"
+        }
+      ],
+      "remainingIssues": []
+    },
+    {
+      "slug": "dsh-engineering-blueprint",
+      "file": "deck.en.json",
+      "sourceIssues": [],
+      "remainingIssues": []
     }
   ]
 }

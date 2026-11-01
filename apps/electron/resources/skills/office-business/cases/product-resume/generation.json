@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这份简历和求职信的版式，用我的经历重写。没有的公司、数字和日期标待补充，不要留下样例里的北窗科技。"
+}

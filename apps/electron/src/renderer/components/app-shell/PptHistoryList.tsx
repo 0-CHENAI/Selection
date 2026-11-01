@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
-import { LoaderCircle, MoreHorizontal, Plus, Presentation } from 'lucide-react'
+import { FileText, LoaderCircle, MoreHorizontal, Plus, Presentation, Table2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@craft-agent/shared/i18n'
 import type { SessionMeta } from '@/atoms/sessions'
@@ -32,6 +32,7 @@ import { useNavigation } from '@/contexts/NavigationContext'
 import { useFocusZone, useRovingTabIndex } from '@/hooks/keyboard'
 import { useSessionActions } from '@/hooks/useSessionActions'
 import { draftSessionNavigateOptions, routes } from '@/lib/navigate'
+import { officeSessionRoute, officeSessionSection, readOfficeSection } from '@/components/office/office-home'
 import { cn } from '@/lib/utils'
 import { getSessionTitle } from '@/utils/session'
 import { CompactSessionMenu } from './CompactSessionMenu'
@@ -139,7 +140,8 @@ export function PptHistoryList({
     // Leave the route the user moved to while the confirmation was open.
     if (!deleted || selectedIdRef.current !== sessionId) return
     const nextId = nextPptHistoryId(snapshot, sessionId)
-    navigate(nextId ? routes.view.ppt(nextId) : routes.view.ppt(), nextId ? undefined : draftSessionNavigateOptions())
+    const next = snapshot.find(item => item.id === nextId)
+    navigate(next ? officeSessionRoute(next) : routes.view.office(readOfficeSection()), next ? undefined : draftSessionNavigateOptions())
   }, [handleDeleteWithToast, navigate])
   const openRename = React.useCallback((sessionId: string, name: string) => {
     setRenameSessionId(sessionId)
@@ -147,17 +149,18 @@ export function PptHistoryList({
   }, [])
 
   return <div ref={zoneRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" data-testid="ppt-history">
-    <SessionSearchHeader searchQuery={query} onSearchChange={setQuery} placeholder={t('ppt.searchHistory')} resultCount={visible.length} inputRef={searchInputRef} onKeyDown={handleSearchKeyDown} onFocus={() => { setIsSearchFocused(true); focusZone('navigator', { intent: 'click', moveFocus: false }) }} onBlur={() => setIsSearchFocused(false)} />
+    <SessionSearchHeader searchQuery={query} onSearchChange={setQuery} placeholder={t('office.history.search')} resultCount={visible.length} inputRef={searchInputRef} onKeyDown={handleSearchKeyDown} onFocus={() => { setIsSearchFocused(true); focusZone('navigator', { intent: 'click', moveFocus: false }) }} onBlur={() => setIsSearchFocused(false)} />
     {items.length === 0 ? <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
       <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-foreground/4 text-muted-foreground"><Presentation className="size-6" strokeWidth={1.5} /></div>
-      <p className="text-sm font-medium">{t('ppt.emptyTitle')}</p>
-      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{t('ppt.emptyDescription')}</p>
-      <Button type="button" variant="ghost" onClick={onNew} className="mt-4 h-8 gap-1.5 rounded-[6px] bg-background px-3 text-[13px] shadow-minimal"><Plus className="size-3.5" />{t('ppt.new')}</Button>
-    </div> : <div ref={listRef} role="listbox" aria-label={t('ppt.searchHistory')} className="min-h-0 flex-1 overflow-y-auto pb-4">
+      <p className="text-sm font-medium">{t('office.history.emptyTitle')}</p>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{t('office.history.emptyDescription')}</p>
+      <Button type="button" variant="ghost" onClick={onNew} className="mt-4 h-8 gap-1.5 rounded-[6px] bg-background px-3 text-[13px] shadow-minimal"><Plus className="size-3.5" />{t('office.new')}</Button>
+    </div> : <div ref={listRef} role="listbox" aria-label={t('office.history.search')} className="min-h-0 flex-1 overflow-y-auto pb-4">
       {visible.length === 0 && <p className="px-4 py-8 text-center text-xs text-muted-foreground">{t('ppt.noSearchResults')}</p>}
       {groups.filter(group => group.items.length > 0).map(group => <section key={group.label}>
         <div className="px-4 pb-1 pt-3 text-[11px] font-medium tracking-wider text-muted-foreground">{group.label}</div>
         {group.items.map(item => {
+          const kind = officeSessionSection(item) ?? 'ppt'
           const template = item.ppt?.templateId ? templates.get(item.ppt.templateId) : undefined
           const selected = item.id === selectedSessionId
           const timestamp = item.lastMessageAt ?? item.createdAt
@@ -170,6 +173,7 @@ export function PptHistoryList({
             selected={selected}
             timestamp={timestamp}
             language={i18n.language}
+            kind={kind}
             templateCover={template?.cover}
             templateTitle={template?.title}
             itemProps={keyboard.getItemProps(item, index)}
@@ -213,12 +217,18 @@ export function PptHistoryList({
   </div>
 }
 
+function KindMark({ kind }: { kind: 'ppt' | 'word' | 'excel' }) {
+  const Icon = kind === 'word' ? FileText : kind === 'excel' ? Table2 : Presentation
+  return <Icon className="size-2.5" aria-hidden />
+}
+
 function PptHistoryRow({
   item,
   title,
   selected,
   timestamp,
   language,
+  kind,
   templateCover,
   templateTitle,
   templatePages,
@@ -240,6 +250,7 @@ function PptHistoryRow({
   selected: boolean
   timestamp?: number
   language: string
+  kind: 'ppt' | 'word' | 'excel'
   templateCover?: string
   templateTitle?: string
   templatePages?: number
@@ -277,7 +288,7 @@ function PptHistoryRow({
     />
   )
   const row = (
-    <div className="group relative mr-2 pl-2" data-session-id={item.id} data-testid="ppt-history-item">
+    <div className="group relative mr-2 pl-2" data-session-id={item.id} data-testid="ppt-history-item" data-office-kind={kind}>
       {selected && <span className="absolute inset-y-0 left-0 w-0.5 bg-accent" />}
       <button
         {...itemProps}
@@ -294,13 +305,14 @@ function PptHistoryRow({
         aria-current={selected ? 'page' : undefined}
         className={cn('flex w-full items-center gap-3 rounded-lg py-2.5 pl-2 pr-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring', selected ? 'bg-foreground/3' : 'hover:bg-foreground/2')}
       >
-        <span title={templateTitle ? t('ppt.referenceTemplate', { title: templateTitle }) : undefined} className="relative flex h-[38px] w-[66px] shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-foreground/5 shadow-minimal">
-          {templateCover ? <img src={templateCover} alt={t('ppt.referenceCover')} className="h-full w-full object-cover" /> : <Presentation className="size-5 text-muted-foreground" />}
+        <span title={templateTitle ? t('ppt.referenceTemplate', { title: templateTitle }) : t(`office.history.${kind}`)} className="relative flex h-[38px] w-[66px] shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-foreground/5 shadow-minimal">
+          {templateCover ? <img src={templateCover} alt={t('ppt.referenceCover')} className="h-full w-full object-cover" /> : kind === 'word' ? <FileText className="size-5 text-muted-foreground" /> : kind === 'excel' ? <Table2 className="size-5 text-muted-foreground" /> : <Presentation className="size-5 text-muted-foreground" />}
+          <span className="absolute bottom-0.5 left-0.5 flex size-3.5 items-center justify-center rounded-sm bg-background/90 text-foreground shadow-minimal" title={t(`office.history.${kind}`)}><KindMark kind={kind} /></span>
           {generating && <span className="absolute inset-0 flex items-center justify-center bg-background/55 backdrop-blur-[1px]"><LoaderCircle className="size-3.5 animate-spin text-accent motion-reduce:animate-none" /></span>}
         </span>
         <span className="min-w-0 flex-1">
           <span className={cn('block truncate text-[13px]', generating && 'animate-shimmer-text')}>{item.name || item.preview || t('ppt.new')}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{historyStatus(item, templatePages, t)}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{historyStatus(item, templatePages, kind, t)}</span>
         </span>
         {timestamp && <span className={cn('self-start whitespace-nowrap pt-0.5 text-[11px] text-muted-foreground', menuHeld ? 'invisible' : isCompactMode ? undefined : 'group-hover:invisible')}>{formatDistanceToNow(timestamp, { locale: getDateLocale(language), addSuffix: false })}</span>}
       </button>
@@ -356,12 +368,12 @@ function PptHistoryRow({
   )
 }
 
-function historyStatus(item: SessionMeta, templatePages: number | undefined, t: (key: string, options?: Record<string, unknown>) => string) {
+function historyStatus(item: SessionMeta, templatePages: number | undefined, section: 'ppt' | 'word' | 'excel', t: (key: string, options?: Record<string, unknown>) => string) {
   const kind = pptHistoryKind({ processing: item.isProcessing, progress: item.pptProgress, templatePages })
-  if (kind.kind === 'progress') return t('ppt.generatingProgress', { current: kind.current, total: kind.total })
-  if (kind.kind === 'generating') return t('ppt.generating')
-  if (kind.kind === 'pages') return t('ppt.pages', { count: kind.count })
-  return 'PPTX'
+  if (section === 'ppt' && kind.kind === 'progress') return t('ppt.generatingProgress', { current: kind.current, total: kind.total })
+  if (section === 'ppt' && kind.kind === 'generating') return t('ppt.generating')
+  if (section === 'ppt' && kind.kind === 'pages') return t('ppt.pages', { count: kind.count })
+  return t(`office.history.${section}`)
 }
 
 function useCompactRowGesture(enabled: boolean, onOpen: () => void) {

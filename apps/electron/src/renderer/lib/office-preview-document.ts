@@ -1,4 +1,5 @@
 import katexSource from 'katex/dist/katex.min.js?raw'
+import { XLSX_FLOAT_ANCHOR_SOURCE } from '@craft-agent/shared/utils/xlsx-float-anchor-script'
 import { officePreviewPageBridge } from './office-preview-page'
 
 /** The sandbox has no application origin, network, file access, or write API. */
@@ -44,6 +45,29 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     fittedWidth = width;
     return true;
   };
+  // OfficeCLI places Excel floating charts at 15pt per row; taller CJK rows push
+  // the cells down and the chart covers them. Lay each chart over the cells it
+  // covers in Excel (same script as office-page-render-script). Re-run whenever
+  // the sheet's layout changes: sheet switch, web fonts, row height changes.
+  const anchorXlsxFloats = ${XLSX_FLOAT_ANCHOR_SOURCE};
+  const anchorFloats = () => anchorXlsxFloats(document.querySelector('.sheet-content.active'));
+  let anchorQueued = false;
+  const queueAnchorFloats = () => {
+    if (anchorQueued) return;
+    anchorQueued = true;
+    requestAnimationFrame(() => { anchorQueued = false; anchorFloats(); });
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    const switchSheet = window.switchSheet;
+    if (typeof switchSheet === 'function') window.switchSheet = (index) => { switchSheet(index); anchorFloats(); };
+    requestAnimationFrame(anchorFloats);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueAnchorFloats, () => {});
+    const tables = [...document.querySelectorAll('.sheet-content .table-wrapper > table')];
+    if (tables.length && typeof ResizeObserver === 'function' && document.querySelector('.sheet-content [data-from-row]')) {
+      const observer = new ResizeObserver(queueAnchorFloats);
+      for (const table of tables) observer.observe(table);
+    }
+  });
   ${officePreviewPageBridge(Number.isInteger(options.page) && options.page! >= 1 && options.page! <= 500 ? options.page! : null)}
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => {
     fitSlidesToViewport();
@@ -63,6 +87,7 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
     // slide box was still zero. One later pass corrects that without moving the
     // scroll offset the reader already has.
     window.addEventListener('load', () => {
+      anchorFloats();
       const main = document.querySelector('.main');
       const slide = document.querySelector('.main > .slide-container .slide');
       if (!main || !slide || slide.getBoundingClientRect().width <= main.clientWidth + 1) return;

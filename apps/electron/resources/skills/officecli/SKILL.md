@@ -19,7 +19,7 @@ Selection already ships the correct OfficeCLI binary and its official skills. Us
 
 换色只改主题 token，保留布局/文字/图表/页数，不自动升级为换皮。继承的模板选择、跟进消息或检查失败都不是整套重做授权；问答不触发修改，明确要新稿时才启动新建。
 
-没有匹配 deck 的外来 PPTX 必须先按 [外来稿 brief](references/external-ppt-brief.md) 用 `scripts/ppt-brief.ts`（OfficeCLI query）生成有损结构摘要，编辑前完整读取并校验源文件哈希，再选三分路由；变化后重新生成。定点改仍用 OfficeCLI；不能伪造保真导入，也不能为局部修改重建整套。无法原位完成的版式修改须说明限制，整套重建仍需明确意图。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。
+没有匹配 deck 的外来 PPTX 必须先按 [外来稿 brief](references/external-ppt-brief.md) 用 `scripts/ppt-brief.ts`（OfficeCLI query）生成有损结构摘要，编辑前完整读取并校验源文件哈希，再选三分路由；变化后重新生成。`office_edit` 仍用 OfficeCLI 定点改副本。改版式或整套换风格走 `ppt_import`（`deck-cli.mjs import`），得到 deck.json 后再修订；原件和模板都不覆盖。映射不了的对象保留在原位并标成不可编辑。OfficeCLI 改过后以保存的 PPTX 为准；后续 deck 修订前核对并同步这些改动，不能用旧工程导出覆盖新文字。新附件继续读取，但不重置既有风格。中途上传的 PPTX 是外来稿，不是个人模板。
 
 ## Load only what the task needs
 
@@ -71,7 +71,7 @@ Prose quality is a different skill. This router formats and delivers Office file
 
 ## 业务案例
 
-会议纪要、工作通知/公文草稿、Excel 执行台账先读 [Office 业务案例](../office-business/SKILL.md) 与其 catalog，再加载上表相应正式格式指南。已有模板采用副本 + 指定段落/单元格修改，保留原件、样式、页眉页脚和公式。案例不授权重建用户原稿。
+Word 案例（会议纪要、调研报告、公文通知）和 Excel 案例（年度经营、青岚港、荧光酶、执行台账）及对应业务技能先读 [Office 业务案例](../office-business/SKILL.md) 与其 catalog。Word 业务技能在 `office-business/business-skills/`。Excel 业务技能是 `saas-metrics-coach`、`dataset-health-audit`、`data-viz-gen`。已有模板采用副本 + 指定段落/单元格修改，保留原件、样式、页眉页脚和公式。案例不授权重建用户原稿，也不改用 python-docx、openpyxl 或 LibreOffice Kit。Excel 交付前要重算并核对。
 
 ## Artifact paths
 

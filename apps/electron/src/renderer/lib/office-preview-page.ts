@@ -1,5 +1,24 @@
 export const OFFICE_PREVIEW_SHOW_PAGE = 'selection-office-show-page'
 export const OFFICE_PREVIEW_REVEAL = 'selection-office-reveal'
+export const OFFICE_PREVIEW_OPEN_CASE = 'selection-office-open-case'
+export const OFFICE_PREVIEW_CLOSE_CASE = 'selection-office-close-case'
+
+export interface OfficeCasePreviewRequest {
+  caseId: string
+  /** The chat that asks. Omit on the empty Office home. */
+  sessionId?: string
+}
+
+/** Open a bundled case sample, read-only, in the Office 协同 panel. The host picks the file. */
+export function requestOfficeCasePreview(request: OfficeCasePreviewRequest): void {
+  if (!request.caseId) return
+  window.dispatchEvent(new CustomEvent(OFFICE_PREVIEW_OPEN_CASE, { detail: request }))
+}
+
+/** Close a case sample opened from the empty home when the home goes away. */
+export function closeOfficeCasePreview(): void {
+  window.dispatchEvent(new Event(OFFICE_PREVIEW_CLOSE_CASE))
+}
 
 export interface OfficePreviewPageRequest {
   sessionId: string

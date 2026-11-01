@@ -9,12 +9,11 @@ export const THEMES = Object.entries(themesRaw as Record<string, { name: string;
 export const CATEGORIES = ['全部', '商务', '咨询', '学术', '教学', '技术', '创意', '社媒', '自定义'] as const
 
 // Curated order for the 全部 tab: a mix across categories, Chinese titles first.
+// Product picker ids are dsh-cartesian, ppt169_china_economy_2025_briefing, mbb-consulting,
+// operating-review, dsh-engineering-blueprint, dsh-course-workshop. This mockup still
+// names the two ppt-master decks by their example ids, which share those covers.
 export const HOME_ORDER = [
-  'ppt169_china_economy_2025_briefing', 'ppt169_qianli_jiangshan_scroll', 'ppt169_raft_consensus_deepdive', 'ppt169_ev_market_priorities',
-  'ppt169_attention_is_all_you_need', 'ppt169_mid_autumn_papercut', 'ppt169_dujiangyan_zh_sparse', 'xiaohongshu_song_diancha',
-  'dsh-cartesian', 'ppt169_infosec_training_zh_long', 'ppt169_solar_cheapest_power', 'ppt169_pixel_breakfast_atlas',
-  'ppt169_kubernetes_blueprint_2026', 'ppt43_sleep_science_explainer', 'ppt169_sanxingdui_kiosk_zh', 'dsh-course-workshop',
-  'ppt169_beidou_navigation_narrated', 'ppt169_tokaido_shinkansen_60_ja', 'moments_midautumn_moon_quick', 'ppt169_teachers_day_chalkboard',
+  'dsh-cartesian', 'ppt169_china_economy_2025_briefing', 'ppt169_ev_market_priorities', 'ppt169_apple_fy2025_review', 'dsh-engineering-blueprint', 'dsh-course-workshop',
 ]
 
 export const HISTORY = [

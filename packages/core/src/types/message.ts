@@ -47,6 +47,13 @@ export type AuthStatus = 'pending' | 'completed' | 'cancelled' | 'failed';
  */
 export type ToolStatus = 'pending' | 'executing' | 'completed' | 'error' | 'backgrounded';
 
+/** Host marker for one Office mode injection. Replaced, not stacked, when the fingerprint changes. */
+export interface OfficeInjectionMarker {
+  source: 'selection-office-composer';
+  fingerprint: string;
+  status: 'active' | 'replaced';
+}
+
 /** Session-scoped options frozen with a queued user message. */
 export interface QueuedMessageContext {
   sourceSlugs: string[];
@@ -70,6 +77,8 @@ export interface TurnContext {
   skillSlugs?: string[];
   /** Host-defined serializable PPT options; validated by the PPT service on replay. */
   ppt?: unknown;
+  /** Host-defined Word / Excel selection; validated by the Office catalog on replay. */
+  office?: unknown;
 }
 
 /**
@@ -458,6 +467,8 @@ export interface Message {
   // finished background agent's result. Filtered out in groupMessagesByTurn so
   // it never appears as a user/assistant bubble (desktop + viewer).
   hidden?: boolean;
+  /** Word / Excel guide injection. Hidden from the transcript bubble. */
+  officeInjection?: OfficeInjectionMarker;
   // Turn ID: Correlation ID from the API's message.id, groups all messages in an assistant turn
   turnId?: string;
   // Status type for special status messages (e.g., compacting)
@@ -516,6 +527,10 @@ export interface StoredMessage {
   annotationFollowUps?: AnnotationFeedbackSnapshot[];
   /** Host-validated active Office document retained independently of the preview lifetime. */
   officeDocumentPath?: string;
+  /** Hidden from the sidebar preview and the transcript bubble. */
+  hidden?: boolean;
+  /** Word / Excel guide injection. Survives reload so the fingerprint is not injected again. */
+  officeInjection?: OfficeInjectionMarker;
   /** Submitted context path retained for idempotent client retries. */
   officeContextPath?: string;
   type: MessageRole;

@@ -1,0 +1,7 @@
+{
+  "tool": "officecli",
+  "version": "1.0.157",
+  "script": "scripts/personal-office-samples.ts",
+  "fictional": true,
+  "prompt": "参考这份项目计划的工期公式和周视图，用我的任务、开始日和工期另做一张表。不知道的负责人标待补充。"
+}

@@ -121,7 +121,7 @@ describe('office selection capsule', () => {
     expect(html).toContain('已选 2 / 256')
     const hook = readFileSync(new URL('../../../hooks/useOfficePreview.tsx', import.meta.url), 'utf8')
     expect(hook).toContain('decideOfficeSelection(')
-    expect(hook).toContain('{target.preview && <OfficeSelectionCapsule count={target.count} busy={!!target.busy} />}')
+    expect(hook).toContain('{target.preview && !target.preview.readOnly && <OfficeSelectionCapsule count={target.count} busy={!!target.busy} />}')
     expect(hook).toContain('paths: decision.paths')
     expect(hook).toContain("decision.type === 'overflow'")
   })

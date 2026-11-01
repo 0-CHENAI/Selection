@@ -1,3 +1,4 @@
+import type { OfficeDocumentState, OfficeRequest } from './office'
 import type { PptProgress, PptRequest, PptRevision } from './ppt'
 import type { HandoverLink, HandoverOperation } from './handover'
 /**
@@ -70,6 +71,8 @@ export interface RuntimeRecoveryView {
 
 export interface Session extends WorkModeMetadata {
   ppt?: PptRequest
+  /** Word / Excel document mode and selected case. Orthogonal to workMode. Null clears it. */
+  office?: OfficeDocumentState | null
   pptProgress?: PptProgress
   handover?: HandoverLink
   runtimeRecovery?: RuntimeRecoveryView
@@ -168,6 +171,7 @@ export interface Session extends WorkModeMetadata {
 
 export interface CreateSessionOptions {
   ppt?: PptRequest
+  office?: OfficeDocumentState
   workMode?: WorkMode
   name?: string
   permissionMode?: PermissionMode
@@ -716,7 +720,7 @@ export type SessionEvent =
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'thinking_probe'; sessionId: string; modelId: string; provider?: string; mode: 'unsupported' | 'always-on' | 'levels'; levels: Array<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; level?: string }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'ppt' | 'pptProgress' | 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'ppt' | 'office' | 'pptProgress' | 'handover' | 'workMode' | 'workModeNeedsReview' | 'executionRootSessionId' | 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -735,6 +739,8 @@ export type SessionEvent =
 
 export interface SendMessageOptions {
   ppt?: PptRequest
+  /** Selects the Word / Excel case for this turn. Mutually exclusive with `ppt`. */
+  office?: OfficeRequest
   /** Appended to model input only. Never stored on the user message. */
   pptRevision?: PptRevision
   officeSelection?: import('./artifacts').OfficeSelection
@@ -770,6 +776,7 @@ export interface SendMessageOptions {
 export type SessionCommand =
   | { type: 'handover'; operation: HandoverOperation }
   | { type: 'setWorkMode'; mode: WorkMode }
+  | { type: 'officeTemplates'; body: string }
   | { type: 'setProgressSupervision'; enabled: boolean }
   | { type: 'continueProgress' }
   | { type: 'resumeExecution' }

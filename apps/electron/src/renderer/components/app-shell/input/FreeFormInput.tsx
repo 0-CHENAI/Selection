@@ -7,6 +7,8 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { useAtom, useAtomValue } from 'jotai'
 import { pptComposerAtomFamily, pptComposerOverrideAtomFamily } from '@/atoms/ppt'
+import { officeComposerAtomFamily } from '@/atoms/office'
+import { attachedOfficeCase } from '@/components/office/OfficeSelectedCase'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { findAttachmentSizeProblem, formatAttachmentSizeProblem } from '@/lib/attachment-size'
@@ -501,6 +503,7 @@ export function FreeFormInput({
   const pptComposerKey = sourceSelectionKey ?? sessionId ?? ''
   const [, setPptRequest] = useAtom(pptComposerAtomFamily(pptComposerKey))
   const pptOverride = useAtomValue(pptComposerOverrideAtomFamily(pptComposerKey))
+  const officeCase = useAtomValue(officeComposerAtomFamily(pptComposerKey))
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
@@ -1989,6 +1992,7 @@ export function FreeFormInput({
         <AttachmentPreview
           pptComposerKey={pptComposerKey}
           hasPptTemplate={!!pptOverride?.templateId}
+          hasOfficeCase={!!attachedOfficeCase(officeCase)}
           attachments={attachments}
           onRemove={handleRemoveAttachment}
           disabled={disabled}

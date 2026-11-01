@@ -8,7 +8,7 @@ import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
 import { homedir } from 'os'
 import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
-import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
+import { OFFICE_CASE_PREVIEW_SESSION, RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { readFileAttachment, resolveImageSendPolicy } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
@@ -53,6 +53,12 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
   server.handle(RPC_CHANNELS.artifacts.OFFICE_PREVIEW, async (ctx, operation: import('@craft-agent/shared/protocol').OfficePreviewOperation) => {
     const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (operation?.sessionId === OFFICE_CASE_PREVIEW_SESSION) {
+      // Empty Office home: no chat yet, so only bundled case samples, scoped to this workspace.
+      if (!workspaceId) throw new Error('Workspace required')
+      if (!deps.sessionManager.officeHomePreview) throw new Error('Office preview is unavailable')
+      return deps.sessionManager.officeHomePreview(operation, workspaceId, ctx.clientId)
+    }
     const session = operation && await deps.sessionManager.getSession(operation.sessionId)
     if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
     if (!deps.sessionManager.officePreview) throw new Error('Office preview is unavailable')

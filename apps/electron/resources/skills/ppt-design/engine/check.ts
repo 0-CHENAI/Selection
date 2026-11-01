@@ -2,8 +2,57 @@ import { argumentLayoutById } from './argument-layouts.ts'
 import { composite, contrastMinimum, contrastRatio, splitColor } from './contrast.ts'
 import { containsCjk, defaultLeading, fitSlack, literalNewline, orphanLines, textWidth, wrapText } from './metrics.ts'
 import { colorRef } from './schema.ts'
-import type { Bounds, Deck, DeckElement, DeckIssue, DeckPage } from './types.ts'
+import type { Bounds, Deck, DeckElement, DeckIssue, DeckPage, ImageSlot } from './types.ts'
 import { issue } from './schema.ts'
+
+/** dsh `layoutRepetitionIssues` warns when a run is at least this many pages (`end - start < 3` does not). */
+export const LAYOUT_REPETITION_RUN = 3
+
+const COLOR_TOKEN = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$/
+const BOOKEND_LAYOUT = /^(?:cover|title|opening|section|closing|final|blank)$/i
+const COVER_LAYOUT = /^(?:cover|title|opening)$/i
+const ASPECT: Record<ImageSlot['aspectRatio'], number> = {
+  '1:1': 1,
+  '16:9': 16 / 9,
+  '9:16': 9 / 16,
+  '4:3': 4 / 3,
+  '3:4': 3 / 4,
+}
+
+export type CheckOptions = {
+  /** When set, a local image src that does not exist is `missing_asset`. Placeholders stay warnings. */
+  assetExists?: (src: string) => boolean
+}
+
+export function isPlaceholderImageSrc(src: string | undefined): boolean {
+  if (!src) return false
+  return src.startsWith('placeholder:') || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src)
+}
+
+export function blockingIssues(issues: DeckIssue[]): DeckIssue[] {
+  return issues.filter(item => item.severity !== 'warning')
+}
+
+export function revisionStatus(issues: DeckIssue[]): { status: 'ok' | 'needs_revision'; code: 0 | 2; errorCount: number; warningCount: number } {
+  const errorCount = blockingIssues(issues).length
+  return { status: errorCount ? 'needs_revision' : 'ok', code: errorCount ? 2 : 0, errorCount, warningCount: issues.length - errorCount }
+}
+
+/** Same shape as the Word / Excel delivery guard: file, page, element id. Warnings are listed and do not block. */
+export function formatNeedsRevision(file: string, issues: DeckIssue[]): string {
+  const blocking = blockingIssues(issues)
+  const warnings = issues.filter(item => item.severity === 'warning')
+  const lines = [`needs_revision：${blocking.length} 项需要修正，不能以「就绪」交付。`]
+  blocking.forEach((item, index) => {
+    const where = [file, item.pageId ? `页 ${item.pageId}` : '', item.elementId ? `元素 ${item.elementId}` : ''].filter(Boolean).join(' · ')
+    lines.push(`[${index + 1}] ${where}\n${item.code}：${item.message}`)
+  })
+  if (warnings.length) {
+    lines.push(`另有 ${warnings.length} 项提醒，不阻止导出：`)
+    for (const item of warnings) lines.push(`- ${[item.pageId ? `页 ${item.pageId}` : '', item.code, item.message].filter(Boolean).join(' · ')}`)
+  }
+  return lines.join('\n')
+}
 
 function overlaps(a: Bounds, b: Bounds): boolean {
   const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
@@ -92,11 +141,15 @@ function pointIn(box: Bounds, x: number, y: number): boolean {
   return x >= box.x - 0.25 && y >= box.y - 0.25 && x <= box.x + box.w + 0.25 && y <= box.y + box.h + 0.25
 }
 
-export function checkDeck(deck: Deck): DeckIssue[] {
+export function checkDeck(deck: Deck, options: CheckOptions = {}): DeckIssue[] {
   const issues: DeckIssue[] = []
   deck.pages.forEach(page => {
-    issues.push(...checkPage(deck, page))
+    issues.push(...checkPage(deck, page, options))
   })
+  if (deck.profile !== 'example') {
+    issues.push(...checkLayoutRepetition(deck))
+    issues.push(...checkCoverFocus(deck))
+  }
   return issues
 }
 
@@ -151,7 +204,7 @@ function checkChartImage(deck: Deck, page: DeckPage, element: DeckElement): Deck
   return issues
 }
 
-function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
+function checkPage(deck: Deck, page: DeckPage, options: CheckOptions): DeckIssue[] {
   const issues: DeckIssue[] = [...checkArgumentLayout(page)]
   const { width, height } = deck.canvas
   let background = '#FFFFFF'
@@ -170,6 +223,7 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
     if (off && !chartPicture) {
       issues.push(issue('out_of_bounds', `元素超出 ${width}×${height} 画布（x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h}）`, page.id, element.id))
     }
+    if (element.retained) continue
     if (chartPicture) issues.push(...checkChartImage(deck, page, element))
     if (element.type === 'text' && element.text && element.font && element.textCapacity) {
       issues.push(...checkText(deck, page, element, background))
@@ -177,11 +231,15 @@ function checkPage(deck: Deck, page: DeckPage): DeckIssue[] {
     if (element.type === 'chart' && element.chart?.kind === 'waterfall') {
       issues.push(...checkWaterfall(page, element))
     }
+    if (element.type === 'chart') issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element))
+    if (element.type === 'image' && !element.chartImage) issues.push(...checkImage(page, element, options))
     if (element.type === 'table' && element.table) {
       issues.push(...checkTable(deck, page, element, background))
     }
   }
-  issues.push(...checkOverlap(page, deck.profile === 'example'))
+  const editable = { ...page, elements: page.elements.filter(element => !element.retained) }
+  issues.push(...checkOverlap(editable, deck.profile === 'example'))
+  if (deck.profile !== 'example') issues.push(...checkTextLayer(page))
   return issues
 }
 
@@ -365,6 +423,165 @@ function checkTable(deck: Deck, page: DeckPage, element: DeckElement, pageBackgr
         issues.push(issue('schema', error instanceof Error ? error.message : String(error), page.id, element.id))
       }
     })
+  })
+  return issues
+}
+
+function checkLayoutRepetition(deck: Deck): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  let runStart = 0
+  let runLayout: string | undefined
+  const finish = (end: number) => {
+    if (!runLayout || end - runStart < LAYOUT_REPETITION_RUN) return
+    const first = deck.pages[runStart]
+    if (!first) return
+    issues.push(issue(
+      'layout_repetition',
+      `第 ${runStart + 1}–${end} 页连续使用版式 ${runLayout}。调整主视觉或在 design-plan 里写明连续对比的理由。`,
+      first.id,
+      undefined,
+      'warning',
+    ))
+  }
+  deck.pages.forEach((page, index) => {
+    const layout = page.layout?.trim() ?? ''
+    const counted = layout.length > 0 && layout !== 'free' && !BOOKEND_LAYOUT.test(layout)
+    if (!counted) {
+      finish(index)
+      runStart = index + 1
+      runLayout = undefined
+      return
+    }
+    if (layout === runLayout) return
+    finish(index)
+    runStart = index
+    runLayout = layout
+  })
+  finish(deck.pages.length)
+  return issues
+}
+
+function checkCoverFocus(deck: Deck): DeckIssue[] {
+  const canvas = deck.canvas.width * deck.canvas.height
+  const issues: DeckIssue[] = []
+  for (const page of deck.pages) {
+    if (!COVER_LAYOUT.test(page.layout?.trim() ?? '')) continue
+    const visual = page.elements.reduce((largest, element) => {
+      if (element.type !== 'image' && element.type !== 'chart' && element.type !== 'table') return largest
+      if (canvas <= 0) return largest
+      return Math.max(largest, (element.bounds.w * element.bounds.h) / canvas)
+    }, 0)
+    if (visual >= 0.25) continue
+    const sizes = page.elements.flatMap(element => {
+      if (element.type !== 'text' || !element.text?.trim() || !element.font) return []
+      return [element.font.size]
+    }).sort((left, right) => left - right)
+    if (sizes.length < 3) continue
+    const middle = Math.floor(sizes.length / 2)
+    const median = sizes.length % 2 === 1 ? sizes[middle]! : ((sizes[middle - 1] ?? 0) + (sizes[middle] ?? 0)) / 2
+    const largest = sizes.at(-1) ?? 0
+    if (median > 0 && largest / median >= 3) continue
+    issues.push(issue('cover_focus', '封面需要更明确的首读焦点：让一张图片、图表或表格占据至少 25% 画布，或让最大标题达到可见文字中位字号的 3 倍。', page.id, undefined, 'warning'))
+  }
+  return issues
+}
+
+function checkChartData(page: DeckPage, element: DeckElement): DeckIssue[] {
+  const chart = element.chart
+  if (!chart || chart.categories.length < 1 || chart.series.length < 1) {
+    return [issue('chart_data', `图表 ${element.id} 缺少类别或序列`, page.id, element.id)]
+  }
+  for (const series of chart.series) {
+    if (series.values.length !== chart.categories.length || series.values.some(value => typeof value !== 'number' || !Number.isFinite(value))) {
+      return [issue('chart_data', `图表 ${element.id} 的序列「${series.name}」与类别列数不一致，或含有非数字`, page.id, element.id)]
+    }
+  }
+  return []
+}
+
+function checkChartSeriesColor(page: DeckPage, element: DeckElement): DeckIssue[] {
+  const chart = element.chart
+  const colors = chart?.colors
+  if (!chart || !colors?.length) return []
+  if (colors.some(color => !COLOR_TOKEN.test(color))) {
+    return [issue('chart_series_color', `图表 ${element.id} 的颜色需要是 #RRGGBB、#RRGGBBAA 或主题色引用`, page.id, element.id)]
+  }
+  return []
+}
+
+function slotFor(page: DeckPage, elementId: string): ImageSlot | undefined {
+  return page.imageSlots?.slots.find(slot => slot.elementId === elementId)
+}
+
+function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  const src = element.src?.trim() ?? ''
+  const slot = slotFor(page, element.id)
+  if (/^https?:\/\//i.test(src)) {
+    issues.push(issue('remote_image', `图片 ${element.id} 使用了网络地址。请先把图片放进工作区再引用。`, page.id, element.id))
+  } else if (isPlaceholderImageSrc(src)) {
+    issues.push(issue('missing_asset', `图片 ${element.id} 仍是占位。没有生图提供方时保留占位并提示，不要当成已配图。`, page.id, element.id, 'warning'))
+  } else if (!src && slot) {
+    issues.push(issue('missing_asset', `图片槽 ${element.id} 没有素材。`, page.id, element.id))
+  } else if (src && options.assetExists && !options.assetExists(src)) {
+    issues.push(issue('missing_asset', `找不到图片资源 ${src}。`, page.id, element.id))
+  }
+  const fit = element.fit as string | undefined
+  if (fit && fit !== 'fill' && fit !== 'contain' && fit !== 'cover') {
+    issues.push(issue('image_fit', `图片 ${element.id} 的 fit 只能是 fill、contain 或 cover。`, page.id, element.id))
+  }
+  if (slot && element.bounds.w > 0 && element.bounds.h > 0) {
+    const actual = element.bounds.w / element.bounds.h
+    const expected = ASPECT[slot.aspectRatio]
+    if (expected && Math.abs(actual - expected) / expected > 0.08) {
+      issues.push(issue('image_fit', `图片槽 ${element.id} 的画面比例是 ${slot.aspectRatio}，当前框是 ${element.bounds.w.toFixed(0)}×${element.bounds.h.toFixed(0)}，比例不符。`, page.id, element.id))
+    }
+  }
+  if (element.crop) {
+    const { l, t, r, b } = element.crop
+    const values = [l, t, r, b]
+    if (values.some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+      issues.push(issue('image_crop', `图片 ${element.id} 的裁剪应是四边的非负比例。`, page.id, element.id))
+    } else if (l + r >= 1 || t + b >= 1) {
+      issues.push(issue('image_crop', `图片 ${element.id} 的裁剪没有留下有效画面。`, page.id, element.id))
+    } else if ((1 - l - r) * (1 - t - b) < 0.5) {
+      issues.push(issue('image_crop', `图片 ${element.id} 的主体被裁掉太多，请保留至少一半画面。`, page.id, element.id))
+    }
+  }
+  return issues
+}
+
+function areaOverlap(left: Bounds, right: Bounds): { area: number; width: number } {
+  const width = Math.max(0, Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x))
+  const height = Math.max(0, Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y))
+  return { area: width * height, width }
+}
+
+function checkTextLayer(page: DeckPage): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  page.elements.forEach((element, index) => {
+    if (element.type !== 'text' || element.bounds.w <= 0 || element.bounds.h <= 0) return
+    const textArea = element.bounds.w * element.bounds.h
+    for (const earlier of page.elements.slice(0, index)) {
+      if (earlier.type !== 'table' && earlier.type !== 'chart') continue
+      if (areaOverlap(element.bounds, earlier.bounds).area / textArea >= 0.15) {
+        issues.push(issue('text_occlusion', `文本 ${element.id} 与 ${earlier.id} 的内容区域重叠。`, page.id, element.id, 'warning'))
+        break
+      }
+    }
+    for (const later of page.elements.slice(index + 1)) {
+      if (later.type === 'shape' && (later.shape === 'line' || later.bounds.h <= 2 || later.bounds.w <= 2)) continue
+      if (later.type !== 'table' && later.type !== 'chart' && later.type !== 'image' && later.type !== 'shape') continue
+      const intersection = areaOverlap(element.bounds, later.bounds)
+      if (intersection.area / textArea >= 0.15 && later.type !== 'shape') {
+        issues.push(issue('text_occlusion', `文本 ${element.id} 可能被后绘制的 ${later.id} 遮挡。`, page.id, element.id, 'warning'))
+        break
+      }
+      if (later.bounds.y > element.bounds.y && later.bounds.y < element.bounds.y + element.bounds.h && intersection.width / element.bounds.w >= 0.3 && later.type !== 'shape') {
+        issues.push(issue('text_drift', `文本 ${element.id} 可能跨入下方 ${later.id} 的边界。`, page.id, element.id, 'warning'))
+        break
+      }
+    }
   })
   return issues
 }

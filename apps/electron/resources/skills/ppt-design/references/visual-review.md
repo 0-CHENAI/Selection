@@ -1,12 +1,12 @@
 # 逐页视觉检查
 
-`deck_check` 只处理越界、重叠、容量、对比度、孤字、字面量换行、瀑布不轧平和中文误用 `$latin`。它不判断疏密、图表是否像默认表格、连线有没有接到该接的节点、页脚是否对齐，也不判断这页是否真的在论证。
+`deck_check` 处理越界、重叠、容量、对比度、孤字、字面量换行、瀑布不轧平、中文误用 `$latin`，以及图表数据、图表颜色、图片槽比例、裁剪、远程图片和丢失素材。连续三页同一版式、封面焦点、文字可能被图表挡住，只给提醒，不拦截导出。它不判断疏密、图表是否像默认表格、连线有没有接到该接的节点，也不判断这页是否真的在论证。
 
 ### G4 检查范围（O2）
 
 新稿、整套换皮或没有有效既往视觉证据时检查全部页。局部文字/单页/指定页版式修订，仅重新截图并原生读图受影响页；记录页码、修改内容和沿用的未改页证据。主题/字体等全局修改检查全部页；页序重排检查受影响的叙事顺序与页面。无法证明未改页未受影响时扩大到全量。
 
-已知总页数 N，局部截图使用 `deck-cli.mjs screenshot <pptx> --out <dataFolderPath>/slides --pages N --only-pages 2,4`，列表为从 1 开始的实际页码，保持原文件名，不重编号、不覆盖无关截图。直接 CLI 定点修改也可逐页调用 OfficeCLI screenshot。截图不是视觉验收，仍需 Read 或 call_llm attachments 原生读图。
+生成或改完之后，用 `office_render` 看已经导出的 PPTX（与 Office 协同面板同一套页面）。整项任务最多 3 轮：首次加上至多两次复查。返回的图片要自己看，不要 OCR。宿主把看过的页和文件哈希记在 `data/visual-qa.json`。已知总页数 N 时，也可以用 `deck-cli.mjs screenshot <pptx> --out <dataFolderPath>/slides --pages N --only-pages 2,4`，列表为从 1 开始的实际页码，保持原文件名。截图不是视觉验收，仍需 Read 或 `call_llm` attachments 原生读图。
 
 后文的每轮检查均指本节确定的范围。首次与至多两次修复复查共用原三次上限，不因范围缩小、换会话或换 renderer 而重置；检查后修改使对应页证据失效，不允许复用过期截图宣称通过。
 
@@ -32,6 +32,6 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 - 连线和色条对得上句子。闸门没有被不该跨过去的条挡住。
 - 来源还在，示例句和虚构专名已经换成用户材料。
 - 封面和收束页用的是这一套自己的构图。发丝网格和 8 pt 以内的圆点是装饰，不应当成挡住正文的线。
-- 中文 `dsh-course-workshop` 第 3 页和 `dsh-engineering-blueprint` 第 3 页的源标题会在末行落下一个字。换成用户句子后，截图里末行必须不是单字。
+- 换成用户句子后，截图里任何文本框的末行都不能只剩一个字（`dsh-course-workshop`、`dsh-engineering-blueprint` 第 3 页的窄框最容易出现）。
 
 截图只能证明静态页面。没有在 PowerPoint、Keynote 或 WPS 里播放过的动画或 Morph，要明确说未验证。

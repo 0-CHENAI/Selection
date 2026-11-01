@@ -1,0 +1,456 @@
+{
+  "meeting-minutes": [
+    {
+      "kind": "heading",
+      "style": "Title",
+      "text": "发布会筹备对齐会议纪要"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "一、会议信息"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "二、工作安排"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "三、议题记录"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "议题一：发布会概述与预热工作（市场部）"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "议题二：产品演示与演示脚本（PM 主导）"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "议题三：线上产品展示与物料准备"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "议题四：产品手册"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "议题五：线下体验区与整体排期"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "四、行动项"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "五、后续确认"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "待确认事项"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "整理建议"
+    }
+  ],
+  "coffee-market": [
+    {
+      "kind": "heading",
+      "style": "Title",
+      "text": "中国现制咖啡市场调研报告"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "02 供给结构与品牌覆盖"
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "扩张方式影响总部收入与门店经营的关系"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "03 同店销售与经营质量"
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "区分价格变化与交易次数变化"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "04 消费场景与需求假设"
+    },
+    {
+      "kind": "table",
+      "columns": 4
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "产品组合需要服务具体时段"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "用户分层采用行为变量"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "05 门店贡献与价格敏感性"
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "价格折让需要相应的增量交易"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "06 市场进入与跟踪重点"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "重点跟踪四类变化"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "结论适用范围"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "07 研究方法与资料索引"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "数据比较原则"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "主要来源"
+    }
+  ],
+  "equity-research": [
+    {
+      "kind": "table",
+      "columns": 1
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "目录"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "阅读路径"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "三个分析层次"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "执行摘要：盈利质量进入验证期"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "一、恢复速度决定全年目标的可实现路径"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "二、ASP 变化需要放回车型结构中解释"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "三、分部利润修复需要毛利与费用共同作用"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "四、质量与服务是扩大规模后的必要能力"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "1. 交付规模：从季度波动看年度节奏"
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "1.1 换代切换解释波动的一部分"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "1.2 分清交付瓶颈，才能解释增长速度"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "2. 产品组合：扩大覆盖与提高运营复杂度"
+    },
+    {
+      "kind": "table",
+      "columns": 4
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "2.1 价格带覆盖与收入结构需要联动分析"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "2.2 多产品线对生产和服务提出更高要求"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "2.3 生态协同的商业价值，需要可量化证据"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "3. 经营质量：毛利改善与费用约束"
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "3.1 量增与价降共同影响收入"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "4. 情景测算：把增长目标转为经营条件"
+    },
+    {
+      "kind": "table",
+      "columns": 4
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "4.1 用节奏要求检验增长假设"
+    },
+    {
+      "kind": "table",
+      "columns": 4
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "4.2 收入增长与毛利改善可以相互补充"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "5. 风险与催化：建立可追踪的观察表"
+    },
+    {
+      "kind": "table",
+      "columns": 3
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "5.1 召回事件分别对应具体产品与缺陷"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "5.2 判断上修与下修的触发条件"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "附录 A：数据来源与检索入口"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "资料使用顺序"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "附录 B：计算方法与口径说明"
+    },
+    {
+      "kind": "table",
+      "columns": 4
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "主要计算"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "数据处理规则"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "术语表"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "披露附录"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "报告属性与作者说明"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "信息来源与时效"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "财务口径与估值范围"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "情景测算与前瞻性判断"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "产品价格、安全与召回信息"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading2",
+      "text": "使用与独立判断"
+    }
+  ],
+  "government-notice": [
+    {
+      "kind": "image",
+      "count": 1
+    },
+    {
+      "kind": "heading",
+      "style": "Title",
+      "text": "中国中车关于开展2025年“质量安全月”活动的通知"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "一、活动主题和时间"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "二、重点工作"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "三、组织实施"
+    },
+    {
+      "kind": "heading",
+      "style": "Heading1",
+      "text": "四、信息报送"
+    },
+    {
+      "kind": "table",
+      "columns": 1
+    }
+  ]
+}
