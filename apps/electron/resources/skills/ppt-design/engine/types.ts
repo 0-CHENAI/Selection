@@ -344,6 +344,7 @@ export type IssueCode =
   | 'empty_picture_slot'
   | 'text_drift'
   | 'text_occlusion'
+  | 'text_collision'
   | 'unreconciled'
   | 'font'
 
