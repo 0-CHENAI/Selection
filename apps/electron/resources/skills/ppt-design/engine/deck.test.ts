@@ -9,7 +9,7 @@ import { parseDeckDocument, parseDeckSource } from './schema.ts'
 import { captureSlides } from './screenshot.ts'
 import { chart, fixtureTheme, makeDeck, makePage, panel, text } from '../styles/kit.ts'
 import type { Deck, DeckElement } from './types.ts'
-import { addedDshTemplates } from '../../../../../../scripts/adapt-dsh-office-templates'
+import { adaptedFirstDshTemplates, addedDshTemplates } from '../../../../../../scripts/adapt-dsh-office-templates'
 
 const root = new URL('..', import.meta.url)
 
@@ -325,6 +325,16 @@ describe('reference styles', () => {
       expect(design).toContain('DSH Desktop')
     }
     expect(accents.size).toBeGreaterThan(1)
+    for (const id of ids) {
+      for (const key of ['deck', 'deckEn'] as const) {
+        const parsed = parseDeckSource(read(catalog[id]![key]))
+        expect(parsed.issues).toEqual([])
+        expect(checkDeck(parsed.deck!)).toEqual([])
+      }
+    }
+    for (const id of adaptedFirstDshTemplates) expect(catalog[id]!.deck).toBe(`styles/examples/imported/${id}/deck.json`)
+    expect(parseDeckSource(read(catalog['dsh-course-workshop']!.deck)).deck!.pages[2]!.elements.find(item => item.id === 't7')!.text).toBe('从引导练习\n走向独立完成')
+    expect(parseDeckSource(read(catalog['dsh-engineering-blueprint']!.deck)).deck!.pages[2]!.elements.find(item => item.id === 't101')!.text).toBe('明确\n每一层边界')
     const dir = tempDir('sel-deck-ref-')
     const blueprint = parseDeckSource(read('styles/dsh-engineering-blueprint/deck.json')).deck!
     const exported = await exportDeck(blueprint, join(dir, 'blueprint.pptx'), { platform: 'linux', enforceCheck: false })
@@ -522,7 +532,7 @@ describe('O3 imported DSH template coverage', () => {
     const picker = JSON.parse(read('styles/picker.json'))
     const diagnostics = JSON.parse(read('styles/dsh-import-diagnostics.json'))
     expect(addedDshTemplates).toHaveLength(11)
-    expect(diagnostics.adaptations).toHaveLength(22)
+    expect(diagnostics.adaptations).toHaveLength(26)
     for (const id of addedDshTemplates) {
       expect(picker.templates[id].previewId).toBe(id)
       const archived = picker.templates[id].tier === 'archive'

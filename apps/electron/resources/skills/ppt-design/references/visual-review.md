@@ -32,6 +32,6 @@ Do not OCR or run a Swift/Vision/tesseract script in place of image input. For s
 - 连线和色条对得上句子。闸门没有被不该跨过去的条挡住。
 - 来源还在，示例句和虚构专名已经换成用户材料。
 - 封面和收束页用的是这一套自己的构图。发丝网格和 8 pt 以内的圆点是装饰，不应当成挡住正文的线。
-- 中文 `dsh-course-workshop` 第 3 页和 `dsh-engineering-blueprint` 第 3 页的源标题会在末行落下一个字。换成用户句子后，截图里末行必须不是单字。
+- 换成用户句子后，截图里任何文本框的末行都不能只剩一个字（`dsh-course-workshop`、`dsh-engineering-blueprint` 第 3 页的窄框最容易出现）。
 
 截图只能证明静态页面。没有在 PowerPoint、Keynote 或 WPS 里播放过的动画或 Morph，要明确说未验证。

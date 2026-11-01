@@ -11,8 +11,8 @@
   "dsh-course-workshop": {
     "name": "课程培训 · Course Workshop",
     "design": "styles/dsh-course-workshop/design.md",
-    "deck": "styles/dsh-course-workshop/deck.json",
-    "deckEn": "styles/dsh-course-workshop/deck.en.json",
+    "deck": "styles/examples/imported/dsh-course-workshop/deck.json",
+    "deckEn": "styles/examples/imported/dsh-course-workshop/deck.en.json",
     "when": "固定学习目标边栏、概念图、实例与自测；用于培训、课程和工作坊。",
     "source": "DSH Desktop v0.2.21 adaptation of html-anything deck-course-module, Apache-2.0, https://github.com/nexu-io/html-anything/tree/c31204544230578ac814026fecc153c6e36587ae",
     "license": "Apache-2.0"
@@ -29,8 +29,8 @@
   "dsh-engineering-blueprint": {
     "name": "工程蓝图 · Engineering Blueprint",
     "design": "styles/dsh-engineering-blueprint/design.md",
-    "deck": "styles/dsh-engineering-blueprint/deck.json",
-    "deckEn": "styles/dsh-engineering-blueprint/deck.en.json",
+    "deck": "styles/examples/imported/dsh-engineering-blueprint/deck.json",
+    "deckEn": "styles/examples/imported/dsh-engineering-blueprint/deck.en.json",
     "when": "纸张底色、工程网格、流程盒和反馈路径；用于架构评审、技术方案及执行计划。",
     "source": "DSH Desktop v0.2.21 adaptation of html-anything deck-blueprint, Apache-2.0, https://github.com/nexu-io/html-anything/tree/c31204544230578ac814026fecc153c6e36587ae",
     "license": "Apache-2.0"

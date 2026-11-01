@@ -89,12 +89,12 @@ export const PARITY_ITEMS: ParityItem[] = [
   {
     id: 'PPT-TEMPLATE-READY',
     domain: 'ppt',
-    capability: '从 dsh 搬来的 16 套风格模板原样就能通过 Selection 自己的预检，直接导出',
-    status: 'partial',
+    capability: '从 dsh 搬来的 16 套风格模板，catalog 指向的中英文参考页都能通过 Selection 自己的预检，直接导出',
+    status: 'aligned',
     dsh: 'dsh 用同一批模板直接出成稿',
-    evidence: ['apps/electron/resources/skills/ppt-design/engine/cli.ts'],
-    needle: 'needs_revision',
-    reason: '`deck-cli check --platform mac` 下 dsh-signal、blue-professional、cartesian、editorial-notebook、soft-editorial 通过；其余 11 套被孤字、对比度、色块相交或容量判成 needs_revision，要模型先改一轮才能导出。',
+    evidence: ['apps/electron/resources/skills/ppt-design/engine/deck.test.ts', 'apps/electron/resources/skills/ppt-design/styles/dsh-import-diagnostics.json'],
+    needle: 'adaptedFirstDshTemplates',
+    reason: '原导入页按字节冻结不改。11 套新增包和 dsh-course-workshop、dsh-engineering-blueprint 两套首批包的参考页另存在独立样例扩展里，只改断行、容量、对比度、装饰语义和少量冲突几何，字号不缩，预检规则不放宽。16 套 32 份参考页 deck_check 全部干净，mac/win 导出全部 ok。',
   },
   {
     id: 'PPT-PREFLIGHT',
