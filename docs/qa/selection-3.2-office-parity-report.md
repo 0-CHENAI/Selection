@@ -8,11 +8,11 @@
 
 | 领域 | 对齐 | 部分 | 未对齐 | 排除 | 计入 | 得分 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| PPT | 11 | 2 | 0 | 3 | 13 | 92.3% |
+| PPT | 12 | 1 | 0 | 3 | 13 | 96.2% |
 | Word | 19 | 0 | 0 | 2 | 19 | 100% |
 | Excel | 11 | 1 | 0 | 2 | 12 | 95.8% |
 | 共享底座 | 9 | 1 | 0 | 1 | 10 | 95% |
-| 总体 | 50 | 4 | 0 | 8 | 54 | 96.3% |
+| 总体 | 51 | 3 | 0 | 8 | 54 | 97.2% |
 
 总分是 52 / 54。四个领域都不低于 90%。这是能力行的分数，不是把 dsh 的 393 个文件逐个算进去，也不是模型成稿的审美分。文件清单仍以 [dsh-office-inventory.md](../plans/dsh-office-inventory.md) 为准。
 
@@ -24,6 +24,7 @@
 
 - **PPT-IMAGE 从对齐改为部分。** dsh 的 `dsh-image-generation` 能接 bytedance Ark Seedream 和 OpenAI Images，设置页保存前会校验密钥。Selection 这边只有配图槽和占位图。真出图在 #741。
 - **新增 PPT-TEMPLATE-READY，记部分。** 用 `deck-cli check --platform mac` 把 16 套 dsh 风格模板原样跑了一遍。dsh-signal、blue-professional、cartesian、editorial-notebook、soft-editorial 通过。其余 11 套被孤字、对比度、色块相交或文本框容量判成 needs_revision，在 Selection 里要模型先改一轮才能导出。dsh 用同一批模板直接出稿。
+- **PPT-TEMPLATE-READY 改为对齐（逐套修模板，不放宽检查）。** 复查发现上面那次跑的是 `styles/<id>/` 下按字节冻结的原导入页。其中 9 套 catalog 早已指向 `styles/examples/imported/` 或 `styles/_archive/imported/` 下修过的参考页，预检本来就干净。真正还会被交给模型的只剩两处：默认套 `dsh-course-workshop` 第 3 页 `t7`「从引导练习走向独立完成」和 `dsh-engineering-blueprint` 第 3 页 `t101`「明确每一层边界」，末行只剩一个字。现在这两套也走同一个适配脚本，参考页另存到 `styles/examples/imported/<id>/`，只改断行（「从引导练习／走向独立完成」「明确／每一层边界」），字号和框都不变，catalog 改指向新参考页。复测：16 套 32 份 catalog 参考页 `deck_check` 全部 0 问题，`render --platform mac` 和 `--platform win` 64 次全部 ok。
 - **SHR-CHART-HTML 仍是部分，但原因换了。** 原来的问题是 OfficeCLI 只认 `xdr:twoCellAnchor`。dsh 案例是 openpyxl 写的 `oneCellAnchor`，于是三张图都叠在 A1，按 400×250pt 画，盖住了指标。#742 按工作簿锚点改写浮动层，再按实际行高和列宽对齐。港口、荧光酶、家庭预算已经不挡指标。剩下的问题是 HTML 列宽比 Excel 窄，年度经营总览的日新增图会压住右侧季度表的两列。
 - **新增 XLS-AUDIT-XLSX。** dsh 的 `data_quality_checker.py` 用 `pandas.read_excel` 直接读 xlsx，Selection 原来只收 CSV。现在 `office_business` 的 data-quality 可以直接读 xlsx，并能指定 sheet 和 range。
 - **新增 XLS-EDIT-RECALC。** 跑质量对比时发现一个真问题：OfficeCLI 1.0.157 每条命令都会自动起常驻进程，`set` 的改动几秒后才落盘。模型改完输入格马上调 `xlsx_recalculate`，读到的还是旧文件，重算结果没变，却报「已重算并通过核对」。现在重算前先 `officecli close` 落盘。复测：把年度经营 1 月基础版新增 MRR 从 10,560 改成 52,800，全年订阅收入从 1,404.71 万变成 1,406.82 万。
@@ -48,7 +49,7 @@ dsh 的公文目录约 320KB，其中大部分是不能搬的范文、金句和�
 | PPT-IMPORT | PPTX 导入为可编辑 deck.json；写不进的对象按原位置保留并诊断 | 对齐 | `pptx-to-deck.ts`、`pptx-import.test.ts` |
 | PPT-PERSONAL | 个人模板登记、预览，并用 ppt_template_create_project 复制成任务工程 | 对齐 | `ppt-template-project.ts`、`ppt-template-project.test.ts` |
 | PPT-IMAGE | 模板配图槽合同、复用组；接上 Seedream / OpenAI 真出图，设置里可配可校验；图内不写文字 | 部分 | `selection-3.2-office-stage-12.md`、`ppt-tools.ts` |
-| PPT-TEMPLATE-READY | 从 dsh 搬来的 16 套风格模板原样就能通过 Selection 自己的预检，直接导出 | 部分 | `cli.ts` |
+| PPT-TEMPLATE-READY | 从 dsh 搬来的 16 套风格模板，catalog 指向的参考页都能通过 Selection 自己的预检，直接导出 | 对齐 | `deck.test.ts`、`dsh-import-diagnostics.json` |
 | PPT-PREFLIGHT | 预检：连续同版式、封面焦点、图表数据与颜色、图片适配裁切、远程图、缺素材、文字遮挡 | 对齐 | `preflight.test.ts`、`dsh-ppt-parity.md` |
 | PPT-GATE | 预检 error 不把 PPTX 标成就绪；warning 仍可导出 | 对齐 | `selection-3.2-office-stage-13.md` |
 | PPT-VISUAL | 生成后 office_render 读图再改，同一文件最多三轮，禁止 OCR | 对齐 | `office-render.ts`、`office-tool-policy.ts` |
@@ -146,7 +147,7 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 - `ppt-dsh-blue-professional.png`：米黄底和蓝色强调一致。+18%、$240m、67% 这些大数都在，堆叠条和柱状图位置一致。dsh 标题是衬线体，Selection 回退成粗黑体，观感更硬。
 - `ppt-dsh-cartesian.png`：封面的细圆和「理性简报」、3/8 的大数、树状分支都一致。同样是标题字体从衬线体回退。
 
-这三套都能直接导出。另外 11 套过不了 Selection 自己的预检（见 PPT-TEMPLATE-READY），没有截图。
+这三套都能直接导出。其余 13 套的 catalog 参考页现在也都能过预检、直接导出（见 PPT-TEMPLATE-READY），这次没有逐套和 dsh 并排出对比图。
 
 ### Word（4 类）
 
@@ -167,14 +168,13 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 - 没有启动 dsh 应用。Word / Excel 对照用的是冻结提交里的样例文件，PPT 用的是之前在 box 上用 dsh ppt-runtime 出的图。
 - 没有在装了 Word、Excel、PowerPoint 或 WPS 的机器上打开。字体回退只看了 HTML 页。
 - 图表缓存没有跟 Excel `CalculateFull` 比。
-- 11 套过不了预检的 PPT 模板没有出图。
+- 其余 13 套 PPT 模板没有和 dsh 并排出对比图，只看了修过的两页截图。
 
 ## 还没对齐的
 
-计入分数的四项部分对齐：
+计入分数的三项部分对齐：
 
 - PPT-IMAGE：真出图的提供方和设置页在 #741，合入后转为对齐。
-- PPT-TEMPLATE-READY：11 套 dsh 风格模板过不了 Selection 自己的预检。要么逐套修模板，要么给 `profile: template` 放宽装饰性检查，需要 LinNai 定。
 - XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
 - SHR-CHART-HTML：HTML 列宽比 Excel 窄，宽图仍可能压住右侧的表。协同面板实时编辑时，OfficeCLI watch 推送的增量更新不经过这次的锚点改写，刷新后才对齐。
 

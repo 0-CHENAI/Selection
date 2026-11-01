@@ -6,10 +6,14 @@ import type { Deck } from '../apps/electron/resources/skills/ppt-design/engine/t
 
 const root = resolve(import.meta.dir, '../apps/electron/resources/skills/ppt-design/styles')
 export const addedDshTemplates = ['dsh-monochrome', 'dsh-blue-professional', 'dsh-neo-grid-bold', 'swiss-signal-grid', 'dsh-signal', 'dsh-broadside', 'dsh-playful', 'dsh-sakura-chroma', 'modular-logistics-system', 'nordic-operating-report', 'dsh-editorial-forest']
+/** Default-picker packs from the first DSH import whose Chinese source page leaves a single character on its last line. */
+export const adaptedFirstDshTemplates = ['dsh-course-workshop', 'dsh-engineering-blueprint']
 
 function adapt(deck: Deck, slug: string): void {
   for (const page of deck.pages) {
     for (const element of page.elements) {
+      if (slug === 'dsh-course-workshop' && page.id === '03' && element.id === 't7' && element.text === '从引导练习走向独立完成') element.text = '从引导练习\n走向独立完成'
+      if (slug === 'dsh-engineering-blueprint' && page.id === '03' && element.id === 't101' && element.text === '明确每一层边界') element.text = '明确\n每一层边界'
       if (slug === 'dsh-sakura-chroma' && page.id === '12' && ['s3', 's4', 's5'].includes(element.id)) element.role = 'decoration' // rotated background ribbons behind the closing label
       if (slug === 'nordic-operating-report' && page.id === '03' && element.id === 'scale-current') element.font!.color = '#086A80'
       if (slug === 'dsh-broadside' && (page.id === '01' && ['t3', 't4'].includes(element.id) || page.id === '12' && ['t2', 't3'].includes(element.id) || page.id === '06' && element.id === 't10')) element.font!.color = '#181915'
@@ -66,8 +70,10 @@ if (import.meta.main) {
   const catalog = JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8'))
   const record: unknown[] = []
   const outputs: { directory: string; file: string; content: string }[] = []
-  for (const slug of addedDshTemplates) {
-    const directory = join(root, 'examples/imported', slug)
+  for (const slug of [...addedDshTemplates, ...adaptedFirstDshTemplates]) {
+    // Packs archived out of the picker keep their adapted pages under _archive/imported (not in the installer).
+    const base = String(catalog[slug].deck).startsWith(`styles/_archive/imported/${slug}/`) ? '_archive/imported' : 'examples/imported'
+    const directory = join(root, base, slug)
     for (const file of ['deck.json', 'deck.en.json']) {
       const deck = JSON.parse(readFileSync(join(root, slug, file), 'utf8')) as Deck
       const before = checkDeck(deck)
@@ -78,8 +84,8 @@ if (import.meta.main) {
       record.push({ slug, file, sourceIssues: before, remainingIssues: after })
       console.log(`${slug}/${file}: ${before.length} → ${after.length}`)
     }
-    catalog[slug].deck = `styles/examples/imported/${slug}/deck.json`
-    catalog[slug].deckEn = `styles/examples/imported/${slug}/deck.en.json`
+    catalog[slug].deck = `styles/${base}/${slug}/deck.json`
+    catalog[slug].deckEn = `styles/${base}/${slug}/deck.en.json`
   }
   // A failed later pack must not leave earlier adapted decks regenerated without diagnostics.
   for (const { directory, file, content } of outputs) {

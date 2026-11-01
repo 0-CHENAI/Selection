@@ -60,4 +60,4 @@
 
 没有合适的参考页时，仍使用该风格的 token、边距和字号区间，新开一个 `layout` id，不要混入另一套的色值。
 
-两处中文源页面会报 `orphan`：`dsh-course-workshop` 第 3 页 `03:t7`「从引导练习走向独立完成」，`dsh-engineering-blueprint` 第 3 页 `03:t101`「明确每一层边界」。沿用这些页时重排句子。不要缩小字号，也不要把框加宽到撞上邻列。首批其余参考页没有这个问题。新增十一套的源页诊断与适配记录见 `styles/dsh-import-diagnostics.json`；可选参考页使用目录指向的独立样例扩展，不覆盖源页。
+`dsh-course-workshop` 第 3 页 `03:t7` 和 `dsh-engineering-blueprint` 第 3 页 `03:t101` 的中文源页会报 `orphan`，catalog 指向的 `styles/examples/imported/<id>/` 参考页只改了断行（「从引导练习／走向独立完成」「明确／每一层边界」），字号和框不变。新增十一套与这两套的源页诊断与适配记录见 `styles/dsh-import-diagnostics.json`；参考页使用目录指向的独立样例扩展，不覆盖源页。catalog 指向的十六套参考页中英文预检全部干净。
