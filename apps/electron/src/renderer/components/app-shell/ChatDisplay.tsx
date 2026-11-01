@@ -13,6 +13,7 @@ import { OfficeSessionCase, officeSessionCase } from '@/components/office/Office
 import { OfficeModeSwitcher } from '@/components/office/OfficeModeSwitcher'
 import type { OfficeHomeSection } from '@/components/office/office-home'
 import { SentTemplateReference } from '@/components/ppt/SentTemplateReference'
+import { SentOfficeCase, sentOfficeCase } from '@/components/office/SentOfficeCase'
 import type { SendMessageOptions } from '@craft-agent/shared/protocol'
 import {
   AlertTriangle,
@@ -2914,7 +2915,7 @@ function MessageBubble({
       <UserMessageBubble
         content={message.content}
         attachments={message.attachments}
-        leadingAttachment={message.turnContext?.ppt ? <SentTemplateReference request={message.turnContext.ppt} /> : undefined}
+        leadingAttachment={message.turnContext?.ppt ? <SentTemplateReference request={message.turnContext.ppt} /> : sentOfficeCase(message.turnContext?.office) ? <SentOfficeCase office={message.turnContext?.office} sessionId={sessionId} /> : undefined}
         badges={message.badges}
         isPending={message.isPending}
         isQueued={message.isQueued}
@@ -3038,6 +3039,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
     prev.message.turnContext?.ppt === next.message.turnContext?.ppt &&
+    prev.message.turnContext?.office === next.message.turnContext?.office &&
     prev.contextRecovery === next.contextRecovery &&
     prev.executionRecovery === next.executionRecovery &&
     prev.sessionId === next.sessionId &&

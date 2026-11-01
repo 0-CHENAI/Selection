@@ -83,3 +83,11 @@ C5（模型取 Word 案例第 1 页和最后 1 页并看图）：上表第一行
 - 原有 dsh 的 `prompt` 字段保留不用；#734 原先补写的 5 条输入框提示词不再加入。
 - 案例修订号未改：已经在进行中的会话沿用旧注入，新会话或重新选择案例后才带要点。
 - 测试：`office-catalog.test.ts`（每个案例都有要点、长度与必含项；选中时注入且位置正确；未选不注入；渲染端源码不读 guidance），`office-home.test.tsx`（首页与输入框案例卡片的渲染结果里没有要点原文）。
+
+## 已发送消息上的 Word / Excel 参考案例卡片（#709）
+
+- 从案例开始的第一条用户消息，气泡上方显示案例封面卡片，尺寸、圆角、阴影与 PPT 已发送消息的参考模板卡片（`SentTemplateReference`）一致；悬停显示「参考案例：标题」。
+- 数据来自消息的 `turnContext.office`（`mode` + `templateId` + `revision`），随会话 JSONL 持久化，重新打开会话仍显示。只选模式没选案例、模式与案例不符、PPT 消息都不显示。
+- 点击卡片按 dsh 588412b 的做法只读预览样例：dsh 在首条用户消息页脚放「文件图标 + 案例标题」，点标题打开预览；Selection 沿用 PPT 的封面卡片样式，点击在本会话的 Office 协同面板只读打开样例。没有样例文件的虚构小样只显示卡片，不可点。
+- 代码：`components/office/SentOfficeCase.tsx`、`ChatDisplay` 的 `leadingAttachment` 与 memo 比较；playground「Office 已发送消息的参考案例」。
+- 截图：`/workspace/sw709-shots/sent-card/`（浅色 / 深色，PPT、Word、Excel 三条已发送消息并排）。
