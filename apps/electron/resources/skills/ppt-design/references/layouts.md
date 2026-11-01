@@ -2,7 +2,7 @@
 
 每套风格的 `layout` 写在它自己的 `deck.json` 里，形如 `01-cover`、`02-content`。这些 id 标识参考页结构，不要求相邻页不同。主题 token、页眉页脚层级沿用锁定风格；论证槽可适配当前画布，改几何后必须 check。
 
-结构版式在 [layouts/catalog.json](../layouts/catalog.json)。七套来自 ppt-master 的 SVG 页面，颜色是 token，默认主题是中性石板色。画布分别是 16:9、4:3、1:1、9:16 和 3:4。选用某一套时，deck 的 `canvas` 用该套的尺寸，不要把竖版页面硬塞进 960×540。图片位是虚线框，渐变已铺平。
+结构版式在 [layouts/catalog.json](../layouts/catalog.json)。七套来自 ppt-master 的 SVG 页面，颜色是 token，默认主题是中性石板色。画布分别是 16:9、4:3、1:1、9:16 和 3:4。选用某一套时，deck 的 `canvas` 用该套的尺寸，不要把竖版页面硬塞进 960×540。图片位是虚线框，渐变已铺平；哪几页有图片位见 catalog 的 `pictureSlotPages`。用户没给图片时不要用这些页。
 
 相邻页的 `layout` 可以相同。一页只有一个主张。
 

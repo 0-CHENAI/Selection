@@ -4,6 +4,7 @@ import { containsCjk, defaultLeading, fitSlack, literalNewline, orphanLines, tex
 import { colorRef } from './schema.ts'
 import type { Bounds, Deck, DeckElement, DeckIssue, DeckPage, ImageSlot } from './types.ts'
 import { issue } from './schema.ts'
+import { isPictureCarrier, isPlaceholderImageSrc, isSamplePhotoSrc } from './picture-slots.ts'
 
 /** dsh `layoutRepetitionIssues` warns when a run is at least this many pages (`end - start < 3` does not). */
 export const LAYOUT_REPETITION_RUN = 3
@@ -24,10 +25,7 @@ export type CheckOptions = {
   assetExists?: (src: string) => boolean
 }
 
-export function isPlaceholderImageSrc(src: string | undefined): boolean {
-  if (!src) return false
-  return src.startsWith('placeholder:') || /(?:^|[/\\])selection-placeholder-[^/\\]+\.png$/i.test(src)
-}
+export { isPlaceholderImageSrc } from './picture-slots.ts'
 
 export function blockingIssues(issues: DeckIssue[]): DeckIssue[] {
   return issues.filter(item => item.severity !== 'warning')
@@ -232,14 +230,14 @@ function checkPage(deck: Deck, page: DeckPage, options: CheckOptions): DeckIssue
       issues.push(...checkWaterfall(page, element))
     }
     if (element.type === 'chart') issues.push(...checkChartData(page, element), ...checkChartSeriesColor(page, element))
-    if (element.type === 'image' && !element.chartImage) issues.push(...checkImage(page, element, options))
+    if (element.type === 'image' && !element.chartImage) issues.push(...checkImage(page, element, options, deck.profile === 'example'))
     if (element.type === 'table' && element.table) {
       issues.push(...checkTable(deck, page, element, background))
     }
   }
   const editable = { ...page, elements: page.elements.filter(element => !element.retained) }
   issues.push(...checkOverlap(editable, deck.profile === 'example'))
-  if (deck.profile !== 'example') issues.push(...checkTextLayer(page))
+  if (deck.profile !== 'example') issues.push(...checkTextLayer(page), ...checkPictureCarriers(page))
   return issues
 }
 
@@ -513,14 +511,16 @@ function slotFor(page: DeckPage, elementId: string): ImageSlot | undefined {
   return page.imageSlots?.slots.find(slot => slot.elementId === elementId)
 }
 
-function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions): DeckIssue[] {
+function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions, example = false): DeckIssue[] {
   const issues: DeckIssue[] = []
   const src = element.src?.trim() ?? ''
   const slot = slotFor(page, element.id)
   if (/^https?:\/\//i.test(src)) {
     issues.push(issue('remote_image', `图片 ${element.id} 使用了网络地址。请先把图片放进工作区再引用。`, page.id, element.id))
   } else if (isPlaceholderImageSrc(src)) {
-    issues.push(issue('missing_asset', `图片 ${element.id} 还没有图片，导出为占位框。请用用户的图片替换，或告诉用户这一页缺图；不要当成已配图。`, page.id, element.id, 'warning'))
+    issues.push(issue('missing_asset', `图片 ${element.id} 还是空的图片位，会导出成占位框。有用户图片就放进来；没有就把这一页换成没有图片位的版式，占位框只作最后手段。`, page.id, element.id, 'warning'))
+  } else if (!example && isSamplePhotoSrc(src)) {
+    issues.push(issue('missing_asset', `图片 ${element.id} 还是模板的样例照片。有用户图片就换成用户的图；没有就把这一页换成没有图片位的版式，删掉这张图。`, page.id, element.id))
   } else if (!src && slot) {
     issues.push(issue('missing_asset', `图片槽 ${element.id} 没有素材。`, page.id, element.id))
   } else if (src && options.assetExists && !options.assetExists(src)) {
@@ -549,6 +549,16 @@ function checkImage(page: DeckPage, element: DeckElement, options: CheckOptions)
     }
   }
   return issues
+}
+
+/** 结构版式的虚线图片框。没有一张图盖住它，就是成稿里的空占位。 */
+function checkPictureCarriers(page: DeckPage): DeckIssue[] {
+  const images = page.elements.filter(element => element.type === 'image' && element.src && !isPlaceholderImageSrc(element.src))
+  return page.elements.filter(isPictureCarrier).flatMap(carrier => {
+    const area = carrier.bounds.w * carrier.bounds.h
+    const filled = area > 0 && images.some(image => areaOverlap(carrier.bounds, image.bounds).area / area >= 0.5)
+    return filled ? [] : [issue('empty_picture_slot', `图片框 ${carrier.id} 没有放图。有用户图片就放进来；没有就换成没有图片位的版式，不要留空框。`, page.id, carrier.id, 'warning')]
+  })
 }
 
 function areaOverlap(left: Bounds, right: Bounds): { area: number; width: number } {

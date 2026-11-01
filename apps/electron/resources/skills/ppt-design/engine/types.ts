@@ -341,6 +341,7 @@ export type IssueCode =
   | 'image_crop'
   | 'remote_image'
   | 'missing_asset'
+  | 'empty_picture_slot'
   | 'text_drift'
   | 'text_occlusion'
   | 'unreconciled'

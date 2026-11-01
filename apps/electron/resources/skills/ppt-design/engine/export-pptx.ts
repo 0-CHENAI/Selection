@@ -193,7 +193,7 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
     return
   }
   if (element.type === 'image' && element.src) {
-    const fitted = fitImage(element)
+    const fitted = imagePlacement(element, deck)
     slide.addImage({
       path: resolveAsset(element.src),
       x: inches(fitted.x),
@@ -208,10 +208,17 @@ function addElement(pres: PptxGenJS, slide: PptxGenJS.Slide, deck: Deck, element
   if (element.type === 'chart' && element.chart) addChart(pres, slide, deck, element, platform, pageBackground)
 }
 
-function fitImage(element: DeckElement): { x: number; y: number; w: number; h: number } {
-  if (element.fit === 'fill') return element.bounds
-  const size = element.src ? readImageSize(resolveAsset(element.src)) : null
-  if (!size) return element.bounds
+/**
+ * 图片放进图框时不裁、不改比例（LinNai，2026-11）：按原比例缩放到完全放进框里，居中，其余留白。
+ * 例外只有两种，都是原作者的选择：导入稿里写了 `crop` 的图，以及导入稿原样带来的图片
+ * （`ppt_import` 写出的 `slide<N>-<id>.png|jpg`，保持原稿的几何）。
+ */
+export function imagePlacement(element: DeckElement, deck?: Pick<Deck, 'version'>): { x: number; y: number; w: number; h: number } {
+  if (element.crop) return element.bounds
+  if (!element.src) return element.bounds
+  if (element.fit === 'fill' && deck?.version === 2 && isImportedAsset(element.src)) return element.bounds
+  const size = readImageSize(resolveAsset(element.src))
+  if (!size || size.width <= 0 || size.height <= 0) return element.bounds
   const scale = Math.min(element.bounds.w / size.width, element.bounds.h / size.height)
   const w = size.width * scale
   const h = size.height * scale
@@ -222,26 +229,13 @@ function fitImage(element: DeckElement): { x: number; y: number; w: number; h: n
   }
 }
 
-/**
- * `fill` 填满图框但不拉伸：图片比例和框不一致时按中心裁掉多出的部分。
- * 用户换进模板槽位的照片比例常与模板不同，直接拉伸会变形。显式 `crop` 优先。
- */
+function isImportedAsset(src: string): boolean {
+  return /(?:^|[/\\])slide\d+-[^/\\]+\.(?:png|jpe?g)$/i.test(src)
+}
+
+/** 只有导入稿自带的 `crop` 会写成 srcRect。用户图片从不裁切。 */
 export function effectiveCrop(element: DeckElement): { l: number; t: number; r: number; b: number } | undefined {
-  if (element.type !== 'image') return undefined
-  if (element.crop) return element.crop
-  if (element.fit !== 'fill' || !element.src || isPlaceholderImageSrc(element.src)) return undefined
-  if (element.bounds.w <= 0 || element.bounds.h <= 0) return undefined
-  const size = readImageSize(resolveAsset(element.src))
-  if (!size || size.width <= 0 || size.height <= 0) return undefined
-  const image = size.width / size.height
-  const box = element.bounds.w / element.bounds.h
-  if (Math.abs(image - box) / box <= 0.01) return undefined
-  if (image > box) {
-    const side = (1 - box / image) / 2
-    return { l: side, t: 0, r: side, b: 0 }
-  }
-  const side = (1 - image / box) / 2
-  return { l: 0, t: side, r: 0, b: side }
+  return element.type === 'image' ? element.crop : undefined
 }
 
 /** 没有用户图片的槽位画成可见、可删的占位框，不放透明像素，也不当成配图。 */

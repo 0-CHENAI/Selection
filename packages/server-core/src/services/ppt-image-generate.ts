@@ -87,7 +87,7 @@ export async function generatePresentationImage(request: ImageGenerateRequest): 
   let width = 1
   let height = 1
   let placeholder = true
-  let message = 'Selection 不生成图片。槽位保留占位，请用用户提供的图片替换，或告诉用户哪几页缺图。不要把占位说成已配图。'
+  let message = 'Selection 不生成图片。有用户图片就原样放进图片位；没有就把这一页换成没有图片位的版式。占位只作最后手段，不要说成已配图。'
   if (generator) {
     const generated = await generator(request)
     if (!generated.bytes.byteLength) throw new Error('生图提供方返回了空文件')
