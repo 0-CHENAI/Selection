@@ -271,7 +271,7 @@ export type DeckElement = {
   radius?: number
   /** SVG path in the element's own box, origin at the top-left, units in points. */
   path?: string
-  /** `evenodd` punches holes. The default is the nonzero winding rule. */
+  /** `evenodd` punches holes in the preview. DrawingML has no fill-rule attribute: the export writes every subpath into one `a:path`, which PowerPoint and LibreOffice fill with holes. */
   pathRule?: 'evenodd' | 'nonzero'
   gradient?: GradientFill
   pattern?: PatternFill

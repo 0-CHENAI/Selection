@@ -21311,7 +21311,6 @@ async function finishSlideXml(bytes, deck, platform) {
     const page = deck.pages[index];
     const faces = new Map;
     const fills = new Map;
-    const evenOdd = new Set;
     for (const element of page.elements) {
       const face = element.font?.face ?? element.table?.face;
       if (face)
@@ -21319,11 +21318,9 @@ async function finishSlideXml(bytes, deck, platform) {
       const fill = fillOverride(element);
       if (fill)
         fills.set(element.id, fill);
-      if (element.pathRule === "evenodd")
-        evenOdd.add(element.id);
     }
     const multiRun = mergeInlineRuns(page.elements).some((element) => (element.runs?.length ?? 0) > 1);
-    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0 && !multiRun)
+    if (faces.size === 0 && fills.size === 0 && !multiRun)
       continue;
     const path = `ppt/slides/slide${index + 1}.xml`;
     const file = zip.file(path);
@@ -21331,7 +21328,7 @@ async function finishSlideXml(bytes, deck, platform) {
       continue;
     const original = await file.async("string");
     const xml = multiRun ? singleParagraphProperties(original) : original;
-    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShape(block, faces, fills, evenOdd));
+    const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, (block) => rewriteShape(block, faces, fills));
     if (next !== original) {
       zip.file(path, next);
       changed = true;
@@ -21442,7 +21439,7 @@ function cropXml(crop) {
   const part = (value) => Math.max(0, Math.min(1e5, Math.round(value * 1e5)));
   return `<a:srcRect l="${part(crop.l)}" t="${part(crop.t)}" r="${part(crop.r)}" b="${part(crop.b)}"/>`;
 }
-function rewriteShape(block, faces, fills, evenOdd) {
+function rewriteShape(block, faces, fills) {
   const name = block.match(/<p:cNvPr[^>]*\sname="([^"]*)"/);
   if (!name)
     return block;
@@ -21457,8 +21454,6 @@ function rewriteShape(block, faces, fills, evenOdd) {
   const fill = fills.get(id);
   if (fill)
     next = replaceShapeFill(next, fill);
-  if (evenOdd.has(id))
-    next = next.replace(/<a:path\b(?![^>]*\bfill=)/, '<a:path fill="evenOdd"');
   return next;
 }
 function replaceShapeFill(block, fillXml) {
@@ -21473,7 +21468,8 @@ function replaceShapeFill(block, fillXml) {
       next = body.replace("<a:noFill/>", fillXml);
     else
       next = `${body}${fillXml}`;
-    return `<p:spPr>${next}${line}</p:spPr>`;
+    const effect = next.search(/<a:(?:effectLst|effectDag|scene3d|sp3d|extLst)\b/);
+    return effect < 0 ? `<p:spPr>${next}${line}</p:spPr>` : `<p:spPr>${next.slice(0, effect)}${line}${next.slice(effect)}</p:spPr>`;
   });
 }
 function fillOverride(element) {
@@ -22224,6 +22220,7 @@ function polishPie(xml, accent, background, label) {
 }
 function polishBarLabels(xml) {
   let next = xml.replace(/<c:showCatName val="0"\/>/g, '<c:showCatName val="1"/>');
+  next = next.replace(/(<c:dLbls>\s*(?:<c:numFmt[^>]*\/>\s*)?<c:txPr>\s*)<a:bodyPr\/>/g, '$1<a:bodyPr wrap="none"/>');
   if (!next.includes("<c:separator>"))
     next = next.replace(/<c:showLeaderLines/g, "<c:separator> </c:separator><c:showLeaderLines");
   return next;
