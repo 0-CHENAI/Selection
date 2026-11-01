@@ -31,8 +31,8 @@ import {
 
 const HEX = /^#[0-9A-Fa-f]{6}$/
 const SHA256 = /^[0-9a-f]{64}$/
-const ELEMENT_KEYS = ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'chartImage', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit']
-const ELEMENT_V2_KEYS = [...ELEMENT_KEYS, 'group', 'crop', 'mask', 'link', 'runs', 'retained']
+const ELEMENT_KEYS = ['id', 'type', 'bounds', 'role', 'rotate', 'text', 'textCapacity', 'font', 'shape', 'fill', 'line', 'radius', 'arrow', 'src', 'alt', 'chart', 'chartImage', 'table', 'path', 'pathRule', 'gradient', 'pattern', 'shadow', 'fit', 'runs']
+const ELEMENT_V2_KEYS = [...ELEMENT_KEYS, 'group', 'crop', 'mask', 'link', 'retained']
 const CHART_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const FONT_TOKEN = /^\$cjk$|^\$latin$/
 const COLOR_REF = /^(\$[A-Za-z][A-Za-z0-9_-]*|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$/
@@ -432,6 +432,15 @@ function parseElement(value: unknown, pageId: string, issues: DeckIssue[], v2: b
     const table = parseTable(value.table, id, issues, pageId, id)
     if (table) element.table = table
   }
+  if (value.runs !== undefined) {
+    // 行内强调：一个文本框里分段加粗或变色。runs 拼起来必须等于 text。
+    if (value.type !== 'text') issues.push(issue('schema', `元素 ${id} 的 runs 只用于文本`, pageId, id))
+    else {
+      const runs = parseRuns(value.runs, id, pageId, issues)
+      if (runs && runs.map(run => run.text).join('') !== element.text) issues.push(issue('schema', `元素 ${id} 的 runs 拼起来要和 text 一致`, pageId, id))
+      else if (runs) element.runs = runs
+    }
+  }
   if (v2) applyV2Element(value, element, pageId, issues)
   return element
 }
@@ -454,10 +463,6 @@ function applyV2Element(value: Record<string, unknown>, element: DeckElement, pa
     if (!isObject(value.link) || typeof value.link.href !== 'string' || !safeHref(value.link.href) || Object.keys(value.link).some(key => key !== 'href')) {
       issues.push(issue('schema', `元素 ${element.id} 的 link.href 必须是 http(s) 链接`, pageId, element.id))
     } else element.link = { href: value.link.href }
-  }
-  if (value.runs !== undefined) {
-    const runs = parseRuns(value.runs, element.id, pageId, issues)
-    if (runs) element.runs = runs
   }
   if (value.retained !== undefined) {
     if (!isObject(value.retained) || typeof value.retained.feature !== 'string' || !value.retained.feature.trim() || value.retained.feature.length > 80 || typeof value.retained.message !== 'string' || !value.retained.message.trim() || value.retained.message.length > 500 || Object.keys(value.retained).some(key => key !== 'feature' && key !== 'message')) {

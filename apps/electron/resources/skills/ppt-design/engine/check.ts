@@ -235,6 +235,7 @@ function checkPage(deck: Deck, page: DeckPage, options: CheckOptions): DeckIssue
       issues.push(...checkTable(deck, page, element, background))
     }
   }
+  issues.push(...checkTextCollision(page))
   const editable = { ...page, elements: page.elements.filter(element => !element.retained) }
   issues.push(...checkOverlap(editable, deck.profile === 'example'))
   if (deck.profile !== 'example') issues.push(...checkTextLayer(page), ...checkPictureCarriers(page))
@@ -559,6 +560,54 @@ function checkPictureCarriers(page: DeckPage): DeckIssue[] {
     const filled = area > 0 && images.some(image => areaOverlap(carrier.bounds, image.bounds).area / area >= 0.5)
     return filled ? [] : [issue('empty_picture_slot', `图片框 ${carrier.id} 没有放图。有用户图片就放进来；没有就换成没有图片位的版式，不要留空框。`, page.id, carrier.id, 'warning')]
   })
+}
+
+/**
+ * 换行后的正文压到另一段正文上（例如段落末行盖住下面的小标签）。
+ * 按导出时的排法估计每段字的范围：单行框不换行，多行框按框宽换行，超出框高的行照样往下排。
+ * 只看正文字号（≤24 pt、两者相差不到一倍）、不同行、文字不同的两段，避开大号装饰数字、
+ * 叠字阴影和同一行并排的强调词，所以参考页里不会误报。
+ */
+function inkBox(element: DeckElement): Bounds {
+  const font = element.font!
+  const text = element.text ?? ''
+  const bold = font.weight === 'bold'
+  const tracking = font.tracking ?? 0
+  const leading = font.leading ?? defaultLeading(font.size)
+  const wrap = (element.textCapacity?.maxLines ?? 1) > 1
+  const lines = wrap ? wrapText(text, element.bounds.w, font.size, bold, tracking) : text.split('\n')
+  const widest = lines.reduce((max, line) => Math.max(max, textWidth(line, font.size, bold, tracking)), 0)
+  const w = wrap ? Math.min(widest, element.bounds.w) : widest
+  const h = lines.length <= 1 ? font.size : font.size + (lines.length - 1) * font.size * leading
+  const align = font.align ?? 'left'
+  const valign = font.valign ?? 'top'
+  const x = align === 'center' ? element.bounds.x + (element.bounds.w - w) / 2 : align === 'right' ? element.bounds.x + element.bounds.w - w : element.bounds.x
+  const y = valign === 'middle' ? element.bounds.y + (element.bounds.h - h) / 2 : valign === 'bottom' ? element.bounds.y + element.bounds.h - h : element.bounds.y
+  return { x, y, w, h }
+}
+
+function checkTextCollision(page: DeckPage): DeckIssue[] {
+  const issues: DeckIssue[] = []
+  const texts = page.elements.filter(element => element.type === 'text' && element.font && element.text?.trim() && !element.retained && !element.rotate && element.role !== 'decoration')
+  for (let i = 0; i < texts.length; i++) {
+    for (let j = i + 1; j < texts.length; j++) {
+      const a = texts[i]!
+      const b = texts[j]!
+      const big = Math.max(a.font!.size, b.font!.size)
+      const small = Math.min(a.font!.size, b.font!.size)
+      if (big > 24 || big / small > 2) continue
+      if (a.text!.trim() === b.text!.trim()) continue
+      if (Math.abs(a.bounds.y - b.bounds.y) < 0.5 * small) continue
+      const boxA = inkBox(a)
+      const boxB = inkBox(b)
+      const ix = Math.min(boxA.x + boxA.w, boxB.x + boxB.w) - Math.max(boxA.x, boxB.x)
+      const iy = Math.min(boxA.y + boxA.h, boxB.y + boxB.h) - Math.max(boxA.y, boxB.y)
+      if (ix > 0.3 * small && iy > 0.4 * small) {
+        issues.push(issue('text_collision', `文字 ${a.id} 和 ${b.id} 排开后压在一起（重叠约 ${ix.toFixed(0)}×${iy.toFixed(0)} pt）。移开其中一段，或缩短文字。`, page.id, a.id, 'warning'))
+      }
+    }
+  }
+  return issues
 }
 
 function areaOverlap(left: Bounds, right: Bounds): { area: number; width: number } {

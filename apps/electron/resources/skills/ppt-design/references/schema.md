@@ -27,7 +27,7 @@
 
 | type | 还需要 |
 |---|---|
-| `text` | `text`、`textCapacity`、`font.family`（`$cjk` 或 `$latin`）、`font.size`（6–240）。可选 `font.face`、`leading`、`tracking`（-20–80）、`align`、`valign`、`weight`、`italic`、`color` |
+| `text` | `text`、`textCapacity`、`font.family`（`$cjk` 或 `$latin`）、`font.size`（6–240）。可选 `font.face`、`leading`、`tracking`（-20–80）、`align`、`valign`、`weight`、`italic`、`color`。一行里有几个词要加粗或换色时写 `runs`：`[{ text, bold?, italic?, color? }]`，拼起来必须等于 `text`；不要把强调词拆成并排的几个文本框 |
 | `shape` | `shape`：`rect`、`roundRect`、`ellipse`、`line`、`path`。除了 `line` 和只有描边的 `path`，都要 `fill`、`gradient` 或 `pattern`。`roundRect` 的 `radius` 是 pt。`path` 还要 `path`（SVG 路径，坐标是形状框内的 pt） |
 | `image` | `src`、`alt`。默认 `fit: contain`，按比例放进 `bounds` 并居中。`fit: fill` 铺满 `bounds`，用于已经裁好的图 |
 | `chart` | `chart.kind`：`bar`（横向条形）、`column`、`line`、`pie`、`doughnut`、`waterfall`、`area`、`scatter`、`bubble`、`radar`、`combo`、`stacked`、`stackedPercent`。`categories` 与每条 `series.values` 等长 |
@@ -87,4 +87,4 @@ ppt-master 的示例成稿还有图表、表格、路径、渐变、图案和图
 
 `--screenshot` 会先试 OfficeCLI 的 `view screenshot`，再试本机已有的 LibreOffice 和 `pdftoppm`。两者都没有时，PPTX 仍然成功，`screenshots.available` 为 `false`。不要为此安装 Python 或打包新的渲染运行时。没有截图就不能把 G4 标成通过。
 
-重叠检查看的是字形所占的框，不是整个文本框。文字压在面板上时，两个方向的相交都要超过 12 pt，并且字形没有落在面板内，才会报。线和文字按线段是否穿过字形来判断，不用线的外接矩形。
+重叠检查看的是字形所占的框，不是整个文本框。文字压在面板上时，两个方向的相交都要超过 12 pt，并且字形没有落在面板内，才会报。线和文字按线段是否穿过字形来判断，不用线的外接矩形。正文换行后压到另一段文字上（两段不在同一行、字号相近）会报 `text_collision` 警告。

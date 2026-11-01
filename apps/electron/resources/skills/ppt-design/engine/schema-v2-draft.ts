@@ -170,7 +170,6 @@ function elementBlocksDowngrade(element: DraftElement): string | null {
   if (element.crop) return `元素 ${element.id} 带有 crop，降回 version 1 会丢掉裁剪`
   if (element.mask) return `元素 ${element.id} 带有 mask，降回 version 1 会丢掉遮罩`
   if (element.link) return `元素 ${element.id} 带有 link，降回 version 1 会丢掉超链接`
-  if (element.runs && element.runs.length > 0) return `元素 ${element.id} 带有 runs，降回 version 1 会丢掉分段样式`
   if (element.retained) return `元素 ${element.id} 带有 retained，降回 version 1 会丢掉保留对象`
   return null
 }

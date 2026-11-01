@@ -10,6 +10,8 @@ import { containsCjk, defaultLeading } from './metrics.ts'
 import { pathToDrawingPoints } from './svg-path.ts'
 import { comboSeriesRoles, type ChartKind, type ChartSpec, type Deck, type DeckElement, type DeckIssue, type FontFace, type GradientFill, type PatternFill, type PlatformName, type ScreenshotResult } from './types.ts'
 import { captureSlides } from './screenshot.ts'
+import { normalizeChartXml } from './chart-schema.ts'
+import { mergeInlineRuns } from './inline-runs.ts'
 
 const PT = 72
 
@@ -82,7 +84,8 @@ async function buildPptx(deck: Deck, platform: PlatformName): Promise<Buffer> {
     const slide = pres.addSlide()
     const pageBackground = colorRef(page.background, deck.theme, '$paper')
     slide.background = { color: hex(pageBackground) }
-    for (const element of page.elements) addElement(pres, slide, deck, element, platform, pageBackground)
+    // 同一行拆开的强调词合成一个文本框，避免字体宽度不同造成的空隙和重叠。
+    for (const element of mergeInlineRuns(page.elements)) addElement(pres, slide, deck, element, platform, pageBackground)
     if (page.notes) slide.addNotes(page.notes)
   }
   const raw = await pres.write({ outputType: 'nodebuffer' })
@@ -764,23 +767,52 @@ async function finishSlideXml(bytes: Buffer, deck: Deck, platform: PlatformName)
       if (fill) fills.set(element.id, fill)
       if (element.pathRule === 'evenodd') evenOdd.add(element.id)
     }
-    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0) continue
+    const multiRun = mergeInlineRuns(page.elements).some(element => (element.runs?.length ?? 0) > 1)
+    if (faces.size === 0 && fills.size === 0 && evenOdd.size === 0 && !multiRun) continue
     const path = `ppt/slides/slide${index + 1}.xml`
     const file = zip.file(path)
     if (!file) continue
-    const xml = await file.async('string')
+    const original = await file.async('string')
+    const xml = multiRun ? singleParagraphProperties(original) : original
     // `<p:sp` is also the prefix of `<p:spTree>`. Require the tag to end so the tree is left intact.
     const next = xml.replace(/<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g, block => rewriteShape(block, faces, fills, evenOdd))
-    if (next !== xml) {
+    if (next !== original) {
       zip.file(path, next)
       changed = true
     }
   }
   if (await polishCharts(zip, deck, platform)) changed = true
   if (await shrinkBubbleScale(zip)) changed = true
+  if (await normalizeCharts(zip)) changed = true
   if (await patchImportMarks(zip, deck)) changed = true
   if (!changed) return bytes
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+}
+
+/**
+ * PptxGenJS 给多段 runs 的每一段前面都写一个 a:pPr。架构里 a:pPr 只能是段落的第一个子元素，
+ * 多出来的会让严格校验报错。保留第一个，删掉 run 之间的。
+ */
+export function singleParagraphProperties(xml: string): string {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (all, inner: string) => {
+    const first = inner.search(/<a:(?:r|br|fld)\b/)
+    if (first < 0) return all
+    const tail = inner.slice(first).replace(/<a:pPr\b[^>]*\/>|<a:pPr\b[^>]*>[\s\S]*?<\/a:pPr>/g, '')
+    return `<a:p>${inner.slice(0, first)}${tail}</a:p>`
+  })
+}
+
+/** 图表 XML 按架构重排，见 chart-schema.ts。 */
+async function normalizeCharts(zip: JSZip): Promise<boolean> {
+  let changed = false
+  for (const file of zip.file(/ppt\/charts\/chart\d+\.xml/)) {
+    const xml = await file.async('string')
+    const next = normalizeChartXml(xml)
+    if (next === xml) continue
+    zip.file(file.name, next)
+    changed = true
+  }
+  return changed
 }
 
 /** PptxGenJS leaves bubbleScale at the PowerPoint default, which clips the largest bubble against the plot. */
