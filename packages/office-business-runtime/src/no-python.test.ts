@@ -41,3 +41,16 @@ test('office parity path ships no Python and stays out of the installer', () => 
     expect(text.includes('office-business-runtime')).toBe(false)
   }
 })
+
+test('installer inputs carry no LibreOffice Kit, PPTD engine, or Office Python scripts', () => {
+  const builder = readFileSync(join(repoRoot, 'apps/electron/electron-builder.yml'), 'utf8').toLowerCase()
+  for (const word of ['libreoffice', 'soffice', 'lokit', 'pptd']) expect(builder.includes(word)).toBe(false)
+
+  const shipped = [
+    'apps/electron/resources/skills/office-business',
+    'apps/electron/resources/skills/ppt-design',
+    'apps/electron/resources/bin',
+  ].flatMap(dir => filesUnder(join(repoRoot, dir)))
+  const forbidden = shipped.filter(path => /\.(py|pyc)$/i.test(path) || /soffice|libreoffice|lokit|pptd/i.test(path.slice(repoRoot.length)))
+  expect(forbidden).toEqual([])
+})
