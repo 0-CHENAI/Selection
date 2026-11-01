@@ -119,7 +119,9 @@ function scoreGov(text: string): number {
   return hits.length ? Math.max(...hits) : 0
 }
 
-const SCORERS: Array<{ id: string; score: (text: string) => number }> = [
+type OfficeRouteId = (typeof OFFICE_DOCUMENT_ROUTE_TABLE)[number]['id']
+
+const SCORERS: Array<{ id: OfficeRouteId; score: (text: string) => number }> = [
   { id: 'resume', score: scoreResume },
   { id: 'letter', score: scoreLetter },
   { id: 'invitation', score: scoreInvitation },
