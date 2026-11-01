@@ -6,6 +6,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { excelDateSerial, readXlsxCells, type CellScalar, type CheckSpec } from '../office-render-poc/formula.ts'
 import { patchWorkbookCells, type CellPatch } from './workbook.ts'
+import { normalizeCaseChecks } from './case-checks.ts'
+
+export { normalizeCaseChecks }
 
 export const excelCaseRoot = join(import.meta.dir, '../../../../../apps/electron/resources/skills/office-business/cases')
 
@@ -23,7 +26,7 @@ export function readCaseBytes(id: 'annual-business' | 'port-cargo' | 'bio-assay'
 }
 
 export function readChecks(id: 'port-cargo' | 'bio-assay'): CheckSpec[] {
-  return JSON.parse(readFileSync(join(excelCaseRoot, id, 'checks.json'), 'utf8')) as CheckSpec[]
+  return normalizeCaseChecks(JSON.parse(readFileSync(join(excelCaseRoot, id, 'checks.json'), 'utf8')), `${id}/checks.json`)
 }
 
 export function sha256(bytes: Uint8Array): string {
