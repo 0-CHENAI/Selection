@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
@@ -7,6 +7,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import type { OfficeDocumentState } from '@craft-agent/shared/protocol/office'
 import { listOfficeTemplates } from '../office-catalog.ts'
 import { readPrintSetup } from '../excel-delivery/page-setup.ts'
+import { normalizeCaseChecks } from '../excel-delivery/cases.ts'
 import { formatDeliveryIssues, officeDeliveryIssues, prepareOfficeTemplate, recalculateWorkspaceXlsx, writeOfficeTemplate, type OfficeToolSession } from './service.ts'
 import { diagnoseFonts, documentFonts, parseFcList, parseMacFonts, parseWindowsFontRegistry } from './font-diagnostics.ts'
 
@@ -132,6 +133,55 @@ describe('delivery guard (needs_revision loop)', () => {
     expect(ok.ready).toBe(true)
     const unreviewed = await recalculateWorkspaceXlsx(s, { path: prepared.workspace_path, key_cells: ['增长质量!N62'], visual_review: 'reviewed', blank_page: true })
     expect(unreviewed.code).toBe('blank-page')
+  })
+})
+
+describe('checks.json shapes (#728 personal-office Excel cases)', () => {
+  const casesDir = join(businessRoot, 'cases')
+  const withChecks = readdirSync(casesDir).filter(id => existsSync(join(casesDir, id, 'checks.json')))
+
+  test('every case checks.json normalizes to CheckSpec[] (list or {sheet, expect} form)', () => {
+    expect(withChecks).toEqual(expect.arrayContaining(['bio-assay', 'port-cargo', 'household-budget', 'equipment-quote', 'project-gantt', 'quarterly-okr', 'vendor-statement']))
+    for (const id of withChecks) {
+      const checks = normalizeCaseChecks(JSON.parse(readFileSync(join(casesDir, id, 'checks.json'), 'utf8')), id)
+      for (const check of checks) {
+        expect(typeof check.sheet).toBe('string')
+        expect(check.cell).toMatch(/^\$?[A-Z]+\$?\d+$/)
+      }
+      if (id !== 'project-gantt') expect(checks.length).toBeGreaterThan(0)
+    }
+  })
+
+  test('object form maps expect keys, honours Sheet!A1 keys and rejects bad shapes', () => {
+    expect(normalizeCaseChecks({ sheet: '收支', expect: { C11: 18000, "'其它'!B2": '是' }, tolerance: 0.01 })).toEqual([
+      { sheet: '收支', cell: 'C11', expected: 18000, tolerance: 0.01 },
+      { sheet: '其它', cell: 'B2', expected: '是', tolerance: 0.01 },
+    ])
+    expect(normalizeCaseChecks({ sheet: '计划', note: '只有说明' })).toEqual([])
+    expect(() => normalizeCaseChecks({ expect: { C1: 1 } })).toThrow('缺少 sheet')
+    expect(() => normalizeCaseChecks([{ sheet: 'A' }])).toThrow('sheet / cell / expected')
+    expect(() => normalizeCaseChecks('x')).toThrow('格式不对')
+  })
+
+  for (const id of ['household-budget', 'equipment-quote', 'quarterly-okr', 'vendor-statement']) {
+    test(`${id}: xlsx_recalculate uses the {sheet, expect} checks and is ready`, async () => {
+      const s = session({ mode: 'excel', templateId: id, revision: revision(id) })
+      const prepared = await prepareOfficeTemplate(s, { template_id: id })
+      const result = await recalculateWorkspaceXlsx(s, { path: prepared.workspace_path, visual_review: 'not-needed' })
+      expect(result.checks?.passed).toBe(true)
+      expect(result.checks?.failures).toEqual([])
+      expect(result.ready).toBe(true)
+    })
+  }
+
+  test('project-gantt: note-only checks.json falls back to the key-cell dual read', async () => {
+    const s = session({ mode: 'excel', templateId: 'project-gantt', revision: revision('project-gantt') })
+    const prepared = await prepareOfficeTemplate(s, { template_id: 'project-gantt' })
+    const missing = await recalculateWorkspaceXlsx(s, { path: prepared.workspace_path, visual_review: 'not-needed' })
+    expect(missing.code).toBe('dual-read-missing')
+    const ok = await recalculateWorkspaceXlsx(s, { path: prepared.workspace_path, key_cells: ['计划!D6', '计划!D7'], visual_review: 'not-needed' })
+    expect(ok.dualRead.every(cell => cell.ok)).toBe(true)
+    expect(ok.ready).toBe(true)
   })
 })
 

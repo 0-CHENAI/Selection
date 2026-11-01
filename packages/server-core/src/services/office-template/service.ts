@@ -16,6 +16,7 @@ import type { OfficeTemplate } from '../office-catalog.ts'
 import { applyPageSetupExtension, type PageSetupExtension } from '../excel-delivery/page-setup.ts'
 import { runXlsxRecalculateTool, workbookHasFormulas, type XlsxToolArgs, type XlsxToolDeps, type XlsxToolResult } from '../excel-delivery/xlsx-tool.ts'
 import type { CheckSpec } from '../office-render-poc/formula.ts'
+import { normalizeCaseChecks } from '../excel-delivery/cases.ts'
 import {
   formatLayoutDiagnostics,
   prepareDocxSource,
@@ -282,7 +283,9 @@ function caseChecks(session: OfficeToolSession): CheckSpec[] | undefined {
   const entry = catalogCase(session.businessRoot, state.templateId)
   if (!entry) return undefined
   const path = join(caseDir(session.businessRoot, entry), 'checks.json')
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as CheckSpec[] : undefined
+  if (!existsSync(path)) return undefined
+  const checks = normalizeCaseChecks(JSON.parse(readFileSync(path, 'utf8')), `${state.templateId}/checks.json`)
+  return checks.length ? checks : undefined
 }
 
 /** OfficeCLI 1.0.157 会自动起常驻进程，set 后改动可能还没写盘；重算前先落盘并释放文件。 */
