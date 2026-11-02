@@ -138,14 +138,15 @@ export function mountWebglEffort(
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW)
     gl.enableVertexAttribArray(0)
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
-    // Transparent clear: the CSS track shows through until the first opaque frame,
-    // so a light menu never flashes opaque black.
+    // Transparent clear: light menus stay unpainted between particles and never
+    // flash black while the field initializes.
     gl.clearColor(0, 0, 0, 0)
 
     const uniforms = {
       time: gl.getUniformLocation(simulation, 'u_time'),
       slider: gl.getUniformLocation(simulation, 'u_slider'),
       elapsed: gl.getUniformLocation(simulation, 'u_elapsed'),
+      origin: gl.getUniformLocation(simulation, 'u_origin'),
       back: gl.getUniformLocation(simulation, 'u_back'),
       simCells: gl.getUniformLocation(simulation, 'u_cells'),
       ember: gl.getUniformLocation(simulation, 'u_ember'),
@@ -166,13 +167,15 @@ export function mountWebglEffort(
       floor: gl.getUniformLocation(composite, 'u_floor'),
       rise: gl.getUniformLocation(composite, 'u_rise'),
       chroma: gl.getUniformLocation(composite, 'u_chroma'),
+      backdrop: gl.getUniformLocation(composite, 'u_backdrop'),
     }
     let front: Target
     let back: Target
     let horizontal: Target
     let vertical: Target
     let columns = 83
-    const rows = 7
+    const rows = 6
+    let origin = 1
 
     function currentTheme(): EffortShaderTheme {
       const dark = document.documentElement?.classList.contains('dark') ?? false
@@ -201,6 +204,7 @@ export function mountWebglEffort(
       gl!.uniform1f(uniforms.floor, theme.floor)
       gl!.uniform1f(uniforms.rise, theme.rise)
       gl!.uniform1f(uniforms.chroma, theme.chroma)
+      gl!.uniform1f(uniforms.backdrop, theme.backdrop)
     }
 
     function render(now: number) {
@@ -225,6 +229,7 @@ export function mountWebglEffort(
         gl!.uniform1f(uniforms.time, motion.matches ? 5 : now / 1000)
         gl!.uniform1f(uniforms.slider, 1)
         gl!.uniform1f(uniforms.elapsed, elapsed)
+        gl!.uniform1f(uniforms.origin, origin)
         gl!.uniform2f(uniforms.simCells, columns, rows)
         gl!.activeTexture(gl!.TEXTURE0)
         gl!.bindTexture(gl!.TEXTURE_2D, front.texture)
@@ -253,8 +258,8 @@ export function mountWebglEffort(
       gl!.clearColor(0, 0, 0, 0)
       gl!.clear(gl!.COLOR_BUFFER_BIT)
       gl!.useProgram(composite)
-      gl!.uniform2f(uniforms.compCells, columns, rows)
       gl!.bindTexture(gl!.TEXTURE_2D, front.texture)
+      gl!.uniform2f(uniforms.compCells, columns, rows)
       gl!.uniform1i(uniforms.scene, 0)
       gl!.activeTexture(gl!.TEXTURE1)
       gl!.bindTexture(gl!.TEXTURE_2D, vertical.texture)
@@ -282,6 +287,9 @@ export function mountWebglEffort(
       height = canvas.height = nextHeight
       // Fractional columns preserve isotropic cells at every responsive width.
       columns = width / height * rows
+      // Max centers the handle half its width inside the track's right edge.
+      const thumbSize = Number.parseFloat(getComputedStyle(canvas).getPropertyValue('--prompt-effort-thumb')) || 26
+      origin = 1 - thumbSize / (2 * rect.width)
       destroyTargets()
       gl!.activeTexture(gl!.TEXTURE0)
       front = makeTarget()
