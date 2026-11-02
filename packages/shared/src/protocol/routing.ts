@@ -345,6 +345,11 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.kimi.CANCEL_OAUTH,
   RPC_CHANNELS.kimi.DEVICE_CODE,
 
+  // xAI — SuperGrok/X Premium device-flow OAuth via capability passthrough
+  RPC_CHANNELS.xai.START_OAUTH,
+  RPC_CHANNELS.xai.CANCEL_OAUTH,
+  RPC_CHANNELS.xai.DEVICE_CODE,
+
   // Claude OAuth — runs on workspace server so credentials and connection config
   // end up on the same server that will use them. Browser opening is client-side.
   // (ChatGPT OAuth stays LOCAL_ONLY — requires localhost callback server.)

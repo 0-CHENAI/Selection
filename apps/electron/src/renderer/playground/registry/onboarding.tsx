@@ -253,7 +253,7 @@ export const onboardingComponents: ComponentEntry[] = [
         props: {
           apiSetupMethod: 'pi_copilot_oauth',
           status: 'validating',
-          copilotDeviceCode: { userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' },
+          oauthDeviceCode: { userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' },
         },
       },
       { name: 'Validating', props: { apiSetupMethod: 'pi_copilot_oauth', status: 'validating' } },
@@ -288,13 +288,39 @@ export const onboardingComponents: ComponentEntry[] = [
         props: {
           apiSetupMethod: 'pi_kimi_oauth',
           status: 'validating',
-          copilotDeviceCode: { userCode: 'WXYZ-5678', verificationUri: 'https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678' },
+          oauthDeviceCode: { userCode: 'WXYZ-5678', verificationUri: 'https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678' },
         },
       },
       { name: 'Success', props: { apiSetupMethod: 'pi_kimi_oauth', status: 'success' } },
     ],
     mockData: () => ({
       apiSetupMethod: 'pi_kimi_oauth',
+      onSubmit: noopHandler,
+      onStartOAuth: noopHandler,
+      onBack: noopHandler,
+    }),
+  },
+  {
+    id: 'credentials-step-xai',
+    name: 'Credentials - SuperGrok / X Premium',
+    category: 'Onboarding',
+    description: 'xAI OAuth device flow authentication',
+    component: CredentialsStep,
+    props: [],
+    variants: [
+      { name: 'Initial', props: { apiSetupMethod: 'pi_xai_oauth', status: 'idle' } },
+      {
+        name: 'Device Code Shown',
+        props: {
+          apiSetupMethod: 'pi_xai_oauth',
+          status: 'validating',
+          oauthDeviceCode: { userCode: 'GROK-1234', verificationUri: 'https://auth.x.ai/device' },
+        },
+      },
+      { name: 'Success', props: { apiSetupMethod: 'pi_xai_oauth', status: 'success' } },
+    ],
+    mockData: () => ({
+      apiSetupMethod: 'pi_xai_oauth',
       onSubmit: noopHandler,
       onStartOAuth: noopHandler,
       onBack: noopHandler,

@@ -67,6 +67,8 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.copilot.DEVICE_CODE]: [data: { userCode: string; verificationUri: string }]
   // Kimi Code device code event
   [RPC_CHANNELS.kimi.DEVICE_CODE]: [data: { userCode: string; verificationUri: string }]
+  // xAI subscription device code event
+  [RPC_CHANNELS.xai.DEVICE_CODE]: [data: { userCode: string; verificationUri: string }]
 
   // Menu events (per-window, no payload)
   [RPC_CHANNELS.menu.NEW_CHAT]: []

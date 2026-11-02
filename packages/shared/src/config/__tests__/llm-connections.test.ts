@@ -148,6 +148,14 @@ describe('getDefaultModelForConnection', () => {
     expect(getDefaultModelForConnection('pi', 'kimi-coding')).toBe('pi/k3')
   })
 
+  it('Pi xAI OAuth defaults to an available Grok model from the SDK catalog', () => {
+    const defaultModel = getDefaultModelForConnection('pi', 'xai')
+    const modelIds = getDefaultModelsForConnection('pi', 'xai')
+      .map(model => typeof model === 'string' ? model : model.id)
+    expect(defaultModel).toBe('pi/grok-4.3')
+    expect(modelIds).toContain(defaultModel)
+  })
+
   it('Pi Moonshot defaults to Kimi K3 in both API regions', () => {
     for (const provider of ['moonshotai', 'moonshotai-cn'] as const) {
       const defaultModel = getDefaultModelForConnection('pi', provider)

@@ -25,6 +25,16 @@ describe('adaptCredentialForPiSdk', () => {
     expect(adaptCredentialForPiSdk('openai', credential)).toEqual(credential);
   });
 
+  it('preserves xAI subscription credentials as OAuth', () => {
+    const credential = {
+      type: 'oauth' as const,
+      access: 'xai-access',
+      refresh: '',
+      expires: Number.MAX_SAFE_INTEGER,
+    };
+    expect(adaptCredentialForPiSdk('xai', credential)).toEqual(credential);
+  });
+
   it('stores adapted bearer credentials through the shared synchronization path', async () => {
     const store = new InMemoryCredentialStore();
 

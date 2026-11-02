@@ -376,6 +376,9 @@ const EXPECTED_CHANNELS: string[] = [
   'workspaces:create',
   'workspaces:get',
   'workspaces:updateRemote',
+  'xai:cancelOAuth',
+  'xai:deviceCode',
+  'xai:startOAuth',
 ]
 
 const EXPECTED_COUNT = EXPECTED_CHANNELS.length

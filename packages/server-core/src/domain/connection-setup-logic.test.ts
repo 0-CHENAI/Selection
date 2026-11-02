@@ -228,6 +228,20 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.name).toBe('Kimi Code 2')
   })
 
+  it('SuperGrok → Pi OAuth on the xAI provider', () => {
+    const conn = createBuiltInConnection('supergrok')
+    expect(conn.name).toBe('SuperGrok / X Premium')
+    expect(conn.providerType).toBe('pi')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.piAuthProvider).toBe('xai')
+  })
+
+  it('derived SuperGrok slugs reuse the template', () => {
+    const conn = createBuiltInConnection('supergrok-2')
+    expect(conn.piAuthProvider).toBe('xai')
+    expect(conn.name).toBe('SuperGrok / X Premium 2')
+  })
+
 })
 
 describe('persistableLlmSetupCredential', () => {

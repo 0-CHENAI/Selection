@@ -828,6 +828,7 @@ export default function AiSettingsPage() {
 
   // Handler for closing the modal via X button or Escape - resets state and cancels OAuth
   const handleCloseApiSetup = useCallback(() => {
+    void apiSetupOnboarding.handleCancelOAuth()
     closeApiSetup()
     apiSetupOnboarding.reset()
     setIsDirectEdit(false)
@@ -896,7 +897,9 @@ export default function AiSettingsPage() {
         ? 'pi_copilot_oauth'
         : connection.piAuthProvider === 'kimi-coding'
           ? 'pi_kimi_oauth'
-          : 'pi_chatgpt_oauth'
+          : connection.piAuthProvider === 'xai'
+            ? 'pi_xai_oauth'
+            : 'pi_chatgpt_oauth'
       apiSetupOnboarding.handleStartOAuth(method, connection.slug)
     }
   }, [apiSetupOnboarding, openApiSetup, t])
@@ -1277,7 +1280,7 @@ export default function AiSettingsPage() {
                   isWaitingForCode={apiSetupOnboarding.isWaitingForCode}
                   onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
                   onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
-                  copilotDeviceCode={apiSetupOnboarding.copilotDeviceCode}
+                  oauthDeviceCode={apiSetupOnboarding.oauthDeviceCode}
                   editInitialValues={resolveSettingsApiSetupInitialValues({
                     directEdit: isDirectEdit,
                     editInitialValues,

@@ -178,6 +178,11 @@ export const CHANNEL_MAP = {
   cancelKimiOAuth: invoke(RPC_CHANNELS.kimi.CANCEL_OAUTH),
   onKimiDeviceCode: listener(RPC_CHANNELS.kimi.DEVICE_CODE),
 
+  // xAI OAuth (SuperGrok / X Premium device flow)
+  startXaiOAuth: invoke(RPC_CHANNELS.xai.START_OAUTH),
+  cancelXaiOAuth: invoke(RPC_CHANNELS.xai.CANCEL_OAUTH),
+  onXaiDeviceCode: listener(RPC_CHANNELS.xai.DEVICE_CODE),
+
   // Server info (REMOTE_ELIGIBLE)
   getServerHomeDir: invoke(RPC_CHANNELS.server.HOME_DIR),
 

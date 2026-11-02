@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { buildPiApiKeyModels } from '../pi-model-submission'
+import { OAUTH_PROVIDER_OPTIONS } from '../ApiKeyInput'
 import {
   ORDER_APP_ICON_SLUG,
   SELECTION_APP_ICON_SLUG,
@@ -17,6 +18,13 @@ const require = createRequire(import.meta.url)
 const iconsDir = join(dirname(require.resolve('@lobehub/icons-static-svg/package.json')), 'icons')
 
 describe('provider preset order', () => {
+  it('offers SuperGrok/X Premium as an account sign-in method', () => {
+    expect(OAUTH_PROVIDER_OPTIONS).toContainEqual({
+      method: 'pi_xai_oauth',
+      label: 'SuperGrok / X Premium',
+    })
+  })
+
   it('sorts API key presets by name without regard to case', () => {
     const labels = getPresetsForProvider('pi_api_key').map((preset) => preset.label)
     const sorted = [...labels].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true }))
@@ -123,6 +131,7 @@ describe('LobeHub preset icons', () => {
     expect(presetBrandSlug('pi_chatgpt_oauth')).toBe('openai')
     expect(presetBrandSlug('pi_copilot_oauth')).toBe('githubcopilot')
     expect(presetBrandSlug('pi_kimi_oauth')).toBe('kimi')
+    expect(presetBrandSlug('pi_xai_oauth')).toBe('xai')
     expect(markSource).toContain('icons/githubcopilot.svg')
   })
 })

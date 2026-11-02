@@ -242,6 +242,11 @@ export const RPC_CHANNELS = {
     CANCEL_OAUTH: 'kimi:cancelOAuth',
     DEVICE_CODE: 'kimi:deviceCode',
   },
+  xai: {
+    START_OAUTH: 'xai:startOAuth',
+    CANCEL_OAUTH: 'xai:cancelOAuth',
+    DEVICE_CODE: 'xai:deviceCode',
+  },
   settings: {
     SETUP_LLM_CONNECTION: 'settings:setupLlmConnection',
     TEST_LLM_CONNECTION_SETUP: 'settings:testLlmConnectionSetup',

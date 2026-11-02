@@ -195,6 +195,12 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
     authType: 'oauth',
     piAuthProvider: 'kimi-coding',
   },
+  'supergrok': {
+    name: 'SuperGrok / X Premium',
+    providerType: 'pi',
+    authType: 'oauth',
+    piAuthProvider: 'xai',
+  },
   'pi-api-key': {
     name: 'Selection Backend (API Key)',
     providerType: 'pi',

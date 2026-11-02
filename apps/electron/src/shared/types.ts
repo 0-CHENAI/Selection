@@ -474,6 +474,11 @@ export interface ElectronAPI {
   cancelKimiOAuth(): Promise<{ success: boolean }>
   onKimiDeviceCode(callback: (data: { userCode: string; verificationUri: string }) => void): () => void
 
+  // xAI OAuth (SuperGrok / X Premium device flow)
+  startXaiOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>
+  cancelXaiOAuth(): Promise<{ success: boolean }>
+  onXaiDeviceCode(callback: (data: { userCode: string; verificationUri: string }) => void): () => void
+
   /** Unified LLM connection setup */
   setupLlmConnection(setup: LlmConnectionSetup): Promise<{ success: boolean; error?: string }>
   /** Unified connection test — spawns a lightweight agent subprocess to validate credentials */

@@ -42,8 +42,8 @@ interface CredentialsStepProps {
   isWaitingForCode?: boolean
   onSubmitAuthCode?: (code: string) => void
   onCancelOAuth?: () => void
-  // Device flow (GitHub Copilot / Kimi Code)
-  copilotDeviceCode?: { userCode: string; verificationUri: string }
+  // Device flow (GitHub Copilot / Kimi Code / xAI)
+  oauthDeviceCode?: { userCode: string; verificationUri: string }
   // Edit mode (pre-fill existing connection values)
   editInitialValues?: {
     apiKey?: string
@@ -70,14 +70,15 @@ export function CredentialsStep({
   onBack,
   onSelectApiSetupMethod,
   allowOAuthSwitch,
-  copilotDeviceCode,
+  oauthDeviceCode,
   editInitialValues,
 }: CredentialsStepProps) {
   const { t } = useTranslation()
   const isChatGptOAuth = apiSetupMethod === 'pi_chatgpt_oauth'
   const isCopilotOAuth = apiSetupMethod === 'pi_copilot_oauth'
   const isKimiOAuth = apiSetupMethod === 'pi_kimi_oauth'
-  const isDeviceFlowOAuth = isCopilotOAuth || isKimiOAuth
+  const isXaiOAuth = apiSetupMethod === 'pi_xai_oauth'
+  const isDeviceFlowOAuth = isCopilotOAuth || isKimiOAuth || isXaiOAuth
   const isPiApiKey = apiSetupMethod === 'pi_api_key'
   const isApiKey = isPiApiKey
 
@@ -103,24 +104,24 @@ export function CredentialsStep({
     onBack()
   }
 
-  // Device-flow (Copilot / Kimi Code) device code clipboard handling
+  // Device-flow OAuth device code clipboard handling
   const [copiedCode, setCopiedCode] = useState(false)
 
   // Auto-copy device code to clipboard when it appears
   useEffect(() => {
-    if (copilotDeviceCode?.userCode) {
-      navigator.clipboard.writeText(copilotDeviceCode.userCode).then(() => {
+    if (oauthDeviceCode?.userCode) {
+      navigator.clipboard.writeText(oauthDeviceCode.userCode).then(() => {
         setCopiedCode(true)
         setTimeout(() => setCopiedCode(false), 2000)
       }).catch(() => {
         // Clipboard write failed, user can still click to copy
       })
     }
-  }, [copilotDeviceCode?.userCode])
+  }, [oauthDeviceCode?.userCode])
 
   const handleCopyCode = () => {
-    if (copilotDeviceCode?.userCode) {
-      navigator.clipboard.writeText(copilotDeviceCode.userCode).then(() => {
+    if (oauthDeviceCode?.userCode) {
+      navigator.clipboard.writeText(oauthDeviceCode.userCode).then(() => {
         setCopiedCode(true)
         setTimeout(() => setCopiedCode(false), 2000)
       })
@@ -167,9 +168,19 @@ export function CredentialsStep({
     )
   }
 
-  // --- Device-flow OAuth (GitHub Copilot / Kimi Code) ---
+  // --- Device-flow OAuth (GitHub Copilot / Kimi Code / xAI) ---
   if (isDeviceFlowOAuth) {
-    const copy = isKimiOAuth
+    const copy = isXaiOAuth
+      ? {
+          title: t("onboarding.credentials.connectXai"),
+          description: t("onboarding.credentials.connectXaiDesc"),
+          signIn: t("onboarding.credentials.signInXai"),
+          enterCode: t("onboarding.credentials.enterCodeOnXai"),
+          browserOpened: t("onboarding.credentials.browserOpenedXai"),
+          clickToSignIn: t("onboarding.credentials.clickToSignInXai"),
+          connected: t("onboarding.credentials.xaiConnected"),
+        }
+      : isKimiOAuth
       ? {
           title: t("onboarding.credentials.connectKimi"),
           description: t("onboarding.credentials.connectKimiDesc"),
@@ -208,7 +219,7 @@ export function CredentialsStep({
         }
       >
         <div className="space-y-4">
-          {copilotDeviceCode ? (
+          {oauthDeviceCode ? (
             <div className="rounded-xl bg-foreground-2 p-4 text-sm space-y-3">
               <p className="text-muted-foreground text-center">
                 {copy.enterCode}
@@ -219,7 +230,7 @@ export function CredentialsStep({
                   onClick={handleCopyCode}
                   className="text-2xl font-mono font-bold tracking-widest text-foreground px-4 py-2 rounded-lg bg-background border border-border hover:bg-foreground-2 transition-colors cursor-pointer"
                 >
-                  {copilotDeviceCode.userCode}
+                  {oauthDeviceCode.userCode}
                 </button>
                 <span className={`text-xs text-muted-foreground flex items-center gap-1 transition-opacity ${copiedCode ? 'opacity-100' : 'opacity-0'}`}>
                   <Check className="size-3" />
@@ -229,6 +240,14 @@ export function CredentialsStep({
               <p className="text-muted-foreground text-xs text-center">
                 {copy.browserOpened}
               </p>
+              <button
+                type="button"
+                onClick={() => void window.electronAPI.openUrl(oauthDeviceCode.verificationUri)}
+                className="mx-auto flex items-center gap-1.5 text-xs text-foreground/70 transition-colors hover:text-foreground"
+              >
+                <ExternalLink className="size-3" />
+                {copy.signIn}
+              </button>
             </div>
           ) : (
             <div className="rounded-xl bg-foreground-2 p-4 text-sm text-muted-foreground text-center">

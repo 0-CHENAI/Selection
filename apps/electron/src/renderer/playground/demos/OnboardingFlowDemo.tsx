@@ -176,7 +176,7 @@ export function OnboardingFlowDemo() {
               baseUrl: ORDER_OPENAI_BASE_URL,
               customApi: 'openai-completions',
             } : undefined}
-            copilotDeviceCode={
+            oauthDeviceCode={
               method === 'pi_copilot_oauth' && credStatus === 'validating'
                 ? { userCode: 'DEMO-1234', verificationUri: 'https://github.com/login/device' }
                 : undefined

@@ -51,6 +51,7 @@ import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
 let kimiOAuthAbort: AbortController | null = null
+let xaiOAuthAbort: AbortController | null = null
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.llmConnections.LIST,
@@ -74,6 +75,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.copilot.LOGOUT,
   RPC_CHANNELS.kimi.START_OAUTH,
   RPC_CHANNELS.kimi.CANCEL_OAUTH,
+  RPC_CHANNELS.xai.START_OAUTH,
+  RPC_CHANNELS.xai.CANCEL_OAUTH,
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
   RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
   RPC_CHANNELS.pi.FETCH_CUSTOM_ENDPOINT_MODELS,
@@ -1055,6 +1058,74 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       kimiOAuthAbort.abort()
       kimiOAuthAbort = null
       deps.platform.logger?.info('Kimi Code OAuth cancelled')
+    }
+    return { success: true }
+  })
+
+  // ============================================================
+  // xAI OAuth (SuperGrok / X Premium device flow via Pi SDK)
+  // ============================================================
+
+  server.handle(RPC_CHANNELS.xai.START_OAUTH, async (ctx, connectionSlug: string): Promise<{
+    success: boolean
+    error?: string
+  }> => {
+    let flowAbort: AbortController | null = null
+    try {
+      const { loginXaiWithSdk } = await import('@craft-agent/shared/auth/xai-sdk')
+      const credentialManager = getCredentialManager()
+
+      xaiOAuthAbort?.abort()
+      flowAbort = new AbortController()
+      xaiOAuthAbort = flowAbort
+
+      deps.platform.logger?.info(`Starting xAI OAuth device flow for connection: ${connectionSlug}`)
+
+      const credentials = await loginXaiWithSdk({
+        onDeviceCode: ({ userCode, verificationUri }) => {
+          pushTyped(server, RPC_CHANNELS.xai.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
+            userCode,
+            verificationUri,
+          })
+          server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, verificationUri).catch(err => {
+            deps.platform.logger?.warn(`Failed to open browser for xAI OAuth: ${err}`)
+          })
+        },
+        onProgress: message => {
+          deps.platform.logger?.info(`[xAI OAuth] ${message}`)
+        },
+        signal: flowAbort.signal,
+      })
+
+      if (flowAbort.signal.aborted || xaiOAuthAbort !== flowAbort) {
+        throw new Error('xAI OAuth flow was cancelled or superseded')
+      }
+      xaiOAuthAbort = null
+
+      await credentialManager.setLlmOAuth(connectionSlug, {
+        accessToken: credentials.access,
+        refreshToken: credentials.refresh,
+        expiresAt: credentials.expires,
+      })
+
+      deps.platform.logger?.info('xAI OAuth completed successfully')
+      refreshModelsInBackground(connectionSlug, 'xAI auth')
+      return { success: true }
+    } catch (error) {
+      if (flowAbort && xaiOAuthAbort === flowAbort) xaiOAuthAbort = null
+      deps.platform.logger?.error('xAI OAuth failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OAuth authentication failed',
+      }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.xai.CANCEL_OAUTH, async (): Promise<{ success: boolean }> => {
+    if (xaiOAuthAbort) {
+      xaiOAuthAbort.abort()
+      xaiOAuthAbort = null
+      deps.platform.logger?.info('xAI OAuth cancelled')
     }
     return { success: true }
   })

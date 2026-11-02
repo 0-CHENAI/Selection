@@ -86,8 +86,8 @@ interface UseOnboardingReturn {
   handleSubmitAuthCode: (code: string) => void
   handleCancelOAuth: () => void
 
-  // Copilot device code (displayed during device flow)
-  copilotDeviceCode?: { userCode: string; verificationUri: string }
+  // Device code displayed during subscription OAuth flows
+  oauthDeviceCode?: { userCode: string; verificationUri: string }
 
   // Git Bash (Windows)
   handleBrowseGitBash: () => Promise<string | null>
@@ -114,6 +114,7 @@ export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   pi_chatgpt_oauth: 'chatgpt-plus',
   pi_copilot_oauth: 'github-copilot',
   pi_kimi_oauth: 'kimi-code',
+  pi_xai_oauth: 'supergrok',
   pi_api_key: 'pi-api-key',
 }
 
@@ -187,6 +188,7 @@ export function apiSetupMethodToConnectionSetup(
     case 'pi_chatgpt_oauth':
     case 'pi_copilot_oauth':
     case 'pi_kimi_oauth':
+    case 'pi_xai_oauth':
       return {
         slug,
         credential: options.credential,
@@ -531,10 +533,10 @@ export function useOnboarding({
   // Two-step OAuth flow state
   const [isWaitingForCode, setIsWaitingForCode] = useState(false)
 
-  // Device code displayed during device-flow OAuth (GitHub Copilot, Kimi Code)
-  const [copilotDeviceCode, setCopilotDeviceCode] = useState<{ userCode: string; verificationUri: string } | undefined>()
+  // Device code displayed during device-flow OAuth
+  const [oauthDeviceCode, setOAuthDeviceCode] = useState<{ userCode: string; verificationUri: string } | undefined>()
 
-  // Start OAuth flow (Claude or ChatGPT depending on selected method)
+  // Start the selected browser or device-code OAuth flow.
   const handleStartOAuth = useCallback(async (methodOverride?: ApiSetupMethod, connectionSlugOverride?: string) => {
     const effectiveMethod = methodOverride ?? state.apiSetupMethod
 
@@ -587,7 +589,7 @@ export function useOnboarding({
 
         // Subscribe to device code event before starting the flow
         const cleanup = window.electronAPI.onCopilotDeviceCode((data) => {
-          setCopilotDeviceCode(data)
+          setOAuthDeviceCode(data)
         })
 
         try {
@@ -604,7 +606,7 @@ export function useOnboarding({
           }
         } finally {
           cleanup()
-          setCopilotDeviceCode(undefined)
+          setOAuthDeviceCode(undefined)
         }
         return
       }
@@ -616,7 +618,7 @@ export function useOnboarding({
         const connectionSlug = apiSetupMethodToConnectionSetup(effectiveMethod, {}, effectiveEditingSlug, existingSlugs).slug
 
         const cleanup = window.electronAPI.onKimiDeviceCode((data) => {
-          setCopilotDeviceCode(data)
+          setOAuthDeviceCode(data)
         })
 
         try {
@@ -633,7 +635,36 @@ export function useOnboarding({
           }
         } finally {
           cleanup()
-          setCopilotDeviceCode(undefined)
+          setOAuthDeviceCode(undefined)
+        }
+        return
+      }
+
+      // xAI OAuth (device flow for SuperGrok or X Premium subscriptions)
+      if (effectiveMethod === 'pi_xai_oauth') {
+        const effectiveEditingSlug = connectionSlugOverride ?? editingSlug
+        const isReauth = !!effectiveEditingSlug
+        const connectionSlug = apiSetupMethodToConnectionSetup(effectiveMethod, {}, effectiveEditingSlug, existingSlugs).slug
+
+        const cleanup = window.electronAPI.onXaiDeviceCode((data) => {
+          setOAuthDeviceCode(data)
+        })
+
+        try {
+          const result = await window.electronAPI.startXaiOAuth(connectionSlug)
+
+          if (result.success) {
+            await saveAndValidateConnection(connectionSlug, effectiveMethod, undefined, isReauth)
+          } else {
+            setState(s => ({
+              ...s,
+              credentialStatus: 'error',
+              errorMessage: result.error || 'xAI authentication failed',
+            }))
+          }
+        } finally {
+          cleanup()
+          setOAuthDeviceCode(undefined)
         }
         return
       }
@@ -746,10 +777,24 @@ export function useOnboarding({
   // Cancel OAuth flow
   const handleCancelOAuth = useCallback(async () => {
     setIsWaitingForCode(false)
+    setOAuthDeviceCode(undefined)
     setState(s => ({ ...s, credentialStatus: 'idle', errorMessage: undefined }))
-    // Clear OAuth state on backend
-    await window.electronAPI.clearClaudeOAuthState()
-  }, [])
+    try {
+      if (state.apiSetupMethod === 'pi_copilot_oauth') {
+        await window.electronAPI.cancelCopilotOAuth()
+      } else if (state.apiSetupMethod === 'pi_kimi_oauth') {
+        await window.electronAPI.cancelKimiOAuth()
+      } else if (state.apiSetupMethod === 'pi_xai_oauth') {
+        await window.electronAPI.cancelXaiOAuth()
+      } else {
+        await window.electronAPI.clearClaudeOAuthState()
+      }
+    } catch (error) {
+      // Closing the UI should still succeed when a stale remote server does
+      // not expose the matching cancellation channel yet.
+      console.warn('[Onboarding] Failed to cancel OAuth flow:', error)
+    }
+  }, [state.apiSetupMethod])
 
   // Git Bash handlers (Windows only)
   const handleBrowseGitBash = useCallback(async () => {
@@ -837,6 +882,7 @@ export function useOnboarding({
       errorMessage: undefined,
     })
     setIsWaitingForCode(false)
+    setOAuthDeviceCode(undefined)
     setCredentialPrefill(undefined)
     // Clean up any pending OAuth state
     window.electronAPI.clearClaudeOAuthState().catch(() => {
@@ -858,8 +904,8 @@ export function useOnboarding({
     isWaitingForCode,
     handleSubmitAuthCode,
     handleCancelOAuth,
-    // Copilot device code
-    copilotDeviceCode,
+    // Subscription OAuth device code
+    oauthDeviceCode,
     // Git Bash (Windows)
     handleBrowseGitBash,
     handleUseGitBashPath,

@@ -67,6 +67,7 @@ const PRESET_ICON_SLUG: Readonly<Record<string, string>> = {
   pi_chatgpt_oauth: 'openai',
   pi_copilot_oauth: 'githubcopilot',
   pi_kimi_oauth: 'kimi',
+  pi_xai_oauth: 'xai',
 }
 
 export function presetBrandSlug(presetKey: string): string | null {

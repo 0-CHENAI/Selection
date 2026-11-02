@@ -145,7 +145,7 @@ import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
 import { saveBinaryResponse } from '../utils/binary-detection.ts';
 
 /** OAuth providers whose short-lived tokens are refreshed main-side before spawn and before each turn. */
-const PROACTIVE_OAUTH_REFRESH_PROVIDERS: ReadonlySet<string> = new Set(['github-copilot', 'kimi-coding']);
+const PROACTIVE_OAUTH_REFRESH_PROVIDERS: ReadonlySet<string> = new Set(['github-copilot', 'kimi-coding', 'xai']);
 /** Refresh when a token has less than this much validity left. */
 const OAUTH_REFRESH_SKEW_MS = 5 * 60_000;
 
@@ -885,16 +885,11 @@ export class PiAgent extends BaseAgent {
               },
             };
           }
-          // Kimi Code (Pi 1.3.0+): Chat Completions at
-          // https://api.kimi.com/coding/v1. OAuth `toAuth` sets
-          // `Authorization: Bearer`. Keep the oauth credential (empty refresh,
-          // far-future expiry) so the subprocess does not refresh — Kimi
-          // rotates refresh tokens, and refresh stays main-side
-          // (refreshAndPushTokens). An api_key credential would also be sent
-          // as Bearer by the Chat Completions client, but it would not go
-          // through `toAuth` and adapt-credential does not upgrade it.
-          if (piAuthProvider === 'kimi-coding') {
-            this.debug(`Retrieved Kimi Code OAuth credential for Pi provider: ${piAuthProvider}`);
+          // Kimi Code and xAI offer both API-key and OAuth auth. Preserve the
+          // oauth credential shape so Pi calls the provider's `toAuth`; keep
+          // refresh main-side because these providers may rotate refresh tokens.
+          if (piAuthProvider === 'kimi-coding' || piAuthProvider === 'xai') {
+            this.debug(`Retrieved subscription OAuth credential for Pi provider: ${piAuthProvider}`);
             return {
               provider: piAuthProvider,
               credential: {
@@ -1014,7 +1009,7 @@ export class PiAgent extends BaseAgent {
 
   /**
    * Refresh OAuth tokens and push updated credentials to the running subprocess.
-   * Handles Copilot and Kimi Code (Pi SDK) and ChatGPT token refresh.
+   * Handles Copilot, Kimi Code, xAI (Pi SDK), and ChatGPT token refresh.
    */
   private async refreshAndPushTokens(): Promise<void> {
     if (this.config.authType !== 'oauth') return;
@@ -1065,6 +1060,14 @@ export class PiAgent extends BaseAgent {
           // always persist the returned one.
           const { refreshKimiCodingTokenWithSdk } = await import('../auth/kimi-coding-sdk.ts');
           const newCreds = await refreshKimiCodingTokenWithSdk(stored.refreshToken);
+          await credentialManager.setLlmOAuth(slug, {
+            accessToken: newCreds.access,
+            refreshToken: newCreds.refresh,
+            expiresAt: newCreds.expires,
+          });
+        } else if (piAuthProvider === 'xai') {
+          const { refreshXaiTokenWithSdk } = await import('../auth/xai-sdk.ts');
+          const newCreds = await refreshXaiTokenWithSdk(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,

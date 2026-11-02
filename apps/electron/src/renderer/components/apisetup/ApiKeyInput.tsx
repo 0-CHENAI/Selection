@@ -130,13 +130,14 @@ export interface ApiKeySubmitData {
 }
 
 /** OAuth-based setup methods that can be reached from the endpoint dropdown. */
-export type OAuthSetupMethod = 'pi_chatgpt_oauth' | 'pi_copilot_oauth' | 'pi_kimi_oauth'
+export type OAuthSetupMethod = 'pi_chatgpt_oauth' | 'pi_copilot_oauth' | 'pi_kimi_oauth' | 'pi_xai_oauth'
 
 /** Account sign-in providers shown in the endpoint dropdown's OAuth section. */
 export const OAUTH_PROVIDER_OPTIONS: ReadonlyArray<{ method: OAuthSetupMethod; label: string }> = [
   { method: 'pi_chatgpt_oauth', label: 'ChatGPT' },
   { method: 'pi_copilot_oauth', label: 'GitHub Copilot' },
   { method: 'pi_kimi_oauth', label: 'Kimi Code' },
+  { method: 'pi_xai_oauth', label: 'SuperGrok / X Premium' },
 ]
 
 export interface ApiKeyInputProps {

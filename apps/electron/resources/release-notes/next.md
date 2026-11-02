@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **SuperGrok / X Premium 登录** — xAI 连接新增官方设备 OAuth 登录，可直接使用 SuperGrok 或 X Premium 订阅；令牌在主进程安全保存并按到期时间刷新，API Key 登录方式继续保留。
+
 - **Fast 按连接能力显示** — 模型选择器仅在当前连接的认证、模型、官方端点和传输协议支持 Fast 时显示开关及费用提示；自定义网关或协议不匹配时隐藏整块入口，运行时也不发送不适用的 `service_tier` 参数。
 
 - **OfficeCLI 升级至 1.0.160** — 更新受管 OfficeCLI 的六平台版本锁定、校验和及随包指南，batch / help 支持上游新增的 `--compact` 参数；继续禁用运行时自更新。升级资源沿用 PR #701 的标准快照。
