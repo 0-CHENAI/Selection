@@ -192,11 +192,11 @@ describe('office document mode', () => {
     expect(listed.result.mode).toBeNull()
   })
 
-  test('business skills are registered for the model and for explicit user invocation', () => {
+  test('business skills stay model-callable without appearing in user-facing skill lists', () => {
     const skills = loadAllSkills('/tmp/office-mode-skills')
     for (const slug of ['meeting-recap', 'saas-metrics-coach', 'gov-doc-writing']) {
       expect(loadSkillBySlug('/tmp/office-mode-skills', slug)?.source).toBe('bundled')
-      expect(filterUserFacingSkills(skills).some(item => item.slug === slug)).toBe(true)
+      expect(filterUserFacingSkills(skills).some(item => item.slug === slug)).toBe(false)
       expect(toSkillCatalogEntries(skills).some(item => item.slug === slug)).toBe(true)
     }
     expect(loadSkillBySlug('/tmp/office-mode-skills', 'gov-doc-writing')?.content).toContain('未复用')

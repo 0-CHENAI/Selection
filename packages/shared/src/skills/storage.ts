@@ -16,7 +16,6 @@ import { homedir } from 'os';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { recoverSkillInstalls, skillReadDirectory, pendingSkillSlugs } from './install-transaction.ts';
-import { isOfficeBusinessSkill } from './office-business-skills.ts';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
@@ -62,10 +61,9 @@ export function getBundledSkillDirectories(): string[] {
   return dirs;
 }
 
-/** App-bundled skills stay callable by the agent but are omitted from the Skills UI. Office business skills are the exception: the user can invoke them explicitly. */
+/** App-bundled skills stay callable by the agent but are omitted from user-facing skill lists and slash commands. */
 export function isUserFacingSkill(skill: Pick<LoadedSkill, 'source'> & { slug?: string }): boolean {
-  if (skill.source !== 'bundled') return true;
-  return !!skill.slug && isOfficeBusinessSkill(skill.slug);
+  return skill.source !== 'bundled';
 }
 
 export function filterUserFacingSkills<T extends { source: SkillSource; slug?: string }>(skills: T[]): T[] {

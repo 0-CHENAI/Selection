@@ -132,6 +132,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **内置技能按需调用** — 应用随包技能不再显示在技能管理页、slash 命令和其他用户选择列表中；模型目录、自然语言路由与 Office 案例的按需注入保持可用。
+
 - **PPT 导出结构校验** — 修正备注母版列表的 OOXML 顺序，保留备注、母版和页面关系，避免生成的演示稿在 OfficeCLI 校验时报告结构错误。Issue #689。
 
 - **Office 整合修复** — 跟进修改不再用输入框残留参数回退已选风格或配色；打开已有 PPTX 时不再注入新建指令，按页文字修改保留 OfficeCLI 定点路径。补齐模板来源、完整 MIT/Apache 许可与随包 NOTICE，保留 Max WebGL 与独立 Fast 行为。（#698）

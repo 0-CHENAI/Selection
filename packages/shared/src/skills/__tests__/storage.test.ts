@@ -567,11 +567,12 @@ describe('loadAllSkills', () => {
 });
 
 describe('bundled skills', () => {
-  it('exposes only the hidden router while keeping official guides private', () => {
+  it('keeps bundled skills callable while hiding every one from user-facing lists', () => {
     const dirs = getBundledSkillDirectories();
     expect(dirs.some(dir => existsSync(join(dir, 'officecli', 'SKILL.md')))).toBe(true);
 
     const all = loadAllSkills(workspaceRoot);
+    expect(filterUserFacingSkills(all).some(item => item.source === 'bundled')).toBe(false);
     for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
       expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(false);
     }
@@ -580,7 +581,6 @@ describe('bundled skills', () => {
     expect(router).toBeTruthy();
     expect(router!.source).toBe('bundled');
     expect(all.find(item => item.slug === 'officecli')?.source).toBe('bundled');
-    expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli')).toBe(false);
 
     const privateGuidesDir = getBundledOfficecliSkillsDir();
     expect(privateGuidesDir).toBeTruthy();
