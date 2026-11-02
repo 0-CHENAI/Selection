@@ -41,46 +41,42 @@ const lightPalette = ruleBodies(css, '.prompt-field,\n.prompt-effort-settings {'
 const darkPalette = ruleBodies(css, '.dark .prompt-field,\n.dark .prompt-effort-settings {')[0] ?? ''
 const proSpark = ruleBodies(css, ".prompt-effort-settings[data-work-mode='PRO'] {")[0] ?? ''
 const proLight = ruleBodies(css, ".prompt-effort-settings[data-work-mode='PRO'] {")[1] ?? ''
-const proDark = ruleBodies(css, ".dark .prompt-effort-settings[data-work-mode='PRO'] {")[0] ?? ''
 
 describe('max effort theme css', () => {
-  it('uses a soft light track and a lifted dark track', () => {
+  it('only paints the Max backdrop in dark menus', () => {
     expect(lightPalette).toContain('--prompt-spark: oklch(0.49 0.16 293)')
     expect(darkPalette).toContain('--prompt-spark: oklch(0.78 0.11 293)')
     const lightTrack = lightPalette.match(/--prompt-effort-max-track:\s*([^;]+);/)?.[1]
-    const darkTrack = darkPalette.match(/--prompt-effort-max-track:\s*([^;]+);/)?.[1]
     expect(lightTrack).toBeTruthy()
-    expect(darkTrack).toBeTruthy()
-    expect(lightTrack).not.toBe(darkTrack)
-    expect(lightTrack).toContain('0.975')
-    expect(darkTrack).toContain('0.23')
-    expect(css).not.toContain('oklch(0.14 0.008 293)')
+    expect(lightTrack).toContain('0.18 0.008')
+    expect(lightPalette).toContain('--prompt-effort-backdrop: 0')
+    expect(darkPalette).toContain('--prompt-effort-backdrop: 1')
+    expect(darkPalette).not.toContain('--prompt-effort-max-track:')
     expect(css).toContain('--prompt-effort-track-bg: var(--prompt-effort-max-track)')
     expect(hues(lightPalette).some(hue => Math.abs(hue - 293) < 1)).toBe(true)
     expect(hues(darkPalette).some(hue => Math.abs(hue - 293) < 1)).toBe(true)
-    expect(darkPalette).toContain('color(srgb 0.28 0.1 0.58)')
-    expect(darkPalette).toContain('--prompt-effort-chroma: 0')
+    expect(lightPalette).toContain('color(srgb 0.28 0.1 0.58)')
     expect(lightPalette).toContain('--prompt-effort-chroma: 1')
+    expect(darkPalette).toContain('--prompt-effort-chroma: 0')
   })
 
   it('follows the PRO gold token for track, cells, fill, and thumb', () => {
     expect(proSpark).toContain('--prompt-spark: var(--pro-accent)')
-    expect(proDark).toContain('--prompt-spark: var(--pro-accent)')
-    for (const block of [proLight, proDark]) {
+    for (const block of [proLight]) {
       expect(block).toContain('--prompt-effort-max-track: color-mix(in oklch, var(--prompt-spark)')
       expect(block).toContain('--prompt-effort-ember: color-mix(in oklch, var(--prompt-spark)')
-      expect(block).toContain('--prompt-effort-mid: color-mix(in oklch, var(--prompt-spark)')
+      expect(block).toContain('--prompt-effort-mid: var(--prompt-spark)')
       expect(block).toContain('--prompt-effort-core: color-mix(in oklch, var(--prompt-spark)')
       expect(hues(block).length).toBeGreaterThan(0)
       expect(hues(block).every(hue => hue >= 55 && hue <= 100)).toBe(true)
       expect(block).not.toContain('293')
     }
-    expect(proDark).toMatch(/--prompt-effort-core:[^;]*0\.97/)
+    expect(proLight).toMatch(/--prompt-effort-core:[^;]*0\.97/)
     expect(proSpark).toContain('--prompt-effort-label: var(--prompt-spark)')
     const maxPaint = ruleBodies(css, '.prompt-effort-settings[data-max] {')[0] ?? ''
-    expect(maxPaint).toContain('--prompt-effort-track-bg: var(--prompt-effort-max-track)')
-    expect(maxPaint).toContain('--prompt-effort-fill-bg: color-mix(in srgb, var(--prompt-spark) 35%, transparent)')
-    expect(maxPaint).toContain('--prompt-effort-thumb-bg: var(--prompt-spark)')
+    expect(maxPaint).toContain('--prompt-effort-track-bg: color-mix(in oklab, var(--foreground) 4%, var(--popover))')
+    expect(maxPaint).toContain('--prompt-effort-fill-bg: transparent')
+    expect(maxPaint).toContain('--prompt-effort-thumb-bg: var(--prompt-effort-core)')
     expect(maxPaint).toContain('--prompt-effort-label: var(--prompt-spark)')
     expect(themeCss).toContain('--pro-accent: oklch(0.50178870 0.09392988 58.44502375)')
     expect(themeCss).toContain('--pro-accent: oklch(0.76808414 0.08380584 76.89195147)')
@@ -144,14 +140,20 @@ describe('effort color parsing', () => {
     expect(lifted && crushed && relativeLuma(lifted) > relativeLuma(crushed) * 2).toBe(true)
   })
 
-  it('keeps light and dark fallbacks apart, with the rich purple ember on dark', () => {
+  it('keeps fallback cells brighter than the track in both themes', () => {
     const light = effortThemeFallback(false)
     const dark = effortThemeFallback(true)
     expect(light.track).not.toEqual(dark.track)
     expect(light.chroma).toBe(1)
+    expect(light.backdrop).toBe(0)
+    expect(dark.backdrop).toBe(1)
     expect(dark.chroma).toBe(0)
     expect(dark.ember).toEqual([0.28, 0.1, 0.58])
-    expect(dark.heat).toBe(1.2)
+    expect(dark.heat).toBe(2.2)
+    for (const palette of [light, dark]) {
+      expect(relativeLuma(palette.mid)).toBeGreaterThan(relativeLuma(palette.track) * 10)
+      expect(relativeLuma(palette.core)).toBeGreaterThan(relativeLuma(palette.mid))
+    }
     const theme = readEffortShaderTheme({
       color: 'rgb(180, 120, 40)',
       borderTopColor: 'rgb(196, 140, 48)',
@@ -209,6 +211,7 @@ describe('effort color interpolation', () => {
       mid: [0.86, 0.58, 0.24],
       core: [1, 0.94, 0.86],
       track: [0.28, 0.18, 0.08],
+      heat: 2.6,
     })
     const mounted = stepEffortShaderTheme(null, purple, 0, false)
     expect(mounted.settled).toBe(true)
@@ -221,6 +224,8 @@ describe('effort color interpolation', () => {
 
     const midway = stepEffortShaderTheme(started.blend, gold, 1000 + EFFORT_COLOR_BLEND_MS / 2, false)
     expect(midway.settled).toBe(false)
+    expect(midway.theme.backdrop).toBeGreaterThan(0.5)
+    expect(midway.theme.backdrop).toBeLessThan(1)
     expect(midway.theme.heat).toBeGreaterThan((purple.heat + gold.heat) / 2)
     expect(midway.theme.ember[0]).toBeGreaterThan(lerpEffortRgb(purple.ember, gold.ember, 0.5)[0])
 
@@ -315,7 +320,7 @@ describe('max effort webgl field', () => {
     expect(FRAG_SIM).toContain('u_heat')
     expect(FRAG_SIM).not.toContain('vec3(0.28, 0.10, 0.58)')
     expect(FRAG_COMP).toContain('u_track')
-    expect(FRAG_COMP).toContain('mix(u_track, shown, presence)')
+    expect(FRAG_COMP).toContain('u_backdrop')
 
     const warnings: unknown[][] = []
     console.warn = (...args: unknown[]) => { warnings.push(args) }
@@ -388,6 +393,8 @@ describe('max effort webgl field', () => {
     expect(calls.filter(call => call.name === 'clearColor').every(call => call.args.join(',') === '0,0,0,0')).toBe(true)
     expect(draws()).toBe(35)
     expect(queue.size).toBe(0)
+    const origin = calls.find(call => call.name === 'uniform1f' && call.args[0] === 'u_origin')
+    expect(origin?.args[1]).toBeCloseTo(167 / 180, 6)
     const ember = calls.filter(call => call.name === 'uniform3f' && call.args[0] === 'u_ember').at(-1)
     expect(ember?.args.slice(1)).toEqual([90 / 255, 60 / 255, 170 / 255])
     expect((ember?.args[1] as number) < (ember?.args[3] as number)).toBe(true)

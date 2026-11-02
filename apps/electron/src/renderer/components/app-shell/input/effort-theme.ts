@@ -16,6 +16,7 @@ export interface EffortShaderTheme {
   floor: number
   rise: number
   chroma: number
+  backdrop: number
 }
 
 export const EFFORT_THEME_VARS = {
@@ -24,30 +25,29 @@ export const EFFORT_THEME_VARS = {
   floor: '--prompt-effort-floor',
   rise: '--prompt-effort-rise',
   chroma: '--prompt-effort-chroma',
+  backdrop: '--prompt-effort-backdrop',
 } as const
 
 const LIGHT_FALLBACK: EffortShaderTheme = {
-  ember: [0.56, 0.44, 0.76],
-  mid: [0.5, 0.36, 0.78],
-  core: [0.78, 0.7, 0.9],
-  track: [0.9, 0.88, 0.96],
-  heat: 0.58,
-  exposure: 0.8,
-  floor: 0.05,
-  rise: 0.2,
+  ember: [0.28, 0.1, 0.58],
+  mid: [0.43, 0.28, 0.69],
+  core: [0.96, 0.94, 0.98],
+  track: [0.065, 0.06, 0.08],
+  heat: 2.2,
+  exposure: 0.98,
+  floor: 0.025,
+  rise: 0.32,
   chroma: 1,
+  backdrop: 0,
 }
 
 const DARK_FALLBACK: EffortShaderTheme = {
-  ember: [0.28, 0.1, 0.58],
+  ...LIGHT_FALLBACK,
   mid: [0.62, 0.32, 1],
   core: [1, 0.94, 0.98],
-  track: [0.18, 0.14, 0.26],
-  heat: 1.2,
-  exposure: 1.1,
-  floor: 0,
-  rise: 0.12,
+  track: [0.075, 0.065, 0.09],
   chroma: 0,
+  backdrop: 1,
 }
 
 export function effortThemeFallback(isDark: boolean): EffortShaderTheme {
@@ -148,11 +148,12 @@ export function readEffortShaderTheme(style: Pick<CSSStyleDeclaration, 'color' |
     floor: unit(EFFORT_THEME_VARS.floor, fallback.floor),
     rise: unit(EFFORT_THEME_VARS.rise, fallback.rise),
     chroma: unit(EFFORT_THEME_VARS.chroma, fallback.chroma),
+    backdrop: unit(EFFORT_THEME_VARS.backdrop, fallback.backdrop),
   }
 }
 
 const COLOR_KEYS = ['ember', 'mid', 'core', 'track'] as const
-const UNIT_KEYS = ['heat', 'exposure', 'floor', 'rise', 'chroma'] as const
+const UNIT_KEYS = ['heat', 'exposure', 'floor', 'rise', 'chroma', 'backdrop'] as const
 
 function srgbDecode(channel: number): number {
   const clamped = Math.min(1, Math.max(0, channel))
@@ -235,6 +236,7 @@ function copyTheme(theme: EffortShaderTheme): EffortShaderTheme {
     floor: theme.floor,
     rise: theme.rise,
     chroma: theme.chroma,
+    backdrop: theme.backdrop,
   }
 }
 

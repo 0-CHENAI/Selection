@@ -11,9 +11,8 @@ import { useWebglEffort } from '@/hooks/useWebglEffort'
 import { EFFORT_FIELD_FADE_MS } from './effort-theme'
 import './PromptBarEffects.css'
 
-// Slider geometry and motion adapted from https://reactbits.dev/r/PromptBar-TS-TW.json.
-const EFFORT_EDGE = 11
-// Slightly larger than the 22px track so the knob reads as floating above it.
+// Keep the reference's rounded-square handle inside the 28px particle field.
+const EFFORT_EDGE = 13
 const EFFORT_THUMB = 26
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
