@@ -16,7 +16,7 @@
 | O5 #688 | [#696](https://github.com/0-CHENAI/Selection/pull/696) | [Word/Excel 案例](selection-3.2-office-o5.md) | Validate 41004874701、OfficeCLI 41004874522 成功；已纳入 Ship 组合基线 |
 | Ship #689 | [#697](https://github.com/0-CHENAI/Selection/pull/697) | 本页与两个验收脚本 | 阶段验收完成；后续整合与发布见文末最终交付 |
 
-O5 当时在所固定的 DSH 来源中未找到案例，采用了标记为 Selection 原创的业务编排；后续 #704 来源清单和 #708 / #711 案例阶段已补齐 dsh Word/Excel 样例，当前覆盖以 #717 对齐报告为准。仍使用 OfficeCLI 模板副本与定点修改；没有引入 PPTD、Harness、Cordis、Python office-runtime、LibreOffice Kit 或替换编辑器。
+O5 当时在所固定的 DSH 来源中未找到案例，采用了标记为 Selection 原创的业务编排；后续 #704 来源清单和 #710 / #712 案例阶段已补齐 dsh Word/Excel 样例，当前覆盖以 #717 对齐报告为准。仍使用 OfficeCLI 模板副本与定点修改；没有引入 PPTD、Harness、Cordis、Python office-runtime、LibreOffice Kit 或替换编辑器。
 
 ## Ship 门禁
 
