@@ -1952,7 +1952,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }
   const processingIndicator = (
     <AnimatePresence initial={false}>
-      {sessionBusy && !hasMoreBelow && (
+      {/* This sits at the logical tail already. The virtual window can lag a
+          newly sent message, so gating on it can hide the only live status. */}
+      {sessionBusy && (
         <HeightPresence key="processing-indicator" animateIn reduceMotion={reduceMotion}>
           <ProcessingIndicator
             startTime={session?.processingStartedAt ?? session?.tokenUsage?.currentTurn?.startedAt ?? session?.messages.findLast(m => m.role === 'user' && !m.isQueued)?.timestamp}
