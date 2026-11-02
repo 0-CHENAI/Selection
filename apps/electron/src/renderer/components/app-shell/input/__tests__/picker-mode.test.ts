@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import { derivePickerMode, type PickerModeInput } from '../picker-mode'
+import { derivePickerMode, pickerPageShowsCurrentConnection, type PickerModeInput } from '../picker-mode'
 
 function input(overrides: Partial<PickerModeInput> = {}): PickerModeInput {
   return {
@@ -61,5 +61,16 @@ describe('derivePickerMode', () => {
         input({ connectionCount: 0 }),
       ),
     ).toBe('flat')
+  })
+})
+
+describe('pickerPageShowsCurrentConnection', () => {
+  test('only shows current model controls on the active connection page', () => {
+    expect(pickerPageShowsCurrentConnection('flat', undefined, 'chatgpt')).toBe(true)
+    expect(pickerPageShowsCurrentConnection('switcher', 'chatgpt', 'chatgpt')).toBe(true)
+    expect(pickerPageShowsCurrentConnection('switcher', 'deepseek', 'chatgpt')).toBe(false)
+    expect(pickerPageShowsCurrentConnection('switcher', null, 'chatgpt')).toBe(false)
+    expect(pickerPageShowsCurrentConnection('switcher', null, null)).toBe(false)
+    expect(pickerPageShowsCurrentConnection('unavailable', 'chatgpt', 'chatgpt')).toBe(false)
   })
 })

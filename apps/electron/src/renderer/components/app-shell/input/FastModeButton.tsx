@@ -14,7 +14,7 @@ export function fastModeDetailKey(supported: boolean, busy?: boolean, family?: F
 }
 
 /** Per-session priority-processing flag, independent of reasoning effort. */
-export function FastModeButton({ enabled, supported, family, busy, onChange, inMenu = false, workMode }: {
+export function FastModeButton({ enabled, supported, family, busy, onChange, inMenu = false, workMode, iconOnly = false }: {
   enabled: boolean
   supported: boolean
   family?: FastServiceFamily
@@ -22,6 +22,7 @@ export function FastModeButton({ enabled, supported, family, busy, onChange, inM
   onChange: (enabled: boolean) => void
   inMenu?: boolean
   workMode?: WorkMode
+  iconOnly?: boolean
 }) {
   const { t } = useTranslation()
   const inactive = !supported || !!busy
@@ -37,12 +38,13 @@ export function FastModeButton({ enabled, supported, family, busy, onChange, inM
       disabled={inactive}
       data-testid="gpt-oauth-fast"
       data-active={active || undefined}
+      data-icon-only={iconOnly || undefined}
       data-state={!supported ? 'unsupported' : busy ? 'busy' : active ? 'on' : 'off'}
       className="prompt-fast-button"
       onClick={inMenu ? undefined : () => onChange(!enabled)}
     >
       <Zap size={14} strokeWidth={1.8} aria-hidden="true" />
-      <span>Fast</span>
+      {!iconOnly && <span>Fast</span>}
     </button>
   )
   return (

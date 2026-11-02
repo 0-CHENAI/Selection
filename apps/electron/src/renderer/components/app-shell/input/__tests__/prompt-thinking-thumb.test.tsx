@@ -22,7 +22,7 @@ beforeAll(async () => {
   ;({ PromptThinkingSettings } = await import('../PromptBarEffects'))
 })
 
-function renderSettings(value: React.ComponentProps<typeof PromptThinkingSettings>['value'] = 'medium', overrides: Partial<React.ComponentProps<typeof PromptThinkingSettings>> = {}) {
+function createTestI18n() {
   const i18n = i18next.createInstance()
   void i18n.init({
     lng: 'zh-Hans',
@@ -32,8 +32,12 @@ function renderSettings(value: React.ComponentProps<typeof PromptThinkingSetting
       'zh-Hans': { translation: LOCALE_REGISTRY['zh-Hans'].messages },
     },
   } as InitOptions)
+  return i18n
+}
+
+function renderSettings(value: React.ComponentProps<typeof PromptThinkingSettings>['value'] = 'medium', overrides: Partial<React.ComponentProps<typeof PromptThinkingSettings>> = {}) {
   return renderToStaticMarkup(
-    <I18nextProvider i18n={i18n}>
+    <I18nextProvider i18n={createTestI18n()}>
       <PromptThinkingSettings
         value={value}
         levels={THINKING_LEVELS}
@@ -55,18 +59,71 @@ describe('thinking effort', () => {
     expect(html).toContain('aria-disabled="false"')
   })
 
-  it('shows the field only at Max, not at other models’ highest stops', () => {
+  it('tracks dragging and maps both track ends to the correct effort levels', () => {
+    const changes: ThinkingLevel[] = []
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(<I18nextProvider i18n={createTestI18n()}><PromptThinkingSettings value="medium" levels={THINKING_LEVELS} inMenu={false} onChange={level => changes.push(level)} /></I18nextProvider>)
+    })
+    const slider = () => renderer.root.findByProps({ role: 'slider' })
+    const target = { setPointerCapture: () => {}, focus: () => {}, getBoundingClientRect: () => ({ left: 0, width: 200 }) }
+    act(() => slider().props.onPointerDown({ button: 0, pointerId: 1, clientX: 13, currentTarget: target }))
+    expect(slider().props['data-dragging']).toBe(true)
+    act(() => slider().props.onPointerMove({ buttons: 1, clientX: 187, currentTarget: target }))
+    expect(changes).toEqual([THINKING_LEVELS[0]!.id, THINKING_LEVELS.at(-1)!.id])
+    act(() => slider().props.onPointerUp())
+    expect(slider().props['data-dragging']).toBeUndefined()
+    act(() => renderer.unmount())
+  })
+
+  it('places the supplied action in the heading instead of the help button', () => {
+    const html = renderSettings('medium', { headingAction: <button type="button">Fast</button> })
+    const heading = html.slice(html.indexOf('prompt-effort-heading'), html.indexOf('prompt-effort-track'))
+    expect(heading).toContain('>Fast</button>')
+    expect(heading).not.toContain('prompt-effort-help')
+    expect(renderSettings('medium')).toContain('prompt-effort-help')
+
+    const alwaysOn = renderSettings('medium', { unavailable: 'always-on', headingAction: <button type="button">Fast</button> })
+    expect(alwaysOn).toContain('>Fast</button>')
+  })
+
+  it('keeps endpoint labels only when the slider represents an on/off choice', () => {
+    expect(renderSettings('medium')).not.toContain('prompt-effort-endpoints')
+    const binary = renderSettings('off', { binary: true, levels: THINKING_LEVELS.filter(level => ['off', 'high'].includes(level.id)) })
+    expect(binary).toContain('prompt-effort-endpoints')
+    expect(binary).toContain('>无思考</span>')
+    expect(binary).toContain('>开启</span>')
+  })
+
+  it('shows the current effort, model entry, and slider in the overview', () => {
+    const html = renderSettings('high', {
+      headingAction: <button type="button" aria-label="Fast">⚡</button>,
+      modelName: 'GPT-5.6 Sol',
+      onBrowseModels: () => {},
+    })
+    expect(html).toContain('data-overview="true"')
+    expect(html).toContain('aria-label="Fast"')
+    expect(html).toContain('aria-label="模型: GPT-5.6 Sol"')
+    expect(html).toContain('role="slider"')
+    expect(html).not.toContain('prompt-effort-endpoints')
+  })
+
+  it('shows the field at the highest available stop for each model', () => {
     expect(renderSettings('max')).toContain('<canvas')
     for (const value of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
       expect(renderSettings(value)).not.toContain('<canvas')
     }
-    expect(renderSettings('high', { levels: THINKING_LEVELS.filter(level => ['low', 'medium', 'high'].includes(level.id)) })).not.toContain('<canvas')
+    const moLevels = THINKING_LEVELS.filter(level => ['low', 'medium', 'xhigh'].includes(level.id))
+    expect(renderSettings('xhigh', { levels: moLevels })).toContain('<canvas')
+    expect(renderSettings('medium', { levels: moLevels })).not.toContain('<canvas')
+    expect(renderSettings('high', { levels: THINKING_LEVELS.filter(level => ['low', 'medium', 'high'].includes(level.id)) })).toContain('<canvas')
+    expect(renderSettings('high', { binary: true, levels: THINKING_LEVELS.filter(level => ['off', 'high'].includes(level.id)) })).toContain('<canvas')
   })
 
-  it('does not ignite unavailable, disabled, binary, or stale Max selections', () => {
+  it('does not ignite unavailable, disabled, single-stop, or stale selections', () => {
     for (const overrides of [
       { disabled: true },
-      { binary: true },
+      { levels: THINKING_LEVELS.filter(level => level.id === 'max') },
       { unavailable: 'always-on' as const },
       { levels: THINKING_LEVELS.filter(level => level.id !== 'max') },
     ]) {
@@ -75,6 +132,13 @@ describe('thinking effort', () => {
     const disabled = renderSettings('medium', { disabled: true, inMenu: false })
     expect(disabled).toContain('aria-disabled="true"')
     expect(disabled).toContain('tabindex="-1"')
+  })
+
+  it('shows the selected label without a slider for a single available stop', () => {
+    const html = renderSettings('xhigh', { levels: THINKING_LEVELS.filter(level => level.id === 'xhigh') })
+    expect(html).toContain('超高')
+    expect(html).not.toContain('role="slider"')
+    expect(html).not.toContain('<canvas')
   })
 
   it('marks PRO so the Max field can follow the gold accent', () => {

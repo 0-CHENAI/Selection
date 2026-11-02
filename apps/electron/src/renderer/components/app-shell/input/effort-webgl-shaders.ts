@@ -1,8 +1,8 @@
 /**
  * Flame simulation and bloom from https://github.com/254558/claude-range-slider
  * (src/components/shaders/index.js). Keep its sparks, ignition, feedback trail,
- * original cell shape, and unmasked bloom. Tighten only the bloom radius;
- * adapt responsive geometry, colors, and compositing for the menu themes.
+ * original cell shape, and unmasked bloom. Adapt responsive geometry, colors,
+ * compositing, and the settled tail for the menu themes.
  */
 export const VERT = `#version 300 es
   layout(location=0) in vec2 a_pos;
@@ -83,6 +83,12 @@ export const FRAG_SIM = `#version 300 es
     float leadF    = sin(leadD * 100.0 + t * 20.0 * ts + h2 * 6.28) * 0.5 + 0.5;
     float leadSpark = leadZone * step(0.6, h2) * leadF * act * es * 0.5;
     float total = energy + edge + leadSpark;
+    // Once the ignition front has passed, the low-energy tail should drift as
+    // a soft wave rather than repeatedly flashing a few hash-selected cells.
+    float tailBlend = (1.0 - smoothstep(0.12, 0.42, uv.x)) * smoothstep(3.0, 5.0, u_elapsed);
+    float tailWave = 0.5 + 0.5 * sin(uv.x * 11.0 - t * 1.2 + uv.y * 2.5);
+    float tailGlow = smoothstep(0.08, 0.42, uv.x) * vf * (0.38 + 0.16 * tailWave) * act * es;
+    total = mix(total, tailGlow, tailBlend);
     vec3 ember = u_ember;
     vec3 wpur  = u_mid;
     vec3 wht   = u_core;
@@ -97,8 +103,7 @@ export const FRAG_SIM = `#version 300 es
     col *= cell;
     col *= fade_mask;
     // Emit from the handle center. Each cell arrives with the outward front,
-    // then ignites at a staggered time and builds energy locally. Once settled
-    // this mask is one, so the accepted steady-state field stays unchanged.
+    // then ignites at a staggered time and builds energy locally.
     vec2 cellUV=(id+0.5)/u_cells;
     vec2 fromHandle=cellUV-vec2(u_origin,0.5);
     fromHandle.y*=u_cells.y/u_cells.x;

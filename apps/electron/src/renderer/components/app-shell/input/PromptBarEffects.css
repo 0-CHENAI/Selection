@@ -73,6 +73,12 @@
   initial-value: oklch(0.49 0.16 293);
 }
 
+.prompt-thinking-reveal { animation: prompt-thinking-reveal 240ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes prompt-thinking-reveal {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .prompt-field,
 .prompt-effort-settings {
   --prompt-spark: oklch(0.49 0.16 293);
@@ -157,7 +163,7 @@
 
 .prompt-effort-settings {
   width: 100%;
-  /* Side and bottom room so the 26px knob and its shadow clear the menu clip. */
+  /* Side and bottom room keep the knob and its shadow clear of the menu clip. */
   padding: 10px 14px 16px;
   color: var(--prompt-effort-ink);
   --prompt-effort-ink: var(--foreground);
@@ -191,6 +197,37 @@
 }
 
 .prompt-effort-value { color: var(--prompt-effort-label); }
+
+.prompt-effort-action { display: flex; align-items: center; margin-left: auto; }
+
+.popover-styled.prompt-model-picker[data-overview] {
+  width: 240px;
+  min-width: min(240px, calc(100vw - 24px));
+  border-radius: 20px;
+}
+.prompt-effort-settings[data-overview] { padding: 10px 12px 12px; }
+.prompt-effort-overview-heading {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: start;
+}
+.prompt-effort-overview-action { display: flex; align-items: center; min-height: 22px; }
+.prompt-effort-overview-title { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.prompt-effort-overview-title .prompt-effort-value { font-size: 14px; line-height: 20px; }
+.prompt-effort-model {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  color: var(--prompt-effort-muted);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.prompt-effort-model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-effort-model svg { flex-shrink: 0; }
+.prompt-effort-model:hover { color: var(--foreground); }
+.prompt-effort-model:focus-visible { outline: 1px solid var(--ring); outline-offset: 2px; border-radius: 2px; }
+.prompt-effort-settings[data-overview] .prompt-effort-track { margin-top: 10px; }
 
 .prompt-effort-settings .text-muted-foreground,
 .prompt-effort-help {
@@ -231,8 +268,8 @@
 
 .prompt-effort-track {
   position: relative;
-  height: 28px;
-  margin-top: 8px;
+  height: 24px;
+  margin-top: 12px;
   border-radius: 9px;
   background-color: var(--prompt-effort-track-bg);
   cursor: pointer;
@@ -240,6 +277,7 @@
   user-select: none;
   outline: none;
 }
+.prompt-effort-endpoints + .prompt-effort-track { margin-top: 8px; }
 /* Radix also focuses a menu item on pointer hover. Keep keyboard feedback on
    the thumb so hovering never draws a frame around the whole track. */
 .prompt-effort-track:focus-visible:not(:hover) .prompt-effort-thumb {
@@ -284,11 +322,10 @@
   /* Opacity only. Ember, mid, core, and track snap so the shader can lerp them. */
   transition: opacity 260ms ease;
 }
-.prompt-effort-webgl[data-visible] { opacity: 1; }
+.prompt-effort-webgl[data-visible] { opacity: 0.65; }
 
 .prompt-effort-settings[data-max] .prompt-effort-dot { visibility: hidden; }
 
-/* The reference's rounded-square handle sits inside the taller particle field. */
 .prompt-effort-thumb {
   position: absolute;
   z-index: 1;
@@ -314,12 +351,17 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
 }
 
-.prompt-effort-track:hover .prompt-effort-thumb { transform: scale(1.06); }
-.prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: scale(1.15); }
+.prompt-effort-track:hover .prompt-effort-thumb { transform: scale(1.04); }
+.prompt-effort-track[data-dragging] .prompt-effort-thumb {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--prompt-spark) 18%, transparent), 0 4px 10px rgb(0 0 0 / 0.16);
+  transition: left 60ms linear, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease;
+}
 .prompt-effort-track[aria-disabled='true']:hover .prompt-effort-thumb,
 .prompt-effort-track[aria-disabled='true'][data-dragging] .prompt-effort-thumb { transform: none; }
 
 @media (prefers-reduced-motion: reduce) {
+  .prompt-thinking-reveal { animation: none; }
   .prompt-field::before,
   .prompt-effort-settings,
   .prompt-effort-track,
@@ -327,6 +369,6 @@
   .prompt-effort-thumb,
   .prompt-effort-webgl { transition: none; }
   .prompt-effort-track:hover .prompt-effort-thumb,
-  .prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; }
+  .prompt-effort-track[data-dragging] .prompt-effort-thumb { transform: none; transition: none; }
   .prompt-sparks { display: none; }
 }

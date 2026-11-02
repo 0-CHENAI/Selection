@@ -27,3 +27,8 @@ export function derivePickerMode(input: PickerModeInput): PickerMode {
   if (input.connectionCount > 1) return 'switcher'
   return 'flat'
 }
+
+/** Controls for the active model belong only on its connection's page. */
+export function pickerPageShowsCurrentConnection(mode: PickerMode, shown: string | null | undefined, current: string | null | undefined): boolean {
+  return mode === 'flat' || (mode === 'switcher' && !!current && shown === current)
+}

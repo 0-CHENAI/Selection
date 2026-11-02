@@ -35,6 +35,7 @@ const onInputChange = (id: string, text: string) => { drafts.set(id, text) }
 const store = createStore()
 const fullShell = new URLSearchParams(location.search).has('shell')
 const fastFixture = new URLSearchParams(location.search).has('fast')
+const pickerMotionFixture = new URLSearchParams(location.search).has('picker-motion')
 const fixtureModel = fastFixture ? 'gpt-6.1-sol' : 'gpt-4o'
 const scrollFixture = new URLSearchParams(location.search).has('scroll')
 const calls = { creates: [] as CreateSessionOptions[], sends: [] as unknown[][], commands: [] as unknown[][] }
@@ -151,7 +152,9 @@ function Fixture() {
     isFocusedPanel: true, isCompactMode: compact, orchestrationProjectId: project,
     enabledSources: mockSources, skills: [], onCreateSession,
     llmConnections: [{ slug: 'fixture', name: 'Fixture', providerType: 'pi', piAuthProvider: fastFixture ? 'openai-codex' : 'openai', authType: fastFixture ? 'oauth' : 'api_key',
-      isAuthenticated: true, createdAt: 0, defaultModel: fixtureModel, models: fastFixture ? ['gpt-6.1-sol', 'gpt-4o'] : ['gpt-4o'] }],
+      isAuthenticated: true, createdAt: 0, defaultModel: fixtureModel, models: fastFixture ? ['gpt-6.1-sol', 'gpt-4o'] : ['gpt-4o'] },
+      ...(pickerMotionFixture ? [{ slug: 'picker-target', name: 'Picker Target', providerType: 'pi_compat' as const, piAuthProvider: 'openai', authType: 'api_key' as const,
+        isAuthenticated: true, createdAt: 0, defaultModel: 'gpt-5.6-terra', models: ['gpt-5.6-terra', 'gpt-6-astra'] }] : [])],
     workspaceDefaultLlmConnection: 'fixture',
     onSendMessage: async (...args: unknown[]) => {
       calls.sends.push(args)

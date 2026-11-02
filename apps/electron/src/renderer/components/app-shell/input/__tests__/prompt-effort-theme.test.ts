@@ -98,7 +98,7 @@ describe('max effort theme css', () => {
     expect(css).toContain('box-shadow 250ms ease')
     expect(css).toContain('@property --prompt-spark')
     expect(css).toContain('syntax: "<color>"')
-    expect(css).toContain('.prompt-effort-webgl[data-visible] { opacity: 1; }')
+    expect(css).toContain('.prompt-effort-webgl[data-visible] { opacity: 0.65; }')
     const webgl = ruleBodies(css, '.prompt-effort-webgl {')[0] ?? ''
     expect(webgl).toContain(`transition: opacity ${EFFORT_FIELD_FADE_MS}ms ease`)
     expect(webgl).not.toContain('border-color')

@@ -1,6 +1,6 @@
 import { fastConnectionFamily } from '@craft-agent/shared/agent/fast-mode'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
-import { FastModeButton, fastModeDetailKey } from './FastModeButton'
+import { FastModeButton } from './FastModeButton'
 import { PromptThinkingSettings } from './PromptBarEffects'
 import { modelThinkingCapability, modelThinkingLevels, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
@@ -34,7 +34,7 @@ import {
   type ThinkingLevel,
 } from '@craft-agent/shared/agent/thinking-levels'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
-import { derivePickerMode } from './picker-mode'
+import { derivePickerMode, pickerPageShowsCurrentConnection } from './picker-mode'
 import {
   appendMissingPickerModel,
   chosenPickerModelId,
@@ -301,10 +301,13 @@ export function CompactModelSelector({
     [onModelChange, onConnectionChange, effectiveConnection],
   )
 
+  const fastControl = onFastModeChange && fastSupported ? (
+    <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
+  ) : null
   const thinkingControl = thinkingUnavailable === 'unsupported' || (thinkingUnavailable !== 'always-on' && availableThinkingLevels.length === 0)
     ? null
     : (
-      <PromptThinkingSettings
+      <div className="prompt-thinking-reveal"><PromptThinkingSettings
         value={thinkingLevel}
         levels={availableThinkingLevels}
         workMode={workMode}
@@ -312,8 +315,9 @@ export function CompactModelSelector({
         unavailable={thinkingUnavailable}
         binary={thinkingCapability.binary}
         inMenu={false}
+        headingAction={fastControl}
         onChange={level => onThinkingLevelChange?.(level)}
-      />
+      /></div>
     )
 
   return (
@@ -511,11 +515,8 @@ export function CompactModelSelector({
             </>
           )}
         </div>
-        {onFastModeChange && fastSupported && (
-          <div className="flex items-center justify-between gap-3 border-t border-border/40 px-3 py-2">
-            <p className="min-w-0 text-xs text-muted-foreground">{t(fastModeDetailKey(fastSupported, isProcessing, fastFamily))}</p>
-            <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} />
-          </div>
+        {fastControl && !thinkingControl && pickerPageShowsCurrentConnection(pickerMode, expandedConnection, effectiveConnection) && (
+          <div className="flex justify-end border-t border-border/40 px-3 py-2">{fastControl}</div>
         )}
       </DrawerContent>
     </Drawer>

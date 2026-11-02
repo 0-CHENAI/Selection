@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useReducedMotion } from 'motion/react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { HelpCircleIcon } from '@hugeicons/core-free-icons'
+import { ChevronRight } from 'lucide-react'
 import { Item as MenuItem } from '@radix-ui/react-dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
@@ -11,9 +12,9 @@ import { useWebglEffort } from '@/hooks/useWebglEffort'
 import { EFFORT_FIELD_FADE_MS } from './effort-theme'
 import './PromptBarEffects.css'
 
-// Keep the reference's rounded-square handle inside the 28px particle field.
-const EFFORT_EDGE = 13
+// Keep the handle centered on each stop, including both track endpoints.
 const EFFORT_THUMB = 26
+const EFFORT_EDGE = EFFORT_THUMB / 2
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 
@@ -81,7 +82,7 @@ function MaxEffortField({ visible }: { visible: boolean }) {
 }
 
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange, unavailable, binary, inMenu = true,
+  value, levels, workMode, disabled, onChange, unavailable, binary, inMenu = true, headingAction, modelName, onBrowseModels,
 }: {
   value: ThinkingLevel
   levels: readonly ThinkingLevelDefinition[]
@@ -94,10 +95,13 @@ export function PromptThinkingSettings({
   binary?: boolean
   /** Drawer controls are not descendants of a Radix dropdown menu. */
   inMenu?: boolean
+  headingAction?: React.ReactNode
+  modelName?: string
+  onBrowseModels?: () => void
 }) {
   const { t } = useTranslation()
   const [dragging, setDragging] = React.useState(false)
-  const maxed = !unavailable && !binary && !disabled && levels.length > 1 && value === 'max' && levels.some(level => level.id === 'max')
+  const maxed = !unavailable && !disabled && levels.length > 1 && value === levels.at(-1)?.id
   const maxField = useMaxEffortPresence(maxed)
   if (unavailable) {
     const note = unavailable === 'always-on' ? 'thinking.alwaysOn' : 'thinking.notSupported'
@@ -106,6 +110,7 @@ export function PromptThinkingSettings({
         <div className="prompt-effort-heading">
           <span className="text-muted-foreground">{t('thinking.effort')}</span>
           <span className="prompt-effort-value font-medium">{t(unavailable === 'always-on' ? 'thinking.alwaysOnShort' : 'thinking.notSupported')}</span>
+          {headingAction && <span className="prompt-effort-action">{headingAction}</span>}
         </div>
         <p className="prompt-effort-note text-muted-foreground">{t(note)}</p>
       </div>
@@ -148,6 +153,7 @@ export function PromptThinkingSettings({
       role="slider"
       tabIndex={inactive ? -1 : 0}
       aria-label={t('thinking.effort')}
+      aria-description={t('thinking.effortHelp')}
       aria-orientation="horizontal"
       aria-valuemin={0}
       aria-valuemax={levels.length - 1}
@@ -181,26 +187,37 @@ export function PromptThinkingSettings({
   )
 
   return (
-    <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
-      <div className="prompt-effort-heading">
+    <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode} data-overview={!!onBrowseModels || undefined}>
+      {onBrowseModels ? <div className="prompt-effort-overview-heading">
+        <div className="prompt-effort-overview-action">{headingAction}</div>
+        <div className="prompt-effort-overview-title">
+          <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
+          <MenuItem asChild onSelect={event => { event.preventDefault(); onBrowseModels() }}>
+            <button type="button" className="prompt-effort-model" aria-label={`${t('common.model')}: ${modelName}`}>
+              <span>{modelName}</span><ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </MenuItem>
+        </div>
+        <span aria-hidden="true" />
+      </div> : <div className="prompt-effort-heading">
         <span className="text-muted-foreground">{t('thinking.effort')}</span>
         <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
-        <Tooltip>
+        {headingAction ? <span className="prompt-effort-action">{headingAction}</span> : <Tooltip>
           <TooltipTrigger asChild>
             {inMenu
               ? <MenuItem asChild onSelect={event => event.preventDefault()}>{helpButton}</MenuItem>
               : helpButton}
           </TooltipTrigger>
           <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
-        </Tooltip>
-      </div>
-      <div className="prompt-effort-endpoints text-muted-foreground">
-        <span>{t(binary ? 'thinking.off' : 'thinking.faster')}</span>
-        <span>{t(binary ? 'thinking.on' : 'thinking.smarter')}</span>
-      </div>
-      {inMenu
+        </Tooltip>}
+      </div>}
+      {binary && levels.length > 1 && <div className="prompt-effort-endpoints text-muted-foreground">
+        <span>{t('thinking.off')}</span>
+        <span>{t('thinking.on')}</span>
+      </div>}
+      {levels.length > 1 && (inMenu
         ? <MenuItem asChild disabled={inactive} onSelect={event => event.preventDefault()}>{slider}</MenuItem>
-        : slider}
+        : slider)}
     </div>
   )
 }
