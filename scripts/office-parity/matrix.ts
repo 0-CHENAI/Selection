@@ -79,12 +79,12 @@ export const PARITY_ITEMS: ParityItem[] = [
   {
     id: 'PPT-IMAGE',
     domain: 'ppt',
-    capability: '模板配图槽合同、复用组；接上 Seedream / OpenAI 真出图，设置里可配可校验；图内不写文字',
-    status: 'partial',
+    capability: '按产品决定用用户配图代替生图：有图选图片位版式，无图选无图片位版式；图片完整放入、不裁切、不改比例',
+    status: 'aligned',
     dsh: 'template-image-contract.js、generate-image 与 dsh-image-generation（bytedance Ark Seedream、OpenAI Images，设置页保存前校验）',
-    evidence: ['docs/qa/selection-3.2-office-stage-12.md', 'packages/session-tools-core/src/handlers/ppt-tools.ts'],
-    needle: 'reuse_group',
-    reason: '配图槽和占位图已对齐。真出图的提供方与设置页在 #741，合入前只有占位图。',
+    evidence: ['docs/qa/selection-3.2-office-ship.md', 'apps/electron/resources/skills/ppt-design/engine/user-images.test.ts', 'apps/electron/resources/skills/ppt-design/engine/picture-slots.ts'],
+    needle: '用户图片原样放进图片位：不裁切、不改比例',
+    reason: 'LinNai 决定不内置生图，#741 已关闭；#750 引入用户配图，#752 将最终合同修正为完整放入、允许留白，无图不留空占位。按产品决定用用户配图代替生图，计为对齐，不声称具备内置生图能力。',
   },
   {
     id: 'PPT-TEMPLATE-READY',
@@ -471,7 +471,7 @@ export const PARITY_ITEMS: ParityItem[] = [
     dsh: 'LibreOffice / Excel 重算图表缓存',
     evidence: ['docs/qa/selection-3.2-office-stage-09.md'],
     needle: '不重算图表缓存',
-    reason: '单元格公式已重算。图表缓存留到装有 Excel 的真机，本环境没有 Excel。',
+    reason: '已知遗留：单元格公式已重算，已有 Excel 样例真机通过，但未完成原生图表缓存与 Excel CalculateFull 的专项核对。LinNai 接受该遗留，不阻挡 #718 / #703 收尾；仍按部分对齐计分。',
   },
   {
     id: 'XLS-HASH',
