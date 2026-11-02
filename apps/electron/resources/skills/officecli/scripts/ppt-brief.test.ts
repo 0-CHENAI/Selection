@@ -53,7 +53,9 @@ test.skipIf(process.env.OFFICECLI_INTEGRATION !== '1')('real OfficeCLI sample yi
   const directory = getOfficecliWrapperDir()
   if (!directory) throw new Error('Packaged OfficeCLI wrapper missing')
   const binary = join(directory, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
-  const file = join(root, 'apps/electron/resources/officecli/1.0.157/skills/morph-ppt/reference/styles/light--minimal-product/light__minimal_product.pptx')
+  const officeRoot = join(root, 'apps/electron/resources/officecli')
+  const manifest = JSON.parse(readFileSync(join(officeRoot, 'officecli-manifest.json'), 'utf8')) as { version: string }
+  const file = join(officeRoot, manifest.version, 'skills/morph-ppt/reference/styles/light--minimal-product/light__minimal_product.pptx')
   const dir = mkdtempSync(join(tmpdir(), 'brief-live-'))
   try {
     const before = sourceDigest(file)
