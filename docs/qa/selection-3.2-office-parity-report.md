@@ -1,6 +1,6 @@
 # Selection 3.2 Office 对齐报告
 
-对应 [#717](https://github.com/0-CHENAI/Selection/issues/717)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。对照 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。Selection 侧是集成分支 `office-align-3.2` 加上 #742。
+对应 [#717](https://github.com/0-CHENAI/Selection/issues/717)，父规划 [#703](https://github.com/0-CHENAI/Selection/issues/703)。对照 dsh-desktop `588412b9002fcb3ac88751fab7915e050c965563`。Selection 侧以 `office-align-3.2@16569b3e561b8cba8c1cec8838bf675802da846f` 的实现为基线；已由 [#749（Office 整体集成）](https://github.com/0-CHENAI/Selection/pull/749) 和 [#755（首页、配图及模板修复同步）](https://github.com/0-CHENAI/Selection/pull/755) squash 进入 `test`。本报告按 2026-11-02 LinNai 的收尾决定更新，发布验收基线为 `v3.2.0-beta4`，详见 [交付清单](selection-3.2-office-ship.md)。
 
 对齐看用户能做的事和产物，不看是不是同一套技术栈。LibreOffice Kit、内置 Python、PPTD 按 #705–#707 不打包，不因此扣分。排除项不进分母，部分对齐记 0.5。度量脚本是 `scripts/selection-3.2-office-parity.ts`，行定义在 `scripts/office-parity/matrix.ts`。每一行都要有仓库里的证据文件，脚本会检查文件和关键字还在。
 
@@ -8,24 +8,24 @@
 
 | 领域 | 对齐 | 部分 | 未对齐 | 排除 | 计入 | 得分 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| PPT | 12 | 1 | 0 | 3 | 13 | 96.2% |
+| PPT | 13 | 0 | 0 | 3 | 13 | 100% |
 | Word | 19 | 0 | 0 | 2 | 19 | 100% |
 | Excel | 11 | 1 | 0 | 2 | 12 | 95.8% |
 | 共享底座 | 10 | 0 | 0 | 1 | 10 | 100% |
-| 总体 | 52 | 2 | 0 | 8 | 54 | 98.1% |
+| 总体 | 53 | 1 | 0 | 8 | 54 | 99.1% |
 
-总分是 53 / 54。四个领域都不低于 90%。这是能力行的分数，不是把 dsh 的 393 个文件逐个算进去，也不是模型成稿的审美分。文件清单仍以 [dsh-office-inventory.md](../plans/dsh-office-inventory.md) 为准。
+总分是 53.5 / 54。四个领域都不低于 90%。这是能力行的分数，不是把 dsh 的 393 个文件逐个算进去，也不是模型成稿的审美分。文件清单仍以 [dsh-office-inventory.md](../plans/dsh-office-inventory.md) 为准。
 
-#741 合入后，PPT-IMAGE 转为对齐，PPT 升到 100%，总体升到 99.1%。
+PPT-IMAGE 按 LinNai 决定改为「对齐（用用户配图代替生图）」；不内置生图，#741 已关闭。唯一部分项是 XLS-CHART-CACHE，作为已知遗留接受，仍记 0.5。共享底座的 100% 来自下文 SHR-CHART-HTML 后续修复；#717 早期评论中的共享 95%、总体 96.3% 是历史快照。此次仅更新验收口径和证据，不新增产品实现。
 
-## 这次从严改了什么
+## 历史复核与后续修正
 
 第一版矩阵给了 PPT 100%、总体 98%。复核时对着 dsh 588412b 的代码和实际产物重看了一遍，改了下面几处：
 
-- **PPT-IMAGE 从对齐改为部分。** dsh 的 `dsh-image-generation` 能接 bytedance Ark Seedream 和 OpenAI Images，设置页保存前会校验密钥。Selection 这边只有配图槽和占位图。真出图在 #741。
+- **PPT-IMAGE 从对齐改为部分。** dsh 的 `dsh-image-generation` 能接 bytedance Ark Seedream 和 OpenAI Images，设置页保存前会校验密钥。当时 Selection 只有配图槽和占位图，曾计划由 #741 补真出图。该计划已取消，最终按 #752 的用户配图合同对齐，见上文当前结论。
 - **新增 PPT-TEMPLATE-READY，记部分。** 用 `deck-cli check --platform mac` 把 16 套 dsh 风格模板原样跑了一遍。dsh-signal、blue-professional、cartesian、editorial-notebook、soft-editorial 通过。其余 11 套被孤字、对比度、色块相交或文本框容量判成 needs_revision，在 Selection 里要模型先改一轮才能导出。dsh 用同一批模板直接出稿。
 - **PPT-TEMPLATE-READY 改为对齐（逐套修模板，不放宽检查）。** 复查发现上面那次跑的是 `styles/<id>/` 下按字节冻结的原导入页。其中 9 套 catalog 早已指向 `styles/examples/imported/` 或 `styles/_archive/imported/` 下修过的参考页，预检本来就干净。真正还会被交给模型的只剩两处：默认套 `dsh-course-workshop` 第 3 页 `t7`「从引导练习走向独立完成」和 `dsh-engineering-blueprint` 第 3 页 `t101`「明确每一层边界」，末行只剩一个字。现在这两套也走同一个适配脚本，参考页另存到 `styles/examples/imported/<id>/`，只改断行（「从引导练习／走向独立完成」「明确／每一层边界」），字号和框都不变，catalog 改指向新参考页。复测：16 套 32 份 catalog 参考页 `deck_check` 全部 0 问题，`render --platform mac` 和 `--platform win` 64 次全部 ok。
-- **SHR-CHART-HTML 仍是部分，但原因换了。** 原来的问题是 OfficeCLI 只认 `xdr:twoCellAnchor`。dsh 案例是 openpyxl 写的 `oneCellAnchor`，于是三张图都叠在 A1，按 400×250pt 画，盖住了指标。#742 按工作簿锚点改写浮动层，再按实际行高和列宽对齐。港口、荧光酶、家庭预算已经不挡指标。剩下的问题是 HTML 列宽比 Excel 窄，年度经营总览的日新增图会压住右侧季度表的两列。
+- **SHR-CHART-HTML 当时仍是部分，但原因换了。** 原来的问题是 OfficeCLI 只认 `xdr:twoCellAnchor`。dsh 案例是 openpyxl 写的 `oneCellAnchor`，于是三张图都叠在 A1，按 400×250pt 画，盖住了指标。#742 按工作簿锚点改写浮动层，再按实际行高和列宽对齐。港口、荧光酶、家庭预算已经不挡指标。剩下的问题是 HTML 列宽比 Excel 窄，年度经营总览的日新增图会压住右侧季度表的两列。
 - **SHR-CHART-HTML 改为对齐。** 复查发现「HTML 列宽比 Excel 窄」不成立：OfficeCLI 写出的列宽（B 列 96.83pt、C 起 48.99pt）就是 Excel 按 Carlito 11 换算的 129px、65px。年度经营总览的日新增图在工作簿里是 609pt 宽的 oneCellAnchor，从 B12 起在 Excel 里也一直伸到 M 列一半，同样盖住 K–M 列的季度表；这是 dsh 样例本身的版式，样例按 sha256 锁定，不改。预览现在按 Excel 覆盖的单元格范围摆图：服务端从工作表的列宽、行高算出每张图的起止格（twoCellAnchor 取 from / to，oneCellAnchor 按 ext 推出），写成 `data-anchor-range`；协同面板和 office_render 共用同一段页面脚本，把图按这几格的实际位置移动并缩放，行被中文撑高时图跟着变高，和 Excel 一样。面板里字体加载完、行高变化、切换工作表都会重新对齐。另修了实时刷新的一个真问题：预览换入新文件后，缓存给 office_render 的 HTML 还是旧的，模型按新文件的 hash 会拿到旧页面（真实 OfficeCLI 用例先失败、修后通过）。复测：年度经营、港口、荧光酶、家庭预算 11 张图里，图框四边能落在已渲染格子上的，与对应格子的位置差都在 1px 以内；年度经营第三张图和家庭预算的图越过了已渲染的最后一列 / 一行，那一边保留 Excel 的绝对尺寸。
 - **新增 XLS-AUDIT-XLSX。** dsh 的 `data_quality_checker.py` 用 `pandas.read_excel` 直接读 xlsx，Selection 原来只收 CSV。现在 `office_business` 的 data-quality 可以直接读 xlsx，并能指定 sheet 和 range。
 - **新增 XLS-EDIT-RECALC。** 跑质量对比时发现一个真问题：OfficeCLI 1.0.157 每条命令都会自动起常驻进程，`set` 的改动几秒后才落盘。模型改完输入格马上调 `xlsx_recalculate`，读到的还是旧文件，重算结果没变，却报「已重算并通过核对」。现在重算前先 `officecli close` 落盘。复测：把年度经营 1 月基础版新增 MRR 从 10,560 改成 52,800，全年订阅收入从 1,404.71 万变成 1,406.82 万。
@@ -49,9 +49,9 @@ dsh 的公文目录约 320KB，其中大部分是不能搬的范文、金句和�
 | PPT-BRIEF | 外来 PPTX 先读结构摘要再编辑，原件不被覆盖 | 对齐 | `selection-3.2-office-o4.md`、`ppt-routing.ts` |
 | PPT-IMPORT | PPTX 导入为可编辑 deck.json；写不进的对象按原位置保留并诊断 | 对齐 | `pptx-to-deck.ts`、`pptx-import.test.ts` |
 | PPT-PERSONAL | 个人模板登记、预览，并用 ppt_template_create_project 复制成任务工程 | 对齐 | `ppt-template-project.ts`、`ppt-template-project.test.ts` |
-| PPT-IMAGE | 模板配图槽合同、复用组；接上 Seedream / OpenAI 真出图，设置里可配可校验；图内不写文字 | 部分 | `selection-3.2-office-stage-12.md`、`ppt-tools.ts` |
+| PPT-IMAGE | 按产品决定用用户配图代替生图；有图选带图片位版式，无图选无图片位版式；图片完整放入、不裁切、不改比例，允许留白，不留空占位 | 对齐（产品决定） | `selection-3.2-office-ship.md`、`user-images.test.ts`、`picture-slots.ts`；用户图片合同修复 PR #752 |
 | PPT-TEMPLATE-READY | 从 dsh 搬来的 16 套风格模板，catalog 指向的参考页都能通过 Selection 自己的预检，直接导出 | 对齐 | `deck.test.ts`、`dsh-import-diagnostics.json` |
-| PPT-PREFLIGHT | 预检：连续同版式、封面焦点、图表数据与颜色、图片适配裁切、远程图、缺素材、文字遮挡 | 对齐 | `preflight.test.ts`、`dsh-ppt-parity.md` |
+| PPT-PREFLIGHT | 预检：连续同版式、封面焦点、图表数据与颜色、用户图完整适配、导入原稿显式裁切保留、远程图、缺素材、文字遮挡 | 对齐 | `preflight.test.ts`、`dsh-ppt-parity.md` |
 | PPT-GATE | 预检 error 不把 PPTX 标成就绪；warning 仍可导出 | 对齐 | `selection-3.2-office-stage-13.md` |
 | PPT-VISUAL | 生成后 office_render 读图再改，同一文件最多三轮，禁止 OCR | 对齐 | `office-render.ts`、`office-tool-policy.ts` |
 | PPT-FONT | 中西文字体按主题记号回退，不把缺字当成已验收 | 对齐 | `dsh-ppt-parity.md` |
@@ -101,7 +101,7 @@ dsh 的公文目录约 320KB，其中大部分是不能搬的范文、金句和�
 | XLS-PERSONAL | 报价、预算、对账、项目计划和目标考核五类个人表，含公式或图表 | 对齐 | `selection-3.2-office-personal-728.md`、`office-document-routing.ts` |
 | XLS-AUDIT-XLSX | 数据体检直接读 .xlsx（可指定工作表和区域），不必先另存 CSV | 对齐 | `office-business-tool.ts` |
 | XLS-EDIT-RECALC | 用 OfficeCLI 改完输入格后马上 xlsx_recalculate，重算看到的是改后的值 | 对齐 | `service.ts` |
-| XLS-CHART-CACHE | 原生图表缓存与 Excel CalculateFull 一致 | 部分 | `selection-3.2-office-stage-09.md` |
+| XLS-CHART-CACHE | 原生图表缓存与 Excel CalculateFull 的专项核对未完成；LinNai 接受为已知遗留，不阻挡收尾 | 部分（已知遗留） | `selection-3.2-office-stage-09.md` |
 | XLS-HASH | palette=auto 与 Python 进程哈希逐字节一致 | 排除 | `office-python-features-in-ts.md` |
 | XLS-SAMPLE | 数据体检 --sample 与 pandas RandomState 同序列 | 排除 | `selection-3.2-office-stage-09.md` |
 
@@ -134,9 +134,11 @@ dsh 的公文目录约 320KB，其中大部分是不能搬的范文、金句和�
 7. 数据体检的 `--sample` 不对拍 pandas 的随机序列。
 8. 用户路径上的 PDF 导出仍按阶段 06 延后。`system.ts` 只剩约 7 个 token，这次不加字。
 
-## 质量对比
+## 质量对比（历史 box 验证记录）
 
-全部在 LinNai 的 box 上跑。没有调用模型，也没有调用付费的出图接口。页图用 OfficeCLI 1.0.157 出 HTML，再用本机 Chrome 截图。看图是人工读图，不用 OCR。并排图在 box 的 `/workspace/sw717-shots/`，不进仓库。
+以下为早期 box 验证的范围，不代表后续 Lola 真机验收未进行。后续已通过 Excel 3 个、PPT 4 个、Word 3 个样例；最后一轮 PowerPoint 复测由 LinNai 决定跳过。真机样例数与记录口径见交付清单。
+
+本节对比全部在 LinNai 的 box 上跑。没有调用模型，也没有调用付费的出图接口。页图用 OfficeCLI 1.0.157 出 HTML，再用本机 Chrome 截图。看图是人工读图，不用 OCR。并排图在 box 的 `/workspace/sw717-shots/`，不进仓库。
 
 Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha256 一致）。所以对比的是：左边 dsh 样例，右边 Selection 用自己的工具链按样例做出的新稿。
 
@@ -163,7 +165,7 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 - `excel-bio-assay.png`：checks 五项通过。剂量响应折线和两张 CV 柱图分开，288、3、8、10 四个指标都在。
 - `excel-household-budget.png`：修复前图例写着 Series 1，图从第 16 行起盖住了餐饮、交通两行。修复后系列名取「本期实际」，单系列不再显示图例，图从第 20 行开始，类别轴是房租、餐饮、交通。
 
-### 没跑的
+### 当时未执行的范围
 
 - 没有真实模型轨迹。box 上没有 LLM 和出图密钥，所以不能报 token、耗时，也不能证明模型在真实回合里会调用守卫。
 - 没有启动 dsh 应用。Word / Excel 对照用的是冻结提交里的样例文件，PPT 用的是之前在 box 上用 dsh ppt-runtime 出的图。
@@ -171,18 +173,13 @@ Word 和 Excel 的 dsh 案例样例与 Selection 案例是同一批字节（sha2
 - 图表缓存没有跟 Excel `CalculateFull` 比。
 - 其余 13 套 PPT 模板没有和 dsh 并排出对比图，只看了修过的两页截图。
 
-## 还没对齐的
+## 最终遗留与边界
 
-计入分数的两项部分对齐：
-
-- PPT-IMAGE：真出图的提供方和设置页在 #741，合入后转为对齐。
-- XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
-
-另外记下、但不进百分比的：
-
-- PDF 导出仍不在用户路径上。
-- 真机打开和真实模型回合留给装了 Office 的 macOS / Windows，以及有密钥的夜间运行。
-- `office-business-runtime` 不进 electron-builder 的 files，但 `office_business` 让它被打进了主进程的 JS 包。仍然没有 Python。
+- **XLS-CHART-CACHE：部分对齐，已知遗留。** 已有 Excel 样例真机通过，不等于完成原生图表缓存与 Excel `CalculateFull` 的专项核对。LinNai 接受该遗留，不阻挡 #718 整体验收和 #703 Epic 收尾。
+- **PPT-IMAGE：已对齐（产品决定）。** 不内置图片生成，只使用用户提供的图片。最终合同以 #752 为准：完整放入、不裁切、不改比例；有图用带图片位版式，无图用无图片位版式，不出现空占位。#750 初版的裁切规则已被替代，#741 不再是依赖。
+- **验收豁免不等于通过。** LinNai 决定跳过最后一轮 Lola PowerPoint 真机复测；未执行的安装包连续流程、性能和体积比较逐项记录在交付清单，不纳入已通过项。
+- PDF 导出仍不在本轮用户路径范围内；复杂 PPTX 对象等排除项维持上文边界。
+- `office-business-runtime` 不进 electron-builder 的 files，但 `office_business` 让它被打进了主进程的 JS 包。Office 能力链路没有新增 Python 运行时。
 
 ## 怎么复跑
 

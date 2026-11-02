@@ -1,10 +1,12 @@
 # Selection 3.2 Office/PPT Ship 验收
 
-对应 #689 / draft PR #697，目标 test，里程碑 #9。Ship 从 origin/test 开分支并引入 O0–O5 依赖；各阶段保留独立提交与 draft PR。用户另行授权 v3.2 集成，未授权合入 test 或发布。本页区分已证实、仍在执行和待批准的门禁；不能用定向通过代表全仓绿。
+对应 [#718 整体验收与交付](https://github.com/0-CHENAI/Selection/issues/718) 与 [#703 Office 能力对齐 Epic](https://github.com/0-CHENAI/Selection/issues/703)，里程碑 Selection 3.2（#9）。实现已通过 #749 / #755 合入 test，发布验收基线为 v3.2.0-beta4。最终状态、已接受遗留和 LinNai 决定跳过的验收见文末「#718 最终交付」。
+
+以下 O0–Ship 与 #698 段落保留历史验收证据，其测试数字和临时路径只对应各自当时的运行，不代表本次重新执行。
 
 ## 阶段交付与证据
 
-| 阶段 | Draft PR → test | 交付与验收记录 | 当前证据 |
+| 阶段 | 历史阶段 PR | 交付与验收记录 | 当前证据 |
 | --- | --- | --- | --- |
 | O0 #683 | [#691](https://github.com/0-CHENAI/Selection/pull/691) | [基线入口与缺口表](../plans/selection-3.2-office-baseline.md) | 纯文档盘点，无运行时改动 |
 | O1 #684 | [#692](https://github.com/0-CHENAI/Selection/pull/692) | [三分路由](selection-3.2-office-o1.md) | 阶段 CI 通过；三个真实路由用例均已独立复核 |
@@ -12,9 +14,9 @@
 | O3 #686 | [#694](https://github.com/0-CHENAI/Selection/pull/694) | [模板与按页 UI](selection-3.2-office-o3.md) | 阶段 CI 通过；22 个双语适配工程、264 页结构检查通过；预览与 UI 原生复核范围见阶段记录 |
 | O4 #687 | [#695](https://github.com/0-CHENAI/Selection/pull/695) | [外来稿 brief](selection-3.2-office-o4.md) | 阶段 CI 通过；真实摘要、hash 校验与模型完整读取后编辑通过 |
 | O5 #688 | [#696](https://github.com/0-CHENAI/Selection/pull/696) | [Word/Excel 案例](selection-3.2-office-o5.md) | Validate 41004874701、OfficeCLI 41004874522 成功；已纳入 Ship 组合基线 |
-| Ship #689 | [#697](https://github.com/0-CHENAI/Selection/pull/697) | 本页与两个验收脚本 | 实现与当前授权验收完成；test 发布门禁待批准 |
+| Ship #689 | [#697](https://github.com/0-CHENAI/Selection/pull/697) | 本页与两个验收脚本 | 阶段验收完成；后续整合与发布见文末最终交付 |
 
-O5 固定 DSH 来源未找到可移植的 Word/Excel 案例，采用明确标记的 Selection 原创虚构业务编排，未冒称搬运。仍使用 OfficeCLI 模板副本与定点修改；没有引入 PPTD、Harness、Cordis、Python office-runtime、LibreOffice Kit 或替换编辑器。
+O5 当时在所固定的 DSH 来源中未找到案例，采用了标记为 Selection 原创的业务编排；后续 #704 来源清单和 #708 / #711 案例阶段已补齐 dsh Word/Excel 样例，当前覆盖以 #717 对齐报告为准。仍使用 OfficeCLI 模板副本与定点修改；没有引入 PPTD、Harness、Cordis、Python office-runtime、LibreOffice Kit 或替换编辑器。
 
 ## Ship 门禁
 
@@ -30,7 +32,7 @@ O5 固定 DSH 来源未找到可移植的 Word/Excel 案例，采用明确标记
 | 实现提交 CI | 通过 | a76b483823053ae2172f68d5982e0232f1bd3231；[Validate 41008458729](https://github.com/0-CHENAI/Selection/actions/runs/41008458729)、[OfficeCLI 41008458731](https://github.com/0-CHENAI/Selection/actions/runs/41008458731) 成功；收尾文档提交不改实现，最新 PR 检查另行回读 |
 | 双平台安装包 | 通过 | [run 41008459694](https://github.com/0-CHENAI/Selection/actions/runs/41008459694)，macOS/Windows 构建、校验和与上传成功，publish-release 按条件 skipped |
 | v3.2 实现组合 | 已集成并推送 | e8eb83485c6f1d25eae046b45e37976138be11cd 含 O0–O5 与 Ship，跟已通过全部门禁的 a76b48382 文件树完全一致；后续仅同步收尾文档 |
-| test 合入后 Validate + Package | 待用户批准合入 | 功能分支结果不能代替发布门禁；不关闭 #689 或里程碑 |
+| test 合入后 Validate + Package | 已通过（beta4 基线） | Validate 41323060340、Package 41323060317；链接及提交见文末最终交付 |
 
 ## 复现方法
 
@@ -69,7 +71,7 @@ bun run validate:ci
 
 完整 validate:ci 首次在 deep-link-routing 导入 Electron 时因本机缺安装产物失败。补齐锁定版本 Electron 39.2.7 后，失败项原样通过，未改依赖版本。第二次在真实网络 GitHub OAuth metadata discovery 超过默认 5 秒时失败；该文件原样单独重跑 7 pass / 11 assertions，未跳过或延长超时，第三次遇到下述随包 Bun 缺失，补齐后重新执行，最终完整命令通过。
 
-双平台打包手动运行于功能分支；publish-release 只允许默认分支或 test，本次不会发布。test 合入后的门禁保留待批准，不能由本次打包替代。
+历史双平台打包运行于功能分支，publish-release 当时按条件跳过；后续 test 的 beta4 发布已通过独立 Validate / Package，不能将这两次运行混为一次。
 
 Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强已有演示稿的版式修订、按页反馈、模板参考与外来稿结构理解。没有替换编辑器，不承诺任意复杂 PPTX 无损往返。
 
@@ -84,15 +86,15 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 打包上传失败原因已定位为 artifact 名含功能分支的 `/`，上传/下载统一改用 `github.run_id`（只改命名，不改发布条件），修复后 run 41008459694 已验证两个平台完整上传成功。
 
 
-## 授权范围内的交付回读
+## 2026-10-30 历史交付回读（后续状态见最终交付）
 
 2026-10-30 回读确认：PR #691–#697 全部 open/draft、base=test、milestone=Selection 3.2，对应 Closes #683–#689；没有 PR 合入 test。远端 test 仍为 `3ef1e6e7f4da1e8c6a45745f2fdaa96b74dc9d60`。本轮相对 test 的改动未涉及 effort/WebGL/Fast；既有模板原页未覆盖，新增适配与预览位于独立目录。
 
-已上传产物 `selection-macos-arm64-41008459694`（917058115 bytes）与 `selection-windows-x64-41008459694`（419756808 bytes），均未过期。没有发布 GitHub Release、关闭 issue/里程碑或制作面向用户的 PPT 成品；PPTX/Word/Excel 文件均为验收夹具。test 合入与后续发布门禁仍以用户另行批准为前提。
+已上传产物 `selection-macos-arm64-41008459694`（917058115 bytes）与 `selection-windows-x64-41008459694`（419756808 bytes），当时均未过期。当时没有发布 GitHub Release、关闭 issue/里程碑或制作面向用户的 PPT 成品；PPTX/Word/Excel 文件均为验收夹具。后续合入和发布见最终交付。
 
 ## #698 整合修复与本地复核
 
-本次以 `origin/test` 的 `3ef1e6e7f`（#690）为第一父提交，将 `origin/v3.2` 的 `ef17477df` 本地无冲突整合。只承接 O0–Ship 并修复整合缺口；不合入 test、不发布、不关闭里程碑。#691–#697 保留为阶段档案，由 #698 的单一整合 PR 承接，不再逐条硬合；#681 已由合入的 #690 取代。
+该历史阶段以 `origin/test` 的 `3ef1e6e7f`（#690）为第一父提交，将 `origin/v3.2` 的 `ef17477df` 本地无冲突整合。当时只承接 O0–Ship 并修复整合缺口，尚未执行后续合入和发布；当前状态见最终交付。#691–#697 保留为阶段档案，由 #698 的单一整合 PR 承接，不再逐条硬合；#681 已由合入的 #690 取代。
 
 ### 相对 v3.2 的修复
 
@@ -118,67 +120,65 @@ Beta 文案：**更聪明的改稿**——保留 OfficeCLI 定点编辑，增强
 
 三分路由是明确的模型工具合同，不是对任意模型行为的强制沙箱。外来复杂 PPTX 的母版继承、动画、SmartArt、OLE 等仍不保证无损往返；后续 deck 修改前必须对账 OfficeCLI 改过的成稿。新增三套 retained-native 的底层版权仍来自上游声明，不等于独立法律确权。部分 JSON 的 `v0.2.21` 是继承的导入器标签，以 ATTRIBUTION 固定提交为准。适配器只保证检查失败不写出，不保证磁盘错误/进程中断下跨文件事务性。本次未重打双平台安装包，历史功能分支包与 CI 不能冒充本整合提交的新验收。
 
-## #718 发布准备（尚未合入 test）
+## #718 最终交付（2026-11-02 收尾记录）
 
-这一节是 [#718](https://github.com/0-CHENAI/Selection/issues/718) 的清单和版本说明。它不代替桌面安装包上的全流程，也没有打开指向 `test` 的拉取请求。合入 `test` 仍要 LinNai 批准。
+### 实现、集成与发布基线
 
-### 对齐度
+Office 能力基于 OfficeCLI + TypeScript / Electron；不打包 LibreOffice、不为 Office 链路内置 Python、不移植 PPTD。实现基线是 `office-align-3.2@16569b3e561b8cba8c1cec8838bf675802da846f`，文件内容已分两次 squash 进入 test。不能用原提交不在 test 祖先链中推断实现未合入。
 
-见 [selection-3.2-office-parity-report.md](selection-3.2-office-parity-report.md)。按 dsh 588412b 从严复核后：PPT 96.2%，Word 100%，Excel 95.8%，共享底座 100%，总体 98.1%。计入分母的未对齐项是 0。草稿 PR #741（PPT 配图接 Seedream / OpenAI）合入后，PPT 到 100%，总体到 99.1%。
-
-还剩两项部分对齐，需要 LinNai 书面确认能否带着发布：
-
-- PPT-IMAGE：图片槽合同和占位已经有了，但还没有内置生图提供方，等 #741。
-- XLS-CHART-CACHE：原生图表缓存还没跟装了 Excel 的机器核对。
-
-PDF 导出按阶段 06 排除在用户路径之外。
-
-### 本轮合入 office-align-3.2 的 PR
-
-| PR | 内容 | 合入提交 |
+| PR | 交付能力 | test 上的合并 SHA |
 | --- | --- | --- |
-| #742 | 办公计算会话工具、公文分册、xlsx 体检、重算落盘、草稿版式、Excel 浮动图表锚点、对齐报告 | 997829cb8 |
+| [#749 Office 能力整体集成](https://github.com/0-CHENAI/Selection/pull/749) | 整合案例、模板、业务工具、导入修订、版式守卫、重算与预览、对齐报告 | `8be2f9901a426463ed01051e88f26eec68543700` |
+| [#755 首页、配图和模板修复同步](https://github.com/0-CHENAI/Selection/pull/755) | 同步用户配图合同、Word/Excel 首页点击修复、PPT 模板文字间距与导出修复 | `5239d16ac927128c0fb7834915eacadc9622710e` |
 
-#740 已并入 #742 后关闭。#741（PPT 配图提供方）还是草稿，没有合入，要等 LinNai 看过设置页和密钥存储。
+发布验收基线为 [v3.2.0-beta4 预发布版](https://github.com/0-CHENAI/Selection/releases/tag/v3.2.0-beta4)，对应 test 提交 `56bcf8254a058cdcd7b179631154a707e8990756`。该提交的 [Validate](https://github.com/0-CHENAI/Selection/actions/runs/41323060340) 与 [Package](https://github.com/0-CHENAI/Selection/actions/runs/41323060317) 均成功。2026-11-02 回读时 test 已前进到 `3598245a3ec6d74c59351eb5ff6c0ff6a243723a`，且已有 beta5 / beta6；beta4 是本次 Office 收尾的验收基线，不是当前最新版本。
 
-### 版本
+本轮只更新交付文档与评分元数据，通过 PR 合入 `office-align-3.2`；不直接推 test，也不创建合入 test 的 PR。
 
-版本号已从 `3.1.0` 改为 `3.2.0`：根 `package.json`、`apps/electron/package.json`、`packages/` 下原为 `3.1.0` 的十个工作区包，以及 `bun.lock` 里对应的工作区条目。electron-builder 的安装包名不带版本号，应用内「关于」读取 `package.json`，没有另写版本字符串。`release-notes/next.md` 的说明表明带版本号的 `X.Y.Z.md` 归发布流程，所以这次仍不新建 `release-notes/3.2.0.md`；用户可见的说明继续写在 `next.md`，等批准合入 `test` 后由发布流程改名。
+### 按能力交付
 
-### 文档
+| 领域 | 用户能做什么 / 实现边界 |
+| --- | --- |
+| 来源与技术路线 | 固定 dsh 来源、案例和许可；保留 OfficeCLI 原生编辑，Python 业务计算用 TS 实现，不引入 LibreOffice 或 PPTD |
+| Word | 从案例和个人模板起稿、定点替换并继承样式；会议纪要与公文业务指南、文种路由、草稿版式、七项版式核对和最终交付守卫 |
+| Excel | 经营、港口、实验及个人办公案例；指标计算、直接读取 xlsx 的数据体检、修改后先落盘再重算、公式 checks 核对；HTML 图表按工作簿锚点定位 |
+| PPT | 模板画廊与个人模板工程；外来 PPTX 结构理解和导入、定点编辑 / 局部改版 / 整套换风格三条路由；预检与视觉修订、用户图完整放入；复杂对象保留并诊断，不承诺任意无损往返 |
+| 共享与交付 | Office 模式、案例预览、中途附加材料、修订状态与范围守卫、最终文件保护；随包 Office 使用文档、许可证和打包检查 |
 
-- `office-business/SKILL.md`：重算前先落盘，数据体检可以直接给 xlsx。
-- 新增用户文档 `apps/electron/resources/docs/office.md`（Office 使用说明）。随 `resources/docs` 自动进包，没有加进系统提示，`system.ts` 只剩约 7 个 token。
+后续修复证据：[用户配图初版 #750](https://github.com/0-CHENAI/Selection/pull/750)、[完整放图与无图无占位 #752](https://github.com/0-CHENAI/Selection/pull/752)、[首页入口及模板可见性 #751](https://github.com/0-CHENAI/Selection/pull/751)、[文字间距及图表结构 #753](https://github.com/0-CHENAI/Selection/pull/753)、[44 套 562 页模板导出修复 #754](https://github.com/0-CHENAI/Selection/pull/754)，均由首页、配图及模板同步 PR #755 承接到 test。
 
-### 许可
+### 最终对齐度、产品决定与遗留
 
-- 公文写作是 Selection 自写。来源句在 `office-business/NOTICE`：能力参照 dsh-desktop gov-doc-writing，未复用其内容。分册 08–18 都是自写，测试禁止出现对方的专有栏目名。
-- MIT / Apache-2.0 的案例和技能保留原 LICENSE。ppt-design 的 `ATTRIBUTION.md` 和 `THIRD_PARTY_NOTICES` 仍随模板。
-- 安装包里不含 LibreOffice Kit、Python 办公运行时或 PPTD，没有 MPL-2.0 分发义务。`no-python.test.ts` 现在断言两件事：`electron-builder.yml` 里没有 libreoffice、soffice、lokit、pptd；`office-business`、`ppt-design` 和 `resources/bin` 下没有 .py / .pyc，也没有这几类引擎文件。
-- `office_business` 把 `office-business-runtime` 打进主进程的 JS 包，但这个目录不在 electron-builder 的文件列表里。
+[对齐报告](selection-3.2-office-parity-report.md) 与 `scripts/office-parity/matrix.ts` 使用同一口径：PPT **100%**、Word **100%**、Excel **95.8%**、共享底座 **100%**、总体 **99.1%（53.5 / 54）**。53 项对齐、1 项部分、0 项缺失、8 项排除，各域均 ≥90%。共享底座 100% 已包含图表锚点后续修复，不沿用 #717 早期评论的 95%。分数衡量能力覆盖，不代表所有端到端流程或视觉质量都已实测。
 
-### 体积与性能
+- **PPT-IMAGE：对齐（按产品决定用用户配图代替生图）。** LinNai 决定不内置图片生成，内置生图项 #741 已关闭；用户有图就使用带图片位的版式，无图就使用无图片位的版式，不留空占位。用户图不裁切、不改比例、完整放入，允许留白。最终规则以完整放图修复 #752 为准，替代用户配图初版 #750 的裁切规则；不声称实现了内置生图。
+- **XLS-CHART-CACHE：部分对齐，已知遗留。** 已有 Excel 样例真机通过，但原生图表缓存与 Excel CalculateFull 的专项核对未完成。LinNai 已接受，不阻挡 #718 / #703 收尾，仍记 0.5 分。
+- **最后一轮 Lola PowerPoint 复测：LinNai 决定跳过。** 按该决定直接同步 test（首页、配图及模板同步 PR #755）。不能把该轮写成通过，也不能把此前样例通过扩展为所有最新模板的真机复测通过。
+- PDF 导出继续按阶段 06 排除在本轮用户路径之外；动画、SmartArt、OLE、EMF 的可编辑还原等边界见对齐报告。
 
-这一轮没有重打安装包，体积、冷启动和第一次渲染 / 重算 / 导入的耗时都没有新数据。需要在 macOS arm64 和 Windows x64 安装包上测，再和阶段 02 / 03 的预算比。
+### 安装包全流程：已完成与决定跳过
 
-box 上能给的参考（Linux，OfficeCLI 1.0.157，不代表安装包）：12 页 PPT 用 OfficeCLI 出 HTML 并截四宫格约 4 秒；一份 Word 首页截图约 4 秒；三个 Excel 案例各跑一次 `xlsx_recalculate`（含核对或双读），每个都在 10 秒内。
+以下沿用历史实测，并归档 LinNai 在 2026-11-02 收尾指令中确认的样例数量和豁免；本次文档收尾没有重新安装或运行 Office。整体集成 PR #749 原正文列 PPT 3 个样例，本次 LinNai 确认此前已通过 PPT 4 个，按这一最新确认归档，不将其写成 PR 原有数字。
 
-### 还没在安装包上走过的流程
+- [x] 既有 Lola 真机样例：Excel 3 个、PPT 4 个、Word 3 个，已测试通过（LinNai 收尾确认；#749 保留早期真机记录）。
+- [x] beta4 安装包构建、打包校验和发布：Package 41323060317 成功，预发布版已存在。
+- [x] beta4 基线 test 的 Validate：41323060340 成功；Package：41323060317 成功。
+- [x] 既有确定性验收与原件保护：上文记录的标题、局部版式、整套换风格、外来稿、案例 hash、公式及版式守卫回归已通过；不冒充安装包连续流程验收。
+- [ ] **LinNai 决定跳过**：最后一轮 Lola 真机 PowerPoint 复测（未执行，不计通过）。
+- [ ] **LinNai 决定跳过**：重新在安装包串行执行「首页 Word 案例 → 中途上传 → write → 守卫 → 交付」全流程；已有 Word 样例通过不替代这一完整链路。
+- [ ] **LinNai 决定跳过**：重新在安装包串行执行「Excel 经营案例 → 改数 → 重算 → 交付」全流程；保留既有工具及真机样例证据。
+- [ ] **LinNai 决定跳过**：重新在安装包串行执行「PPT 外来稿导入 → 换风格 → 用户配图 → check → 导出」全流程；保留既有路由和配图验证证据。
+- [ ] **LinNai 决定跳过**：安装包个人模板完整生成流程。
+- [ ] **LinNai 决定跳过**：安装包注入后、写入中、重算中、导入中分别刷新，逐项复测状态不重放副作用。
+- [ ] **LinNai 决定跳过**：安装包 NORM / PRO、深色和 PRO 金色主题的入口组合复测。
+- [ ] **LinNai 决定跳过**：上述整套安装包流程完成后再次核对原始案例 sha256；历史 hash 回归仍单独保留。
+- [ ] **LinNai 决定跳过**：安装包体积与阶段 02 / 03 预算比较；已有打包成功不等于预算比较通过。
+- [ ] **LinNai 决定跳过**：冷启动及首次渲染、重算、导入耗时测量；没有新数据，不填推测值。
 
-下面每条都还没有这次的 macOS arm64 / Windows x64 安装包证据。勾选留给真机，不要把本页前面的 O0–O5 记录当成这一轮的安装包验收。
+### 文档、许可与范围
 
-- [ ] 首页 Office → Word 案例 → 中途上传 → `office_template_write` → 守卫 → 交付
-- [ ] Excel 年度经营 → 改数 → `xlsx_recalculate` → 交付
-- [ ] PPT 外来稿 → 理解 → 导入 → 换风格 → 配图 → check → 导出
-- [ ] 个人模板生成一份稿件
-- [ ] 注入后、写入中、重算中、导入中分别刷新，状态不重放副作用
-- [ ] NORM / PRO、深色、PRO 金色主题下入口仍可用
-- [ ] 原始案例 sha256 在流程后不变
-- [ ] 安装包体积相对阶段 02 / 03 的预算
-- [ ] 冷启动，以及第一次渲染、重算、导入的耗时
-- [ ] 在装了 Word / Excel / PowerPoint 的机器上打开成稿（Lola 的真机检查）
-- [ ] 合入 `test` 之后的 Validate 和 Package
+随包 `office-business/SKILL.md` 说明重算前落盘及 xlsx 数据体检；`apps/electron/resources/docs/office.md` 提供 Office 使用说明。公文分册由 Selection 自写，来源与内容复用边界见 `office-business/NOTICE`；第三方 MIT / Apache-2.0 案例和技能保留 LICENSE、`ppt-design/ATTRIBUTION.md` 与 `THIRD_PARTY_NOTICES`。
 
-box 上已经跑过的是确定性层：对齐脚本、单元测试、质量对比页图（`/workspace/sw717-shots/`）。没有真实模型回合，box 上没有模型和出图密钥。
+Office 能力链路不新增 LibreOffice、Python 办公运行时或 PPTD；相关打包断言见 `no-python.test.ts`。`office_business` 将 TS 的 `office-business-runtime` 打入主进程 JS，并非内置 Python。既有其他工具的运行时不在本次拆改范围。
 
-`answer-delivery.test.ts` 里「linked OfficeCLI outputs」仍是已知偶发失败，这次没有改那个用例。
+长任务治理 #759–#765、OfficeCLI 升级 PR #673 / #701 不属于本 Epic，不作为此次关闭条件，也不在本轮修改范围。
