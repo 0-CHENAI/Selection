@@ -117,8 +117,7 @@ describe('office home', () => {
 
   it('shows a static first-page or first-sheet cover on every home card', async () => {
     const shell = readFileSync(join(import.meta.dir, '../app-shell/AppShell.tsx'), 'utf8')
-    expect(shell).toContain('icon: OfficeIcon')
-    expect(shell).not.toContain('icon: Presentation')
+    expect(shell).toContain('icon: Presentation')
     const covers = join(import.meta.dir, '../../assets/office-covers')
     for (const mode of ['word', 'excel'] as const) {
       const html = renderToStaticMarkup(
