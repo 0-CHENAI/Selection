@@ -51,7 +51,7 @@ test('cancellation terminates the validation process group before returning', as
   } finally { controller.abort(); rmSync(root, { recursive: true, force: true }) }
 })
 
-test.skipIf(process.platform === 'win32')('successful launcher cannot leave background writers in its process group', async () => {
+test('successful launcher cannot leave background writers in its process group', async () => {
   const root = mkdtempSync(join(tmpdir(), 'project-background-')), baseline = join(root, 'base'), candidate = join(root, 'candidate')
   mkdirSync(baseline); mkdirSync(candidate)
   const manifest = JSON.stringify({ packageManager: 'bun@1', scripts: { test: 'bun run launcher.ts' } })

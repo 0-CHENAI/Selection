@@ -47,7 +47,8 @@ async function runLockedProjectValidation(options: ProjectValidationOptions): Pr
       const shell = createIsolatedShell(candidate)
       if (!shell) throw new Error('Native confinement is unavailable; project checks require a supported isolated execution environment')
       try {
-        const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+        const quote = (value: string) => process.platform === 'win32'
+          ? `"${value}"` : "'" + value.replaceAll("'", "'\\''") + "'"
         const executable = options.executable?.[check.packageManager] ?? check.packageManager
         const command = [executable, 'run', check.script].map(quote).join(' ')
         exitCode = (await shell.operations.exec(command, cwd, { signal: options.signal, onData: bytes => { writeSync(fd, bytes) } })).exitCode

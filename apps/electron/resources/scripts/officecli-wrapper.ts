@@ -19,6 +19,12 @@ if (!binary || !existsSync(binary)) {
   process.exit(127);
 }
 
+if (process.platform === 'win32' && process.env.SELECTION_WINDOWS_SANDBOX === '1' && firstVerb(args) === 'open') {
+  const file = args.slice(1).find(arg => !arg.startsWith('-'));
+  console.log(`Direct file mode for ${file ?? 'document'}: the Windows isolated worker disables resident processes. OfficeCLI edits are saved to disk.`);
+  process.exit(0);
+}
+
 const child = spawnSync(binary, args, {
   stdio: 'inherit',
   env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },

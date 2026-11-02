@@ -1,18 +1,20 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative, isAbsolute } from 'node:path'
+import { join, relative, isAbsolute, sep } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
+import { createWindowsIsolatedShell } from './windows-isolated-shell'
 
 /** Only native confinement may authorize Shell in a candidate workspace. */
 export function createIsolatedShell(directory: string, options: { denyExternalBrowsers?: boolean; officeDocument?: { path: string; binary: string } } = {}): { directory: string; operations: BashOperations; dispose: () => void } | undefined {
   const root = realpathSync(directory)
+  if (process.platform === 'win32') return createWindowsIsolatedShell(root, options)
   if (process.platform !== 'darwin' && process.platform !== 'linux') return undefined
   if (process.platform === 'linux' && !['/usr/bin/bwrap', '/bin/bwrap'].some(path => existsSync(path))) return undefined
   const officeDocument = options.officeDocument && { path: realpathSync(options.officeDocument.path), binary: realpathSync(options.officeDocument.binary) }
   if (officeDocument) {
     const path = relative(root, officeDocument.path)
-    if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new Error('Office document escapes isolated workspace')
+    if (isAbsolute(path) || path === '..' || path.startsWith(`..${sep}`)) throw new Error('Office document escapes isolated workspace')
   }
   // .NET Unix sockets have a 104-byte path limit; keep private IPC scratch short.
   const temporary = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'sel-')))
@@ -55,7 +57,7 @@ export function createIsolatedShell(directory: string, options: { denyExternalBr
     if (disposed) throw new Error('Isolated Shell has been disposed')
     if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0 || timeout * 1000 > 2_147_483_647)) throw new Error('Invalid Shell timeout')
     const target = realpathSync(cwd), path = relative(root, target)
-    if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new Error('Shell directory escapes isolated workspace')
+    if (isAbsolute(path) || path === '..' || path.startsWith(`..${sep}`)) throw new Error('Shell directory escapes isolated workspace')
     return new Promise((resolve, reject) => {
       // The supervisor outlives the model's command (including exit/exec), so
       // resident edits reach disk before process-group cleanup kills the daemon.

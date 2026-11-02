@@ -880,11 +880,17 @@ async function ensureSession(): Promise<AgentSession> {
     denyExternalBrowsers: initConfig.denyExternalBrowsers, officeDocument: initConfig.isolatedOfficeDocument,
   }) : undefined;
   confinedShellCleanup = isolatedShell?.dispose;
+  const bashTool = registerRecoveryClass(createBashToolDefinition(cwd, isolatedShell ? { operations: isolatedShell.operations } : undefined), 'unknown');
+  if (isolatedShell && process.platform === 'win32') {
+    bashTool.description = 'Execute a Windows cmd.exe command in the current working directory. Use cmd.exe syntax, not Bash: use && for sequencing, double quotes for paths, and %NAME% for environment variables. Do not use export, source, POSIX quoting, printf, or heredocs. For complex scripts or OfficeCLI batch JSON, write a file first and invoke it with python, node, or officecli batch --input. Returns stdout and stderr; optionally provide a timeout in seconds.';
+    bashTool.promptSnippet = 'Execute Windows cmd.exe commands (python, officecli, node, bun)';
+    bashTool.promptGuidelines = ['Use cmd.exe syntax in this isolated worker. You can inspect PI_* environment variables for current model and session details.'];
+  }
   const builtinDefs = [
     registerRecoveryClass(createSelectionReadToolDefinition(cwd, undefined, {
       getPolicy: () => currentImageSendPolicy(),
     }), 'read-only'),
-    registerRecoveryClass(createBashToolDefinition(cwd, isolatedShell ? { operations: isolatedShell.operations } : undefined), 'unknown'),
+    bashTool,
     registerRecoveryClass(createEditToolDefinition(cwd, { operations: nativeEditOperations }), 'file-verifiable'),
     registerRecoveryClass(createWriteToolDefinition(cwd, { operations: nativeWriteOperations }), 'file-verifiable'),
     registerRecoveryClass(createGrepToolDefinition(cwd), 'read-only'),

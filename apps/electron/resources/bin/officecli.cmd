@@ -19,5 +19,13 @@ if not exist "%WRAPPER%" (
   exit /b 127
 )
 
+if not "%SELECTION_WINDOWS_SANDBOX%"=="1" goto selection_run_officecli
+if not exist "%SELECTION_OFFICECLI_WRAPPER%" (
+  echo Selection's writable OfficeCLI launcher is unavailable in the isolated worker. 1>&2
+  exit /b 127
+)
+set "WRAPPER=%SELECTION_OFFICECLI_WRAPPER%"
+
+:selection_run_officecli
 "%BUN_BIN%" "%WRAPPER%" "%BIN%" %*
 exit /b %ERRORLEVEL%

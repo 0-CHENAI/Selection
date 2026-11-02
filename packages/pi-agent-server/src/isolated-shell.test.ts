@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell'
 import { resolveOfficecliBinary } from '../../shared/src/utils/officecli'
+import { createBashToolDefinition } from '@earendil-works/pi-coding-agent'
+import { assertIsolatedTool, prepareIsolatedWorkspace } from '../../server-core/src/reliability/isolated-workspace'
 import { execFileSync } from 'node:child_process'
 import { unzipSync } from 'fflate'
 
@@ -62,6 +64,77 @@ test.skipIf(process.platform !== 'darwin')('Office native shell denies browser e
     expect(output).toContain('Operation not permitted')
   } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
+
+test.skipIf(process.platform !== 'win32')('Windows native Shell runs Python while containing writes, deletes, metadata edits, and timeouts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-shell-win-'))
+  const candidate = join(root, 'candidate with 空格'), outsideDirectory = join(root, 'outside')
+  const outside = join(root, 'outside.txt'), metadata = join(candidate, '.git', 'config')
+  mkdirSync(candidate, { recursive: true }); mkdirSync(join(candidate, '.git')); mkdirSync(outsideDirectory)
+  writeFileSync(outside, 'original'); writeFileSync(metadata, 'original')
+  symlinkSync(outsideDirectory, join(candidate, 'linked'), 'junction')
+  const shell = createIsolatedShell(candidate)
+  try {
+    expect(shell).toBeDefined()
+    let output = ''
+    const run = (command: string, timeout?: number) => shell!.operations.exec(command, candidate, { onData: bytes => { output += bytes.toString() }, timeout })
+    expect((await run('python -c "from pathlib import Path; print(\'python-ok\'); Path(\'python.txt\').write_text(\'ok\', encoding=\'utf-8\')"')).exitCode).toBe(0)
+    expect(output).toContain('python-ok')
+    expect(readFileSync(join(candidate, 'python.txt'), 'utf8')).toBe('ok')
+    expect((await run('python -c "from pathlib import Path; Path(r\'../outside.txt\').write_text(\'changed\')"')).exitCode).not.toBe(0)
+    expect((await run('python -c "from pathlib import Path; Path(r\'../outside.txt\').unlink()"')).exitCode).not.toBe(0)
+    expect((await run('python -c "from pathlib import Path; Path(r\'linked/escape.txt\').write_text(\'changed\')"')).exitCode).not.toBe(0)
+    expect((await run('python -c "from pathlib import Path; Path(r\'.git/config\').write_text(\'changed\')"')).exitCode).not.toBe(0)
+    expect(readFileSync(outside, 'utf8')).toBe('original')
+    expect(readFileSync(metadata, 'utf8')).toBe('original')
+    output = ''
+    expect((await run('type .git\\config')).exitCode).toBe(0)
+    expect(output).toContain('original')
+    await expect(run('python -c "import time; time.sleep(30)"', 1)).rejects.toThrow('timeout:1')
+    expect((await run('python --version')).exitCode).toBe(0)
+  } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
+}, 120_000)
+
+test.skipIf(process.platform !== 'win32')('Windows isolated sub-agent executes Python through the real Pi Bash tool', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-subagent-win-'))
+  const source = join(root, 'source')
+  mkdirSync(source)
+  const state = prepareIsolatedWorkspace(source, join(root, 'store'))
+  const shell = createIsolatedShell(state.directory)
+  try {
+    expect(shell).toBeDefined()
+    const command = 'python -c "from pathlib import Path; print(\'subagent-python-ok\'); Path(\'subagent.txt\').write_text(\'ok\', encoding=\'utf-8\')"'
+    expect(() => assertIsolatedTool(state, 'Bash', { command }, shell!.directory)).not.toThrow()
+    const tool = createBashToolDefinition(state.directory, { operations: shell!.operations })
+    const context = {
+      cwd: state.directory,
+      sessionManager: { getSessionId: () => 'windows-subagent', getSessionFile: () => join(state.directory, 'session.jsonl') },
+    }
+    const result = await tool.execute('windows-subagent-call', { command }, new AbortController().signal, undefined, context as never)
+    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('subagent-python-ok') })
+    expect(readFileSync(join(state.directory, 'subagent.txt'), 'utf8')).toBe('ok')
+  } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
+}, 120_000)
+
+test.skipIf(!binary || process.platform !== 'win32')('Windows Office candidate edits reach disk without a model save', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-office-win-'))
+  const file = join(root, '候选 文档.docx')
+  const cli = (...args: string[]) => execFileSync(binary!, args, { env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' }, timeout: 30_000 })
+  cli('create', file); cli('close', file)
+  const shell = createIsolatedShell(root, { officeDocument: { path: file, binary: binary! } })
+  const quote = (value: string) => `"${value}"`
+  const wrapper = join(binary!, '..', '..', 'officecli.cmd')
+  try {
+    expect(shell).toBeDefined()
+    let output = ''
+    const run = (command: string) => shell!.operations.exec(command, root, { onData: bytes => { output += bytes.toString() }, timeout: 30 })
+    expect((await run(`${quote(wrapper)} open ${quote(file)} && ${quote(wrapper)} add ${quote(file)} /body --type p --prop text=Changed`)).exitCode).toBe(0)
+    expect(output).toContain('Direct file mode')
+    const xml = Object.entries(unzipSync(readFileSync(file))).filter(([name]) => name.endsWith('.xml'))
+      .map(([, bytes]) => new TextDecoder().decode(bytes)).join('\n')
+    expect(xml).toContain('Changed')
+    expect((await run('exit 7')).exitCode).toBe(7)
+  } finally { shell?.dispose(); cli('close', file); rmSync(root, { recursive: true, force: true }) }
+}, 120_000)
 
 for (const kind of ['docx', 'xlsx', 'pptx']) test.skipIf(!binary || !['darwin', 'linux'].includes(process.platform))(`isolated ${kind} edits reach disk between separate calls without a model save`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'selection-office-transaction-'))
