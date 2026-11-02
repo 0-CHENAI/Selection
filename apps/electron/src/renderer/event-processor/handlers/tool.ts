@@ -22,6 +22,14 @@ import {
  * SDK sends two events per tool: first from stream_event (empty input),
  * second from assistant message (complete input). We handle both.
  */
+export function handleToolProgress(state: SessionState, event: Extract<import('../types').AgentEvent, { type: 'tool_progress' }>): SessionState {
+  const index = findToolMessage(state.session.messages, event.toolUseId)
+  const message = state.session.messages[index]
+  if (!state.session.isProcessing || !message || message.toolStatus !== 'executing') return state
+  if (message.toolProgress && (message.toolProgress.at > event.progress.at || (message.toolProgress.phase === 'processing_result' && event.progress.phase === 'running'))) return state
+  return { ...state, session: updateMessageAt(state.session, index, { toolProgress: { ...message.toolProgress, ...event.progress } }) }
+}
+
 export function handleToolStart(
   state: SessionState,
   event: ToolStartEvent
@@ -89,22 +97,14 @@ export function handleToolResult(
 
   const toolIndex = findToolMessage(session.messages, event.toolUseId)
 
-  const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(event.result || '')
+  const inferredError = event.isError ?? /^\s*(\[ERROR\]|Error:|error:)/.test(event.result || '')
 
   if (toolIndex !== -1) {
-    // Detect "persisted output" - SDK marks as error but data was actually saved successfully
-    const isPersistedOutput = inferredError && (
-      event.result?.includes('Output has been saved to') ||
-      event.result?.includes('Full output saved to')
-    )
-
-    const effectiveIsError = isPersistedOutput ? false : inferredError
-
     // If the tool is already backgrounded, preserve that status — task_completed will set the final status.
     // tool_result arrives with the agentId but the task is still running in the background.
     const existingMessage = session.messages[toolIndex]
     const isBackgrounded = existingMessage?.toolStatus === 'backgrounded' || existingMessage?.isBackground
-    const newToolStatus = isBackgrounded ? 'backgrounded' : (effectiveIsError ? 'error' : 'completed')
+    const newToolStatus = isBackgrounded ? 'backgrounded' : (inferredError ? 'error' : 'completed')
 
     // Update existing tool message
     let updatedSession = updateMessageAt(session, toolIndex, {
@@ -113,14 +113,15 @@ export function handleToolResult(
       answerRunId: event.answerRunId ?? existingMessage?.answerRunId,
       answerProtocol: event.answerProtocol ?? existingMessage?.answerProtocol,
       ...(event.toolInput ? { toolInput: event.toolInput } : {}),
+      toolProgress: undefined,
       toolResult: event.result,
       // A tool_result is authoritative for this execution. Explicitly clear
       // live multimodal blocks when a replacement event has none, otherwise a
       // prior preview can remain attached to a newer text-only result.
       toolResultContent: event.content && event.content.length > 0 ? event.content : undefined,
       toolStatus: newToolStatus,
-      isError: effectiveIsError,
-      errorCode: isPersistedOutput ? 'response_too_large' : undefined,
+      isError: inferredError,
+      errorCode: undefined,
     })
 
     // Safety net: when a parent Task completes, auto-complete any still-pending child tools.
@@ -155,14 +156,6 @@ export function handleToolResult(
   // without a prior tool_start. If tool_start arrives later, findToolMessage will
   // locate this message by toolUseId and update it with input/intent/displayMeta.
 
-  // Detect "persisted output" - SDK marks as error but data was actually saved successfully
-  const isPersistedOutput = inferredError && (
-    event.result?.includes('Output has been saved to') ||
-    event.result?.includes('Full output saved to')
-  )
-
-  const effectiveIsError = isPersistedOutput ? false : inferredError
-
   const toolMessage: Message = {
     id: generateMessageId(),
     role: 'tool',
@@ -172,9 +165,9 @@ export function handleToolResult(
     toolName: event.toolName,
     toolResult: event.result,
     ...(event.content && event.content.length > 0 ? { toolResultContent: event.content } : {}),
-    toolStatus: effectiveIsError ? 'error' : 'completed',
-    isError: effectiveIsError,
-    errorCode: isPersistedOutput ? 'response_too_large' : undefined,
+    toolStatus: inferredError ? 'error' : 'completed',
+    isError: inferredError,
+    errorCode: undefined,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
     answerRoutingVersion: event.answerRoutingVersion,

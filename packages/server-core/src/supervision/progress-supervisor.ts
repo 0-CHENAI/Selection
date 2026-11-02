@@ -13,7 +13,7 @@ export interface ProgressSnapshot {
   sessionId: string; taskId: string; generation: number; revision: number; callId: string
   status: 'model' | 'tool' | 'waiting' | 'handoff' | 'compacting' | 'complete'
   evidence: ProgressEvidence[]; elapsedMs: number; executionTokens: number
-  activity?: { reasoningBytes: number; textBytes: number };
+  activity?: { reasoningBytes: number; textBytes: number; toolInputBytes?: number };
   remainingTokens?: number; orchestrationRevision?: number
 }
 const assessmentSchema = z.object({

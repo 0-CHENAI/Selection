@@ -25,6 +25,7 @@ function sameActivity(previous: ActivityItem, next: ActivityItem): boolean {
     && previous.toolInput === next.toolInput
     && previous.content === next.content
     && previous.toolResultContent === next.toolResultContent
+    && previous.toolProgress === next.toolProgress
     && previous.intent === next.intent
     && previous.messageId === next.messageId
     && previous.annotations === next.annotations

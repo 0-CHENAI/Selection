@@ -277,7 +277,7 @@ export interface StatusEvent {
   type: 'status'
   sessionId: string
   message: string
-  statusType?: 'compacting'
+  statusType?: 'compacting' | 'tool_arguments'
   /** Timestamp from main process for consistent ordering */
   timestamp?: number
 }
@@ -602,6 +602,7 @@ export type AgentEvent =
   | TextDeltaEvent
   | TextCompleteEvent
   | ToolStartEvent
+  | { type: 'tool_progress'; sessionId: string; toolUseId: string; progress: NonNullable<Message['toolProgress']> }
   | ToolResultEvent
   | CompleteEvent
   | ErrorEvent

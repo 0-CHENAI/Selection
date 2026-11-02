@@ -1474,6 +1474,14 @@ export class PiAgent extends BaseAgent {
           provider: getBackendRuntime(this.config).piAuthProvider,
         }, rawMessage)
 
+        // Preserve the lifecycle reason through the host so timeout cleanup
+        // drains/replaces the old runtime before another turn can reuse it.
+        if (errorCode === 'tool_wait_timeout') {
+          for (const controller of this.sessionToolControllers) controller.abort();
+          this.eventQueue.enqueue({ type: 'error', message: rawMessage, code: 'tool_wait_timeout' });
+          break;
+        }
+
         const parsed = parseError(new Error(rawMessage));
         if (parsed.code !== 'unknown_error') {
           this.eventQueue.enqueue({ type: 'typed_error', error: parsed });

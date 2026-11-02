@@ -399,6 +399,8 @@ export interface Message {
   /** Live-only multimodal tool output; excluded by messageToStored to keep Base64 out of JSONL. */
   toolResultContent?: AgentToolResultContent[];
   toolStatus?: ToolStatus;
+  /** Live-only execution telemetry; never model output or persisted transcript. */
+  toolProgress?: { phase: 'running' | 'processing_result'; at: number; outputBytes?: number; executionMs?: number };
   toolDuration?: number;
   toolIntent?: string;
   toolDisplayName?: string;
@@ -813,15 +815,16 @@ export type TextStreamPhase = 'unclassified' | 'intermediate' | 'final';
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
  */
 export type AgentEvent =
-  | { type: 'model_activity'; reasoningBytes: number; textBytes: number }
-  | { type: 'status'; message: string }
+  | { type: 'model_activity'; reasoningBytes: number; textBytes: number; toolInputBytes?: number }
+  | { type: 'status'; message: string; statusType?: 'tool_arguments' }
   | { type: 'info'; message: string; level?: 'info' | 'warning' | 'error' | 'success'; code?: 'image_input_skipped'; imageCount?: number; modelName?: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }
   | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; turnId?: string; parentToolUseId?: string }
   | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
-  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; sourceRead?: SourceReadProof; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  | { type: 'tool_progress'; toolUseId: string; progress: NonNullable<Message['toolProgress']> }
+  | { type: 'tool_result'; executionOutcome?: 'completed' | 'not-performed' | 'unknown'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; sourceRead?: SourceReadProof; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | {
       type: 'permission_request';
       requestId: string;
@@ -837,7 +840,7 @@ export type AgentEvent =
       commandHash?: string;
       approvalTtlSeconds?: number;
     }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: 'tool_wait_timeout' }
   | { type: 'typed_error'; error: TypedError }
   | { type: 'complete'; usage?: AgentEventUsage }
   | { type: 'working_directory_changed'; workingDirectory: string }

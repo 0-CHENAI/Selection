@@ -45,3 +45,16 @@ describe('stabilizeTurns', () => {
     expect(stabilizeTurns(first, second)[0]).toBe(second[0])
   })
 })
+
+
+test('a phase change refreshes the existing work row without remounting historical turns', () => {
+  const user = message('u', 'user', '生成', { timestamp: 1 })
+  const tool = message('bash', 'tool', '', { timestamp: 2, toolName: 'Bash', toolUseId: 'call', toolStatus: 'executing', toolProgress: { phase: 'running', at: 1 } })
+  const first = groupMessagesByTurn([user, tool], { isSessionProcessing: true })
+  const second = groupMessagesByTurn([user, { ...tool, toolProgress: { phase: 'processing_result', at: 2 } }], { isSessionProcessing: true })
+  const stable = stabilizeTurns(first, second)
+  expect(stable[0]).toBe(first[0])
+  const work = stable.find(turn => turn.type === 'assistant')
+  expect(work?.type === 'assistant' && work.activities[0]?.toolProgress?.phase).toBe('processing_result')
+  expect(work).not.toBe(first.find(turn => turn.type === 'assistant'))
+})

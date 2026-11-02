@@ -1571,8 +1571,11 @@ describe('PiEventAdapter', () => {
 
       expect(events[0]).toMatchObject({
         type: 'tool_result',
-        result: '{"artifacts":[',
-        content: [{ type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' }],
+        result: '{"artifacts":[{"path":"data/preview/preview.png"}]}',
+        content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
+          { type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' },
+        ],
       });
       expect(events[0].result).not.toContain('ZmluYWwtaW1hZ2U=');
     });
@@ -1619,7 +1622,7 @@ describe('PiEventAdapter', () => {
       });
     });
 
-    it('should accumulate partial output from tool_execution_update', () => {
+    it('uses the latest output snapshot only when the final result is missing', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       collect(adapter.adaptEvent({
         type: 'tool_execution_start',
@@ -1637,18 +1640,33 @@ describe('PiEventAdapter', () => {
       collect(adapter.adaptEvent({
         type: 'tool_execution_update',
         toolCallId: 'call_1',
-        partialResult: { content: [{ type: 'text', text: 'line 2\n' }] },
+        partialResult: { content: [{ type: 'text', text: 'line 1\nline 2\n' }] },
       } as any));
 
       // End — should use accumulated output
       const events = collect(adapter.adaptEvent({
         type: 'tool_execution_end',
         toolCallId: 'call_1',
-        result: 'ignored because accumulated',
+        result: null,
         isError: false,
       } as any));
 
       expect(events[0].result).toBe('line 1\nline 2\n');
+    });
+
+    it.each([['summary: full output saved to file', false], ['Command exited with code 2', true], ['', false]])('prefers the authoritative final %s over partial stdout', (final, isError) => {
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolCallId: 'final', toolName: 'bash', args: {} } as any));
+      collect(adapter.adaptEvent({ type: 'tool_execution_update', toolCallId: 'final', partialResult: { content: [{ type: 'text', text: 'stale output' }] } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolCallId: 'final', result: { content: [{ type: 'text', text: final }] }, isError } as any));
+      expect(events[0].result).toBe(final);
+      expect(events[0].isError).toBe(isError);
+    });
+
+    it('replaces sliding output windows and bounds retained fallback text', () => {
+      collect(adapter.adaptEvent({ type: 'tool_execution_start', toolCallId: 'bounded', toolName: 'bash', args: {} } as any));
+      for (const text of ['old window', 'x'.repeat(100_000)]) collect(adapter.adaptEvent({ type: 'tool_execution_update', toolCallId: 'bounded', partialResult: { content: [{ type: 'text', text }] } } as any));
+      const events = collect(adapter.adaptEvent({ type: 'tool_execution_end', toolCallId: 'bounded', result: null, isError: false } as any));
+      expect(events[0].result).toBe('x'.repeat(64 * 1024));
     });
 
     it('should use description as intent for bash tools', () => {

@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 import type { Model } from '@earendil-works/pi-ai';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -34,7 +34,8 @@ async function requestThroughInterceptor(model: Model<'openai-completions'>, req
   try {
     const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     expect(exit, stderr).toBe(0);
-    return JSON.parse(stdout);
+    const diagnostics = readFileSync(join(sessionDir, 'diagnostics/model-requests.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    return { ...JSON.parse(stdout), diagnostics };
   } finally { clearTimeout(timeout); proc.kill(); rmSync(sessionDir, { recursive: true, force: true }); }
 }
 
@@ -49,9 +50,15 @@ it('A8 production interceptor shares its slot hook with the runtime and excludes
       reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 128 };
     // Slot wait stays longer than the idle limit, so counting queue time still fails the test.
     // The local SSE response needs more than 80ms once CI is busy.
-    const { response, acquired, released } = await requestThroughInterceptor(model, 2_000, 3_500);
+    const { response, acquired, released, diagnostics } = await requestThroughInterceptor(model, 2_000, 3_500);
     expect(response.stopReason, JSON.stringify({ response, acquired, released })).toBe('stop'); expect(requests).toBe(1);
     expect(acquired).toBe(1); expect(released).toEqual([{ status: 200 }]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].outcome).toBe('success');
+    expect(diagnostics[0].queueMs).toBeGreaterThanOrEqual(3000);
+    expect(diagnostics[0].firstByteMs).toBeDefined();
+    expect(JSON.stringify(diagnostics)).not.toContain('local-test-only');
+    expect(JSON.stringify(diagnostics)).not.toContain('Hello');
   } finally { server.stop(true); }
 }, 20_000);
 

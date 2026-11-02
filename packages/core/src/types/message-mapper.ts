@@ -11,7 +11,7 @@ import type { Message, StoredMessage } from './message.ts';
  * - toolResultContent (may contain large inline image Base64)
  */
 export function messageToStored(msg: Message): StoredMessage {
-  const { role, isStreaming, isPending, queueId, toolResultContent, completedRevealStartTime, ...rest } = msg;
+  const { role, isStreaming, isPending, queueId, toolResultContent, toolProgress, completedRevealStartTime, ...rest } = msg;
   return { ...rest, type: role } as StoredMessage;
 }
 

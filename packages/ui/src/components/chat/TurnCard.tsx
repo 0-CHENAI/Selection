@@ -342,7 +342,8 @@ export interface ActivityItem {
   /** Child execution identity, kept separate from the coordinator's own tools. */
   taskNode?: { title: string; description?: string; sessionId?: string; stateLabel: string }
   attachments?: import('@craft-agent/core').Message['attachments']
-  /** Live-only text/image blocks from a tool result. */
+  /** Live-only execution progress, updated in the existing work row. */
+  toolProgress?: import('@craft-agent/core').Message['toolProgress']
   toolResultContent?: AgentToolResultContent[]
   intent?: string
   /** Optional backing message id (used by plan activities for branching/annotations) */
@@ -1586,6 +1587,11 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         {/* Native tools: Tool name (shrink-0) */}
         {!isMcpOrApiTool && (
           <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayedName}</span>
+        )}
+        {activity.status === 'running' && activity.toolProgress && (
+          <span className="truncate text-muted-foreground" data-tool-phase={activity.toolProgress.phase}>
+            {i18n.t(activity.toolProgress.phase === 'processing_result' ? 'turnCard.toolProcessingResult' : activity.toolProgress.outputBytes ? 'turnCard.toolOutputReceived' : 'turnCard.toolRunning')}
+          </span>
         )}
         {/* Diff stats and filename badges - after tool name */}
         {!isMcpOrApiTool && !isBackgrounded && diffStats && (

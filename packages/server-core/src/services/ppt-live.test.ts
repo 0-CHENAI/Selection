@@ -445,3 +445,31 @@ test('page diagnostics preserve actionable element targets and bound the UI payl
     expect(progress!.pages![0]!.issues ?? []).toEqual([])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('a locked destination preserves the existing deliverable and the next save uses the same path', async () => {
+  const { spyOn } = await import('bun:test')
+  const fs = await import('node:fs')
+  const { fixtureTheme, makeDeck, makePage, text } = await import('../../../../apps/electron/resources/skills/ppt-design/styles/kit.ts')
+  const root = session()
+  let rename: ReturnType<typeof spyOn> | undefined
+  try {
+    mkdirSync(join(root, 'data'), { recursive: true })
+    const deck = makeDeck('保留成果', fixtureTheme, [makePage('p1', 'free', '标题', '$paper', [text('title', '有效标题', 48, 40, 400, 48, 24)], '')])
+    const path = join(root, 'data/deck.json')
+    writeFileSync(path, JSON.stringify(deck))
+    const output = (await exportIncrementalPptx(root))!
+    const before = readFileSync(output)
+    deck.pages[0]!.elements[0]!.text = '新版本标题'
+    writeFileSync(path, JSON.stringify(deck))
+    const original = fs.renameSync
+    rename = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to) === output) throw Object.assign(new Error('destination locked'), { code: 'EBUSY' })
+      return original(from, to)
+    })
+    await expect(exportIncrementalPptx(root)).rejects.toThrow('destination locked')
+    expect(readFileSync(output)).toEqual(before)
+    rename.mockRestore(); rename = undefined
+    expect(await exportIncrementalPptx(root)).toBe(output)
+    expect(readFileSync(output)).not.toEqual(before)
+  } finally { rename?.mockRestore(); rmSync(root, { recursive: true, force: true }) }
+})

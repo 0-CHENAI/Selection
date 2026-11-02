@@ -469,6 +469,8 @@ export interface HandleLargeResponseOptions {
   sessionPath: string;
   /** Context about the tool call */
   context: SummarizationContext;
+  /** Optional stricter per-result input budget. */
+  tokenLimit?: number;
   /** Optional summarize callback — typically agent.runMiniCompletion.bind(agent) */
   summarize?: (prompt: string) => Promise<string | null>;
   /** Active model's context window — see {@link guardLargeResult}. */
@@ -581,7 +583,7 @@ export async function handleLargeResponse(
   const { text, sessionPath, context, summarize, contextWindow } = opts;
   const estimatedTokens = estimateTokensDensityAware(text);
 
-  if (estimatedTokens <= tokenLimitFor(contextWindow)) {
+  if (estimatedTokens <= Math.min(opts.tokenLimit ?? Infinity, tokenLimitFor(contextWindow))) {
     return null; // Not large enough — caller should return as-is
   }
 
@@ -623,7 +625,7 @@ export async function handleLargeResponse(
     relativePath,
     absolutePath,
     summary,
-    preview: summary ? undefined : text.substring(0, 2000),
+    preview: summary ? undefined : text.length <= 2000 ? text : `${text.slice(0, 1000)}\n[… middle omitted; read the saved file …]\n${text.slice(-1000)}`,
   });
 
   return { message, filePath: absolutePath, wasSummarized: !!summary };

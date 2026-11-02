@@ -274,3 +274,46 @@ it.each([
     expect(permission.recoveryClass).toBe(recovery);
   } finally { server.stop(true); }
 }, RUN_TIMEOUT_MS + 1000);
+
+it('large native Bash completion retains exit failure and emits phases without a summary request', async () => {
+  const requests: any[] = [];
+  const server = Bun.serve({ port: 0, async fetch(request) {
+    requests.push(await request.json());
+    const chunks = requests.length === 1 ? [
+      { choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_large_bash', type: 'function', function: {
+        name: 'bash', arguments: JSON.stringify({ command: "printf '%050000d' 0; printf '\\nfailed'; exit 7" }),
+      } }] }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+    ] : [
+      { choices: [{ index: 0, delta: { role: 'assistant', content: 'Done' }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+    ];
+    return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  let approved = false;
+  try {
+    const output = await driveBundle([
+      { type: 'init', apiKey: 'test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
+        workspaceRootPath: scratchDir, sessionId: 'large-bash', sessionPath: scratchDir,
+        workingDirectory: scratchDir, plansFolderPath: join(scratchDir, 'plans'),
+        providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+        customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'local-model', contextWindow: 65536, maxTokens: 256 }] },
+      { type: 'prompt', id: 'large-bash', message: 'Run the local test command.', systemPrompt: 'Local protocol test.' },
+    ], (output, send) => {
+      const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+      const permission = events.find(event => event.type === 'pre_tool_use_request');
+      if (permission && !approved) { approved = true; send({ type: 'pre_tool_use_response', requestId: permission.requestId, action: 'continue' }); }
+      return events.some(event => event.type === 'event' && event.event?.type === 'tool_execution_end');
+    });
+    const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line).event]; } catch { return []; } }).filter(Boolean);
+    const end = events.find(event => event.type === 'tool_execution_end');
+    expect(end.isError).toBe(true);
+    expect(end.result.structuredContent, JSON.stringify(end.result).slice(0, 1200)).toMatchObject({ exit_code: 7 });
+    expect(end.result.details.selectionExecutionOutcome).toBe('unknown');
+    expect(JSON.stringify(end.result.content)).toContain('Full data saved to:');
+    expect(JSON.stringify(end.result.content)).toContain('Command exited with code 7');
+    expect(JSON.stringify(end.result.content).length).toBeLessThan(4000);
+    expect(events.filter(event => event.type === 'tool_execution_update').map(event => event.partialResult?.details?.selectionToolProgress?.phase).filter(Boolean)).toEqual(['running', 'processing_result']);
+    expect(JSON.stringify(requests)).not.toContain('Tool result to summarize:');
+  } finally { server.stop(true); }
+}, RUN_TIMEOUT_MS + 1000);
