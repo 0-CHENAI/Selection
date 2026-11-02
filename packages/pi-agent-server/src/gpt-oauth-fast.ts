@@ -1,12 +1,12 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
-import { fastServiceTier } from '../../shared/src/agent/fast-mode.ts'
+import { fastTransportFamily } from '../../shared/src/agent/fast-mode.ts'
 
 /** Read the preference per request, including tool continuations and recreated sessions. */
 export function installFastServiceTier(session: AgentSession, enabled: () => boolean | undefined): void {
   const stream = session.agent.streamFunction
   session.agent.streamFunction = (model, context, options) => {
-    const serviceTier = fastServiceTier(enabled(), model.id, model.provider)
-    if (!serviceTier) return stream(model, context, options)
+    if (!fastTransportFamily(model.id, model.provider, model.api, model.baseUrl)) return stream(model, context, options)
+    const serviceTier = enabled() ? 'priority' : 'default'
     // Pi's simple-stream adapter drops provider-specific serviceTier options.
     // Apply at the final payload boundary and preserve existing payload hooks.
     return stream(model, context, {

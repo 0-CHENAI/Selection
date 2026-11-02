@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Fast 按连接能力显示** — 模型选择器仅在当前连接的认证、模型、官方端点和传输协议支持 Fast 时显示开关及费用提示；自定义网关或协议不匹配时隐藏整块入口，运行时也不发送不适用的 `service_tier` 参数。
+
 - **OfficeCLI 升级至 1.0.160** — 更新受管 OfficeCLI 的六平台版本锁定、校验和及随包指南，batch / help 支持上游新增的 `--compact` 参数；继续禁用运行时自更新。升级资源沿用 PR #701 的标准快照。
 
 - **PPT 用用户图片配图** — Selection 不生成图片。对话里附了图片时，选有图片位的页面，图片保持原比例完整放进去，不裁切、不拉伸，多出的地方留白；没附图片时只用没有图片位的页面，成稿里不留空框和模板样例照片。模板和结构版式的图片位页码记在 catalog 的 `pictureSlotPages`。去掉了没有界面的生图配置文件入口。#741 已关闭。

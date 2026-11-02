@@ -1,4 +1,4 @@
-import { fastServiceFamily } from '@craft-agent/shared/agent/fast-mode'
+import { fastConnectionFamily } from '@craft-agent/shared/agent/fast-mode'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { FastModeButton, fastModeDetailKey } from './FastModeButton'
 import { PromptThinkingSettings } from './PromptBarEffects'
@@ -206,7 +206,7 @@ export function CompactModelSelector({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-  const fastFamily = fastServiceFamily(currentModel, effectiveConnectionDetails?.piAuthProvider)
+  const fastFamily = connectionUnavailable ? undefined : fastConnectionFamily(currentModel, effectiveConnectionDetails)
   const fastSupported = fastFamily !== undefined
 
   const pickerMode = derivePickerMode({

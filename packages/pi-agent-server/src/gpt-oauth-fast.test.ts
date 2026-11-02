@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-codex-responses'
 import { streamSimple as streamOpenAiCompletions } from '@earendil-works/pi-ai/api/openai-completions'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Api, Model } from '@earendil-works/pi-ai'
 import { installFastServiceTier } from './gpt-oauth-fast'
 import { fastServiceTier, gptOAuthServiceTier, supportsGptOAuthFast, supportsPriorityFast } from '../../shared/src/agent/fast-mode'
 
@@ -104,4 +104,21 @@ test('a server downgrade to Standard is reported instead of appearing as active 
     fetch: async () => new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { id: 'r', service_tier: 'default', output: [] } })}\n\n`, { headers: { 'content-type': 'text/event-stream' } }),
   })
   expect((await stream.result()).errorMessage).toContain('Fast 未生效')
+})
+
+test('unsupported transport and third-party endpoints receive no Fast payload hook', async () => {
+  const received: unknown[] = []
+  const originalHook = (body: unknown) => body
+  const session = { agent: { streamFunction: (_model: unknown, _context: unknown, options: unknown) => { received.push(options) } } } as unknown as AgentSession
+  installFastServiceTier(session, () => true)
+  for (const candidate of [
+    { ...grokModel, api: 'anthropic-messages' },
+    { ...grokModel, baseUrl: 'https://gateway.example/v1' },
+    { ...model, api: 'openai-responses' },
+    { ...model, baseUrl: 'https://gateway.example/backend-api' },
+  ]) {
+    const options = { onPayload: originalHook }
+    await session.agent.streamFunction(candidate as Model<Api>, { messages: [] }, options)
+    expect(received.at(-1)).toBe(options)
+  }
 })
