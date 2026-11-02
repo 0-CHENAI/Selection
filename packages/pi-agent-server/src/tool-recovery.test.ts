@@ -63,7 +63,7 @@ test('the real SDK distinguishes preparation rejection from execution and after-
   expect(reused).toHaveLength(3)
   expect(reused.slice(0, 2).every(result => outcome(result) !== 'not-performed')).toBe(true)
   expect(outcome(reused[2]!)).toBe('not-performed')
-  expect(outcome(results.find(result => result.toolCallId === 'after-error')!)).not.toBe('not-performed')
+  expect(outcome(results.find(result => result.toolCallId === 'after-error')!)).toBe('unknown')
   expect(outcome(results.find(result => result.toolCallId === 'prewrite')!)).toBe('not-performed')
   expect(outcome(results.find(result => result.toolCallId === 'success')!)).toBe('completed')
 })

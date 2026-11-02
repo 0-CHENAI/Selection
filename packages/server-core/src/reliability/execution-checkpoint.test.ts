@@ -208,3 +208,22 @@ test('actor/worker attempt identity reloads and fences old task bindings', () =>
     }
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test('unknown execution replies remain blocked across reload; confirmed work is retained', async () => {
+  const { settleCheckpointTool } = await import('./execution-checkpoint')
+  const root = mkdtempSync(join(tmpdir(), 'checkpoint-unknown-'))
+  try {
+    const saved = structuredClone(checkpoint)
+    saved.pendingTools = { old: { name: 'Write', recovery: 'file-verifiable' }, lost: { name: 'Bash', recovery: 'unknown' } }
+    settleCheckpointTool(saved, 'old', 'completed')
+    settleCheckpointTool(saved, 'lost', 'unknown')
+    writeExecutionCheckpoint(root, saved)
+    const loaded = readExecutionCheckpoint(root)
+    if (loaded.kind !== 'ok') throw new Error('missing checkpoint')
+    expect(loaded.checkpoint.completedTools).toEqual(['old'])
+    expect(loaded.checkpoint.pendingTools.lost).toBeDefined()
+    expect(recoveryBlocker(loaded.checkpoint, current)).toBe('unknown-tool-result')
+    settleCheckpointTool(saved, 'lost', 'not-performed')
+    expect(recoveryBlocker(saved, current)).toBeUndefined()
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

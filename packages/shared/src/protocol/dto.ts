@@ -685,12 +685,13 @@ export type SessionEvent =
   | { type: 'text_delta'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; delta: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; turnId?: string }
   | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; streamKind?: 'thinking'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; artifactVersions?: Message['artifactVersions']; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
+  | { type: 'tool_progress'; sessionId: string; toolUseId: string; progress: NonNullable<Message['toolProgress']> }
   | { type: 'tool_result'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; toolUseId: string; toolName: string; result: string; content?: AgentToolResultContent[]; toolInput?: Record<string, unknown>; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
   | { type: 'error'; sessionId: string; error: string; timestamp?: number }
   | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
   | { type: 'complete'; sessionId: string; answerRunId?: string; answerRoutingVersion?: 1; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean; backgroundTasksAlive?: boolean; orchestrationPending?: boolean }
   | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[]; runningChildCount?: number }
-  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }
+  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' | 'tool_arguments' }
   | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete'; level?: 'info' | 'warning' | 'error' | 'success'; timestamp?: number }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'title_regenerating'; sessionId: string; isRegenerating: boolean }

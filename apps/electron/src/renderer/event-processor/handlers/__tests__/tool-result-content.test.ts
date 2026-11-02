@@ -74,3 +74,21 @@ describe('tool result multimodal content', () => {
     expect(JSON.stringify(state.session.messages)).not.toContain('hunter2')
   })
 })
+
+describe('saved stdout does not turn failed execution into success', () => {
+  it.each([false, true])('honors an explicit error with an existing row=%s', existing => {
+    const state = emptyState()
+    if (existing) state.session.messages.push({ id: 'bash', role: 'tool', timestamp: 1, content: '', toolUseId: 'bash', toolName: 'Bash', toolStatus: 'executing' })
+    const result = handleToolResult(state, { type: 'tool_result', sessionId: state.session.id, toolUseId: 'bash', toolName: 'Bash',
+      result: 'Full output saved to /tmp/full.log\nCommand exited with code 7', isError: true })
+    expect(result.session.messages[0]).toMatchObject({ toolStatus: 'error', isError: true })
+  })
+})
+
+
+it('honors host success for quoted error text and keeps the legacy missing-flag fallback', () => {
+  const state = emptyState();
+  const event: ToolResultEvent = { type: 'tool_result', sessionId: state.session.id, toolUseId: 'read', toolName: 'Read', result: '[ERROR] quoted log line' };
+  expect(handleToolResult(state, { ...event, isError: false }).session.messages[0]?.toolStatus).toBe('completed');
+  expect(handleToolResult(state, event).session.messages[0]?.toolStatus).toBe('error');
+});

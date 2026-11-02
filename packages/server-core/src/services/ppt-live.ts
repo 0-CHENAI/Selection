@@ -398,18 +398,9 @@ function moveFile(from: string, to: string): void {
 
 function replaceFile(tmp: string, dest: string): void {
   mkdirSync(dirname(dest), { recursive: true })
-  try {
-    renameSync(tmp, dest)
-  } catch {
-    rmSync(dest, { force: true })
-    try {
-      renameSync(tmp, dest)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
-      copyFileSync(tmp, dest)
-      rmSync(tmp, { force: true })
-    }
-  }
+  // The candidate lives beside the destination, on the same filesystem.
+  // An open/locked destination must leave the last valid deliverable untouched.
+  renameSync(tmp, dest)
 }
 
 /** Sidecar paths are trusted only inside the session folder or the selected working directory. */

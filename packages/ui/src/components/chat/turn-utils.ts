@@ -677,6 +677,7 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
     toolResultContent: message.toolResultContent,
+    toolProgress: message.toolProgress,
     intent: cleanToolMetadataLabel(message.toolIntent),
     displayName: cleanToolMetadataLabel(message.toolDisplayName),  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer

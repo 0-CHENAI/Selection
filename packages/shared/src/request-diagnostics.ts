@@ -19,6 +19,8 @@ export interface RequestDiagnosticScope {
   attempts: number;
   latest?: RequestDiagnostic;
   queuedRequests?: number;
+  queueStartedAt?: number;
+  queueMs?: number;
   onQueueState?: (queued: boolean) => void;
 }
 // Preload and bundled runtime must share the same async context, without a session-global last error.
@@ -40,11 +42,16 @@ export function subscribeModelRequestQueue(scope: RequestDiagnosticScope, listen
 export function beginModelRequestQueue(): () => void {
   const scope = storage.getStore();
   if (!scope) return () => {};
+  if (!scope.queuedRequests) scope.queueStartedAt = Date.now();
   scope.queuedRequests = (scope.queuedRequests ?? 0) + 1; scope.onQueueState?.(true);
   let finished = false;
   return () => {
     if (finished) return;
     finished = true; scope.queuedRequests = Math.max(0, (scope.queuedRequests ?? 0) - 1);
+    if (!scope.queuedRequests && scope.queueStartedAt !== undefined) {
+      scope.queueMs = (scope.queueMs ?? 0) + Math.max(0, Date.now() - scope.queueStartedAt);
+      scope.queueStartedAt = undefined;
+    }
     scope.onQueueState?.(!!scope.queuedRequests);
   };
 }

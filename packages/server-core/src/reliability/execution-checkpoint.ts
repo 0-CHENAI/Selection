@@ -267,3 +267,10 @@ export function recoveryTranscriptMatches(sessionPath: string, checkpoint: Execu
     } catch { return false }
   })
 }
+
+/** A reply is not proof of completion when the runtime lost the operation outcome. */
+export function settleCheckpointTool(checkpoint: ExecutionCheckpoint, toolCallId: string, outcome?: 'completed' | 'not-performed' | 'unknown'): void {
+  if (outcome === 'unknown') return
+  delete checkpoint.pendingTools[toolCallId]
+  if (!checkpoint.completedTools.includes(toolCallId)) checkpoint.completedTools.push(toolCallId)
+}

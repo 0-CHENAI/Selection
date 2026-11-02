@@ -23,11 +23,14 @@ export function installToolExecutionOutcomeTracking(agent: Agent): void {
       const result = await afterToolCall?.(context, signal)
       const content = result?.content ?? context.result.content ?? []
       executed.add(content)
-      return { ...result, content }
+      // Returning an unchanged content field makes the SDK treat it as a
+      // replacement and discard structuredContent (e.g. Bash exit_code).
+      // Preserve the original hook contract; tracking itself changes no result.
+      return result
     } catch (error) {
       const content = [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }]
       executed.add(content)
-      return { content, details: {}, isError: true }
+      return { ...withExecutionOutcome({ content, details: {} }, 'unknown'), isError: true }
     }
   }
   agent.subscribe(event => {

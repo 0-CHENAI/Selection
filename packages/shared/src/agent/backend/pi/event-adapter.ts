@@ -184,6 +184,7 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Track tool names from execution_start for proper tool_result correlation
   private answerPreviewTimes = new Map<string, number>();
   private answerStreams = new Map<string, AnswerArgumentStream>();
+  private toolProgressAt = new Map<string, number>();
   private toolNames: Map<string, string> = new Map();
 
   // Track whether streaming deltas have been received for the current message
@@ -198,6 +199,8 @@ export class PiEventAdapter extends BaseEventAdapter {
   private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
   private activityAt = 0;
+  private toolInputBytes = 0;
+  private showingToolArguments = false;
   private reasoningBytes = 0;
   private visibleBytes = 0;
   /** Live reasoning is its own intermediate turn so it never joins the answer. */
@@ -415,6 +418,8 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   protected onTurnStart(): void {
+    this.toolInputBytes = 0;
+    this.showingToolArguments = false;
     this.pendingRetryError = null;
     this.awaitingRetry = false;
     this.retryErrorDelivered = false;
@@ -422,6 +427,7 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.boundaryStreamed = false;
     this.markerAnswerStarted = false;
     this.toolNames.clear();
+    this.toolProgressAt.clear();
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
     this.subTurnCounter = 0;
@@ -469,6 +475,10 @@ export class PiEventAdapter extends BaseEventAdapter {
         break;
 
       case 'agent_end':
+        if (this.showingToolArguments) {
+          this.showingToolArguments = false;
+          yield { type: 'status', message: '', statusType: 'tool_arguments' };
+        }
         if ((event as { willRetry?: boolean }).willRetry === true) {
           this.pendingRetryError = null;
           this.awaitingRetry = true;
@@ -517,7 +527,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.answerPreviewTimes.clear();
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
-        this.reasoningBytes = 0; this.visibleBytes = 0; this.activityAt = 0;
+        this.reasoningBytes = 0; this.visibleBytes = 0; this.activityAt = 0; this.toolInputBytes = 0; this.showingToolArguments = false;
         yield { type: 'model_call_start' };
         break;
 
@@ -554,6 +564,15 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes };
         }
         if (amEvent.type === 'toolcall_delta') {
+          this.toolInputBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+          if (amEvent.delta && !this.showingToolArguments) {
+            this.showingToolArguments = true;
+            yield { type: 'status', message: 'Generating tool arguments', statusType: 'tool_arguments' };
+          }
+          if (amEvent.delta && Date.now() - this.activityAt >= 1000) {
+            this.activityAt = Date.now();
+            yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes, toolInputBytes: this.toolInputBytes };
+          }
           const part = amEvent.partial.content[amEvent.contentIndex];
           if (part?.type === 'toolCall' && /^(?:mcp__session__|session__)?submit_answer$/.test(part.name)) {
             let decoder = this.answerStreams.get(part.id);
@@ -601,6 +620,10 @@ export class PiEventAdapter extends BaseEventAdapter {
         // event to the Craft assistant message created here (#782).
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
+        if (this.showingToolArguments) {
+          this.showingToolArguments = false;
+          yield { type: 'status', message: '', statusType: 'tool_arguments' };
+        }
         yield* this.finishThinking();
         const transportDetails = Array.isArray(msg.craftTransportDiagnostics)
           ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
@@ -837,15 +860,24 @@ export class PiEventAdapter extends BaseEventAdapter {
       }
 
       case 'tool_execution_update': {
-        // Accumulate partial output for streaming tool results
+        if (!this.toolNames.has(event.toolCallId)) break;
+        // Pi updates are complete snapshots (including a sliding truncation
+        // window), not deltas. Retain only a bounded fallback for missing finals.
         const partialResult = event.partialResult;
         if (partialResult && typeof partialResult === 'object') {
           const content = (partialResult as { content?: Array<{ type: string; text?: string }> }).content;
           if (Array.isArray(content)) {
-            for (const part of content) {
-              if (part.type === 'text' && part.text) {
-                this.accumulateOutput(event.toolCallId, part.text);
-              }
+            const text = content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
+            if (content.some(part => part.type === 'text')) this.commandOutput.set(event.toolCallId, text.slice(-64 * 1024));
+            const phase = (partialResult as { details?: { selectionToolProgress?: { phase?: string; executionMs?: number } } }).details?.selectionToolProgress;
+            const now = Date.now();
+            if (this.toolNames.has(event.toolCallId) && (phase || now - (this.toolProgressAt.get(event.toolCallId) ?? 0) >= 1000)) {
+              this.toolProgressAt.set(event.toolCallId, now);
+              yield { type: 'tool_progress', toolUseId: event.toolCallId, progress: {
+                phase: phase?.phase === 'processing_result' ? 'processing_result' : 'running', at: now,
+                ...(text ? { outputBytes: new TextEncoder().encode(text).byteLength } : {}),
+                ...(typeof phase?.executionMs === 'number' && Number.isFinite(phase.executionMs) ? { executionMs: Math.max(0, phase.executionMs) } : {}),
+              } };
             }
           }
         }
@@ -856,6 +888,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         const toolCallId = event.toolCallId;
         const resolvedToolName = this.toolNames.get(toolCallId) || 'tool';
         this.toolNames.delete(toolCallId);
+        this.toolProgressAt.delete(toolCallId);
 
         // Check for block reason
         const blockReason = this.consumeBlockReason(toolCallId, resolvedToolName);
@@ -867,22 +900,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           ? (event.result as { details?: { isError?: unknown; sourceRead?: import('@craft-agent/core/types').SourceReadProof } }).details
           : undefined;
         const isError = event.isError === true || resultDetails?.isError === true;
-        let result: string;
         const normalizedContent = blockReason ? undefined : normalizeToolResultContent(event.result);
-        const finalImages = accumulatedOutput
-          ? normalizedContent?.filter(part => part.type === 'image')
-          : undefined;
-        const content = accumulatedOutput
-          ? finalImages && finalImages.length > 0 ? finalImages : undefined
-          : normalizedContent;
-
-        if (accumulatedOutput) {
-          result = accumulatedOutput;
-        } else if (blockReason) {
-          result = blockReason;
-        } else {
-          result = this.extractToolResult(event.result, isError);
-        }
+        const content = normalizedContent;
+        // A final result owns summaries, exit failures, images and redactions.
+        // Partial stdout must never override it, including an explicitly empty final.
+        const result = blockReason ?? (event.result == null && !isError && accumulatedOutput !== undefined
+          ? accumulatedOutput
+          : this.extractToolResult(event.result, isError));
 
         // After tool completion, the assistant may generate new text
         this.hasEmittedFinalText = false;
@@ -891,12 +915,11 @@ export class PiEventAdapter extends BaseEventAdapter {
 
         // Check if this was classified as a file read
         const readInfo = this.consumeReadCommand(toolCallId);
-        if (readInfo) {
-          yield this.createToolResult(toolCallId, 'Read', result, isError, undefined, content);
-          break;
+        const toolResult = this.createToolResult(toolCallId, readInfo ? 'Read' : resolvedToolName, result, isError, undefined, content);
+        const executionOutcome = (event.result as { details?: { selectionExecutionOutcome?: unknown } } | undefined)?.details?.selectionExecutionOutcome;
+        if (toolResult.type === 'tool_result' && ['completed', 'not-performed', 'unknown'].includes(String(executionOutcome))) {
+          toolResult.executionOutcome = executionOutcome as 'completed' | 'not-performed' | 'unknown';
         }
-
-        const toolResult = this.createToolResult(toolCallId, resolvedToolName, result, isError, undefined, content);
         // Only native original-reading implementations own this metadata; MCP or Bash summaries cannot assert it.
         if (toolResult.type === 'tool_result' && ['read', 'web_fetch', 'document_read'].includes(event.toolName) && !isError && !blockReason) {
           toolResult.sourceRead = resultDetails?.sourceRead;
@@ -1205,7 +1228,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
     if (Array.isArray(typed.content)) {
       const texts = typed.content
-        .filter((c) => c.type === 'text' && c.text)
+        .filter((c) => c.type === 'text' && typeof c.text === 'string')
         .map((c) => c.text!);
       if (texts.length > 0) return texts.join('\n');
     }

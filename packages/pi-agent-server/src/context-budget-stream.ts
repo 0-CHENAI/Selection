@@ -1,3 +1,4 @@
+import { appendModelRequestRecord, modelRequestRecord } from './model-request-record.ts';
 import { PI_SESSION_TOOL_SHORT_NAME_ALIASES } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
 import { boundedModelStream, MODEL_REQUEST_TIMEOUT_MS } from './bounded-model-stream.ts';
 import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails, subscribeModelRequestQueue } from '../../shared/src/request-diagnostics.ts';
@@ -18,6 +19,8 @@ import {
 import type { ModelRuntime as PiModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   buildContextBudget,
+  contextSystemFingerprint,
+  contextToolsFingerprint,
   ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
   calculateOverflowRetryMaxTokens,
 } from '../../shared/src/agent/backend/pi/context-budget.ts';
@@ -149,6 +152,7 @@ export function createContextBudgetedStream(
       ? { ...message, toolsAdded: visible(message.toolsAdded) } : message) : context.messages,
   };
   const diagnosticScope = createRequestDiagnosticScope();
+  const startedAt = Date.now();
   const withDiagnostic = (message: AssistantMessage): AssistantMessage & { craftTransportDiagnostics: string[] } => ({
     ...message, craftTransportDiagnostics: requestDiagnosticDetails(diagnosticScope),
   });
@@ -158,6 +162,15 @@ export function createContextBudgetedStream(
     ? Math.max(1, Math.floor(configuredMaxTokens))
     : Math.max(1, Math.floor(model.maxTokens));
   const budget = buildContextBudget(model.contextWindow, requestedMaxTokens, context);
+  let outcome: 'success' | 'error' | 'cancelled' = 'error';
+  let terminalUsage: AssistantMessage['usage'] | undefined;
+  const diagnosticSessionDir = process.env.CRAFT_SESSION_DIR;
+  const recordCompletion = () => appendModelRequestRecord(diagnosticSessionDir,
+    () => modelRequestRecord(diagnosticScope, startedAt, options?.signal?.aborted ? 'cancelled' : outcome, {
+      messages: context.messages.length, estimatedInputTokens: budget.estimatedInputTokens,
+      systemFingerprint: JSON.stringify({ legacy: contextSystemFingerprint(context), messages: context.messages.filter(message => message.role === 'system') }),
+      toolsFingerprint: contextToolsFingerprint(context),
+    }, terminalUsage));
   const initialOptions = { ...options, maxTokens: budget.maxOutputTokens };
 
   // Utility and compaction requests share this guard, even without a task session.
@@ -169,6 +182,7 @@ export function createContextBudgetedStream(
       error.stopReason = 'aborted';
       error.errorMessage = 'Request cancelled before context preflight completed.';
     }
+    recordCompletion();
     output.push({ type: 'error', reason: error.stopReason === 'aborted' ? 'aborted' : 'error', error: withDiagnostic(error) });
     return output;
   }
@@ -188,124 +202,128 @@ export function createContextBudgetedStream(
     let attempt = 0;
     let attemptOptions = initialOptions;
 
-    while (attempt < 2) {
-      const buffered: AssistantMessageEvent[] = [];
-      const pendingCodexTextPhases: Array<CodexTextPhase | undefined> = [];
-      const codexTextPhases = new Map<number, CodexTextPhase>();
-      let emittedIrreversibleOutput = false;
-      let retryMaxTokens: number | undefined;
-      let lastPartial: AssistantMessage | undefined;
-      const failureMessage = (error: unknown): AssistantMessage => ({
-        ...(lastPartial ? structuredClone(lastPartial) : createThrownErrorMessage(model, error)),
-        stopReason: attemptOptions.signal?.aborted ? 'aborted' : 'error',
-        errorMessage: errorText(error),
-      });
+    try {
+      while (attempt < 2) {
+        const buffered: AssistantMessageEvent[] = [];
+        const pendingCodexTextPhases: Array<CodexTextPhase | undefined> = [];
+        const codexTextPhases = new Map<number, CodexTextPhase>();
+        let emittedIrreversibleOutput = false;
+        let retryMaxTokens: number | undefined;
+        let lastPartial: AssistantMessage | undefined;
+        const failureMessage = (error: unknown): AssistantMessage => ({
+          ...(lastPartial ? structuredClone(lastPartial) : createThrownErrorMessage(model, error)),
+          stopReason: attemptOptions.signal?.aborted ? 'aborted' : 'error',
+          errorMessage: errorText(error),
+        });
 
-      try {
-        const configuredTimeout = attemptOptions.timeoutMs;
-        const timeoutMs = typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
-          ? Math.min(configuredTimeout, MODEL_REQUEST_TIMEOUT_MS) : MODEL_REQUEST_TIMEOUT_MS;
-        const stream = boundedModelStream(
-          signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, {
-            ...attemptOptions, signal,
-            onProviderStreamEvent: model.api === 'openai-codex-responses'
-              ? async (data, sourceModel) => {
-                  rememberCodexTextPhase(data, pendingCodexTextPhases);
-                  await attemptOptions.onProviderStreamEvent?.(data, sourceModel);
-                }
-              : attemptOptions.onProviderStreamEvent,
-            // SDK wall clocks start before fetch, including host queueing. The
-            // cancellable idle bound above owns the deadline once a slot exists.
-            timeoutMs: hasModelRequestGate() ? 2_147_483_647 : attemptOptions.timeoutMs,
-            // Codex defaults to a persistent WebSocket, which bypasses fetch.
-            // Use its supported SSE transport for host-owned request accounting.
-            transport: hasModelRequestGate() && model.api === 'openai-codex-responses' ? 'sse' : attemptOptions.transport,
-          })),
-          attemptOptions.signal, timeoutMs, listener => subscribeModelRequestQueue(diagnosticScope, listener),
-        );
-        for await (const rawEvent of stream) {
-          const phasedEvent = model.api === 'openai-codex-responses'
-            ? annotateCodexTextPhase(rawEvent, pendingCodexTextPhases, codexTextPhases)
-            : rawEvent;
-          if ('partial' in phasedEvent) lastPartial = phasedEvent.partial;
-          const event = phasedEvent.type === 'error' ? { ...phasedEvent, error: withDiagnostic(phasedEvent.error) } : phasedEvent;
-          if (attempt > 0 || emittedIrreversibleOutput) {
-            output.push(event);
-            if (event.type === 'done' || event.type === 'error') return;
-            continue;
+        try {
+          const configuredTimeout = attemptOptions.timeoutMs;
+          const timeoutMs = typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
+            ? Math.min(configuredTimeout, MODEL_REQUEST_TIMEOUT_MS) : MODEL_REQUEST_TIMEOUT_MS;
+          const stream = boundedModelStream(
+            signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, {
+              ...attemptOptions, signal,
+              onProviderStreamEvent: model.api === 'openai-codex-responses'
+                ? async (data, sourceModel) => {
+                    rememberCodexTextPhase(data, pendingCodexTextPhases);
+                    await attemptOptions.onProviderStreamEvent?.(data, sourceModel);
+                  }
+                : attemptOptions.onProviderStreamEvent,
+              // SDK wall clocks start before fetch, including host queueing. The
+              // cancellable idle bound above owns the deadline once a slot exists.
+              timeoutMs: hasModelRequestGate() ? 2_147_483_647 : attemptOptions.timeoutMs,
+              // Codex defaults to a persistent WebSocket, which bypasses fetch.
+              // Use its supported SSE transport for host-owned request accounting.
+              transport: hasModelRequestGate() && model.api === 'openai-codex-responses' ? 'sse' : attemptOptions.transport,
+            })),
+            attemptOptions.signal, timeoutMs, listener => subscribeModelRequestQueue(diagnosticScope, listener),
+          );
+          for await (const rawEvent of stream) {
+            if (rawEvent.type === 'done') { outcome = 'success'; terminalUsage = rawEvent.message.usage; }
+            if (rawEvent.type === 'error') { outcome = rawEvent.reason === 'aborted' ? 'cancelled' : 'error'; terminalUsage = rawEvent.error.usage; }
+            const phasedEvent = model.api === 'openai-codex-responses'
+              ? annotateCodexTextPhase(rawEvent, pendingCodexTextPhases, codexTextPhases)
+              : rawEvent;
+            if ('partial' in phasedEvent) lastPartial = phasedEvent.partial;
+            const event = phasedEvent.type === 'error' ? { ...phasedEvent, error: withDiagnostic(phasedEvent.error) } : phasedEvent;
+            if (attempt > 0 || emittedIrreversibleOutput) {
+              output.push(event);
+              if (event.type === 'done' || event.type === 'error') return;
+              continue;
+            }
+
+            if (isIrreversibleOutput(event)) {
+              emittedIrreversibleOutput = true;
+              pushAll(output, buffered);
+              buffered.length = 0;
+              output.push(event);
+              continue;
+            }
+
+            if (
+              event.type === 'error' &&
+              event.reason !== 'aborted' &&
+              !attemptOptions.signal?.aborted &&
+              isContextOverflow(event.error, model.contextWindow)
+            ) {
+              retryMaxTokens = calculateOverflowRetryMaxTokens(
+                event.error.errorMessage ?? '',
+                model.contextWindow,
+                attemptOptions.maxTokens ?? requestedMaxTokens,
+              );
+              if (retryMaxTokens !== undefined) break;
+            }
+
+            buffered.push(event);
+            if (event.type === 'done' || event.type === 'error') {
+              pushAll(output, buffered);
+              return;
+            }
           }
-
-          if (isIrreversibleOutput(event)) {
-            emittedIrreversibleOutput = true;
-            pushAll(output, buffered);
-            buffered.length = 0;
-            output.push(event);
-            continue;
-          }
-
+        } catch (error) {
+          const message = withDiagnostic(failureMessage(error));
           if (
-            event.type === 'error' &&
-            event.reason !== 'aborted' &&
+            attempt === 0 &&
+            !emittedIrreversibleOutput &&
             !attemptOptions.signal?.aborted &&
-            isContextOverflow(event.error, model.contextWindow)
+            isContextOverflow(message, model.contextWindow)
           ) {
             retryMaxTokens = calculateOverflowRetryMaxTokens(
-              event.error.errorMessage ?? '',
+              message.errorMessage ?? '',
               model.contextWindow,
               attemptOptions.maxTokens ?? requestedMaxTokens,
             );
-            if (retryMaxTokens !== undefined) break;
           }
-
-          buffered.push(event);
-          if (event.type === 'done' || event.type === 'error') {
+          if (retryMaxTokens === undefined || attempt > 0) {
             pushAll(output, buffered);
+            output.push({ type: 'error', reason: message.stopReason === 'aborted' ? 'aborted' : 'error', error: message });
             return;
           }
         }
-      } catch (error) {
-        const message = withDiagnostic(failureMessage(error));
-        if (
-          attempt === 0 &&
-          !emittedIrreversibleOutput &&
-          !attemptOptions.signal?.aborted &&
-          isContextOverflow(message, model.contextWindow)
-        ) {
-          retryMaxTokens = calculateOverflowRetryMaxTokens(
-            message.errorMessage ?? '',
-            model.contextWindow,
-            attemptOptions.maxTokens ?? requestedMaxTokens,
-          );
-        }
-        if (retryMaxTokens === undefined || attempt > 0) {
+
+        if (retryMaxTokens === undefined) {
+          // A malformed provider stream ended without a terminal event. Preserve
+          // its lifecycle events and synthesize a terminal error so callers of
+          // result() cannot hang indefinitely.
           pushAll(output, buffered);
-          output.push({ type: 'error', reason: message.stopReason === 'aborted' ? 'aborted' : 'error', error: message });
+          output.push({
+            type: 'error',
+            reason: 'error',
+            error: withDiagnostic(failureMessage('Provider stream ended without a terminal event')),
+          });
           return;
         }
-      }
 
-      if (retryMaxTokens === undefined) {
-        // A malformed provider stream ended without a terminal event. Preserve
-        // its lifecycle events and synthesize a terminal error so callers of
-        // result() cannot hang indefinitely.
-        pushAll(output, buffered);
-        output.push({
-          type: 'error',
-          reason: 'error',
-          error: withDiagnostic(failureMessage('Provider stream ended without a terminal event')),
+        debug?.({
+          phase: 'retry',
+          model: `${model.provider}/${model.id}`,
+          requestedMaxTokens: attemptOptions.maxTokens ?? requestedMaxTokens,
+          appliedMaxTokens: retryMaxTokens,
         });
-        return;
+        attempt += 1;
+        attemptOptions = { ...attemptOptions, maxTokens: retryMaxTokens };
       }
-
-      debug?.({
-        phase: 'retry',
-        model: `${model.provider}/${model.id}`,
-        requestedMaxTokens: attemptOptions.maxTokens ?? requestedMaxTokens,
-        appliedMaxTokens: retryMaxTokens,
-      });
-      attempt += 1;
-      attemptOptions = { ...attemptOptions, maxTokens: retryMaxTokens };
-    }
+    } finally { recordCompletion(); }
   })();
 
   return output;

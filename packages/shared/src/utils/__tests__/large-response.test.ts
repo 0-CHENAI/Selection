@@ -386,3 +386,18 @@ describe('lossless tool-result spill', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
+
+test('bounded Bash preview preserves the head, exit error and exact original without a model request', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bash-preview-'));
+  try {
+    const text = 'command started\n' + 'row of output '.repeat(2500) + '\nERROR: command exited with code 7';
+    const result = await handleLargeResponse({ text, sessionPath: dir, context: { toolName: 'Bash', input: { command: 'test' } }, tokenLimit: 4000 });
+    expect(result).not.toBeNull();
+    expect(result!.wasSummarized).toBe(false);
+    expect(result!.message).toContain('command started');
+    expect(result!.message).toContain('ERROR: command exited with code 7');
+    expect(result!.message.length).toBeLessThan(3000);
+    expect(readFileSync(result!.filePath, 'utf8')).toBe(text);
+    expect(result!.message).toContain(result!.filePath);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

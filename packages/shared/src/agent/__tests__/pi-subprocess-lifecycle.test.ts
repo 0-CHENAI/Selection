@@ -278,3 +278,17 @@ it('a failed startup can be followed by a successful request without late-exit c
     expect(await f.agent.runMiniCompletion('test')).toBe('recovered');
   } finally { await f.cleanup(); browserSetting.mockRestore(); }
 });
+
+
+it('preserves tool timeout classification and aborts host-owned session waits', async () => {
+  const f = fixture('');
+  const events: any[] = [];
+  const controller = new AbortController();
+  f.internal.eventQueue.enqueue = (event: any) => events.push(event);
+  f.internal.sessionToolControllers.add(controller);
+  try {
+    f.internal.handleLine(JSON.stringify({ type: 'error', code: 'tool_wait_timeout', message: '工具回包超时' }));
+    expect(controller.signal.aborted).toBe(true);
+    expect(events).toContainEqual({ type: 'error', code: 'tool_wait_timeout', message: '工具回包超时' });
+  } finally { await f.cleanup(); }
+});

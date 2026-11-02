@@ -1,3 +1,4 @@
+import { LatestTaskQueue } from '../services/latest-task-queue.ts'
 import { OfficePreviewService, OFFICE_SAMPLE_READ_ONLY, officePreviewBytes, verifyOfficeSelection } from '../reliability/office-preview'
 import { matchOfficeCasePreview, prepareOfficeCasePreview, removeOfficeCasePreviews } from '../services/office-case-preview'
 import { getOfficePageCaptureHost, renderOfficePages } from '../services/office-page-render'
@@ -45,7 +46,7 @@ import { hostname as executionHostName } from 'node:os'
 import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync, unlinkSync } from 'node:fs'
 import { basename as feedbackBasename, extname as feedbackExtension } from 'node:path'
 import { validateWorkspaceFilePath } from '../handlers/utils'
-import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
+import { settleCheckpointTool, executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
 import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
 import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
 import { waitForRuntimeCleanup } from './runtime-cleanup.ts'
@@ -964,6 +965,7 @@ interface ManagedSession extends WorkModeMetadata {
   progressReviewer?: AgentInstance
   progressSupervisor?: ProgressSupervisor
   isolatedWorkspace?: IsolatedWorkspace
+  toolWaitTimeoutGeneration?: number
   executionCheckpoint?: ExecutionCheckpoint
   toolResultRecovery?: import('../../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan
   runtimeRecovery?: import('@craft-agent/shared/protocol/dto').RuntimeRecoveryView
@@ -1551,6 +1553,7 @@ export interface SessionRuntimeActivity {
   type: AgentEvent['type']
   at: number
   reasoningBytes?: number
+  toolInputBytes?: number
   textBytes?: number
 }
 
@@ -1735,6 +1738,7 @@ export class SessionManager implements ISessionManager {
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
+      for (const message of managed.messages) message.toolProgress = undefined
       // Turn capabilities are intentionally memory-only and expire as soon as
       // the turn stops. A later turn must receive newly generation-bound ones.
       this.spawnQualificationCredentials.delete(managed.id)
@@ -1745,16 +1749,14 @@ export class SessionManager implements ISessionManager {
   }
 
   /** One export at a time per session. The deck watcher and tool boundaries share it. */
-  private pptSyncTail = new Map<string, Promise<void>>()
+  private pptSyncQueue = new LatestTaskQueue()
   /** Polls deck.json while a PPT turn is running so pages export before the tool returns. */
   private pptExportWatches = new Map<string, { stop: () => void }>()
 
   /** Publish deck page counts for the history row and the chat result card. */
   private syncPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
-    const previous = this.pptSyncTail.get(managed.id) ?? Promise.resolve()
-    const run = previous.catch(() => {}).then(() => this.publishPptProgress(managed, generating))
-    this.pptSyncTail.set(managed.id, run.catch(() => {}))
-    return run
+    const generation = managed.processingGeneration
+    return this.pptSyncQueue.run(managed.id, () => this.publishPptProgress(managed, generating, generation))
   }
 
   private ensurePptExportWatch(managed: ManagedSession): void {
@@ -1772,16 +1774,19 @@ export class SessionManager implements ISessionManager {
     this.pptExportWatches.delete(sessionId)
   }
 
-  private async publishPptProgress(managed: ManagedSession, generating: boolean): Promise<void> {
-    if (!this.sessions.get(managed.id)) return
+  private async publishPptProgress(managed: ManagedSession, generating: boolean, generation: number): Promise<void> {
+    const ownsUpdate = () => this.sessions.get(managed.id) === managed && managed.processingGeneration === generation
+    if (!ownsUpdate()) return
     if (!managed.ppt && !generating) return
     const dir = getSessionStoragePath(managed.workspace.rootPath, managed.id)
     try { await exportIncrementalPptx(dir, { workingDirectory: managed.workingDirectory }) } catch (error) {
       sessionLog.warn('Incremental PPTX export failed', { sessionId: managed.id, error })
     }
+    if (!ownsUpdate()) return
     // Never publish a successful page state before the current deck has been checked.
     try { await ensurePptChecks(dir) } catch { /* uncached pages remain unverified */ }
-    this.emitPptProgress(managed, dir, generating)
+    if (!ownsUpdate()) return
+    this.emitPptProgress(managed, dir, generating && managed.isProcessing && isPptGenerating(dir))
   }
 
   private emitPptProgress(managed: ManagedSession, dir: string, generating: boolean): void {
@@ -1862,7 +1867,7 @@ export class SessionManager implements ISessionManager {
       generation: managed.processingGeneration,
       type: event.type,
       at: Date.now(),
-      ...(event.type === 'model_activity' ? { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes } : {}),
+      ...(event.type === 'model_activity' ? { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes, toolInputBytes: event.toolInputBytes } : {}),
     }
     for (const listener of this.runtimeActivityListeners) {
       try { listener(activity) } catch (error) { sessionLog.warn('Runtime activity observer failed', error) }
@@ -8299,8 +8304,7 @@ export class SessionManager implements ISessionManager {
         await this.processEvent(managed, event)
         if (event.type === 'tool_result' && managed.executionCheckpoint) {
           this.completeTaskContextAccess(managed, event.toolUseId, event.isError === true)
-          delete managed.executionCheckpoint.pendingTools[event.toolUseId]
-          if (!managed.executionCheckpoint.completedTools.includes(event.toolUseId)) managed.executionCheckpoint.completedTools.push(event.toolUseId)
+          settleCheckpointTool(managed.executionCheckpoint, event.toolUseId, event.executionOutcome)
         }
         if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
           || (event.type === 'info' && event.message.startsWith('Compacted'))) {
@@ -9586,7 +9590,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     let revision = 0, call = 0, began = Date.now()
     let status: ProgressSnapshot['status'] = 'model'
     let modelInFlight = false
-    let activity = { reasoningBytes: 0, textBytes: 0 }
+    let activity: NonNullable<ProgressSnapshot['activity']> = { reasoningBytes: 0, textBytes: 0 }
     let pending: ProgressDecision | undefined
     let pauseReason: string | undefined
     let pauseCode: 'call_time_limit' | 'output_limit' | 'stream_interrupted' | 'progress_needs_user' = 'call_time_limit'
@@ -9695,7 +9699,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       while (active()) {
         let completed: Extract<AgentEvent, { type: 'complete' }> | undefined
         for await (const event of agent.chat(prompt, attachments, options)) {
-          if (event.type === 'model_activity') activity = { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes }
+          if (event.type === 'model_activity') activity = { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes, toolInputBytes: event.toolInputBytes }
           if (event.type === 'model_call_start') { modelInFlight = true; call++; began = Date.now(); status = 'model'; activity = { reasoningBytes: 0, textBytes: 0 } }
           if (event.type === 'usage_update' || event.type === 'complete') modelInFlight = false
           if (event.type === 'tool_start') { busyTools.add(event.toolUseId); revision++; supervisor.invalidate() }
@@ -9704,7 +9708,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             if (event.text.trim()) { revision++; supervisor.invalidate() }
             if (event.type === 'text_delta') activity.textBytes += Buffer.byteLength(event.text)
           }
-          if (event.type === 'status') status = 'compacting'
+          if (event.type === 'status') status = event.statusType === 'tool_arguments' ? 'model' : 'compacting'
           if (event.type === 'permission_request') { status = 'handoff'; supervisor.invalidate() }
           if (event.type === 'typed_error' && (event.error.code === 'output_limit' || event.error.code === 'stream_interrupted' || event.error.code === 'model_request_timeout')) {
             pauseReason = event.error.message; pauseCode = event.error.code === 'model_request_timeout' ? 'call_time_limit' : event.error.code
@@ -11142,6 +11146,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     let completedTurnTokens: number | undefined
     let deliveredArtifacts: Record<string, unknown> | undefined
     let swarmTurnUsageRecorded = false
+
+    if (managed.toolWaitTimeoutGeneration === generation) reason = 'timeout'
 
     const cancellationRequested = () => managed.stopRequested
       || (managed.executionCheckpoint?.generation === generation && managed.executionCheckpoint.status === 'cancelled')
@@ -14719,6 +14725,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         break
       }
 
+      case 'tool_progress': {
+        const message = managed.messages.find(m => m.toolUseId === event.toolUseId);
+        if (!managed.isProcessing || !message || message.toolStatus !== 'executing') break;
+        if (message.toolProgress && (message.toolProgress.at > event.progress.at || (message.toolProgress.phase === 'processing_result' && event.progress.phase === 'running'))) break;
+        message.toolProgress = { ...message.toolProgress, ...event.progress };
+        this.sendEvent({ type: 'tool_progress', sessionId, toolUseId: event.toolUseId, progress: message.toolProgress }, workspaceId);
+        break
+      }
+
       case 'tool_result': {
         const priorTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const previewToolName = event.toolName ?? priorTool?.toolName ?? ''
@@ -14746,7 +14761,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
         // Track if already completed to avoid sending duplicate events
-        const wasAlreadyComplete = existingToolMsg?.toolStatus === 'completed'
+        const wasAlreadyComplete = existingToolMsg?.toolStatus === 'completed' || existingToolMsg?.toolStatus === 'error'
+        const previousResult = existingToolMsg?.toolResult
+        const previousError = existingToolMsg?.isError
+        const previousContent = existingToolMsg?.toolResultContent
 
         sessionLog.info(`RESULT MATCH: toolUseId=${event.toolUseId}, found=${!!existingToolMsg}, toolName=${existingToolMsg?.toolName || toolName}, wasComplete=${wasAlreadyComplete}`)
 
@@ -14764,7 +14782,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (existingToolMsg) {
           // Keep lightweight status text in `content` and store full payload in `toolResult` only.
           existingToolMsg.toolPurpose = toolPurpose
+          existingToolMsg.toolProgress = undefined
           existingToolMsg.toolResult = formattedResult
+          existingToolMsg.toolResultContent = event.content
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
           existingToolMsg.sourceRead = inferredError ? undefined : event.sourceRead
@@ -14793,6 +14813,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
             toolPurpose,
             toolUseId: event.toolUseId,
             toolResult: formattedResult,
+            toolResultContent: event.content,
             sourceRead: inferredError ? undefined : event.sourceRead,
             toolStatus: inferredError ? 'error' : 'completed',
             toolDisplayMeta: fallbackToolDisplayMeta,
@@ -14805,7 +14826,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Send event to renderer if: (a) first completion, (b) result content changed
         // (e.g., safety net auto-completed with empty result, then real result arrived later),
         // or (c) the input was redacted, so the renderer replaces its tool_start copy.
-        const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
+        const resultChanged = wasAlreadyComplete && (previousResult !== formattedResult || previousError !== inferredError || event.content !== undefined || previousContent !== undefined)
         if (!wasAlreadyComplete || resultChanged || redactedToolInput) {
           // Use existing tool message timestamp, or fallback message timestamp for ordering
           const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
@@ -14862,8 +14883,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         this.sendEvent({
           type: 'status',
           sessionId,
-          message: event.message,
-          statusType: event.message.includes('Compacting') ? 'compacting' : undefined
+          message: event.statusType === 'tool_arguments' && event.message ? String(i18n.t('turnCard.toolArguments')) : event.message,
+          statusType: event.statusType ?? (event.message.includes('Compacting') ? 'compacting' : undefined)
         }, workspaceId)
         break
 
@@ -14952,6 +14973,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (isPlainAuthError && this.attemptAuthRetry(sessionId, managed, workspaceId)) {
           break
         }
+
+        if (event.code === 'tool_wait_timeout') managed.toolWaitTimeoutGeneration = managed.processingGeneration
 
         const classified = parseError(new Error(event.message))
         if (classified.code !== 'unknown_error') {
@@ -15474,6 +15497,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       if (message.role !== 'tool' || !message.toolUseId?.startsWith('office-') || !['pending', 'executing'].includes(message.toolStatus ?? '')) continue
       message.toolStatus = 'error'
       message.isError = true
+      message.toolProgress = undefined
       message.toolResult = 'Office 修改任务已结束或中断；此步骤未确认完成。'
     }
   }
@@ -15486,6 +15510,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!parent || !answerRunId || !this.officeRevisionRuns.has(parent.id)) return
     if (event.type === 'permission_request') {
       this.sendEvent({ ...event, sessionId: parent.id, request: { ...event.request, sessionId: parent.id } }, parent.workspace.id)
+      return
+    }
+    if (event.type === 'tool_progress') {
+      const toolUseId = `office-${event.sessionId}-${event.toolUseId}`
+      const message = parent.messages.find(item => item.toolUseId === toolUseId)
+      if (!message || message.toolStatus !== 'executing') return
+      if (message.toolProgress && (message.toolProgress.at > event.progress.at || (message.toolProgress.phase === 'processing_result' && event.progress.phase === 'running'))) return
+      message.toolProgress = { ...message.toolProgress, ...event.progress }
+      this.sendEvent({ ...event, sessionId: parent.id, toolUseId, progress: message.toolProgress }, parent.workspace.id)
       return
     }
     if (event.type !== 'text_delta' && event.type !== 'text_complete' && event.type !== 'tool_start' && event.type !== 'tool_result') return
@@ -15516,7 +15549,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       }
       if (event.type === 'tool_start') Object.assign(message, { toolInput: event.toolInput, toolIntent: event.toolIntent,
         toolDisplayName: event.toolDisplayName, toolDisplayMeta: event.toolDisplayMeta, toolStatus: message.toolStatus ?? 'executing' })
-      else Object.assign(message, { toolResult: event.result, toolStatus: 'completed', isError: event.isError })
+      else Object.assign(message, { toolResult: event.result, toolProgress: undefined, toolStatus: event.isError ? 'error' : 'completed', isError: event.isError })
       message.parentToolUseId = event.parentToolUseId ? prefix + event.parentToolUseId : undefined
       forwarded = { ...event, ...common, toolUseId, parentToolUseId: message.parentToolUseId }
     }

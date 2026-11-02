@@ -52,6 +52,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **长任务执行状态与恢复** — Bash 输出按快照更新，命令返回后显示结果处理阶段，大输出保留原文并提供有限预览，省去默认模型摘要等待；工具参数生成期间显示真实活动。异常回包和停止会收束等待，未确认的操作保留为未知。PPT 连续保存合并导出，始终更新同一份文件，失败保留上一份有效产物。#759–#765。
+
 - **优先使用供应商原生搜索信源** — OpenAI、ChatGPT OAuth、Anthropic、DeepSeek、Google 与 Kimi 连接会优先调用各自官方搜索能力并保留来源链接，失败时再回退 AnySearch；自定义端点、订阅型 OAuth 与其他供应商的凭据不会跨端点发送。停止回答会同时取消搜索，不会在取消后继续回退或产生额外调用。
 
 - **Excel 预览里的图表位置** — 浮动图表按它在 Excel 里覆盖的单元格摆放和缩放，盖住的格子与 Excel 一致；行被中文撑高时图表跟着变高。协同面板刷新后，模型截图看到的也是最新的表格。

@@ -97,7 +97,7 @@ export function handleComplete(
         && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
         && !(m.isBackground && m.taskId)
       ) {
-        return { ...m, toolStatus: 'completed' as const, toolResult: m.toolResult ?? '' }
+        return { ...m, toolProgress: undefined, toolStatus: 'completed' as const, toolResult: m.toolResult ?? '' }
       }
       return m
     })
@@ -155,7 +155,7 @@ export function handleError(
   // Fail-safe: Mark any running tools as failed
   const messagesWithFailedTools = session.messages.map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
-      ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+      ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
   )
 
@@ -194,7 +194,7 @@ export function handleTypedError(
   // Fail-safe: Mark any running tools as failed
   const messagesWithFailedTools = session.messages.map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
-      ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+      ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
   )
 
@@ -244,6 +244,14 @@ export function handleStatus(
   event: StatusEvent
 ): ProcessResult {
   const { session, streaming } = state
+
+  if (event.statusType === 'tool_arguments') {
+    if (!session.isProcessing || (!event.message && session.currentStatus?.statusType !== 'tool_arguments')) return { state, effects: [] }
+    return {
+      state: { session: { ...session, currentStatus: event.message ? { message: event.message, statusType: event.statusType } : undefined }, streaming },
+      effects: [],
+    }
+  }
 
   // An empty status clears transient feedback after recovery, without adding
   // an empty work-chain item to the transcript.
@@ -367,7 +375,7 @@ export function handleInterrupted(
     .map(m => {
       // Mark running tools as interrupted
       if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
-        return { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
+        return { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
       }
       // Clear transient streaming flags even if only isStreaming was set.
       if (m.role === 'assistant' && (m.isPending || m.isStreaming)) {

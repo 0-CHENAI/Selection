@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { waitForBridgeReply } from './bridge-wait.ts';
+import { proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
 import { installFastServiceTier } from './gpt-oauth-fast.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
@@ -107,7 +109,7 @@ import { syncCredentialForPiSdk, type PiCredential } from './adapt-credential.ts
 import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
-import { handleLargeResponse, estimateTokensDensityAware, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
+import { compactToolResult } from './compact-tool-result.ts';
 import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/storage.ts';
 import { buildCallLlmRequest, callLlmPromptImages, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
@@ -136,7 +138,6 @@ import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
 import { resolveImageSendPolicy, type ImageSendPolicy } from '../../shared/src/utils/image-send-size.ts';
 import { fitToolResultImages } from './tool-result-images.ts';
-import { mergeSummarizedToolResult } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 import { isBundledOfficecliLoadSkillCommand } from '../../shared/src/utils/officecli.ts';
 import { getSourceSlugForTool } from '../../shared/src/sources/guide-content.ts';
@@ -1028,6 +1029,7 @@ async function requestPreToolUseApproval(
   toolCallId?: string,
   recoveryClass: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown' = 'unknown',
   confinedShellDirectory?: string,
+  signal?: AbortSignal,
 ): Promise<
   | { action: 'execute'; input: Record<string, unknown> }
   | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
@@ -1043,7 +1045,10 @@ async function requestPreToolUseApproval(
   if (answerError) throw new Error(answerError);
   const requestId = `pi-ptu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  send({
+  // Permission prompts intentionally have no execution deadline.
+  const response = await waitForBridgeReply(pendingPreToolUse, requestId, {
+    signal, interrupted: { action: 'block', reason: 'Aborted' },
+  }, () => send({
     type: 'pre_tool_use_request',
     confinedShellDirectory,
     recoveryClass,
@@ -1053,11 +1058,7 @@ async function requestPreToolUseApproval(
     ...(toolCallId ? { toolCallId } : {}),
     ...(currentAssistantGeneration ? { assistantGeneration: currentAssistantGeneration } : {}),
     input,
-  });
-
-  const response = await new Promise<PreToolUseResponse>((resolve) => {
-    pendingPreToolUse.set(requestId, { resolve });
-  });
+  }));
 
   if (response.action === 'prepare_source_guide') {
     if (!response.sourceGuide || !toolCallId) {
@@ -1148,7 +1149,7 @@ function wrapSingleTool(
         throw new Error('Tool execution was interrupted.');
       }
       // Send to main process for permission checking + transforms
-      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool), tool === confinedBashTool ? confinedBashDirectory : undefined);
+      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool), tool === confinedBashTool ? confinedBashDirectory : undefined, signal);
       if (approval.action === 'prepare_source_guide') {
         return withExecutionOutcome({
           content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
@@ -1170,59 +1171,34 @@ function wrapSingleTool(
       if (fileOperation && (!initConfig || !piSession?.sessionId)) throw new Error('Native file operation session identity is unavailable');
       const execute = () => originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
       executionStarted = true;
+      const executionStartedAt = Date.now();
+      onUpdate?.({ content: [], details: { selectionToolProgress: { phase: 'running', at: executionStartedAt } } });
       const executed = fileOperation
         ? await withToolFileOperation(getSessionPath(initConfig!.workspaceRootPath, initConfig!.sessionId), {
           sessionId: initConfig!.sessionId, sdkSessionId: piSession!.sessionId, answerRunId: executingRunId,
           toolCallId, toolName: sdkToolName,
         }, execute)
         : await execute();
-      const result = withExecutionOutcome(executed, executed.details?.isError === true ? 'unknown' : 'completed');
+      onUpdate?.({ content: [], details: { selectionToolProgress: {
+        phase: 'processing_result', at: Date.now(), executionMs: Date.now() - executionStartedAt,
+      } } });
+      const result = withExecutionOutcome(executed, executed.isError === true || executed.details?.isError === true ? 'unknown' : 'completed');
 
-      // --- Post-execute: large response summarization ---
-
-      const resultText = result.content
-        .filter((c): c is PiTextContent => c.type === 'text')
-        .map(c => c.text)
-        .join('');
-
-      // Source the active model's contextWindow each call so the threshold
-      // tracks set_model mid-session, not the model that was active at session
-      // creation. Falls back to the fixed default when the model isn't set yet.
-      const modelContextWindow = piSession?.agent.state.model?.contextWindow;
+      // Preserve full source guides and explicit history access contracts.
       const command = typeof inputObj.command === 'string' ? inputObj.command : '';
       const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
         && isBundledOfficecliLoadSkillCommand(command);
       const preserveContextSource = tool.name === 'session_history' || tool.name === 'task_context';
-      if (!preserveContextSource && !preserveBundledOfficecliGuide && estimateTokensDensityAware(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
+      if (!preserveContextSource && !preserveBundledOfficecliGuide && initConfig) {
         try {
-          const sessionPath = getSessionPath(
-            initConfig.workspaceRootPath,
-            initConfig.sessionId,
-          );
-
-          const largeResult = await handleLargeResponse({
-            text: resultText,
-            sessionPath,
-            context: {
-              toolName: sdkToolName,
-              input: inputObj,
-              intent,
-              userRequest: currentUserMessage,
-            },
+          return await compactToolResult(result, {
+            toolName: sdkToolName, input: inputObj, intent, userRequest: currentUserMessage,
+            sessionPath: getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId),
+            contextWindow: piSession?.agent.state.model?.contextWindow,
             summarize: runMiniCompletion,
-            contextWindow: modelContextWindow,
           });
-
-          if (largeResult) {
-            return {
-              content: mergeSummarizedToolResult(largeResult.message, result.content),
-              details: result.details,
-            };
-          }
         } catch (error) {
-          debugLog(
-            `Large response handling failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          debugLog(`Large response handling failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
 
@@ -1298,10 +1274,21 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
       execute: async (
         _toolCallId: string,
         params: any,
+        signal?: AbortSignal,
       ): Promise<AgentToolResult<any>> => {
         if (isTurnCompletionTool(executionName)) answerSubmissionSdkMessageId = answerSdkMessageId ?? piSession?.sessionManager.getLeafId() ?? undefined;
         const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
+        const interrupted: ProxyToolExecutionResult = {
+          isError: true, content: 'Tool wait interrupted. Operation outcome unknown; verify before retrying.',
+        };
+        const result = await waitForBridgeReply(pendingToolExecutions, requestId, {
+          signal, interrupted, timeoutMs: proxyReplyDeadlineMs(executionName, params),
+          timedOut: { isError: true, content: 'Tool execution reply deadline exceeded. Operation outcome unknown; do not automatically retry.' },
+          onTimeout: () => {
+            send({ type: 'error', code: 'tool_wait_timeout', message: '工具执行回包超时，已停止本轮。操作结果尚未确认，请核对实际结果后再继续。' });
+            void handleAbort();
+          },
+        }, () => send({
           type: 'tool_execute_request',
           answerRunId,
           toolCallId: _toolCallId,
@@ -1310,10 +1297,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           requestId,
           toolName: executionName,
           args: params as Record<string, unknown>,
-        });
-        const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
-          pendingToolExecutions.set(requestId, { resolve });
-        });
+        }));
 
         if (acceptsTurnCompletion(executionName, result)) answerAccepted = true;
         return {
