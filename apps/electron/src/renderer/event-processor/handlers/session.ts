@@ -56,6 +56,12 @@ import {
   collectOpenAssistantTurnIds,
 } from '../helpers'
 
+function removeTransientStatusMessages(messages: Message[]): Message[] {
+  return messages.some(message => message.role === 'status')
+    ? messages.filter(message => message.role !== 'status')
+    : messages
+}
+
 /**
  * Handle complete - agent loop finished
  *
@@ -73,7 +79,7 @@ export function handleComplete(
   // whose result contained agentId:). Genuinely backgrounded tasks have isBackground=true
   // AND a taskId, so they're excluded — task_completed will finalize them.
   const TERMINAL_TOOL_STATUSES = new Set(['completed', 'error'])
-  let updatedMessages = session.messages
+  let updatedMessages = removeTransientStatusMessages(session.messages)
   if (event.answerRoutingVersion === 1 && event.answerRunId) {
     const ownerIndex = session.messages.findLastIndex(m => m.role === 'user' && !m.hidden && !m.isQueued)
     const owner = session.messages[ownerIndex]
@@ -153,7 +159,7 @@ export function handleError(
   const { session } = state
 
   // Fail-safe: Mark any running tools as failed
-  const messagesWithFailedTools = session.messages.map(m =>
+  const messagesWithFailedTools = removeTransientStatusMessages(session.messages).map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
       ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
@@ -192,7 +198,7 @@ export function handleTypedError(
   const { session } = state
 
   // Fail-safe: Mark any running tools as failed
-  const messagesWithFailedTools = session.messages.map(m =>
+  const messagesWithFailedTools = removeTransientStatusMessages(session.messages).map(m =>
     m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
       ? { ...m, toolProgress: undefined, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
       : m
@@ -256,7 +262,14 @@ export function handleStatus(
   // An empty status clears transient feedback after recovery, without adding
   // an empty work-chain item to the transcript.
   if (!event.message) return {
-    state: { session: { ...session, currentStatus: undefined }, streaming },
+    state: {
+      session: {
+        ...session,
+        messages: removeTransientStatusMessages(session.messages),
+        currentStatus: undefined,
+      },
+      streaming,
+    },
     effects: [],
   }
 
