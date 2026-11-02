@@ -500,7 +500,6 @@ function stageOfficecliWrapper(scratch: string): string {
   const managedWrapper = process.env.CRAFT_OFFICECLI
   const candidates = [
     ...(managedWrapper ? [join(dirname(managedWrapper), '..', 'scripts')] : []),
-    join(import.meta.dir, '..', '..', '..', '..', 'apps', 'electron', 'resources', 'scripts'),
     join(process.cwd(), 'apps', 'electron', 'resources', 'scripts'),
     join(process.cwd(), 'resources', 'scripts'),
   ]
