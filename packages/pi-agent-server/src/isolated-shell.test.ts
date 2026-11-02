@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell'
@@ -71,6 +71,14 @@ test.skipIf(process.platform !== 'win32')('Windows native Shell runs Python whil
   const outside = join(root, 'outside.txt'), metadata = join(candidate, '.git', 'config')
   mkdirSync(candidate, { recursive: true }); mkdirSync(join(candidate, '.git')); mkdirSync(outsideDirectory)
   writeFileSync(outside, 'original'); writeFileSync(metadata, 'original')
+  writeFileSync(join(candidate, 'spawn-tree.py'), [
+    'from pathlib import Path',
+    'import subprocess, sys, time',
+    'marker = str(Path(__file__).with_name("descendant-survived.txt"))',
+    'child = "import time; from pathlib import Path; time.sleep(3); Path(" + repr(marker) + ").write_text(\'alive\')"',
+    'subprocess.Popen([sys.executable, "-c", child])',
+    'time.sleep(30)',
+  ].join('\n'))
   symlinkSync(outsideDirectory, join(candidate, 'linked'), 'junction')
   const shell = createIsolatedShell(candidate)
   try {
@@ -90,6 +98,9 @@ test.skipIf(process.platform !== 'win32')('Windows native Shell runs Python whil
     expect((await run('type .git\\config')).exitCode).toBe(0)
     expect(output).toContain('original')
     await expect(run('python -c "import time; time.sleep(30)"', 1)).rejects.toThrow('timeout:1')
+    await expect(run('python spawn-tree.py', 1)).rejects.toThrow('timeout:1')
+    await Bun.sleep(3_500)
+    expect(existsSync(join(candidate, 'descendant-survived.txt'))).toBe(false)
     expect((await run('python --version')).exitCode).toBe(0)
   } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 120_000)
@@ -115,12 +126,82 @@ test.skipIf(process.platform !== 'win32')('Windows isolated sub-agent executes P
   } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 120_000)
 
+test.skipIf(process.platform !== 'win32')('Windows native Shell restores security after disposal, initialization failure, and process restart', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-shell-acl-'))
+  const seed = join(root, 'seed.txt')
+  writeFileSync(seed, 'seed')
+  writeFileSync(join(root, 'restart-tree.py'), [
+    'from pathlib import Path',
+    'import subprocess, sys, time',
+    'marker = str(Path(__file__).with_name("restart-descendant-survived.txt"))',
+    'child = "import time; from pathlib import Path; time.sleep(3); Path(" + repr(marker) + ").write_text(\'alive\')"',
+    'subprocess.Popen([sys.executable, "-c", child])',
+    'time.sleep(30)',
+  ].join('\n'))
+  const icacls = (path: string) => execFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe'), [path], { encoding: 'utf8' }).replace(/\r\n/g, '\n')
+  const snapshot = () => `${icacls(root)}\n${icacls(seed)}`
+  const original = snapshot()
+  const moduleUrl = new URL('../../shared/src/utils/isolated-shell.ts', import.meta.url).href
+  let shell: ReturnType<typeof createIsolatedShell>
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      shell = createIsolatedShell(root)
+      expect(shell).toBeDefined()
+      expect(snapshot()).not.toBe(original)
+      if (attempt === 0) {
+        expect((await shell!.operations.exec('echo created>created.txt', root, { onData: () => {} })).exitCode).toBe(0)
+      }
+      shell!.dispose(); shell = undefined
+      expect(snapshot()).toBe(original)
+    }
+    expect(icacls(join(root, 'created.txt'))).not.toContain('S-1-4-')
+
+    shell = createIsolatedShell(root)
+    expect(shell).toBeDefined()
+    const running = shell!.operations.exec('python -c "import time; time.sleep(30)"', root, { onData: () => {} }).catch(error => error)
+    await Bun.sleep(500)
+    shell!.dispose(); shell = undefined
+    expect(snapshot()).toBe(original)
+    await running
+
+    const initializationFailure = [
+      `import { createIsolatedShell } from ${JSON.stringify(moduleUrl)}`,
+      `process.env.NODE_ENV = 'test'`,
+      `process.env.SELECTION_WINDOWS_SANDBOX_TEST_FAIL_AFTER_GRANT = '1'`,
+      `try { createIsolatedShell(${JSON.stringify(root)}); process.exit(2) } catch { process.exit(0) }`,
+    ].join('; ')
+    execFileSync(process.execPath, ['-e', initializationFailure], { cwd: process.cwd(), stdio: 'pipe', timeout: 120_000 })
+    expect(snapshot()).toBe(original)
+
+    const interrupted = [
+      `import { createIsolatedShell } from ${JSON.stringify(moduleUrl)}`,
+      `const shell = createIsolatedShell(${JSON.stringify(root)})`,
+      `if (!shell) process.exit(2)`,
+      `void shell.operations.exec('python restart-tree.py', ${JSON.stringify(root)}, { onData: () => {} })`,
+      `await Bun.sleep(500)`,
+      `process.exit(0)`,
+    ].join('; ')
+    execFileSync(process.execPath, ['-e', interrupted], { cwd: process.cwd(), stdio: 'pipe', timeout: 120_000 })
+    expect(snapshot()).not.toBe(original)
+    shell = createIsolatedShell(root)
+    expect(shell).toBeDefined()
+    shell!.dispose(); shell = undefined
+    expect(snapshot()).toBe(original)
+    expect(existsSync(join(root, '.git'))).toBe(false)
+    await Bun.sleep(3_500)
+    expect(existsSync(join(root, 'restart-descendant-survived.txt'))).toBe(false)
+  } finally {
+    shell?.dispose()
+    rmSync(root, { recursive: true, force: true })
+  }
+}, 240_000)
+
 test.skipIf(!binary || process.platform !== 'win32')('Windows Office candidate edits reach disk without a model save', async () => {
   const root = mkdtempSync(join(tmpdir(), 'selection-office-win-'))
   const file = join(root, '候选 文档.docx')
   const cli = (...args: string[]) => execFileSync(binary!, args, { env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' }, timeout: 30_000 })
   cli('create', file); cli('close', file)
-  const shell = createIsolatedShell(root, { officeDocument: { path: file, binary: binary! } })
+  const shell = createIsolatedShell(root, { officeDocument: { path: file, binary: binary! }, denyExternalBrowsers: true })
   const quote = (value: string) => `"${value}"`
   const wrapper = join(binary!, '..', '..', 'officecli.cmd')
   try {

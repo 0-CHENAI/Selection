@@ -1,12 +1,13 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
 
 const source = String.raw`
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
@@ -24,6 +25,10 @@ public static class SelectionWindowsSandbox {
   static extern bool GetSecurityDescriptorDacl(IntPtr descriptor, out bool present, out IntPtr acl, out bool defaulted);
   [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   static extern uint SetNamedSecurityInfo(string path, int objectType, uint securityInfo, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern uint GetNamedSecurityInfo(string path, int objectType, uint securityInfo, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor, uint revision, uint securityInfo, out IntPtr text, out uint length);
   [DllImport("advapi32.dll", SetLastError=true)]
   static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
   [DllImport("advapi32.dll", SetLastError=true)]
@@ -40,14 +45,20 @@ public static class SelectionWindowsSandbox {
   static extern IntPtr GetCurrentProcess();
   [DllImport("kernel32.dll")]
   static extern IntPtr LocalFree(IntPtr value);
-  [DllImport("kernel32.dll", SetLastError=true)]
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
   [DllImport("kernel32.dll", SetLastError=true)]
   static extern bool SetInformationJobObject(IntPtr job, int type, IntPtr info, uint size);
   [DllImport("kernel32.dll", SetLastError=true)]
   static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError=true)]
+  static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+  [DllImport("kernel32.dll", SetLastError=true)]
   static extern uint ResumeThread(IntPtr thread);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  static extern bool TerminateProcess(IntPtr process, uint exitCode);
   [DllImport("kernel32.dll")]
   static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
   [DllImport("kernel32.dll", SetLastError=true)]
@@ -109,6 +120,178 @@ public static class SelectionWindowsSandbox {
       return new SecurityIdentifier(Marshal.ReadIntPtr(memory)).Value;
     } finally { Marshal.FreeHGlobal(memory); }
   }
+  sealed class SecuritySnapshot {
+    public string Path;
+    public string Sddl;
+  }
+  static readonly HashSet<string> journaled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  static string activeJournal = "";
+  static string EncodeText(string value) {
+    return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+  }
+  static string DecodeText(string value) {
+    return Encoding.UTF8.GetString(Convert.FromBase64String(value));
+  }
+  static List<SecuritySnapshot> ReadJournal(string journal) {
+    var snapshots = new List<SecuritySnapshot>();
+    if (!File.Exists(journal)) return snapshots;
+    var content = File.ReadAllText(journal, Encoding.UTF8);
+    var lines = content.Split(new char[] { '\n' });
+    for (var index = 0; index < lines.Length; index++) {
+      var line = lines[index].TrimEnd('\r');
+      if (String.IsNullOrWhiteSpace(line)) continue;
+      // A crash can interrupt the final append before Flush(true). That entry
+      // has not been mutated yet, so recover all prior complete records.
+      if (index == lines.Length - 1 && !content.EndsWith("\n", StringComparison.Ordinal)) continue;
+      var fields = line.Split(new char[] { '\t' }, 2);
+      if (fields.Length != 2) throw new InvalidDataException("Invalid Windows sandbox security journal");
+      snapshots.Add(new SecuritySnapshot { Path = DecodeText(fields[0]), Sddl = DecodeText(fields[1]) });
+    }
+    return snapshots;
+  }
+  static void PrepareJournal(string journal) {
+    if (String.Equals(activeJournal, journal, StringComparison.OrdinalIgnoreCase)) return;
+    activeJournal = journal;
+    journaled.Clear();
+    foreach (var snapshot in ReadJournal(journal)) journaled.Add(snapshot.Path);
+  }
+  static byte[] SnapshotRecord(FileSystemInfo entry) {
+    var path = entry.FullName;
+    IntPtr owner, group, dacl, sacl, descriptor;
+    Error(GetNamedSecurityInfo(path, 1, 0x14, out owner, out group, out dacl, out sacl, out descriptor), "GetNamedSecurityInfo(SecuritySnapshot)");
+    IntPtr text = IntPtr.Zero;
+    try {
+      uint length;
+      Check(ConvertSecurityDescriptorToStringSecurityDescriptor(descriptor, 1, 0x14, out text, out length), "ConvertSecurityDescriptorToStringSecurityDescriptor");
+      var sddl = Marshal.PtrToStringUni(text);
+      return Encoding.UTF8.GetBytes(EncodeText(path) + "\t" + EncodeText(sddl) + "\n");
+    } finally {
+      if (text != IntPtr.Zero) LocalFree(text);
+      if (descriptor != IntPtr.Zero) LocalFree(descriptor);
+    }
+  }
+  static void AppendSnapshot(FileSystemInfo entry, FileStream stream) {
+    var path = entry.FullName;
+    if (journaled.Contains(path)) return;
+    var record = SnapshotRecord(entry);
+    stream.Write(record, 0, record.Length);
+    journaled.Add(path);
+  }
+  static void SnapshotTreeEntry(FileSystemInfo entry, FileStream stream) {
+    AppendSnapshot(entry, stream);
+    var directory = entry as DirectoryInfo;
+    if (directory == null) return;
+    foreach (var child in directory.EnumerateFileSystemInfos()) {
+      if ((child.Attributes & FileAttributes.ReparsePoint) == 0) SnapshotTreeEntry(child, stream);
+    }
+  }
+  public static void SnapshotTree(string path, string journal) {
+    PrepareJournal(journal);
+    using (var stream = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.Read)) {
+      SnapshotTreeEntry(new DirectoryInfo(path), stream);
+      stream.Flush(true);
+    }
+  }
+  static void Snapshot(FileSystemInfo entry, string journal) {
+    if (String.IsNullOrEmpty(journal)) return;
+    PrepareJournal(journal);
+    if (journaled.Contains(entry.FullName)) return;
+    var record = SnapshotRecord(entry);
+    using (var stream = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.Read)) {
+      stream.Write(record, 0, record.Length);
+      stream.Flush(true);
+    }
+    journaled.Add(entry.FullName);
+  }
+  public static void MarkReady(string path) {
+    var record = Encoding.UTF8.GetBytes("ready\n");
+    using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+      stream.Write(record, 0, record.Length);
+      stream.Flush(true);
+    }
+  }
+  static void RestoreSnapshot(SecuritySnapshot snapshot) {
+    if (!Directory.Exists(snapshot.Path) && !File.Exists(snapshot.Path)) return;
+    IntPtr descriptor;
+    uint size;
+    Check(ConvertStringSecurityDescriptorToSecurityDescriptor(snapshot.Sddl, 1, out descriptor, out size), "ConvertStringSecurityDescriptorToSecurityDescriptor(SecuritySnapshot)");
+    try {
+      bool present, defaulted;
+      IntPtr dacl, sacl;
+      Check(GetSecurityDescriptorDacl(descriptor, out present, out dacl, out defaulted), "GetSecurityDescriptorDacl(SecuritySnapshot)");
+      Check(GetSecurityDescriptorSacl(descriptor, out present, out sacl, out defaulted), "GetSecurityDescriptorSacl(SecuritySnapshot)");
+      Error(SetNamedSecurityInfo(snapshot.Path, 1, 0x14, IntPtr.Zero, IntPtr.Zero, dacl, sacl), "SetNamedSecurityInfo(SecuritySnapshot)");
+    } finally { LocalFree(descriptor); }
+  }
+  static void PurgeCapability(FileSystemInfo entry, SecurityIdentifier capability) {
+    if (entry is DirectoryInfo) {
+      var directory = (DirectoryInfo)entry;
+      var security = directory.GetAccessControl();
+      security.PurgeAccessRules(capability);
+      directory.SetAccessControl(security);
+    } else {
+      var file = (FileInfo)entry;
+      var security = file.GetAccessControl();
+      security.PurgeAccessRules(capability);
+      file.SetAccessControl(security);
+    }
+  }
+  static bool HasCapability(FileSystemInfo entry, SecurityIdentifier rootCapability, SecurityIdentifier tempCapability) {
+    AuthorizationRuleCollection rules;
+    if (entry is DirectoryInfo) rules = ((DirectoryInfo)entry).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier));
+    else rules = ((FileInfo)entry).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier));
+    foreach (FileSystemAccessRule rule in rules) {
+      var identity = rule.IdentityReference as SecurityIdentifier;
+      if (identity != null && (identity.Equals(rootCapability) || identity.Equals(tempCapability))) return true;
+    }
+    return false;
+  }
+  static void CleanNewEntries(FileSystemInfo entry, HashSet<string> original, SecurityIdentifier rootCapability, SecurityIdentifier tempCapability) {
+    if (!original.Contains(entry.FullName) && HasCapability(entry, rootCapability, tempCapability)) {
+      PurgeCapability(entry, rootCapability);
+      PurgeCapability(entry, tempCapability);
+      Error(SetNamedSecurityInfo(entry.FullName, 1, 0x10, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero), "SetNamedSecurityInfo(ClearIntegrityLabel)");
+    }
+    var directory = entry as DirectoryInfo;
+    if (directory == null) return;
+    foreach (var child in directory.EnumerateFileSystemInfos()) {
+      if ((child.Attributes & FileAttributes.ReparsePoint) == 0) CleanNewEntries(child, original, rootCapability, tempCapability);
+    }
+  }
+  public static void Restore(string root, string rootCapabilityText, string tempCapabilityText, string journal, string ready) {
+    var snapshots = ReadJournal(journal);
+    if (snapshots.Count == 0) return;
+    var original = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var snapshot in snapshots) {
+      original.Add(snapshot.Path);
+      RestoreSnapshot(snapshot);
+    }
+    if (File.Exists(ready) && Directory.Exists(root)) CleanNewEntries(new DirectoryInfo(root), original, new SecurityIdentifier(rootCapabilityText), new SecurityIdentifier(tempCapabilityText));
+  }
+  static void TerminateJob(string name) {
+    const string prefix = "SelectionWindowsSandbox-";
+    Guid identity;
+    if (!name.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParse(name.Substring(prefix.Length), out identity)) {
+      // The marker is persisted before its process is spawned. A partial marker
+      // therefore cannot identify a live sandbox job and is safe to ignore.
+      return;
+    }
+    var job = OpenJobObject(0x0008, false, name);
+    if (job == IntPtr.Zero) {
+      var code = Marshal.GetLastWin32Error();
+      if (code == 2) return;
+      throw new System.ComponentModel.Win32Exception(code, "OpenJobObject failed with Win32 error " + code);
+    }
+    try { Check(TerminateJobObject(job, 125), "TerminateJobObject"); }
+    finally { CloseHandle(job); }
+  }
+  public static void TerminateJobs(string directory) {
+    if (!Directory.Exists(directory)) return;
+    foreach (var marker in Directory.EnumerateFiles(directory, "*.job")) {
+      var name = File.ReadAllText(marker, Encoding.UTF8).Trim();
+      if (name.Length > 0) TerminateJob(name);
+    }
+  }
   static void LowLabel(string path) {
     IntPtr descriptor;
     uint size;
@@ -120,10 +303,11 @@ public static class SelectionWindowsSandbox {
       Error(SetNamedSecurityInfo(path, 1, 0x10, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, acl), "SetNamedSecurityInfo(LowNoWriteUp)");
     } finally { LocalFree(descriptor); }
   }
-  public static void Grant(string path, string capabilityText) {
-    GrantDirectory(new DirectoryInfo(path), new SecurityIdentifier(capabilityText), new SecurityIdentifier("S-1-1-0"));
+  public static void Grant(string path, string capabilityText, string journal) {
+    GrantDirectory(new DirectoryInfo(path), new SecurityIdentifier(capabilityText), new SecurityIdentifier("S-1-1-0"), journal);
   }
-  static void GrantDirectory(DirectoryInfo directory, SecurityIdentifier capability, SecurityIdentifier everyone) {
+  static void GrantDirectory(DirectoryInfo directory, SecurityIdentifier capability, SecurityIdentifier everyone, string journal) {
+    Snapshot(directory, journal);
     var security = directory.GetAccessControl();
     security.AddAccessRule(new FileSystemAccessRule(capability, FileSystemRights.Modify, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
     security.AddAccessRule(new FileSystemAccessRule(everyone, FileSystemRights.DeleteSubdirectoriesAndFiles, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Deny));
@@ -132,9 +316,10 @@ public static class SelectionWindowsSandbox {
     foreach (var entry in directory.EnumerateFileSystemInfos()) {
       if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
       var child = entry as DirectoryInfo;
-      if (child != null) GrantDirectory(child, capability, everyone);
+      if (child != null) GrantDirectory(child, capability, everyone, journal);
       else {
         var file = (FileInfo)entry;
+        Snapshot(file, journal);
         var acl = file.GetAccessControl();
         acl.AddAccessRule(new FileSystemAccessRule(capability, FileSystemRights.Modify, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Allow));
         file.SetAccessControl(acl);
@@ -142,12 +327,13 @@ public static class SelectionWindowsSandbox {
       }
     }
   }
-  public static void Deny(string path, string capabilityText) {
+  public static void Deny(string path, string capabilityText, string journal) {
     var capability = new SecurityIdentifier(capabilityText);
-    if (Directory.Exists(path)) DenyEntry(new DirectoryInfo(path), capability);
-    else if (File.Exists(path)) DenyEntry(new FileInfo(path), capability);
+    if (Directory.Exists(path)) DenyEntry(new DirectoryInfo(path), capability, journal);
+    else if (File.Exists(path)) DenyEntry(new FileInfo(path), capability, journal);
   }
-  static void DenyEntry(FileSystemInfo entry, SecurityIdentifier capability) {
+  static void DenyEntry(FileSystemInfo entry, SecurityIdentifier capability, string journal) {
+    Snapshot(entry, journal);
     var rights = FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles;
     if (entry is DirectoryInfo) {
       var directory = (DirectoryInfo)entry;
@@ -155,7 +341,7 @@ public static class SelectionWindowsSandbox {
       security.AddAccessRule(new FileSystemAccessRule(capability, rights, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Deny));
       directory.SetAccessControl(security);
       foreach (var child in directory.EnumerateFileSystemInfos()) {
-        if ((child.Attributes & FileAttributes.ReparsePoint) == 0) DenyEntry(child, capability);
+        if ((child.Attributes & FileAttributes.ReparsePoint) == 0) DenyEntry(child, capability, journal);
       }
     } else {
       var file = (FileInfo)entry;
@@ -182,6 +368,7 @@ public static class SelectionWindowsSandbox {
   }
   static uint RunProcess(IntPtr token, IntPtr job, string command, string cwd) {
     IntPtr process = IntPtr.Zero, thread = IntPtr.Zero;
+    bool completed = false;
     try {
       var startup = new StartupInfo();
       startup.cb = Marshal.SizeOf(startup);
@@ -191,21 +378,39 @@ public static class SelectionWindowsSandbox {
       startup.error = GetStdHandle(-12);
       var info = new ProcessInformation();
       var commandLine = "\"" + Path.Combine(Environment.SystemDirectory, "cmd.exe") + "\" /d /s /c \"" + command + "\"";
-      Check(CreateProcessAsUser(token, null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, 0x00000010, IntPtr.Zero, cwd, ref startup, out info), "CreateProcessAsUser");
+      // CREATE_SUSPENDED: no user code may run before the job owns the process.
+      Check(CreateProcessAsUser(token, null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, 0x00000004 | 0x08000000, IntPtr.Zero, cwd, ref startup, out info), "CreateProcessAsUser");
       process = info.Process;
       thread = info.Thread;
       Check(AssignProcessToJobObject(job, process), "AssignProcessToJobObject");
       Check(ResumeThread(thread) != 0xffffffff, "ResumeThread");
-      WaitForSingleObject(process, 0xffffffff);
+      Check(WaitForSingleObject(process, 0xffffffff) == 0, "WaitForSingleObject");
       uint code;
       Check(GetExitCodeProcess(process, out code), "GetExitCodeProcess");
+      completed = true;
       return code;
     } finally {
-      if (thread != IntPtr.Zero) CloseHandle(thread);
-      if (process != IntPtr.Zero) CloseHandle(process);
+      try {
+        // Also terminate on job-assignment/resume failure: an unassigned suspended
+        // process is not covered by closing the job handle.
+        if (process != IntPtr.Zero && !completed) {
+          if (TerminateProcess(process, 125)) {
+            Check(WaitForSingleObject(process, 0xffffffff) == 0, "WaitForSingleObject(TerminatedProcess)");
+          } else {
+            var terminateError = Marshal.GetLastWin32Error();
+            uint existingCode;
+            if (!GetExitCodeProcess(process, out existingCode) || existingCode == 259) {
+              throw new System.ComponentModel.Win32Exception(terminateError, "TerminateProcess failed with Win32 error " + terminateError);
+            }
+          }
+        }
+      } finally {
+        if (thread != IntPtr.Zero) CloseHandle(thread);
+        if (process != IntPtr.Zero) CloseHandle(process);
+      }
     }
   }
-  public static int Run(string rootCapability, string tempCapability, string command, string flushCommand, string cwd) {
+  public static int Run(string rootCapability, string tempCapability, string jobName, string command, string flushCommand, string cwd) {
     IntPtr token = IntPtr.Zero, restricted = IntPtr.Zero, primary = IntPtr.Zero, job = IntPtr.Zero, low = IntPtr.Zero;
     var allocated = new System.Collections.Generic.List<IntPtr>();
     try {
@@ -228,7 +433,7 @@ public static class SelectionWindowsSandbox {
         Marshal.StructureToPtr(label, labelMemory, false);
         Check(SetTokenInformation(primary, 25, labelMemory, (uint)Marshal.SizeOf(label)), "SetTokenInformation(TokenIntegrityLevel)");
       } finally { Marshal.FreeHGlobal(labelMemory); }
-      job = CreateJobObject(IntPtr.Zero, null);
+      job = CreateJobObject(IntPtr.Zero, jobName);
       Check(job != IntPtr.Zero, "CreateJobObject");
       var limit = new ExtendedLimit();
       limit.Basic.LimitFlags = 0x2000;
@@ -311,42 +516,113 @@ function powerShellArguments(script: string): string[] {
   return ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedScript(script)]
 }
 
-function runInvocation(assembly: string, rootCapability: string, tempCapability: string, command: string, flushCommand: string, cwd: string): string {
+function runInvocation(assembly: string, rootCapability: string, tempCapability: string, jobName: string, command: string, flushCommand: string, cwd: string): string {
   return [
     `$ProgressPreference = 'SilentlyContinue'`,
     `Add-Type -Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(assembly)}')))`,
     `[Environment]::SetEnvironmentVariable('SELECTION_SANDBOX_COMMAND', $null, 'Process')`,
     `[Environment]::SetEnvironmentVariable('SELECTION_SANDBOX_FLUSH_COMMAND', $null, 'Process')`,
-    `exit [SelectionWindowsSandbox]::Run('${rootCapability}', '${tempCapability}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(command)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(flushCommand)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(cwd)}')))`,
+    `exit [SelectionWindowsSandbox]::Run('${rootCapability}', '${tempCapability}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(jobName)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(command)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(flushCommand)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(cwd)}')))`,
   ].join('; ')
 }
 
+interface SecurityRecoveryState {
+  version: 1
+  root: string
+  rootCapability: string
+  tempCapability: string
+  ownerPid: number
+  createdGitPlaceholder: boolean
+  temporary: string
+}
+
+const activeWindowsRoots = new Set<string>()
+
+function processIsRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+function isOwnedTemporaryDirectory(path: string): boolean {
+  const child = relative(realpathSync(tmpdir()), path)
+  return /^selection-win-[a-z0-9]{6}$/i.test(child) && !isAbsolute(child) && !child.includes(sep)
+}
+
+function isRecoveryState(value: unknown, activeRoot: string): value is SecurityRecoveryState {
+  if (!value || typeof value !== 'object') return false
+  const state = value as Partial<SecurityRecoveryState>
+  return state.version === 1
+    && typeof state.root === 'string' && state.root.toLowerCase() === activeRoot
+    && typeof state.rootCapability === 'string' && /^S-1-4-(?:\d+-){3}\d+$/.test(state.rootCapability)
+    && typeof state.tempCapability === 'string' && /^S-1-4-(?:\d+-){3}\d+$/.test(state.tempCapability)
+    && typeof state.ownerPid === 'number' && Number.isInteger(state.ownerPid) && state.ownerPid > 0
+    && typeof state.createdGitPlaceholder === 'boolean'
+    && typeof state.temporary === 'string' && isOwnedTemporaryDirectory(state.temporary)
+}
+
+function windowsJobName(): string {
+  return `SelectionWindowsSandbox-${randomUUID()}`
+}
+
+function terminateJobsInvocation(assembly: string, jobsDirectory: string): string {
+  return [
+    `$ErrorActionPreference = 'Stop'`,
+    `Add-Type -Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(assembly)}')))`,
+    `[SelectionWindowsSandbox]::TerminateJobs([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(jobsDirectory)}')))`,
+  ].join('; ')
+}
+
+function restoreInvocation(assembly: string, state: SecurityRecoveryState, journal: string, ready: string): string {
+  return [
+    `$ErrorActionPreference = 'Stop'`,
+    `Add-Type -Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(assembly)}')))`,
+    `[SelectionWindowsSandbox]::Restore([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(state.root)}')), '${state.rootCapability}', '${state.tempCapability}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(journal)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(ready)}')))`,
+  ].join('; ')
+}
+
+function writeDurable(path: string, contents: string): void {
+  const descriptor = openSync(path, 'wx', 0o600)
+  try {
+    writeFileSync(descriptor, contents, 'utf8')
+    fsyncSync(descriptor)
+  } finally { closeSync(descriptor) }
+}
+
 export function createWindowsIsolatedShell(directory: string, options: { denyExternalBrowsers?: boolean; officeDocument?: { path: string; binary: string } } = {}): { directory: string; operations: BashOperations; dispose: () => void } | undefined {
-  if (process.platform !== 'win32' || options.denyExternalBrowsers) return undefined
+  if (process.platform !== 'win32') return undefined
+  // Office tool dispatch enforces denyExternalBrowsers before a command reaches
+  // this native shell; it is a policy flag, not a reason to remove confinement.
   const root = realpathSync(directory)
   const officeDocument = options.officeDocument && { path: realpathSync(options.officeDocument.path), binary: realpathSync(options.officeDocument.binary) }
-  if (officeDocument && !inside(root, officeDocument.path)) throw new Error('Office document escapes isolated workspace')
-  rejectHardLinks(root)
-
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'selection-win-')))
-  const launcher = join(temporary, 'launcher')
-  const home = join(temporary, 'home')
-  const scratch = join(temporary, 'scratch')
-  mkdirSync(launcher)
-  mkdirSync(join(home, 'AppData', 'Roaming'), { recursive: true })
-  mkdirSync(join(home, 'AppData', 'Local'), { recursive: true })
-  mkdirSync(scratch)
-  const officecliWrapper = stageOfficecliWrapper(scratch)
-  const assembly = join(launcher, 'sandbox.dll')
-  const identity = randomUUID()
-  const rootCapability = capability(`root:${root.toLowerCase()}:${identity}`)
-  const tempCapability = capability(`temp:${scratch.toLowerCase()}:${identity}`)
+  const activeRoot = root.toLowerCase()
+  if (activeWindowsRoots.has(activeRoot)) throw new Error('A Windows isolated Shell is already active for this workspace')
+  activeWindowsRoots.add(activeRoot)
+  let temporary = ''
+  let launcher = ''
+  let home = ''
+  let scratch = ''
+  let assembly = ''
+  let rootCapability = ''
+  let tempCapability = ''
+  let officecliWrapper = ''
+  let recoveryDirectory = ''
+  let journal = ''
+  let ready = ''
+  let jobsDirectory = ''
+  let recoveryState: SecurityRecoveryState | undefined
+  let ownsRecovery = false
+  let recoveryDirectoryCreated = false
+  let createdGitPlaceholder = false
   const gitPath = join(root, '.git')
-  const createdGitPlaceholder = !existsSync(gitPath)
-  if (createdGitPlaceholder) mkdirSync(gitPath)
   const children = new Set<number>()
   let disposed = false
   let resourcesDisposed = false
+  let securityRestored = false
 
   const environment = (env?: NodeJS.ProcessEnv) => ({
     ...process.env,
@@ -368,43 +644,163 @@ export function createWindowsIsolatedShell(directory: string, options: { denyExt
     PYTHONDONTWRITEBYTECODE: '1',
     COMSPEC: join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe'),
   })
+  const runPowerShell = (script: string) => execFileSync(powershellPath(), powerShellArguments(script), {
+    cwd: root,
+    env: environment(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+  const registerJob = () => {
+    const name = windowsJobName()
+    const marker = join(jobsDirectory, `${name}.job`)
+    writeDurable(marker, name)
+    return { name, marker }
+  }
+  const unregisterJob = (marker: string) => rmSync(marker, { force: true })
+  const restoreSecurity = () => {
+    if (securityRestored || !ownsRecovery || !recoveryState) return
+    runPowerShell(terminateJobsInvocation(assembly, jobsDirectory))
+    rejectHardLinks(root)
+    runPowerShell(restoreInvocation(assembly, recoveryState, journal, ready))
+    removePlaceholder()
+    rmSync(recoveryDirectory, { recursive: true, force: true })
+    recoveryDirectoryCreated = false
+    securityRestored = true
+    ownsRecovery = false
+    activeWindowsRoots.delete(activeRoot)
+  }
+  const removeEmptyGitPlaceholder = () => {
+    try {
+      if (readdirSync(gitPath).length === 0) rmdirSync(gitPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  const removePlaceholder = () => {
+    if (!createdGitPlaceholder) return
+    removeEmptyGitPlaceholder()
+    createdGitPlaceholder = false
+  }
   const disposeResources = () => {
     if (resourcesDisposed || children.size) return
+    restoreSecurity()
+    removePlaceholder()
+    rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     resourcesDisposed = true
-    if (createdGitPlaceholder) {
-      try {
-        if (readdirSync(gitPath).length === 0) rmdirSync(gitPath)
-      } catch { /* Keep a non-empty or already-removed placeholder untouched. */ }
-    }
-    rmSync(temporary, { recursive: true, force: true })
+    activeWindowsRoots.delete(activeRoot)
   }
   const stop = (pid: number) => {
     const result = spawnSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true, timeout: 10_000 })
     if (result.error && (result.error as NodeJS.ErrnoException).code !== 'ESRCH') throw result.error
+    if (result.status !== 0 && processIsRunning(pid)) throw new Error(`Failed to terminate Windows isolated Shell process ${pid}`)
   }
   const dispose = () => {
+    if (resourcesDisposed) return
     disposed = true
-    for (const pid of children) stop(pid)
-    disposeResources()
+    let failure: unknown
+    for (const pid of children) {
+      try { stop(pid); children.delete(pid) } catch (error) { failure ??= error }
+    }
+    try { disposeResources() } catch (error) { failure ??= error }
+    if (failure) throw failure
   }
 
   try {
-    const bootstrap = [
+    if (officeDocument && !inside(root, officeDocument.path)) throw new Error('Office document escapes isolated workspace')
+    temporary = realpathSync(mkdtempSync(join(tmpdir(), 'selection-win-')))
+    launcher = join(temporary, 'launcher')
+    home = join(temporary, 'home')
+    scratch = join(temporary, 'scratch')
+    mkdirSync(launcher)
+    mkdirSync(join(home, 'AppData', 'Roaming'), { recursive: true })
+    mkdirSync(join(home, 'AppData', 'Local'), { recursive: true })
+    mkdirSync(scratch)
+    officecliWrapper = stageOfficecliWrapper(scratch)
+    assembly = join(launcher, 'sandbox.dll')
+    const identity = randomUUID()
+    rootCapability = capability(`root:${root.toLowerCase()}:${identity}`)
+    tempCapability = capability(`temp:${scratch.toLowerCase()}:${identity}`)
+
+    const compile = [
+      `$ErrorActionPreference = 'Stop'`,
       `$source = @'\n${source}\n'@`,
       `Add-Type -TypeDefinition $source -OutputAssembly ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(assembly)}'))) -ReferencedAssemblies System.dll`,
+    ].join('\r\n')
+    const compilePath = join(launcher, 'compile.ps1')
+    writeFileSync(compilePath, compile, 'utf8')
+    execFileSync(powershellPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', compilePath], {
+      cwd: root, env: environment(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+    })
+
+    const recoveryRoot = join(tmpdir(), 'selection-win-security')
+    mkdirSync(recoveryRoot, { recursive: true })
+    recoveryDirectory = join(recoveryRoot, createHash('sha256').update(activeRoot).digest('hex'))
+    const statePath = join(recoveryDirectory, 'state.json')
+    journal = join(recoveryDirectory, 'security.tsv')
+    ready = join(recoveryDirectory, 'ready')
+    jobsDirectory = join(recoveryDirectory, 'jobs')
+    if (existsSync(recoveryDirectory)) {
+      if (!existsSync(statePath)) {
+        // The directory is created before state is durably written, and no ACL
+        // mutation can happen in that interval.
+        rmSync(recoveryDirectory, { recursive: true, force: true })
+      } else {
+        const candidateState: unknown = JSON.parse(readFileSync(statePath, 'utf8'))
+        if (!isRecoveryState(candidateState, activeRoot)) throw new Error('Invalid Windows sandbox security recovery state')
+        const stale = candidateState
+        if (stale.ownerPid !== process.pid && processIsRunning(stale.ownerPid)) throw new Error('A Windows isolated Shell is already active for this workspace')
+        runPowerShell(terminateJobsInvocation(assembly, jobsDirectory))
+        rejectHardLinks(root)
+        runPowerShell(restoreInvocation(assembly, stale, journal, ready))
+        if (stale.createdGitPlaceholder) removeEmptyGitPlaceholder()
+        rmSync(stale.temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+        rmSync(recoveryDirectory, { recursive: true, force: true })
+      }
+    }
+
+    rejectHardLinks(root)
+    mkdirSync(recoveryDirectory)
+    recoveryDirectoryCreated = true
+    createdGitPlaceholder = !existsSync(gitPath)
+    recoveryState = { version: 1, root, rootCapability, tempCapability, ownerPid: process.pid, createdGitPlaceholder, temporary }
+    writeDurable(statePath, JSON.stringify(recoveryState))
+    writeDurable(journal, '')
+    mkdirSync(jobsDirectory)
+    ownsRecovery = true
+    if (createdGitPlaceholder) mkdirSync(gitPath)
+
+    const bootstrapJob = registerJob()
+    const bootstrap = [
+      `$ErrorActionPreference = 'Stop'`,
       `Add-Type -Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(assembly)}')))`,
-      `[SelectionWindowsSandbox]::Grant([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(root)}')), '${rootCapability}')`,
-      `[SelectionWindowsSandbox]::Grant([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(scratch)}')), '${tempCapability}')`,
-      `[SelectionWindowsSandbox]::Deny([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(gitPath)}')), '${rootCapability}')`,
-      runInvocation(assembly, rootCapability, tempCapability, 'exit 0', '', root),
+      `[SelectionWindowsSandbox]::SnapshotTree([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(root)}')), [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(journal)}')))`,
+      `[SelectionWindowsSandbox]::Grant([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(root)}')), '${rootCapability}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(journal)}')))`,
+      ...(process.env.NODE_ENV === 'test' && process.env.SELECTION_WINDOWS_SANDBOX_TEST_FAIL_AFTER_GRANT === '1' ? [`throw 'Injected Windows sandbox initialization failure'`] : []),
+      `[SelectionWindowsSandbox]::Grant([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(scratch)}')), '${tempCapability}', '')`,
+      `[SelectionWindowsSandbox]::Deny([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(gitPath)}')), '${rootCapability}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(journal)}')))`,
+      `[SelectionWindowsSandbox]::MarkReady([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(ready)}')))`,
+      runInvocation(assembly, rootCapability, tempCapability, bootstrapJob.name, 'exit 0', '', root),
     ].join('\r\n')
     const bootstrapPath = join(launcher, 'bootstrap.ps1')
     writeFileSync(bootstrapPath, bootstrap, 'utf8')
-    execFileSync(powershellPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bootstrapPath], { cwd: root, env: environment(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 })
+    try {
+      execFileSync(powershellPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bootstrapPath], {
+        cwd: root, env: environment(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+      })
+    } finally { unregisterJob(bootstrapJob.marker) }
   } catch (error) {
-    disposeResources()
+    let restorationError: unknown
+    try { restoreSecurity() } catch (failure) { restorationError = failure }
+    if (!ownsRecovery && recoveryDirectoryCreated) rmSync(recoveryDirectory, { recursive: true, force: true })
+    removePlaceholder()
+    if (temporary) rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    activeWindowsRoots.delete(activeRoot)
     const stderr = (error as { stderr?: Buffer | string }).stderr?.toString().trim()
-    throw new Error(`Windows isolated Shell initialization failed${stderr ? `: ${stderr}` : ''}`, { cause: error })
+    const restoreStderr = (restorationError as { stderr?: Buffer | string } | undefined)?.stderr?.toString().trim()
+    const detail = [stderr, restorationError && `security restoration failed${restoreStderr ? `: ${restoreStderr}` : ''}`].filter(Boolean).join('; ')
+    throw new Error(`Windows isolated Shell initialization failed${detail ? `: ${detail}` : ''}`, { cause: restorationError ?? error })
   }
 
   const flushCommand = officeDocument ? `"${officeDocument.binary}" close "${officeDocument.path}"` : ''
@@ -415,12 +811,20 @@ export function createWindowsIsolatedShell(directory: string, options: { denyExt
     const target = realpathSync(cwd)
     if (!inside(root, target)) throw new Error('Shell directory escapes isolated workspace')
     return new Promise((resolve, reject) => {
-      const child = spawn(powershellPath(), powerShellArguments(runInvocation(assembly, rootCapability, tempCapability, command, flushCommand, target)), {
-        cwd: target,
-        env: { ...environment(env), SELECTION_SANDBOX_COMMAND: encode(command), SELECTION_SANDBOX_FLUSH_COMMAND: encode(flushCommand) },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      })
+      const registeredJob = registerJob()
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(powershellPath(), powerShellArguments(runInvocation(assembly, rootCapability, tempCapability, registeredJob.name, command, flushCommand, target)), {
+          cwd: target,
+          env: { ...environment(env), SELECTION_SANDBOX_COMMAND: encode(command), SELECTION_SANDBOX_FLUSH_COMMAND: encode(flushCommand) },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+      } catch (error) {
+        unregisterJob(registeredJob.marker)
+        reject(error)
+        return
+      }
       if (child.pid) children.add(child.pid)
       let timedOut = false
       let terminationError: unknown
@@ -434,20 +838,25 @@ export function createWindowsIsolatedShell(directory: string, options: { denyExt
         if (timer) clearTimeout(timer)
         signal?.removeEventListener('abort', halt)
         if (child.pid) children.delete(child.pid)
+        unregisterJob(registeredJob.marker)
         if (disposed) disposeResources()
       }
       const consume = (bytes: Buffer) => {
         if (outputError !== undefined) return
         try { onData(bytes) } catch (error) { outputError = error ?? new Error('Shell output handling failed'); halt() }
       }
-      child.stdout.on('data', consume)
-      child.stderr.on('data', consume)
+      child.stdout!.on('data', consume)
+      child.stderr!.on('data', consume)
       signal?.addEventListener('abort', halt, { once: true })
       if (signal?.aborted) halt()
-      child.once('error', error => { cleanup(); reject(error) })
+      child.once('error', error => {
+        try { cleanup(); reject(error) } catch (cleanupError) { reject(cleanupError) }
+      })
       child.once('close', exitCode => {
-        cleanup()
-        if (outputError !== undefined) reject(outputError)
+        let cleanupError: unknown
+        try { cleanup() } catch (error) { cleanupError = error }
+        if (cleanupError !== undefined) reject(cleanupError)
+        else if (outputError !== undefined) reject(outputError)
         else if (terminationError) reject(terminationError)
         else if (signal?.aborted) reject(new Error('aborted'))
         else if (timedOut) reject(new Error(`timeout:${timeout}`))
