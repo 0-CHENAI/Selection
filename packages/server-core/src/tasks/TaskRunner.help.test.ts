@@ -145,6 +145,6 @@ test('B9 continuing after restart retries lost help in a fresh context and prese
   expect(() => recovered.taskHelp('root', 0, answer())).toThrow('retired attempt');
   for (const listener of listeners) listener({ workspaceId: 'ws', sessionId: 'recovered-a', generation: 0, reason: 'complete', finalText: 'A confirmed' });
   await tick(); expect(recovered.getRunState('help', 'r')!.nodes.every(node => node.state === 'done')).toBe(true);
-  expect(recovered.submitVerdict('root', { runId: 'r', result: 'pass' }).status).toBe('completed');
+  expect(recovered.getRunState('help', 'r')!.status).toBe('completed');
   await runner.stop('help', 'r'); await stopped;
 });

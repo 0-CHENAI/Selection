@@ -28,10 +28,14 @@ async function complete(id:string,payload:unknown,text='author text') {
   for (const listener of [...listeners]) listener({workspaceId:'ws',sessionId:`session-${id}`,generation:0,reason:'complete',finalText:text});
   await tick();
 }
+function finalChecks(nodeId: string, status: 'pass' | 'fail' | 'unknown' = 'pass') {
+  const revision = runner.getRunState('research', 'r')!.revision;
+  return [{ criterion: 'The research result is supported and discloses remaining uncertainty', status, evidenceRefs: [`node:${nodeId}@r#${revision}`] }];
+}
 beforeEach(()=>{
   root=mkdtempSync(join(tmpdir(),'research-run-'));process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE='1';listeners=new Set();sent=[];
   writeFileSync(join(root,'source.txt'),sourceText);
-  const spec=parseTaskSpec({schema_version:3,id:'research',title:'Research',goal:'cost and risk',runner:'orchestrate',cwd:root,
+  const spec=parseTaskSpec({schema_version:3,id:'research',title:'Research',goal:'cost and risk',acceptance_criteria:'Cost claims are supported and risk evidence gaps are disclosed',runner:'orchestrate',cwd:root,
     research:{line:{id:'main',question:'Cost and risk',premises:['two years']},dimensions:[{id:'cost',requirement:'cost evidence'},{id:'risk',requirement:'risk evidence'}],sources:[{id:'s',path:'source.txt'}]},
     nodes:[node('a','researcher'),node('review','reviewer',['a']),node('report','reporter',['review'])]});
   if(!spec.success)throw new Error(JSON.stringify(spec.error));saveTaskSpec(root,spec.data);runner=new TaskRunner({host:host(),workspaceId:'ws',workspaceRoot:root});
@@ -85,7 +89,7 @@ test('F5-a/d durable business records survive restart, dynamic correction and ex
   await complete('review2',{reviews:[{claimRef:{id:'cost',version:2},citationExists:true,support:'supported',finding:'Original supports 1,000,000',limitations:['No tax or risk data']}]});decide();await tick();
   expect(runner.submitNodeOutput('session-report',{values:{research:{report:{claimRefs:[{id:'cost',version:1}],limitations:['risk'],unresolved:['risk']}}}}).ok).toBe(false);
   await complete('report',{report:{claimRefs:[{id:'cost',version:2}],limitations:['Risk unavailable'],unresolved:['Need risk material']}},'Misleading old Cost 100,000 yuan');
-  decide();runner.submitVerdict('orch',{runId:'r',result:'pass'});
+  decide();runner.submitVerdict('orch',{runId:'r',result:'pass',checks:finalChecks('report')});
   const results=loadTaskResults(root,'research','r');
   expect(results.runStatus).toBe('completed');expect(results.research!.blockers).toEqual([]);
   expect(results.research!.coverage).toEqual({covered:1,limited:0,uncovered:1,total:2});
@@ -204,14 +208,14 @@ test('B4 an undisposed alternative waits before reporter dispatch without pausin
 });
 
 test('final PASS refuses an unavailable frozen research definition rather than dropping its business gate',async()=>{
-  const parsed=parseTaskSpec({schema_version:3,id:'research',title:'Limited research',goal:'disclose evidence gaps',execution:{coordinator_gate:{mode:'off'}},
+  const parsed=parseTaskSpec({schema_version:3,id:'research',title:'Limited research',goal:'disclose evidence gaps',execution:{coordinator_gate:{mode:'off'},verification:{mode:'required'}},
     research:{line:{id:'main',question:'Cost and risk'},dimensions:[{id:'cost',requirement:'cost evidence'}],sources:[]},nodes:[node('only','reporter')]});
   if(!parsed.success)throw new Error(JSON.stringify(parsed.error));saveTaskSpec(root,parsed.data);
   runner.run('research',{runId:'r',orchestratorSessionId:'orch'});await tick();
   await complete('only',{report:{claimRefs:[],limitations:['No cost evidence available'],unresolved:['Need original cost evidence']}});
   expect(runner.getRunState('research','r')!.status).toBe('verifying');
   writeFileSync(specRevisionPath(root,'research','r',0),'corrupt definition');
-  expect(()=>runner.submitVerdict('orch',{runId:'r',result:'pass'})).toThrow('frozen state unavailable');
+  expect(()=>runner.submitVerdict('orch',{runId:'r',result:'pass',checks:finalChecks('only')})).toThrow('frozen state unavailable');
   expect(runner.getRunState('research','r')!.status).toBe('verifying');
 });
 
@@ -285,12 +289,12 @@ test('F6-b shared question and its task commit once, with rollback and exact res
 });
 
 test('verification repair recovery never restores the rejected frontier as completed',async()=>{
-  const spec=parseTaskSpec({schema_version:3,id:'research',title:'Repair recovery',goal:'current outcome',execution:{coordinator_gate:{mode:'off'}},nodes:[{id:'a',prompt:'a'},{id:'b',prompt:'b',depends_on:['a']}]});
+  const spec=parseTaskSpec({schema_version:3,id:'research',title:'Repair recovery',goal:'current outcome',execution:{coordinator_gate:{mode:'off'},verification:{mode:'required'}},nodes:[{id:'a',prompt:'a'},{id:'b',prompt:'b',depends_on:['a']}]});
   if(!spec.success)throw new Error(JSON.stringify(spec));saveTaskSpec(root,spec.data);
   runner.run('research',{runId:'r',orchestratorSessionId:'orch'});await tick();
   for(const id of ['a','b']){for(const listener of [...listeners])listener({workspaceId:'ws',sessionId:`session-${id}`,generation:0,reason:'complete',finalText:`old ${id}`});await tick();}
   expect(runner.getRunState('research','r')!.status).toBe('verifying');
-  runner.submitVerdict('orch',{runId:'r',result:'fail',nodes:['a'],reason:'Need corrected current result'});
+  runner.submitVerdict('orch',{runId:'r',result:'fail',nodes:['a'],reason:'Need corrected current result',checks:finalChecks('a','fail')});
   const result=loadTaskResults(root,'research','r');
   expect(result.nodes.find(node=>node.id==='b')!).toMatchObject({state:'pending'});
   expect(result.nodes.every(node=>node.output===undefined)).toBe(true);
@@ -328,11 +332,12 @@ test('coordinator checkpoints and final verification reference repeated read rec
   decide(); await tick();
   const verification = sent.filter(send => send.id === 'orch').at(-1)!.message;
   expect(verification.length).toBeLessThan(9000);
-  expect(verification).toContain('1,000,000');
-  expect(verification).toContain('"support":"supported"');
+  expect(verification).toContain('get_task_results');
+  expect(verification).not.toContain('1,000,000');
+  expect(verification).not.toContain('"support":"supported"');
   expect(verification).not.toContain('returnedTextHash');
   expect(loadTaskResults(root, 'research', 'r').research!.reads).toEqual(receipts);
-  expect(runner.submitVerdict('orch', { runId: 'r', result: 'pass' }).status).toBe('completed');
+  expect(runner.submitVerdict('orch', { runId: 'r', result: 'pass', checks: finalChecks('report') }).status).toBe('completed');
 });
 
 test('A1 validates host-owned reads, survives restart, and blocks delivery until the reviewer reads independently', async () => {

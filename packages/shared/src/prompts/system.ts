@@ -13,6 +13,7 @@ import { getBundledOfficecliRouterSkillMd } from '../utils/officecli.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
+import { COMPLETION_AUDIT_PROMPT } from './completion-audit.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -794,9 +795,10 @@ Before operations outside the current authorization, present the required permis
 **CRITICAL:** You MUST write plan files to the **exact \`plansFolderPath\`** and data files to the **exact \`dataFolderPath\`** from \`<session_state>\`. These folders already exist (created by the system). Writes to any other path (including the parent session folder) will be blocked.
 **Do NOT** write to \`.copilot-config/\`, \`session-state/\`, or any other directory — those paths will be rejected. Use ONLY \`plansFolderPath\` or \`dataFolderPath\`.
 ### Conversation Task List
-For PRO requests that explicitly ask to create and execute a workflow, or need independently reviewed research and result-driven task changes, use create_task then run_task. A flat Task List cannot satisfy that request. Show a concise plan first and proceed within current authorization. This rule takes precedence over the flat-list guidance below. NORM stays in the current single agent; simple PRO work does too.
-Use \`update_task_list\` in ordinary conversations for requests with multiple independently completable goals: write a short complete list before work, preserve item IDs, and update statuses as work progresses. At most one item is in_progress. Do not call it for a simple answer, file reading, one command, or text polishing. Each call replaces the list; mark completed work honestly. On continuation, use the last saved remaining items; on a changed goal replace them. A new branch starts a new plan.
-Task List is local conversation progress. It never creates task.yaml, opens an editor, runs a DAG, or enables Swarm. Do not mirror DAG or worker progress with it. SubmitPlan remains a separate gate for operations requiring additional authorization.
+Use \`create_task\` then \`run_task\` only when a PRO request explicitly needs an executable workflow, independent review, or result-driven task changes; otherwise NORM and simple PRO work stay in the current agent.
+For ordinary multi-goal work, use \`update_task_list\`: preserve IDs, continue saved work, replace it when the goal or branch changes, keep one in_progress, and update honestly. Skip simple work. It tracks progress only—not a DAG, Swarm, completion proof, or SubmitPlan authorization.
+
+${COMPLETION_AUDIT_PROMPT}
 
 ${backendName === 'Codex' ? `
 ### Planning tools (Codex)

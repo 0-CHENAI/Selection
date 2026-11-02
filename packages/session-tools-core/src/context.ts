@@ -601,6 +601,12 @@ export interface SubmitTaskVerdictInput {
   reason?: string;
   nodes?: string[];
   runId?: string;
+  checks?: Array<{
+    criterion: string;
+    status: 'pass' | 'fail' | 'unknown';
+    evidenceRefs: string[];
+    note?: string;
+  }>;
 }
 
 export interface OrchestrationPatchInput {
@@ -666,8 +672,19 @@ export interface TaskResultsPayload {
   slug: string;
   runId: string | null;
   runIds: string[];
-  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] };
-  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }[];
+  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: SubmitTaskVerdictInput['checks'] };
+  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: SubmitTaskVerdictInput['checks'] }[];
+  metrics?: {
+    verificationMode?: 'auto' | 'required' | 'off';
+    verificationResolution?: 'disabled' | 'reused-node-verdict' | 'model';
+    verificationModelRequested?: boolean;
+    verificationModelRequests?: number;
+    verificationContextBytes?: number;
+    verificationTokensUsed?: number;
+    verificationFormatReasks?: number;
+    deterministicChecks?: { pass: number; fail: number; unknown: number };
+    verdictChecks?: number;
+  };
   repair?: { used: number; max: number };
   runStatus?: string;
   acceptanceCriteria?: string;

@@ -29,6 +29,17 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('audits completion in the existing model turn without adding a router or reviewer (#770)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('## Completion Audit')
+    expect(prompt).toContain('current raw user request')
+    expect(prompt).toContain('keep all unretracted constraints')
+    expect(prompt).toContain('A Task List or plan state is progress, not proof')
+    expect(prompt).toContain('A narrow test cannot prove a broader goal')
+    expect(prompt).toContain('Do not create an intent router, mini-completion, hidden reviewer, sub-agent')
+  })
+
   it('keeps chat citations inline without requesting a duplicate bibliography', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
     expect(prompt).toContain('cite supporting links next to the claims they support')

@@ -63,3 +63,19 @@ scenarios, repeated three times each, have **not** been claimed as 21/21.
 Do not substitute another model and do not promote V3 to a default-on feature.
 Once that connection is available, run the seven scenarios three consecutive
 times, attach per-run results here, and require 21/21 before promotion.
+
+## 2026-11-02 verification policy addendum
+
+The final-verification policy now uses `auto | required | off`; the historical
+`required` boolean remains read-compatible but cannot coexist with `mode`.
+`auto` can reuse a covering terminal verifier or skip an unrequested semantic
+review, while deterministic artifact and runtime gates always remain active.
+When a final model review is actually requested, v3 requires bounded,
+current-run `checks`; fail or unknown checks cannot be submitted as PASS.
+
+The first verification request no longer embeds the frozen TaskSpec or every
+node body. It carries a bounded status/evidence catalog and directs the parent
+to `get_task_results` for exact results. Run-local metrics distinguish disabled,
+reused, model-reviewed, format-corrected, and repaired paths. These contracts
+do not prove model semantic correctness and do not replace Office visual QA or
+research evidence review.

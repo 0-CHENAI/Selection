@@ -45,8 +45,10 @@ class MockHost implements ConductorSessionHost {
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
   readonly orchestrationStatuses: { sessionId: string; status: string; blocker?: string }[] = [];
   readonly cancelled: string[] = [];
+  readonly continued: string[] = [];
   readonly finalTextById = new Map<string, string>();
   usedToolsById = new Map<string, boolean>();
+  liveTokens = 0;
 
   async createSession(_workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }> {
     const id = `sess-${options.name}`;
@@ -71,6 +73,10 @@ class MockHost implements ConductorSessionHost {
   async cancelProcessing(sessionId: string): Promise<void> {
     this.cancelled.push(sessionId);
   }
+  async continueProgress(sessionId: string): Promise<void> {
+    this.continued.push(sessionId);
+  }
+  getProgressLiveTokens(): number { return this.liveTokens; }
   onSessionComplete(listener: (evt: SessionCompletionEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -94,17 +100,29 @@ class MockHost implements ConductorSessionHost {
     return this.created.map((c) => c.options.name!).filter(Boolean);
   }
   complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
+    this.completeSession(this.sessionIdFor(nodeId), opts);
+  }
+  completeSession(sessionId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: TokenUsage; turnTokens?: number; generation?: number } = {}): void {
     const evt: SessionCompletionEvent = {
-      sessionId: this.sessionIdFor(nodeId),
+      sessionId,
       workspaceId: 'ws',
-      generation: 0,
+      generation: opts.generation ?? 0,
       reason: opts.reason ?? 'complete',
       errorCode: opts.errorCode,
       finalText: opts.finalText,
       tokenUsage: opts.tokenUsage,
+      turnTokens: opts.turnTokens,
     };
     for (const listener of [...this.listeners]) listener(evt);
   }
+}
+
+function finalChecks(runId: string, nodeIds: string[] = ['a'], revision = 0) {
+  return [{
+    criterion: 'The declared acceptance criteria are supported by current-run evidence',
+    status: 'pass' as const,
+    evidenceRefs: nodeIds.map(nodeId => `node:${nodeId}@${runId}#${revision}`),
+  }];
 }
 
 function v3Spec(over: Record<string, unknown> = {}): TaskSpec {
@@ -199,7 +217,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(r.getRunState('v3demo', 'f3')!.status).toBe('completed');
   });
 
-  it('verifies typed values from the frozen plan rather than prose alone', async () => {
+  it('verifies typed values through bounded current-run references instead of copying the frozen plan', async () => {
     saveTaskSpec(root, v3Spec({ runner: 'conduct', constraints: ['read only'], nodes: [{ id: 'a', prompt: 'A', outputs: [
       { name: 'cost', kind: 'param', type: 'number', required: true }, { name: 'unresolved', kind: 'param', type: 'boolean', required: true },
     ] }] }));
@@ -207,14 +225,15 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(r.submitNodeOutput('sess-a', { text: 'cost is known; risk remains unknown', values: { cost: 1000000, unresolved: true } }).ok).toBe(true);
     host.complete('a', { finalText: 'Submitted' }); await tick();
     const review = host.sent.find(item => item.sessionId === 'orch')!.message;
-    expect(review).toContain('Runtime-validated values: {"cost":1000000,"unresolved":true}');
-    expect(review).toContain('User constraints for every node: ["read only"]');
+    expect(review).toContain('"status":"validated-value","type":"number"');
     expect(review).toContain('Task slug: v3demo; runId: typed; revision: 0.');
-    expect(review).toContain('Frozen plan: {');
-    expect(review).toContain('"type":"number"'); expect(review).toContain('Run: typed; revision: 0');
-    expect(() => r.submitVerdict('orch', { runId: 'typed', result: 'fail', reason: 'bad target', nodes: ['unknown'] })).toThrow('completed nodes');
+    expect(review).toContain('Current-run evidence reference catalog: ["node:a@typed#0"]');
+    expect(review).toContain('get_task_results');
+    expect(review).not.toContain('Frozen plan: {');
+    expect(review).not.toContain('cost is known; risk remains unknown');
+    expect(() => r.submitVerdict('orch', { runId: 'typed', result: 'fail', reason: 'bad target', nodes: ['unknown'] })).toThrow('completed producing nodes');
     expect(r.getRunState('v3demo', 'typed')!.nodes.find(node => node.id === 'a')!.state).toBe('done');
-    expect(r.submitVerdict('orch', { runId: 'typed', result: 'pass' }).status).toBe('completed');
+    expect(r.submitVerdict('orch', { runId: 'typed', result: 'pass', checks: finalChecks('typed') }).status).toBe('completed');
   });
 
   it('accepts only one same-revision manual/planner commit and refuses to overwrite running nodes', async () => {
@@ -352,7 +371,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     host.complete('b', { finalText: 'Corrected result' }); await tick();
     decide('drain', 'continue', { plannerPhase: 'draining' }); await tick();
     expect(r.getRunState('v3demo', 'r1')!.status).toBe('verifying');
-    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass', checks: finalChecks('r1', ['a'], 0) }).status).toBe('completed');
     const log = readRunLog(root, 'v3demo', 'r1');
     expect(log.some(e => e.kind === 'node-finished' && e.nodeId === 'b' && e.state === 'failed')).toBe(true);
     expect(log.some(e => e.kind === 'run-resumed' && e.retryNodeIds?.includes('b'))).toBe(true);
@@ -372,7 +391,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(r.getRunState('v3demo', 'r1')!.status).toBe('verifying');
     expect(r.getRunState('v3demo', 'r1')!.nodes.map(node => node.id)).toEqual(['a']);
     expect(readRunLog(root, 'v3demo', 'r1').some(e => e.kind === 'orchestration-patch' && e.cancelled?.includes('b'))).toBe(true);
-    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
+    expect(r.submitVerdict('orch', { runId: 'r1', result: 'pass', checks: finalChecks('r1', ['a'], r.getRunState('v3demo', 'r1')!.revision) }).status).toBe('completed');
     const restored = runner().getLatestRun('v3demo')!;
     expect(restored.status).toBe('completed');
     expect(restored.nodes.map(node => node.id)).toEqual(['a']);
@@ -964,7 +983,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(execution.submitNodeOutput('sess-a',{values:{file:'late.txt'}}).ok).toBe(true);
     host.complete('a'); await tick(); expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
     writeFileSync(join(root,'late.txt'),'changed');
-    expect(() => execution.submitVerdict('orch',{runId:'r',result:'pass'})).toThrow('artifact validation is unsettled');
+    expect(() => execution.submitVerdict('orch',{runId:'r',result:'pass',checks:finalChecks('r')})).toThrow('artifact validation is unsettled');
     expect(execution.getRunState('late-artifact','r')?.status).toBe('verifying');
     expect(readRunLog(root,'late-artifact','r').some(event => event.kind === 'verdict' && event.result === 'pass')).toBe(false);
     await execution.stop('late-artifact','r');
@@ -989,7 +1008,7 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(cachedHost.dispatchedNames()).toHaveLength(0);
     expect(readRunLog(root, 'cache-file-reused', 'cached').some(event => event.kind === 'node-artifact-inputs' && event.nodeId === 'pure' && event.sessionId === '')).toBe(true);
     expect(cachedRunner.getRunState('cache-file-reused', 'cached')?.status).toBe('verifying');
-    cachedRunner.submitVerdict('orch', { runId: 'cached', result: 'pass' });
+    cachedRunner.submitVerdict('orch', { runId: 'cached', result: 'pass', checks: finalChecks('cached', ['pure']) });
     writeFileSync(join(root, 'report.txt'), 'external replacement');
     const previous = cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached');
     expect(previous.nodes.find(node => node.id === 'pure')?.state).toBe('done');
@@ -1001,6 +1020,273 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(nextHost.dispatchedNames()).toContain('pure');
     expect(next.getRunState('cache-file-next', 'r2')?.nodes.find(node => node.id === 'pure')?.cacheStatus).toBe('miss');
     next.stop('cache-file-next', 'r2');
+  });
+
+  it('auto skips final-model verification when no acceptance criteria exist', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      acceptance_criteria: undefined,
+      execution: { verification: { mode: 'auto' } },
+      nodes: [{ id: 'a', prompt: 'A' }],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'auto-none', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'done' }); await tick();
+    const snapshot = r.getRunState('v3demo', 'auto-none')!;
+    expect(snapshot.status).toBe('completed');
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(0);
+    expect(snapshot.metrics).toMatchObject({
+      verificationMode: 'auto',
+      verificationResolution: 'disabled',
+      verificationModelRequested: false,
+      verificationModelRequests: 0,
+    });
+  });
+
+  it('auto reuses a covering terminal verifier without another model turn or reserve', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      token_budget: 20_000,
+      execution: { verification: { mode: 'auto' } },
+      nodes: [
+        { id: 'work', prompt: 'produce' },
+        { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+      ],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'auto-reuse', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('work', { finalText: 'current result' }); await tick();
+    expect(r.submitNodeVerdict('sess-review', { result: 'pass', reason: 'covered', evidence: 'current result' }).ok).toBe(true);
+    host.complete('review'); await tick();
+    const snapshot = r.getRunState('v3demo', 'auto-reuse')!;
+    expect(snapshot.status).toBe('completed');
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(0);
+    expect(snapshot.metrics).toMatchObject({
+      verificationMode: 'auto',
+      verificationResolution: 'reused-node-verdict',
+      verificationModelRequested: false,
+      verificationModelRequests: 0,
+    });
+    expect(snapshot.metrics!.verifyBudgetReserved).toBeUndefined();
+  });
+
+  it('required still requests final verification after a covering verifier passes', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'required' } },
+      nodes: [
+        { id: 'work', prompt: 'produce' },
+        { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+      ],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'required-after-review', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('work', { finalText: 'current result' }); await tick();
+    expect(r.submitNodeVerdict('sess-review', { result: 'pass', reason: 'covered', evidence: 'current result' }).ok).toBe(true);
+    host.complete('review'); await tick();
+    expect(r.getRunState('v3demo', 'required-after-review')!.status).toBe('verifying');
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(1);
+    await r.stop('v3demo', 'required-after-review');
+  });
+
+  it('off disables only the model review and still rejects a missing artifact output', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'off' } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact', required: true }] }],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'off-artifact', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'claimed completion without artifact' }); await tick();
+    expect(r.getRunState('v3demo', 'off-artifact')!.status).toBe('failed');
+    expect(host.sent.filter(item => item.sessionId === 'orch' && item.message.includes('submit_task_verdict'))).toHaveLength(0);
+  });
+
+  it('does not report outputs from conditionally skipped nodes as missing evidence', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      params: [{ name: 'enabled', default: false }],
+      execution: { verification: { mode: 'required' } },
+      nodes: [
+        {
+          id: 'optional',
+          prompt: 'optional',
+          when: { ref: 'params.enabled', op: 'eq', value: true },
+          outputs: [{ name: 'result', required: true }],
+        },
+        { id: 'always', prompt: 'always' },
+      ],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'skipped-output', orchestratorSessionId: 'orch' }); await tick();
+    expect(r.getRunState('v3demo', 'skipped-output')!.nodes.find(node => node.id === 'optional')?.state).toBe('skipped');
+    host.complete('always', { finalText: 'done' }); await tick();
+    const message = host.sent.findLast(item => item.sessionId === 'orch')!.message;
+    expect(message).toContain('Unsettled deterministic evidence: []');
+    const completed = r.submitVerdict('orch', {
+      runId: 'skipped-output', result: 'pass', checks: finalChecks('skipped-output', ['always']),
+    });
+    expect(completed.status).toBe('completed');
+    expect(completed.metrics?.deterministicChecks?.unknown).toBe(0);
+  });
+
+  it('auto does not treat a deterministic aggregate as semantic coverage for model-generated ancestors', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'auto' } },
+      nodes: [
+        { id: 'work', prompt: 'produce' },
+        { id: 'aggregate', kind: 'aggregate', depends_on: ['work'], aggregate: 'concat' },
+      ],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'auto-aggregate', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('work', { finalText: 'semantic result' }); await tick();
+    const snapshot = r.getRunState('v3demo', 'auto-aggregate')!;
+    expect(snapshot.status).toBe('verifying');
+    expect(snapshot.metrics).toMatchObject({ verificationMode: 'auto', verificationResolution: 'model', verificationModelRequests: 1 });
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(1);
+    await r.stop('v3demo', 'auto-aggregate');
+  });
+
+  it('required verification enforces current-run checks and persists cost metrics', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'required' } },
+      nodes: [{ id: 'a', prompt: 'A' }],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'required-checks', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'current result' }); await tick();
+    expect(r.getRunState('v3demo', 'required-checks')!.status).toBe('verifying');
+    expect(() => r.submitVerdict('orch', {
+      runId: 'required-checks', result: 'pass',
+      checks: [{ criterion: 'coverage', status: 'unknown', evidenceRefs: [] }],
+    })).toThrow('fail or unknown');
+    expect(() => r.submitVerdict('orch', {
+      runId: 'required-checks', result: 'pass',
+      checks: [{ criterion: 'coverage', status: 'pass', evidenceRefs: ['node:a@foreign#0'] }],
+    })).toThrow('stale, foreign, or unknown');
+    host.liveTokens = 123;
+    const checks = [
+      { criterion: 'branch A is present', status: 'pass' as const, evidenceRefs: ['node:a@required-checks#0'] },
+      { criterion: 'the result is current', status: 'pass' as const, evidenceRefs: ['node:a@required-checks#0'] },
+    ];
+    const completed = r.submitVerdict('orch', { runId: 'required-checks', result: 'pass', checks });
+    expect(completed.status).toBe('completed');
+    expect(completed.metrics).toMatchObject({
+      verificationMode: 'required',
+      verificationResolution: 'model',
+      verificationModelRequested: true,
+      verificationModelRequests: 1,
+      verificationTokensUsed: 123,
+      verdictChecks: 2,
+      repairs: 0,
+    });
+    expect(completed.metrics!.verificationContextBytes).toBeGreaterThan(0);
+    const verdict = readRunLog(root, 'v3demo', 'required-checks').findLast(event => event.kind === 'verdict');
+    expect(verdict?.checks).toEqual(checks);
+  });
+
+  it('a failing check repairs only the named producing node and its dependents', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'required' } },
+      nodes: [
+        { id: 'a', prompt: 'A' }, { id: 'b', prompt: 'B' },
+        { id: 'c', prompt: 'C', depends_on: ['a'] }, { id: 'd', prompt: 'D', depends_on: ['b'] },
+      ],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'local-repair', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'a' }); host.complete('b', { finalText: 'b' }); await tick();
+    host.complete('c', { finalText: 'c' }); host.complete('d', { finalText: 'd' }); await tick();
+    r.submitVerdict('orch', {
+      runId: 'local-repair', result: 'fail', reason: 'A is inconsistent', nodes: ['a'],
+      checks: [{ criterion: 'A is consistent', status: 'fail', evidenceRefs: ['node:a@local-repair#0'] }],
+    });
+    const states = Object.fromEntries(r.getRunState('v3demo', 'local-repair')!.nodes.map(node => [node.id, node.state]));
+    expect(states.a).toBe('running');
+    expect(states.c).toBe('pending');
+    expect(states.b).toBe('done');
+    expect(states.d).toBe('done');
+    await r.stop('v3demo', 'local-repair');
+  });
+
+  it('uses one bounded format correction without consuming business repair', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'required' } },
+      nodes: [{ id: 'a', prompt: 'A' }],
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'format-reask', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'done' }); await tick();
+    host.completeSession('orch', { generation: 1, reason: 'complete', turnTokens: 50 }); await tick();
+    expect(r.getRunState('v3demo', 'format-reask')!.status).toBe('verifying');
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(2);
+    expect(readRunLog(root, 'v3demo', 'format-reask').filter(event => event.kind === 'verdict-format-reask')).toHaveLength(1);
+    expect(readRunLog(root, 'v3demo', 'format-reask').some(event => event.kind === 'run-repairing')).toBe(false);
+    host.liveTokens = 20;
+    const completed = r.submitVerdict('orch', { runId: 'format-reask', result: 'pass', checks: finalChecks('format-reask') });
+    expect(completed.metrics).toMatchObject({
+      verificationModelRequests: 2,
+      verificationFormatReasks: 1,
+      verificationTokensUsed: 70,
+      repairs: 0,
+    });
+  });
+
+  it('resumes an interrupted verification turn after restart without sending duplicate context', async () => {
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      execution: { verification: { mode: 'required' } },
+      nodes: [{ id: 'a', prompt: 'A' }],
+    }));
+    const first = runner();
+    first.run('v3demo', { runId: 'verify-resume', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('a', { finalText: 'done' }); await tick();
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(1);
+
+    const restoredHost = new MockHost();
+    const restored = new TaskRunner({ host: restoredHost, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    expect(restored.getLatestRun('v3demo')?.status).toBe('interrupted');
+    restored.continue('v3demo', 'verify-resume'); await tick();
+    expect(restoredHost.continued).toEqual(['orch']);
+    expect(restoredHost.sent.filter(item => item.sessionId === 'orch')).toHaveLength(0);
+    await restored.stop('v3demo', 'verify-resume');
+  });
+
+  it('keeps final verification context bounded as node outputs grow', async () => {
+    const nodes = Array.from({ length: 50 }, (_, index) => ({
+      id: `n${index}`,
+      prompt: `node ${index}`,
+      ...(index >= 10 ? { depends_on: [`n${index - 10}`] } : {}),
+    }));
+    saveTaskSpec(root, v3Spec({
+      runner: 'conduct',
+      max_parallel: 8,
+      execution: { verification: { mode: 'required' } },
+      nodes,
+    }));
+    const r = runner();
+    r.run('v3demo', { runId: 'bounded-context', orchestratorSessionId: 'orch' }); await tick();
+    const completed = new Set<string>();
+    while (r.getRunState('v3demo', 'bounded-context')!.status === 'running') {
+      const ready = host.dispatchedNames().filter(name => !completed.has(name));
+      expect(ready.length).toBeGreaterThan(0);
+      for (const name of ready) {
+        completed.add(name);
+        host.complete(name, { finalText: `UNBOUNDED-${name}-` + 'x'.repeat(20_000) });
+      }
+      await tick();
+    }
+    const message = host.sent.findLast(item => item.sessionId === 'orch')!.message;
+    expect(Buffer.byteLength(message, 'utf8')).toBeLessThan(20_000);
+    expect(message).not.toContain('UNBOUNDED-');
+    expect(message).not.toContain('Frozen plan:');
+    expect(message).toContain('get_task_results');
+    await r.stop('v3demo', 'bounded-context');
   });
 
 });

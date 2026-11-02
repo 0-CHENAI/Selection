@@ -23,7 +23,8 @@ import { dependencyImpact, dependencyAncestors } from './dependency-impact';
 import { statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SourceReadProof } from '@craft-agent/core/types';
-import type { TaskHelpInput } from '@craft-agent/session-tools-core';
+import type { SubmitTaskVerdictInput, TaskHelpInput } from '@craft-agent/session-tools-core';
+import { TASK_NODE_COMPLETION_AUDIT_PROMPT } from '@craft-agent/shared/prompts';
 import type { CreateSessionOptions, SendMessageOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent, SessionRuntimeActivity } from '../sessions/SessionManager';
 import type { PlannerPhase, PlannerResultEvent, TaskWorkerRecord, TaskSessionBinding } from '@craft-agent/shared/tasks';
@@ -69,12 +70,15 @@ import {
   conditionFromLegacyWhen,
   type ConditionAst,
   DEFAULT_REPAIR_ATTEMPTS,
+  DEFAULT_V3_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
   DEFAULT_DAG_MAX_PARALLEL,
   MAX_DAG_MAX_PARALLEL,
   COORDINATOR_GATE_TIMEOUT_SECONDS,
   CONDUCTOR_CACHE_RUNTIME_VERSION,
   computeVerifyReserve,
+  resolveVerificationMode,
+  extractRefs,
   taskSourceVersion,
   planValueKey,
   validateOrchestrationPatch,
@@ -98,6 +102,9 @@ import {
   type CoordinatorGateState,
   type CoordinatorGateReason,
   type TaskRunMetrics,
+  type TaskVerificationCheck,
+  type VerificationMode,
+  type VerificationResolution,
   type TaskNodeTiming,
   type TaskNodeVerdict,
   type TaskHelpRecord,
@@ -409,6 +416,16 @@ class ActiveRun {
   private repairsUsed = 0;
   /** Malformed-verdict re-asks issued (bounded by MAX_UNPARSED_REASKS); not a repair. */
   private unparsedReAsks = 0;
+  /** Structured-verdict format turns are separate from business repair. */
+  private verificationFormatReasks = 0;
+  private verificationModelRequested = false;
+  private verificationModelRequests = 0;
+  private verificationResolution?: VerificationResolution;
+  private verificationContextBytes = 0;
+  private verificationTokensUsed = 0;
+  private verdictChecks = 0;
+  private verificationDecisionLogged = false;
+  private readonly verificationUsageGenerations = new Set<number>();
   /** Resolved repair cap = min(spec.max_iterations ?? DEFAULT, CAP). */
   private readonly maxRepairs: number;
   /** Inverted edges: node id → set of nodes that (directly) depend on it. Built lazily for the frontier. */
@@ -481,7 +498,7 @@ class ActiveRun {
     );
     // Runner-side clamp (belt-and-suspenders: the schema already caps `max_iterations` at the same
     // bound, so a parsed spec can't exceed it — but a programmatically built spec might).
-    this.maxRepairs = Math.min(spec.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP);
+    this.maxRepairs = Math.min(spec.max_iterations ?? (this.sourceVersion === 3 ? DEFAULT_V3_REPAIR_ATTEMPTS : DEFAULT_REPAIR_ATTEMPTS), MAX_REPAIR_ATTEMPTS_CAP);
     for (const node of spec.nodes) this.state.set(node.id, { state: 'pending', attempt: 0 });
   }
 
@@ -609,6 +626,16 @@ class ActiveRun {
     }
     this.assertSensitiveReady();
     if (this.unconfirmedShutdown.size) throw new TaskControlError(this.runStatus, 'Execution shutdown is unconfirmed; retry stop first');
+    if (this.progressParentResume === 'verifying' && this.opts.orchestratorSessionId) {
+      if (!this.deps.host.continueProgress) throw new TaskControlError(this.runStatus, 'Host cannot resume verification checkpoint');
+      this.deps.host.assertTaskSafePoint?.(this.executionSessions());
+      this.progressParentResume = undefined;
+      this.runStatus = 'verifying';
+      this.log({ kind: 'run-resumed' });
+      void this.deps.host.continueProgress(this.opts.orchestratorSessionId).catch(() => { this.pause(); });
+      this.emitChanged();
+      return this.snapshot();
+    }
     this.deps.host.assertTaskSafePoint?.(this.executionSessions());
     this.reconcileWorkers();
     for (const [, st] of this.state) {
@@ -846,7 +873,21 @@ class ActiveRun {
           if (e.status === 'failed') st.lastFailure = 'feedback-delivery-failed';
           else if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
         }
+      } else if (e.kind === 'verification-decision') {
+        this.verificationResolution = e.resolution;
+        if (e.resolution === 'model') {
+          this.verificationModelRequested = true;
+          this.verificationModelRequests += 1;
+          this.verificationContextBytes += e.contextBytes ?? 0;
+        } else {
+          this.verificationDecisionLogged = true;
+        }
+      } else if (e.kind === 'verification-usage') {
+        this.verificationTokensUsed += e.tokens;
+      } else if (e.kind === 'verdict-format-reask') {
+        this.verificationFormatReasks = Math.max(this.verificationFormatReasks, e.attempt);
       } else if (e.kind === 'verdict') {
+        this.verdictChecks = e.checks?.length ?? 0;
         if (e.result === 'fail') this.repairsUsed += 1;
         else if (e.result === 'unparsed') this.unparsedReAsks += 1;
         else if (e.result === 'pass') this.unparsedReAsks = 0;
@@ -921,6 +962,7 @@ class ActiveRun {
       }
     }
     this.runStatus = deriveRunStatusFromLog(log);
+    if (mode === 'scan' && this.runStatus === 'verifying') this.progressParentResume = 'verifying';
     this.supersededBy ??= listRunIds(this.deps.workspaceRoot, this.slug).find(id => id !== this.runId
       && readRunLog(this.deps.workspaceRoot, this.slug, id).some(event => event.kind === 'run-started' && event.resumedFrom === this.runId));
     // History reads must never subscribe, start timers, change states or write logs.
@@ -2108,11 +2150,11 @@ class ActiveRun {
     return !!output && (!!output.text?.trim() || Object.keys(output.params ?? {}).length > 0);
   }
 
-  submitStructuredVerdict(payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[] }): RunSnapshot {
+  submitStructuredVerdict(payload: SubmitTaskVerdictInput): RunSnapshot {
     if (this.runStatus !== 'verifying') {
       throw new TaskControlError(this.runStatus, 'Run is not waiting for a verdict');
     }
-    this.handleVerdictObject({ result: payload.result, reason: payload.reason, nodes: payload.nodes });
+    this.handleVerdictObject({ result: payload.result, reason: payload.reason, nodes: payload.nodes, checks: payload.checks });
     return this.snapshot();
   }
 
@@ -2415,7 +2457,7 @@ class ActiveRun {
       }
       let deliveryPrompt = prompt;
       if (this.sourceVersion === 3) {
-        deliveryPrompt = `Canonical execution identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, nodeId=${JSON.stringify(key)}, attempt=${attempt}, revision=${options.taskRevision}. Use these exact identities in result tools; a task label is not a slug.\nOriginal user goal: ${this.spec.goal}\nThe original goal is background for this assigned node. Complete only node ${JSON.stringify(key)}; the scheduler owns all other steps. Return your findings as this node output, then end the turn. Never wait for or search for this node\'s own result.\nAcceptance criteria: ${this.spec.acceptance_criteria ?? 'Not specified'}\n\n${deliveryPrompt}`;
+        deliveryPrompt = `Canonical execution identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, nodeId=${JSON.stringify(key)}, attempt=${attempt}, revision=${options.taskRevision}. Use these exact identities in result tools; a task label is not a slug.\nOriginal user goal: ${this.spec.goal}\nThe original goal is background for this assigned node. Complete only node ${JSON.stringify(key)}; the scheduler owns all other steps. Return your findings as this node output, then end the turn. Never wait for or search for this node\'s own result.\nAcceptance criteria: ${this.spec.acceptance_criteria ?? 'Not specified'}\n\n${TASK_NODE_COMPLETION_AUDIT_PROMPT}\n\n${deliveryPrompt}`;
       }
       if (node.actor) {
         deliveryPrompt = `Logical actor ${node.actor.id}${node.actor.persona ? `: ${node.actor.persona}` : ''}. Work binding: run=${this.runId}, node=${key}, attempt=${attempt}, revision=${options.taskRevision}. Submit this task's output separately; prior task outputs remain immutable.\n\n${deliveryPrompt}`;
@@ -2522,7 +2564,29 @@ class ActiveRun {
   private onSessionComplete(evt: SessionCompletionEvent): void {
     const nodeId = this.sessionToNode.get(evt.sessionId);
     if (!nodeId) {
-      if (evt.sessionId === this.opts.orchestratorSessionId
+      const orchestratorCompletion = evt.sessionId === this.opts.orchestratorSessionId;
+      if (orchestratorCompletion && this.runStatus === 'verifying' && this.sourceVersion >= 2) {
+        if (!this.verificationUsageGenerations.has(evt.generation)) {
+          this.verificationUsageGenerations.add(evt.generation);
+          this.recordVerificationUsage(evt.turnTokens ?? 0);
+        }
+        const resumable = ['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '');
+        if (!resumable && evt.reason === 'complete' && !this.verdictLocked) {
+          if (this.verificationFormatReasks < 1) {
+            this.verificationFormatReasks += 1;
+            this.log({ kind: 'verdict-format-reask', attempt: this.verificationFormatReasks });
+            void this.reAskStructuredVerdict();
+          } else {
+            this.finish('failed');
+          }
+          return;
+        }
+        if (!resumable && evt.reason !== 'complete') {
+          this.finish('failed');
+          return;
+        }
+      }
+      if (orchestratorCompletion
         && ['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '')
         && (this.runStatus === 'waiting-coordinator' || this.runStatus === 'verifying')) {
         this.progressParentResume = this.runStatus === 'verifying' ? 'verifying' : 'coordinator';
@@ -2845,16 +2909,31 @@ class ActiveRun {
       this.finish('failed');
       return;
     }
-    if (this.spec.research && !this.qualityGateEnabled()) {
+    // Deterministic artifact and frozen-input checks run before any semantic
+    // verifier decision, including mode=off and verifier-reuse paths.
+    this.revalidateCompletedArtifacts();
+    if ([...this.state.values(), ...this.instances.values()].some(state => !['done', 'skipped'].includes(state.state))) {
+      this.finish('failed');
+      return;
+    }
+    if (this.spec.research) {
       const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
       if (!research || research.blockers.length) { this.finish('failed'); return; }
     }
-    if (this.sourceVersion === 3 && this.qualityGateEnabled()) {
-      if (!this.opts.orchestratorSessionId) {
-        this.finish('failed');
-        return;
+    if (this.sourceVersion === 3) {
+      const decision = this.finalVerificationDecision();
+      this.verificationResolution = decision.resolution;
+      if (decision.resolution === 'model') {
+        if (!this.opts.orchestratorSessionId) {
+          this.recordVerificationDecision(decision);
+          this.finish('failed');
+          return;
+        }
+        this.enterVerifying();
+      } else {
+        this.recordVerificationDecision(decision);
+        this.finish('completed');
       }
-      this.enterVerifying();
       return;
     }
     if (this.opts.verifyOnComplete && this.opts.orchestratorSessionId) {
@@ -2959,6 +3038,43 @@ class ActiveRun {
     this.settleResolvers = [];
   }
 
+  private currentEvidenceRefs(): string[] {
+    const refs: string[] = [];
+    for (const node of this.spec.nodes) {
+      if (this.state.get(node.id)?.state !== 'done') continue;
+      const suffix = `@${this.runId}#${this.attemptRevisions.get(node.id) ?? this.revision}`;
+      refs.push(`node:${node.id}${suffix}`);
+      const output = this.outputs[node.id];
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.kind !== 'artifact' || !(declaration.name in (output?.params ?? {}))) continue;
+        refs.push(`artifact:${node.id}:${declaration.name}${suffix}`);
+      }
+    }
+    return refs;
+  }
+
+  private deterministicEvidenceGaps(): string[] {
+    const gaps: string[] = [];
+    for (const node of this.spec.nodes) {
+      const state = this.state.get(node.id)?.state ?? 'unknown';
+      if (!['done', 'skipped'].includes(state)) gaps.push(`node:${node.id}:${state}`);
+      if (state === 'skipped') continue;
+      const output = this.outputs[node.id];
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.required !== false && !(declaration.name in (output?.params ?? {}))) {
+          gaps.push(`output:${node.id}:${declaration.name}:missing`);
+        }
+      }
+    }
+    if (this.artifactAvailability?.nodeIds.length) gaps.push(`artifact:${this.artifactAvailability.nodeIds.join(',')}:${this.artifactAvailability.reason}`);
+    for (const worker of this.workers.values()) if (['reserved', 'running'].includes(worker.state)) gaps.push(`worker:${worker.workerId}:${worker.state}`);
+    for (const sessionId of this.unconfirmedShutdown) gaps.push(`shutdown:${sessionId}:unknown`);
+    if (this.coordinatorGateEnabled() && this.pendingPlannerResults().length) gaps.push(`planner-results:${this.pendingPlannerResults().length}:unconsumed`);
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    for (const blocker of research?.blockers ?? []) gaps.push(`research:${blocker}`);
+    return gaps;
+  }
+
   private async sendVerification(): Promise<void> {
     const orchestrator = this.opts.orchestratorSessionId;
     if (!orchestrator) {
@@ -2966,29 +3082,70 @@ class ActiveRun {
       return;
     }
     if (this.sourceVersion === 1) this.attachVerdictListener(orchestrator);
-    const sections = this.spec.nodes.map((n) => {
-      const out = this.outputs[n.id];
-      const structured = this.sourceVersion >= 2 && out
-        ? `\nDeclared outputs: ${JSON.stringify(n.outputs ?? [])}\nRuntime-validated values: ${JSON.stringify(n.researchRole ? { ...out.params, research: '(canonical research payload: use get_task_results)' } : out.params ?? {})}\nRun: ${this.runId}; revision: ${this.revision}` : '';
-      return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}${structured}`;
-    });
     const rubric = this.spec.acceptance_criteria
       ? `Acceptance criteria:\n${this.spec.acceptance_criteria}`
       : `Goal: ${this.spec.goal}`;
+    const summaries = this.spec.nodes.map(node => {
+      const state = this.state.get(node.id);
+      const output = this.outputs[node.id];
+      const verdict = this.nodeVerdicts.get(node.id) ?? this.nodeTimings.get(node.id)?.verdict;
+      return {
+        id: node.id,
+        title: nodeTitle(node),
+        kind: node.kind ?? 'session',
+        state: state?.state ?? 'unknown',
+        attempt: state?.attempt ?? 0,
+        revision: this.attemptRevisions.get(node.id) ?? this.revision,
+        declaredOutputs: (node.outputs ?? []).map(declaration => ({
+          name: declaration.name,
+          kind: declaration.kind ?? 'param',
+          type: declaration.type,
+          required: declaration.required !== false,
+          runtime: declaration.name in (output?.params ?? {})
+            ? declaration.kind === 'artifact'
+              ? { status: 'validated-artifact', hash: (output?.params?.[declaration.name] as { hash?: unknown } | undefined)?.hash }
+              : { status: 'validated-value', type: typeof output?.params?.[declaration.name] }
+            : { status: 'missing' },
+        })),
+        ...(verdict ? { verifierVerdict: { result: verdict.result, reason: verdict.reason } } : {}),
+      };
+    });
+    const evidenceRefs = this.currentEvidenceRefs();
+    const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
+    const clip = (value: string, limit = 400) => value.length <= limit ? value : `${value.slice(0, limit)}…`;
+    const researchSummary = research ? {
+      coverage: research.coverage,
+      blockers: research.blockers.slice(0, 16).map(value => clip(value)),
+      blockerCount: research.blockers.length,
+      ...(research.report ? {
+        report: {
+          claimRefs: research.report.claimRefs.slice(0, 32),
+          claimRefCount: research.report.claimRefs.length,
+          limitations: research.report.limitations.slice(0, 16).map(value => clip(value)),
+          limitationCount: research.report.limitations.length,
+          unresolved: research.report.unresolved.slice(0, 16).map(value => clip(value)),
+          unresolvedCount: research.report.unresolved.length,
+        },
+      } : {}),
+    } : undefined;
     const message = [
       `The task "${this.spec.title}" has finished running.`,
       `Task slug: ${this.slug}; runId: ${this.runId}; revision: ${this.revision}.`,
-      `Frozen plan: ${JSON.stringify(this.spec)}`,
+      `Original goal: ${this.spec.goal}`,
       '',
       rubric,
-      this.coordinatorContext(),
       '',
-      'Node outputs:',
-      ...sections,
+      `Bounded node/status/output summary: ${JSON.stringify(summaries)}`,
+      ...(researchSummary ? [`Research state summary: ${JSON.stringify(researchSummary)}`] : []),
+      `Current-run evidence reference catalog: ${JSON.stringify(evidenceRefs)}`,
+      `Unsettled deterministic evidence: ${JSON.stringify(this.deterministicEvidenceGaps())}`,
       '',
-      'Verify the final result against the criteria above and summarize the outcome.',
-      this.sourceVersion >= 2
-        ? 'Call submit_task_verdict with result pass or fail. Parent chat messages are not verdicts.'
+      `Use get_task_results with slug=${JSON.stringify(this.slug)} and runId=${JSON.stringify(this.runId)} to read only the exact node results needed for each criterion. Do not infer evidence from this summary and do not request or reproduce the full frozen plan or every node output.`,
+      'Audit the original goal and every acceptance item against current evidence. A narrow check proves only its own scope; historical narration is not current evidence. Missing or conflicting evidence is unknown, never pass.',
+      this.sourceVersion === 3
+        ? `Call submit_task_verdict with runId=${JSON.stringify(this.runId)}, result pass or fail, and bounded checks. Each check must contain criterion, status pass/fail/unknown, and evidenceRefs copied from the current-run catalog (format kind:node[:detail]@runId#revision). PASS requires every check to be pass with evidence. Checks explain gaps but do not choose repair scope; FAIL nodes may name only completed producing nodes. Parent chat messages are not verdicts.`
+        : this.sourceVersion === 2
+          ? 'Call submit_task_verdict with result pass or fail. Parent chat messages are not verdicts.'
         : [
             'End your reply with a verdict line, on its own line, in exactly one of these forms:',
             'VERDICT: PASS',
@@ -2997,6 +3154,16 @@ class ActiveRun {
             'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
           ].join('\n'),
     ].join('\n');
+    if (this.sourceVersion === 3) {
+      const contextBytes = Buffer.byteLength(message, 'utf8');
+      this.verificationModelRequested = true;
+      this.verificationModelRequests += 1;
+      this.verificationContextBytes += contextBytes;
+      this.recordVerificationDecision(
+        { mode: this.verificationMode(), resolution: 'model', reason: this.finalVerificationDecision().reason },
+        { contextBytes, reserveTokens: this.verifyReserveTokens() },
+      );
+    }
     await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
@@ -3043,12 +3210,63 @@ class ActiveRun {
     this.handleVerdictObject(parseVerdict(text));
   }
 
-  private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }): void {
+  private validateFinalChecks(result: 'pass' | 'fail', checks: TaskVerificationCheck[] | undefined): void {
+    if (!checks?.length || checks.length > 64) {
+      throw new TaskControlError(this.runStatus, 'New v3 final verification requires 1-64 structured checks');
+    }
+    const allowedRefs = new Set(this.currentEvidenceRefs());
+    const seen = new Set<string>();
+    for (const [index, check] of checks.entries()) {
+      const keys = Object.keys(check as unknown as Record<string, unknown>);
+      const unknown = keys.filter(key => !['criterion', 'status', 'evidenceRefs', 'note'].includes(key));
+      if (unknown.length) throw new TaskControlError(this.runStatus, `Check ${index + 1} has unknown fields: ${unknown.join(', ')}`);
+      const criterion = check.criterion?.trim();
+      if (!criterion || criterion.length > 1_000) throw new TaskControlError(this.runStatus, `Check ${index + 1} criterion must be 1-1000 characters`);
+      const key = criterion.toLocaleLowerCase();
+      if (seen.has(key)) throw new TaskControlError(this.runStatus, `Duplicate verification criterion: ${criterion}`);
+      seen.add(key);
+      if (!['pass', 'fail', 'unknown'].includes(check.status)) throw new TaskControlError(this.runStatus, `Check ${index + 1} has an invalid status`);
+      if (!Array.isArray(check.evidenceRefs) || check.evidenceRefs.length > 16) throw new TaskControlError(this.runStatus, `Check ${index + 1} evidenceRefs must contain at most 16 items`);
+      if (check.status === 'pass' && check.evidenceRefs.length === 0) throw new TaskControlError(this.runStatus, `PASS check ${index + 1} requires current-run evidence`);
+      const invalidRefs = check.evidenceRefs.filter(ref => typeof ref !== 'string' || ref.length === 0 || ref.length > 512 || !allowedRefs.has(ref));
+      if (invalidRefs.length) throw new TaskControlError(this.runStatus, `Check ${index + 1} references stale, foreign, or unknown evidence: ${invalidRefs.join(', ')}`);
+      if (check.note !== undefined && (!check.note.trim() || check.note.length > 2_000)) throw new TaskControlError(this.runStatus, `Check ${index + 1} note must be 1-2000 characters`);
+    }
+    const nonPass = checks.filter(check => check.status !== 'pass');
+    if (result === 'pass' && nonPass.length) {
+      throw new TaskControlError(this.runStatus, `Cannot accept PASS: ${nonPass.length} verification check(s) are fail or unknown`);
+    }
+    if (result === 'fail' && nonPass.length === 0) {
+      throw new TaskControlError(this.runStatus, 'A FAIL verdict requires at least one fail or unknown check');
+    }
+  }
+
+  private recordVerificationUsage(tokens: number): void {
+    const value = Math.max(0, Math.floor(tokens));
+    if (!value) return;
+    this.verificationTokensUsed += value;
+    this.tokensUsed += value;
+    this.log({ kind: 'verification-usage', tokens: value });
+  }
+
+  private recordLiveVerificationUsage(): void {
+    const orchestrator = this.opts.orchestratorSessionId;
+    if (!orchestrator) return;
+    this.recordVerificationUsage(this.deps.host.getProgressLiveTokens?.(orchestrator) ?? 0);
+  }
+
+  private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: TaskVerificationCheck[] }): void {
     if (this.runStatus !== 'verifying') return;
     if (this.verdictLocked) return;
     if (this.sourceVersion >= 2 && verdict.result === 'fail' && verdict.nodes?.length) {
-      const invalid = verdict.nodes.filter(id => this.state.get(id)?.state !== 'done');
-      if (invalid.length) throw new TaskControlError(this.runStatus, `FAIL may rework only completed nodes: ${invalid.join(', ')}`);
+      const invalid = verdict.nodes.filter(id => {
+        const node = this.spec.nodes.find(candidate => candidate.id === id);
+        return this.state.get(id)?.state !== 'done' || !node || node.kind === 'verify' || node.kind === 'judge' || node.kind === 'approval' || node.kind === 'finally';
+      });
+      if (invalid.length) throw new TaskControlError(this.runStatus, `FAIL may rework only completed producing nodes: ${invalid.join(', ')}`);
+    }
+    if (this.sourceVersion === 3 && verdict.result !== 'unparsed') {
+      this.validateFinalChecks(verdict.result, verdict.checks);
     }
     if (verdict.result === 'pass') {
       const research = this.spec.research ? loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId) : undefined;
@@ -3060,8 +3278,11 @@ class ActiveRun {
         throw new TaskControlError(this.runStatus, 'Cannot accept PASS: execution, result consumption or artifact validation is unsettled');
       }
     }
+    if (this.sourceVersion === 3 && verdict.result !== 'unparsed') this.recordLiveVerificationUsage();
     this.verdictLocked = true;
-    this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes });
+    this.verdictChecks = verdict.checks?.length ?? 0;
+    this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes,
+      ...(verdict.checks?.length ? { checks: structuredClone(verdict.checks) } : {}) });
 
     if (verdict.result === 'pass') {
       this.unparsedReAsks = 0;
@@ -3111,6 +3332,31 @@ class ActiveRun {
       'VERDICT: FAIL — <one-line reason>',
       'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
     ].join('\n');
+    await this.sendToOrchestrator(orchestrator, message, 'verification');
+  }
+
+  /** One bounded structured-format correction; it never consumes business repair budget. */
+  private async reAskStructuredVerdict(): Promise<void> {
+    const orchestrator = this.opts.orchestratorSessionId;
+    if (!orchestrator) {
+      this.finish('failed');
+      return;
+    }
+    const message = [
+      'The previous verification turn ended without an accepted structured verdict. This is the only format-correction turn; do not redo the task or broaden its scope.',
+      `Canonical identity: slug=${JSON.stringify(this.slug)}, runId=${JSON.stringify(this.runId)}, revision=${this.revision}.`,
+      `Allowed current-run evidence refs: ${JSON.stringify(this.currentEvidenceRefs())}`,
+      'Call submit_task_verdict now. Include 1-64 checks; every check needs a non-empty criterion, status pass/fail/unknown, and at most 16 evidenceRefs. PASS requires every check to be pass with evidence. FAIL nodes may name only completed producing nodes.',
+      'Do not write a prose-only verdict. End the turn after the tool accepts the verdict.',
+    ].join('\n');
+    const contextBytes = Buffer.byteLength(message, 'utf8');
+    this.verificationModelRequested = true;
+    this.verificationModelRequests += 1;
+    this.verificationContextBytes += contextBytes;
+    this.recordVerificationDecision(
+      { mode: this.verificationMode(), resolution: 'model', reason: 'structured-format-reask' },
+      { contextBytes, reserveTokens: 0 },
+    );
     await this.sendToOrchestrator(orchestrator, message, 'verification');
   }
 
@@ -3377,12 +3623,76 @@ class ActiveRun {
     return this.spec.execution?.coordinator_gate?.mode === 'adaptive' && !this.spec.research;
   }
 
+  private verificationMode(): VerificationMode {
+    return resolveVerificationMode(this.spec.execution?.verification);
+  }
+
+  /** Nodes whose values constitute the declared delivery; falls back to graph terminals. */
+  private deliveryNodeIds(): Set<string> {
+    const explicit = new Set<string>();
+    for (const value of Object.values(this.spec.outputs ?? {})) {
+      for (const ref of extractRefs(value)) if (ref.kind === 'node') explicit.add(ref.nodeId);
+    }
+    if (explicit.size) return explicit;
+    const terminals = this.spec.nodes.filter(node => node.kind !== 'finally' && (this.dependentsMap().get(node.id)?.size ?? 0) === 0);
+    return new Set((terminals.length ? terminals : this.spec.nodes.filter(node => node.kind !== 'finally')).map(node => node.id));
+  }
+
+  /** A verifier covers delivery only when it runs after every declared delivery node (or is itself the delivery). */
+  private coveringVerifierIds(requirePass: boolean): string[] {
+    const delivery = this.deliveryNodeIds();
+    return this.spec.nodes.flatMap(node => {
+      if (node.kind !== 'verify' && node.kind !== 'judge') return [];
+      const covered = dependencyAncestors(node.id, this.edges);
+      if (![...delivery].every(id => id === node.id || covered.has(id))) return [];
+      if (!requirePass) return [node.id];
+      const verdict = this.nodeVerdicts.get(node.id) ?? this.nodeTimings.get(node.id)?.verdict;
+      return this.state.get(node.id)?.state === 'done' && verdict?.result === 'pass' ? [node.id] : [];
+    });
+  }
+
+  private deterministicOnlyDelivery(): boolean {
+    const delivery = this.deliveryNodeIds();
+    const deliveryAndAncestors = new Set<string>();
+    for (const id of delivery) {
+      deliveryAndAncestors.add(id);
+      for (const ancestor of dependencyAncestors(id, this.edges)) deliveryAndAncestors.add(ancestor);
+    }
+    return deliveryAndAncestors.size > 0 && [...deliveryAndAncestors].every(id => {
+      const node = this.spec.nodes.find(candidate => candidate.id === id);
+      return !!node && !isSessionLikeKind(node.kind);
+    });
+  }
+
+  private finalVerificationDecision(): { mode: VerificationMode; resolution: VerificationResolution; reason: string } {
+    const mode = this.verificationMode();
+    if (mode === 'off') return { mode, resolution: 'disabled', reason: 'explicit-off' };
+    if (mode === 'required') return { mode, resolution: 'model', reason: 'explicit-required' };
+    if (!this.spec.acceptance_criteria?.trim()) return { mode, resolution: 'disabled', reason: 'no-acceptance-criteria' };
+    if (this.spec.research) return { mode, resolution: 'model', reason: 'research-requires-semantic-review' };
+    const covering = this.coveringVerifierIds(true);
+    if (covering.length) return { mode, resolution: 'reused-node-verdict', reason: `covering-verifier:${covering.join(',')}` };
+    if (this.deterministicOnlyDelivery()) return { mode, resolution: 'disabled', reason: 'deterministic-only-delivery' };
+    return { mode, resolution: 'model', reason: 'acceptance-not-covered-by-terminal-verifier' };
+  }
+
+  /** Whether worker scheduling must preserve a final-model reserve. */
   private qualityGateEnabled(): boolean {
-    return (
-      this.sourceVersion === 3
-      && (this.spec.execution?.verification?.required ?? true)
-      && !!this.spec.acceptance_criteria?.trim()
-    );
+    if (this.sourceVersion !== 3) return false;
+    const mode = this.verificationMode();
+    if (mode === 'off') return false;
+    if (mode === 'required') return true;
+    if (!this.spec.acceptance_criteria?.trim()) return false;
+    if (this.spec.research) return true;
+    if (this.coveringVerifierIds(false).length) return false;
+    return !this.deterministicOnlyDelivery();
+  }
+
+  private recordVerificationDecision(decision: { mode: VerificationMode; resolution: VerificationResolution; reason: string }, extra: { contextBytes?: number; reserveTokens?: number } = {}): void {
+    if (decision.resolution !== 'model' && this.verificationDecisionLogged) return;
+    this.verificationResolution = decision.resolution;
+    this.log({ kind: 'verification-decision', ...decision, ...extra });
+    if (decision.resolution !== 'model') this.verificationDecisionLogged = true;
   }
 
   recordProgressUsage(sessionId: string, tokens: number): void {
@@ -3809,6 +4119,32 @@ class ActiveRun {
     }
   }
 
+  private deterministicCheckCounts(): { pass: number; fail: number; unknown: number } {
+    const counts = { pass: 0, fail: 0, unknown: 0 };
+    const add = (status: keyof typeof counts) => { counts[status] += 1; };
+    for (const node of this.spec.nodes) {
+      const state = this.state.get(node.id)?.state;
+      if (state === 'done' || state === 'skipped') add('pass');
+      else if (state && ['failed', 'invalid', 'cancelled'].includes(state)) add('fail');
+      else add('unknown');
+      if (state === 'skipped') continue;
+      for (const declaration of node.outputs ?? []) {
+        if (declaration.required === false) continue;
+        if (declaration.name in (this.outputs[node.id]?.params ?? {})) add('pass');
+        else if (state === 'done') add('fail');
+        else add('unknown');
+      }
+    }
+    if (this.spec.research) {
+      const research = loadResearchResults(this.deps.workspaceRoot, this.slug, this.runId);
+      if (!research) add('unknown');
+      else if (research.blockers.length) add('fail');
+      else add('pass');
+    }
+    if (this.unconfirmedShutdown.size || [...this.workers.values()].some(worker => ['reserved', 'running'].includes(worker.state))) add('unknown');
+    return counts;
+  }
+
   private buildMetrics(): TaskRunMetrics {
     const metrics = emptyRunMetrics();
     metrics.elapsedMs = Math.max(0, this.nowMs() - this.runStartedAtMs);
@@ -3820,6 +4156,17 @@ class ActiveRun {
     metrics.cacheHits = this.cacheHits;
     metrics.cacheMisses = this.cacheMisses;
     metrics.cacheBypasses = this.cacheBypasses;
+    if (this.sourceVersion === 3) {
+      metrics.verificationMode = this.verificationMode();
+      metrics.verificationResolution = this.verificationResolution;
+      metrics.verificationModelRequested = this.verificationModelRequested;
+      metrics.verificationModelRequests = this.verificationModelRequests;
+      metrics.verificationContextBytes = this.verificationContextBytes;
+      metrics.verificationTokensUsed = this.verificationTokensUsed;
+      metrics.verificationFormatReasks = this.verificationFormatReasks;
+      metrics.deterministicChecks = this.deterministicCheckCounts();
+      metrics.verdictChecks = this.verdictChecks;
+    }
     let retries = 0;
     let queueMs = 0;
     let modelMs = 0;
@@ -4610,7 +4957,7 @@ export class TaskRunner {
     return run.taskHelp(sessionId, generation, input);
   }
 
-  submitVerdict(sessionId: string, payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[]; runId?: string }): RunSnapshot {
+  submitVerdict(sessionId: string, payload: SubmitTaskVerdictInput): RunSnapshot {
     const run = payload.runId
       ? [...this.runs.values()].find((r) => {
           const snapshot = r.snapshot();

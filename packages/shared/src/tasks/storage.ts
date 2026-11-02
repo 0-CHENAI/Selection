@@ -153,7 +153,10 @@ type RunLogPayload =
       /** Expanded descendants whose inputs changed; reconstruct from the new upstream outputs. */
       discardInstanceIds?: string[];
     }
-  | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; evidence?: string }
+  | { t: string; kind: 'verification-decision'; mode: import('./schema.ts').VerificationMode; resolution: import('./metrics.ts').VerificationResolution; reason: string; contextBytes?: number; reserveTokens?: number }
+  | { t: string; kind: 'verification-usage'; tokens: number }
+  | { t: string; kind: 'verdict-format-reask'; attempt: number }
+  | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; evidence?: string; checks?: import('./metrics.ts').TaskVerificationCheck[] }
   | { t: string; kind: 'node-verdict'; nodeId: string; result: 'pass' | 'fail'; reason?: string; nodes?: string[]; evidence?: string }
   | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; added?: string[]; updated?: string[]; cancelled?: string[]; consumedResults?: string[]; plannerPhase?: PlannerPhase; changeKind?: 'structure' | 'repair' | 'research' }
   | {

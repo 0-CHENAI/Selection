@@ -2,7 +2,26 @@
  * Run / node metrics persisted on the snapshot and run log.
  * Phase 0 records these without changing scheduling.
  */
+import type { VerificationMode } from './schema.ts';
+
 export type CacheStatus = 'none' | 'hit' | 'miss' | 'bypass';
+
+export type VerificationResolution = 'disabled' | 'reused-node-verdict' | 'model';
+export type VerificationCheckStatus = 'pass' | 'fail' | 'unknown';
+
+/** Final-model checks are run-local evidence receipts, not a persistent intent ledger. */
+export interface TaskVerificationCheck {
+  criterion: string;
+  status: VerificationCheckStatus;
+  evidenceRefs: string[];
+  note?: string;
+}
+
+export interface DeterministicCheckCounts {
+  pass: number;
+  fail: number;
+  unknown: number;
+}
 
 export type CoordinatorGateReason =
   | 'new-result'
@@ -35,6 +54,15 @@ export interface TaskRunMetrics {
   cacheBypasses: number;
   verifyBudgetReserved?: number;
   verifyBudgetRemaining?: number;
+  verificationMode?: VerificationMode;
+  verificationResolution?: VerificationResolution;
+  verificationModelRequested?: boolean;
+  verificationModelRequests?: number;
+  verificationContextBytes?: number;
+  verificationTokensUsed?: number;
+  verificationFormatReasks?: number;
+  deterministicChecks?: DeterministicCheckCounts;
+  verdictChecks?: number;
   criticalPathNodeIds?: string[];
 }
 

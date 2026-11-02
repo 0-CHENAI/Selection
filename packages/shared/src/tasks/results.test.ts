@@ -113,4 +113,23 @@ describe('loadTaskResults', () => {
     expect(repaired.verdict?.result).toBe('pass');
   });
 
+  it('restores new checks and metrics while leaving historical check-less verdicts untouched', () => {
+    writeSpecRevision(root, 'demo', 'r1', 0, spec());
+    const t = '2026-11-02T00:00:00.000Z';
+    for (const entry of [
+      { t, kind: 'run-started', taskId: 'demo', runId: 'r1' },
+      { t, kind: 'verdict', result: 'pass' },
+      { t, kind: 'verdict', result: 'pass', checks: [{ criterion: 'current output', status: 'pass', evidenceRefs: ['node:audit@r1#0'] }] },
+      { t, kind: 'metrics', metrics: { elapsedMs: 1, tokensUsed: 20, retries: 0, repairs: 0, coordinatorWaitMs: 0, coordinatorWaits: 0, cacheHits: 0, cacheMisses: 0, cacheBypasses: 0, verificationMode: 'required', verificationResolution: 'model', verdictChecks: 1 } },
+      { t, kind: 'run-completed' },
+    ] as RunLogEntry[]) appendRunLog(root, 'demo', 'r1', entry);
+
+    const result = loadTaskResults(root, 'demo', 'r1');
+    expect(result.verdicts?.[0]).toEqual({ result: 'pass' });
+    expect(result.verdicts?.[1]?.checks).toEqual([
+      { criterion: 'current output', status: 'pass', evidenceRefs: ['node:audit@r1#0'] },
+    ]);
+    expect(result.metrics).toMatchObject({ verificationMode: 'required', verificationResolution: 'model', verdictChecks: 1 });
+  });
+
 });

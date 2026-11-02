@@ -40,6 +40,10 @@ function decide(extra: Partial<OrchestrationDecision> = {}) {
   return runner.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId, baseRevision: state.revision, decisionId: `decision-${state.seq}`, action: 'continue', ...extra });
 }
 async function start() { runner.run('dynamic', { runId: 'r', orchestratorSessionId: 'orch', orchestrateAllowed: true }); decide(); await tick(); }
+function finalChecks(target: TaskRunner, nodeId = 'c') {
+  const revision = target.getRunState('dynamic', 'r')!.revision;
+  return [{ criterion: 'The final report satisfies the current acceptance criteria', status: 'pass' as const, evidenceRefs: [`node:${nodeId}@r#${revision}`] }];
+}
 
 it('minimal automatic DAG joins two workers, delivers only the real report, and requires final acceptance', async () => {
   const plan = loadTaskDocument(root, 'dynamic')!.spec!;
@@ -95,7 +99,7 @@ it('minimal automatic DAG joins two workers, delivers only the real report, and 
     expect(before.coordinatorGate!.reason).toBe('before-verify');
     expect(before.planner!.pendingResults).toHaveLength(3);
     const receipt = decide(); expect(receipt.status).toBe('verifying');
-    runner.submitVerdict('orch', { runId: 'r', result: 'pass' });
+    runner.submitVerdict('orch', { runId: 'r', result: 'pass', checks: finalChecks(runner) });
     expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
     expect(readRunLog(root, 'dynamic', 'r').filter(event => event.kind === 'coordinator-request')).toHaveLength(1);
     const recoveredHost = makeHost(), recovered = new TaskRunner({ host: recoveredHost, workspaceId: 'ws', workspaceRoot: root });
@@ -122,7 +126,7 @@ it('adaptive failure recovery preserves the successful branch and cannot bypass 
   host.complete('a', 'repaired A'); await tick();
   expect(host.created.filter(id => id === 'session-c')).toHaveLength(1);
   host.complete('c', 'report'); await tick(); decide();
-  runner.submitVerdict('orch', { runId: 'r', result: 'pass' });
+  runner.submitVerdict('orch', { runId: 'r', result: 'pass', checks: finalChecks(runner) });
   expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
 });
 
@@ -143,7 +147,7 @@ it('adaptive recovery retains completed branches and waits for explicit human re
   const state = readRunState(root, 'dynamic', 'r')!;
   recovered.applyOrchestrationDecisionByRunId('orch', { runId: 'r', checkpointId: state.coordinatorGate!.checkpointId,
     decisionId: 'accept-recovered-results', baseRevision: state.revision, action: 'continue' });
-  recovered.submitVerdict('orch', { runId: 'r', result: 'pass' });
+  recovered.submitVerdict('orch', { runId: 'r', result: 'pass', checks: finalChecks(recovered) });
   expect(recovered.getRunState('dynamic', 'r')!.status).toBe('completed');
 });
 
@@ -258,7 +262,7 @@ it('F4-a consumes A and adds D atomically while B is live, without duplicate wor
   expect(host.sent.find(item => item.id === 'session-c')!.message).toContain('B basis unknown D tax unknown');
   host.complete('c', 'report'); await tick(); expect(runner.getRunState('dynamic', 'r')!.planner!.phase).toBe('active');
   decide(); expect(runner.getRunState('dynamic', 'r')!.planner!.phase).toBe('exhausted'); expect(runner.getRunState('dynamic', 'r')!.status).toBe('verifying');
-  runner.submitVerdict('orch', { runId: 'r', result: 'pass' }); expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
+  runner.submitVerdict('orch', { runId: 'r', result: 'pass', checks: finalChecks(runner) }); expect(runner.getRunState('dynamic', 'r')!.status).toBe('completed');
 });
 
 it('concurrent results expose the next canonical checkpoint after accepting the previous one',async()=>{

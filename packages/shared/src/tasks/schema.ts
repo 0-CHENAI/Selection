@@ -51,6 +51,8 @@ export const CACHE_MODES_V3 = ['none', 'run-pure', 'workspace-pure'] as const;
 export const CACHE_MODES = [...CACHE_MODES_V2, ...CACHE_MODES_V3] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
 export const COORDINATOR_GATE_MODES = ['required', 'adaptive', 'off'] as const;
+export const VERIFICATION_MODES = ['auto', 'required', 'off'] as const;
+export type VerificationMode = (typeof VERIFICATION_MODES)[number];
 
 /** DAG worker concurrency defaults/caps for the technical preview. */
 export const DEFAULT_DAG_MAX_PARALLEL = 4;
@@ -65,6 +67,8 @@ export const MAX_DAG_MAX_PARALLEL = 8;
 
 /** Repair attempts allowed when a task omits `max_iterations`. */
 export const DEFAULT_REPAIR_ATTEMPTS = 3;
+/** New v3 final verification defaults to one local repair; explicit max_iterations may raise it. */
+export const DEFAULT_V3_REPAIR_ATTEMPTS = 1;
 /** Hard upper bound on `max_iterations` — a guardrail against runaway verify→repair loops. */
 export const MAX_REPAIR_ATTEMPTS_CAP = 10;
 
@@ -229,10 +233,32 @@ export const CoordinatorGateSchema = z
 
 export const VerificationExecutionSchema = z
   .object({
-    required: z.boolean().default(true),
+    /** New policy. Omitted means auto; kept optional so legacy `required` can be detected without ambiguity. */
+    mode: z.enum(VERIFICATION_MODES).optional(),
+    /** Legacy compatibility: true → required, false → off. Must not coexist with mode. */
+    required: z.boolean().optional(),
     reserve_ratio: z.literal(VERIFY_RESERVE_RATIO).optional(),
   })
+  .superRefine((verification, ctx) => {
+    if (verification.mode !== undefined && verification.required !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['required'],
+        message: 'execution.verification.mode and execution.verification.required cannot be used together; remove the legacy required field',
+      });
+    }
+  })
   .strict();
+
+/** Resolve the frozen run policy without inspecting or classifying natural-language intent. */
+export function resolveVerificationMode(
+  verification: z.input<typeof VerificationExecutionSchema> | z.output<typeof VerificationExecutionSchema> | undefined,
+): VerificationMode {
+  if (verification?.mode) return verification.mode;
+  if (verification?.required === true) return 'required';
+  if (verification?.required === false) return 'off';
+  return 'auto';
+}
 
 export const TaskExecutionSchema = z
   .object({
@@ -341,7 +367,7 @@ export const TaskSpecSchema = z
     token_budget: z.number().int().positive().optional(),
     max_parallel: z.number().int().positive().optional(),
     /** Max repair attempts on a FAIL verdict (re-run the repair frontier). 0 disables repair;
-     *  capped at MAX_REPAIR_ATTEMPTS_CAP. Omitted → runner uses DEFAULT_REPAIR_ATTEMPTS. */
+     *  capped at MAX_REPAIR_ATTEMPTS_CAP. Omitted → v3 uses one repair; legacy versions keep DEFAULT_REPAIR_ATTEMPTS. */
     max_iterations: z.number().int().min(0).max(MAX_REPAIR_ATTEMPTS_CAP).optional(),
     execution: TaskExecutionSchema.optional(),
     nodes: z.array(TaskNodeSchema).min(1, 'A task must define at least one node'),

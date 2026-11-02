@@ -4,7 +4,9 @@
  */
 import {
   DEFAULT_REPAIR_ATTEMPTS,
+  DEFAULT_V3_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
+  taskSourceVersion,
   nodeDisplayTitle,
 } from './schema.ts'
 import {
@@ -31,8 +33,9 @@ export interface LoadedTaskResults {
   slug: string
   runId: string | null
   runIds: string[]
-  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
-  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }[]
+  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: import('./metrics.ts').TaskVerificationCheck[] }
+  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; checks?: import('./metrics.ts').TaskVerificationCheck[] }[]
+  metrics?: import('./metrics.ts').TaskRunMetrics
   repair?: { used: number; max: number }
   runStatus?: string
   tokensUsed?: number
@@ -80,6 +83,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   const verdicts: NonNullable<LoadedTaskResults['verdicts']> = []
   let currentVerdict: LoadedTaskResults['verdict']
   let tokensUsed: number | undefined
+  let metrics: LoadedTaskResults['metrics']
   for (const entry of log) {
     if (entry.kind === 'node-scheduled') {
       const node = ensure(entry.nodeId)
@@ -120,8 +124,11 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
         result: entry.result,
         ...(entry.reason ? { reason: entry.reason } : {}),
         ...(entry.nodes?.length ? { nodes: entry.nodes } : {}),
+        ...(entry.checks?.length ? { checks: structuredClone(entry.checks) } : {}),
       })
       currentVerdict = verdicts.at(-1)
+    } else if (entry.kind === 'metrics') {
+      metrics = structuredClone(entry.metrics)
     } else if ('tokensUsed' in entry && typeof entry.tokensUsed === 'number') {
       tokensUsed = entry.tokensUsed
     }
@@ -147,7 +154,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   })
 
   const repairUsed = verdicts.filter((v) => v.result === 'fail').length
-  const repairMax = Math.min(snapshot?.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP)
+  const repairMax = Math.min(snapshot?.max_iterations ?? (snapshot && taskSourceVersion(snapshot) === 3 ? DEFAULT_V3_REPAIR_ATTEMPTS : DEFAULT_REPAIR_ATTEMPTS), MAX_REPAIR_ATTEMPTS_CAP)
   const superseded = log.findLast(event => event.kind === 'run-superseded')
   // The new run's start is the canonical lineage receipt. Reconstruct the old
   // side if publication was interrupted between the two history notifications.
@@ -169,6 +176,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     runIds,
     verdict: currentVerdict,
     verdicts,
+    ...(metrics ? { metrics } : {}),
     repair: { used: repairUsed, max: repairMax },
     ...(runStatus ? { runStatus } : {}),
     ...(tokensUsed !== undefined ? { tokensUsed } : {}),

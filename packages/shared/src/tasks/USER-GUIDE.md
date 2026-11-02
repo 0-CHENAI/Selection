@@ -51,6 +51,13 @@ v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache:
 - 添加替代节点不消除原节点失败。所有活动 worker 收尾后，retry 必须注明原因，复用原运行恢复规则，将失败/无效节点及受影响下游重置为 pending；成功的无关分支和失败历史保留。协调者在新的检查点补丁修正 pending 节点的输入/依赖，再继续执行。不能把没有实质修正的重复重试当成进展。
 - 协调器连续 120 秒没有实际模型输出或工具进展时暂停，并显示 `coordinator-timeout`，不会自动继续。真实进展会延长等待期限并持久化；不增长的心跳、仅等待 API 的状态和其他子节点的活动不会延长期限。
 - verify/judge 必须 `submit_task_node_verdict`。最终 run verdict 仍由父 Coordinator 的 `submit_task_verdict` 提交，普通聊天文本不是 verdict。
+- `execution.verification.mode` 支持 `auto`、`required`、`off`，省略时为 `auto`。历史 `required: true / false` 分别按 `required / off` 读取；新旧字段同时出现会拒绝定义，避免静默猜测。
+- `auto` 只使用图结构和当前运行证据，不分类自然语言意图：覆盖交付范围的终态 verify/judge PASS 可直接复用；没有验收标准时不凭空增加复核；仍有未覆盖的模型语义验收、研究证据边界或冲突时保留父 Coordinator 复核。`required` 始终复核，`off` 只关闭模型复核，artifact、Schema、运行状态、worker 收尾和研究 blocker 等确定性门禁仍然执行。
+- 最终复核只携带 goal、验收标准、有界节点/声明输出摘要、当前证据引用与未知项。具体输出由 Coordinator 用 `get_task_results` 按需读取，不再复制完整冻结计划和全部节点正文。
+- 新 v3 最终 verdict 使用有界 `checks`（`criterion`、`pass | fail | unknown`、当前 run 的 `evidenceRefs`、可选 `note`）。PASS 的每项检查都必须为 pass 且带当前证据；fail/unknown、跨 run/revision 引用或未知字段会被宿主拒绝。FAIL 的 `nodes` 仍只能命名已完成的 producing 节点，checks 不扩大 repair 前沿。
+- 格式错误最多触发一次格式纠正，不计入业务 repair；v3 未显式配置时默认最多一次局部 repair。验证模式、决策结果、模型请求数、上下文字节、验证 token、确定性检查数、checks 数、格式纠正和 repair 计入本地 run log/metrics，不新增外部遥测。
+
+结构化 checks 是证据覆盖回执，不是语义正确性的证明。模型仍可能拆分得过粗或误读证据；无法证明的项目必须保持 unknown，必要的 Office 视觉检查、研究独立审查和外部真实状态核验不能由结构通过替代。
 
 ## 补丁边界（orchestrate）
 

@@ -2481,7 +2481,7 @@ describe('TaskRunner (Conductor)', () => {
     let calls = 0;
     restartedHost.finalizeTaskWorkspace = async (id, outputs, current) => {
       current(); calls++; expect(id).toBe('sess-a'); expect(outputs).toEqual({ file: 'candidate.txt' });
-      return { file: { path: '/official/candidate.txt', hash: 'verified', size: 9, artifactDeliveryVersion: 1 } };
+      return { file: { path: join(root, 'candidate.txt'), hash: createHash('sha256').update('candidate').digest('hex'), size: 9, artifactDeliveryVersion: 1 } };
     };
     const restarted = new TaskRunner({ host: restartedHost, workspaceId: 'ws', workspaceRoot: root });
     restarted.scanUnfinished();

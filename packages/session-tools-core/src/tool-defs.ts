@@ -343,12 +343,24 @@ export const SubmitOrchestrationPatchSchema = z.object({
   action: z.enum(['continue', 'pause']).optional(),
 });
 
+const VerificationCheckSchema = z.object({
+  criterion: z.string().trim().min(1).max(1_000).describe('One concrete criterion audited for this final verdict'),
+  status: z.enum(['pass', 'fail', 'unknown']),
+  evidenceRefs: z.array(z.string().trim().min(1).max(512)).max(16).describe('Bounded current-run evidence references from the verification prompt'),
+  note: z.string().trim().min(1).max(2_000).optional(),
+}).strict().superRefine((check, ctx) => {
+  if (check.status === 'pass' && check.evidenceRefs.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['evidenceRefs'], message: 'A pass check requires at least one current-run evidence reference' });
+  }
+});
+
 export const SubmitTaskVerdictSchema = z.object({
   result: z.enum(['pass', 'fail']).describe('Verification result'),
   reason: z.string().optional().describe('One-line reason for a fail'),
   nodes: z.array(z.string()).optional().describe('Definition node ids to repair on fail'),
   runId: z.string().optional().describe('Run id when the parent has more than one active run'),
-});
+  checks: z.array(VerificationCheckSchema).min(1).max(64).optional().describe('Required for new v3 final verification. Every acceptance item must be pass, fail, or unknown; pass requires current-run evidence.'),
+}).strict();
 
 export const SubmitOrchestrationDecisionSchema = z.object({
   consumedResults: z.array(z.string()).optional().describe('Result event ids consumed; defaults to exactly the checkpoint events'),
@@ -694,7 +706,7 @@ Required when the node declares outputs. Pass values matching the declared names
 
   submit_task_verdict: `Submit the Conductor verification verdict for the current run.
 
-Use result pass or fail. Fail may include reason and nodes to repair. Parent chat messages are never treated as a verdict.`,
+Use result pass or fail. New v3 final verification requires bounded checks with criterion, pass/fail/unknown, and current-run evidenceRefs in the exact format supplied by the host. PASS is rejected when a check is fail/unknown or lacks evidence. Fail may include reason and completed producing nodes to repair; checks explain gaps but never widen the repair frontier. Parent chat messages are never treated as a verdict.`,
 
   submit_orchestration_patch: `Apply a restricted patch to the current orchestrate run.
 

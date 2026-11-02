@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseTaskSpec, computeVerifyReserve } from './schema.ts';
+import { parseTaskSpec, computeVerifyReserve, resolveVerificationMode } from './schema.ts';
 import { parseTaskDocument, saveTaskDocument, previewV3Migration } from './document.ts';
 import { validateOrchestrationDecision } from './orchestration-decision.ts';
 import { validateTaskNodeVerdict } from './node-verdict.ts';
@@ -71,6 +71,32 @@ describe('v3 schema and migration', () => {
     expect(computeVerifyReserve(100_000)).toBe(20_000);
     expect(computeVerifyReserve(1_000_000)).toBe(32_768);
     expect(computeVerifyReserve(undefined)).toBe(0);
+  });
+
+  it('defaults verification to auto and preserves the legacy required mapping', () => {
+    expect(resolveVerificationMode(undefined)).toBe('auto');
+    expect(resolveVerificationMode({ mode: 'auto' })).toBe('auto');
+    expect(resolveVerificationMode({ mode: 'required' })).toBe('required');
+    expect(resolveVerificationMode({ mode: 'off' })).toBe('off');
+    expect(resolveVerificationMode({ required: true })).toBe('required');
+    expect(resolveVerificationMode({ required: false })).toBe('off');
+    for (const mode of ['auto', 'required', 'off'] as const) {
+      expect(parseTaskSpec({
+        ...V3,
+        execution: { ...V3.execution, verification: { mode, reserve_ratio: 0.2 } },
+      }).success).toBe(true);
+    }
+  });
+
+  it('rejects ambiguous verification mode plus legacy required input', () => {
+    expect(parseTaskSpec({
+      ...V3,
+      execution: { ...V3.execution, verification: { mode: 'auto', required: true } },
+    }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...V3,
+      execution: { ...V3.execution, verification: { mode: 'required', required: true } },
+    }).success).toBe(false);
   });
 
   it('requires confirmation before converting cache: pure', () => {
