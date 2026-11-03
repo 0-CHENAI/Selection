@@ -31,6 +31,7 @@
     "./auth/callback-page": "./src/auth/callback-page.ts",
     "./auth/types": "./src/auth/types.ts",
     "./config": "./src/config/index.ts",
+    "./config/search-settings": "./src/config/search-settings.ts",
     "./config/paths": "./src/config/paths.ts",
     "./config/types": "./src/config/types.ts",
     "./display-titles": "./src/display-titles.ts",

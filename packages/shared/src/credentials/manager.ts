@@ -370,6 +370,22 @@ export class CredentialManager {
     return (await this.getAnySearchApiKey()) !== null;
   }
 
+  async getSearchProviderApiKey(provider: import('../config/search-settings.ts').SearchKeyProviderId): Promise<string | null> {
+    const types = { anysearch: 'anysearch_api_key', deepseek: 'deepseek_search_api_key', tavily: 'tavily_search_api_key',
+      exa: 'exa_search_api_key', brave: 'brave_search_api_key' } as const;
+    const cred = await this.get({ type: types[provider] });
+    return cred?.value?.trim() || null;
+  }
+
+  async setSearchProviderApiKey(provider: import('../config/search-settings.ts').SearchKeyProviderId, apiKey: string): Promise<void> {
+    const types = { anysearch: 'anysearch_api_key', deepseek: 'deepseek_search_api_key', tavily: 'tavily_search_api_key',
+      exa: 'exa_search_api_key', brave: 'brave_search_api_key' } as const;
+    const id = { type: types[provider] };
+    const value = apiKey.trim();
+    if (value) await this.set(id, { value });
+    else await this.delete(id);
+  }
+
   /**
    * Get OAuth token for an LLM connection.
    * @param connectionSlug - The connection slug

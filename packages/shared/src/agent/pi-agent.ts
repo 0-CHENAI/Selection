@@ -1231,6 +1231,10 @@ export class PiAgent extends BaseAgent {
         this.observeBridgeRequest(this.handleAnySearchApiKeyRequest(msg as { id?: unknown }), this.subprocess);
         break;
 
+      case 'search_settings_request':
+        this.observeBridgeRequest(this.handleSearchSettingsRequest(msg as { id?: unknown; provider?: unknown }), this.subprocess);
+        break;
+
       case 'pre_tool_use_request':
         // Subprocess needs permission check + transforms before tool execution
         this.observeBridgeRequest(this.handlePreToolUseRequest(msg as {
@@ -2660,6 +2664,24 @@ export class PiAgent extends BaseAgent {
       this.debug(`Failed to read AnySearch API key: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.send({ type: 'anysearch_api_key_result', id, apiKey });
+  }
+
+  private async handleSearchSettingsRequest(msg: { id?: unknown; provider?: unknown }): Promise<void> {
+    const id = typeof msg.id === 'string' ? msg.id : '';
+    if (!id) return;
+    try {
+      if (msg.provider === undefined) {
+        const { getSearchSettings } = await import('../config/storage.ts');
+        this.send({ type: 'search_settings_result', id, settings: getSearchSettings() });
+      } else {
+        const { isSearchProviderId } = await import('../config/search-settings.ts');
+        if (!isSearchProviderId(msg.provider) || msg.provider === 'native') throw new Error('Invalid provider');
+        const apiKey = await getCredentialManager().getSearchProviderApiKey(msg.provider);
+        this.send({ type: 'search_settings_result', id, apiKey: apiKey ?? '' });
+      }
+    } catch {
+      this.send({ type: 'search_settings_result', id, error: 'Search settings unavailable' });
+    }
   }
 
   private async requestRuntimeConfigUpdate(update: BackendRuntimeUpdate): Promise<boolean> {

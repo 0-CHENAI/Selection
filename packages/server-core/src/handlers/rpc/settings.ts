@@ -44,6 +44,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED,
   RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED,
   RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY,
+  RPC_CHANNELS.settings.SET_SEARCH_SETTINGS,
+  RPC_CHANNELS.settings.SET_SEARCH_PROVIDER_API_KEY,
   RPC_CHANNELS.dialog.OPEN_FOLDER,
 ] as const
 
@@ -343,10 +345,16 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.settings.GET_ADVANCED, async () => {
     const { getDagOrchestrationEnabled, getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    const { getSearchSettings } = await import('@craft-agent/shared/config/storage')
+    const manager = getCredentialManager()
+    const ids = ['deepseek', 'tavily', 'exa', 'brave', 'anysearch'] as const
+    const configured = Object.fromEntries(await Promise.all(ids.map(async id => [id, !!(await manager.getSearchProviderApiKey(id))])))
     return {
       dagOrchestrationEnabled: getDagOrchestrationEnabled(),
       swarmAgentsEnabled: getSwarmAgentsEnabled(),
-      anySearchApiKeyConfigured: await getCredentialManager().hasAnySearchApiKey(),
+      anySearchApiKeyConfigured: configured.anysearch,
+      searchSettings: getSearchSettings(),
+      searchKeysConfigured: configured,
     }
   })
 
@@ -369,5 +377,18 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')
     await getCredentialManager().setAnySearchApiKey(apiKey)
     return { configured: apiKey.trim().length > 0 }
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_SEARCH_SETTINGS, async (_ctx, settings: unknown) => {
+    const { setSearchSettings } = await import('@craft-agent/shared/config/storage')
+    return setSearchSettings(settings)
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_SEARCH_PROVIDER_API_KEY, async (_ctx, provider: string, apiKey: string) => {
+    const allowed = ['anysearch', 'deepseek', 'tavily', 'exa', 'brave'] as const
+    if (!allowed.includes(provider as typeof allowed[number]) || typeof apiKey !== 'string') throw new Error('Invalid search provider or API key')
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    await getCredentialManager().setSearchProviderApiKey(provider as typeof allowed[number], apiKey)
+    return { configured: !!apiKey.trim() }
   })
 }

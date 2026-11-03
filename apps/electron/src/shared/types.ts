@@ -642,10 +642,14 @@ export interface ElectronAPI {
     dagOrchestrationEnabled: boolean
     swarmAgentsEnabled: boolean
     anySearchApiKeyConfigured: boolean
+    searchSettings?: import('@craft-agent/shared/config/search-settings').SearchSettings | null
+    searchKeysConfigured?: Partial<Record<import('@craft-agent/shared/config/search-settings').SearchKeyProviderId, boolean>>
   }>
   setDagOrchestrationEnabled(enabled: boolean): Promise<void>
   setSwarmAgentsEnabled(enabled: boolean): Promise<void>
   setAnySearchApiKey(apiKey: string): Promise<{ configured: boolean }>
+  setSearchSettings(settings: import('@craft-agent/shared/config/search-settings').SearchSettings): Promise<import('@craft-agent/shared/config/search-settings').SearchSettings>
+  setSearchProviderApiKey(provider: import('@craft-agent/shared/config/search-settings').SearchKeyProviderId, apiKey: string): Promise<{ configured: boolean }>
 
   refreshBadge(): Promise<void>
   setDockIconWithBadge(dataUrl: string): Promise<void>

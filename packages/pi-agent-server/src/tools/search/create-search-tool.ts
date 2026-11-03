@@ -56,6 +56,7 @@ function formatErrorSnippet(message: string, max = 180): string {
 export function createSearchTool(
   provider: WebSearchProvider,
   fallbackProvider?: WebSearchProvider,
+  resolveOrderedProviders?: (signal?: AbortSignal) => Promise<WebSearchProvider[] | null>,
 ): ToolDefinition<typeof schema> {
   return {
     name: 'web_search',
@@ -70,8 +71,31 @@ export function createSearchTool(
       const count = Math.max(1, Math.min(10, params.count ?? 5));
       const providerName = provider.name;
 
+      let ordered: WebSearchProvider[] | null | undefined;
+      try { ordered = await resolveOrderedProviders?.(signal); }
+      catch (error) {
+        if (signal?.aborted) throw error;
+        return { content: [{ type: 'text' as const, text: 'Search settings are unavailable. Please retry.' }], details: { isError: true } };
+      }
       try {
         signal?.throwIfAborted();
+        if (ordered) {
+          const failed: string[] = [];
+          for (const candidate of ordered) {
+            signal?.throwIfAborted();
+            try {
+              const results = await candidate.search(query, count, signal);
+              return formatResults(query, candidate.name, results, failed.length
+                ? `Search providers unavailable: ${failed.join(', ')}. Used ${candidate.name}.` : undefined);
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              failed.push(candidate.name);
+            }
+          }
+          return { content: [{ type: 'text' as const, text: ordered.length
+            ? `Search failed: all enabled providers were unavailable (${failed.join(', ')}).`
+            : 'Search failed: no search providers are enabled.' }], details: { isError: true } };
+        }
         const results = await provider.search(query, count, signal);
         return formatResults(query, providerName, results);
       } catch (err) {

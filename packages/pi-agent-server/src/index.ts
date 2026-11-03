@@ -124,6 +124,8 @@ import { createDocumentTools } from './tools/documents.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { createDynamicSearchProvider, requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
+import { createOrderedProviderResolver } from './tools/search/ordered-providers.ts';
+import { requestSearchSettings, type SearchSettingsRequest, type SearchSettingsResponse } from './tools/search/search-settings-bridge.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
 import {
@@ -264,6 +266,7 @@ type InboundMessage =
   | { type: 'steer'; message: string }
   | { type: 'token_update'; piAuth: { provider: string; credential: PiCredential } }
   | { type: 'anysearch_api_key_result'; id: string; apiKey: string }
+  | SearchSettingsResponse
   | { type: 'shutdown' };
 
 /** Proxy tool definition from main process */
@@ -387,6 +390,7 @@ type OutboundMessage =
   | OutboundSetAutoCompactionResult
   | OutboundRuntimeConfigUpdateResult
   | OutboundAnySearchApiKeyRequest
+  | SearchSettingsRequest
   | OutboundSessionIdUpdate
   | OutboundThinkingProbe
   | OutboundImageInputSkipped
@@ -421,6 +425,7 @@ let moduleRuntimePromise: Promise<AuthenticatedRuntime> | null = null;
 let runtimeConfigGeneration = 0;
 const modelConfigurationQueue = new ModelConfigurationQueue();
 const pendingAnySearchApiKeys = new Map<string, (apiKey: string) => void>();
+const pendingSearchSettings = new Map<string, (response: SearchSettingsResponse) => void>();
 let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
@@ -859,7 +864,22 @@ async function ensureSession(): Promise<AgentSession> {
     }),
   );
   const anySearchFallback = resolveSearchProvider(undefined, undefined, resolveAnySearchApiKey);
-  const searchTool = createSearchTool(searchProvider, anySearchFallback);
+  const orderedProviders = createOrderedProviderResolver(
+    async signal => {
+      const response = await requestSearchSettings(send, pendingSearchSettings, undefined, signal);
+      if (!('settings' in response)) throw new Error('Search settings response is missing');
+      if (response.settings === undefined) throw new Error('Search settings response is invalid');
+      return response.settings;
+    },
+    async (provider, signal) => {
+      const response = await requestSearchSettings(send, pendingSearchSettings, provider, signal);
+      if (typeof response.apiKey !== 'string') throw new Error('Search key response is invalid');
+      return response.apiKey;
+    },
+    () => resolveSearchProvider(initConfig?.piAuth, initConfig?.model, resolveAnySearchApiKey,
+      { customEndpoint: !!initConfig?.customEndpoint, authType: initConfig?.authType, baseUrl: initConfig?.baseUrl }),
+  );
+  const searchTool = createSearchTool(searchProvider, anySearchFallback, orderedProviders);
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null,
     () => cwd,
@@ -2608,6 +2628,13 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       const resolve = pendingAnySearchApiKeys.get(msg.id);
       pendingAnySearchApiKeys.delete(msg.id);
       resolve?.(typeof msg.apiKey === 'string' ? msg.apiKey : '');
+      break;
+    }
+
+    case 'search_settings_result': {
+      const resolve = pendingSearchSettings.get(msg.id);
+      pendingSearchSettings.delete(msg.id);
+      resolve?.(msg);
       break;
     }
 

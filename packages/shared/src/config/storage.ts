@@ -27,6 +27,7 @@ import { isValidThinkingLevel, normalizeThinkingLevel } from '../agent/thinking-
 import { parsePermissionMode, PERMISSION_MODE_ORDER } from '../agent/mode-types.ts';
 import { type ConfigDefaults } from './config-defaults-schema.ts';
 import { isValidThemeFile } from './validators.ts';
+import { normalizeSearchSettings, type SearchSettings } from './search-settings.ts';
 
 // Re-export CONFIG_DIR for convenience (centralized in paths.ts)
 export { CONFIG_DIR, DEFAULT_CONFIG_DIR_NAME } from './paths.ts';
@@ -99,6 +100,7 @@ export interface StoredConfig {
   // before these settings existed.
   dagOrchestrationEnabled?: boolean;
   swarmAgentsEnabled?: boolean;
+  searchSettings?: SearchSettings;
   // Network proxy
   networkProxy?: import('./types.ts').NetworkProxySettings;
   // Windows: path to Git Bash (bash.exe) for the SDK subprocess
@@ -322,6 +324,25 @@ export function loadStoredConfig(): StoredConfig | null {
     debug('[config] loadStoredConfig failed:', error instanceof Error ? error.message : error);
     return null;
   }
+}
+
+export function getSearchSettings(): SearchSettings | null {
+  const config = loadStoredConfig();
+  if (!config) throw new Error('Application configuration is unavailable');
+  if (config.searchSettings === undefined) return null;
+  const settings = normalizeSearchSettings(config.searchSettings);
+  if (!settings) throw new Error('Invalid stored search provider settings');
+  return settings;
+}
+
+export function setSearchSettings(value: unknown): SearchSettings {
+  const settings = normalizeSearchSettings(value);
+  if (!settings) throw new Error('Invalid search provider settings');
+  const config = loadStoredConfig();
+  if (!config) throw new Error('Application configuration is unavailable');
+  config.searchSettings = settings;
+  saveConfig(config);
+  return settings;
 }
 
 // Legacy credential helpers removed - use connection-aware credential lookup instead:

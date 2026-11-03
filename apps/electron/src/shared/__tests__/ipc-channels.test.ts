@@ -260,6 +260,8 @@ const EXPECTED_CHANNELS: string[] = [
   'settings:setDagOrchestrationEnabled',
   'settings:setDefaultThinkingLevel',
   'settings:setNetworkProxy',
+  'settings:setSearchProviderApiKey',
+  'settings:setSearchSettings',
   'settings:setServerConfig',
   'settings:setSharedProjectMemoryEnabled',
   'settings:setSwarmAgentsEnabled',

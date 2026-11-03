@@ -35,6 +35,7 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { boundedCollisionDetection, restrictToContainer, verticalAxisOnly } from './sortable-list-geometry'
 
 // ============================================================
 // Custom PointerSensor — skips drag activation on elements with data-no-dnd
@@ -98,6 +99,10 @@ const measuringConfig: MeasuringConfiguration = {
   },
 }
 
+const verticalModifiers = [verticalAxisOnly]
+const containerModifiers = [restrictToContainer]
+const verticalContainerModifiers = [verticalAxisOnly, restrictToContainer]
+
 // ============================================================
 // Types
 // ============================================================
@@ -130,6 +135,14 @@ interface SortableListProps<T extends SortableItemData> {
   className?: string
   /** Attach drag listeners only to the handle props passed to renderItem. */
   handleOnly?: boolean
+  /** Also allow pointer dragging from the row while keeping keyboard control on the handle. */
+  dragAnywhere?: boolean
+  /** Constrain movement and collision detection to the vertical axis. */
+  verticalOnly?: boolean
+  /** Keep the dragged item within the list's top and bottom edges. */
+  constrainToList?: boolean
+  /** Disable both pointer and keyboard sorting. */
+  disabled?: boolean
 }
 
 // ============================================================
@@ -144,6 +157,10 @@ export function SortableList<T extends SortableItemData>({
   showOverlay = true,
   className,
   handleOnly = false,
+  dragAnywhere = false,
+  verticalOnly = false,
+  constrainToList = false,
+  disabled = false,
 }: SortableListProps<T>) {
   const [activeId, setActiveId] = React.useState<string | null>(null)
 
@@ -185,11 +202,12 @@ export function SortableList<T extends SortableItemData>({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={constrainToList ? boundedCollisionDetection : closestCenter}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
       measuring={measuringConfig}
+      modifiers={verticalOnly ? (constrainToList ? verticalContainerModifiers : verticalModifiers) : (constrainToList ? containerModifiers : undefined)}
     >
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
         <div className={className}>
@@ -200,6 +218,9 @@ export function SortableList<T extends SortableItemData>({
               isDragActive={activeId === item.id}
               hideWhileDragging={showOverlay}
               handleOnly={handleOnly}
+              dragAnywhere={handleOnly && dragAnywhere}
+              disabled={disabled}
+              preserveDragSize={constrainToList}
             >
               {(dragHandleProps) => renderItem(item, activeId === item.id, dragHandleProps)}
             </SortableItemWrapper>
@@ -239,10 +260,13 @@ interface SortableItemWrapperProps {
   isDragActive: boolean
   hideWhileDragging: boolean
   handleOnly: boolean
+  dragAnywhere: boolean
+  disabled: boolean
+  preserveDragSize: boolean
   children: (dragHandleProps: SortableDragHandleProps) => React.ReactNode
 }
 
-function SortableItemWrapper({ id, isDragActive, hideWhileDragging, handleOnly, children }: SortableItemWrapperProps) {
+function SortableItemWrapper({ id, isDragActive, hideWhileDragging, handleOnly, dragAnywhere, disabled, preserveDragSize, children }: SortableItemWrapperProps) {
   const {
     attributes,
     listeners,
@@ -251,21 +275,24 @@ function SortableItemWrapper({ id, isDragActive, hideWhileDragging, handleOnly, 
     transform,
     transition,
     isDragging,
-  } = useSortable({ id })
+  } = useSortable({ id, disabled })
 
   const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
+    transform: CSS.Transform.toString(transform && preserveDragSize && isDragging
+      ? { ...transform, scaleX: 1, scaleY: 1 } : transform),
     transition,
     // Hide ghost only when DragOverlay is enabled
     opacity: isDragging && hideWhileDragging ? 0 : 1,
-    ...(!handleOnly ? { cursor: isDragActive ? 'grabbing' : 'grab' } : {}),
+    ...((!handleOnly || dragAnywhere) && !disabled ? { cursor: isDragActive ? 'grabbing' : 'grab' } : {}),
   }
 
   const dragHandleProps = {
     ref: setActivatorNodeRef,
     ...attributes,
     ...listeners,
+    ...(dragAnywhere ? { onPointerDown: undefined } : {}),
   } as SortableDragHandleProps
+  const rowPointerDown = listeners?.onPointerDown as React.PointerEventHandler<HTMLDivElement> | undefined
 
   return (
     <div
@@ -273,6 +300,7 @@ function SortableItemWrapper({ id, isDragActive, hideWhileDragging, handleOnly, 
       style={style}
       {...(!handleOnly ? attributes : {})}
       {...(!handleOnly ? listeners : {})}
+      {...(dragAnywhere ? { onPointerDown: rowPointerDown } : {})}
     >
       {children(dragHandleProps)}
     </div>

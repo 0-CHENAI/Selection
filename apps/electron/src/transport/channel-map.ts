@@ -368,6 +368,8 @@ export const CHANNEL_MAP = {
   setDagOrchestrationEnabled: invoke(RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED),
   setSwarmAgentsEnabled: invoke(RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED),
   setAnySearchApiKey: invoke(RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY),
+  setSearchSettings: invoke(RPC_CHANNELS.settings.SET_SEARCH_SETTINGS),
+  setSearchProviderApiKey: invoke(RPC_CHANNELS.settings.SET_SEARCH_PROVIDER_API_KEY),
 
   // Badge
   refreshBadge: invoke(RPC_CHANNELS.badge.REFRESH),

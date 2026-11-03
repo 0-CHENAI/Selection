@@ -35,7 +35,11 @@ export type CredentialType =
   // Messaging gateway credentials (keyed by workspaceId + platform)
   | 'messaging_bearer'   // Messaging platform credentials
   // App-level search provider credentials
-  | 'anysearch_api_key'; // AnySearch API key for built-in web search
+  | 'anysearch_api_key' // AnySearch API key for built-in web search
+  | 'deepseek_search_api_key'
+  | 'tavily_search_api_key'
+  | 'exa_search_api_key'
+  | 'brave_search_api_key';
 
 /** Valid credential types for validation */
 const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
@@ -52,6 +56,10 @@ const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'source_basic',
   'messaging_bearer',
   'anysearch_api_key',
+  'deepseek_search_api_key',
+  'tavily_search_api_key',
+  'exa_search_api_key',
+  'brave_search_api_key',
 ] as const;
 
 /** Check if a string is a valid CredentialType */

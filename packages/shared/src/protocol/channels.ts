@@ -260,6 +260,8 @@ export const RPC_CHANNELS = {
     SET_DAG_ORCHESTRATION_ENABLED: 'settings:setDagOrchestrationEnabled',
     SET_SWARM_AGENTS_ENABLED: 'settings:setSwarmAgentsEnabled',
     SET_ANYSEARCH_API_KEY: 'settings:setAnySearchApiKey',
+    SET_SEARCH_SETTINGS: 'settings:setSearchSettings',
+    SET_SEARCH_PROVIDER_API_KEY: 'settings:setSearchProviderApiKey',
     GET_SERVER_CONFIG: 'settings:getServerConfig',
     SET_SERVER_CONFIG: 'settings:setServerConfig',
     GET_SERVER_STATUS: 'settings:getServerStatus',
