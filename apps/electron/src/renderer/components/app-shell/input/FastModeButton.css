@@ -12,19 +12,32 @@
   height: 18px;
   padding: 0;
   border: 0;
+  box-shadow: none;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
   font-size: 12px;
   line-height: 18px;
   cursor: pointer;
-  transition: color 180ms ease;
+  transition: color 180ms ease, text-shadow 180ms ease;
 }
 .prompt-fast-button::before { content: ''; position: absolute; inset: -5px -4px; }
 .dark .prompt-fast-button { --fast-accent: oklch(0.78 0.15 293); }
 .prompt-fast-seat[data-work-mode='PRO'] .prompt-fast-button { --fast-accent: var(--pro-accent); }
 .prompt-fast-button:not(:disabled):hover { color: var(--foreground); }
-.prompt-fast-button:focus-visible { outline: 1px solid var(--ring); outline-offset: 3px; border-radius: 2px; }
+.prompt-fast-button:focus-visible {
+  outline: none;
+  color: var(--foreground);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--fast-accent) 55%, transparent);
+}
+.prompt-fast-button:focus-visible svg {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--fast-accent) 65%, transparent));
+}
+.prompt-fast-button:focus-visible:not([data-icon-only]) {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
 .prompt-fast-button:disabled {
   cursor: default;
   opacity: 0.55;

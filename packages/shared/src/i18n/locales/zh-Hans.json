@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "无法停止共享",
   "chat.failedToUpdateShare": "无法更新共享",
   "chat.fastMode.busy": "当前回复结束后可切换 Fast",
-  "chat.fastMode.description": "加速回复 · 订阅额度 2.5 倍 / 购买额度 2 倍",
+  "chat.fastMode.description": "1.5x 速度 · 2 倍额度消耗",
   "chat.fastMode.grokDescription": "优先处理 · 按标准 Token 费率的 2 倍计费",
   "chat.fastMode.unsupported": "当前连接或模型不支持 Fast",
   "chat.filesCount_few": "{{count}} 个文件",

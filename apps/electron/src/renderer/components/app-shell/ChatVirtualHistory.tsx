@@ -27,6 +27,10 @@ export function shouldMeasureVirtualScrollMargin(
   return entries.some(entry => entry.target !== list)
 }
 
+export function isVirtualTurnInWindow(index: number, start: number, end: number): boolean {
+  return index >= start && index < end
+}
+
 /** Estimates only seed the scrollbar; ResizeObserver caches actual row heights. */
 export function estimateChatTurnHeight(turn: Turn, width: number): number {
   const text = turn.type === 'assistant' ? turn.response?.text ?? '' : turn.message.content

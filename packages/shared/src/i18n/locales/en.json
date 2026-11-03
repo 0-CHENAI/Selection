@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "Failed to stop sharing",
   "chat.failedToUpdateShare": "Failed to update share",
   "chat.fastMode.busy": "Wait for the current response before changing Fast",
-  "chat.fastMode.description": "Faster responses · 2.5× subscription usage / 2× credits",
+  "chat.fastMode.description": "1.5x speed · 2x quota usage",
   "chat.fastMode.grokDescription": "Priority processing · billed at 2× standard token rates",
   "chat.fastMode.unsupported": "Fast is unavailable for this connection or model",
   "chat.filesCount_few": "{{count}} files",

@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "共有の停止に失敗しました",
   "chat.failedToUpdateShare": "共有の更新に失敗しました",
   "chat.fastMode.busy": "現在の応答が完了してから Fast を切り替えてください",
-  "chat.fastMode.description": "応答を高速化 · サブスクリプション枠 2.5 倍 / クレジット 2 倍",
+  "chat.fastMode.description": "1.5x 速度 · 2 倍の利用枠消費",
   "chat.fastMode.grokDescription": "優先処理 · 標準トークン料金の2倍",
   "chat.fastMode.unsupported": "この接続またはモデルは Fast に対応していません",
   "chat.filesCount_few": "{{count}} 件のファイル",

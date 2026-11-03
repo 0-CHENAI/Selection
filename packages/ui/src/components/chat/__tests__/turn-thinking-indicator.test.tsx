@@ -368,6 +368,9 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(chatDisplay).toContain('<HeightPresence key="processing-indicator"')
     expect(chatDisplay).toContain('{sessionBusy && (')
     expect(chatDisplay).not.toContain('{sessionBusy && !hasMoreBelow && (')
+    expect(chatDisplay).toContain('const processingTurnInWindow = isVirtualTurnInWindow(processingTurnIndex, startIndex, endIndex)')
+    expect(chatDisplay).toContain('{!processingTurnInWindow && !clarificationLayout && processingIndicator}')
+    expect(chatDisplay).not.toContain('{processingTurnIndex === -1 && !clarificationLayout && processingIndicator}')
     expect(chatDisplay).not.toContain('py-1 -mb-1 text-[13px] text-muted-foreground">\n      {/* Spinner in same location as TurnCard chevron */}\n      <div className="w-3 h-3 flex items-center justify-center shrink-0">\n        <Spinner className="text-[10px]" />\n      </div>\n      {/* Label with crossfade')
   })
 

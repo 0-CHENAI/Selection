@@ -15,6 +15,12 @@ describe('models-pi filtering', () => {
     expect(ids.some(id => id.startsWith('pi/gpt-4'))).toBe(false);
   });
 
+  it('exposes the full current ChatGPT OAuth catalog', () => {
+    const ids = getPiModelsForAuthProvider('openai-codex').map(model => model.id);
+    expect(ids).toContain('pi/gpt-6.1-sol');
+    expect(ids).toContain('pi/gpt-6.1-terra');
+  });
+
   it('keeps Claude Opus 4.6 models in Anthropic catalogs', () => {
     // TODO(opus-4.6-sunset): flip these back to exclusion when 4.6 is deprecated.
     const anthropicIds = getPiModelsForAuthProvider('anthropic').map(m => m.id);

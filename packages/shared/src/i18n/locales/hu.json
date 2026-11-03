@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "A megosztás leállítása sikertelen",
   "chat.failedToUpdateShare": "A megosztás frissítése sikertelen",
   "chat.fastMode.busy": "A Fast mód a jelenlegi válasz befejezése után módosítható",
-  "chat.fastMode.description": "Gyorsabb válaszok · 2,5× előfizetési keret / 2× kredit",
+  "chat.fastMode.description": "1,5x sebesség · 2x kvótafelhasználás",
   "chat.fastMode.grokDescription": "Elsőbbségi feldolgozás · a normál tokenár kétszerese",
   "chat.fastMode.unsupported": "A Fast nem érhető el ehhez a kapcsolathoz vagy modellhez",
   "chat.filesCount_few": "{{count}} fájl",

@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "Nie udało się zatrzymać udostępniania",
   "chat.failedToUpdateShare": "Nie udało się zaktualizować udostępnienia",
   "chat.fastMode.busy": "Poczekaj na koniec bieżącej odpowiedzi, aby zmienić Fast",
-  "chat.fastMode.description": "Szybsze odpowiedzi · 2,5× limitu subskrypcji / 2× kredytów",
+  "chat.fastMode.description": "Prędkość 1,5x · 2x zużycie limitu",
   "chat.fastMode.grokDescription": "Przetwarzanie priorytetowe · dwukrotna standardowa stawka za token",
   "chat.fastMode.unsupported": "Fast jest niedostępny dla tego połączenia lub modelu",
   "chat.filesCount_few": "{{count}} pliki",

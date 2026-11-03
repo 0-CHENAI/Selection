@@ -56,7 +56,7 @@ export function FastModeButton({ enabled, supported, family, busy, onChange, inM
             : button}
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-64">Fast · {description}</TooltipContent>
+      <TooltipContent side="top" className="max-w-64">{description}</TooltipContent>
     </Tooltip>
   )
 }

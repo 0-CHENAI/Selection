@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Virtualizer } from '@tanstack/react-virtual'
-import { shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
+import { isVirtualTurnInWindow, shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
 
 function history() {
   const corrections: number[] = []
@@ -22,6 +22,16 @@ describe('virtual scroll margin', () => {
   test('still measures when the viewport or the content above the list changes', () => {
     expect(shouldMeasureVirtualScrollMargin([{ target: viewport }], list)).toBe(true)
     expect(shouldMeasureVirtualScrollMargin([{ target: list }, { target: viewport }], list)).toBe(true)
+  })
+})
+
+describe('virtual turn window', () => {
+  test('uses a half-open range and rejects absent or unmounted turns', () => {
+    expect(isVirtualTurnInWindow(-1, 4, 8)).toBe(false)
+    expect(isVirtualTurnInWindow(3, 4, 8)).toBe(false)
+    expect(isVirtualTurnInWindow(4, 4, 8)).toBe(true)
+    expect(isVirtualTurnInWindow(7, 4, 8)).toBe(true)
+    expect(isVirtualTurnInWindow(8, 4, 8)).toBe(false)
   })
 })
 

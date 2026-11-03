@@ -355,7 +355,7 @@
   "chat.failedToStopSharing": "Freigabe konnte nicht beendet werden",
   "chat.failedToUpdateShare": "Freigabe konnte nicht aktualisiert werden",
   "chat.fastMode.busy": "Fast kann nach Abschluss der aktuellen Antwort geändert werden",
-  "chat.fastMode.description": "Schnellere Antworten · 2,5× Abo-Kontingent / 2× Guthaben",
+  "chat.fastMode.description": "1,5x Tempo · 2x Kontingentverbrauch",
   "chat.fastMode.grokDescription": "Prioritätsverarbeitung · Abrechnung zum 2-fachen Standard-Tokenpreis",
   "chat.fastMode.unsupported": "Fast ist für diese Verbindung oder dieses Modell nicht verfügbar",
   "chat.filesCount_few": "{{count}} Dateien",
