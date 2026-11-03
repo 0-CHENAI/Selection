@@ -5,7 +5,13 @@
 import { $ } from 'bun';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import type { BuildConfig } from './common';
+import type { Arch, BuildConfig } from './common';
+
+export function darwinBuilderArgs(arch: Arch): string[] {
+  // Explicit target names prevent configured target architectures from adding
+  // an unrequested second architecture to this single-architecture build.
+  return ['--mac', 'dmg', 'zip', `--${arch}`];
+}
 
 /**
  * Package the macOS app with electron-builder
@@ -21,7 +27,7 @@ export async function packageDarwin(config: BuildConfig): Promise<string> {
   process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= 'true';
 
   // Build electron-builder arguments
-  const builderArgs = ['--mac', `--${arch}`];
+  const builderArgs = darwinBuilderArgs(arch);
 
   // Add code signing if identity is available
   if (process.env.APPLE_SIGNING_IDENTITY) {
