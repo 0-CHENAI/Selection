@@ -15,6 +15,8 @@ import {
   replaceLoadedSessionAtom,
   appendMessageAtom,
   updateSessionAtom,
+  updateSessionMetaAtom,
+  removeSessionAtom,
 } from '../sessions'
 
 function msg(id: string, role: Message['role'] = 'user'): Message {
@@ -298,6 +300,84 @@ describe('refreshSessionsMetadataAtom', () => {
 })
 
 describe('independent renderer session isolation', () => {
+  it('keeps newer independent run states when a stale list snapshot arrives', () => {
+    const store = createStore()
+    const a = makeSession({ id: 'a', isProcessing: false })
+    const b = makeSession({ id: 'b', isProcessing: false })
+    const c = makeSession({ id: 'c', isProcessing: true })
+    store.set(initializeSessionsAtom, [a, b, c])
+    const baselineSessions = new Map(['a', 'b', 'c'].map(id => [id, store.get(sessionAtomFamily(id))]))
+    store.set(updateSessionAtom, 'a', current => current && { ...current, isProcessing: true })
+    store.set(updateSessionAtom, 'b', current => current && { ...current, isProcessing: true })
+    store.set(updateSessionAtom, 'c', current => current && { ...current, isProcessing: false })
+    store.set(refreshSessionsMetadataAtom, { sessions: [a, b, c], loadedSessionIds: new Set<string>(), baselineSessions })
+    const map = store.get(sessionMetaMapAtom)
+    expect(map.get('a')?.isProcessing).toBe(true)
+    expect(map.get('b')?.isProcessing).toBe(true)
+    expect(map.get('c')?.isProcessing).toBe(false)
+    store.set(updateSessionAtom, 'a', current => current && { ...current, isProcessing: false })
+    expect(store.get(sessionMetaMapAtom).get('b')?.isProcessing).toBe(true)
+  })
+
+  it('still applies an unchanged authoritative snapshot to recover missed completion', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [makeSession({ id: 'a', isProcessing: true })])
+    const baselineSessions = new Map([['a', store.get(sessionAtomFamily('a'))]])
+    store.set(refreshSessionsMetadataAtom, { sessions: [makeSession({ id: 'a', isProcessing: false })], loadedSessionIds: new Set<string>(), baselineSessions })
+    expect(store.get(sessionMetaMapAtom).get('a')?.isProcessing).toBe(false)
+  })
+
+  it('applies the server run state when only an unrelated local field changed', () => {
+    const store = createStore()
+    const old = makeSession({ id: 'a', name: 'Old', isProcessing: false })
+    store.set(initializeSessionsAtom, [old])
+    const baselineSessions = new Map([['a', store.get(sessionAtomFamily('a'))]])
+    const baselineMetas = store.get(sessionMetaMapAtom)
+    store.set(updateSessionAtom, 'a', current => current && { ...current, name: 'Renamed' })
+    store.set(refreshSessionsMetadataAtom, { sessions: [{ ...old, isProcessing: true }],
+      loadedSessionIds: new Set<string>(), baselineSessions, baselineMetas })
+    expect(store.get(sessionMetaMapAtom).get('a')?.isProcessing).toBe(true)
+    expect(store.get(sessionMetaMapAtom).get('a')?.name).toBe('Renamed')
+  })
+
+  it('does not resurrect a session deleted while the list request was in flight', () => {
+    const store = createStore()
+    const session = makeSession({ id: 'a' })
+    store.set(initializeSessionsAtom, [session])
+    const baselineSessions = new Map([['a', store.get(sessionAtomFamily('a'))]])
+    store.set(removeSessionAtom, 'a')
+    store.set(refreshSessionsMetadataAtom, { sessions: [session], loadedSessionIds: new Set<string>(), baselineSessions })
+    expect(store.get(sessionMetaMapAtom).has('a')).toBe(false)
+    expect(store.get(sessionAtomFamily('a'))).toBe(null)
+  })
+
+  it('keeps metadata-only edits while applying newer server fields', () => {
+    const store = createStore()
+    const old = makeSession({ id: 'a', name: 'Old', hasUnread: true, isProcessing: true })
+    store.set(initializeSessionsAtom, [old])
+    const baselineSessions = new Map([['a', store.get(sessionAtomFamily('a'))]])
+    const baselineMetas = store.get(sessionMetaMapAtom)
+    store.set(updateSessionMetaAtom, 'a', { hasUnread: false })
+    store.set(refreshSessionsMetadataAtom, { sessions: [{ ...old, name: 'Fresh', isProcessing: false }],
+      loadedSessionIds: new Set<string>(), baselineSessions, baselineMetas })
+    expect(store.get(sessionMetaMapAtom).get('a')?.hasUnread).toBe(false)
+    expect(store.get(sessionMetaMapAtom).get('a')?.name).toBe('Fresh')
+    expect(store.get(sessionMetaMapAtom).get('a')?.isProcessing).toBe(false)
+  })
+
+  it('does not restore a deleted metadata-only session', () => {
+    const store = createStore()
+    const old = makeSession({ id: 'a' })
+    store.set(initializeSessionsAtom, [old])
+    store.set(sessionAtomFamily('a'), null)
+    const baselineSessions = new Map([['a', null]])
+    const baselineMetas = store.get(sessionMetaMapAtom)
+    store.set(removeSessionAtom, 'a')
+    store.set(refreshSessionsMetadataAtom, { sessions: [old], loadedSessionIds: new Set<string>(), baselineSessions, baselineMetas })
+    expect(store.get(sessionMetaMapAtom).has('a')).toBe(false)
+    expect(store.get(sessionAtomFamily('a'))).toBe(null)
+  })
+
   it('never appends one session canary to a sibling session atom', () => {
     const store = createStore()
     store.set(replaceLoadedSessionAtom, makeSession({

@@ -327,7 +327,7 @@ describe('startup migration (integration)', () => {
     expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
   })
 
-  it('does not overwrite a genuine Codex Best/Balanced/Fast tier list', () => {
+  it('restores the full Codex catalog even for a saved OAuth tier list', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
     const tier = ['pi/gpt-5.6-sol', 'pi/gpt-5.6-terra', 'pi/gpt-5.6-luna']
 
@@ -348,16 +348,15 @@ describe('startup migration (integration)', () => {
     runMigration(configDir)
 
     const connection = findConnection(configPath, 'chatgpt-plus')
-    expect(connection.modelSelectionMode).toBe('userDefined3Tier')
-    expect(connection.models).toEqual(tier)
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(getPiModelsForAuthProvider('openai-codex').map(model => model.id)))
     expect(connection.defaultModel).toBe(tier[0])
-    expect(modelIdsOf(connection)).not.toContain('pi/gpt-6.1-sol')
+    expect(modelIdsOf(connection)).toContain('pi/gpt-6.1-sol')
   })
 
-  it('drops Codex ids removed in Pi 1.4.0 from a genuine tier and moves the default', () => {
+  it('replaces removed Codex ids with the current OAuth catalog and moves the default', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
-    // gpt-5.5 is no longer in the live Codex catalog. A real three-tier list
-    // keeps its mode and loses only the unknown id.
+    // gpt-5.5 is no longer in the live Codex catalog.
     const tier = ['pi/gpt-5.5', 'pi/gpt-5.6-sol', 'pi/gpt-5.6-luna']
 
     writeRootConfig(configPath, workspaceRoot, [
@@ -377,9 +376,86 @@ describe('startup migration (integration)', () => {
     runMigration(configDir)
 
     const connection = findConnection(configPath, 'chatgpt-plus')
-    expect(connection.modelSelectionMode).toBe('userDefined3Tier')
-    expect(connection.models).toEqual(['pi/gpt-5.6-sol', 'pi/gpt-5.6-luna'])
-    expect(connection.defaultModel).toBe('pi/gpt-5.6-sol')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(getPiModelsForAuthProvider('openai-codex').map(model => model.id)))
+    expect(modelIdsOf(connection)).not.toContain('pi/gpt-5.5')
+    expect(modelIdsOf(connection)).toContain(connection.defaultModel)
+  })
+
+  it.each(['kimi-coding', 'xai'])('restores all SDK models for existing %s OAuth connections', (provider) => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const catalog = getPiModelsForAuthProvider(provider).map(model => model.id)
+    expect(catalog.length).toBeGreaterThan(1)
+    if (provider === 'kimi-coding') {
+      expect(catalog).toContain('pi/k3.1-pro')
+      expect(catalog).toContain('pi/k3.1-pro-highspeed')
+    }
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'oauth', name: provider, providerType: 'pi', authType: 'oauth',
+      piAuthProvider: provider, modelSelectionMode: 'userDefined3Tier',
+      models: [catalog[0]], defaultModel: catalog[0], createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'oauth')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(new Set(modelIdsOf(connection))).toEqual(new Set(catalog))
+    expect(connection.defaultModel).toBe(catalog[0])
+    const first = readFileSync(configPath, 'utf8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf8')).toBe(first)
+  })
+
+  it('preserves the last live Copilot policy catalog until it can be refreshed', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const models = ['pi/copilot-policy-model-a', 'pi/copilot-policy-model-b']
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'copilot', name: 'Copilot', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'github-copilot', modelSelectionMode: 'userDefined3Tier',
+      models, defaultModel: models[1], createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'copilot')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(connection.models).toEqual(models)
+    expect(connection.defaultModel).toBe(models[1])
+  })
+
+  it('keeps existing OAuth models when the provider catalog is unavailable', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'oauth', name: 'OAuth', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'unknown-provider', modelSelectionMode: 'userDefined3Tier',
+      models: ['pi/last-known'], defaultModel: 'pi/last-known', createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'oauth')
+    expect(connection.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(connection.models).toEqual(['pi/last-known'])
+    expect(connection.defaultModel).toBe('pi/last-known')
+  })
+
+  it('does not replace an empty Copilot policy catalog with static models on restart', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    writeRootConfig(configPath, workspaceRoot, [{
+      slug: 'copilot', name: 'Copilot', providerType: 'pi', authType: 'oauth',
+      piAuthProvider: 'github-copilot', modelSelectionMode: 'automaticallySyncedFromProvider',
+      models: [], defaultModel: '', createdAt: Date.now(),
+    }])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'copilot')
+    expect(connection.models).toEqual([])
+    expect(connection.defaultModel).toBe('')
+    const first = readFileSync(configPath, 'utf8')
+    runMigration(configDir)
+    expect(readFileSync(configPath, 'utf8')).toBe(first)
   })
 
   it('normalizes legacy unprefixed userDefined3Tier model IDs instead of resetting', () => {

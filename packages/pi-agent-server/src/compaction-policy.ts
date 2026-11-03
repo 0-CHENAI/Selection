@@ -636,6 +636,9 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
       parentId: null, timestamp: new Date().toISOString(), customType: TASK_CONTEXT_TYPE, data: pendingNotes }] : branch;
     const recoveryBudget = Math.min(2000, Math.floor(maxTokens / 3));
     const recovery = taskRecoveryContext(sourceEntries, recoveryBudget);
+    // taskRecoveryContext takes characters, while the provider limit is tokens.
+    const recoveryTokens = recovery ? estimateTextTokensConservatively(`\n<source-recovery>\n${recovery}\n</source-recovery>`) : 0;
+    const summaryLimit = Math.max(1, maxTokens - recoveryTokens);
     const sources = taskReconciliationContext(sourceEntries, Math.min(12000, Math.max(1000, maxTokens)));
     const summaryContext = normalizeContext({ messages: [...context.messages, {
       role: 'system', content: COMPACTION_FOCUS + '\n' + TASK_RECONCILIATION_INSTRUCTIONS, timestamp: Date.now(),
@@ -668,6 +671,9 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
     void (async () => {
       let terminal = false;
       let lastPartial: AssistantMessage | undefined;
+      let retrySummary = false;
+      let firstTruncatedText = '';
+      let firstUsage: AssistantMessage['usage'] | undefined;
       const fail = (message: string, original?: AssistantMessage) => {
         const error: AssistantMessage = original ? { ...original, stopReason: 'error', errorMessage: message } : {
           role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
@@ -684,43 +690,91 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         // Preserve disabled/minimal reasoning; cap only the more expensive levels.
         const reasoning = model.reasoning && options?.reasoning
           ? { reasoning: options.reasoning === 'minimal' ? 'minimal' as const : 'low' as const } : {};
-        for await (const event of await stream(model, summaryContext, { ...options,
-          maxTokens: Math.max(1, maxTokens - (recovery ? recoveryBudget : 0)), ...reasoning })) {
-          if ('partial' in event) lastPartial = event.partial;
-          if (event.type === 'done') {
-            const text = event.message.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
-            if (options?.signal?.aborted || event.message.stopReason !== 'stop' || !text) fail('Compaction summary is empty or incomplete; original history was retained.', event.message);
-            else {
-              const reconciled = reconcileSummary(text, sourceEntries);
-              if (!reconciled.summary) fail('Compaction summary contains no usable summary; original history was retained.', event.message);
-              else {
-                let reference = '';
-                if (reconciled.reconciled) {
-                  pendingNotes = reconciled.items;
-                  const id = session.sessionManager.appendCustomEntry(STAGED_TASK_CONTEXT_TYPE, pendingNotes);
-                  reference = taskContextReference(id);
-                }
-                const repairedState = taskRecoveryContext([...branch, { type: 'custom', id: 'checked-context',
-                  parentId: null, timestamp: new Date().toISOString(), customType: TASK_CONTEXT_TYPE, data: reconciled.items }], recoveryBudget);
-                // Deterministic repair: a model cannot silently omit/relabel source state.
-                // The next request also restores it independently from the persisted branch.
-                const protectedSummary = [reconciled.summary, reference, repairedState && `\n<source-recovery>\n${repairedState}\n</source-recovery>`,
-                  !reconciled.reconciled && recovery ? 'Task-note reconciliation unavailable; source records and prior notes were retained. Recheck newer user instructions before acting.' : ''].filter(Boolean).join('\n');
-                output.push({ ...event, message: { ...event.message, content: [{ type: 'text', text: protectedSummary }] } });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (options?.signal?.aborted) { fail('Compaction cancelled; original history was retained.', lastPartial); break; }
+          const requestContext = attempt === 0 ? summaryContext : normalizeContext({ messages: [...summaryContext.messages, {
+            role: 'user', timestamp: Date.now(), content: `The previous summary exceeded the output limit. Summarize more concisely in at most ${Math.max(1, Math.floor(summaryLimit * 0.6))} tokens, including task context updates. Prioritize current goals, constraints, decisions, pending work, and unresolved errors.`,
+          }] });
+          for await (const event of await stream(model, requestContext, { ...options,
+            maxTokens: summaryLimit, ...reasoning })) {
+            if ('partial' in event) lastPartial = event.partial;
+            if (event.type === 'done') {
+              const text = event.message.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
+              const truncated = String(event.message.stopReason) === 'length' || String(event.message.stopReason) === 'max_tokens';
+              debug('[compaction-summary]', { attempt: attempt + 1, maxTokens, recoveryChars: recovery.length,
+                recoveryTokens, summaryLimit, outputTokens: event.message.usage.output,
+                stopReason: event.message.stopReason, truncated });
+              if (options?.signal?.aborted) fail('Compaction cancelled; original history was retained.', event.message);
+              else if (event.message.content.some(part => part.type === 'toolCall'))
+                fail('Compaction summary attempted to call a tool; original history was retained.', event.message);
+              else if (truncated && attempt === 0) {
+                firstTruncatedText = text; firstUsage = event.message.usage; retrySummary = true; terminal = true; break;
               }
+              else if ((!truncated && event.message.stopReason !== 'stop') || (!text && !truncated))
+                fail('Compaction summary is empty or incomplete; original history was retained.', event.message);
+              else {
+                // An unfinished metadata block is not summary text and cannot be reconciled.
+                const clean = (value: string) => {
+                  const start = value.lastIndexOf('<task-context-updates>');
+                  return truncated && start >= 0 && !value.slice(start).includes('</task-context-updates>')
+                    ? value.slice(0, start).trim() : value;
+                };
+                let reconciled = reconcileSummary(clean(text), sourceEntries);
+                let fallback = 'retry';
+                if (truncated && !reconciled.summary && firstTruncatedText) {
+                  reconciled = reconcileSummary(clean(firstTruncatedText), sourceEntries);
+                  fallback = 'first';
+                }
+                if (truncated) debug('[compaction-summary] fallback', { attempt: attempt + 1, fallback, usable: Boolean(reconciled.summary) });
+                if (!reconciled.summary) fail(truncated
+                  ? 'Compaction summary exceeded the output limit without usable text; original history was retained.'
+                  : 'Compaction summary contains no usable summary; original history was retained.', event.message);
+                else {
+                  let reference = '';
+                  if (reconciled.reconciled) {
+                    pendingNotes = reconciled.items;
+                    const id = session.sessionManager.appendCustomEntry(STAGED_TASK_CONTEXT_TYPE, pendingNotes);
+                    reference = taskContextReference(id);
+                  }
+                  const repairedState = taskRecoveryContext([...branch, { type: 'custom', id: 'checked-context',
+                    parentId: null, timestamp: new Date().toISOString(), customType: TASK_CONTEXT_TYPE, data: reconciled.items }], recoveryBudget);
+                  // Deterministic repair: a model cannot silently omit/relabel source state.
+                  // The next request also restores it independently from the persisted branch.
+                  const protectedSummary = [reconciled.summary, reference, repairedState && `\n<source-recovery>\n${repairedState}\n</source-recovery>`,
+                    !reconciled.reconciled && recovery ? 'Task-note reconciliation unavailable; source records and prior notes were retained. Recheck newer user instructions before acting.' : ''].filter(Boolean).join('\n');
+                  const finalUsage = event.message.usage;
+                  const usage = firstUsage ? {
+                    input: firstUsage.input + finalUsage.input, output: firstUsage.output + finalUsage.output,
+                    cacheRead: firstUsage.cacheRead + finalUsage.cacheRead, cacheWrite: firstUsage.cacheWrite + finalUsage.cacheWrite,
+                    ...(firstUsage.cacheWrite1h !== undefined || finalUsage.cacheWrite1h !== undefined
+                      ? { cacheWrite1h: (firstUsage.cacheWrite1h ?? 0) + (finalUsage.cacheWrite1h ?? 0) } : {}),
+                    ...(firstUsage.reasoning !== undefined || finalUsage.reasoning !== undefined
+                      ? { reasoning: (firstUsage.reasoning ?? 0) + (finalUsage.reasoning ?? 0) } : {}),
+                    totalTokens: firstUsage.totalTokens + finalUsage.totalTokens,
+                    cost: { input: firstUsage.cost.input + finalUsage.cost.input, output: firstUsage.cost.output + finalUsage.cost.output,
+                      cacheRead: firstUsage.cost.cacheRead + finalUsage.cost.cacheRead, cacheWrite: firstUsage.cost.cacheWrite + finalUsage.cost.cacheWrite,
+                      total: firstUsage.cost.total + finalUsage.cost.total,
+                      ...(firstUsage.cost.totalFromProvider !== undefined || finalUsage.cost.totalFromProvider !== undefined
+                        ? { totalFromProvider: firstUsage.cost.totalFromProvider === true && finalUsage.cost.totalFromProvider === true } : {}) },
+                  } : finalUsage;
+                  output.push({ ...event, reason: 'stop', message: { ...event.message, usage, stopReason: 'stop', content: [{ type: 'text', text: protectedSummary }] } });
+                }
+              }
+              terminal = true;
+              break;
             }
-            terminal = true;
-            break;
+            if (event.type === 'error') {
+              // The SDK checks only stopReason=error, not aborted, before saving.
+              fail(event.error.errorMessage || 'Compaction cancelled; original history was retained.', event.error);
+              terminal = true;
+              break;
+            }
+            // Do not expose partial output from a discarded attempt.
           }
-          if (event.type === 'error') {
-            // The SDK checks only stopReason=error, not aborted, before saving.
-            fail(event.error.errorMessage || 'Compaction cancelled; original history was retained.', event.error);
-            terminal = true;
-            break;
-          }
-          output.push(event);
+          if (!terminal) { fail('Compaction stream ended without a summary; original history was retained.', lastPartial); break; }
+          if (attempt === 0 && retrySummary) { terminal = false; continue; }
+          break;
         }
-        if (!terminal) fail('Compaction stream ended without a summary; original history was retained.', lastPartial);
       } catch (error) {
         fail(error instanceof Error ? error.message : String(error), lastPartial);
       }

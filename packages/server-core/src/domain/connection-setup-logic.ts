@@ -256,13 +256,15 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
     name = `${name} ${suffixMatch[1]}`
   }
 
+  const isCopilotOAuth = providerType === 'pi' && authType === 'oauth' && template.piAuthProvider === 'github-copilot'
+
   return {
     slug,
     name,
     providerType,
     authType,
-    models: getDefaultModelsForConnection(providerType, template.piAuthProvider),
-    defaultModel: getDefaultModelForConnection(providerType, template.piAuthProvider),
+    models: isCopilotOAuth ? [] : getDefaultModelsForConnection(providerType, template.piAuthProvider),
+    defaultModel: isCopilotOAuth ? '' : getDefaultModelForConnection(providerType, template.piAuthProvider),
     modelSelectionMode: providerType === 'pi' ? 'automaticallySyncedFromProvider' : undefined,
     piAuthProvider: template.piAuthProvider,
     midStreamBehavior: defaultMidStreamBehavior(providerType),

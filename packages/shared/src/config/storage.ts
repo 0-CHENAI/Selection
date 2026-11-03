@@ -1803,6 +1803,9 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
     const defaultModels = getDefaultModelsForConnection(connection.providerType, connection.piAuthProvider);
     const defaultModel = getDefaultModelForConnection(connection.providerType, connection.piAuthProvider);
     const providerDefaultModelIds = normalizeModelIds(defaultModels as Array<{ id: string } | string>);
+    const isCopilotOAuth = connection.providerType === 'pi'
+      && connection.authType === 'oauth'
+      && connection.piAuthProvider === 'github-copilot';
 
     // Note: bedrock connections are migrated to pi + amazon-bedrock by migrateLegacyProviderTypes()
     // before this function runs, so no bedrock-specific normalization needed here.
@@ -1812,11 +1815,10 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       // models are enabled), so force automaticallySyncedFromProvider regardless
       // of what inferModelSelectionMode would compute from stale static SDK data.
       const isCopilot = connection.piAuthProvider === 'github-copilot';
-      // Already-persisted userDefined3Tier is not re-inferred. Restore only
-      // Codex lists that are a stale full catalog, then let the auto branch
-      // merge the current catalog (including ids added since the snapshot).
+      // OAuth model availability is provider-managed, including connections
+      // saved by older versions with a user-defined subset.
       const restoreCodexCatalog = shouldRestoreOpenAiCodexCatalogSync(connection, providerDefaultModelIds);
-      const mode = isCopilot || restoreCodexCatalog
+      const mode = connection.authType === 'oauth' || isCopilot || restoreCodexCatalog
         ? 'automaticallySyncedFromProvider' as const
         : (connection.modelSelectionMode ?? inferModelSelectionMode(connection, providerDefaultModelIds));
       if (connection.modelSelectionMode !== mode) {
@@ -1833,7 +1835,9 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
 
       if (mode === 'automaticallySyncedFromProvider') {
         const currentIds = normalizeModelIds(connection.models);
-        if (providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
+        // A saved Copilot list may reflect account policy; do not replace it
+        // with the SDK's unfiltered static catalog.
+        if (!isCopilotOAuth && (!isCopilot || currentIds.length === 0) && providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
           connection.models = defaultModels;
           changed = true;
         }
@@ -1878,12 +1882,12 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       }
     }
 
-    if (defaultModels.length > 0 && (!connection.models || (Array.isArray(connection.models) && connection.models.length === 0))) {
+    if (!isCopilotOAuth && defaultModels.length > 0 && (!connection.models || (Array.isArray(connection.models) && connection.models.length === 0))) {
       connection.models = defaultModels;
       changed = true;
     }
 
-    if (!connection.defaultModel && defaultModel) {
+    if (!isCopilotOAuth && !connection.defaultModel && defaultModel) {
       connection.defaultModel = defaultModel;
       changed = true;
     }

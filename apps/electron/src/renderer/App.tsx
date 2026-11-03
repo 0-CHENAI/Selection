@@ -347,6 +347,7 @@ export default function App() {
   const updateSessionDirect = useSetAtom(updateSessionAtom)
   const replaceLoadedSession = useSetAtom(replaceLoadedSessionAtom)
   const store = useStore()
+  const pendingSessionCreations = useRef(new Map<string, object>())
 
   // Helper to update a session by ID with partial fields
   // Uses per-session atom directly instead of updating an array
@@ -622,6 +623,9 @@ export default function App() {
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
     try {
+      const baselineMetas = store.get(sessionMetaMapAtom)
+      const baselineSessions = new Map(Array.from(baselineMetas.keys(), id =>
+        [id, store.get(sessionAtomFamily(id))] as const))
       const sessions = await window.electronAPI.getSessions()
       const returnedIds = new Set(sessions.map(s => s.id))
       const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
@@ -653,11 +657,12 @@ export default function App() {
       // Single transactional atom write — all cross-atom mutations happen
       // inside one Jotai write function so React subscribers see one
       // consistent update instead of intermediate states.
-      const nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
+      const nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing, baselineSessions, baselineMetas })
 
       // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
       for (const session of sessions) {
-        syncSessionOptionsFromSession(session)
+        const current = store.get(sessionAtomFamily(session.id))
+        if (current) syncSessionOptionsFromSession(current)
       }
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
@@ -1015,13 +1020,18 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
+        const beforeLoad = store.get(sessionAtomFamily(sessionId))
+        const request = {}
+        pendingSessionCreations.current.set(sessionId, request)
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
+            if (pendingSessionCreations.current.get(sessionId) !== request) return
             if (createdSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
               const existing = store.get(sessionAtomFamily(sessionId))
               const merged = existing
-                ? { ...createdSession, messages: mergeCreatedSessionMessages(existing.messages, createdSession.messages) }
+                ? { ...createdSession, ...(existing !== beforeLoad ? { isProcessing: existing.isProcessing,
+                  processingStartedAt: existing.processingStartedAt } : {}), messages: mergeCreatedSessionMessages(existing.messages, createdSession.messages) }
                 : createdSession
               if (existingMeta) {
                 replaceLoadedSession(merged)
@@ -1031,13 +1041,19 @@ export default function App() {
               syncSessionOptionsFromSession(createdSession)
               return
             }
-            return window.electronAPI.getSessions().then(initializeSessions)
+            return window.electronAPI.getSessions().then(sessions => {
+              if (pendingSessionCreations.current.get(sessionId) === request) initializeSessions(sessions)
+            })
           })
           .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .finally(() => {
+            if (pendingSessionCreations.current.get(sessionId) === request) pendingSessionCreations.current.delete(sessionId)
+          })
         return
       }
 
       if (event.type === 'session_deleted') {
+        pendingSessionCreations.current.delete(sessionId)
         removeSession(sessionId)
         return
       }

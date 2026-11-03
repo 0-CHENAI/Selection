@@ -185,6 +185,21 @@ export const sessionIdsAtom = atom<string[]>([])
  */
 export const loadedSessionsAtom = atom<Set<string>>(new Set<string>())
 
+/** Apply only local changes made after an asynchronous snapshot was requested. */
+function mergeChanges<T extends object>(snapshot: T, before: T, current: T): T {
+  const result = { ...snapshot }
+  const target = result as Record<string, unknown>
+  const previous = before as Record<string, unknown>
+  const latest = current as Record<string, unknown>
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(latest)])) {
+    if (previous[key] !== latest[key]) {
+      if (key in latest) target[key] = latest[key]
+      else delete target[key]
+    }
+  }
+  return result
+}
+
 /**
  * Promise cache for deduplicating concurrent session load requests.
  * Prevents race condition where multiple calls (e.g., from React re-renders)
@@ -380,9 +395,10 @@ export const refreshSessionsMetadataAtom = atom(
   (
     get,
     set,
-    payload: { sessions: Session[]; loadedSessionIds: Set<string>; removeMissing?: boolean }
+    payload: { sessions: Session[]; loadedSessionIds: Set<string>; removeMissing?: boolean; baselineSessions?: Map<string, Session | null>; baselineMetas?: Map<string, SessionMeta> }
   ): Map<string, SessionMeta> => {
-    const { sessions, loadedSessionIds, removeMissing = true } = payload
+    const { sessions, loadedSessionIds, removeMissing = true, baselineSessions, baselineMetas } = payload
+    const currentMetas = get(sessionMetaMapAtom)
 
     // Remove stale sessions only for authoritative refreshes. Stale reconnect
     // recovery can receive a transient partial list immediately after sleep/wake;
@@ -393,7 +409,9 @@ export const refreshSessionsMetadataAtom = atom(
     const latestIds = new Set(sessions.map(s => s.id))
     if (removeMissing) {
       for (const staleId of currentIds) {
-        if (!latestIds.has(staleId)) {
+        if (!latestIds.has(staleId) && (!baselineSessions || (baselineSessions.has(staleId)
+          && baselineSessions.get(staleId) === get(sessionAtomFamily(staleId))))
+          && (!baselineMetas || baselineMetas.get(staleId) === currentMetas.get(staleId))) {
           set(removeSessionAtom, staleId)
         }
       }
@@ -401,14 +419,26 @@ export const refreshSessionsMetadataAtom = atom(
 
     // Update each session atom, preserving messages for loaded sessions
     const unloadedIds: string[] = []
+    const refreshedSessions = new Map<string, Session>()
     for (const session of sessions) {
       const currentSession = get(sessionAtomFamily(session.id))
-      const shouldPreserveMessages = !!currentSession && loadedSessionIds.has(session.id)
-      const nextSession = shouldPreserveMessages && currentSession
+      if (baselineMetas?.has(session.id) && !currentMetas.has(session.id)) continue
+      const before = baselineSessions?.get(session.id)
+      if (baselineSessions?.has(session.id) && before && !currentSession) continue
+      const shouldPreserveMessages = !!currentSession && (loadedSessionIds.has(session.id) || currentSession.isProcessing)
+      let nextSession = shouldPreserveMessages && currentSession
         ? { ...session, messages: currentSession.messages }
         : session
 
+      if (baselineSessions && currentSession && before !== currentSession) {
+        // Merge only fields changed since the fetch began. Other fields can
+        // still be repaired by the authoritative server snapshot.
+        if (!before) nextSession = currentSession
+        else nextSession = mergeChanges(nextSession, before, currentSession)
+      }
+
       set(sessionAtomFamily(session.id), nextSession)
+      refreshedSessions.set(session.id, nextSession)
 
       // Track sessions that lost their messages so lazy-loading re-fetches them
       if (!shouldPreserveMessages && loadedSessionIds.has(session.id)) {
@@ -426,11 +456,19 @@ export const refreshSessionsMetadataAtom = atom(
     // Build and set metadata map. Non-destructive refresh starts from the
     // existing map so sessions omitted by a transient partial response remain
     // visible. Returned sessions are still authoritative for their own fields.
-    const nextMetaMap = removeMissing
-      ? new Map<string, SessionMeta>()
-      : new Map(get(sessionMetaMapAtom))
+    const nextMetaMap = new Map(get(sessionMetaMapAtom))
     for (const session of sessions) {
-      nextMetaMap.set(session.id, extractSessionMeta(session))
+      const refreshed = refreshedSessions.get(session.id)
+      if (refreshed) {
+        let nextMeta = extractSessionMeta(refreshed)
+        const before = baselineMetas?.get(session.id)
+        const current = currentMetas.get(session.id)
+        if (before && current && before !== current) {
+          // Keep fields updated only in metadata while the request was pending.
+          nextMeta = mergeChanges(nextMeta, before, current)
+        }
+        nextMetaMap.set(session.id, nextMeta)
+      }
     }
     set(sessionMetaMapAtom, nextMetaMap)
 

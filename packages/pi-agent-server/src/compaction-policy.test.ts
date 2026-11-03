@@ -24,6 +24,8 @@ function harness(text = '## Goal\nContinue the requested task.', stopReason: Ass
     agentRunActive: boolean;
     branch?: SessionEntry[];
     responseUsage?: AssistantMessage['usage'];
+    responses?: Array<{ text: string; stopReason: AssistantMessage['stopReason']; usage?: AssistantMessage['usage'] }>;
+    responseContent?: AssistantMessage['content'];
   } = {
     compacting: true, enabled: true, keepRecentTokens: 20_000, reserveTokens: 200_001, agentRunActive: false,
   };
@@ -52,15 +54,16 @@ function harness(text = '## Goal\nContinue the requested task.', stopReason: Ass
       return () => { listener = undefined; };
     },
     agent: { streamFunction: (_model: unknown, context: Context, options: SimpleStreamOptions | undefined) => {
+      const response = state.responses?.[calls.length];
       calls.push({ context, options });
       const stream = createAssistantMessageEventStream();
       const message: AssistantMessage = {
-        role: 'assistant', content: [{ type: 'text', text }], api: model.api, provider: model.provider, model: model.id,
-        usage: state.responseUsage ?? usage, stopReason, timestamp: 1,
-        ...(stopReason === 'error' || stopReason === 'aborted' ? { errorMessage: text } : {}),
+        role: 'assistant', content: state.responseContent ?? [{ type: 'text', text: response?.text ?? text }], api: model.api, provider: model.provider, model: model.id,
+        usage: response?.usage ?? state.responseUsage ?? usage, stopReason: response?.stopReason ?? stopReason, timestamp: 1,
+        ...((response?.stopReason ?? stopReason) === 'error' || (response?.stopReason ?? stopReason) === 'aborted' ? { errorMessage: text } : {}),
       };
-      if (stopReason === 'aborted' || stopReason === 'error') stream.push({ type: 'error', reason: stopReason, error: message });
-      else stream.push({ type: 'done', reason: stopReason, message });
+      if (message.stopReason === 'aborted' || message.stopReason === 'error') stream.push({ type: 'error', reason: message.stopReason, error: message });
+      else stream.push({ type: 'done', reason: message.stopReason, message });
       return stream;
     } },
   } as unknown as AgentSession;
@@ -333,11 +336,82 @@ describe('80% compaction policy', () => {
     expect(calls[0]!.options.reasoning).toBe('low');
     expect(getCurrentSystemPrompt(calls[0]!.context.messages)).toContain('constraints and permissions');
   });
-  it('prevents SDK acceptance of empty, truncated or aborted summaries', async () => {
-    for (const [text, reason] of [['', 'stop'], ['partial', 'length'], ['', 'aborted']] as const) {
+  it('prevents SDK acceptance of empty or aborted summaries', async () => {
+    for (const [text, reason] of [['', 'stop'], ['', 'aborted']] as const) {
       const { session } = harness(text, reason);
       await expect(compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction)).rejects.toThrow('Summarization failed');
     }
+  });
+  it('retries a truncated summary once and accepts the shorter response', async () => {
+    const { session, state, calls } = harness();
+    state.responses = [{ text: 'Partial first summary', stopReason: 'length' }, { text: 'Complete retry', stopReason: 'stop' }];
+    const result = await compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
+    expect(result.summary).toContain('Complete retry');
+    expect(result.summary).not.toContain('Partial first summary');
+    expect(result.usage).toEqual({ ...usage, input: 200, output: 40, totalTokens: 240 });
+    expect(calls).toHaveLength(2);
+    expect(JSON.stringify(calls[1]!.context.messages)).toContain('at most');
+  });
+  it('recognizes provider max_tokens as a truncated summary', async () => {
+    const { session, state, calls } = harness();
+    state.responses = [{ text: 'Partial', stopReason: 'max_tokens' as AssistantMessage['stopReason'] },
+      { text: 'Complete', stopReason: 'stop' }];
+    const result = await compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
+    expect(result.summary).toContain('Complete');
+    expect(calls).toHaveLength(2);
+  });
+  it('accounts for both attempts including optional usage and provider cost fields', async () => {
+    const { session, state } = harness();
+    state.responses = [
+      { text: 'Partial', stopReason: 'length', usage: { ...usage, reasoning: 4, cacheWrite1h: 7,
+        cost: { ...usage.cost, total: 2, totalFromProvider: true } } },
+      { text: 'Complete', stopReason: 'stop', usage: { ...usage, reasoning: 5,
+        cost: { ...usage.cost, total: 3, totalFromProvider: false } } },
+    ];
+    const result = await compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
+    expect(result.usage?.reasoning).toBe(9);
+    expect(result.usage?.cacheWrite1h).toBe(7);
+    expect(result.usage?.cost.total).toBe(5);
+    expect(result.usage?.cost.totalFromProvider).toBe(false);
+  });
+  it('accepts a second truncation after removing incomplete metadata and restoring source state', async () => {
+    const { session, state, calls } = harness();
+    state.branch = branchMessages([{ role: 'user', content: 'Keep this requirement', timestamp: 1 }]);
+    state.responses = [{ text: 'First', stopReason: 'length' },
+      { text: 'Useful summary\n<task-context-updates>[{"key":', stopReason: 'length' }];
+    const result = await compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
+    expect(result.summary).toContain('Useful summary');
+    expect(result.summary).toContain('<source-recovery>');
+    expect(result.summary).not.toContain('<task-context-updates>');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.options!.maxTokens!).toBeGreaterThan(6192);
+    expect(calls[0]!.options!.maxTokens!).toBeLessThan(8192);
+  });
+  it('reports the output limit when both attempts have no usable text', async () => {
+    const { session, state, calls } = harness();
+    state.responses = [{ text: '', stopReason: 'length' }, { text: '', stopReason: 'length' }];
+    await expect(compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction)).rejects.toThrow('output limit');
+    expect(calls).toHaveLength(2);
+  });
+  it('uses the first usable truncated summary if the second truncated response is empty', async () => {
+    const { session, state } = harness();
+    state.responses = [{ text: 'Useful first summary\n<task-context-updates>[', stopReason: 'length' }, { text: '', stopReason: 'length' }];
+    const result = await compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
+    expect(result.summary).toContain('Useful first summary');
+    expect(result.summary).not.toContain('<task-context-updates>');
+  });
+  it('does not accept an earlier partial result when the retry fails or is empty', async () => {
+    for (const response of [{ text: '', stopReason: 'stop' }, { text: 'provider error', stopReason: 'error' }, { text: '', stopReason: 'aborted' }] as const) {
+      const { session, state } = harness();
+      state.responses = [{ text: 'Partial', stopReason: 'length' }, response];
+      await expect(compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction)).rejects.toThrow('Summarization failed');
+    }
+  });
+  it('rejects a summary containing a tool call rather than hiding it from the SDK', async () => {
+    const { session, state, calls } = harness();
+    state.responseContent = [{ type: 'text', text: 'Summary' }, { type: 'toolCall', id: 'unexpected', name: 'write', arguments: {} }];
+    await expect(compact(preparation(), model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction)).rejects.toThrow('attempted to call a tool');
+    expect(calls).toHaveLength(1);
   });
   it('supplies the prior checkpoint to split-turn summarization even with no older messages', async () => {
     const { session, calls } = harness();

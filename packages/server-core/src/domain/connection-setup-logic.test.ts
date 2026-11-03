@@ -208,6 +208,14 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.midStreamBehavior).toBe('queue')
   })
 
+  it('starts Copilot without a static model list before the policy fetch', () => {
+    const conn = createBuiltInConnection('github-copilot')
+    expect(conn.authType).toBe('oauth')
+    expect(conn.modelSelectionMode).toBe('automaticallySyncedFromProvider')
+    expect(conn.models).toEqual([])
+    expect(conn.defaultModel).toBe('')
+  })
+
   it("Pi API key (Selection Backend) → 'queue'", () => {
     const conn = createBuiltInConnection('pi-api-key')
     expect(conn.providerType).toBe('pi')

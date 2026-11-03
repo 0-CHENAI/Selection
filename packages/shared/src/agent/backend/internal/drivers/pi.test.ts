@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { piDriver } from './pi.ts';
 
 describe('piDriver.buildRuntime custom endpoint models', () => {
@@ -133,6 +135,69 @@ describe('piDriver.buildRuntime custom endpoint models', () => {
     expect(runtime.customModels).toEqual([
       { id: 'deepseek-v4-flash', contextWindow: 1_000_000, maxTokens: 384_000 },
     ]);
+  });
+});
+
+describe('piDriver.fetchModels Copilot OAuth', () => {
+  const connection = {
+    slug: 'copilot', name: 'Copilot', providerType: 'pi', authType: 'oauth',
+    piAuthProvider: 'github-copilot', createdAt: 1,
+  } as const;
+
+  it('rejects missing credentials instead of returning the unfiltered SDK catalog', async () => {
+    await expect(piDriver.fetchModels!({
+      connection, credentials: {}, timeoutMs: 5000,
+      hostRuntime: {} as never, resolvedPaths: {} as never,
+    })).rejects.toThrow('credentials are unavailable');
+  });
+
+  it('propagates a failed policy fetch instead of returning the unfiltered SDK catalog', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+    try {
+      await expect(piDriver.fetchModels!({
+        connection, credentials: { oauthRefreshToken: 'offline-test' }, timeoutMs: 5000,
+        hostRuntime: {} as never, resolvedPaths: {} as never,
+      })).rejects.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns the complete enabled live catalog without disabled policy models', () => {
+    const sdk = pathToFileURL(join(import.meta.dir, '../../../../auth/github-copilot-sdk.ts')).href;
+    const driver = pathToFileURL(join(import.meta.dir, 'pi.ts')).href;
+    const run = Bun.spawnSync([process.execPath, '--eval', `
+      import { mock } from 'bun:test';
+      mock.module(${JSON.stringify(sdk)}, () => ({
+        refreshGitHubCopilotTokenWithSdk: async () => ({ access: 'proxy-ep=proxy.test.example' })
+      }));
+      globalThis.fetch = async () => new Response(JSON.stringify({ data: [
+        { id: 'model-one', name: 'One', policy: { state: 'enabled' } },
+        { id: 'model-two', name: 'Two', policy: { state: 'enabled' } },
+        { id: 'gpt-4.1', name: 'GPT-4.1', policy: { state: 'enabled' } },
+        { id: 'model-disabled', name: 'Disabled', policy: { state: 'disabled' } }
+      ] }), { status: 200 });
+      const { piDriver } = await import(${JSON.stringify(driver)});
+      const args = {
+        connection: ${JSON.stringify(connection)}, credentials: { oauthRefreshToken: 'test' },
+        timeoutMs: 5000, hostRuntime: {}, resolvedPaths: {},
+      };
+      const result = await piDriver.fetchModels(args);
+      globalThis.fetch = async () => new Response(JSON.stringify({ data: [
+        { id: 'model-disabled', name: 'Disabled', policy: { state: 'disabled' } }
+      ] }), { status: 200 });
+      const none = await piDriver.fetchModels(args);
+      globalThis.fetch = async () => new Response('{}', { status: 200 });
+      let invalidRejected = false;
+      try { await piDriver.fetchModels(args); } catch { invalidRejected = true; }
+      globalThis.fetch = async () => new Response(JSON.stringify({ data: [{}] }), { status: 200 });
+      let malformedRejected = false;
+      try { await piDriver.fetchModels(args); } catch { malformedRejected = true; }
+      console.log(JSON.stringify({ ids: result.models.map(model => model.id), none: none.models, invalidRejected, malformedRejected }));
+    `], { stdout: 'pipe', stderr: 'pipe' });
+    if (run.exitCode !== 0) throw new Error(run.stderr.toString());
+    expect(JSON.parse(run.stdout.toString().trim())).toEqual({ ids: ['model-one', 'model-two', 'gpt-4.1'], none: [], invalidRejected: true, malformedRejected: true });
   });
 });
 

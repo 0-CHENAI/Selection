@@ -138,6 +138,53 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
 });
 
 
+it.each(['automatic', 'manual'] as const)('a long real Pi session commits one checkpoint after a truncated %s summary retry', async mode => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-truncated-summary-'));
+  tempDirs.push(cwd);
+  let summaryCalls = 0;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    getModel: (provider: string, modelId: string) => provider === model.provider && modelId === model.id ? model : undefined,
+    streamSimple: (_model: typeof model, context: Context) => {
+      const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
+      if (summary) summaryCalls++;
+      const truncated = summary && summaryCalls === 1;
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'done', reason: truncated ? 'length' : 'stop', message: {
+        role: 'assistant', content: [{ type: 'text', text: truncated ? 'Partial summary' : summary ? 'Concise checkpoint' : 'Continued successfully' }],
+        api: model.api, provider: model.provider, model: model.id,
+        usage: truncated ? { ...usage, output: 6192 } : usage, stopReason: truncated ? 'length' : 'stop', timestamp: Date.now(),
+      } });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  const manager = SessionManager.inMemory(cwd);
+  const settings = SettingsManager.inMemory();
+  const { session } = await createAgentSession({ cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off',
+    noTools: 'all', modelRuntime: runtime, settingsManager: settings, sessionManager: manager });
+  settings.setCompactionEnabled(true);
+  applyCompactionSettings(settings, model.contextWindow, true);
+  installCompactionPolicy(session);
+  for (const [index, length] of [100_000, 40_000, 40_000].entries()) {
+    manager.appendMessage({ role: 'user', content: `Keep the constraint ${index}: ${'文'.repeat(length)}`, timestamp: index * 2 + 1 });
+    manager.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'Earlier work' }], api: model.api,
+      provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: index * 2 + 2 });
+  }
+  session.agent.state.messages = manager.buildSessionContext().messages;
+  const events: string[] = [];
+  session.subscribe(event => { if (event.type === 'compaction_end') events.push(event.result ? 'success' : 'failure'); });
+  if (mode === 'manual') await session.compact();
+  else await session.prompt('Continue the task');
+  const checkpoints = manager.getBranch().filter(entry => entry.type === 'compaction');
+  expect(summaryCalls).toBe(2);
+  expect(checkpoints).toHaveLength(1);
+  expect(checkpoints[0]!.summary).toContain('Concise checkpoint');
+  expect(checkpoints[0]!.summary).toContain('<source-recovery>');
+  expect(events).toEqual(['success']);
+});
+
 it('the real SDK preserves tool pairs across mid-turn compaction and never re-executes completed work', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-tool-compaction-'));
   tempDirs.push(cwd);

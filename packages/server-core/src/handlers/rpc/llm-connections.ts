@@ -181,7 +181,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
         // Only set default models when using standard Pi provider AND user didn't pick explicit models
-        if (!hasConfiguredBaseUrl && !setup.models?.length) {
+        const isCopilotOAuth = connection.authType === 'oauth' && setup.piAuthProvider === 'github-copilot'
+        if (!hasConfiguredBaseUrl && !setup.models?.length && !isCopilotOAuth) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
           updates.defaultModel = getDefaultModelForConnection('pi', setup.piAuthProvider)
           updates.modelSelectionMode ??= 'automaticallySyncedFromProvider'
@@ -250,6 +251,23 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       const pendingConnection: LlmConnection = {
         ...connection,
         ...updates,
+      }
+
+      if (pendingConnection.providerType === 'pi' && pendingConnection.authType === 'oauth') {
+        // The provider owns OAuth availability; setup must not save a subset.
+        pendingConnection.modelSelectionMode = 'automaticallySyncedFromProvider'
+        updates.modelSelectionMode = 'automaticallySyncedFromProvider'
+        if (setup.models !== undefined) {
+          pendingConnection.models = connection.models
+          delete updates.models
+        }
+        if (setup.defaultModel !== undefined) {
+          const modelIds = (pendingConnection.models ?? []).map(model => typeof model === 'string' ? model : model.id)
+          if (!pendingConnection.defaultModel || !modelIds.includes(pendingConnection.defaultModel)) {
+            pendingConnection.defaultModel = connection.defaultModel
+            delete updates.defaultModel
+          }
+        }
       }
 
       if (pendingConnection.providerType === 'pi') {
@@ -561,15 +579,37 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (existing) {
         // Update existing connection (can't change slug)
         const { slug: _slug, ...updates } = connection
+        if (existing.providerType === 'pi' && existing.authType === 'oauth'
+          && connection.providerType === 'pi' && connection.authType === 'oauth') {
+          // Settings saves may carry a stale snapshot while refresh is in flight.
+          delete updates.models
+          updates.modelSelectionMode = 'automaticallySyncedFromProvider'
+          const modelIds = (existing.models ?? []).map(model => typeof model === 'string' ? model : model.id)
+          if (updates.defaultModel !== undefined && !modelIds.includes(updates.defaultModel)
+            && !(modelIds.length === 0 && updates.defaultModel === '')) {
+            delete updates.defaultModel
+          }
+        }
         const success = updateLlmConnection(connection.slug, updates)
         if (!success) {
           return { success: false, error: 'Failed to update connection' }
         }
       } else {
         // Create new connection
-        const success = addLlmConnection(connection)
+        let newConnection = connection
+        if (connection.providerType === 'pi' && connection.authType === 'oauth') {
+          const models = connection.piAuthProvider === 'github-copilot'
+            ? [] : getDefaultModelsForConnection('pi', connection.piAuthProvider)
+          const ids = models.map(model => typeof model === 'string' ? model : model.id)
+          newConnection = { ...connection, models, modelSelectionMode: 'automaticallySyncedFromProvider',
+            defaultModel: connection.defaultModel && ids.includes(connection.defaultModel) ? connection.defaultModel : ids[0] ?? '' }
+        }
+        const success = addLlmConnection(newConnection)
         if (!success) {
           return { success: false, error: 'Connection with this slug already exists' }
+        }
+        if (newConnection.providerType === 'pi' && newConnection.authType === 'oauth') {
+          refreshModelsInBackground(newConnection.slug, 'connection creation')
         }
       }
       deps.platform.logger?.info(`LLM connection saved: ${connection.slug}`)
