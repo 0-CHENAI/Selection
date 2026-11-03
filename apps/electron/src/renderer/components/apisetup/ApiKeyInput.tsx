@@ -184,7 +184,7 @@ export interface ApiKeyInputProps {
 const COMPAT_ANTHROPIC_DEFAULTS = 'claude-opus-4-8, claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5'
 const COMPAT_OPENAI_DEFAULTS = 'openai/gpt-5.2-codex, openai/gpt-5.1-codex-mini'
 const COMPAT_MINIMAX_DEFAULTS = 'MiniMax-M2.5, MiniMax-M2.5-highspeed'
-const COMPAT_KIMI_DEFAULTS = 'k3, kimi-for-coding, kimi-for-coding-highspeed'
+const COMPAT_KIMI_DEFAULTS = 'k3, k3.1-pro, k3.1-pro-highspeed, kimi-for-coding, kimi-for-coding-highspeed'
 
 function parseModelList(value: string): string[] {
   return parseSelectedModels(value)

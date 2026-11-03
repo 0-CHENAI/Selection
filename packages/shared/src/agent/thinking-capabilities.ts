@@ -283,7 +283,7 @@ export function fallbackThinkingCapability(modelId: string): ThinkingCapability 
   if (/deepseek-(v4-flash|flash)/.test(id)) return levelsCapability(['off', 'low', 'high', 'max'], 'static')
   if (id.startsWith('deepseek-')) return levelsCapability(['off', 'high', 'max'], 'static')
 
-  // HighSpeed and K2.7 think whenever they run. K3 / K2.8 Code accept low, high, max.
+  // HighSpeed and K2.7 think whenever they run. K3 / K3.1 Pro / K2.8 Code accept low, high, max.
   if (/kimi-k2\.7|kimi-k2-7|kimi-for-coding-highspeed|for-coding-highspeed|k2\.7-code-highspeed/.test(id)) {
     return alwaysOn('static')
   }

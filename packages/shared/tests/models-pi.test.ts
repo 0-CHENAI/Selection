@@ -66,9 +66,21 @@ describe('models-pi filtering', () => {
     expect(getPiApiKeyProviders().some(provider => provider.key === 'xai' && provider.label === 'xAI (Grok)')).toBe(true);
   });
 
-  it('exposes Kimi K3 for Moonshot and Kimi Coding providers', () => {
-    expect(getPiModelsForAuthProvider('moonshotai').map(model => model.id)).toContain('pi/kimi-k3');
-    expect(getPiModelsForAuthProvider('moonshotai-cn').map(model => model.id)).toContain('pi/kimi-k3');
-    expect(getPiModelsForAuthProvider('kimi-coding').map(model => model.id)).toContain('pi/k3');
+  it('exposes Kimi K3 and K3.1 Pro for Moonshot and Kimi Coding providers', () => {
+    expect(getPiModelsForAuthProvider('moonshotai').map(model => model.id)).toEqual(expect.arrayContaining([
+      'pi/kimi-k3',
+      'pi/kimi-k3.1-pro',
+      'pi/kimi-k3.1-pro-highspeed',
+    ]));
+    expect(getPiModelsForAuthProvider('moonshotai-cn').map(model => model.id)).toEqual(expect.arrayContaining([
+      'pi/kimi-k3',
+      'pi/kimi-k3.1-pro',
+      'pi/kimi-k3.1-pro-highspeed',
+    ]));
+    expect(getPiModelsForAuthProvider('kimi-coding').map(model => model.id)).toEqual(expect.arrayContaining([
+      'pi/k3',
+      'pi/k3.1-pro',
+      'pi/k3.1-pro-highspeed',
+    ]));
   });
 });

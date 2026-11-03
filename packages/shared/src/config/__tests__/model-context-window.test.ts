@@ -67,6 +67,12 @@ describe('API key context windows', () => {
       maxTokens: 384_000,
     })
     expect(withResolvedContextWindow('kimi-k2.6')).toMatchObject({ contextWindow: 262_144 })
+    expect(withResolvedContextWindow('k3.1-pro')).toEqual({
+      id: 'k3.1-pro',
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+    })
+    expect(withResolvedContextWindow('kimi-k3.1-pro')).toMatchObject({ contextWindow: 1_048_576 })
     expect(withResolvedContextWindow('Opus')).toBe('Opus')
     expect(resolveConnectionModelContextWindow({
       ...BASE,

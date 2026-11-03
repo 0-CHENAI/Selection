@@ -215,7 +215,7 @@ export const SpawnSessionSchema = z.object({
   // controls. ORDER/Laufry follows JSON-schema property order when composing
   // tool arguments; putting this object last caused trailing role/lifecycle
   // keys to be emitted inside qualification under load. `.passthrough()` keeps
-  // Pi's TypeBox validator from rejecting those leftover keys.
+  // Pi's pi-schema validator from rejecting those leftover keys.
   qualification: z.object({
     tracks: z.array(z.object({
       name: z.string().min(1),

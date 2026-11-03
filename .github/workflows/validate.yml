@@ -84,7 +84,7 @@ jobs:
         if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
         run: bun run typecheck:all
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Verify renderer startup
         if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}

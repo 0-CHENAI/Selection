@@ -22,14 +22,18 @@ describe('kimi-coding-sdk', () => {
     expect(provider!.auth.apiKey).toBeDefined()
   })
 
-  it('Kimi Code uses Chat Completions at api.kimi.com/coding/v1 and does not list K3.1 yet', () => {
+  it('Kimi Code uses Chat Completions at api.kimi.com/coding/v1 and lists K3.1 Pro', () => {
     const provider = builtinProviders().find(p => p.id === KIMI_CODING_PROVIDER_ID)
     const models = provider!.getModels()
     const ids = models.map(model => model.id)
-    expect(ids).toEqual(expect.arrayContaining(['k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed']))
-    // Upstream earendil-works/pi#11355 is still open. Do not invent K3.1 entries.
-    expect(ids).not.toContain('k3.1-pro')
-    expect(ids).not.toContain('k3.1-pro-highspeed')
+    expect(ids).toEqual(expect.arrayContaining([
+      'k3',
+      'k3-256k',
+      'k3.1-pro',
+      'k3.1-pro-highspeed',
+      'kimi-for-coding',
+      'kimi-for-coding-highspeed',
+    ]))
     for (const model of models) {
       expect(model.api).toBe('openai-completions')
       expect(model.baseUrl).toBe('https://api.kimi.com/coding/v1')
