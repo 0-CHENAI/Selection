@@ -48,8 +48,12 @@ const KNOWN_PRESET_CONTEXT_WINDOWS: Readonly<Record<string, KnownModelLimits>> =
   'kimi-k2.7-code': { contextWindow: 262_144, maxTokens: 262_144 },
   'kimi-k2.7-code-highspeed': { contextWindow: 262_144, maxTokens: 262_144 },
   'kimi-k3': { contextWindow: 1_048_576, maxTokens: 1_048_576 },
+  'kimi-k3.1-pro': { contextWindow: 1_048_576, maxTokens: 1_048_576 },
+  'kimi-k3.1-pro-highspeed': { contextWindow: 1_048_576, maxTokens: 1_048_576 },
   'k3': { contextWindow: 1_048_576, maxTokens: 131_072 },
   'k3-256k': { contextWindow: 262_144, maxTokens: 131_072 },
+  'k3.1-pro': { contextWindow: 1_048_576, maxTokens: 131_072 },
+  'k3.1-pro-highspeed': { contextWindow: 1_048_576, maxTokens: 131_072 },
   'kimi-for-coding': { contextWindow: 1_048_576, maxTokens: 32_768 },
   'kimi-for-coding-highspeed': { contextWindow: 262_144, maxTokens: 32_768 },
 }

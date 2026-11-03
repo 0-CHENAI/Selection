@@ -66,7 +66,7 @@ describe('Pi pre-validation tool argument recovery', () => {
     expect(prepareArguments({ file_path: 'a.txt' })).toEqual({ path: 'a.txt', offset: 1 });
   });
 
-  it('cleans spawn_session qualification extras before Pi TypeBox validation', () => {
+  it('cleans spawn_session qualification extras before Pi pi-schema validation', () => {
     const spawn = getToolDefsAsJsonSchema().find(def => def.name === 'spawn_session');
     expect(spawn).toBeDefined();
 
@@ -199,7 +199,7 @@ describe('Pi pre-validation tool argument recovery', () => {
       id: 'call-wrong-type',
       name: 'write',
       arguments: wrongType,
-    })).toThrow(/must have required properties content/);
+    })).toThrow(/content: missing/);
 
     const preview = createRecoveringArgumentPreparer(
       ISSUE_255_MARKDOWN_PREVIEW_TOOL_CALL.name,

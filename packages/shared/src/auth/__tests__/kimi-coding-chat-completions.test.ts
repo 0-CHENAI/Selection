@@ -135,7 +135,7 @@ it('sends Kimi Code OAuth as Chat Completions Bearer and parses reasoning plus t
     expect(header(request.headers, 'authorization')).toBe('Bearer kimi-access-token')
     expect(header(request.headers, 'x-api-key')).toBeUndefined()
     expect(header(request.headers, 'accept-encoding')).toBe('identity')
-    expect(header(request.headers, 'user-agent')).toMatch(/^pi\/1\.4\.0 \([^;]+; (?:bun|node)\/[^;]+; [^)]+\)$/)
+    expect(header(request.headers, 'user-agent')).toMatch(/^pi\/1\.5\.0 \([^;]+; (?:bun|node)\/[^;]+; [^)]+\)$/)
 
     const body = request.body as {
       model?: string

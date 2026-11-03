@@ -35,7 +35,7 @@ test('the real SDK distinguishes preparation rejection from execution and after-
     streamFn: () => {
       const step = turns++
       const calls = step === 0 ? [
-        { id: 'invalid', name: 'write', arguments: { value: 1 } },
+        { id: 'invalid', name: 'write', arguments: { value: {} } },
         { id: 'missing', name: 'missing_tool', arguments: {} },
         { id: 'blocked', name: 'write', arguments: { value: 'blocked' } },
         { id: 'reused', name: 'write', arguments: { value: 'throw' } },
@@ -43,7 +43,7 @@ test('the real SDK distinguishes preparation rejection from execution and after-
         { id: 'after-error', name: 'write', arguments: { value: 'after-error' } },
         { id: 'prewrite', name: 'write', arguments: { value: 'prewrite' } },
         { id: 'success', name: 'write', arguments: { value: 'success' } },
-      ] : step === 1 ? [{ id: 'reused', name: 'write', arguments: { value: 2 } }] : []
+      ] : step === 1 ? [{ id: 'reused', name: 'write', arguments: { value: [] } }] : []
       const message: AssistantMessage = { role: 'assistant', api: model.api, provider: model.provider, model: model.id,
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         stopReason: calls.length ? 'toolUse' : 'stop', timestamp: step, content: calls.map(call => ({ type: 'toolCall', ...call })) }
