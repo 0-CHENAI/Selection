@@ -42,7 +42,8 @@ describe('running orchestration composer chrome', () => {
     // A settled clarification hoists this strip above the last card. It stays
     // in-flight for that same request, including while a swarm/DAG is running.
     expect(chatDisplaySrc).toContain('const isProcessing = sessionBusy && sharesUserRequest(allTurns, index, processingTurnIndex)')
-    expect(chatDisplaySrc).toContain('{sessionBusy && !hasMoreBelow && (')
+    // The processing strip follows the busy state alone; the virtual window can lag a new message.
+    expect(chatDisplaySrc).toContain('{sessionBusy && (')
     expect(chatDisplaySrc).toContain('stopTask')
     expect(chatDisplaySrc).toContain('stopSessionSwarm')
     expect(chatDisplaySrc).toContain('pickStoppableTaskRun')
