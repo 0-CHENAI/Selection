@@ -1,9 +1,8 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { buildPiApiKeyModels } from '../pi-model-submission'
-import { OAUTH_PROVIDER_OPTIONS } from '../ApiKeyInput'
 import {
   ORDER_APP_ICON_SLUG,
   SELECTION_APP_ICON_SLUG,
@@ -13,6 +12,12 @@ import {
   presetMonogram,
   sortNamedPresets,
 } from '../provider-presets'
+
+// ApiKeyInput reaches the PPT PDF preview, whose Vite `?url` worker import Bun cannot load.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
+mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }))
+
+const { OAUTH_PROVIDER_OPTIONS } = await import('../ApiKeyInput')
 
 const require = createRequire(import.meta.url)
 const iconsDir = join(dirname(require.resolve('@lobehub/icons-static-svg/package.json')), 'icons')
