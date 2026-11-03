@@ -33,7 +33,8 @@ jobs:
       - name: Verify Windows artifact delivery
         run: bun test packages/server-core/src/reliability/artifact-versions.test.ts packages/server-core/src/reliability/conversation-artifact-versions.test.ts packages/server-core/src/reliability/artifact-delivery-review.test.ts packages/server-core/src/sessions/session-artifact-display.test.ts packages/server-core/src/sessions/artifact-restore-agent.test.ts packages/server-core/src/sessions/answer-delivery.test.ts packages/ui/src/components/chat/__tests__/response-artifacts.test.ts apps/electron/src/renderer/event-processor/handlers/__tests__/artifact-selection-updated.test.ts apps/electron/src/main/__tests__/answer-delivery-pipeline.test.ts
 
-  validate:
+  validation_checks:
+    name: validation-checks
     runs-on: xcode-27 # macOS 27, Apple Silicon (arm64)
 
     steps:
@@ -74,7 +75,84 @@ jobs:
           bun -e 'import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path"; import { createIsolatedShell } from "./packages/shared/src/utils/isolated-shell"; const root = mkdtempSync(join(tmpdir(), "selection-ci-shell-")); const shell = createIsolatedShell(root); try { if (!shell) throw new Error("CI native confinement is unavailable"); } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }); }'
 
       - name: Verify pinned OfficeCLI runtime and internal resources
+        id: validation_ready
         run: bun run officecli:check
 
-      - name: Run validation suite
-        run: bun run validate:ci
+      # Run independent checks even if an earlier check failed, while still
+      # failing the job and skipping everything when setup did not complete.
+      - name: Typecheck all packages
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run typecheck:all
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Verify renderer startup
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:renderer-startup
+
+      - name: Run shared configuration tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:shared:all
+
+      - name: Run Pi agent server tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:pi-agent-server
+
+      - name: Run document tool tests
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run test:doc-tools
+
+      - name: Lint source
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run lint
+
+      - name: Check translations
+        if: ${{ !cancelled() && steps.validation_ready.outcome == 'success' }}
+        run: bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage
+
+  tracked_tests:
+    name: tracked-tests
+    runs-on: xcode-27 # Match the native macOS validation environment.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify native macOS confinement for tests
+        run: |
+          bun -e 'import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path"; import { createIsolatedShell } from "./packages/shared/src/utils/isolated-shell"; const root = mkdtempSync(join(tmpdir(), "selection-ci-shell-")); const shell = createIsolatedShell(root); try { if (!shell) throw new Error("CI native confinement is unavailable"); } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }); }'
+
+      - name: Verify pinned OfficeCLI runtime and internal resources
+        run: bun run officecli:check
+
+      - name: Run tracked tests
+        run: bash scripts/run-tracked-tests.sh --keep-going
+
+  # Preserve the existing required check name while gating on both parallel jobs.
+  validate:
+    needs: [validation_checks, tracked_tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all validation jobs to pass
+        env:
+          CHECKS_RESULT: ${{ needs.validation_checks.result }}
+          TESTS_RESULT: ${{ needs.tracked_tests.result }}
+        run: |
+          echo "Validation checks: $CHECKS_RESULT; tracked tests: $TESTS_RESULT"
+          test "$CHECKS_RESULT" = success && test "$TESTS_RESULT" = success

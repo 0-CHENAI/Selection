@@ -4,6 +4,14 @@
 
 set -euo pipefail
 
+KEEP_GOING=false
+if [ "${1:-}" = "--keep-going" ] && [ "$#" -eq 1 ]; then
+  KEEP_GOING=true
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: $0 [--keep-going]" >&2
+  exit 2
+fi
+
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
@@ -21,10 +29,20 @@ done < <(
   git ls-files -z --cached --others --exclude-standard
 )
 
-for file in "${TEST_FILES[@]}"; do
-  bun test "$file"
+FAILED_FILES=()
+
+for file in ${TEST_FILES[@]+"${TEST_FILES[@]}"} ${ISOLATED_FILES[@]+"${ISOLATED_FILES[@]}"}; do
+  if bun test "$file"; then
+    continue
+  fi
+  FAILED_FILES+=("${file#"$REPO_ROOT"/}")
+  if [ "$KEEP_GOING" = false ]; then
+    break
+  fi
 done
 
-for file in "${ISOLATED_FILES[@]}"; do
-  bun test "$file"
-done
+if [ "${#FAILED_FILES[@]}" -gt 0 ]; then
+  printf '\nFailed test files (%s):\n' "${#FAILED_FILES[@]}" >&2
+  printf '  %s\n' "${FAILED_FILES[@]}" >&2
+  exit 1
+fi
