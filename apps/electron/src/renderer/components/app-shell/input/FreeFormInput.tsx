@@ -82,6 +82,7 @@ import { ChatWorkingDirectoryControl } from './ChatWorkingDirectoryControl'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode, pickerPageShowsCurrentConnection } from './picker-mode'
+import { modelPickerPlacement } from './model-picker-position'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
@@ -745,6 +746,8 @@ export function FreeFormInput({
     reduced: modelPickerReducedMotion,
   }
   const modelMenuRef = React.useRef<HTMLDivElement>(null)
+  const modelTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const [modelMenuPlacement, setModelMenuPlacement] = React.useState<{ side: 'top' | 'bottom'; maxHeight: number }>({ side: 'top', maxHeight: 384 })
   const modelMenuPreviousBoundsRef = React.useRef<{ height: number; edge: number; side: string; reason: 'page' | 'model' } | null>(null)
   const rememberModelPickerBounds = React.useCallback((reason: 'page' | 'model') => {
     const menu = modelMenuRef.current
@@ -879,6 +882,9 @@ export function FreeFormInput({
   }, [focusComposerAfterPicker])
 
   const handleModelDropdownOpenChange = React.useCallback((open: boolean) => {
+    if (open && modelTriggerRef.current) {
+      setModelMenuPlacement(modelPickerPlacement(modelTriggerRef.current.getBoundingClientRect(), window.innerHeight))
+    }
     setModelDropdownOpen(open)
     setModelPickerOverview(open && hasThinkingOverview)
     setModelPickerPage({
@@ -888,6 +894,24 @@ export function FreeFormInput({
     })
     if (!open) focusComposerAfterPicker()
   }, [focusComposerAfterPicker, pickerMode, currentModel, effectiveConnectionDetails, hasThinkingOverview])
+
+  React.useEffect(() => {
+    if (!modelDropdownOpen) return
+    const update = (event: Event) => {
+      // Scrolling the model list cannot move its trigger and should not cause
+      // a layout read for every wheel or touch event.
+      if (event.type === 'scroll' && event.target instanceof Node && modelMenuRef.current?.contains(event.target)) return
+      const trigger = modelTriggerRef.current
+      if (!trigger) return
+      setModelMenuPlacement(previous => {
+        const next = modelPickerPlacement(trigger.getBoundingClientRect(), window.innerHeight, previous.side)
+        return next.side === previous.side && next.maxHeight === previous.maxHeight ? previous : next
+      })
+    }
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => { window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true) }
+  }, [modelDropdownOpen])
 
   // The pages share one menu. Move focus to the new page's first item.
   React.useEffect(() => {
@@ -2458,6 +2482,7 @@ export function FreeFormInput({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
+                    ref={modelTriggerRef}
                     disabled={disabled}
                     className={cn(
                       "input-toolbar-btn inline-flex min-w-0 max-w-[12rem] items-center h-7 px-1.5 gap-0.5 text-[13px] rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
@@ -2486,11 +2511,12 @@ export function FreeFormInput({
               </TooltipContent>
             </Tooltip>
             <StyledDropdownMenuContent
-              side="top"
+              side={modelMenuPlacement.side}
               align="end"
               sideOffset={8}
+              style={{ maxHeight: `min(24rem, ${modelMenuPlacement.maxHeight}px)` }}
               ref={modelMenuRef}
-              className="prompt-model-picker relative min-w-[260px] max-w-[calc(100vw-24px)] max-h-[min(24rem,70vh)] flex flex-col overflow-hidden"
+              className="prompt-model-picker relative min-w-[min(260px,calc(100vw-24px))] max-w-[calc(100vw-24px)] max-h-[min(24rem,70vh)] flex flex-col overflow-hidden"
               data-overview={(modelPickerOverview && !!overviewThinkingSettings) || undefined}
               onKeyDown={event => {
                 if (event.key !== 'ArrowLeft' || modelPickerOverview) return

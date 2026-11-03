@@ -5,6 +5,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { PptCategory, PptTemplate } from '@craft-agent/shared/protocol'
 import { refreshPptCatalog, usePptCatalog } from './usePptCatalog'
 import { PptTemplatePreview } from './PptTemplatePreview'
+import { Button } from '@/components/ui/button'
 
 const categories: [PptCategory, string][] = [['商务', 'business'], ['咨询', 'consulting'], ['学术', 'academic'], ['教学', 'teaching'], ['技术', 'technology'], ['创意', 'creative'], ['社媒', 'social']]
 
@@ -88,7 +89,7 @@ export function galleryTemplates(templates: readonly PptTemplate[], category: st
   })
 }
 
-export function TemplateGallery({ onSelect, compact = false, selectedId }: { onSelect: (template: PptTemplate, source: DOMRect) => void; compact?: boolean; selectedId?: string }) {
+export function TemplateGallery({ onSelect, compact = false, selectedId }: { onSelect: (template: PptTemplate, source?: DOMRect) => void; compact?: boolean; selectedId?: string }) {
   const { t } = useTranslation()
   const [revision, setRevision] = React.useState(0)
   const { catalog, error, retry } = usePptCatalog(revision)
@@ -141,7 +142,7 @@ export function TemplateGallery({ onSelect, compact = false, selectedId }: { onS
         <div className="mb-4 flex items-center justify-between gap-3"><Dialog.Title className="truncate text-base font-semibold">{preview?.title}</Dialog.Title><Dialog.Close aria-label={t('ppt.close')}><X className="size-4" /></Dialog.Close></div>
         <Dialog.Description className="mb-3 text-xs text-muted-foreground">{t('ppt.preview')} · {t('ppt.pages', { count: preview?.pages ?? 0 })}</Dialog.Description>
         <div data-ppt-preview-scroll className="min-h-0 space-y-4 overflow-y-auto">{preview && <PptTemplatePreview key={preview.id} template={preview} />}</div>
-        <button type="button" className="mt-4 self-end rounded-lg bg-accent px-4 py-2 text-sm text-accent-foreground" onClick={event => { if (preview) { onSelect(preview, event.currentTarget.getBoundingClientRect()); setPreview(undefined) } }}>{t('ppt.selectTemplate')}</button>
+        <Button type="button" className="mt-4 self-end" onClick={() => { if (preview) { onSelect(preview); setPreview(undefined) } }}>{t('ppt.selectTemplate')}</Button>
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
   </section>

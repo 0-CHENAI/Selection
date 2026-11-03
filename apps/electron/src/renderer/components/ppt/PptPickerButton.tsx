@@ -7,7 +7,7 @@ import { FreeFormInputContextBadge } from '@/components/app-shell/input/FreeForm
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { NavigationContext, routes } from '@/contexts/NavigationContext'
 import { TemplateGallery } from './TemplateGallery'
-import { queueTemplateFlight } from './SelectedTemplate'
+import { queueTemplateFlight } from './template-flight'
 
 export function PptPickerButton({ composerKey, disabled, pptMode }: { composerKey: string; disabled?: boolean; pptMode?: boolean }) {
   const { t } = useTranslation()
@@ -47,7 +47,7 @@ export function PptPickerButton({ composerKey, disabled, pptMode }: { composerKe
             compact
             selectedId={selectedId}
             onSelect={(template, source) => {
-              queueTemplateFlight(composerKey, source)
+              queueTemplateFlight(composerKey, template.id !== selectedId ? source : undefined)
               setRequest(value => replacePptTemplate(value, template.id))
               setOpen(false)
             }}

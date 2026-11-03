@@ -10,6 +10,7 @@ import { resolvePptTemplate } from './template-lookup'
 import { usePptCatalog } from './usePptCatalog'
 import { TemplateOptions } from './TemplateOptions'
 import { attachTrail, CARD_HEIGHT, CARD_WIDTH, CTRL, FAN, tiltExtent } from './geometry'
+import { consumeTemplateFlight } from './template-flight'
 import './ppt-picker.css'
 
 export function SelectedTemplate({ composerKey, disabled }: { composerKey: string; disabled?: boolean }) {
@@ -20,7 +21,6 @@ export function SelectedTemplate({ composerKey, disabled }: { composerKey: strin
   if (!override?.templateId || !template) return null
   return <TemplateCard template={template} composerKey={composerKey} disabled={disabled} onRemove={() => setRequest(null)} />
 }
-
 function TemplateCard({ template, composerKey, disabled, onRemove }: { template: PptTemplate; composerKey: string; disabled?: boolean; onRemove: () => void }) {
   const { t } = useTranslation()
   const [request, setRequest] = useAtom(pptComposerAtomFamily(composerKey))
@@ -75,16 +75,49 @@ export function AttachedCoverCard({ id, cover, pages = [], title, label, flightK
   React.useLayoutEffect(() => {
     const target = ref.current
     const source = consumeTemplateFlight(flightKey)
-    if (!target || reduced || !source) return
-    const destination = target.getBoundingClientRect()
+    if (!target || reduced || !source || document.hidden || source.width <= 0 || source.height <= 0) return
     const image = document.createElement('img')
     image.src = cover
     image.className = 'ppt-template-flight'
-    Object.assign(image.style, { position: 'fixed', left: `${source.x}px`, top: `${source.y}px`, width: `${source.width}px`, height: `${source.height}px`, objectFit: 'cover', borderRadius: '9px', pointerEvents: 'none' })
+    image.alt = ''
+    image.setAttribute('aria-hidden', 'true')
+    Object.assign(image.style, { position: 'fixed', left: `${source.x}px`, top: `${source.y}px`, width: `${source.width}px`, height: `${source.height}px`, objectFit: 'cover', borderRadius: '9px', pointerEvents: 'none', transformOrigin: 'center' })
+    // The composer changes height while the card enters. Keep only the flying
+    // cover visible and follow its actual destination until the layout settles.
+    const previousOpacity = target.style.opacity
+    const previousInert = target.inert
+    target.style.opacity = '0'
+    target.inert = true
     document.body.appendChild(image)
-    const animation = image.animate([{ transform: 'translate(0, 0) rotate(0deg)', opacity: 1 }, { transform: `translate(${destination.x - source.x}px, ${destination.y - source.y}px) rotate(-3deg)`, width: `${CARD_WIDTH}px`, height: `${CARD_HEIGHT}px`, opacity: 1 }], { duration: 420, easing: 'cubic-bezier(.22,.75,.25,1)' })
-    animation.onfinish = () => image.remove()
-    return () => { animation.cancel(); image.remove() }
+    let started: number | undefined
+    let frame = 0
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      cancelAnimationFrame(frame)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      target.style.opacity = previousOpacity
+      target.inert = previousInert
+      image.remove()
+    }
+    const onVisibilityChange = () => { if (document.hidden) finish() }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    const tick = (now: number) => {
+      started ??= now
+      const progress = Math.min(1, Math.max(0, (now - started) / 280))
+      const eased = 1 - (1 - progress) ** 3
+      const destination = target.getBoundingClientRect()
+      const dx = destination.left + destination.width / 2 - (source.left + source.width / 2)
+      const dy = destination.top + destination.height / 2 - (source.top + source.height / 2)
+      const scaleX = 1 + (destination.width / source.width - 1) * eased
+      const scaleY = 1 + (destination.height / source.height - 1) * eased
+      image.style.transform = `translate(${dx * eased}px, ${dy * eased}px) scale(${scaleX}, ${scaleY})`
+      if (progress < 1) frame = requestAnimationFrame(tick)
+      else finish()
+    }
+    frame = requestAnimationFrame(tick)
+    return finish
   }, [id, cover, flightKey, reduced])
   return <motion.div layout={!reduced} data-testid={testIds.root} className="relative h-16 shrink-0 self-end" style={{ width: CARD_WIDTH + attachTrail() + left }}>
     <motion.div ref={ref} key={id} initial={reduced ? false : { scale: .92, rotate: -3 }} animate={{ scale: hover ? 1.03 : 1, rotate: tilt }} transition={{ duration: reduced ? 0 : .2, ease: [.34, 1.56, .64, 1] }} className="absolute" style={{ width: CARD_WIDTH, height: CARD_HEIGHT, left, top: `calc(50% - ${CARD_HEIGHT / 2}px)` }} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocusCapture={() => setHover(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHover(false) }} aria-label={label}>
@@ -99,7 +132,3 @@ export function AttachedCoverCard({ id, cover, pages = [], title, label, flightK
     </motion.div>
   </motion.div>
 }
-
-const flights = new Map<string, DOMRect>()
-export function queueTemplateFlight(key: string, source: DOMRect) { flights.set(key, source) }
-export function consumeTemplateFlight(key: string) { const source = flights.get(key); flights.delete(key); return source }

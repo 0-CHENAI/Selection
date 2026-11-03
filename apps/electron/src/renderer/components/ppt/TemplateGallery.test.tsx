@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -9,6 +9,7 @@ import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
 import { galleryTemplates, TemplateGrid } from './TemplateGallery'
 import { TemplateOptions } from './TemplateOptions'
+import { consumeTemplateFlight, queueTemplateFlight } from './template-flight'
 
 const i18n = i18next.createInstance()
 await i18n.use(initReactI18next).init({ lng: 'zh-Hans', resources: { 'zh-Hans': { translation: LOCALE_REGISTRY['zh-Hans'].messages } }, interpolation: { escapeValue: false } })
@@ -22,6 +23,28 @@ const variants = [
   { id: 'dsh-monochrome', title: '极简研究', cover: 'data:variant-2', referencePages: [] },
 ]
 const template: PptTemplate = { id: 'rational-brief', title: '理性简报', category: '商务', tier: 'default', canvas: '16:9', pages: 12, cover: 'data:cover', referencePages: [], variants } as PptTemplate
+
+test('clears queued flight geometry when selection has no visual source', () => {
+  const source = { x: 10, y: 20, width: 100, height: 56 } as DOMRect
+  queueTemplateFlight('test-composer', source)
+  queueTemplateFlight('test-composer')
+  expect(consumeTemplateFlight('test-composer')).toBeUndefined()
+  queueTemplateFlight('test-composer', source)
+  expect(consumeTemplateFlight('test-composer')).toBe(source)
+  expect(consumeTemplateFlight('test-composer')).toBeUndefined()
+})
+
+test('does not animate from a source left behind by an abandoned selection', () => {
+  const clock = spyOn(Date, 'now')
+  try {
+    clock.mockReturnValue(10_000)
+    queueTemplateFlight('abandoned-composer', { x: 10, y: 20, width: 100, height: 56 } as DOMRect)
+    clock.mockReturnValue(12_001)
+    expect(consumeTemplateFlight('abandoned-composer')).toBeUndefined()
+  } finally {
+    clock.mockRestore()
+  }
+})
 
 test('template cards show cover, title and category · pages without variant chips', () => {
   const html = render(<TemplateGrid templates={[template]} compact={false} onSelect={() => {}} onPreview={() => {}} />)

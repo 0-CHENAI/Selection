@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { closeOfficeCasePreview, requestOfficeCasePreview } from '@/lib/office-preview-page'
 import { officeCaseCovers } from './office-covers'
 import { casesForOfficeHome } from './office-home'
-import { queueTemplateFlight } from '@/components/ppt/SelectedTemplate'
+import { queueTemplateFlight } from '@/components/ppt/template-flight'
 
 type OfficeCase = {
   id: string

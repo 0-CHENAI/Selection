@@ -26,6 +26,7 @@ import { AppShell } from '@/components/app-shell/AppShell'
 import { ConfirmationHost } from '@/components/ConfirmationHost'
 import { confirmClientDialog } from '@/lib/confirmation'
 import { navigate, routes } from '@/lib/navigate'
+import previewPdfUrl from '@/../../resources/skills/ppt-design/styles/_archive/previews/documents/ppt169_swiss_grid_systems.pdf?url'
 import type { CreateSessionOptions, Session } from '../../../../../../shared/types'
 import '@/index.css'
 
@@ -35,7 +36,8 @@ const onInputChange = (id: string, text: string) => { drafts.set(id, text) }
 const store = createStore()
 const fullShell = new URLSearchParams(location.search).has('shell')
 const fastFixture = new URLSearchParams(location.search).has('fast')
-const pickerMotionFixture = new URLSearchParams(location.search).has('picker-motion')
+const pickerMotionFixture = new URLSearchParams(location.search).has('picker-motion') || new URLSearchParams(location.search).has('picker-long')
+const pickerLongFixture = new URLSearchParams(location.search).has('picker-long')
 const fixtureModel = fastFixture ? 'gpt-6.1-sol' : 'gpt-4o'
 const scrollFixture = new URLSearchParams(location.search).has('scroll')
 const calls = { creates: [] as CreateSessionOptions[], sends: [] as unknown[][], commands: [] as unknown[][] }
@@ -64,7 +66,15 @@ Object.assign(window.electronAPI, {
     { id: 'fixture-template', title: 'Strategy review', category: '商务', canvas: '16:9', pages: 12, cover, referencePages: [cover] },
     ...(scrollFixture ? [{ id: 'scroll-template', title: 'Scrollable template', category: '自定义', canvas: '16:9', pages: 12, cover, referencePages: [cover] }] : []),
   ], themes: [] }),
-  getPptTemplatePreview: async () => cover,
+  getPptTemplatePreview: async (_templateId: string, page?: number) => {
+    if (page !== undefined) return cover
+    const bytes = new Uint8Array(await (await fetch(previewPdfUrl)).arrayBuffer())
+    let binary = ''
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+    }
+    return `data:application/pdf;base64,${btoa(binary)}`
+  },
   getWorkspaceSettings: async () => ({}),
   getSessionMessages: async (id: string) => store.get(sessionAtomFamily(id)) ?? null,
   sessionCommand: async (id: string, command: { type: string; dir?: string }) => {
@@ -154,7 +164,8 @@ function Fixture() {
     llmConnections: [{ slug: 'fixture', name: 'Fixture', providerType: 'pi', piAuthProvider: fastFixture ? 'openai-codex' : 'openai', authType: fastFixture ? 'oauth' : 'api_key',
       isAuthenticated: true, createdAt: 0, defaultModel: fixtureModel, models: fastFixture ? ['gpt-6.1-sol', 'gpt-4o'] : ['gpt-4o'] },
       ...(pickerMotionFixture ? [{ slug: 'picker-target', name: 'Picker Target', providerType: 'pi_compat' as const, piAuthProvider: 'openai', authType: 'api_key' as const,
-        isAuthenticated: true, createdAt: 0, defaultModel: 'gpt-5.6-terra', models: ['gpt-5.6-terra', 'gpt-6-astra'] }] : [])],
+        isAuthenticated: true, createdAt: 0, defaultModel: 'gpt-5.6-terra', models: pickerLongFixture
+          ? Array.from({ length: 24 }, (_, index) => `test-model-${index + 1}`) : ['gpt-5.6-terra', 'gpt-6-astra'] }] : [])],
     workspaceDefaultLlmConnection: 'fixture',
     onSendMessage: async (...args: unknown[]) => {
       calls.sends.push(args)
