@@ -13,6 +13,13 @@ describe('resolveSourceActivationRetry', () => {
     })
   })
 
+  it('does not re-attach images when the original message had text', () => {
+    expect(resolveSourceActivationRetry({
+      originalMessage: 'look at this',
+      attachments: [{ name: 'photo.jpg', type: 'image' }],
+    })).toEqual({ text: 'look at this' })
+  })
+
   it('falls back to the last user message when the activation payload is empty', () => {
     expect(resolveSourceActivationRetry({
       originalMessage: '',

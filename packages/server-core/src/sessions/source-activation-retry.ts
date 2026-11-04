@@ -15,8 +15,12 @@ export function resolveSourceActivationRetry(input: {
   lastUserMessage?: string
   attachments?: unknown[]
 }): SourceActivationRetry | null {
-  const text = sanitizeUserMessageForRetry(input.originalMessage || input.lastUserMessage || '').trim()
-  const attachments = input.attachments?.length ? input.attachments : undefined
+  const originalText = sanitizeUserMessageForRetry(input.originalMessage || '').trim()
+  const text = originalText || sanitizeUserMessageForRetry(input.lastUserMessage || '').trim()
+  // Re-attach only for attachment-only turns. Text turns already have the
+  // images in history; repeating lastSentAttachments on every activation
+  // resends them.
+  const attachments = !originalText && input.attachments?.length ? input.attachments : undefined
   if (!text && !attachments) return null
   return { text, attachments }
 }
