@@ -31,6 +31,15 @@ export function isVirtualTurnInWindow(index: number, start: number, end: number)
   return index >= start && index < end
 }
 
+/**
+ * Whether the standalone tail status should show. Only the window end matters:
+ * a processing turn above the top edge is still on screen as a card, and
+ * keying on start flips with scroll and makes sticky follow oscillate.
+ */
+export function shouldShowTailProcessingIndicator(index: number, end: number): boolean {
+  return index === -1 || index >= end
+}
+
 /** Estimates only seed the scrollbar; ResizeObserver caches actual row heights. */
 export function estimateChatTurnHeight(turn: Turn, width: number): number {
   const text = turn.type === 'assistant' ? turn.response?.text ?? '' : turn.message.content
