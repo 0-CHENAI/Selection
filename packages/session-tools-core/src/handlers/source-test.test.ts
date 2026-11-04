@@ -490,6 +490,34 @@ describe('source_test API connection branches', () => {
     expect(text).toContain('missing stored credentials');
     expect(fetchCalls).toBe(0);
     expect(cred.getTokenCalls).toBeGreaterThan(0);
+    expect(cred.refreshCalls).toBeGreaterThan(0);
+  });
+
+  it('expired but refreshable OAuth API token is refreshed before the probe', async () => {
+    writeApiSource(tempDir, 'oauth-expired-api', {
+      isAuthenticated: true,
+      api: { baseUrl: 'https://api.example.test', authType: 'oauth' },
+    } as Partial<SourceConfig>);
+    let fetchCalls = 0;
+    ({ restore: restoreFetch } = installFetchStub(() => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    }));
+
+    const cred = makeCredentialManager({ cachedToken: null, refreshedToken: 'fresh-tok' });
+    const ctx = createCtx(tempDir, {
+      credentialManager: cred.manager,
+      activateSourceInSession: async () => ({ ok: true }),
+    });
+
+    const result = await handleSourceTest(ctx, { sourceSlug: 'oauth-expired-api', autoEnable: false });
+    const text = result.content[0]?.text ?? '';
+
+    expect(text).toContain('API connection successful (authenticated)');
+    expect(text).not.toContain('missing stored credentials');
+    expect(fetchCalls).toBe(1);
+    expect(cred.getTokenCalls).toBeGreaterThan(0);
+    expect(cred.refreshCalls).toBeGreaterThan(0);
   });
 
   it('basic probe honors testEndpoint.method (no HEAD→GET fallback dance)', async () => {

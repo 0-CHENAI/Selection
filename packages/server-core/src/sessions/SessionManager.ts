@@ -89,6 +89,7 @@ import {
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
 import { resolveSourceActivationRetry, sourceActivationRetryMessage } from './source-activation-retry.ts'
+import { collectSourceSyncFailures, nextSourceSyncNotices, sourceSyncModelReminder } from './source-sync-failures.ts'
 import { completionStopReason } from './completion-outcome.ts'
 import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
 import { i18n } from '@craft-agent/shared/i18n'
@@ -1175,6 +1176,10 @@ interface ManagedSession extends WorkModeMetadata {
   lastSentAttachments?: FileAttachment[]
   lastSentStoredAttachments?: StoredAttachment[]
   lastSentOptions?: SendMessageOptions
+  /** Source slugs whose connection currently failed (model-visible each turn). */
+  sourceSyncFailures?: string[]
+  /** Slugs already shown to the user so sendMessage does not repeat the notice. */
+  notifiedSourceSyncFailures?: Set<string>
   // Flag to prevent infinite retry loops (reset at start of each sendMessage)
   authRetryAttempted?: boolean
   // Flag indicating auth retry is in progress (to prevent complete handler from interfering)
@@ -2410,9 +2415,10 @@ export class SessionManager implements ISessionManager {
    * If agent is null (session hasn't sent any messages), skip - fresh build happens on next message.
    */
   private reportSourceSyncFailures(managed: ManagedSession, failures: unknown): void {
-    if (!Array.isArray(failures) || failures.length === 0) return
-    for (const slug of failures) {
-      if (typeof slug !== 'string' || !slug) continue
+    const current = collectSourceSyncFailures(failures)
+    managed.sourceSyncFailures = current
+    const notified = managed.notifiedSourceSyncFailures ??= new Set()
+    for (const slug of nextSourceSyncNotices(notified, current)) {
       const message = i18n.isInitialized
         ? String(i18n.t('sources.syncFailed', { slug }))
         : `Could not connect to source "${slug}".`
@@ -8291,9 +8297,12 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
       }
       const imageSkipNote = skippedImageCount > 0 ? `\n\n${buildSkippedImagesNote(skippedImageCount)}` : ''
+      const sourceFailNote = managed.sourceSyncFailures?.length
+        ? `\n\n${sourceSyncModelReminder(managed.sourceSyncFailures)}`
+        : ''
       const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
-        ? `${currentInput}${imageSkipNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
-        : `${currentInput}${imageSkipNote}`
+        ? `${currentInput}${imageSkipNote}${sourceFailNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : `${currentInput}${imageSkipNote}${sourceFailNote}`
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')

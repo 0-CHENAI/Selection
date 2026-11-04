@@ -510,12 +510,21 @@ async function testApiConnectionWithAuth(
     workspaceId,
   };
 
-  // Get token from credential manager
+  // Cached token first; refresh fallback for expired-but-refreshable OAuth.
+  // getToken returns empty for expired credentials (credential-manager.ts),
+  // and source_test runs before TokenRefreshManager.
   let token: string | null = null;
   try {
     token = await ctx.credentialManager!.getToken(loadedSource);
   } catch {
-    // Couldn't get token, will fall through to basic test
+    // Couldn't read the cache; still try refresh below.
+  }
+  if (!token) {
+    try {
+      token = await ctx.credentialManager!.refresh(loadedSource);
+    } catch {
+      // Refresh failed — report missing credentials to the caller.
+    }
   }
 
   if (!token) {
