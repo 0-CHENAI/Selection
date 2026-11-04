@@ -32,6 +32,7 @@ import {
   type BlockedCommandHintRule,
   type PermissionPaths,
 } from './mode-types.ts';
+import { isPlainMcpVerb } from './mcp-tool-names.ts';
 
 // ============================================================
 // App-level Permissions Directory
@@ -257,6 +258,8 @@ export interface MergedPermissionsConfig {
   /** Command-specific hints for blocked Bash command explanations */
   blockedCommandHints: CompiledBlockedCommandHint[];
   readOnlyMcpPatterns: RegExp[];
+  /** Read verbs from the app defaults, matched as whole words (see ModeConfig.readOnlyMcpVerbs) */
+  readOnlyMcpVerbs: string[];
   /** Fine-grained API endpoint rules */
   allowedApiEndpoints: CompiledApiEndpointRule[];
   /** File paths allowed for writes in Explore mode (glob patterns) */
@@ -687,6 +690,7 @@ class PermissionsConfigCache {
       readOnlyBashPatterns: [...defaults.readOnlyBashPatterns],
       blockedCommandHints: [...(defaults.blockedCommandHints ?? [])],
       readOnlyMcpPatterns: [...defaults.readOnlyMcpPatterns],
+      readOnlyMcpVerbs: [...(defaults.readOnlyMcpVerbs ?? [])],
       allowedApiEndpoints: [],
       allowedWritePaths: [],
       displayName: defaults.displayName,
@@ -751,8 +755,14 @@ class PermissionsConfigCache {
       }
     }
 
-    // Add allowed MCP patterns
+    // Add allowed MCP patterns. Plain words ("get", "list") are read verbs matched as whole
+    // words of the tool name; as raw regexes they matched substrings of the full
+    // `mcp__<source>__<tool>` name (`delete_account` contains "count"). Real regexes stay regexes.
     for (const pattern of config.allowedMcpPatterns) {
+      if (isPlainMcpVerb(pattern)) {
+        merged.readOnlyMcpVerbs.push(pattern);
+        continue;
+      }
       const regex = validateRegex(pattern);
       if (regex) {
         merged.readOnlyMcpPatterns.push(regex);

@@ -240,6 +240,12 @@ export interface ModeConfig {
   blockedCommandHints?: CompiledBlockedCommandHint[];
   /** Read-only MCP patterns (tools matching these are allowed) */
   readOnlyMcpPatterns: RegExp[];
+  /**
+   * Read verbs from permissions.json, matched as whole words of the tool's own
+   * name (see mcp-tool-names.ts). Plain words like "get" used to be compiled as
+   * substring regexes and let write tools through Explore mode.
+   */
+  readOnlyMcpVerbs?: string[];
   /** Fine-grained API endpoint rules (method + path pattern) */
   allowedApiEndpoints: CompiledApiEndpointRule[];
   /** File paths allowed for writes in Explore mode (glob patterns) */
@@ -280,6 +286,7 @@ export const SAFE_MODE_CONFIG: ModeConfig = {
   readOnlyBashPatterns: [],
   blockedCommandHints: [],
   readOnlyMcpPatterns: [],
+  readOnlyMcpVerbs: [],
   allowedApiEndpoints: [],
   displayName: 'Read-only Explore',
   shortcutHint: 'SHIFT+TAB',
