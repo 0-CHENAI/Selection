@@ -1024,6 +1024,11 @@ async function ensureSession(): Promise<AgentSession> {
   toolsChanged = false;
   debugLog(`Created Pi session: ${session.sessionId} (${wrappedAll.length} tools)`);
 
+  // Tool-set rebuilds recreate the session in this process. Keep the child's
+  // SDK id so the next createPiSessionManager resumes the branch instead of
+  // forking the parent again.
+  if (initConfig) initConfig.resumeSdkSessionId = session.sessionId;
+
   // Notify main process of session ID
   send({ type: 'session_id_update', sessionId: session.sessionId });
 

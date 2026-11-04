@@ -329,6 +329,62 @@ describe('Pi tool image persistence', () => {
   })
 })
 
+it('keeps branch turns when rebuilt with the parent resume id still set', () => {
+  const root = tempRoot()
+  const parentDir = join(root, 'parent')
+  const childDir = join(root, 'child', '.pi-sessions')
+  mkdirSync(join(parentDir, '.pi-sessions'), { recursive: true })
+  mkdirSync(childDir, { recursive: true })
+  const parent = createPiSessionManager({ cwd: root, sessionDir: join(parentDir, '.pi-sessions') })
+  parent.appendMessage(user('parent question', 1))
+  parent.appendMessage(assistant('parent answer', 2))
+  const staleOptions = {
+    cwd: root,
+    sessionDir: childDir,
+    branchFromSessionPath: parentDir,
+    branchFromSdkSessionId: parent.getSessionId(),
+    resumeSdkSessionId: parent.getSessionId(),
+  }
+  const child = createPiSessionManager(staleOptions)
+  child.appendMessage(user('branch follow-up', 3))
+  child.appendMessage(assistant('branch answer', 4))
+
+  const rebuilt = createPiSessionManager(staleOptions)
+  expect(rebuilt.getSessionId()).toBe(child.getSessionId())
+  expect(textFromContext(rebuilt)).toEqual([
+    'parent question',
+    'parent answer',
+    'branch follow-up',
+    'branch answer',
+  ])
+})
+
+it('records a craft-branch-point so a turn cutoff survives reopen', () => {
+  const root = tempRoot()
+  const parentCraft = join(root, 'session-parent')
+  const parentSessionDir = join(parentCraft, '.pi-sessions')
+  const childSessionDir = join(root, 'session-child', '.pi-sessions')
+  mkdirSync(parentSessionDir, { recursive: true })
+  mkdirSync(childSessionDir, { recursive: true })
+  const parent = createPiSessionManager({ cwd: root, sessionDir: parentSessionDir, forceFreshSession: true })
+  parent.appendMessage(user('FIRST_USER', 1))
+  const anchor = parent.appendMessage(assistant('FIRST_ASSISTANT', 2))
+  parent.appendMessage(user('LATER_USER', 3))
+  parent.appendMessage(assistant('LATER_ASSISTANT', 4))
+
+  const child = createPiSessionManager({
+    cwd: root,
+    sessionDir: childSessionDir,
+    branchFromSessionPath: parentCraft,
+    branchFromSdkSessionId: parent.getSessionId(),
+    branchFromSdkTurnId: anchor,
+  })
+  expect(textFromContext(child)).toEqual(['FIRST_USER', 'FIRST_ASSISTANT'])
+  const persisted = readFileSync(child.getSessionFile()!, 'utf8')
+  expect(persisted).toContain('craft-branch-point')
+  expect(persisted).toContain(anchor)
+})
+
 it('resumes the child after its source is deleted instead of forking again', () => {
   const root = tempRoot()
   const parentDir = join(root, 'parent')

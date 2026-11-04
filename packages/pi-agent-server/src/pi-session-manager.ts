@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, extname, isAbsolute, join } from 'node:path'
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { SessionManager as PiSessionManager } from '@earendil-works/pi-coding-agent'
 import type { Message } from '@earendil-works/pi-ai'
 
@@ -265,6 +265,14 @@ export function createPiSessionManager(options: CreatePiSessionManagerOptions): 
 
   if (branchFromSessionPath) {
     const parentSessionDir = join(branchFromSessionPath, '.pi-sessions')
+    // A branch writes into its own session dir. If that dir already has a file
+    // (tool-set rebuild, subprocess still holding the parent's resume id),
+    // resume it. Regeneration uses the parent's dir and must still re-fork.
+    if (!forceFreshSession && resolve(sessionDir) !== resolve(parentSessionDir)) {
+      const existingBranch = findMostRecentSessionFile(sessionDir)
+      if (existingBranch) return protectSessionJsonl(PiSessionManager.open(existingBranch, sessionDir, cwd))
+    }
+
     const parentSessionFile = findSessionFileById(parentSessionDir, branchFromSdkSessionId)
       ?? findMostRecentSessionFile(parentSessionDir)
     if (!parentSessionFile) {
@@ -278,6 +286,10 @@ export function createPiSessionManager(options: CreatePiSessionManagerOptions): 
         throw new Error(`Pi branch preflight failed: branch anchor not found: ${branchFromSdkTurnId}`)
       }
       forked.branch(branchFromSdkTurnId)
+      // branch() moves the leaf in memory only. Persist the cutoff so a file
+      // reopened before the branch's first message does not take the parent's
+      // latest entry as the leaf.
+      forked.appendCustomEntry('craft-branch-point', { anchorId: branchFromSdkTurnId })
     }
     return protectSessionJsonl(forked)
   }
