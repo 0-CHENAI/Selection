@@ -16,7 +16,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { classifyFile, type FilePreviewType } from '@craft-agent/ui'
+import { resolveFileOpenRoute, type FilePreviewType } from '@craft-agent/ui'
 import { getLanguageFromPath } from '@/lib/file-utils'
 
 // ── Preview state types ────────────────────────────────────────────────────────
@@ -141,16 +141,18 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
    * (e.g., @uiw/react-json-view crashes on null value).
    */
   const handleOpenFile = useCallback(async (path: string) => {
-    const classification = classifyFile(path)
+    const route = await resolveFileOpenRoute(path, async (candidate) => {
+      await optionsRef.current.readFileDataUrl(candidate)
+      return true
+    })
 
-    if (!classification.canPreview || !classification.type) {
-      // No preview available — open in default external app
+    if (route.kind === 'external') {
       return (await optionsRef.current.openFileExternal(path)) !== false
     }
 
-    const type = classification.type
-    if (type === 'html') return optionsRef.current.openHtmlFile(path)
+    if (route.kind === 'html') return optionsRef.current.openHtmlFile(path)
 
+    const type = route.type
     // For image/pdf: set state immediately — the overlay handles its own async loading
     if (type === 'image' || type === 'pdf') {
       setPreviewState({ type, filePath: path })

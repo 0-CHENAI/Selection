@@ -22,6 +22,7 @@ import {
 } from '@craft-agent/session-tools-core';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { isBrowserToolNameOrAlias } from './browser-tool-names.ts';
+import { isReadOnlyMcpToolName } from './mcp-tool-names.ts';
 import type { PermissionsContext, MergedPermissionsConfig } from './permissions-config.ts';
 import {
   validateBashCommand,
@@ -1720,7 +1721,8 @@ export function getPathHint(targetPath: string, plansFolderPath: string, dataFol
  * Check if an MCP tool is read-only using the given config
  */
 function isReadOnlyMcpToolWithConfig(toolName: string, config: ToolCheckConfig): boolean {
-  return config.readOnlyMcpPatterns.some(pattern => pattern.test(toolName));
+  return isReadOnlyMcpToolName(toolName, config.readOnlyMcpVerbs ?? [])
+    || config.readOnlyMcpPatterns.some(pattern => pattern.test(toolName));
 }
 
 /**
@@ -1777,6 +1779,7 @@ export function isApiEndpointAllowed(
  */
 const ALWAYS_ALLOWED_TOOLS = new Set([
   'Read', 'Glob', 'Grep',           // File reading
+  'Find', 'Ls',                     // Pi file listing (only passed via default-allow before)
   'Task', 'TaskOutput',             // Agent orchestration
   'WebFetch', 'WebSearch',          // Web research
   'TodoWrite',                      // Task tracking
@@ -1789,6 +1792,9 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   // Browser automation tool (canonical wrapper)
   'browser_tool',
 ]);
+
+/** Always-allowed tools that also come as an MCP tool of any server (mcp__plan__SubmitPlan). */
+const ALWAYS_ALLOWED_MCP_VARIANTS = ['SubmitPlan'];
 
 /**
  * Result type for tool permission checks
@@ -1845,11 +1851,10 @@ export function shouldAllowToolInMode(
     return { allowed: true };
   }
 
-  // Check if tool name ends with an always-allowed tool (for MCP variants like mcp__plan__SubmitPlan)
-  for (const allowedTool of ALWAYS_ALLOWED_TOOLS) {
-    if (toolName.endsWith(`__${allowedTool}`)) {
-      return { allowed: true };
-    }
+  // MCP variants of an always-allowed tool (mcp__plan__SubmitPlan). Not every always-allowed name:
+  // a source's own `Read` or `Task` is a mutation of that source, not Craft's file Read.
+  if (ALWAYS_ALLOWED_MCP_VARIANTS.some(allowedTool => toolName.endsWith(`__${allowedTool}`))) {
+    return { allowed: true };
   }
 
   // Browser tool aliases (legacy browser_open/browser_snapshot/...)
@@ -2090,8 +2095,11 @@ export function shouldAllowToolInMode(
     };
   }
 
-  // Default: allow other tools not explicitly handled
-  return { allowed: true };
+  // A tool none of the above knows may change things: Explore runs only what it knows to be read-only
+  return {
+    allowed: false,
+    reason: getBlockReasonWithConfig(toolName, config),
+  };
 }
 
 /**

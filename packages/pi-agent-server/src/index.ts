@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { waitForBridgeReply } from './bridge-wait.ts';
 import { proxyReplyDeadlineMs } from './proxy-reply-deadline.ts';
+import { replaceProxyTools, type ProxyToolDef } from './register-tools.ts';
 import { installFastServiceTier } from './gpt-oauth-fast.ts';
 import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass, ToolNotPerformedError, withExecutionOutcome, installToolExecutionOutcomeTracking } from './tool-recovery';
@@ -268,13 +269,6 @@ type InboundMessage =
   | { type: 'anysearch_api_key_result'; id: string; apiKey: string }
   | SearchSettingsResponse
   | { type: 'shutdown' };
-
-/** Proxy tool definition from main process */
-interface ProxyToolDef {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
 
 /** Canonical tool metadata propagated on Pi tool start events */
 interface ToolExecutionMetadata {
@@ -1023,6 +1017,11 @@ async function ensureSession(): Promise<AgentSession> {
 
   toolsChanged = false;
   debugLog(`Created Pi session: ${session.sessionId} (${wrappedAll.length} tools)`);
+
+  // Tool-set rebuilds recreate the session in this process. Keep the child's
+  // SDK id so the next createPiSessionManager resumes the branch instead of
+  // forking the parent again.
+  if (initConfig) initConfig.resumeSdkSessionId = session.sessionId;
 
   // Notify main process of session ID
   send({ type: 'session_id_update', sessionId: session.sessionId });
@@ -2189,17 +2188,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 }
 
 function handleRegisterTools(msg: Extract<InboundMessage, { type: 'register_tools' }>): void {
-  // Merge: replace existing tools by name, add new ones
-  const incoming = new Map(msg.tools.map(t => [t.name, t]));
-  proxyToolDefs = [
-    ...proxyToolDefs.filter(t => !incoming.has(t.name)),
-    ...msg.tools,
-  ];
-  debugLog(`Registered ${msg.tools.length} proxy tools (total: ${proxyToolDefs.length}): ${msg.tools.map(t => t.name).join(', ')}`);
+  // The main process sends the whole set: a tool it leaves out (a source turned off) is dropped
+  const { tools, changed } = replaceProxyTools(proxyToolDefs, msg.tools);
+  proxyToolDefs = tools;
+  debugLog(`Registered ${msg.tools.length} proxy tools${changed ? '' : ' (unchanged)'}: ${msg.tools.map(t => t.name).join(', ')}`);
 
   // If session exists, mark for recreation on next prompt.
   // Don't dispose mid-generation — the flag is checked in handlePrompt().
-  if (piSession) {
+  if (piSession && changed) {
     toolsChanged = true;
     debugLog('Proxy tools changed — session will be recreated on next prompt');
   }

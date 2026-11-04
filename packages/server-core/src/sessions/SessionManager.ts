@@ -88,6 +88,8 @@ import {
   shouldQueueFirstTurnAiTitle,
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
+import { resolveSourceActivationRetry, sourceActivationRetryMessage } from './source-activation-retry.ts'
+import { collectSourceSyncFailures, nextSourceSyncNotices, sourceSyncModelReminder } from './source-sync-failures.ts'
 import { completionStopReason } from './completion-outcome.ts'
 import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
 import { i18n } from '@craft-agent/shared/i18n'
@@ -1174,6 +1176,10 @@ interface ManagedSession extends WorkModeMetadata {
   lastSentAttachments?: FileAttachment[]
   lastSentStoredAttachments?: StoredAttachment[]
   lastSentOptions?: SendMessageOptions
+  /** Source slugs whose connection currently failed (model-visible each turn). */
+  sourceSyncFailures?: string[]
+  /** Slugs already shown to the user so sendMessage does not repeat the notice. */
+  notifiedSourceSyncFailures?: Set<string>
   // Flag to prevent infinite retry loops (reset at start of each sendMessage)
   authRetryAttempted?: boolean
   // Flag indicating auth retry is in progress (to prevent complete handler from interfering)
@@ -2408,6 +2414,24 @@ export class SessionManager implements ISessionManager {
    * Called by ConfigWatcher when source files change on disk.
    * If agent is null (session hasn't sent any messages), skip - fresh build happens on next message.
    */
+  private reportSourceSyncFailures(managed: ManagedSession, failures: unknown): void {
+    const current = collectSourceSyncFailures(failures)
+    managed.sourceSyncFailures = current
+    const notified = managed.notifiedSourceSyncFailures ??= new Set()
+    for (const slug of nextSourceSyncNotices(notified, current)) {
+      const message = i18n.isInitialized
+        ? String(i18n.t('sources.syncFailed', { slug }))
+        : `Could not connect to source "${slug}".`
+      sessionLog.warn(message)
+      this.sendEvent({
+        type: 'info',
+        sessionId: managed.id,
+        message,
+        level: 'warning',
+      }, managed.workspace.id)
+    }
+  }
+
   private async reloadSessionSources(managed: ManagedSession): Promise<void> {
     if (!managed.agent) return  // No agent = nothing to update (fresh build on next message)
 
@@ -2431,7 +2455,7 @@ export class SessionManager implements ISessionManager {
     // Update bridge-mcp-server config/credentials for backends that need it
     await applyBridgeUpdates(managed.agent, sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath, 'source reload', managed.poolServer?.url)
 
-    await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+    this.reportSourceSyncFailures(managed, await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
     sessionLog.info(`Sources reloaded for session ${managed.id}: ${Object.keys(mcpServers).length} MCP, ${Object.keys(apiServers).length} API`)
   }
@@ -5736,9 +5760,9 @@ export class SessionManager implements ISessionManager {
           // resend of the original user message with a "[{slug} activated]" suffix —
           // landing in a fresh turn with tools live (craft-agents-oss#804).
           const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
-          if (userMessage) {
-            managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
-          }
+          // Attachment-only turns have empty text; still schedule a restart so
+          // source_activated can resend the attachments.
+          managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
           return { ok: true, availability: 'next-turn' as const }
         },
       })
@@ -5821,7 +5845,7 @@ export class SessionManager implements ISessionManager {
         // Update bridge-mcp-server config/credentials for backends that need it
         await applyBridgeUpdates(managed.agent!, sessionPath, allEnabledSources, mcpServers, managed.id, workspaceRootPath, 'source enable', managed.poolServer?.url)
 
-        await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs)
+        this.reportSourceSyncFailures(managed, await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
         sessionLog.info(`Auto-enabled source ${sourceSlug} for session ${managed.id}`)
 
@@ -6324,7 +6348,7 @@ export class SessionManager implements ISessionManager {
       const usableSources = sources.filter(isSourceUsable)
       await applyBridgeUpdates(managed.agent, sessionPath, usableSources, mcpServers, managed.id, workspaceRootPath, 'source config change', managed.poolServer?.url)
 
-      await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+      this.reportSourceSyncFailures(managed, await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
       sessionLog.info(`Applied ${Object.keys(mcpServers).length} MCP + ${Object.keys(apiServers).length} API sources to active agent (${allSources.length} total)`)
     }
@@ -8078,7 +8102,7 @@ export class SessionManager implements ISessionManager {
       if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
         const usableSources = sources.filter(isSourceUsable)
         const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+        this.reportSourceSyncFailures(managed, await agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
         await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
         sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
       }
@@ -8273,9 +8297,12 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
       }
       const imageSkipNote = skippedImageCount > 0 ? `\n\n${buildSkippedImagesNote(skippedImageCount)}` : ''
+      const sourceFailNote = managed.sourceSyncFailures?.length
+        ? `\n\n${sourceSyncModelReminder(managed.sourceSyncFailures)}`
+        : ''
       const chatMessage = priorTaskList?.some(item => item.status !== 'completed')
-        ? `${currentInput}${imageSkipNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
-        : `${currentInput}${imageSkipNote}`
+        ? `${currentInput}${imageSkipNote}${sourceFailNote}\n\n<conversation_task_list>${JSON.stringify(priorTaskList)}</conversation_task_list>\nThis is the last saved conversation plan. If continuing that goal, resume remaining items and preserve completed work; if the user changed the goal, replace the list. It grants no delegation or workflow authority.`
+        : `${currentInput}${imageSkipNote}${sourceFailNote}`
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, chatMessage, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -14602,7 +14629,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
         // A following tool proves an earlier answer candidate was process text.
         if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) this.revealHiddenDrafts(managed)
-        const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
+        const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input, managed.workingDirectory)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
@@ -14752,7 +14779,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const toolName = event.toolName || 'unknown'
 
         // Format absolute paths to relative paths for better readability
-        const rawFormattedResult = event.result ? formatPathsToRelative(event.result) : ''
+        const rawFormattedResult = event.result ? formatPathsToRelative(event.result, managed.workingDirectory) : ''
 
         // Safety net: prevent massive tool results from bloating session JSONL (protects all backends)
         const MAX_PERSISTED_RESULT_CHARS = 200_000 // ~50K tokens
@@ -15281,16 +15308,28 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (!managed) break
 
         // Sanitize so a polluted originalMessage (legacy system-reminder embed)
-        // cannot re-enter the transcript on auto-retry.
-        const originalMessage = sanitizeUserMessageForRetry(event.originalMessage ?? '')
-        if (!originalMessage.trim()) {
+        // cannot re-enter the transcript on auto-retry. Attachment-only turns
+        // have empty text — fall back to the last user message and attachments.
+        let lastUserMessage = ''
+        for (let i = managed.messages.length - 1; i >= 0; i--) {
+          const candidate = managed.messages[i]
+          if (candidate.role !== 'user' || candidate.hidden) continue
+          lastUserMessage = typeof candidate.content === 'string' ? candidate.content : ''
+          break
+        }
+        const retry = resolveSourceActivationRetry({
+          originalMessage: event.originalMessage ?? '',
+          lastUserMessage,
+          attachments: managed.lastSentAttachments,
+        })
+        if (!retry) {
           sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
           break
         }
 
         // Suffix is for the model (chain activations). The entire continuation
         // is hidden so it cannot appear as another user-authored turn.
-        const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
+        const messageWithSuffix = sourceActivationRetryMessage(retry.text, event.sourceSlug)
         const messageCountAtSchedule = managed.messages.length
 
         // Stash the retry payload so a duplicate sendMessage from a legacy renderer
@@ -15329,7 +15368,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           // so a legacy renderer's duplicate RPC arriving ~50ms later gets dropped.
           // The pending slot is cleared by the deadline check in sendMessage, by the
           // next matching sendMessage that drops as a duplicate, or by session deletion.
-          this.sendMessage(sessionId, messageWithSuffix, undefined, undefined, { hidden: true }).catch(err => {
+          this.sendMessage(sessionId, messageWithSuffix, retry.attachments as FileAttachment[] | undefined, current.lastSentStoredAttachments, { hidden: true }).catch(err => {
             sessionLog.error(`Auto-retry sendMessage failed for ${sessionId}:`, err)
           })
         }, 100)

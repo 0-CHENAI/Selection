@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "Im Erkundungsmodus erlaubte Tool-Muster.",
   "sourceInfo.tools": "Tools",
   "sourceInfo.toolsDesc": "Von diesem Server bereitgestellte Operationen.",
+  "sources.syncFailed": "Verbindung zur Quelle „{{slug}}“ fehlgeschlagen.",
   "sourcesList.addSource": "Quelle hinzufügen",
   "sourcesList.copyFromWorkspace": "Aus Workspace kopieren",
   "sourcesList.emptyDescription": "Quellen verbinden Ihren Agenten mit externen Daten — MCP-Server, REST-APIs und lokale Ordner.",

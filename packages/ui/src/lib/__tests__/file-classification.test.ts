@@ -16,6 +16,11 @@ describe('classifyFile', () => {
     expect(classifyFile('logo.svg')).toEqual({ type: 'image', canPreview: true })
   })
 
+  it('previews HEIC/HEIF after server-side JPEG transcode', () => {
+    expect(classifyFile('IMG_0001.HEIC')).toEqual({ type: 'image', canPreview: true })
+    expect(classifyFile('photo.heif')).toEqual({ type: 'image', canPreview: true })
+  })
+
   it('still treats other code files as code', () => {
     expect(classifyFile('app.ts')).toEqual({ type: 'code', canPreview: true })
     expect(classifyFile('styles.css')).toEqual({ type: 'code', canPreview: true })

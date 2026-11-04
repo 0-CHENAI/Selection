@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "Dozwolone wzorce narzędzi w trybie Eksploruj.",
   "sourceInfo.tools": "Narzędzia",
   "sourceInfo.toolsDesc": "Operacje udostępniane przez ten serwer.",
+  "sources.syncFailed": "Nie udało się połączyć ze źródłem „{{slug}}”.",
   "sourcesList.addSource": "Dodaj źródło",
   "sourcesList.copyFromWorkspace": "Kopiuj z przestrzeni",
   "sourcesList.emptyDescription": "Źródła łączą agenta z zewnętrznymi danymi — serwery MCP, REST API i lokalne foldery.",

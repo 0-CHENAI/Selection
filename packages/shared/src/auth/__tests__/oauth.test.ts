@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
-import { getMcpBaseUrl, discoverOAuthMetadata, prepareMcpOAuth } from '../oauth';
+import { getMcpBaseUrl, discoverOAuthMetadata, prepareMcpOAuth, exchangeMcpOAuth } from '../oauth';
 
 // ============================================================
 // Unit tests for internal helpers exported only for testing
@@ -97,7 +97,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://mcp.craft.do/my/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://mcp.craft.do/my' });
     });
 
     it('falls back to RFC 8414 when HEAD returns non-401', async () => {
@@ -214,7 +214,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('falls back to POST when both HEAD and GET return 405 (Streamable HTTP)', async () => {
@@ -256,7 +256,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('falls back when authorization_servers is empty array', async () => {
@@ -403,7 +403,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('parses resource_metadata with single quotes', async () => {
@@ -437,7 +437,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
   });
 
@@ -725,7 +725,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('falls back when WWW-Authenticate header is null', async () => {
@@ -780,7 +780,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('falls back when resource_metadata value has no quotes', async () => {
@@ -1034,7 +1034,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
 
     it('handles authorization server URL at root (no path)', async () => {
@@ -1067,7 +1067,7 @@ describe('discoverOAuthMetadata', () => {
       });
 
       const result = await discoverOAuthMetadata('https://example.com/mcp');
-      expect(result).toEqual(authServerMetadata);
+      expect(result).toEqual({ ...authServerMetadata, resource: 'https://example.com/api' });
     });
   });
 
@@ -1223,5 +1223,120 @@ describe('prepareMcpOAuth', () => {
     });
 
     await expect(prepareMcpOAuth('https://example.com/mcp', { callbackPort: 8914 })).rejects.toThrow('Failed to register OAuth client: Server error');
+  });
+
+  it('puts the PRM resource on the authorize URL and returns it for token exchange', async () => {
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === 'https://mcp.craft.do/my/mcp' && options?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': 'Bearer resource_metadata="https://mcp.craft.do/.well-known/oauth-protected-resource/my"',
+          },
+        }));
+      }
+      if (url === 'https://mcp.craft.do/.well-known/oauth-protected-resource/my') {
+        return Promise.resolve(new Response(JSON.stringify({
+          resource: 'https://mcp.craft.do/my',
+          authorization_servers: ['https://mcp.craft.do/my/auth'],
+        }), { status: 200 }));
+      }
+      if (url === 'https://mcp.craft.do/my/auth/.well-known/oauth-authorization-server') {
+        return Promise.resolve(new Response(JSON.stringify({
+          authorization_endpoint: 'https://mcp.craft.do/my/auth/authorize',
+          token_endpoint: 'https://mcp.craft.do/my/auth/token',
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response('Not Found', { status: 404 }));
+    });
+
+    const result = await prepareMcpOAuth('https://mcp.craft.do/my/mcp', { callbackPort: 8914 });
+    expect(result.resource).toBe('https://mcp.craft.do/my');
+    expect(new URL(result.authUrl).searchParams.get('resource')).toBe('https://mcp.craft.do/my');
+  });
+
+  it('does not invent a resource when discovery used only RFC 8414', async () => {
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (options?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      if (url === 'https://example.com/.well-known/oauth-authorization-server') {
+        return Promise.resolve(new Response(JSON.stringify({
+          authorization_endpoint: 'https://example.com/oauth/authorize',
+          token_endpoint: 'https://example.com/oauth/token',
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response('Not Found', { status: 404 }));
+    });
+
+    const result = await prepareMcpOAuth('https://example.com/mcp', { callbackPort: 8914 });
+    expect(result.resource).toBeUndefined();
+    expect(new URL(result.authUrl).searchParams.has('resource')).toBe(false);
+  });
+});
+
+describe('exchangeMcpOAuth resource indicator', () => {
+  const originalFetch = globalThis.fetch;
+  let mockFetch: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    mockFetch = mock(() => Promise.resolve(new Response('Not Found', { status: 404 })));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('repeats the resource on the token request', async () => {
+    mockFetch.mockImplementation((_url: string, options?: RequestInit) => {
+      const body = typeof options?.body === 'string' ? options.body : '';
+      expect(body).toContain('resource=https%3A%2F%2Fmcp.craft.do%2Fmy');
+      return Promise.resolve(new Response(JSON.stringify({
+        access_token: 'tok',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      }), { status: 200 }));
+    });
+
+    const result = await exchangeMcpOAuth({
+      code: 'code',
+      codeVerifier: 'verifier',
+      tokenEndpoint: 'https://mcp.craft.do/my/auth/token',
+      clientId: 'client',
+      redirectUri: 'http://localhost:8914/oauth/callback',
+      resource: 'https://mcp.craft.do/my',
+    });
+    expect(result.success).toBe(true);
+    expect(result.accessToken).toBe('tok');
+  });
+
+  it('retries the token request without resource after invalid_target', async () => {
+    const bodies: string[] = [];
+    mockFetch.mockImplementation((_url: string, options?: RequestInit) => {
+      const body = typeof options?.body === 'string' ? options.body : '';
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'invalid_target' }), { status: 400 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        access_token: 'tok2',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      }), { status: 200 }));
+    });
+
+    const result = await exchangeMcpOAuth({
+      code: 'code',
+      codeVerifier: 'verifier',
+      tokenEndpoint: 'https://example.com/oauth/token',
+      clientId: 'client',
+      redirectUri: 'http://localhost:8914/oauth/callback',
+      resource: 'https://example.com/mcp',
+    });
+    expect(result.success).toBe(true);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('resource=');
+    expect(bodies[1]).not.toContain('resource=');
   });
 });

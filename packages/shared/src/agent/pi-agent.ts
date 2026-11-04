@@ -21,7 +21,7 @@ import type { ModelRequestLease } from '../model-request-gate';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
+import { hydrateAndTranscodeAttachments, imageAttachmentsMissingBytes } from '../utils/files.ts';
 import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 import { streamTrace } from '../stream-trace.ts';
@@ -98,6 +98,7 @@ import {
   getSessionToolProxyDefs,
   SESSION_TOOL_NAMES,
 } from './backend/pi/session-tool-defs.ts';
+import { combineProxyToolDefs, nextProxyToolsPayload } from './backend/pi/proxy-tools-sync.ts';
 
 // Session tool registry (for executing proxy tool calls)
 import {
@@ -240,6 +241,7 @@ export class PiAgent extends BaseAgent {
   private readline: ReadlineInterface | null = null;
   private subprocessReady: Promise<void> | null = null;
   private sourceToolRegistrationReady = false;
+  private sentProxyTools: string | null = null;
   private subprocessReadyResolve: (() => void) | null = null;
   private subprocessReadyReject: ((error: Error) => void) | null = null;
   private subprocessEpoch = 0;
@@ -784,14 +786,15 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
-    this.registerSessionToolsWithSubprocess();
-
-    // If pool has source tools, register them with the subprocess.
+    this.sentProxyTools = null;
     this.sourceToolRegistrationReady = true;
-    this.registerPoolToolsWithSubprocess();
+    this.syncProxyTools();
   }
 
-  private registerSessionToolsWithSubprocess(): void {
+  private buildSessionToolDefs(): {
+    sessionToolDefs: ReturnType<typeof getSessionToolProxyDefs>;
+    includeAnswerDelivery: boolean;
+  } {
     // natural-v1 commits the final tool-free message; no delivery tool exists.
     let sessionToolDefs = getSessionToolProxyDefs({ executionSession: this.config.session })
       .filter(def => !isSubmitAnswer(def.name));
@@ -817,12 +820,33 @@ export class PiAgent extends BaseAgent {
       }
     }
 
+    return { sessionToolDefs, includeAnswerDelivery };
+  }
+
+  /**
+   * Send the complete proxy-tool set (session + currently enabled sources).
+   * The subprocess replaces its registered set, so a disabled source is dropped
+   * by omitting it here — including when the source list is empty.
+   */
+  private syncProxyTools(): void {
+    const { sessionToolDefs, includeAnswerDelivery } = this.buildSessionToolDefs();
+    const sourceTools = (this.mcpPool && this.sourceToolRegistrationReady)
+      ? this.mcpPool.getProxyToolDefs()
+      : [];
+    const tools = combineProxyToolDefs(sessionToolDefs, sourceTools);
+    const { json, shouldSend } = nextProxyToolsPayload(this.sentProxyTools, tools);
+    if (!shouldSend) return;
     this.send({
       type: 'register_tools',
-      tools: sessionToolDefs,
+      tools,
     });
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess`);
+    this.sentProxyTools = json;
     this.registeredAnswerDelivery = includeAnswerDelivery;
+    this.debug(`Sent ${tools.length} proxy tools to the subprocess`);
+  }
+
+  private registerSessionToolsWithSubprocess(): void {
+    this.syncProxyTools();
   }
 
   /**
@@ -831,15 +855,8 @@ export class PiAgent extends BaseAgent {
   private registerPoolToolsWithSubprocess(): void {
     // Sources are configured before the lazy subprocess starts, and may also
     // change after it exits. Startup registers the pool's latest definitions.
-    if (!this.mcpPool || !this.subprocess || !this.sourceToolRegistrationReady) return;
-    const proxyDefs = this.mcpPool.getProxyToolDefs();
-    if (proxyDefs.length > 0) {
-      this.send({
-        type: 'register_tools',
-        tools: proxyDefs,
-      });
-      this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
-    }
+    if (!this.subprocess || !this.sourceToolRegistrationReady) return;
+    this.syncProxyTools();
   }
 
   /**
@@ -2482,6 +2499,7 @@ export class PiAgent extends BaseAgent {
   private handleSubprocessExit(code: number | null, signal: string | null): void {
     this.cancelModelRequests();
     this.sourceToolRegistrationReady = false;
+    this.sentProxyTools = null;
     ++this.subprocessEpoch;
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
@@ -2826,7 +2844,7 @@ export class PiAgent extends BaseAgent {
       if (!this._isProcessing || this.abortReason) return;
       // A persisted or newly bound canonical root can acquire this protocol
       // after its subprocess was created with native text answers.
-      if (this.answerDelivery && !this.registeredAnswerDelivery) this.registerSessionToolsWithSubprocess();
+      if (this.answerDelivery && !this.registeredAnswerDelivery) this.syncProxyTools();
       const trimmedMessage = message.trim();
       const compactMatch = trimmedMessage.match(/^\/compact(?:\s+([\s\S]+))?$/i);
       if (compactMatch) {
@@ -2895,7 +2913,7 @@ export class PiAgent extends BaseAgent {
       // Process attachments
       const attachmentParts: string[] = [];
       const images: Array<{ type: string; data: string; mimeType: string }> = [];
-      const hydratedAttachments = hydrateAttachmentBytes(attachments) || [];
+      const hydratedAttachments = await hydrateAndTranscodeAttachments(attachments) || [];
       const missingImages = imageAttachmentsMissingBytes(hydratedAttachments);
       if (missingImages.length > 0) {
         const names = missingImages.map(att => att.name).join(', ');
@@ -3151,14 +3169,15 @@ export class PiAgent extends BaseAgent {
     mcpServers: Record<string, SdkMcpServerConfig>,
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
-  ): Promise<void> {
+  ): Promise<string[]> {
     // BaseAgent.setSourceServers() handles:
     //   1. SourceManager state tracking (active slugs)
     //   2. McpClientPool sync (connecting/disconnecting MCP + API sources)
-    await super.setSourceServers(mcpServers, apiServers, intendedSlugs);
+    const failures = await super.setSourceServers(mcpServers, apiServers, intendedSlugs);
 
     // Register pool's proxy tool defs with subprocess so the model can call them.
     this.registerPoolToolsWithSubprocess();
+    return failures;
   }
 
   // ============================================================
@@ -3360,6 +3379,7 @@ export class PiAgent extends BaseAgent {
 
   private async stopSubprocessGracefully(timeoutMs: number): Promise<void> {
     this.sourceToolRegistrationReady = false;
+    this.sentProxyTools = null;
     if (this.subprocessStartup) { this.killSubprocess(); return; }
     const child = this.subprocess;
     if (!child) {
@@ -3428,6 +3448,7 @@ export class PiAgent extends BaseAgent {
   private killSubprocess(): void {
     this.cancelModelRequests();
     this.sourceToolRegistrationReady = false;
+    this.sentProxyTools = null;
     ++this.subprocessEpoch;
     this.cancelSubprocessStartup?.(new Error('Pi startup cancelled'));
     this.cancelSubprocessStartup = null;

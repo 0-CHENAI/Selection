@@ -467,6 +467,59 @@ describe('source_test API connection branches', () => {
     expect(persisted.connectionStatus).toBe('connected');
   });
 
+  it('authenticated source with no stored token does not fall through to an unauthenticated probe', async () => {
+    writeApiSource(tempDir, 'auth-missing-api', {
+      isAuthenticated: true,
+      api: { baseUrl: 'https://api.example.test', authType: 'bearer' },
+    } as Partial<SourceConfig>);
+    let fetchCalls = 0;
+    ({ restore: restoreFetch } = installFetchStub(() => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    }));
+
+    const cred = makeCredentialManager({ cachedToken: null });
+    const ctx = createCtx(tempDir, {
+      credentialManager: cred.manager,
+      activateSourceInSession: async () => ({ ok: true }),
+    });
+
+    const result = await handleSourceTest(ctx, { sourceSlug: 'auth-missing-api', autoEnable: false });
+    const text = result.content[0]?.text ?? '';
+
+    expect(text).toContain('missing stored credentials');
+    expect(fetchCalls).toBe(0);
+    expect(cred.getTokenCalls).toBeGreaterThan(0);
+    expect(cred.refreshCalls).toBeGreaterThan(0);
+  });
+
+  it('expired but refreshable OAuth API token is refreshed before the probe', async () => {
+    writeApiSource(tempDir, 'oauth-expired-api', {
+      isAuthenticated: true,
+      api: { baseUrl: 'https://api.example.test', authType: 'oauth' },
+    } as Partial<SourceConfig>);
+    let fetchCalls = 0;
+    ({ restore: restoreFetch } = installFetchStub(() => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    }));
+
+    const cred = makeCredentialManager({ cachedToken: null, refreshedToken: 'fresh-tok' });
+    const ctx = createCtx(tempDir, {
+      credentialManager: cred.manager,
+      activateSourceInSession: async () => ({ ok: true }),
+    });
+
+    const result = await handleSourceTest(ctx, { sourceSlug: 'oauth-expired-api', autoEnable: false });
+    const text = result.content[0]?.text ?? '';
+
+    expect(text).toContain('API connection successful (authenticated)');
+    expect(text).not.toContain('missing stored credentials');
+    expect(fetchCalls).toBe(1);
+    expect(cred.getTokenCalls).toBeGreaterThan(0);
+    expect(cred.refreshCalls).toBeGreaterThan(0);
+  });
+
   it('basic probe honors testEndpoint.method (no HEAD→GET fallback dance)', async () => {
     // Regression for the HEAD→GET-on-405 fallback that silently passed POST-only
     // endpoints. With a configured method, the basic probe must call it directly.

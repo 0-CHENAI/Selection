@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "Patrones de herramientas permitidos en el modo Explorar.",
   "sourceInfo.tools": "Herramientas",
   "sourceInfo.toolsDesc": "Operaciones expuestas por este servidor.",
+  "sources.syncFailed": "No se pudo conectar con la fuente \"{{slug}}\".",
   "sourcesList.addSource": "Añadir fuente",
   "sourcesList.copyFromWorkspace": "Copiar de otro espacio",
   "sourcesList.emptyDescription": "Las fuentes conectan tu agente a datos externos: servidores MCP, APIs REST y carpetas locales.",

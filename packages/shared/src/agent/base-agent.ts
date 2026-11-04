@@ -712,7 +712,7 @@ export abstract class BaseAgent implements AgentBackend {
     mcpServers: Record<string, SdkMcpServerConfig>,
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
-  ): Promise<void> {
+  ): Promise<string[]> {
     // Update SourceManager state (common tracking)
     this.sourceManager.updateActiveState(
       Object.keys(mcpServers),
@@ -724,11 +724,13 @@ export abstract class BaseAgent implements AgentBackend {
     // Both MCP sources and API sources are routed through the pool.
     if (this.config.mcpPool) {
       try {
-        await this.config.mcpPool.sync(mcpServers, apiServers as Record<string, ApiServerConfig>);
+        return await this.config.mcpPool.sync(mcpServers, apiServers as Record<string, ApiServerConfig>);
       } catch (err) {
         this.debug(`Failed to sync MCP pool: ${err instanceof Error ? err.message : String(err)}`);
+        return intendedSlugs?.length ? [...intendedSlugs] : [...Object.keys(mcpServers), ...Object.keys(apiServers)];
       }
     }
+    return [];
   }
 
   getActiveSourceSlugs(): string[] {

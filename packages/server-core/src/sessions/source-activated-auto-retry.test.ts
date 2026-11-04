@@ -185,6 +185,61 @@ describe('source_activated auto-retry', () => {
     expect(managed.autoRetryTimer).toBeUndefined()
   })
 
+  it('attachment-only turn — resends last attachments when originalMessage is empty', async () => {
+    const sessionId = 'attachment-only'
+    const managed = buildSession(sessionId)
+    const attachments = [{ name: 'photo.jpg', type: 'image', path: '/tmp/photo.jpg', mimeType: 'image/jpeg', size: 12 }]
+    managed.lastSentAttachments = attachments as never
+    const calls: Array<{ message: string; attachments?: unknown; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, sentAttachments, _stored, options) => {
+      calls.push({ message, attachments: sentAttachments, hidden: options?.hidden })
+    }
+
+    await fireSourceActivated(sessionId, 'github', '')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([{
+      message: '[github activated]',
+      attachments,
+      hidden: true,
+    }])
+  })
+
+  it('does not resend lastSentAttachments when the original message had text', async () => {
+    const sessionId = 'text-plus-attachments'
+    const managed = buildSession(sessionId)
+    managed.lastSentAttachments = [{ name: 'photo.jpg', type: 'image', path: '/tmp/photo.jpg', mimeType: 'image/jpeg', size: 12 }] as never
+    const calls: Array<{ message: string; attachments?: unknown; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, sentAttachments, _stored, options) => {
+      calls.push({ message, attachments: sentAttachments, hidden: options?.hidden })
+    }
+
+    await fireSourceActivated(sessionId, 'github', 'look at this')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([{
+      message: 'look at this\n\n[github activated]',
+      attachments: undefined,
+      hidden: true,
+    }])
+  })
+
   it('legitimate user message preempts retry — skipped when follow-up arrived', async () => {
     const sessionId = 'preempted'
     const managed = buildSession(sessionId)

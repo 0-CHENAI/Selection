@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "Tool patterns allowed in Explore mode.",
   "sourceInfo.tools": "Tools",
   "sourceInfo.toolsDesc": "Operations exposed by this server.",
+  "sources.syncFailed": "Could not connect to source \"{{slug}}\".",
   "sourcesList.addSource": "Add Source",
   "sourcesList.copyFromWorkspace": "Copy from Workspace",
   "sourcesList.emptyDescription": "Sources connect your agent to external data — MCP servers, REST APIs, and local folders.",

@@ -304,6 +304,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // HEIC conversion is a static import so esbuild inlines heic-convert +
+  // libheif-js/wasm-bundle. A leftover runtime import() would miss the
+  // packaged app (electron-builder excludes node_modules).
+  const mainSource = readFileSync(OUTPUT_FILE, "utf-8");
+  if (mainSource.includes('import("heic-convert")') || mainSource.includes("import('heic-convert')")) {
+    console.error("❌ HEIC converter was left as a runtime import in main.cjs");
+    process.exit(1);
+  }
+  if (!/libheif|heic-convert/i.test(mainSource)) {
+    console.error("❌ HEIC converter was not bundled into main.cjs");
+    process.exit(1);
+  }
+
   console.log("✅ Build complete and verified");
   process.exit(0);
 }
