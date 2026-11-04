@@ -88,6 +88,7 @@ import {
   shouldQueueFirstTurnAiTitle,
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
+import { resolveSourceActivationRetry, sourceActivationRetryMessage } from './source-activation-retry.ts'
 import { completionStopReason } from './completion-outcome.ts'
 import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
 import { i18n } from '@craft-agent/shared/i18n'
@@ -5753,9 +5754,9 @@ export class SessionManager implements ISessionManager {
           // resend of the original user message with a "[{slug} activated]" suffix —
           // landing in a fresh turn with tools live (craft-agents-oss#804).
           const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
-          if (userMessage) {
-            managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
-          }
+          // Attachment-only turns have empty text; still schedule a restart so
+          // source_activated can resend the attachments.
+          managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
           return { ok: true, availability: 'next-turn' as const }
         },
       })
@@ -15298,16 +15299,28 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (!managed) break
 
         // Sanitize so a polluted originalMessage (legacy system-reminder embed)
-        // cannot re-enter the transcript on auto-retry.
-        const originalMessage = sanitizeUserMessageForRetry(event.originalMessage ?? '')
-        if (!originalMessage.trim()) {
+        // cannot re-enter the transcript on auto-retry. Attachment-only turns
+        // have empty text — fall back to the last user message and attachments.
+        let lastUserMessage = ''
+        for (let i = managed.messages.length - 1; i >= 0; i--) {
+          const candidate = managed.messages[i]
+          if (candidate.role !== 'user' || candidate.hidden) continue
+          lastUserMessage = typeof candidate.content === 'string' ? candidate.content : ''
+          break
+        }
+        const retry = resolveSourceActivationRetry({
+          originalMessage: event.originalMessage ?? '',
+          lastUserMessage,
+          attachments: managed.lastSentAttachments,
+        })
+        if (!retry) {
           sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
           break
         }
 
         // Suffix is for the model (chain activations). The entire continuation
         // is hidden so it cannot appear as another user-authored turn.
-        const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
+        const messageWithSuffix = sourceActivationRetryMessage(retry.text, event.sourceSlug)
         const messageCountAtSchedule = managed.messages.length
 
         // Stash the retry payload so a duplicate sendMessage from a legacy renderer
@@ -15346,7 +15359,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           // so a legacy renderer's duplicate RPC arriving ~50ms later gets dropped.
           // The pending slot is cleared by the deadline check in sendMessage, by the
           // next matching sendMessage that drops as a duplicate, or by session deletion.
-          this.sendMessage(sessionId, messageWithSuffix, undefined, undefined, { hidden: true }).catch(err => {
+          this.sendMessage(sessionId, messageWithSuffix, retry.attachments as FileAttachment[] | undefined, current.lastSentStoredAttachments, { hidden: true }).catch(err => {
             sessionLog.error(`Auto-retry sendMessage failed for ${sessionId}:`, err)
           })
         }, 100)
