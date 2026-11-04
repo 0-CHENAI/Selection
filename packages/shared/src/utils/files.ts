@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync, closeSync, openSync, fstatSync, readSync } from 'fs';
-import { extname, basename, resolve, join, relative } from 'path';
+import { extname, basename, resolve, join, relative, sep } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { resolveImageSendPolicy, resolveImageSendSize } from './image-send-size.ts';
@@ -1033,22 +1033,37 @@ function readImageFile(tempFile: string): FileAttachment | null {
 }
 
 /**
+ * Reject missing cwd, a filesystem root (`/`, `C:\`), or a trailing-slash-only
+ * path. Relativizing against the root rewrites `/Users/x` into `./Users/x`.
+ */
+function normalizeRelativizeBase(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  const trimmed = cwd.replace(/[\/\\]+$/, '');
+  if (!trimmed || /^[A-Za-z]:$/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+/**
  * Format a single absolute path to relative if it's within cwd
  * @param absolutePath - The absolute path to format
- * @param cwd - Current working directory (defaults to process.cwd())
+ * @param cwd - The session's working directory. Without one the path is returned unchanged.
  * @returns Relative path prefixed with ./ or original path if outside cwd
  */
 export function formatSinglePathToRelative(absolutePath: string, cwd?: string): string {
-  const basePath = cwd || process.cwd();
+  const basePath = normalizeRelativizeBase(cwd);
+  if (!basePath) return absolutePath;
 
-  if (absolutePath.startsWith(basePath)) {
-    const relativePath = relative(basePath, absolutePath);
-    if (relativePath && !relativePath.startsWith('..') && !relativePath.startsWith('./')) {
-      return './' + relativePath;
-    }
-    return relativePath || absolutePath;
+  // Require a segment boundary so `/Users/gy/x` is not treated as inside `/Users/gyula`.
+  const isInside = absolutePath === basePath
+    || absolutePath.startsWith(basePath + '/')
+    || absolutePath.startsWith(basePath + sep);
+  if (!isInside) return absolutePath;
+
+  const relativePath = relative(basePath, absolutePath);
+  if (relativePath && !relativePath.startsWith('..') && !relativePath.startsWith('./')) {
+    return './' + relativePath;
   }
-  return absolutePath;
+  return relativePath || absolutePath;
 }
 
 /**
@@ -1056,11 +1071,12 @@ export function formatSinglePathToRelative(absolutePath: string, cwd?: string): 
  * Converts paths like /Users/john/project/src/file.ts to ./src/file.ts
  *
  * @param text - Text containing file paths
- * @param cwd - Current working directory (defaults to process.cwd())
+ * @param cwd - The session's working directory. Without one the text is returned unchanged.
  * @returns Text with absolute paths converted to relative paths
  */
 export function formatPathsToRelative(text: string, cwd?: string): string {
-  const basePath = cwd || process.cwd();
+  const basePath = normalizeRelativizeBase(cwd);
+  if (!basePath) return text;
 
   // Regex to match absolute file paths
   // Matches paths starting with / followed by path segments
@@ -1077,7 +1093,7 @@ export function formatPathsToRelative(text: string, cwd?: string): string {
  * Handles common tool input patterns like { file_path: "..." } or { path: "..." }
  *
  * @param input - Tool input object
- * @param cwd - Current working directory (defaults to process.cwd())
+ * @param cwd - The session's working directory. Without one values are copied unchanged.
  * @returns New object with paths formatted to relative
  */
 export function formatToolInputPaths(

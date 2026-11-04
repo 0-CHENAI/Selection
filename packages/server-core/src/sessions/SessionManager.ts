@@ -14602,7 +14602,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
         // A following tool proves an earlier answer candidate was process text.
         if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) this.revealHiddenDrafts(managed)
-        const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
+        const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input, managed.workingDirectory)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
@@ -14752,7 +14752,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         const toolName = event.toolName || 'unknown'
 
         // Format absolute paths to relative paths for better readability
-        const rawFormattedResult = event.result ? formatPathsToRelative(event.result) : ''
+        const rawFormattedResult = event.result ? formatPathsToRelative(event.result, managed.workingDirectory) : ''
 
         // Safety net: prevent massive tool results from bloating session JSONL (protects all backends)
         const MAX_PERSISTED_RESULT_CHARS = 200_000 // ~50K tokens

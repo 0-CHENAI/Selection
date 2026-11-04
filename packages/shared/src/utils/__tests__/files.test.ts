@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAndTranscodeAttachments, hydrateAttachmentBytes, imageAttachmentsMissingBytes, readFileAttachment, resolveRegenerateAttachments, withStoredImagePaths } from '../files'
+import { fileAttachmentsFromStored, formatSinglePathToRelative, formatToolInputPaths, getFileType, getMimeType, hydrateAndTranscodeAttachments, hydrateAttachmentBytes, imageAttachmentsMissingBytes, readFileAttachment, resolveRegenerateAttachments, withStoredImagePaths } from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -335,5 +335,35 @@ describe('hydrateAttachmentBytes', () => {
       size: 21 * 1024 * 1024,
     }
     expect(hydrateAttachmentBytes([attachment])).toEqual([attachment])
+  })
+})
+
+describe('formatSinglePathToRelative', () => {
+  test('leaves paths unchanged without a working directory', () => {
+    expect(formatSinglePathToRelative('/Users/gyula/project/src/a.ts')).toBe('/Users/gyula/project/src/a.ts')
+  })
+
+  test('does not treat a prefix sibling as inside the working directory', () => {
+    expect(formatSinglePathToRelative('/Users/gy/x.ts', '/Users/gyula')).toBe('/Users/gy/x.ts')
+    expect(formatSinglePathToRelative('/Users/gyula/src/a.ts', '/Users/gyula')).toBe('./src/a.ts')
+  })
+
+  test('does not relativize against a filesystem root', () => {
+    expect(formatSinglePathToRelative('/Users/gyula/a.ts', '/')).toBe('/Users/gyula/a.ts')
+  })
+
+  test('formats tool input paths against the session working directory', () => {
+    expect(formatToolInputPaths(
+      { file_path: '/Users/gyula/project/src/a.ts', command: 'cat /Users/gyula/project/src/a.ts' },
+      '/Users/gyula/project',
+    )).toEqual({
+      file_path: './src/a.ts',
+      command: 'cat ./src/a.ts',
+    })
+    expect(formatToolInputPaths(
+      { file_path: '/Users/gyula/project/src/a.ts' },
+    )).toEqual({
+      file_path: '/Users/gyula/project/src/a.ts',
+    })
   })
 })
