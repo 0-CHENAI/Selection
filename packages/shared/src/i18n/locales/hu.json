@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "A Felfedező módban engedélyezett eszközminták.",
   "sourceInfo.tools": "Eszközök",
   "sourceInfo.toolsDesc": "A szerver által közzétett műveletek.",
+  "sources.syncFailed": "Nem sikerült csatlakozni a(z) „{{slug}}” forráshoz.",
   "sourcesList.addSource": "Forrás hozzáadása",
   "sourcesList.copyFromWorkspace": "Másolás munkaterületről",
   "sourcesList.emptyDescription": "A források külső adatokhoz csatlakoztatják az ügynököt — MCP szerverek, REST API-k és helyi mappák.",

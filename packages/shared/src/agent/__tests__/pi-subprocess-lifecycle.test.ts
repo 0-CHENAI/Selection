@@ -100,6 +100,17 @@ describe('Pi subprocess lifecycle fault injection', () => {
     } finally { await f.cleanup(); }
   });
 
+  it('returns MCP pool sync failures to the session host', async () => {
+    const f = fixture('');
+    f.internal.config.mcpPool = {
+      sync: async () => ['database'],
+      getProxyToolDefs: () => [],
+    };
+    try {
+      await expect(f.agent.setSourceServers({}, {}, ['database'])).resolves.toEqual(['database']);
+    } finally { await f.cleanup(); }
+  });
+
   it('does not register source tools while the child is still initializing', async () => {
     const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
     const f = fixture('');

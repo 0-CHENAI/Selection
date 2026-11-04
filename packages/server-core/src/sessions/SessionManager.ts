@@ -2408,6 +2408,23 @@ export class SessionManager implements ISessionManager {
    * Called by ConfigWatcher when source files change on disk.
    * If agent is null (session hasn't sent any messages), skip - fresh build happens on next message.
    */
+  private reportSourceSyncFailures(managed: ManagedSession, failures: unknown): void {
+    if (!Array.isArray(failures) || failures.length === 0) return
+    for (const slug of failures) {
+      if (typeof slug !== 'string' || !slug) continue
+      const message = i18n.isInitialized
+        ? String(i18n.t('sources.syncFailed', { slug }))
+        : `Could not connect to source "${slug}".`
+      sessionLog.warn(message)
+      this.sendEvent({
+        type: 'info',
+        sessionId: managed.id,
+        message,
+        level: 'warning',
+      }, managed.workspace.id)
+    }
+  }
+
   private async reloadSessionSources(managed: ManagedSession): Promise<void> {
     if (!managed.agent) return  // No agent = nothing to update (fresh build on next message)
 
@@ -2431,7 +2448,7 @@ export class SessionManager implements ISessionManager {
     // Update bridge-mcp-server config/credentials for backends that need it
     await applyBridgeUpdates(managed.agent, sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath, 'source reload', managed.poolServer?.url)
 
-    await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+    this.reportSourceSyncFailures(managed, await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
     sessionLog.info(`Sources reloaded for session ${managed.id}: ${Object.keys(mcpServers).length} MCP, ${Object.keys(apiServers).length} API`)
   }
@@ -5821,7 +5838,7 @@ export class SessionManager implements ISessionManager {
         // Update bridge-mcp-server config/credentials for backends that need it
         await applyBridgeUpdates(managed.agent!, sessionPath, allEnabledSources, mcpServers, managed.id, workspaceRootPath, 'source enable', managed.poolServer?.url)
 
-        await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs)
+        this.reportSourceSyncFailures(managed, await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
         sessionLog.info(`Auto-enabled source ${sourceSlug} for session ${managed.id}`)
 
@@ -6324,7 +6341,7 @@ export class SessionManager implements ISessionManager {
       const usableSources = sources.filter(isSourceUsable)
       await applyBridgeUpdates(managed.agent, sessionPath, usableSources, mcpServers, managed.id, workspaceRootPath, 'source config change', managed.poolServer?.url)
 
-      await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+      this.reportSourceSyncFailures(managed, await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
 
       sessionLog.info(`Applied ${Object.keys(mcpServers).length} MCP + ${Object.keys(apiServers).length} API sources to active agent (${allSources.length} total)`)
     }
@@ -8078,7 +8095,7 @@ export class SessionManager implements ISessionManager {
       if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
         const usableSources = sources.filter(isSourceUsable)
         const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+        this.reportSourceSyncFailures(managed, await agent.setSourceServers(mcpServers, apiServers, intendedSlugs))
         await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
         sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
       }

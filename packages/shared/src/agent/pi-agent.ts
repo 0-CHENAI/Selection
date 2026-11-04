@@ -3169,14 +3169,15 @@ export class PiAgent extends BaseAgent {
     mcpServers: Record<string, SdkMcpServerConfig>,
     apiServers: Record<string, unknown>,
     intendedSlugs?: string[]
-  ): Promise<void> {
+  ): Promise<string[]> {
     // BaseAgent.setSourceServers() handles:
     //   1. SourceManager state tracking (active slugs)
     //   2. McpClientPool sync (connecting/disconnecting MCP + API sources)
-    await super.setSourceServers(mcpServers, apiServers, intendedSlugs);
+    const failures = await super.setSourceServers(mcpServers, apiServers, intendedSlugs);
 
     // Register pool's proxy tool defs with subprocess so the model can call them.
     this.registerPoolToolsWithSubprocess();
+    return failures;
   }
 
   // ============================================================

@@ -477,7 +477,12 @@ async function testApiConnection(
     if (authResult.attempted) {
       return authResult;
     }
-    // If auth test wasn't attempted (no token), fall through to basic test
+    return {
+      lines: ['✗ Authenticated source is missing stored credentials'],
+      success: false,
+      hasError: true,
+      error: 'Missing credentials',
+    };
   }
 
   // Basic connection test (no auth)

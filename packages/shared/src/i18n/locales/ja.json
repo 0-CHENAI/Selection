@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "探索モードで許可されるツールパターン。",
   "sourceInfo.tools": "ツール",
   "sourceInfo.toolsDesc": "このサーバーが公開する操作。",
+  "sources.syncFailed": "ソース「{{slug}}」に接続できませんでした。",
   "sourcesList.addSource": "ソースを追加",
   "sourcesList.copyFromWorkspace": "他のワークスペースからコピー",
   "sourcesList.emptyDescription": "ソースは、MCPサーバー、REST API、ローカルフォルダなどの外部データにエージェントを接続します。",

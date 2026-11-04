@@ -2067,6 +2067,7 @@
   "sourceInfo.toolPatternsAllowed": "探索模式允许的工具模式。",
   "sourceInfo.tools": "工具",
   "sourceInfo.toolsDesc": "此服务器暴露的操作。",
+  "sources.syncFailed": "无法连接数据源“{{slug}}”。",
   "sourcesList.addSource": "添加数据源",
   "sourcesList.copyFromWorkspace": "从其他工作区复制",
   "sourcesList.emptyDescription": "数据源将智能体连接到外部数据——MCP 服务器、REST API 和本地文件夹。",
