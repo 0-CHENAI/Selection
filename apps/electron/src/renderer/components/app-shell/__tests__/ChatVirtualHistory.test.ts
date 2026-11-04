@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Virtualizer } from '@tanstack/react-virtual'
-import { isVirtualTurnInWindow, shouldShowTailProcessingIndicator, shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
+import { shouldShowTailProcessingIndicator, shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
 
 function history() {
   const corrections: number[] = []
@@ -25,22 +25,13 @@ describe('virtual scroll margin', () => {
   })
 })
 
-describe('virtual turn window', () => {
-  test('uses a half-open range and rejects absent or unmounted turns', () => {
-    expect(isVirtualTurnInWindow(-1, 4, 8)).toBe(false)
-    expect(isVirtualTurnInWindow(3, 4, 8)).toBe(false)
-    expect(isVirtualTurnInWindow(4, 4, 8)).toBe(true)
-    expect(isVirtualTurnInWindow(7, 4, 8)).toBe(true)
-    expect(isVirtualTurnInWindow(8, 4, 8)).toBe(false)
-  })
-})
-
 describe('tail processing indicator', () => {
-  test('ignores the window start so scrolling cannot toggle it', () => {
-    expect(shouldShowTailProcessingIndicator(-1, 8)).toBe(true)
-    expect(shouldShowTailProcessingIndicator(8, 8)).toBe(true)
-    expect(shouldShowTailProcessingIndicator(7, 8)).toBe(false)
-    expect(shouldShowTailProcessingIndicator(2, 8)).toBe(false)
+  test('does not depend on the virtual window and hides once a processing turn exists', () => {
+    expect(shouldShowTailProcessingIndicator.length).toBe(1)
+    expect(shouldShowTailProcessingIndicator(-1)).toBe(true)
+    expect(shouldShowTailProcessingIndicator(0)).toBe(false)
+    expect(shouldShowTailProcessingIndicator(7)).toBe(false)
+    expect(shouldShowTailProcessingIndicator(8)).toBe(false)
   })
 })
 

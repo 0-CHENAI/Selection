@@ -1696,7 +1696,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const processingTurnIndex = allTurns.findLastIndex((turn, index) =>
     turn.type === 'assistant' && index > latestUserIndex,
   )
-  const showTailProcessingIndicator = shouldShowTailProcessingIndicator(processingTurnIndex, endIndex)
+  const showTailProcessingIndicator = shouldShowTailProcessingIndicator(processingTurnIndex)
   const completedRun = session?.tokenUsage?.lastTurn
   const currentRun = session?.tokenUsage?.currentTurn
   const workTimings = useMemo(() => getWorkTimings(allTurns, completedRun, currentRun), [allTurns, completedRun, currentRun])
