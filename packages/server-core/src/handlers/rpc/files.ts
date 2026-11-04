@@ -10,7 +10,7 @@ import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
 import { OFFICE_CASE_PREVIEW_SESSION, RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
-import { convertHeicToJpeg, isHeicImage, readFileAttachment, resolveImageSendPolicy } from '@craft-agent/shared/utils'
+import { HeicPreviewUnavailableError, heicCacheKey, isHeicImage, readFileAttachment, resolveImageSendPolicy, tryConvertHeicToJpeg } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
 import { getLlmConnection, getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { storeAttachmentImage } from './attachment-image'
@@ -263,13 +263,15 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         avif: 'image/avif',
       }
       if (isHeicImage({ mimeType: mimeMap[ext], name: safePath, bytes: buffer })) {
-        const jpeg = await convertHeicToJpeg(buffer)
+        const jpeg = await tryConvertHeicToJpeg(buffer, undefined, heicCacheKey(safePath, buffer))
+        if (!jpeg) throw new HeicPreviewUnavailableError()
         return `data:image/jpeg;base64,${jpeg.toString('base64')}`
       }
       const mime = mimeMap[ext] || 'application/octet-stream'
       const base64 = buffer.toString('base64')
       return `data:${mime};base64,${base64}`
     } catch (error) {
+      if (error instanceof HeicPreviewUnavailableError) throw error
       const message = error instanceof Error ? error.message : 'Unknown error'
       deps.platform.logger.error('readFileDataUrl error:', message)
       throw new Error(`Failed to read file as data URL: ${message}`)
@@ -286,7 +288,8 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       let source: Buffer | string = safePath
       const original = await readFile(safePath)
       if (isHeicImage({ name: safePath, bytes: original })) {
-        source = await convertHeicToJpeg(original)
+        const jpeg = await tryConvertHeicToJpeg(original, undefined, heicCacheKey(safePath, original))
+        if (jpeg) source = jpeg
       }
       const preview = await deps.platform.imageProcessor.process(source, {
         resize: { width: size, height: size },
@@ -343,11 +346,14 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
 
       let thumbSource: Buffer | string = safePath
       if (attachment.base64 && isHeicImage({ mimeType: attachment.mimeType, name: attachment.name })) {
-        const jpeg = await convertHeicToJpeg(Buffer.from(attachment.base64, 'base64'))
-        attachment.base64 = jpeg.toString('base64')
-        attachment.mimeType = 'image/jpeg'
-        attachment.size = jpeg.length
-        thumbSource = jpeg
+        const original = Buffer.from(attachment.base64, 'base64')
+        const jpeg = await tryConvertHeicToJpeg(original, undefined, heicCacheKey(safePath, original))
+        if (jpeg) {
+          attachment.base64 = jpeg.toString('base64')
+          attachment.mimeType = 'image/jpeg'
+          attachment.size = jpeg.length
+          thumbSource = jpeg
+        }
       }
 
       // Generate thumbnail for image preview

@@ -4,7 +4,7 @@ import { extname, basename, resolve, join, relative, sep } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { resolveImageSendPolicy, resolveImageSendSize } from './image-send-size.ts';
-import { convertHeicToJpeg, isHeicImage, type HeicConvertFn } from './heic.ts';
+import { convertHeicToJpeg, heicCacheKey, isHeicImage, type HeicConvertFn } from './heic.ts';
 
 export interface FileFingerprint { hash: string; size: number }
 
@@ -511,7 +511,8 @@ export async function hydrateAndTranscodeAttachments(
       return attachment
     }
     try {
-      const jpeg = await convertHeicToJpeg(Buffer.from(attachment.base64, 'base64'), convert)
+      const bytes = Buffer.from(attachment.base64, 'base64')
+      const jpeg = await convertHeicToJpeg(bytes, convert, attachment.path ? heicCacheKey(attachment.path, bytes) : undefined)
       return {
         ...attachment,
         base64: jpeg.toString('base64'),

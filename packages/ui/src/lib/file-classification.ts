@@ -19,6 +19,7 @@ export interface FileClassification {
 /**
  * Image formats — rendered in ImagePreviewOverlay via data URL.
  * HEIC/HEIF are included because the file RPC transcodes them to JPEG.
+ * If that transcode fails, the link interceptor falls back to the system opener.
  * TIFF stays external — Chromium has no codec and we do not transcode it.
  */
 const IMAGE_EXTENSIONS = new Set([

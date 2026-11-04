@@ -269,6 +269,11 @@ export {
   type FilePreviewType,
   type FileClassification,
 } from './lib/file-classification'
+export {
+  isHeicFilePath,
+  resolveFileOpenRoute,
+  type FileOpenRoute,
+} from './lib/file-open-route'
 
 // Utilities
 export { cn } from './lib/utils'

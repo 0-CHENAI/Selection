@@ -30,7 +30,7 @@ import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { SplashScreen } from '@/components/SplashScreen'
-import { TooltipProvider } from '@craft-agent/ui'
+import { isHeicFilePath, TooltipProvider } from '@craft-agent/ui'
 import { FocusProvider } from '@/context/FocusContext'
 import { ModalProvider } from '@/context/ModalContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
@@ -2412,6 +2412,7 @@ export default function App() {
               onClose={linkInterceptor.closePreview}
               loadDataUrl={linkInterceptor.readFileDataUrl}
               loadPdfData={linkInterceptor.readFileBinary}
+              onOpenExternal={linkInterceptor.openFileExternal}
               isDark={isDark}
             />
           )}
@@ -2455,12 +2456,14 @@ function FilePreviewRenderer({
   onClose,
   loadDataUrl,
   loadPdfData,
+  onOpenExternal,
   isDark,
 }: {
   state: FilePreviewState
   onClose: () => void
   loadDataUrl: (path: string) => Promise<string>
   loadPdfData: (path: string) => Promise<Uint8Array>
+  onOpenExternal?: (path: string) => Promise<void | boolean> | void
   isDark: boolean
 }) {
   const theme = isDark ? 'dark' : 'light' as const
@@ -2473,6 +2476,13 @@ function FilePreviewRenderer({
           onClose={onClose}
           filePath={state.filePath}
           loadDataUrl={loadDataUrl}
+          onLoadError={isHeicFilePath(state.filePath)
+            ? () => {
+                onClose()
+                void onOpenExternal?.(state.filePath)
+                return true
+              }
+            : undefined}
           theme={theme}
         />
       )
