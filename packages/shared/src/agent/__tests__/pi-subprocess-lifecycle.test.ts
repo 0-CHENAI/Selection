@@ -101,6 +101,7 @@ describe('Pi subprocess lifecycle fault injection', () => {
   });
 
   it('does not register source tools while the child is still initializing', async () => {
+    const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
     const f = fixture('');
     const sent: unknown[] = [];
     f.internal.subprocess = {};
@@ -115,7 +116,31 @@ describe('Pi subprocess lifecycle fault injection', () => {
       f.internal.sourceToolRegistrationReady = true;
       await f.agent.setSourceServers({}, {}, ['database']);
       expect(sent).toHaveLength(1);
-    } finally { f.internal.subprocess = null; await f.cleanup(); }
+    } finally { f.internal.subprocess = null; await f.cleanup(); browserSetting.mockRestore(); }
+  });
+
+  it('re-registers the complete set when every source is disabled', async () => {
+    const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
+    const f = fixture('');
+    const sent: Array<{ type: string; tools?: Array<{ name: string }> }> = [];
+    f.internal.subprocess = {};
+    f.internal.sourceToolRegistrationReady = true;
+    f.internal.send = (command: unknown) => sent.push(command as { type: string; tools?: Array<{ name: string }> });
+    let sourceTools: Array<{ name: string }> = [{ name: 'mcp__database__query' }];
+    f.internal.config.mcpPool = {
+      sync: async () => {},
+      getProxyToolDefs: () => sourceTools,
+    };
+    try {
+      await f.agent.setSourceServers({}, {}, ['database']);
+      expect(sent.at(-1)?.tools?.some(tool => tool.name === 'mcp__database__query')).toBe(true);
+      sourceTools = [];
+      await f.agent.setSourceServers({}, {}, []);
+      const last = sent.at(-1);
+      expect(last?.type).toBe('register_tools');
+      expect(last?.tools?.some(tool => tool.name === 'mcp__database__query')).toBe(false);
+      expect(last?.tools?.some(tool => tool.name.startsWith('mcp__session__'))).toBe(true);
+    } finally { f.internal.subprocess = null; await f.cleanup(); browserSetting.mockRestore(); }
   });
 
   for (const outcome of ['success', 'failure'] as const) {
