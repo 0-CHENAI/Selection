@@ -23,10 +23,10 @@ function makeFixture() {
   writeFileSync(join(bin, 'bun'), '#!/bin/bash\nprintf "%s\\n" "${2##*/}" >> "$TEST_CALLS"\ncase "$2" in *fail*) exit 1 ;; esac\n', { mode: 0o755 })
   expect(spawnSync('git', ['init', '-q', repo]).status).toBe(0)
   writeFileSync(join(repo, '.gitignore'), 'ignored.test.ts\n')
-  for (const name of ['0 untracked.test.ts', 'a fail.test.ts', 'b pass.test.ts', 'c fail.isolated.ts', 'ignored.test.ts']) {
+  for (const name of ['0 untracked.test.ts', 'a fail.test.ts', 'b pass.test.ts', 'c fail.isolated.ts', 'd helper.fixture.ts', 'ignored.test.ts']) {
     writeFileSync(join(repo, name), '')
   }
-  expect(spawnSync('git', ['add', '.gitignore', 'a fail.test.ts', 'b pass.test.ts'], { cwd: repo }).status).toBe(0)
+  expect(spawnSync('git', ['add', '.gitignore', 'a fail.test.ts', 'b pass.test.ts', 'd helper.fixture.ts'], { cwd: repo }).status).toBe(0)
   return { repo, bin, log }
 }
 

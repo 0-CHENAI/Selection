@@ -8,7 +8,7 @@ describe('search settings over the Electron RPC transport', () => {
     const dir = mkdtempSync(join(tmpdir(), 'selection-search-rpc-'))
     try {
       writeFileSync(join(dir, 'config.json'), JSON.stringify({ workspaces: [], activeWorkspaceId: null }))
-      const result = Bun.spawnSync(['bun', join(import.meta.dir, 'search-settings-rpc.isolated.ts')], {
+      const result = Bun.spawnSync(['bun', join(import.meta.dir, 'search-settings-rpc.fixture.ts')], {
         env: { ...process.env, CRAFT_CONFIG_DIR: dir },
         stdout: 'pipe', stderr: 'pipe',
       })
