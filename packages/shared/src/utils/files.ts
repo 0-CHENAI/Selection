@@ -4,6 +4,7 @@ import { extname, basename, resolve, join, relative } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { resolveImageSendPolicy, resolveImageSendSize } from './image-send-size.ts';
+import { convertHeicToJpeg, isHeicImage, type HeicConvertFn } from './heic.ts';
 
 export interface FileFingerprint { hash: string; size: number }
 
@@ -489,6 +490,38 @@ export function hydrateAttachmentBytes(attachments: FileAttachment[] | undefined
       return attachment
     }
   })
+}
+
+/**
+ * Hydrate bytes, then transcode leftover HEIC/HEIF so the model receives JPEG.
+ * Attach-time conversion is preferred; this covers regenerate / path-only retries.
+ */
+export async function hydrateAndTranscodeAttachments(
+  attachments: FileAttachment[] | undefined,
+  convert?: HeicConvertFn,
+): Promise<FileAttachment[] | undefined> {
+  const hydrated = hydrateAttachmentBytes(attachments)
+  if (!hydrated?.length) return hydrated
+  return Promise.all(hydrated.map(async (attachment) => {
+    if (!attachment.base64 || !isHeicImage({
+      mimeType: attachment.mimeType,
+      name: attachment.name,
+      bytes: Buffer.from(attachment.base64, 'base64'),
+    })) {
+      return attachment
+    }
+    try {
+      const jpeg = await convertHeicToJpeg(Buffer.from(attachment.base64, 'base64'), convert)
+      return {
+        ...attachment,
+        base64: jpeg.toString('base64'),
+        mimeType: 'image/jpeg',
+        size: jpeg.length,
+      }
+    } catch {
+      return attachment
+    }
+  }))
 }
 
 export function imageAttachmentsMissingBytes(

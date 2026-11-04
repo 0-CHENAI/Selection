@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAttachmentBytes, imageAttachmentsMissingBytes, readFileAttachment, resolveRegenerateAttachments, withStoredImagePaths } from '../files'
+import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAndTranscodeAttachments, hydrateAttachmentBytes, imageAttachmentsMissingBytes, readFileAttachment, resolveRegenerateAttachments, withStoredImagePaths } from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -279,6 +279,21 @@ describe('hydrateAttachmentBytes', () => {
 
   test('returns undefined for empty input', () => {
     expect(hydrateAttachmentBytes(undefined)).toBeUndefined()
+  })
+
+  test('transcodes leftover HEIC bytes to JPEG', async () => {
+    const jpeg = Buffer.from('converted-jpeg')
+    const hydrated = await hydrateAndTranscodeAttachments([{
+      type: 'image',
+      path: '/tmp/IMG_0001.HEIC',
+      name: 'IMG_0001.HEIC',
+      mimeType: 'image/heic',
+      size: 4,
+      base64: Buffer.from('heic').toString('base64'),
+    }], async () => jpeg)
+
+    expect(hydrated?.[0]?.mimeType).toBe('image/jpeg')
+    expect(hydrated?.[0]?.base64).toBe(jpeg.toString('base64'))
   })
 
   test('keeps a path-only image when the file is missing', () => {

@@ -18,12 +18,11 @@ export interface FileClassification {
 
 /**
  * Image formats — rendered in ImagePreviewOverlay via data URL.
- * Only includes formats Chromium can natively decode.
- * HEIC/HEIF and TIFF are excluded — Chromium has no codec for these,
- * so they fall through to system open (external app).
+ * HEIC/HEIF are included because the file RPC transcodes them to JPEG.
+ * TIFF stays external — Chromium has no codec and we do not transcode it.
  */
 const IMAGE_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'heic', 'heif',
 ])
 
 /**
@@ -80,7 +79,7 @@ const EXTERNAL_EXTENSIONS = new Set([
   'dmg', 'pkg', 'exe', 'msi',       // Installers
   'mp3', 'wav', 'flac', 'aac',      // Audio
   'mp4', 'mov', 'avi', 'mkv',       // Video
-  'heic', 'heif', 'tiff', 'tif',    // Images Chromium can't decode
+  'tiff', 'tif',                    // Images Chromium can't decode
 ])
 
 /**

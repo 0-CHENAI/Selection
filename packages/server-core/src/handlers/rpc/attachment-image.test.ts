@@ -89,4 +89,30 @@ describe('storeAttachmentImage', () => {
     expect(readFileSync(join(resizedDir, originalName))).toEqual(originalBytes)
     expect(readFileSync(join(resizedDir, storedFileName))).toEqual(resizedBytes)
   })
+
+  test('transcodes HEIC to JPEG before the image processor sees it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'selection-attachment-heic-'))
+    dirs.push(dir)
+    const storedFileName = `${id}_IMG_0001.HEIC`
+    const heicBytes = Buffer.from('fake-heic')
+    const jpegBytes = Buffer.from('converted-jpeg')
+    const small = processor({ width: 800, height: 600 })
+
+    const saved = await storeAttachmentImage({
+      bytes: heicBytes,
+      mimeType: 'image/heic',
+      declaredSize: heicBytes.length,
+      attachmentsDir: dir,
+      storedFileName,
+      processor: small,
+      logger,
+      convertHeic: async () => jpegBytes,
+    })
+
+    expect(saved.wasResized).toBe(true)
+    expect(saved.outputMimeType).toBe('image/jpeg')
+    expect(saved.resizedBase64).toBe(jpegBytes.toString('base64'))
+    expect(readFileSync(join(dir, storedFileName))).toEqual(jpegBytes)
+    expect(readFileSync(saved.originalPath!)).toEqual(heicBytes)
+  })
 })

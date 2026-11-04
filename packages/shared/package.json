@@ -112,6 +112,7 @@
     "date-fns": "^4.1.0",
     "fflate": "^0.8.2",
     "gray-matter": "^4.0.3",
+    "heic-convert": "^2.1.0",
     "i18next": "^26.0.3",
     "incr-regex-package": "^1.0.4",
     "shell-quote": "^1.8.3",

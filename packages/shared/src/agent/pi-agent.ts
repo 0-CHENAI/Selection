@@ -21,7 +21,7 @@ import type { ModelRequestLease } from '../model-request-gate';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
+import { hydrateAndTranscodeAttachments, imageAttachmentsMissingBytes } from '../utils/files.ts';
 import { buildAttachedImagePrompt } from '../utils/image-attachment.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 import { streamTrace } from '../stream-trace.ts';
@@ -2913,7 +2913,7 @@ export class PiAgent extends BaseAgent {
       // Process attachments
       const attachmentParts: string[] = [];
       const images: Array<{ type: string; data: string; mimeType: string }> = [];
-      const hydratedAttachments = hydrateAttachmentBytes(attachments) || [];
+      const hydratedAttachments = await hydrateAndTranscodeAttachments(attachments) || [];
       const missingImages = imageAttachmentsMissingBytes(hydratedAttachments);
       if (missingImages.length > 0) {
         const names = missingImages.map(att => att.name).join(', ');
