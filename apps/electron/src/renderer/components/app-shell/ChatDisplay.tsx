@@ -29,7 +29,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
-import { ChatVirtualHistory, isVirtualTurnInWindow, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
+import { ChatVirtualHistory, shouldShowTailProcessingIndicator, type ChatVirtualHistoryHandle } from './ChatVirtualHistory'
 import { getWorkTimings, workStatusOwnsUser } from './ChatDisplay.work-status'
 import { findRetryableCancelledUser, isCancelledTurnMarker } from '@craft-agent/shared/sessions/cancelled-turn'
 import { useComposerEnter } from '@/lib/composer-enter'
@@ -1696,7 +1696,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const processingTurnIndex = allTurns.findLastIndex((turn, index) =>
     turn.type === 'assistant' && index > latestUserIndex,
   )
-  const processingTurnInWindow = isVirtualTurnInWindow(processingTurnIndex, startIndex, endIndex)
+  const showTailProcessingIndicator = shouldShowTailProcessingIndicator(processingTurnIndex, endIndex)
   const completedRun = session?.tokenUsage?.lastTurn
   const currentRun = session?.tokenUsage?.currentTurn
   const workTimings = useMemo(() => getWorkTimings(allTurns, completedRun, currentRun), [allTurns, completedRun, currentRun])
@@ -2560,7 +2560,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {!processingTurnInWindow && !clarificationLayout && processingIndicator}
+                {showTailProcessingIndicator && !clarificationLayout && processingIndicator}
                 {/* Scroll anchor. The capsule and back-to-bottom control live in the composer toolbar, so the transcript does not reserve a gap for either. */}
                 <div ref={messagesEndRef} />
               </div>

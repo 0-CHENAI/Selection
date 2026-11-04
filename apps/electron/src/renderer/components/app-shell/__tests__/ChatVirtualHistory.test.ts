@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Virtualizer } from '@tanstack/react-virtual'
-import { isVirtualTurnInWindow, shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
+import { isVirtualTurnInWindow, shouldShowTailProcessingIndicator, shouldMeasureVirtualScrollMargin } from '../ChatVirtualHistory'
 
 function history() {
   const corrections: number[] = []
@@ -32,6 +32,15 @@ describe('virtual turn window', () => {
     expect(isVirtualTurnInWindow(4, 4, 8)).toBe(true)
     expect(isVirtualTurnInWindow(7, 4, 8)).toBe(true)
     expect(isVirtualTurnInWindow(8, 4, 8)).toBe(false)
+  })
+})
+
+describe('tail processing indicator', () => {
+  test('ignores the window start so scrolling cannot toggle it', () => {
+    expect(shouldShowTailProcessingIndicator(-1, 8)).toBe(true)
+    expect(shouldShowTailProcessingIndicator(8, 8)).toBe(true)
+    expect(shouldShowTailProcessingIndicator(7, 8)).toBe(false)
+    expect(shouldShowTailProcessingIndicator(2, 8)).toBe(false)
   })
 })
 
