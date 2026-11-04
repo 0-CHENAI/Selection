@@ -53,6 +53,7 @@ export async function completeOAuthFlow(opts: {
     clientId: flow.clientId,
     clientSecret: flow.clientSecret,
     redirectUri: flow.redirectUri,
+    resource: flow.resource,
   })
 
   flowStore.remove(state)
@@ -117,6 +118,7 @@ export function registerOAuthHandlers(server: RpcServer, deps: HandlerDeps): voi
       clientSecret: prepared.clientSecret,
       tokenEndpoint: prepared.tokenEndpoint,
       provider: prepared.provider,
+      resource: prepared.resource,
       ownerClientId: ctx.clientId,
       workspaceId: ctx.workspaceId,
       sourceSlug,
