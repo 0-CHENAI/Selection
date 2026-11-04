@@ -2247,6 +2247,7 @@ export function FreeFormInput({
             }
             isExpanded={false}
             hasSelection={attachments.length > 0}
+            selectionChrome={false}
             showChevron={false}
             data-testid="composer-attach"
             onMouseDown={event => event.preventDefault()}
@@ -2353,6 +2354,7 @@ export function FreeFormInput({
             }
             isExpanded={isEmptySession}
             hasSelection={attachments.length > 0}
+            selectionChrome={false}
             showChevron={false}
             data-testid="composer-attach"
             onMouseDown={event => event.preventDefault()}
