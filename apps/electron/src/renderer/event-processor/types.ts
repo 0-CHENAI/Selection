@@ -388,6 +388,8 @@ export interface LLMConnectionChangedEvent {
   sessionId: string
   connectionSlug: string
   supportsBranching?: boolean
+  /** Present when the connection and model were changed together. */
+  model?: string | null
 }
 
 /**

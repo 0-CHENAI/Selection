@@ -574,6 +574,7 @@ export function handleConnectionChanged(
       session: {
         ...session,
         llmConnection: event.connectionSlug,
+        ...('model' in event && { model: event.model ?? undefined }),
         ...(event.supportsBranching !== undefined && { supportsBranching: event.supportsBranching }),
       },
       streaming,

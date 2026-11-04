@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "Selecciona los niveles que admite este modelo. No seleccionar ninguno significa que no admite razonamiento.",
   "apiSetup.temporaryCredentials": "Para credenciales temporales (STS)",
   "apiSetup.thinkingAutomatic": "Automático (mantener las capacidades predeterminadas)",
+  "apiSetup.thinkingLevelsAutoHint": "Por defecto, la capacidad se detecta automáticamente. Selecciona niveles para definirla; desmarcarlos todos desactiva el razonamiento.",
   "apiSetup.thinkingLevelsUnchangedHint": "Déjalo sin cambios para conservar las capacidades actuales; selecciona niveles para reemplazarlas.",
   "apiSetup.tokenInputError": "Introduce entre {{min}} y {{max}} tokens; se admiten formatos como 128K y 500k",
   "auth.addCredentials": "Agregar credenciales",

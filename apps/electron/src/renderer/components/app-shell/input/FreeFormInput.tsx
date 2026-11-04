@@ -2587,7 +2587,6 @@ export function FreeFormInput({
                       onBack={() => navigateModelPicker(null)}
                       onPick={(modelId, connectionSlug) => {
                         if (effectiveConnection !== connectionSlug || !isPickerModelSelected(currentModel, modelId)) rememberModelPickerBounds('model')
-                        if (effectiveConnection !== connectionSlug) onConnectionChange?.(connectionSlug)
                         onModelChange(modelId, connectionSlug)
                         if (hasThinkingOverview) setModelPickerOverview(true)
                       }}

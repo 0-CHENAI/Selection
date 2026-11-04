@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "选择此模型实际支持的档位；不勾选任何档位表示不支持思考。",
   "apiSetup.temporaryCredentials": "用于临时凭证 (STS)",
   "apiSetup.thinkingAutomatic": "自动（保持默认能力）",
+  "apiSetup.thinkingLevelsAutoHint": "默认按模型能力自动判断；勾选后使用所选档位，全部取消表示不支持思考。",
   "apiSetup.thinkingLevelsUnchangedHint": "未修改时保留现有模型能力；勾选后按所选档位保存。",
   "apiSetup.tokenInputError": "请输入 {{min}}–{{max}} tokens，支持 128K、500k 等写法",
   "auth.addCredentials": "添加凭证",

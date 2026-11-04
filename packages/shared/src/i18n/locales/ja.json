@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "このモデルが対応するレベルを選択してください。未選択は推論非対応を意味します。",
   "apiSetup.temporaryCredentials": "一時的な認証情報 (STS) の場合",
   "apiSetup.thinkingAutomatic": "自動（既定の能力を維持）",
+  "apiSetup.thinkingLevelsAutoHint": "初期状態ではモデルの能力を自動判定します。段階を選ぶと手動設定になり、すべて解除すると推論が無効になります。",
   "apiSetup.thinkingLevelsUnchangedHint": "変更しなければ既存のモデル能力を保持します。レベルを選ぶと上書きされます。",
   "apiSetup.tokenInputError": "{{min}}–{{max}} トークンを入力してください。128K や 500k などの表記に対応しています",
   "auth.addCredentials": "認証情報を追加",

@@ -176,7 +176,6 @@ export function CompactModelSelector({
   currentModel,
   currentConnection,
   onModelChange,
-  onConnectionChange,
   fastMode = false,
   onFastModeChange,
   workMode,
@@ -292,13 +291,9 @@ export function CompactModelSelector({
 
   const handlePickSwitcherModel = React.useCallback(
     (connSlug: string, modelId: string) => {
-      const isCurrentConnection = effectiveConnection === connSlug
-      if (!isCurrentConnection && onConnectionChange) {
-        onConnectionChange(connSlug)
-      }
       onModelChange(modelId, connSlug)
     },
-    [onModelChange, onConnectionChange, effectiveConnection],
+    [onModelChange],
   )
 
   const fastControl = onFastModeChange && fastSupported ? (

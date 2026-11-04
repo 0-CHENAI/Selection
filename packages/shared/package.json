@@ -20,6 +20,7 @@
     "./agent/fast-mode": "./src/agent/fast-mode.ts",
     "./agent/thinking-levels": "./src/agent/thinking-levels.ts",
     "./agent/thinking-capabilities": "./src/agent/thinking-capabilities.ts",
+    "./agent/custom-endpoint-thinking": "./src/agent/custom-endpoint-thinking.ts",
     "./config/models-dev-thinking": "./src/config/models-dev-thinking.ts",
     "./config/models-dev-thinking-cache": "./src/config/models-dev-thinking-cache.ts",
     "./config/thinking-probe-store": "./src/config/thinking-probe-store.ts",

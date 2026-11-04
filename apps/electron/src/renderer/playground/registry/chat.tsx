@@ -839,7 +839,10 @@ function InputContainerPlayground({
               mockInputCallbacks.onSubmit(message, attachments)
               setProcessing(true)
             },
-            onModelChange: setModel,
+            onModelChange: (nextModel, nextConnection) => {
+              setModel(nextModel)
+              if (nextConnection) setConnection(nextConnection)
+            },
             onInputChange: setInputValue,
             inputValue,
             onHeightChange: mockInputCallbacks.onHeightChange,

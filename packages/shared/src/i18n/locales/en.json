@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "Select the levels supported by this model. No levels selected means reasoning is unsupported.",
   "apiSetup.temporaryCredentials": "For temporary credentials (STS)",
   "apiSetup.thinkingAutomatic": "Automatic (keep default capabilities)",
+  "apiSetup.thinkingLevelsAutoHint": "By default, capabilities are detected automatically. Select levels to override; clearing all selected levels disables thinking.",
   "apiSetup.thinkingLevelsUnchangedHint": "Leave unchanged to preserve existing model capabilities; select levels to override them.",
   "apiSetup.tokenInputError": "Enter {{min}}–{{max}} tokens; formats such as 128K and 500k are supported",
   "auth.addCredentials": "Add Credentials",

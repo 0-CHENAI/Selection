@@ -845,7 +845,7 @@ export function ApiKeyInput({
           imageSupport: image.imageSupport,
           supportsImages: image.supportsImages,
           learnedSupportsImages: image.learnedSupportsImages,
-          supportedThinkingLevels: modelThinkingLevels[id] ?? (initialValues ? undefined : []),
+          supportedThinkingLevels: modelThinkingLevels[id],
           thinkingMode: initialValues?.modelThinkingModes?.[id],
           contextWindow,
           maxTokens,
@@ -1429,7 +1429,7 @@ export function ApiKeyInput({
 
                   <fieldset className="space-y-2" disabled={isDisabled}>
                     <legend className="text-xs">{t('apiSetup.supportedThinkingLevels')}</legend>
-                    <p className="text-xs text-muted-foreground">{t(initialValues && modelThinkingLevels[id] === undefined ? 'apiSetup.thinkingLevelsUnchangedHint' : 'apiSetup.supportedThinkingLevelsHint')}</p>
+                    <p className="text-xs text-muted-foreground">{t(modelThinkingLevels[id] === undefined ? (initialValues ? 'apiSetup.thinkingLevelsUnchangedHint' : 'apiSetup.thinkingLevelsAutoHint') : 'apiSetup.supportedThinkingLevelsHint')}</p>
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                       {THINKING_LEVELS.map(level => <label key={level.id} className={cn("relative flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-xs transition-colors focus-within:ring-2 focus-within:ring-ring", modelThinkingLevels[id]?.includes(level.id) ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-foreground/5")}>

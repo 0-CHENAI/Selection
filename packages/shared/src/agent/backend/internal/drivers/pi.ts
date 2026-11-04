@@ -4,6 +4,7 @@ import { thinkingFieldsFromUpstream } from '../../../thinking-capabilities.ts';
 import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 import { toPiProviderId } from '../../../../config/pi-provider-ids.ts';
+import { toCustomEndpointModelWithThinking } from '../../../custom-endpoint-thinking.ts';
 import { toCustomEndpointModelPayload } from '../../../../config/model-image-support.ts';
 import { withResolvedContextWindow } from '../../../../config/model-context-window.ts';
 import {
@@ -277,7 +278,9 @@ export const piDriver: ProviderDriver = {
     imageMaxPixels: context.connection?.imageMaxPixels,
     customEndpoint: context.connection?.customEndpoint,
     customModels: context.connection?.models?.map((model) => (
-      toCustomEndpointModelPayload(withResolvedContextWindow(model))
+      context.connection?.providerType === 'pi_compat' || context.connection?.customEndpoint
+        ? toCustomEndpointModelWithThinking(withResolvedContextWindow(model), context.connection?.piAuthProvider)
+        : toCustomEndpointModelPayload(withResolvedContextWindow(model))
     )),
   }),
   fetchModels: async ({ connection, credentials, timeoutMs }) => {

@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "Wybierz poziomy obsługiwane przez ten model. Brak wyboru oznacza brak obsługi rozumowania.",
   "apiSetup.temporaryCredentials": "Dla tymczasowych danych uwierzytelniających (STS)",
   "apiSetup.thinkingAutomatic": "Automatycznie (zachowaj domyślne możliwości)",
+  "apiSetup.thinkingLevelsAutoHint": "Domyślnie możliwości modelu są wykrywane automatycznie. Wybór poziomów nadpisuje to ustawienie; odznaczenie wszystkich wyłącza rozumowanie.",
   "apiSetup.thinkingLevelsUnchangedHint": "Nie zmieniaj, aby zachować istniejące możliwości modelu; wybierz poziomy, aby je nadpisać.",
   "apiSetup.tokenInputError": "Wpisz {{min}}–{{max}} tokenów; obsługiwane są zapisy takie jak 128K i 500k",
   "auth.addCredentials": "Dodaj dane uwierzytelniające",

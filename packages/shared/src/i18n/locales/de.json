@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "Wählen Sie die von diesem Modell unterstützten Stufen. Keine Auswahl bedeutet, dass Denken nicht unterstützt wird.",
   "apiSetup.temporaryCredentials": "Für temporäre Anmeldedaten (STS)",
   "apiSetup.thinkingAutomatic": "Automatisch (Standardfähigkeiten beibehalten)",
+  "apiSetup.thinkingLevelsAutoHint": "Standardmäßig wird die Modellfähigkeit automatisch ermittelt. Ausgewählte Stufen überschreiben dies; alle Stufen abzuwählen deaktiviert das Denken.",
   "apiSetup.thinkingLevelsUnchangedHint": "Unverändert lassen, um vorhandene Modellfähigkeiten beizubehalten; Stufen wählen, um sie zu überschreiben.",
   "apiSetup.tokenInputError": "Geben Sie {{min}}–{{max}} Tokens ein; Formate wie 128K und 500k werden unterstützt",
   "auth.addCredentials": "Anmeldedaten hinzufügen",

@@ -704,7 +704,7 @@ export type SessionEvent =
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
   | { type: 'project_id_changed'; sessionId: string; projectId: string | null }
-  | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
+  | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean; model?: string | null }
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string; kind?: 'workflow'; workflowId?: string; orchestrationId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
   | { type: 'task_progress'; sessionId: string; toolUseId: string; elapsedSeconds: number; turnId?: string }

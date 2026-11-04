@@ -83,6 +83,7 @@
   "apiSetup.supportedThinkingLevelsHint": "Válaszd ki a modell által támogatott szinteket. Ha egyet sem választasz, a gondolkodás nem támogatott.",
   "apiSetup.temporaryCredentials": "Ideiglenes hitelesítő adatokhoz (STS)",
   "apiSetup.thinkingAutomatic": "Automatikus (alapértelmezett képességek megtartása)",
+  "apiSetup.thinkingLevelsAutoHint": "Alapértelmezés szerint a rendszer automatikusan állapítja meg a képességet. A kijelölt szintek felülírják ezt; minden szint törlése kikapcsolja a gondolkodást.",
   "apiSetup.thinkingLevelsUnchangedHint": "Hagyd változatlanul a meglévő modellképességek megőrzéséhez; a szintek kiválasztása felülírja őket.",
   "apiSetup.tokenInputError": "Adj meg {{min}}–{{max}} tokent; a 128K és 500k formátum is támogatott",
   "auth.addCredentials": "Hitelesítő adatok hozzáadása",

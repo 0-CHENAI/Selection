@@ -173,6 +173,7 @@ import {
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
 import { buildSkippedImagesNote, learnModelRejectsImages, resolveAuthEnvVars, toCustomEndpointModelPayload, updateLlmConnection } from '@craft-agent/shared/config'
+import { toCustomEndpointModelWithThinking } from '@craft-agent/shared/agent/custom-endpoint-thinking'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
@@ -1598,7 +1599,11 @@ export function buildAgentRuntimeConfigUpdate(
       baseUrl: connection.baseUrl,
       piAuthProvider: connection.piAuthProvider,
       customEndpoint: connection.customEndpoint,
-      customModels: connection.models?.map(toCustomEndpointModelPayload),
+      customModels: connection.models?.map(model => (
+        connection.providerType === 'pi_compat' || connection.customEndpoint
+          ? toCustomEndpointModelWithThinking(model, connection.piAuthProvider)
+          : toCustomEndpointModelPayload(model)
+      )),
       imagePixelBudget: connection.imagePixelBudget,
       imageMaxBytes: connection.imageMaxBytes,
       imageMaxDimension: connection.imageMaxDimension,
@@ -6864,6 +6869,7 @@ export class SessionManager implements ISessionManager {
           type: 'connection_changed',
           sessionId,
           connectionSlug: managed.llmConnection!,
+          model: nextModel ?? null,
           supportsBranching: resolveSupportsBranching(managed),
         }, managed.workspace.id)
         if (managed.agent) {

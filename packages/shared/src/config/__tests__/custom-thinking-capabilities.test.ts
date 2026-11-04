@@ -2,6 +2,8 @@ import { expect, it } from 'bun:test'
 import { toCustomEndpointModelPayload } from '../model-image-support'
 import { constrainThinkingLevel, modelThinkingLevels } from '../../agent/thinking-levels'
 import { buildCustomEndpointModelDef, normalizeCustomEndpointModelEntry } from '../../../../pi-agent-server/src/custom-endpoint-models'
+import { toCustomEndpointModelWithThinking } from '../../agent/custom-endpoint-thinking'
+import { clearModelsDevThinkingIndex, installModelsDevThinkingIndex } from '../models-dev-thinking'
 
 it('preserves editable context and reasoning capabilities from settings through SDK registration', () => {
   const stored = { id: 'custom', supportsImages: false,
@@ -29,4 +31,18 @@ it('distinguishes explicit no reasoning from legacy/default capabilities', () =>
 it('declares custom high-end levels to the SDK instead of silently clamping them', () => {
   const model = buildCustomEndpointModelDef('custom', undefined, { supportedThinkingLevels: ['high', 'xhigh', 'max'] })
   expect(model.thinkingLevelMap).toMatchObject({ low: null, medium: null, minimal: null, high: 'high', xhigh: 'xhigh', max: 'max' })
+})
+
+it('passes resolved catalog thinking levels to the subprocess while preserving explicit choices', () => {
+  installModelsDevThinkingIndex([{
+    provider: 'openai', id: 'test-custom-catalog-model', mode: 'levels', levels: ['off', 'high', 'max'],
+  }])
+  const payload = toCustomEndpointModelWithThinking({ id: 'test-custom-catalog-model' }, 'openai')
+  const entry = normalizeCustomEndpointModelEntry(payload)
+  expect(entry.supportedThinkingLevels).toEqual(['off', 'high', 'max'])
+  expect(constrainThinkingLevel('max', entry.supportedThinkingLevels)).toBe('max')
+  expect(toCustomEndpointModelWithThinking({ id: 'test-custom-catalog-model', supportedThinkingLevels: [] }, 'openai'))
+    .toMatchObject({ supportedThinkingLevels: [] })
+  expect(toCustomEndpointModelWithThinking({ id: 'unknown-custom-model' })).toBe('unknown-custom-model')
+  clearModelsDevThinkingIndex()
 })
