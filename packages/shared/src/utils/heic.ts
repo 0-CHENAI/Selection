@@ -34,8 +34,11 @@ export function isHeicImage(input: {
 }
 
 async function loadDefaultConvert(): Promise<HeicConvertFn> {
-  const mod = await import('heic-convert') as { default?: HeicConvertFn } & HeicConvertFn
-  return typeof mod === 'function' ? mod : (mod.default as HeicConvertFn)
+  const specifier: string = 'heic-convert'
+  const mod = await import(specifier) as { default?: HeicConvertFn } | HeicConvertFn
+  if (typeof mod === 'function') return mod
+  if (mod && typeof mod.default === 'function') return mod.default
+  throw new Error('heic-convert did not export a converter')
 }
 
 export async function convertHeicToJpeg(
@@ -48,5 +51,5 @@ export async function convertHeicToJpeg(
     format: 'JPEG',
     quality: 0.92,
   })
-  return Buffer.from(result)
+  return Buffer.from(new Uint8Array(result))
 }
