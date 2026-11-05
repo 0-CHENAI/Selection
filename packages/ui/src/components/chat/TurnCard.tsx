@@ -27,6 +27,14 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { thinkingLabelSizer, useThinkingCompletionSwap } from './thinking-step-motion'
 import {
+  PROCESS_CHAIN_EXPAND_MS,
+  PROCESS_CHAIN_ROW_PX,
+  initialProcessChainWindow,
+  shouldWindowProcessChain,
+  useProcessChainWindow,
+  type ProcessChainWindow,
+} from './process-chain-window'
+import {
   ChevronRight,
   CheckCircle2,
   XCircle,
@@ -87,6 +95,7 @@ import {
   shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
+  type ProcessChainEntry,
   type TurnPhase,
 } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
@@ -815,73 +824,48 @@ export function ActivityStatusIcon({
   /** Custom icon from tool metadata - emoji or data URL (base64) */
   customIcon?: string
 }) {
-  const reduceMotion = useReducedMotion()
-  const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
-
-  // The lattice is for active work; terminal states use the familiar circle icons.
+  // Terminal icons stay static. A Motion wrapper here never crossfaded the
+  // running spinner (that path returns above) and only added a node per row.
   if (status === 'running' || status === 'backgrounded') {
     return <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
       <Spinner className={cn(SIZE_CONFIG.spinnerSize, status === 'backgrounded' && 'text-accent')} />
     </span>
   }
 
-  // Render the appropriate icon based on status
-  const renderIcon = () => {
-    // For completed status with custom icon, use it instead of checkmark
-    if (status === 'completed' && customIcon) {
-      // Check if it's an emoji (short string, not a URL or data URL)
-      // Emojis can be 1-4+ characters due to ZWJ sequences
-      const isLikelyEmoji = customIcon.length <= 8 && !/^(https?:\/\/|data:)/.test(customIcon)
-      if (isLikelyEmoji) {
-        return (
-          <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[10px] leading-none")}>
-            {customIcon}
-          </span>
-        )
-      }
-      // Otherwise it's a data URL (base64) or HTTP URL
+  if (status === 'completed' && customIcon) {
+    const isLikelyEmoji = customIcon.length <= 8 && !/^(https?:\/\/|data:)/.test(customIcon)
+    if (isLikelyEmoji) {
       return (
-        <img
-          src={customIcon}
-          alt=""
-          className={cn(SIZE_CONFIG.iconSize, "shrink-0 rounded-sm object-contain")}
-        />
+        <span className={cn(SIZE_CONFIG.iconSize, "shrink-0 flex items-center justify-center text-[10px] leading-none")}>
+          {customIcon}
+        </span>
       )
     }
-
-    // Default icon logic
-    switch (status) {
-      case 'pending':
-        return <Circle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
-      case 'completed':
-        // Edit and Write tools get their own icons with accent color instead of green checkmark
-        if (toolName === 'Edit') {
-          return <Pencil className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
-        }
-        if (toolName === 'Write') {
-          return <FilePenLine className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
-        }
-        return <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-success")} />
-      case 'error':
-        return <XCircle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-destructive")} />
-    }
+    return (
+      <img
+        src={customIcon}
+        alt=""
+        className={cn(SIZE_CONFIG.iconSize, "shrink-0 rounded-sm object-contain")}
+      />
+    )
   }
 
-  // Wrap in AnimatePresence for crossfade between states
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={status}
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={reduceMotion ? undefined : { opacity: 0, scale: 0.8 }}
-        transition={iconTransition}
-        className="shrink-0"
-      >
-        {renderIcon()}
-      </motion.div>
-    </AnimatePresence>
-  )
+  switch (status) {
+    case 'pending':
+      return <Circle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
+    case 'completed':
+      if (toolName === 'Edit') {
+        return <Pencil className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
+      }
+      if (toolName === 'Write') {
+        return <FilePenLine className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
+      }
+      return <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-success")} />
+    case 'error':
+      return <XCircle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-destructive")} />
+    default:
+      return null
+  }
 }
 
 interface ActivityRowProps {
@@ -912,9 +896,22 @@ function ExpandableHeightPanel({
 }) {
   const wasOpen = useRef(open)
   const toggling = wasOpen.current !== open
+  const [renderChildren, setRenderChildren] = useState(open)
   useEffect(() => {
     wasOpen.current = open
   }, [open])
+  useEffect(() => {
+    if (open) {
+      setRenderChildren(true)
+      return
+    }
+    if (reduceMotion) {
+      setRenderChildren(false)
+      return
+    }
+    const timer = window.setTimeout(() => setRenderChildren(false), PROCESS_CHAIN_EXPAND_MS)
+    return () => window.clearTimeout(timer)
+  }, [open, reduceMotion])
 
   return (
     <div
@@ -924,18 +921,123 @@ function ExpandableHeightPanel({
         opacity: open ? 1 : 0,
         transition: reduceMotion || !toggling
           ? undefined
-          : 'grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease',
+          : `grid-template-rows ${PROCESS_CHAIN_EXPAND_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease`,
       }}
       aria-hidden={!open}
     >
       <div className={cn('min-h-0 min-w-0', (toggling || !open) && 'overflow-hidden')}>
-        {children}
+        {(open || renderChildren) ? children : null}
       </div>
     </div>
   )
 }
 
 const WORK_CHAIN_EASE = [0.22, 1, 0.36, 1] as const
+
+function processChainRowsAreUniform(entries: readonly ProcessChainEntry[]): boolean {
+  return entries.every(entry => {
+    if (entry.kind === 'clarification') return true
+    return !isActivityGroup(entry.row) && !entry.row.taskContext?.briefing
+  })
+}
+
+function processChainWindowStyle(window: ProcessChainWindow | null): string | undefined {
+  if (!window) return undefined
+  return `${window.start}:${window.end}/${window.count}`
+}
+
+function ThinkingSlotRow({ visible }: { visible: boolean }) {
+  return (
+    <div
+      data-thinking-slot=""
+      aria-hidden={!visible || undefined}
+      style={{ visibility: visible ? 'visible' : 'hidden' }}
+      className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+    >
+      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+        <Spinner className={SIZE_CONFIG.spinnerSize} />
+      </div>
+      <span>{visible ? thinkingStatusLabel() : null}</span>
+    </div>
+  )
+}
+
+function ProcessChainEntryRow({
+  entry,
+  index,
+  isExpanded,
+  reduceMotion,
+  stagger,
+  animate,
+  lastChildSet,
+  expandedActivityGroups,
+  onExpandedActivityGroupsChange,
+  onOpenActivityDetails,
+  sessionFolderPath,
+  displayMode,
+}: {
+  entry: ProcessChainEntry
+  index: number
+  isExpanded: boolean
+  reduceMotion: boolean | null
+  stagger: boolean
+  animate: boolean
+  lastChildSet: Set<string>
+  expandedActivityGroups: Set<string>
+  onExpandedActivityGroupsChange: (groups: Set<string>) => void
+  onOpenActivityDetails?: (activity: ActivityItem) => void
+  sessionFolderPath?: string
+  displayMode: 'informative' | 'detailed'
+}) {
+  if (entry.kind === 'clarification') {
+    if (!isExpanded) return null
+    return (
+      <WorkChainRow
+        reduceMotion={reduceMotion}
+        stagger={stagger}
+        staggerIndex={index}
+        animate={animate}
+      >
+        <ClarificationChainRow message={entry.message} />
+      </WorkChainRow>
+    )
+  }
+  const item = entry.row
+  return isActivityGroup(item) ? (
+    <WorkChainRow
+      reduceMotion={reduceMotion}
+      stagger={stagger}
+      staggerIndex={index}
+      animate={animate}
+    >
+      <ActivityGroupRow
+        group={item}
+        expandedGroups={expandedActivityGroups}
+        onExpandedGroupsChange={onExpandedActivityGroupsChange}
+        onOpenActivityDetails={onOpenActivityDetails}
+        animationIndex={index}
+        animateEntrance={false}
+        sessionFolderPath={sessionFolderPath}
+        displayMode={displayMode}
+      />
+    </WorkChainRow>
+  ) : (
+    <WorkChainRow
+      reduceMotion={reduceMotion}
+      stagger={stagger}
+      staggerIndex={index}
+      animate={animate}
+    >
+      <ActivityRow
+        activity={item}
+        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
+        isLastChild={lastChildSet.has(item.id)}
+        sessionFolderPath={sessionFolderPath}
+        displayMode={displayMode}
+      />
+    </WorkChainRow>
+  )
+}
 
 /** Spinner and chevron share one 12px slot so thinking → work does not shift the title. */
 function WorkHeaderIcon({
@@ -1105,15 +1207,19 @@ function WorkChainRow({
   reduceMotion,
   stagger,
   staggerIndex = 0,
+  animate = false,
   children,
 }: {
   reduceMotion: boolean | null
   stagger: boolean
   staggerIndex?: number
+  /** Live rows that join or leave the chain. History and windowed slices stay static. */
+  animate?: boolean
   children: React.ReactNode
 }) {
   const instant = !!reduceMotion
-  const delay = !instant && stagger
+  const useMotion = !instant && (stagger || animate)
+  const delay = useMotion && stagger
     ? (staggerIndex < SIZE_CONFIG.staggeredAnimationLimit
       ? staggerIndex * 0.03
       : SIZE_CONFIG.staggeredAnimationLimit * 0.03)
@@ -1122,9 +1228,22 @@ function WorkChainRow({
   const fadeIn = { duration: instant ? 0 : 0.22, ease: WORK_CHAIN_EASE, delay: instant ? 0 : 0.06 }
   const fadeOut = { duration: instant ? 0 : 0.16, ease: WORK_CHAIN_EASE }
 
+  if (!useMotion) {
+    return (
+      <div
+        data-process-chain-row=""
+        className="overflow-hidden"
+        style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${PROCESS_CHAIN_ROW_PX}px` }}
+      >
+        <div className="py-px">{children}</div>
+      </div>
+    )
+  }
+
   return (
     <motion.div
-      initial={instant ? false : stagger ? { opacity: 0, x: -8 } : { opacity: 0, height: 0, y: 3 }}
+      data-process-chain-row=""
+      initial={stagger ? { opacity: 0, x: -8 } : { opacity: 0, height: 0, y: 3 }}
       animate={{
         opacity: 1,
         x: 0,
@@ -1133,12 +1252,12 @@ function WorkChainRow({
         transition: {
           delay,
           height: heightTween,
-          opacity: stagger ? { duration: instant ? 0 : 0.2, delay } : fadeIn,
-          x: { duration: instant ? 0 : stagger ? 0.22 : 0, ease: WORK_CHAIN_EASE, delay },
+          opacity: stagger ? { duration: 0.2, delay } : fadeIn,
+          x: { duration: stagger ? 0.22 : 0, ease: WORK_CHAIN_EASE, delay },
           y: heightTween,
         },
       }}
-      exit={instant ? undefined : {
+      exit={{
         opacity: 0,
         height: 0,
         y: -2,
@@ -3555,6 +3674,13 @@ function TurnCardContent({
     ),
     [groupedActivities, visibleActivities, hasClarifications, settledClarifications],
   )
+  const chainIsUniform = useMemo(() => processChainRowsAreUniform(chainEntries), [chainEntries])
+  const windowProcessChain = shouldWindowProcessChain(chainEntries.length, chainIsUniform)
+  const measuredChainWindow = useProcessChainWindow(
+    activitiesContainerRef,
+    chainEntries.length,
+    windowProcessChain,
+  )
 
   const hasVisibleResponse = !!response && (
     hasRenderableAssistantText(response.text)
@@ -3655,6 +3781,14 @@ function TurnCardContent({
   // that arrives later slides in while a header that mounts with its badge does not.
   const chromeWasMounted = chromeMountedRef.current
   const animateLiveBlocks = !isComplete || wasLiveRef.current
+  const chainWindow = windowProcessChain
+    ? (measuredChainWindow ?? initialProcessChainWindow(chainEntries.length))
+    : null
+  const visibleChainEntries = chainWindow
+    ? chainEntries.slice(chainWindow.start, chainWindow.end)
+    : chainEntries
+  const liveRowMotion = animateLiveBlocks && !isComplete && !chainWindow
+  const staggerRows = !!staggerOnThisExpand && !chainWindow
 
   // No space-y on the root: a sibling margin sits outside the height tweens and
   // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
@@ -3765,84 +3899,89 @@ function TurnCardContent({
                 <div
                   ref={activitiesContainerRef}
                   data-process-chain=""
+                  data-process-chain-window={processChainWindowStyle(chainWindow)}
                   className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
                 >
+                  {chainWindow && chainWindow.padTop > 0 && (
+                    <div
+                      data-process-chain-spacer="top"
+                      aria-hidden="true"
+                      style={{ height: chainWindow.padTop }}
+                    />
+                  )}
                   {/* Rows joining a header that is already on screen slide in;
-                      history and a header mounting with its rows do not. */}
+                      history, windowed slices, and a header mounting with its rows do not. */}
+                  {liveRowMotion ? (
                   <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
-                  {chainEntries.map((entry, index) => {
-                    if (entry.kind === 'clarification') {
-                      if (!isExpanded) return null
-                      return (
-                        <WorkChainRow
-                          key={entry.message.id}
-                          reduceMotion={reduceMotion}
-                          stagger={!!staggerOnThisExpand}
-                          staggerIndex={index}
-                        >
-                          <ClarificationChainRow message={entry.message} />
-                        </WorkChainRow>
-                      )
-                    }
-                    const item = entry.row
-                    return isActivityGroup(item) ? (
-                      <WorkChainRow
-                        key={item.parent.id}
-                        reduceMotion={reduceMotion}
-                        stagger={!!staggerOnThisExpand}
-                        staggerIndex={index}
-                      >
-                        <ActivityGroupRow
-                          group={item}
-                          expandedGroups={expandedActivityGroups}
-                          onExpandedGroupsChange={handleExpandedActivityGroupsChange}
-                          onOpenActivityDetails={onOpenActivityDetails}
-                          animationIndex={index}
-                          animateEntrance={false}
-                          sessionFolderPath={sessionFolderPath}
-                          displayMode={displayMode}
-                        />
-                      </WorkChainRow>
-                    ) : (
-                      <WorkChainRow
-                        key={item.id}
-                        reduceMotion={reduceMotion}
-                        stagger={!!staggerOnThisExpand}
-                        staggerIndex={index}
-                      >
-                        <ActivityRow
-                          activity={item}
-                          onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
-                          isLastChild={lastChildSet.has(item.id)}
-                          sessionFolderPath={sessionFolderPath}
-                          displayMode={displayMode}
-                        />
-                      </WorkChainRow>
-                    )
-                  })}
-                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
-                  {/* Thinking/Buffering indicator - shown while waiting for response */}
+                  {visibleChainEntries.map((entry, index) => (
+                    <ProcessChainEntryRow
+                      key={entry.kind === 'clarification' ? entry.message.id : isActivityGroup(entry.row) ? entry.row.parent.id : entry.row.id}
+                      entry={entry}
+                      index={index}
+                      isExpanded={isExpanded}
+                      reduceMotion={reduceMotion}
+                      stagger={staggerRows}
+                      animate={liveRowMotion}
+                      lastChildSet={lastChildSet}
+                      expandedActivityGroups={expandedActivityGroups}
+                      onExpandedActivityGroupsChange={handleExpandedActivityGroupsChange}
+                      onOpenActivityDetails={onOpenActivityDetails}
+                      sessionFolderPath={sessionFolderPath}
+                      displayMode={displayMode}
+                    />
+                  ))}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false} animate={liveRowMotion}>{workControls}</WorkChainRow>}
                   {reserveThinkingSlot && (
                     <WorkChainRow
                       key="thinking"
                       reduceMotion={reduceMotion}
-                      stagger={!!staggerOnThisExpand}
+                      stagger={staggerRows}
                       staggerIndex={visibleActivities.length}
+                      animate={liveRowMotion}
                     >
-                      <div
-                        data-thinking-slot=""
-                        aria-hidden={!showGenericThinkingIndicator || undefined}
-                        style={{ visibility: showGenericThinkingIndicator ? 'visible' : 'hidden' }}
-                        className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
-                      >
-                        <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-                          <Spinner className={SIZE_CONFIG.spinnerSize} />
-                        </div>
-                        <span>{showGenericThinkingIndicator ? thinkingStatusLabel() : null}</span>
-                      </div>
+                      <ThinkingSlotRow visible={showGenericThinkingIndicator} />
                     </WorkChainRow>
                   )}
                   </AnimatePresence>
+                  ) : (
+                  <>
+                  {visibleChainEntries.map((entry, index) => (
+                    <ProcessChainEntryRow
+                      key={entry.kind === 'clarification' ? entry.message.id : isActivityGroup(entry.row) ? entry.row.parent.id : entry.row.id}
+                      entry={entry}
+                      index={index}
+                      isExpanded={isExpanded}
+                      reduceMotion={reduceMotion}
+                      stagger={staggerRows}
+                      animate={false}
+                      lastChildSet={lastChildSet}
+                      expandedActivityGroups={expandedActivityGroups}
+                      onExpandedActivityGroupsChange={handleExpandedActivityGroupsChange}
+                      onOpenActivityDetails={onOpenActivityDetails}
+                      sessionFolderPath={sessionFolderPath}
+                      displayMode={displayMode}
+                    />
+                  ))}
+                  {workControls && <WorkChainRow key="work-controls" reduceMotion={reduceMotion} stagger={false}>{workControls}</WorkChainRow>}
+                  {reserveThinkingSlot && (
+                    <WorkChainRow
+                      key="thinking"
+                      reduceMotion={reduceMotion}
+                      stagger={false}
+                      staggerIndex={visibleActivities.length}
+                    >
+                      <ThinkingSlotRow visible={showGenericThinkingIndicator} />
+                    </WorkChainRow>
+                  )}
+                  </>
+                  )}
+                  {chainWindow && chainWindow.padBottom > 0 && (
+                    <div
+                      data-process-chain-spacer="bottom"
+                      aria-hidden="true"
+                      style={{ height: chainWindow.padBottom }}
+                    />
+                  )}
                 </div>
           </ExpandableHeightPanel>
           )}

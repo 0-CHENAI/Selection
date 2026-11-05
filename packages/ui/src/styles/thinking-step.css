@@ -42,7 +42,6 @@
     transform var(--think-swap) var(--think-ease),
     filter var(--think-swap) var(--think-ease),
     opacity var(--think-swap) var(--think-ease);
-  will-change: transform, filter, opacity;
 }
 
 /* Base glyphs stay in --think-base. The sweep is a second copy of the
@@ -88,6 +87,12 @@
     transform var(--think-swap) var(--think-ease),
     filter var(--think-swap) var(--think-ease),
     opacity var(--think-swap) var(--think-ease);
+}
+
+.thinking-swap-text.thinking-text-shimmer,
+.thinking-swap-text.is-exit,
+.thinking-swap-text.is-enter-start,
+.thinking-preview-enter {
   will-change: transform, filter, opacity;
 }
 

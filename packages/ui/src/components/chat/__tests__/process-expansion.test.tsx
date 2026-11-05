@@ -79,6 +79,8 @@ describe('process folds only follow user input', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('Final answer stays visible.')
     let parent = answer.parent
     while (parent) { expect(parent.props['aria-hidden']).not.toBe(true); parent = parent.parent }
+    expect(JSON.stringify(renderer.toJSON())).not.toContain(thinking.content)
+    click(); expectFold(true)
     expect(JSON.stringify(renderer.toJSON())).toContain(thinking.content)
   })
 
