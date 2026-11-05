@@ -1,3 +1,5 @@
+# Scheduled draft PR for OfficeCLI upgrades. Permissions stay scoped to
+# contents/pull-requests/actions write. No new secrets. See docs/ci.md.
 name: OfficeCLI Upgrade Draft
 
 on:
@@ -16,6 +18,7 @@ concurrency:
 
 env:
   OFFICECLI_BASE_BRANCH: test
+  HUSKY: "0"
 
 jobs:
   update:
@@ -29,10 +32,10 @@ jobs:
           ref: ${{ env.OFFICECLI_BASE_BRANCH }}
           fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
         with:
-          bun-version: "1.3.10"
+          install-dependencies: "false"
 
       - name: Synchronize latest stable OfficeCLI release
         id: sync
@@ -86,3 +89,4 @@ jobs:
           # GITHUB_TOKEN-created PRs do not trigger pull_request workflows.
           gh workflow run validate.yml --ref "$branch"
           gh workflow run officecli-integration.yml --ref "$branch"
+          gh workflow run validate-macos-native.yml --ref "$branch"
