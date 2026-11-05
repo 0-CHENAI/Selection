@@ -101,8 +101,11 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).not.toContain('第 1 次尝试')
     expect(html).toContain('重试失败节点')
     const collapsed = await renderTurn('zh-Hans', activities, { ...options, expanded: false })
-    expect(collapsed).toMatch(/aria-hidden="true"[\s\S]*重试失败节点/)
+    expect(collapsed).toContain('aria-expanded="false"')
     expect(collapsed).toContain('grid-template-rows:0fr')
+    expect(collapsed).toContain('aria-hidden="true"')
+    expect(collapsed).not.toContain('重试失败节点')
+    expect(collapsed).not.toContain('data-process-chain')
   })
   it.each(['en', 'zh-Hans'] as const)('interleaves child tasks and operations chronologically at the same row level in %s', async language => {
     const html = await renderTurn(language, [
@@ -596,4 +599,35 @@ it('hides the streaming transcript, then shows a one-line summary only when the 
   expect(redacted).not.toContain('data-thinking-preview')
   expect(redacted).not.toContain('role="button"')
   expect(redacted).not.toContain('lucide-circle')
+})
+
+it('does not mount every offscreen thinking row in a long expanded chain', async () => {
+  const activities: ActivityItem[] = Array.from({ length: 80 }, (_, index) => ({
+    id: `think-${index}`,
+    type: 'thinking',
+    status: 'completed',
+    timestamp: index + 1,
+    content: `步骤 ${index}`,
+  }))
+  const html = await renderTurn('zh-Hans', activities, {
+    isComplete: true,
+    isStreaming: false,
+    expanded: true,
+  })
+  const mounted = countOccurrences(html, 'data-thinking-step=""')
+  expect(html).toContain('data-process-chain-window')
+  expect(html).toContain('data-process-chain-spacer')
+  expect(mounted).toBeGreaterThan(0)
+  expect(mounted).toBeLessThan(80)
+  expect(html).toContain('步骤 0')
+  expect(html).not.toContain('步骤 79')
+
+  const collapsed = await renderTurn('zh-Hans', activities, {
+    isComplete: true,
+    isStreaming: false,
+    expanded: false,
+  })
+  expect(collapsed).toContain('aria-expanded="false"')
+  expect(collapsed).not.toContain('data-thinking-step')
+  expect(collapsed).not.toContain('data-process-chain')
 })
