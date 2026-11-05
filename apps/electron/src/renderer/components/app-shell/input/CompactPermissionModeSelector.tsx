@@ -10,6 +10,7 @@ import {
   DrawerClose,
 } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
+import { applyOptimisticPermissionModeChange } from '@/lib/permission-mode-selection'
 import {
   PERMISSION_MODE_CONFIG,
   PERMISSION_MODE_ORDER,
@@ -79,7 +80,8 @@ export function CompactPermissionModeSelector({
 }: CompactPermissionModeSelectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
-  // Optimistic local state — updates immediately, syncs with prop
+  // Optimistic local state — updates immediately, rolls back if the parent
+  // rejects (Full Takeover confirmation cancelled), and syncs when the prop changes.
   const [optimisticMode, setOptimisticMode] = React.useState(permissionMode)
 
   React.useEffect(() => {
@@ -87,10 +89,14 @@ export function CompactPermissionModeSelector({
   }, [permissionMode])
 
   const handleSelect = React.useCallback((mode: PermissionMode) => {
-    setOptimisticMode(mode)
-    onPermissionModeChange?.(mode)
     setOpen(false)
-  }, [onPermissionModeChange])
+    void applyOptimisticPermissionModeChange({
+      nextMode: mode,
+      currentMode: permissionMode,
+      setOptimisticMode,
+      onChange: onPermissionModeChange,
+    })
+  }, [permissionMode, onPermissionModeChange])
 
   const style = MODE_STYLES[optimisticMode]
 

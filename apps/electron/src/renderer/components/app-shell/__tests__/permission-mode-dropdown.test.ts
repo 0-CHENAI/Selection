@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const badges = readFileSync(join(import.meta.dir, '../ActiveOptionBadges.tsx'), 'utf8')
+const compact = readFileSync(join(import.meta.dir, '../input/CompactPermissionModeSelector.tsx'), 'utf8')
+const chatPage = readFileSync(join(import.meta.dir, '../../../pages/ChatPage.tsx'), 'utf8')
+const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
 const app = readFileSync(join(import.meta.dir, '../../../App.tsx'), 'utf8')
 
 describe('permission mode dropdown', () => {
@@ -17,5 +20,12 @@ describe('permission mode dropdown', () => {
   it('keeps draft composer mode changes in memory until a session exists', () => {
     expect(app).toContain('isDraftSessionOptionsId(sessionId)')
     expect(app).toContain('if (isDraftSessionOptionsId(sessionId)) return')
+  })
+
+  it('reverts optimistic Full Takeover when the parent rejects the change', () => {
+    expect(badges).toContain('applyOptimisticPermissionModeChange')
+    expect(compact).toContain('applyOptimisticPermissionModeChange')
+    expect(chatPage).toContain('commitPermissionModeChange')
+    expect(appShell).toContain('nextModeAfterDeclinedTakeover')
   })
 })

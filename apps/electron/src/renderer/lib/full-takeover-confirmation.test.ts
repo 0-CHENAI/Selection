@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createFullTakeoverConfirmation } from './full-takeover-confirmation'
+import { commitPermissionModeChange, createFullTakeoverConfirmation } from './full-takeover-confirmation'
 
 function setup(options: {
   /** Workspaces whose stored setting already records the acknowledgement. */
@@ -90,6 +90,32 @@ describe('Full Takeover confirmation', () => {
     await confirmation.confirm(null)
     await confirmation.confirm(undefined)
     expect(state.asks).toBe(2)
+  })
+
+  test('commitPermissionModeChange does not apply when confirmation is declined', async () => {
+    const applied: string[] = []
+    const ok = await commitPermissionModeChange(
+      'allow-all',
+      'ask',
+      'ws-1',
+      (mode) => { applied.push(mode) },
+      async () => false,
+    )
+    expect(ok).toBe(false)
+    expect(applied).toEqual([])
+  })
+
+  test('commitPermissionModeChange applies allow-all when confirmation succeeds', async () => {
+    const applied: string[] = []
+    const ok = await commitPermissionModeChange(
+      'allow-all',
+      'ask',
+      'ws-1',
+      (mode) => { applied.push(mode) },
+      async () => true,
+    )
+    expect(ok).toBe(true)
+    expect(applied).toEqual(['allow-all'])
   })
 
   test('concurrent triggers share a single dialog', async () => {
