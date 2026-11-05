@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { TOOLBAR_CONTROL_HEIGHT, TOOLBAR_SHELL_MAX, toolbarCapsuleFit } from '@craft-agent/ui/chat'
 import { cn } from '@/lib/utils'
+import { applyOptimisticPermissionModeChange } from '@/lib/permission-mode-selection'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Check, ChevronDown, FolderOpen } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
@@ -580,19 +581,23 @@ const MODE_DESC_KEYS: Record<PermissionMode, string> = {
 function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessionId, iconsOnly = false }: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
-  // Optimistic local state - updates immediately, syncs with prop
+  // Optimistic local state — updates immediately, rolls back if the parent
+  // rejects (Full Takeover confirmation cancelled), and syncs when the prop changes.
   const [optimisticMode, setOptimisticMode] = React.useState(permissionMode)
 
-  // Sync optimistic state when prop changes (confirmation from backend)
   React.useEffect(() => {
     setOptimisticMode(permissionMode)
   }, [permissionMode])
 
   const handleSelect = React.useCallback((mode: PermissionMode) => {
-    setOptimisticMode(mode)
-    onPermissionModeChange?.(mode)
     setOpen(false)
-  }, [onPermissionModeChange])
+    void applyOptimisticPermissionModeChange({
+      nextMode: mode,
+      currentMode: permissionMode,
+      setOptimisticMode,
+      onChange: onPermissionModeChange,
+    })
+  }, [permissionMode, onPermissionModeChange])
 
   // Mode-specific styling using CSS variables (theme-aware)
   // - safe (Explore): foreground at 60% opacity - subtle, read-only feel

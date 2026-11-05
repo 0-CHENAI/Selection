@@ -96,3 +96,24 @@ export function confirmPermissionModeChange(
   if (nextMode !== 'allow-all' || currentMode === 'allow-all') return Promise.resolve(true)
   return fullTakeoverConfirmation.confirm(workspaceId)
 }
+
+/**
+ * Apply a user-initiated permission-mode change only after the Full
+ * Takeover gate. Resolves `false` when the dialog is cancelled so
+ * optimistic UI can roll back; resolves `true` after `apply` runs.
+ */
+export async function commitPermissionModeChange<T extends string>(
+  nextMode: T,
+  currentMode: string | undefined,
+  workspaceId: string | null | undefined,
+  apply: (mode: T) => void | Promise<void>,
+  confirm: (
+    nextMode: T,
+    currentMode: string | undefined,
+    workspaceId: string | null | undefined,
+  ) => Promise<boolean> = confirmPermissionModeChange,
+): Promise<boolean> {
+  if (!(await confirm(nextMode, currentMode, workspaceId))) return false
+  await apply(nextMode)
+  return true
+}

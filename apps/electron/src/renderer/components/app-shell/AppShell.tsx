@@ -69,6 +69,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
+import { nextModeAfterDeclinedTakeover } from '@/lib/permission-mode-selection'
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
@@ -891,8 +892,9 @@ function AppShellContent({
       // If declined, skip past it so repeated Shift+Tab keeps cycling instead of
       // reopening the dialog.
       if (!(await confirmPermissionModeChange(nextMode, currentMode, activeWorkspaceId))) {
-        nextMode = modes[(nextIndex + 1) % modes.length]
-        if (!nextMode || nextMode === 'allow-all' || nextMode === currentMode) return
+        const skipped = nextModeAfterDeclinedTakeover(modes, nextIndex, currentMode)
+        if (!skipped) return
+        nextMode = skipped
       }
       contextValue.onSessionOptionsChange(effectiveSessionId, { permissionMode: nextMode })
     }

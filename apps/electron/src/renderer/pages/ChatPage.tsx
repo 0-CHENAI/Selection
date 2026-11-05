@@ -57,7 +57,7 @@ import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import { resolveSessionThinkingLevel, type ThinkingLevel, type ThinkingModelRef } from '@craft-agent/shared/agent/thinking-levels'
 import { useThinkingCatalog } from '@/hooks/useThinkingCatalog'
 import { getSessionTitle } from '@/utils/session'
-import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
+import { commitPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import type { PermissionMode } from '../../shared/types'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable, connectionModelIdsMatch } from '@config/llm-connections'
@@ -392,8 +392,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
   // User-initiated mode changes only (badge, compact selector, plan approval).
   // Switching into Full Takeover asks for risk confirmation once per workspace.
   const handlePermissionModeChange = React.useCallback(async (mode: PermissionMode) => {
-    if (!(await confirmPermissionModeChange(mode, sessionOpts.permissionMode, activeWorkspaceId))) return
-    setPermissionMode(mode)
+    return commitPermissionModeChange(mode, sessionOpts.permissionMode, activeWorkspaceId, setPermissionMode)
   }, [sessionOpts.permissionMode, activeWorkspaceId, setPermissionMode])
 
   const handleThinkingLevelChange = React.useCallback((level: ThinkingLevel) => {
