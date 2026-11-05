@@ -6,6 +6,11 @@ import {
   nextModeAfterDeclinedTakeover,
 } from './permission-mode-selection'
 
+/** bun:test's `toBe` keeps the initializer literal; compare through the union. */
+function expectMode(actual: PermissionMode, expected: PermissionMode) {
+  expect(actual).toBe(expected)
+}
+
 describe('applyOptimisticPermissionModeChange', () => {
   test('select Full Takeover then cancel keeps the previous mode in UI and result', async () => {
     let painted: PermissionMode = 'ask'
@@ -17,8 +22,8 @@ describe('applyOptimisticPermissionModeChange', () => {
       onChange: async () => false,
     })
 
-    expect(result).toBe('ask')
-    expect(painted).toBe('ask')
+    expectMode(result, 'ask')
+    expectMode(painted, 'ask')
   })
 
   test('select Full Takeover then confirm paints and returns allow-all', async () => {
@@ -35,8 +40,8 @@ describe('applyOptimisticPermissionModeChange', () => {
       },
     })
 
-    expect(result).toBe('allow-all')
-    expect(painted).toBe('allow-all')
+    expectMode(result, 'allow-all')
+    expectMode(painted, 'allow-all')
     expect(applied).toEqual(['allow-all'])
   })
 
@@ -68,9 +73,9 @@ describe('applyOptimisticPermissionModeChange', () => {
       ),
     })
 
-    expect(result).toBe('ask')
-    expect(painted).toBe('ask')
-    expect(sessionMode).toBe('ask')
+    expectMode(result, 'ask')
+    expectMode(painted, 'ask')
+    expectMode(sessionMode, 'ask')
   })
 
   test('gated parent confirm applies allow-all to UI and session', async () => {
@@ -90,9 +95,9 @@ describe('applyOptimisticPermissionModeChange', () => {
       ),
     })
 
-    expect(result).toBe('allow-all')
-    expect(painted).toBe('allow-all')
-    expect(sessionMode).toBe('allow-all')
+    expectMode(result, 'allow-all')
+    expectMode(painted, 'allow-all')
+    expectMode(sessionMode, 'allow-all')
   })
 
   test('void handlers (immediate apply) keep the optimistic mode', async () => {
@@ -103,7 +108,7 @@ describe('applyOptimisticPermissionModeChange', () => {
       setOptimisticMode: (mode) => { painted = mode },
       onChange: () => {},
     })
-    expect(painted).toBe('safe')
+    expectMode(painted, 'safe')
   })
 })
 
