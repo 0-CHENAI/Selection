@@ -49,4 +49,4 @@ description: "做请假、报销等申请表。必填项空着标待补充，不
 
 ## 文件交付
 
-先 `officecli load_skill word`。需要填空域时再加载 word-form。不要用 Python 或 LibreOffice。样例只读。交付前走版式守卫。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。需要填空域时再加载 word-form。不要用 Python 或 LibreOffice。样例只读。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

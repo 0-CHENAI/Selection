@@ -124,8 +124,11 @@ describe('stage 07 word assets', () => {
     expect(byId.get('coffee-market')).not.toHaveProperty('prompt')
     expect(byId.get('government-notice')).toMatchObject({ businessSkill: 'gov-doc-writing' })
     expect(byId.get('selection-meeting-minutes')).toMatchObject({ category: 'Selection 样例' })
+    expect(String(byId.get('selection-meeting-minutes')?.description)).toContain('没有原生样例')
     expect(byId.get('selection-work-notice')).toMatchObject({ category: 'Selection 样例' })
+    expect(String(byId.get('selection-work-notice')?.description)).toContain('没有原生样例')
     expect(byId.get('execution-tracker')).toMatchObject({ mode: 'excel' })
+    expect(String(byId.get('execution-tracker')?.description)).toContain('没有原生样例')
     const selection = byId.get('meeting-minutes')?.selection as { namespace?: string }
     expect(selection.namespace).toBe('selection.office.v1')
   })

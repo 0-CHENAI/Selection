@@ -73,4 +73,4 @@ description: "起草租赁、劳务、采购、保密等合同。缺项标待补
 
 ## 文件交付
 
-用 OfficeCLI 写 DOCX，先 `officecli load_skill word`。不要用 Python、python-docx 或 LibreOffice。案例原件只读，新稿写到工作区副本。套用房屋租赁样例时，只学条款顺序和版式；当事人、房屋、金额、日期全部替换。交付前走版式守卫。用户没有要求时，不导出 PDF，不发起电子签。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`，不要用 OfficeCLI 重建版式。没有案例时再 `officecli load_skill word`。不要用 Python、python-docx 或 LibreOffice。案例原件只读，新稿写到工作区副本。套用房屋租赁样例时，只学条款顺序和版式；当事人、房屋、金额、日期全部替换。交付靠宿主版式守卫和文件卡片；不要把 `view screenshot` 当交付前置。用户没有要求时，不导出 PDF，不发起电子签。

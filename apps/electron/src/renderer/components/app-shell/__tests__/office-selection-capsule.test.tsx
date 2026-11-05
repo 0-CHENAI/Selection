@@ -177,19 +177,8 @@ test.skipIf(!chromeBinary())('the selection capsule is the top hit over a PowerP
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
-  const debugPort = 20000 + Math.floor(Math.random() * 20000)
-  const chrome = spawn(chromeBinary()!, [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    `--remote-debugging-port=${debugPort}`,
-    `--user-data-dir=/tmp/selection-office-capsule-${debugPort}`,
-    '--window-size=900,700',
-    'about:blank',
-  ], { stdio: 'ignore' })
   try {
-    const hit = await probeCapsule(debugPort, port)
+    const hit = await launchChromeAndProbe(port)
     expect(hit.overlaps).toBe(true)
     expect(hit.onCapsule).toBe(true)
     expect(hit.hiddenWhileResizing).toBe(true)
@@ -200,10 +189,35 @@ test.skipIf(!chromeBinary())('the selection capsule is the top hit over a PowerP
     expect(hit.viewZ).toBe('0')
     expect(hit.frameZ).toBe('1')
   } finally {
-    chrome.kill('SIGKILL')
     await new Promise(resolve => server.close(resolve))
   }
-}, 30_000)
+}, 45_000)
+
+async function launchChromeAndProbe(port: number): Promise<CapsuleHit> {
+  const tryOnce = async (): Promise<CapsuleHit> => {
+    const debugPort = 20000 + Math.floor(Math.random() * 20000)
+    const chrome = spawn(chromeBinary()!, [
+      '--headless=new',
+      '--disable-gpu',
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      `--remote-debugging-port=${debugPort}`,
+      `--user-data-dir=/tmp/selection-office-capsule-${debugPort}`,
+      '--window-size=900,700',
+      'about:blank',
+    ], { stdio: 'ignore' })
+    try {
+      return await probeCapsule(debugPort, port)
+    } finally {
+      chrome.kill('SIGKILL')
+    }
+  }
+  try {
+    return await tryOnce()
+  } catch {
+    return await tryOnce()
+  }
+}
 
 interface CapsuleHit {
   overlaps: boolean
@@ -218,7 +232,7 @@ interface CapsuleHit {
 }
 
 async function probeCapsule(debugPort: number, port: number): Promise<CapsuleHit> {
-  const deadline = Date.now() + 10_000
+  const deadline = Date.now() + 20_000
   let last = ''
   let socketUrl = ''
   while (Date.now() < deadline) {

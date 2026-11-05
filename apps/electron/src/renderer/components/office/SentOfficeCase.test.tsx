@@ -42,6 +42,7 @@ describe('sent Word / Excel case card', () => {
   it('a case without a sample file is a plain card; one with a sample opens it read-only for this chat', async () => {
     const tracker = render({ mode: 'excel', templateId: 'execution-tracker', revision: 'selection-o5' })
     expect(tracker).toContain('data-testid="office-sent-case"')
+    expect(tracker).toContain('没有原生样例')
     expect(tracker).not.toContain('<button')
     const seen: unknown[] = []
     const runtime = globalThis as { window?: unknown }

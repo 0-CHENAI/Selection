@@ -5,9 +5,11 @@ import { OFFICE_FORMAT_UPDATED, OFFICE_REQUEST_MAX_BYTES, type OfficeDocumentSta
 import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, toSkillCatalogEntries } from '@craft-agent/shared/skills'
 import { pptSendOptions } from './ppt-catalog'
 import {
+  OFFICECLI_DOCX_FULL_SKILL_MARKERS,
   authoringSkillForMode,
   buildOfficeInjection,
   executeOfficeTemplates,
+  hasWordNativeSample,
   listOfficeTemplates,
   officeAttachmentsKeepTemplate,
   officeFingerprint,
@@ -17,6 +19,7 @@ import {
   preserveOfficeInjection,
   projectOfficeModelContext,
   routedOfficeSkillNote,
+  usesWordTemplateGuide,
   type OfficeTranscriptMessage,
 } from './office-catalog'
 import { getOfficeRenderCapabilities, officeRenderPreview, officeRenderRecalc, resolveOfficeRenderPlan, setOfficeRenderCapabilities, setOfficeRenderHosts } from './office-render'
@@ -42,14 +45,15 @@ describe('office document mode', () => {
       })
       if (turn === 0) {
         builds += 1
-        expect(planned.modelAddition).toContain('office-docx 指南')
-        expect(planned.modelAddition).toContain('OfficeCLI DOCX Skill')
+        expect(planned.modelAddition).toContain('office-docx-template 指南')
+        expect(planned.modelAddition).not.toContain('OfficeCLI DOCX Skill')
         expect(planned.modelAddition).toContain('meeting-minutes@20261012.1')
         expect(planned.modelAddition).toContain('<business_skill name="meeting-recap">')
         expect(planned.modelAddition).toContain('行动项')
         expect(planned.modelAddition).toContain('Selection 文件交付')
-        expect(planned.modelAddition).toContain('--render native')
-        expect(planned.modelAddition).toContain('printToPDF')
+        expect(planned.modelAddition).toContain('产品内置 Office 预览')
+        expect(planned.modelAddition).not.toContain('--render native')
+        expect(planned.modelAddition).toContain('不要把 officecli-pptx 当作本次成稿技能')
       } else {
         expect(planned.modelAddition).toBeUndefined()
       }
@@ -262,9 +266,15 @@ describe('office document mode', () => {
       const injection = buildOfficeInjection({ mode: template.mode, templateId: template.id, revision: template.revision }, templates)
       const head = injection.slice(injection.indexOf('当前界面所选 Office 案例'))
       expect(head, template.id).toContain(`selected_template_id: ${template.id}`)
-      expect(head, template.id).toContain(`office_template(template_id="${template.id}")`)
       expect(head, template.id).toContain(`案例参考要点：${template.guidance}`)
-      expect(head.indexOf('案例参考要点'), template.id).toBeGreaterThan(head.indexOf('office_template(template_id='))
+      if (template.mode === 'word' && !hasWordNativeSample(template)) {
+        expect(head, template.id).toContain('没有原生样例文件')
+        expect(head, template.id).not.toContain(`office_template(template_id="${template.id}")`)
+        expect(head.indexOf('案例参考要点'), template.id).toBeGreaterThan(head.indexOf('没有原生样例文件'))
+      } else {
+        expect(head, template.id).toContain(`office_template(template_id="${template.id}")`)
+        expect(head.indexOf('案例参考要点'), template.id).toBeGreaterThan(head.indexOf('office_template(template_id='))
+      }
     }
     const planned = planOfficeTurn({ messages: [], templates, request: { mode: 'word', templateId: 'coffee-market', revision: templates.find(item => item.id === 'coffee-market')!.revision } })
     expect(planned.modelAddition).toContain(`案例参考要点：${templates.find(item => item.id === 'coffee-market')!.guidance}`)
@@ -273,6 +283,74 @@ describe('office document mode', () => {
       expect(bare).not.toContain('案例参考要点')
       for (const template of templates) expect(bare).not.toContain(template.guidance!)
     }
+  })
+
+  test('Word injection shape: native sampleFile gets the slim template guide; recipe / bare Word keep officecli-docx', () => {
+    const templates = listOfficeTemplates()
+    const wordCases = templates.filter(item => item.mode === 'word')
+    const withSample = wordCases.filter(hasWordNativeSample)
+    const withoutSample = wordCases.filter(item => !hasWordNativeSample(item))
+    expect(withSample.map(item => item.id)).toContain('meeting-minutes')
+    expect(withSample.map(item => item.id)).toContain('coffee-market')
+    expect(withoutSample.map(item => item.id)).toEqual(['selection-meeting-minutes', 'selection-work-notice'])
+
+    const slimGuide = readFileSync(join(import.meta.dir, '../../../../apps/electron/resources/skills/office-business/guides/office-docx-template.md'), 'utf8')
+    expect(slimGuide.length).toBeGreaterThan(800)
+    expect(slimGuide.length).toBeLessThanOrEqual(8 * 1024)
+    for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(slimGuide).not.toContain(marker)
+    expect(slimGuide).toContain('office_template')
+    expect(slimGuide).toContain('office_template_write')
+    expect(slimGuide).toContain('submit_answer')
+    expect(slimGuide).toContain('needs_revision')
+    expect(slimGuide).not.toContain('python-docx 写盘')
+    expect(slimGuide).toContain('不要使用 python-docx')
+
+    const sizes: Array<{ id: string; kind: 'template' | 'recipe' | 'bare'; chars: number }> = []
+    for (const template of withSample) {
+      const injection = buildOfficeInjection({ mode: 'word', templateId: template.id, revision: template.revision }, templates)
+      expect(usesWordTemplateGuide({ mode: 'word', templateId: template.id, revision: template.revision }, templates), template.id).toBe(true)
+      expect(injection, template.id).toContain('office-docx-template 指南')
+      expect(injection, template.id).toContain('office_template')
+      expect(injection, template.id).toContain('office_template_write')
+      expect(injection, template.id).toContain('产品内置 Office 预览')
+      expect(injection, template.id).not.toContain('# OfficeCLI DOCX Skill')
+      expect(injection, template.id).not.toContain('officecli-docx 指南')
+      for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(injection, `${template.id} ${marker}`).not.toContain(marker)
+      sizes.push({ id: template.id, kind: 'template', chars: injection.length })
+    }
+
+    for (const template of withoutSample) {
+      const injection = buildOfficeInjection({ mode: 'word', templateId: template.id, revision: template.revision }, templates)
+      expect(usesWordTemplateGuide({ mode: 'word', templateId: template.id, revision: template.revision }, templates), template.id).toBe(false)
+      expect(injection, template.id).toContain('office-docx 指南')
+      expect(injection, template.id).toContain('# OfficeCLI DOCX Skill')
+      expect(injection, template.id).toContain('没有原生样例文件')
+      expect(injection, template.id).toContain('较慢路径')
+      expect(injection, template.id).not.toContain('office-docx-template 指南')
+      for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(injection, `${template.id} ${marker}`).toContain(marker)
+      sizes.push({ id: template.id, kind: 'recipe', chars: injection.length })
+    }
+
+    const bare = buildOfficeInjection({ mode: 'word' }, templates)
+    expect(usesWordTemplateGuide({ mode: 'word' }, templates)).toBe(false)
+    expect(bare).toContain('office-docx 指南')
+    expect(bare).toContain('# OfficeCLI DOCX Skill')
+    expect(bare).toContain('--render native')
+    expect(bare).toContain('printToPDF')
+    expect(bare).not.toContain('office-docx-template 指南')
+    for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(bare).toContain(marker)
+    sizes.push({ id: 'word-bare', kind: 'bare', chars: bare.length })
+
+    const minutes = sizes.find(item => item.id === 'meeting-minutes')!
+    const recipe = sizes.find(item => item.id === 'selection-meeting-minutes')!
+    const bareSize = sizes.find(item => item.id === 'word-bare')!
+    expect(minutes.chars).toBeLessThan(bareSize.chars - 20_000)
+    expect(recipe.chars).toBeGreaterThan(bareSize.chars - 2_000)
+    expect(bareSize.chars).toBeGreaterThan(40_000)
+
+    const excel = buildOfficeInjection({ mode: 'excel' }, templates)
+    expect(excel).toContain('office-xlsx 指南')
+    expect(excel).toContain('OfficeCLI XLSX Skill')
   })
 
   test('case guidance never reaches the composer', () => {

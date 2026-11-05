@@ -64,4 +64,4 @@ description: "整理中英文简历和求职信。事实以用户材料为准，
 
 ## 文件交付
 
-用 OfficeCLI 写 DOCX，先 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只提供一页简历加一页求职信的版式。姓名、公司、岗位和结果全部替换。交付前走版式守卫。用户没要 PDF 时不导出。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只提供一页简历加一页求职信的版式。姓名、公司、岗位和结果全部替换。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。用户没要 PDF 时不导出。

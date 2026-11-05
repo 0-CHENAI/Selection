@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "Open the sample read-only in the Office panel",
   "office.case.previewLabel": "Preview sample: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "No native sample · generation recipe (slower)",
+  "office.case.recipePathHint": "This case has no native sample file. It uses the OfficeCLI generation recipe, which is slower than filling a template.",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Sample · read-only",

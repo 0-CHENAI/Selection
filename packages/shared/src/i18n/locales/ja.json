@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "Office パネルでサンプルを読み取り専用で開く",
   "office.case.previewLabel": "サンプルを表示：{{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "ネイティブサンプルなし · レシピ生成（低速）",
+  "office.case.recipePathHint": "このケースにはネイティブのサンプルファイルがありません。OfficeCLI のレシピで一から作るため、テンプレート記入より遅くなります。",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "サンプル · 読み取り専用",

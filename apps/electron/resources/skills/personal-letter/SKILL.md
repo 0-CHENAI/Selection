@@ -49,4 +49,4 @@ description: "写英文商务信函。按正式信函格式，缺的标待补充
 
 ## 文件交付
 
-先 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学信头、日期、称呼、分段和结尾的位置。交付前走版式守卫。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学信头、日期、称呼、分段和结尾的位置。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "Abrir el ejemplo en solo lectura en el panel de Office",
   "office.case.previewLabel": "Ver ejemplo: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "Sin muestra nativa · receta (más lento)",
+  "office.case.recipePathHint": "Este caso no tiene un archivo de muestra nativo. Usa la receta de OfficeCLI, más lenta que rellenar una plantilla.",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Ejemplo · solo lectura",

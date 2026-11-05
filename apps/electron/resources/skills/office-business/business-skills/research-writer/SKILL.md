@@ -544,11 +544,11 @@ your-project/
 
 把研究报告写成 Word 时：
 
-1. 先读 OfficeCLI 路由 `../../officecli/SKILL.md`，再执行 `officecli load_skill word`。
-2. 案例 `coffee-market` 与 `equity-research` 的 `example.docx` 只读。复制到工作区后再填写。禁止覆盖案例目录。
+1. 选中 `coffee-market` 或 `equity-research` 时：先 `office_template`，再一次 `office_template_write`。不要先 `officecli load_skill word`，也不要默认 `office_render` / screenshot。无案例时再读 OfficeCLI 路由 `../../officecli/SKILL.md` 并执行 `officecli load_skill word`。
+2. 案例 `coffee-market` 与 `equity-research` 的 `example.docx` 只读。禁止覆盖案例目录。
 3. 事实、数字和引文只来自用户材料或案例 `inputs/`。输入里没有的公司经营数字写「待确认」，不要把示例公司的冻结数字安到另一家公司上。
 4. 图表放在案例结构里的原位置。咖啡案例用 `inputs/coffee-chart-1.png` 至 `coffee-chart-4.png`；公司研报用 `inputs/image1.png` 至 `image3.png`。来源索引放在文末来源节。
-5. 先调用 `office_template` 拿到段落 / run ID，再用 `office_template_write` 按段落 ID 写；新增段落用 `style_from` 继承原样式。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。
-6. 不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit，也不为本步导出 PDF。渲染预览等 #705 选定后再做，不用 OCR。
-7. 成稿保持克制：少形容词，结论先行，每条数据能回到来源。成品是工作区 DOCX，由 Selection 的文件卡片呈现。
+5. `office_template_write` 按段落 ID 写；新增段落用 `style_from` 继承原样式。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。
+6. 不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。写出成功且守卫通过后不要默认导出 PDF。用户要求检查排版或 needs_revision 后再做视觉，不用 OCR。
+7. 成稿保持克制：少形容词，结论先行，每条数据能回到来源。成品是工作区 DOCX，由 Selection 的文件卡片呈现。预览看产品内置 Office 预览，不要把 `view screenshot` 当交付前置。
 
