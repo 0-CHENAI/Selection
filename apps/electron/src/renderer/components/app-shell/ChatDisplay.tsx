@@ -2096,6 +2096,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   )}
                   <HandoverMessageBubble session={session} compactMode={compactMode} />
                   <ChatVirtualHistory key={session.id} ref={virtualHistoryRef} turns={allTurns}
+                    activeTurnStartIndex={sessionBusy ? Math.max(0, latestUserIndex) : undefined}
                     viewportRef={scrollViewportRef} getTurnKey={getTurnKey} onWindowChange={handleHistoryWindowChange}>
                   {(turn, index) => {
                     // Compute turn key and check if it's a search match

@@ -113,7 +113,8 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
   test('a streaming row reports its real height instead of an estimated box', () => {
     const history = readFileSync(new URL('../ChatVirtualHistory.tsx', import.meta.url), 'utf8')
     expect(history).toContain('data-chat-virtual-streaming')
-    expect(history).toContain('layOutStreamingRow ? undefined : { contentVisibility:')
+    expect(history).toContain('const layOutRow = active || (streaming && visible)')
+    expect(history).toContain("...(layOutRow ? {} : { contentVisibility: 'auto'")
     expect(history).toContain('shouldMeasureVirtualScrollMargin')
   })
 

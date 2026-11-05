@@ -10,6 +10,8 @@ export interface ChatVirtualHistoryHandle {
 
 interface Props {
   turns: Turn[]
+  /** Current request must mount even before the estimated window catches up. */
+  activeTurnStartIndex?: number
   viewportRef: React.RefObject<HTMLDivElement>
   getTurnKey: (turn: Turn, index: number) => string
   onWindowChange: (start: number, end: number) => void
@@ -49,7 +51,7 @@ export function estimateChatTurnHeight(turn: Turn, width: number): number {
 
 /** Load viewport neighbours once; release visited rows only on session unmount. */
 export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Props>(function ChatVirtualHistory({
-  turns, viewportRef, getTurnKey, onWindowChange, children,
+  turns, activeTurnStartIndex, viewportRef, getTurnKey, onWindowChange, children,
 }, ref) {
   const listRef = React.useRef<HTMLDivElement>(null)
   const retainedKeys = React.useRef(new Set<string>())
@@ -143,6 +145,14 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
   }), [virtualizer])
   const rows = virtualizer.getVirtualItems()
   for (const row of rows) retainedKeys.current.add(String(row.key))
+  // The running status moves inside the assistant card as soon as its data
+  // arrives. Mount the whole current request independently of the virtual
+  // window, including initially empty/animated rows and tool-only turns.
+  if (activeTurnStartIndex != null && activeTurnStartIndex >= 0) {
+    for (let index = activeTurnStartIndex; index < turns.length; index++) {
+      retainedKeys.current.add(getTurnKey(turns[index]!, index))
+    }
+  }
   const retainedRows = virtualizer.measurementsCache.filter(row => retainedKeys.current.has(String(row.key)))
   const start = rows[0]?.index ?? 0
   const end = rows.length ? rows[rows.length - 1]!.index + 1 : 0
@@ -158,15 +168,22 @@ export const ChatVirtualHistory = React.forwardRef<ChatVirtualHistoryHandle, Pro
           // follow never sees a taller transcript until the stream ends.
           const streaming = turn.type === 'assistant' && turn.isStreaming
           const visible = row.index >= start && row.index < end
-          // Offscreen live rows must not lay out every token. Only the on-screen
-          // streaming row reports its real height so stick-to-bottom can follow.
-          const layOutStreamingRow = streaming && visible
+          const active = activeTurnStartIndex != null && activeTurnStartIndex >= 0 && row.index >= activeTurnStartIndex
+          // Current-request rows must measure actual content, even when an old
+          // estimate places them outside the window. Otherwise follow-scroll
+          // and visibility can wait on each other indefinitely.
+          const layOutRow = active || (streaming && visible)
           return (
           <div key={row.key} data-index={row.index} ref={virtualizer.measureElement}
             data-chat-virtual-visible={visible}
             data-chat-virtual-streaming={streaming ? '' : undefined}
             className="absolute left-0 top-0 w-full min-w-0"
-            style={layOutStreamingRow ? undefined : { contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }}>
+            style={{
+              // directDomUpdates positions window rows only on commit. Newly
+              // pinned rows also need their position on their very first paint.
+              transform: `translate3d(0, ${row.start - scrollMargin}px, 0)`,
+              ...(layOutRow ? {} : { contentVisibility: 'auto', containIntrinsicSize: `auto ${row.size}px` }),
+            }}>
             {children(turn, row.index)}
           </div>
           )

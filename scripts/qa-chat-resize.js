@@ -119,8 +119,8 @@ await page.evaluate(() => {
       }
       function Reveal({ identity, streaming = false, fresh, count = 1 }) {
         const ref = React.useRef(null)
-        useSemanticReveal(ref, String(count), fresh, streaming, identity)
-        return h('div', { ref }, Array.from({ length: count }, (_, i) => h('p', { key: i }, `段落 ${i}`)))
+        useSemanticReveal(ref, 'x'.repeat(count), fresh, streaming, identity)
+        return h('div', { ref }, Array.from({ length: count }, (_, i) => h('p', { key: i, 'data-stream-start': i, 'data-stream-end': i + 1 }, `段落 ${i}`)))
       }
       try {
         revealRoot.render(h(React.StrictMode, null, h(Reveal, { identity: 'qa-history' })))
