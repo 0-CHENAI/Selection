@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { load } from 'js-yaml'
 
+// CI --keep-going uses a process pool (one bun test per file). Isolated files
+// still run last and serially. Default mode stays serial and fail-fast.
 const runner = join(import.meta.dir, 'run-tracked-tests.sh')
 const fixtures: string[] = []
 
@@ -42,7 +44,9 @@ function run(fixture: ReturnType<typeof makeFixture>, ...args: string[]) {
 test('CI mode runs every tracked and untracked test, then reports all failures', () => {
   const result = run(makeFixture(), '--keep-going')
   expect(result.status).toBe(1)
-  expect(result.calls).toEqual(['0 untracked.test.ts', 'a fail.test.ts', 'b pass.test.ts', 'c fail.isolated.ts'])
+  // Regular files may finish in any order under the process pool; isolated stay last.
+  expect(result.calls.at(-1)).toBe('c fail.isolated.ts')
+  expect(result.calls.slice(0, -1).sort()).toEqual(['0 untracked.test.ts', 'a fail.test.ts', 'b pass.test.ts'])
   expect(result.stderr).toContain('Failed test files (2):')
   expect(result.stderr).toContain('a fail.test.ts')
   expect(result.stderr).toContain('c fail.isolated.ts')
@@ -62,7 +66,7 @@ test('CI mode succeeds when no tests fail, including an empty isolated set', () 
   expect(spawnSync('git', ['rm', '--cached', 'a fail.test.ts'], { cwd: fixture.repo }).status).toBe(0)
   const result = run(fixture, '--keep-going')
   expect(result.status).toBe(0)
-  expect(result.calls).toEqual(['0 untracked.test.ts', 'b pass.test.ts'])
+  expect(result.calls.sort()).toEqual(['0 untracked.test.ts', 'b pass.test.ts'])
 })
 
 test('the required validation check rejects failed or skipped parallel jobs', () => {

@@ -1,0 +1,54 @@
+# Optional Darwin coverage. Not a PR merge gate.
+#
+# PRs used to block on xcode-27 / macos-15 for typecheck, lint, and tracked
+# tests. Those jobs queued for ~15 minutes and cancelled with 0 steps when
+# capacity was gone (#787, #788). Linux Validate now owns that gate.
+# This workflow keeps sandbox-exec and Darwin-only tests on a schedule.
+name: Validate macOS Native
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: validate-macos-native
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: "0"
+
+jobs:
+  macos-native:
+    name: macos-native-validation
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Show macOS validation environment
+        run: |
+          sw_vers
+          uname -m
+
+      - name: Setup Selection CI
+        uses: ./.github/actions/setup-selection-ci
+        with:
+          install-uv: "true"
+          cache-officecli-runtime: "true"
+
+      - name: Verify native macOS confinement
+        run: bun scripts/ci/probe-native-confinement.ts
+
+      - name: Verify pinned OfficeCLI runtime and internal resources
+        run: bun run officecli:prepare && bun run officecli:check
+
+      - name: Run tracked tests
+        env:
+          TRACKED_TEST_PROCS: "4"
+        run: bash scripts/run-tracked-tests.sh --keep-going

@@ -1,3 +1,6 @@
+# Post-merge packaging only. Not a PR gate. macOS ARM64 still needs macos-15
+# here because it produces the Darwin installers; a queue stall on this
+# workflow does not turn a PR red. See docs/ci.md.
 name: Package Desktop Installers
 
 on:
@@ -7,8 +10,15 @@ on:
       - test
   workflow_dispatch:
 
+concurrency:
+  group: package-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
+
+env:
+  HUSKY: "0"
 
 jobs:
   package-macos-arm64:

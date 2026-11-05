@@ -1,4 +1,6 @@
+# Path-filtered skill-install contract. These tests are not Darwin-specific.
 name: Skill Install Contract
+
 on:
   pull_request:
     paths:
@@ -7,20 +9,29 @@ on:
       - 'packages/session-tools-core/**'
       - 'packages/session-mcp-server/**'
       - '.github/workflows/skill-install.yml'
+      - '.github/actions/setup-selection-ci/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-install-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HUSKY: "0"
+
 jobs:
   skill-install:
     runs-on: ${{ matrix.os }}
+    name: skill-install (${{ matrix.os }})
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-2025]
+        os: [ubuntu-latest, windows-2025]
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.10'
-      - run: bun install --frozen-lockfile
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-selection-ci
       - run: bun test packages/shared/src/skills/install.test.ts packages/shared/src/skills/install-source.test.ts packages/shared/src/agent/__tests__/pi-skill-install.test.ts

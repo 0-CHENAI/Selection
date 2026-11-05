@@ -1,0 +1,25 @@
+name: Run OfficeCLI packaged integration
+description: Prepare the reviewed runtime, build the packaged layout, and run OfficeCLI skill integration. Call setup-selection-ci from the workflow first.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify reviewed runtime and resources
+      shell: bash
+      run: bun run officecli:prepare && bun run officecli:check
+
+    - name: Build packaged resource layout
+      shell: bash
+      run: bun run electron:build:resources
+
+    - name: Stage trusted Bun runtime in packaged layout
+      shell: bash
+      run: |
+        bun -e 'import { chmodSync, copyFileSync, mkdirSync } from "node:fs"; import { dirname, join } from "node:path"; const target = join("apps/electron/dist/vendor/bun", process.platform === "win32" ? "bun.exe" : "bun"); mkdirSync(dirname(target), { recursive: true }); copyFileSync(process.execPath, target); if (process.platform !== "win32") chmodSync(target, 0o755);'
+
+    - name: Run packaged OfficeCLI skill integration
+      shell: bash
+      env:
+        CRAFT_RESOURCES_BASE: ${{ github.workspace }}/apps/electron/dist
+        OFFICECLI_INTEGRATION: "1"
+      run: bun run test:officecli:integration
