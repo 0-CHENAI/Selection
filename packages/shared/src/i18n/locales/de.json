@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "Beispiel schreibgeschützt im Office-Bereich öffnen",
   "office.case.previewLabel": "Beispiel ansehen: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "Kein natives Beispiel · Rezeptpfad (langsamer)",
+  "office.case.recipePathHint": "Dieser Fall hat keine native Beispieldatei und folgt dem OfficeCLI-Rezept — langsamer als das Ausfüllen einer Vorlage.",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Beispiel · schreibgeschützt",

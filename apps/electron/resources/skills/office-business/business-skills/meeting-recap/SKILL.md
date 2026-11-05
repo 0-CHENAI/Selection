@@ -61,13 +61,13 @@ license: MIT
 
 用户选择会议纪要案例时，只读 `cases/meeting-minutes/example.docx`。把原件复制到会话工作区后再改，禁止覆盖案例目录里的文件。
 
-先调用 `office_template(template_id="meeting-minutes")`，按返回的段落 / run ID 用 `office_template_write` 写出新的 DOCX：replacements 替换示例事实，additions 用 `style_from` 继承原段落样式，行动项超出示例行数时用 row_additions 克隆表格行。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。需要 OfficeCLI 时先读 [OfficeCLI 路由](../../officecli/SKILL.md)，执行 `officecli load_skill word`。
+先调用 `office_template(template_id="meeting-minutes")`，按返回的段落 / run ID 用一次 `office_template_write` 写出新的 DOCX：replacements 替换示例事实，additions 用 `style_from` 继承原段落样式，行动项超出示例行数时用 row_additions 克隆表格行。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。写出成功且守卫通过后，不要再跑 OfficeCLI 增量编辑，也不要默认 `office_render` / screenshot。仅在用户要求检查排版，或宿主返回 needs_revision 之后，再读 [OfficeCLI 路由](../../officecli/SKILL.md) 并执行 `officecli load_skill word`。
 
 沿用所选原件的 A4 纵向、约 2cm 页边距及原生标题样式。Title 约 23pt、Heading 1 约 14pt、Heading 2 约 12pt，黑色；正文 11pt、精确 16pt 行距。标题设 keep_with_next，与后文保持相邻。Title 样式与标题段落不带边框；段落 snapToGrid 为 false，保持实际行距。原件字体随副本保留；换字体时先看返回的 `font_warnings`。
 
 会议案例的行动表为“任务与交付要求 / 责任分工 / 期限”三列，宽度 10.2 / 3.1 / 3.7cm。任务单元格按任务、交付标准与来源分层呈现，责任和期限居中。改列宽时同时改 tblGrid 的 gridCol 与每个单元格的 tcW，两者保持一致。表格段落用精确 14pt 行距，行高自动，保留单元格内边距、完整表格行与重复表头；页脚沿用 PAGE / NUMPAGES 字段。行动项数量与页数由当前材料自然形成。
 
-用当前用户材料替换案例中的示例事实，保留标题样式、可编辑段落及表格。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。有 `office_render` 时导出 PDF 逐页复核：标题与后文是否同页、三列宽度、尾页密度、字体诊断；没有页图时写「视觉检查未做」，不以缺页图冒充通过，不用 OCR。
+用当前用户材料替换案例中的示例事实，保留标题样式、可编辑段落及表格。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。不要把截图当交付前置。用户要求检查排版或 needs_revision 之后，有 `office_render` 再导出 PDF 逐页复核：标题与后文是否同页、三列宽度、尾页密度、字体诊断；没有页图时写「视觉检查未做」，不以缺页图冒充通过，不用 OCR。
 
 结构检查调用会话工具 `office_business`，command 为 `validate-minutes`，传入纪要 Markdown 或工作区内的路径。退出码 0 表示章节、表格字段、日期和重复任务通过。该检查不证明事实与原文一致。安装包不带 Python；计算在应用进程内完成：
 
@@ -88,7 +88,7 @@ license: MIT
 - 每项任务只在行动项表中登记一次，议题和汇总之间的信息一致。
 - 当前 DOCX 的示例内容已由本次会议事实完整替换，案例原件的 sha256 未变。
 - `office_business` 的 validate-minutes 已通过。
-- 版式守卫已通过；逐页页图检查已做，或明确记为未做。
+- 版式守卫已通过。不要默认做逐页页图；用户要求或 needs_revision 后再做视觉，或明确记为未做。
 
 可选运行上面的校验命令。脚本验证结构；事实准确性由原文逐项核对。
 
@@ -100,4 +100,4 @@ Selection 3.2 阶段 07 保留上述方法论和 LICENSE，把文件交付从安
 
 ## Selection 文件交付
 
-当前用户材料提供事实，所选案例提供结构和版式。未知字段写「待确认」。制作 Word 用 `office_template` + `office_template_write`，不用 python-docx。案例原件只读。纪要交付前运行 `validate-minutes`。宿主交付前自动跑版式守卫。成品由文件卡片交付。
+当前用户材料提供事实，所选案例提供结构和版式。未知字段写「待确认」。制作 Word 用 `office_template` + `office_template_write`，不用 python-docx。案例原件只读。纪要交付前运行 `validate-minutes`。宿主交付前自动跑版式守卫。预览看产品内置 Office 预览，不要把 `view screenshot` 当交付前置。成品由文件卡片交付。

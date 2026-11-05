@@ -34,7 +34,18 @@ export function SentOfficeCase({ office, sessionId }: { office: unknown; session
   const image = cover
     ? <img src={cover} alt={label} className="h-full w-full object-cover" />
     : <span className="flex h-full items-center justify-center px-1 text-center text-[11px] text-muted-foreground">{item.title}</span>
-  if (!canPreview) return <div title={label} className={className} data-testid="office-sent-case" data-office-case={item.id}>{image}</div>
+  if (!canPreview) {
+    return (
+      <div
+        title={`${label} · ${t('office.case.recipePathHint')}`}
+        className={className}
+        data-testid="office-sent-case"
+        data-office-case={item.id}
+      >
+        {image}
+      </div>
+    )
+  }
   return (
     <button
       type="button"

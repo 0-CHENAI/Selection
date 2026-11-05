@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "Otwórz przykład tylko do odczytu w panelu Office",
   "office.case.previewLabel": "Podgląd przykładu: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "Brak natywnego wzorca · receptura (wolniej)",
+  "office.case.recipePathHint": "Ten przypadek nie ma natywnego pliku wzorcowego. Korzysta z receptury OfficeCLI, wolniejszej niż wypełnianie szablonu.",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Przykład · tylko do odczytu",

@@ -236,11 +236,29 @@ describe('office home', () => {
     for (const id of ['meeting-minutes', 'coffee-market', 'equity-research', 'government-notice']) expect(word).toContain(`data-testid="office-case-preview-${id}"`)
     for (const id of ['annual-business', 'port-cargo', 'bio-assay']) expect(excel).toContain(`data-testid="office-case-preview-${id}"`)
     expect(excel).not.toContain('data-testid="office-case-preview-execution-tracker"')
+    expect(excel).toContain('data-testid="office-case-recipe-execution-tracker"')
+    expect(excel).toContain('无原生样例 · 按配方生成（较慢）')
+    expect(word).not.toContain('data-testid="office-case-recipe-meeting-minutes"')
     expect(word).toContain('aria-label="预览样例：中国现制咖啡市场调研报告"')
     expect(word).toContain('group-focus-within/case:opacity-100')
     expect(hasOfficeCaseSample({ sampleFile: 'example.xlsx' })).toBe(true)
     expect(hasOfficeCaseSample({ sampleFile: null })).toBe(false)
     expect(hasOfficeCaseSample({ sampleFile: 'deck.pptx' })).toBe(false)
+  })
+
+  it('an attached Selection sample without a native file explains the slower recipe path', async () => {
+    const selected = readFileSync(join(import.meta.dir, 'OfficeSelectedCase.tsx'), 'utf8')
+    expect(selected).toContain('office-case-recipe-hint')
+    expect(selected).toContain('office.case.recipePathHint')
+    expect(selected).toContain('!canPreview')
+    const { SentOfficeCase } = await import('./SentOfficeCase')
+    const sent = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <SentOfficeCase office={{ mode: 'excel', templateId: 'execution-tracker', revision: 'selection-o5' }} />
+      </I18nextProvider>,
+    )
+    expect(sent).toContain('没有原生样例')
+    expect(sent).not.toContain('<button')
   })
 
   it('a chat started from a case keeps a preview entry above the composer', async () => {

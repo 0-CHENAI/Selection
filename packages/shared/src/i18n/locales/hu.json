@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "A minta megnyitása csak olvasásra az Office panelen",
   "office.case.previewLabel": "Minta megtekintése: {{title}}",
   "office.case.previewSample": "Preview sample",
+  "office.case.recipePath": "Nincs natív minta · receptúra (lassabb)",
+  "office.case.recipePathHint": "Ennek az esetnek nincs natív mintafájlja. Az OfficeCLI receptúrát követi, ami lassabb a sablon kitöltésénél.",
   "office.case.referenceCase": "Reference case: {{title}}",
   "office.case.remove": "Remove case: {{title}}",
   "office.case.sampleBadge": "Minta · csak olvasható",

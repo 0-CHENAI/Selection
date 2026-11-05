@@ -1126,6 +1126,8 @@
   "office.case.previewHint": "在右侧 Office 协同面板只读打开样例",
   "office.case.previewLabel": "预览样例：{{title}}",
   "office.case.previewSample": "预览样例",
+  "office.case.recipePath": "无原生样例 · 按配方生成（较慢）",
+  "office.case.recipePathHint": "本案没有原生样例，会按生成配方用 OfficeCLI 从零制作，比「做同款」模板路径慢。",
   "office.case.referenceCase": "参考案例：{{title}}",
   "office.case.remove": "移除案例：{{title}}",
   "office.case.sampleBadge": "案例样例 · 只读",

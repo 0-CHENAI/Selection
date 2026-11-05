@@ -58,6 +58,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Word 案例「做同款」少绕路** — 选中带原生样例的 Word 案例时，只注入精简模板指南，默认走 `office_template` → 一次 `office_template_write` → 交付，不再把完整 OfficeCLI 技能和截图环当成必做。没有原生样例的 Selection 样例会标明按配方生成，行为不变。宿主 7 项版式守卫和 `needs_revision` 仍生效。
+
 - **Windows sub-agent 可执行 Python 与 OfficeCLI** — 为隔离工作区补上 Windows 受限令牌执行层，普通 sub-agent 现在可以在候选目录中运行 Python、OfficeCLI 和项目检查；写入、删除与 `.git` 修改仍限制在授权范围内，不再因为缺少原生 Shell 而直接拦截所有命令。
 
 - **长任务执行状态与恢复** — Bash 输出按快照更新，命令返回后显示结果处理阶段，大输出保留原文并提供有限预览，省去默认模型摘要等待；工具参数生成期间显示真实活动。异常回包和停止会收束等待，未确认的操作保留为未知。PPT 连续保存合并导出，始终更新同一份文件，失败保留上一份有效产物。#759–#765。

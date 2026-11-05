@@ -113,8 +113,8 @@ description: 按机关、文种和现有材料起草通知、请示、报告、�
 4. 版头不是示例案例的机关名。
 5. 字体字号和页边距符合第 5 册，或已写明偏差。
 6. 没有伪造的签发人和印章。
-7. OfficeCLI `validate` 已运行。页图用 `office_render` 原生读取，不用 OCR。
+7. 套用案例时版式守卫已通过。不要默认跑页图。用户要求检查排版或 needs_revision 之后，再用 `office_render` 原生读图，不用 OCR。无案例路径才运行 OfficeCLI `validate`。
 
 ## 文件交付
 
-用 OfficeCLI 写 DOCX。先 `officecli load_skill word`，步骤见第 6 册。不使用 python-docx，不调用 Python，不调用 LibreOffice。案例原件只读。套用案例时先 `office_template` 再 `office_template_write`；版头发文机关必须替换。宿主在写出和交付前跑版式守卫。需要看页面时调用 `office_render`，最多看三轮，禁止 OCR。
+套用案例时先 `office_template` 再一次 `office_template_write`；版头发文机关必须替换。不要先 `officecli load_skill word`。写出成功且守卫通过后，不要默认 `office_render` / screenshot。不使用 python-docx，不调用 Python，不调用 LibreOffice。案例原件只读。宿主在写出和交付前跑版式守卫。预览看产品内置 Office 预览，不要把 `view screenshot` 当交付前置。无案例、守卫失败需要改结构、或用户要求检查排版时，再 `officecli load_skill word`（步骤见第 6 册）或调用 `office_render`，最多看三轮，禁止 OCR。

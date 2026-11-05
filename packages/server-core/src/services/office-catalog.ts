@@ -324,21 +324,80 @@ export function authoringSkillForMode(mode: OfficeDocumentMode | 'ppt' | null): 
   return { skill: '', allowOfficePptxAuthoring: false }
 }
 
+/** Full officecli-docx phrases that must stay out of the Word template-case injection. */
+export const OFFICECLI_DOCX_FULL_SKILL_MARKERS = [
+  'Incremental execution',
+  'Visual delivery floor (applies to EVERY document)',
+  '### Delivery Gate (run before handing off',
+] as const
+
+export function hasWordNativeSample(template: Pick<OfficeTemplate, 'mode' | 'sampleFile'> | undefined): boolean {
+  return template?.mode === 'word' && typeof template.sampleFile === 'string' && /\.docx$/i.test(template.sampleFile)
+}
+
+/** Word + selected case + non-empty sampleFile → slim template guide, not the full OfficeCLI bible. */
+export function usesWordTemplateGuide(state: OfficeDocumentState, templates: OfficeTemplate[]): boolean {
+  return hasWordNativeSample(selectedOfficeTemplate(state, templates))
+}
+
+function wordTemplateGuidePath(): string {
+  const roots: string[] = []
+  try {
+    roots.push(getOfficeBusinessRoot())
+  } catch {
+    // Fall through to cwd candidates used in unit tests and unpackaged runs.
+  }
+  roots.push(
+    join(process.cwd(), 'apps', 'electron', 'resources', 'skills', 'office-business'),
+    join(process.cwd(), 'resources', 'skills', 'office-business'),
+    join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'skills', 'office-business'),
+  )
+  const found = [...new Set(roots)]
+    .map(root => join(root, 'guides', 'office-docx-template.md'))
+    .find(path => existsSync(path))
+  if (!found) throw new Error('Office 模板指南不可用。')
+  return found
+}
+
+const WORD_TEMPLATE_METHOD_TIPS = [
+  '方法要点：本案走模板填写。版式、字体、页眉页脚来自案例原件，不要用 OfficeCLI 重建。',
+  '不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。',
+  '分册和参考资料只在需要时读取。交付靠宿主 7 项版式守卫和文件卡片；预览看产品内置 Office 预览。',
+  'office_template_write 已成功且守卫未报错时，不要再跑 OfficeCLI 增量编辑，也不要默认 office_render / screenshot，不要把 view screenshot 当交付前置。',
+  '用户要求检查排版，或宿主返回 needs_revision 之后，再做视觉核验或按诊断重写。',
+].join('')
+
+const OFFICECLI_METHOD_TIPS = '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。预览在 Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `view screenshot --render native`，否则用 Electron capturePage。PDF 再不行时用 OfficeCLI HTML 加 Electron printToPDF。'
+
+function wordCaseToolOrder(template: OfficeTemplate): string {
+  if (!template.sampleFile) {
+    return `本案没有原生样例文件，不能调用 office_template。按案例生成配方用 OfficeCLI 从零制作（较慢路径）。不要把 screenshot 当交付前置。`
+  }
+  return `先调用 office_template(template_id="${template.id}")，再用 office_template_write 按返回的 editable_paragraphs 编排并替换内容，生成新的 DOCX。不要改案例原件。交付前版式守卫未通过就不能交。office_template_write 成功且守卫通过后，不要默认 office_render / screenshot。`
+}
+
 export function buildOfficeInjection(state: OfficeDocumentState, templates: OfficeTemplate[], skillsRoot?: string): string {
+  const template = selectedOfficeTemplate(state, templates)
+  const wordTemplate = hasWordNativeSample(template)
   const guide = state.mode === 'word' ? 'office-docx' : 'office-xlsx'
   const slug = state.mode === 'word' ? 'officecli-docx' : 'officecli-xlsx'
   const label = state.mode === 'word' ? 'Word DOCX' : 'Excel XLSX'
-  const foundation = readText(guidePath(slug))
-  const parts = [
-    `当前输出格式：${label}。`,
-    `${guide} 指南（实现是 OfficeCLI 的 ${slug}，不搬入 python-docx 或 openpyxl 正文）：`,
-    foundation,
-    '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。预览在 Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `view screenshot --render native`，否则用 Electron capturePage。PDF 再不行时用 OfficeCLI HTML 加 Electron printToPDF。',
-  ]
-  const template = selectedOfficeTemplate(state, templates)
+  const parts = wordTemplate
+    ? [
+      `当前输出格式：${label}。`,
+      'office-docx-template 指南（案例填模板；不注入完整 officecli-docx）：',
+      readText(wordTemplateGuidePath()),
+      WORD_TEMPLATE_METHOD_TIPS,
+    ]
+    : [
+      `当前输出格式：${label}。`,
+      `${guide} 指南（实现是 OfficeCLI 的 ${slug}，不搬入 python-docx 或 openpyxl 正文）：`,
+      readText(guidePath(slug)),
+      OFFICECLI_METHOD_TIPS,
+    ]
   if (template) {
     const toolOrder = template.mode === 'word'
-      ? `先调用 office_template(template_id="${template.id}")，再用 office_template_write 按返回的 editable_paragraphs 编排并替换内容，生成新的 DOCX。不要改案例原件。交付前版式守卫未通过就不能交。`
+      ? wordCaseToolOrder(template)
       : `先调用 office_template(template_id="${template.id}")，再用 OfficeCLI 修改返回的工作区副本。交付前必须调用 xlsx_recalculate；未重算或核对不一致时，不要把缓存值当成结果。`
     parts.push([
       `当前界面所选 Office 案例：${template.title}。`,

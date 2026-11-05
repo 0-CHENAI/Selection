@@ -2,6 +2,8 @@
 
 ## 工具
 
+套用 `government-notice` 时用 `office_template` / `office_template_write`，不要先加载 OfficeCLI。无案例、守卫失败需要改结构、或用户要求从零重做时：
+
 1. 阅读 [OfficeCLI 路由](../../../officecli/SKILL.md)。
 2. 执行 `officecli load_skill word`。
 3. 不安装、不调用 python-docx，不使用 Python，不使用 LibreOffice Kit。
@@ -30,6 +32,6 @@
 
 ## 看页面
 
-交付前用 `office_render` 看首页版头和末页版记，原生读图，最多三轮。禁止 OCR。宿主暂时没有页图时，结论写「视觉检查未做」，不要写成通过。PDF 按已定的原生优先顺序；这一步没接上时说明边界，不假装已经导出。
+`office_template_write` 成功且版式守卫通过后，不要默认 `office_render` / screenshot。仅当用户要求检查排版，或宿主返回 needs_revision 之后，再用 `office_render` 看首页版头和末页版记，原生读图，最多三轮。禁止 OCR。宿主暂时没有页图时，结论写「视觉检查未做」，不要写成通过。预览以产品内置 Office 预览为准，不要把 `view screenshot` 当交付前置。PDF 按已定的原生优先顺序；这一步没接上时说明边界，不假装已经导出。
 
 成品路径使用用户指定的位置；用户没指定时放在当前工作目录。中间文件放进会话的 `dataFolderPath`。由 Selection 的文件卡片呈现 DOCX。

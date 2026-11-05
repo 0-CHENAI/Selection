@@ -52,6 +52,11 @@ export function OfficeSelectedCase({ composerKey, disabled }: { composerKey: str
           <div className="px-2 pb-1 pt-1.5">
             <p title={item.title} className="truncate text-[13px] font-medium text-foreground">{item.title}</p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{t('office.case.attachedBadge')}{item.category ? ` · ${item.category}` : ''}</p>
+            {!canPreview && (
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground" data-testid="office-case-recipe-hint">
+                {t('office.case.recipePathHint')}
+              </p>
+            )}
           </div>
           {canPreview && (
             <button

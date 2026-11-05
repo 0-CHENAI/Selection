@@ -50,4 +50,4 @@ description: "写产品需求文档。用户故事和验收标准写清，缺的
 
 ## 文件交付
 
-先 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学章节顺序。交付前走版式守卫。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学章节顺序。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

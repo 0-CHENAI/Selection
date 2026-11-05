@@ -108,6 +108,15 @@ export function OfficeCaseGallery({ mode, composerKey }: { mode: 'word' | 'excel
               </div>
               <p title={item.title} className="mt-2 truncate text-[13px]">{item.title}</p>
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.category}</p>
+              {!hasOfficeCaseSample(item) && (
+                <p
+                  className="mt-0.5 truncate text-[11px] text-muted-foreground"
+                  title={t('office.case.recipePathHint')}
+                  data-testid={`office-case-recipe-${item.id}`}
+                >
+                  {t('office.case.recipePath')}
+                </p>
+              )}
             </article>
           )
         })}
