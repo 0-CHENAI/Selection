@@ -7,13 +7,15 @@
 | 检查名 | 工作流 | Runner | 做什么 |
 | --- | --- | --- | --- |
 | `validation-checks` | Validate | `ubuntu-latest` | 文件名、OfficeCLI 资源/策略、Linux bubblewrap 隔离、typecheck、renderer 冷启动、共享/Pi/文档工具测试、lint、i18n |
-| `tracked-tests` | Validate | `ubuntu-latest` | `scripts/run-tracked-tests.sh`（普通文件并行，`.isolated.ts` 串行） |
+| `tracked-tests` | Validate | `ubuntu-latest` | `scripts/run-tracked-tests.sh`（每个文件单独进程；CI 下最多 4 个进程并行，`.isolated.ts` 仍串行） |
 | `validate` | Validate | `ubuntu-latest` | 聚合上面两个 job。失败文案会标明 Infra（取消/跳过）还是 Product（job 已开始后失败） |
 | `artifact-windows` | Validate | `windows-2025` | Windows 产物投递相关单测 |
 
 `packages/ui`、Electron renderer、typecheck、lint、tracked tests 都在这条 Linux/Windows 门禁上。改 UI 仍然会跑 `validation-checks` / `tracked-tests`。
 
 同一 PR 分支的新 push 会取消进行中的 Validate / OfficeCLI / 路径过滤工作流，避免把分钟数耗在过期 commit 上。推到 `test` / `main` 的 Validate **不会**被取消。
+
+tracked tests 不能把很多文件丢进同一个 `bun test` 进程。Electron 的 `mock.module`、模块加载时读的 `CRAFT_CONFIG_DIR`、以及 i18n 单例都会串台。CI 用多个进程并行，每个文件仍是单独进程。
 
 ## 路径过滤（只有相关 diff 才跑）
 

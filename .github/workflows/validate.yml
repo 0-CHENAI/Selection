@@ -131,6 +131,8 @@ jobs:
         run: bun scripts/sync-officecli.ts --check
 
       - name: Run tracked tests
+        env:
+          TRACKED_TEST_PROCS: "4"
         run: bash scripts/run-tracked-tests.sh --keep-going
 
   # Preserve the existing required check name while gating on both Linux jobs.

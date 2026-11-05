@@ -49,4 +49,6 @@ jobs:
         run: bun run officecli:prepare && bun run officecli:check
 
       - name: Run tracked tests
+        env:
+          TRACKED_TEST_PROCS: "4"
         run: bash scripts/run-tracked-tests.sh --keep-going
