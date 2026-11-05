@@ -27,17 +27,15 @@ export function shouldMeasureVirtualScrollMargin(
   return entries.some(entry => entry.target !== list)
 }
 
-export function isVirtualTurnInWindow(index: number, start: number, end: number): boolean {
-  return index >= start && index < end
-}
-
 /**
- * Whether the standalone tail status should show. Only the window end matters:
- * a processing turn above the top edge is still on screen as a card, and
- * keying on start flips with scroll and makes sticky follow oscillate.
+ * Standalone tail status covers the gap after send, before an assistant card
+ * exists. Do not key this on the virtual window: retained rows can sit on
+ * screen while start/end still exclude them, which toggles height and makes
+ * sticky follow oscillate. Once a processing turn exists, the in-card status
+ * is the only running timer.
  */
-export function shouldShowTailProcessingIndicator(index: number, end: number): boolean {
-  return index === -1 || index >= end
+export function shouldShowTailProcessingIndicator(processingTurnIndex: number): boolean {
+  return processingTurnIndex === -1
 }
 
 /** Estimates only seed the scrollbar; ResizeObserver caches actual row heights. */
