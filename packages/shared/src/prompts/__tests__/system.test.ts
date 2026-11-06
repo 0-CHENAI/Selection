@@ -24,9 +24,12 @@ import {
 } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
 import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
+import {
+  GIT_COAUTHOR_TRAILER,
+  LEGACY_CRAFT_GIT_COAUTHOR_EMAILS,
+} from '../../branding.ts'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
-const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
   it('audits completion in the existing model turn without adding a router or reviewer (#770)', () => {
@@ -282,12 +285,20 @@ describe('system prompt guidance', () => {
   })
 })
 
+function expectNoLegacyCraftGitHubIdentity(prompt: string) {
+  for (const email of LEGACY_CRAFT_GIT_COAUTHOR_EMAILS) {
+    expect(prompt).not.toContain(`<${email}>`)
+  }
+  expect(prompt).not.toContain('Co-Authored-By: Craft Agent')
+  expect(prompt).not.toContain('Co-Authored-By: Craft Agents')
+}
+
 describe('includeCoAuthoredBy handling', () => {
   beforeEach(() => {
     mockIncludeCoAuthoredBy = true
   })
 
-  it('includes the Git Conventions block when the arg is explicitly true', () => {
+  it('includes the Selection GitHub trailer when the arg is explicitly true', () => {
     const prompt = getSystemPrompt(
       undefined,
       undefined,
@@ -299,10 +310,12 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).toContain(GIT_COAUTHOR_TRAILER)
+    expect(prompt).toContain('GitHub pull request, issue, or comment bodies')
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
-  it('omits the Git Conventions block when the arg is explicitly false', () => {
+  it('omits the Git Conventions trailer when the arg is explicitly false', () => {
     const prompt = getSystemPrompt(
       undefined,
       undefined,
@@ -314,7 +327,8 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).not.toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).not.toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).not.toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
   // Regression test for #576: Pi-backed sessions called getSystemPrompt without
@@ -335,7 +349,8 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).not.toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).not.toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).not.toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 
   it('falls back to getCoAuthorPreference() === true when the arg is omitted and the user has not opted out', () => {
@@ -349,7 +364,8 @@ describe('includeCoAuthoredBy handling', () => {
     )
 
     expect(prompt).toContain(GIT_CONVENTIONS_HEADING)
-    expect(prompt).toContain(CO_AUTHOR_TRAILER)
+    expect(prompt).toContain(GIT_COAUTHOR_TRAILER)
+    expectNoLegacyCraftGitHubIdentity(prompt)
   })
 })
 
