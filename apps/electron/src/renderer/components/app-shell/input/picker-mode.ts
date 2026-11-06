@@ -11,6 +11,10 @@
  *                        so every added provider's models stay selectable
  *   3. flat            — list models for the only / active connection
  *
+ * Both `flat` and `switcher` use the same list/row chrome (names, checks,
+ * nested thinking under the current connection). Single-connection must not
+ * land on a separate effort-first overview card.
+ *
  * Multimodal capability is configured in Settings, not in this picker.
  */
 

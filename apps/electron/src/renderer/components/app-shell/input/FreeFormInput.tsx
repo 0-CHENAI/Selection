@@ -571,7 +571,6 @@ export function FreeFormInput({
   // The prompt slider is replaced by an explanation when this model cannot scale effort.
   const thinkingUnavailable = thinkingCapability.mode === 'levels' ? undefined : thinkingCapability.mode
   const thinkingDisabled = thinkingUnavailable !== undefined || availableThinkingLevels.length <= 1
-  const hasThinkingOverview = pickerMode === 'flat' && usePromptAppearance && !!onThinkingLevelChange && !thinkingUnavailable && availableThinkingLevels.length > 0
   const promptMaxed = usePromptAppearance && !thinkingDisabled && availableThinkingLevels.length > 1
     && thinkingLevel === availableThinkingLevels.at(-1)?.id
 
@@ -733,7 +732,6 @@ export function FreeFormInput({
   const [isFocused, setIsFocused] = React.useState(false)
   const [inputMaxHeight, setInputMaxHeight] = React.useState(540)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
-  const [modelPickerOverview, setModelPickerOverview] = React.useState(false)
   const [modelPickerPage, setModelPickerPage] = React.useState<{
     connectionSlug: string | null
     direction: 'forward' | 'back' | null
@@ -886,14 +884,13 @@ export function FreeFormInput({
       setModelMenuPlacement(modelPickerPlacement(modelTriggerRef.current.getBoundingClientRect(), window.innerHeight))
     }
     setModelDropdownOpen(open)
-    setModelPickerOverview(open && hasThinkingOverview)
     setModelPickerPage({
       connectionSlug: open && pickerMode === 'switcher' && currentModel && effectiveConnectionDetails?.isAuthenticated
         ? effectiveConnectionDetails.slug : null,
       direction: null,
     })
     if (!open) focusComposerAfterPicker()
-  }, [focusComposerAfterPicker, pickerMode, currentModel, effectiveConnectionDetails, hasThinkingOverview])
+  }, [focusComposerAfterPicker, pickerMode, currentModel, effectiveConnectionDetails])
 
   React.useEffect(() => {
     if (!modelDropdownOpen) return
@@ -915,7 +912,7 @@ export function FreeFormInput({
 
   // The pages share one menu. Move focus to the new page's first item.
   React.useEffect(() => {
-    if (!modelDropdownOpen || modelPickerOverview) return
+    if (!modelDropdownOpen) return
     const frame = requestAnimationFrame(() => {
       if (pickerMode === 'flat' && modelSearchInputRef.current) {
         modelSearchInputRef.current.focus()
@@ -924,7 +921,7 @@ export function FreeFormInput({
       modelMenuRef.current?.querySelector<HTMLElement>('[data-model-picker-active="true"] [role="menuitem"]:not([data-disabled])')?.focus()
     })
     return () => cancelAnimationFrame(frame)
-  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode, modelPickerOverview])
+  }, [modelDropdownOpen, browsedConnectionSlug, pickerMode])
 
   React.useEffect(() => {
     const openPicker = (event: CustomEvent<{ sessionId?: string }>) => {
@@ -1939,23 +1936,6 @@ export function FreeFormInput({
   const fastControl = onFastModeChange && fastSupported ? (
     <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu />
   ) : null
-  const overviewFastControl = onFastModeChange && fastSupported ? (
-    <FastModeButton enabled={fastMode} supported={fastSupported} family={fastFamily} busy={isProcessing} workMode={workMode} onChange={onFastModeChange} inMenu iconOnly />
-  ) : null
-  const browseOverviewModels = () => setModelPickerOverview(false)
-  const overviewThinkingSettings = hasThinkingOverview ? (
-    <PromptThinkingSettings
-      value={thinkingLevel}
-      levels={availableThinkingLevels}
-      workMode={workMode}
-      disabled={disabled || thinkingDisabled}
-      binary={thinkingCapability.binary}
-      headingAction={overviewFastControl}
-      modelName={currentModelDisplayName}
-      onBrowseModels={browseOverviewModels}
-      onChange={onThinkingLevelChange!}
-    />
-  ) : null
   const promptThinkingSettings = usePromptAppearance && onThinkingLevelChange && thinkingUnavailable !== 'unsupported' && (thinkingUnavailable === 'always-on' || availableThinkingLevels.length > 0) ? (
     <PromptThinkingSettings
       value={thinkingLevel}
@@ -2519,16 +2499,9 @@ export function FreeFormInput({
               style={{ maxHeight: `min(24rem, ${modelMenuPlacement.maxHeight}px)` }}
               ref={modelMenuRef}
               className="prompt-model-picker relative min-w-[min(260px,calc(100vw-24px))] max-w-[calc(100vw-24px)] max-h-[min(24rem,70vh)] flex flex-col overflow-hidden"
-              data-overview={(modelPickerOverview && !!overviewThinkingSettings) || undefined}
               onKeyDown={event => {
-                if (event.key !== 'ArrowLeft' || modelPickerOverview) return
+                if (event.key !== 'ArrowLeft' || !browsedConnection) return
                 if ((event.target as HTMLElement).closest('input, [role="slider"]')) return
-                if (hasThinkingOverview && (pickerMode === 'flat' || !browsedConnection)) {
-                  event.preventDefault()
-                  setModelPickerOverview(true)
-                  return
-                }
-                if (!browsedConnection) return
                 event.preventDefault()
                 navigateModelPicker(null)
               }}
@@ -2539,14 +2512,14 @@ export function FreeFormInput({
               // close it (#332).
               onCloseAutoFocus={keepComposerFocusOnPickerClose}
               onOpenAutoFocus={(event) => {
-                if (modelPickerOverview || pickerMode !== 'flat' || !showModelSearch) return
+                if (pickerMode !== 'flat' || !showModelSearch) return
                 event.preventDefault()
                 modelSearchInputRef.current?.focus()
               }}
             >
               <AnimatePresence initial={false} mode="popLayout" custom={modelPickerMotion}>
               <motion.div
-                key={modelPickerOverview ? 'overview' : browsedConnectionSlug ?? pickerMode}
+                key={browsedConnectionSlug ?? pickerMode}
                 className="model-picker-page flex min-h-0 min-w-0 flex-col gap-0.5"
                 data-direction={modelPickerPage.direction ?? undefined}
                 custom={modelPickerMotion}
@@ -2560,14 +2533,10 @@ export function FreeFormInput({
                 }}
               >
                 <ModelPickerPageContent>
-                {modelPickerOverview && overviewThinkingSettings ? overviewThinkingSettings : <>
-                {hasThinkingOverview && (pickerMode === 'flat' || !browsedConnection) && (
-                  <StyledDropdownMenuItem onSelect={event => { event.preventDefault(); setModelPickerOverview(true) }} className="shrink-0 flex items-center gap-2 px-2 py-2 rounded-lg">
-                    <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate font-medium text-sm">{t('thinking.effort')}</span>
-                  </StyledDropdownMenuItem>
-                )}
-                <div className={pickerMode === 'switcher' && browsedConnection ? 'contents' : 'min-h-0 overflow-y-auto'}>
+                <div
+                  className={pickerMode === 'switcher' && browsedConnection ? 'contents' : 'min-h-0 overflow-y-auto'}
+                  data-model-picker-list={pickerMode === 'switcher' && browsedConnection ? undefined : true}
+                >
                 {/* Connection unavailable message */}
                 {pickerMode === 'unavailable' ? (
                   <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
@@ -2585,12 +2554,11 @@ export function FreeFormInput({
                       liveOpenRouterModels={liveOpenRouterModels}
                       currentModel={currentModel}
                       isCurrentConnection={effectiveConnection === browsedConnection.slug}
-                      thinkingSettings={!hasThinkingOverview && effectiveConnection === browsedConnection.slug ? promptThinkingSettings : undefined}
+                      thinkingSettings={effectiveConnection === browsedConnection.slug ? promptThinkingSettings : undefined}
                       onBack={() => navigateModelPicker(null)}
                       onPick={(modelId, connectionSlug) => {
                         if (effectiveConnection !== connectionSlug || !isPickerModelSelected(currentModel, modelId)) rememberModelPickerBounds('model')
                         onModelChange(modelId, connectionSlug)
-                        if (hasThinkingOverview) setModelPickerOverview(true)
                       }}
                     />
                   ) : connectionsByProvider.map(([providerName, connections], index) => (
@@ -2672,8 +2640,8 @@ export function FreeFormInput({
                             event.preventDefault()
                             const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
                             if (next === undefined) return
+                            if (!isPickerModelSelected(currentModel, modelId)) rememberModelPickerBounds('model')
                             onModelChange(next, effectiveConnection)
-                            if (hasThinkingOverview) setModelPickerOverview(true)
                           }}
                           className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                         >
@@ -2703,13 +2671,13 @@ export function FreeFormInput({
                 )}
 
                 </div>
-                {!hasThinkingOverview && fastControl && currentPickerPage && !fastInThinkingHeading && (
+                {fastControl && currentPickerPage && !fastInThinkingHeading && (
                   <div className="shrink-0">
                     <StyledDropdownMenuSeparator className="my-1" />
                     <div className="flex justify-end px-3 py-2">{fastControl}</div>
                   </div>
                 )}
-                {!hasThinkingOverview && pickerMode === 'flat' && promptThinkingSettings && (
+                {pickerMode === 'flat' && promptThinkingSettings && (
                   <div className="prompt-thinking-reveal shrink-0">
                     <StyledDropdownMenuSeparator className="my-1" />
                     {promptThinkingSettings}
@@ -2760,7 +2728,6 @@ export function FreeFormInput({
                     </DropdownMenuSub>
                   </>
                 )}
-                </>}
                 </ModelPickerPageContent>
               </motion.div>
               </AnimatePresence>

@@ -73,4 +73,9 @@ describe('pickerPageShowsCurrentConnection', () => {
     expect(pickerPageShowsCurrentConnection('switcher', null, null)).toBe(false)
     expect(pickerPageShowsCurrentConnection('unavailable', 'chatgpt', 'chatgpt')).toBe(false)
   })
+
+  test('single-connection flat is already on the current connection page', () => {
+    expect(pickerPageShowsCurrentConnection('flat', null, 'laufry')).toBe(true)
+    expect(pickerPageShowsCurrentConnection('flat', 'laufry', 'laufry')).toBe(true)
+  })
 })

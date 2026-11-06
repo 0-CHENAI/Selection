@@ -568,6 +568,8 @@ interface InputContainerPlaygroundProps {
   appearance?: 'classic' | 'prompt'
   workMode?: WorkMode
   modelPickerHierarchy?: boolean
+  /** One connection so the picker uses `flat` list chrome, not the multi-provider switcher. */
+  modelPickerSingle?: boolean
   thinkingLevel?: ThinkingLevel
   disabled?: boolean
   isProcessing?: boolean
@@ -598,6 +600,7 @@ function InputContainerPlayground({
   appearance = 'prompt',
   workMode = 'NORM',
   modelPickerHierarchy = false,
+  modelPickerSingle = false,
   thinkingLevel = 'medium',
   disabled = false,
   isProcessing = false,
@@ -791,8 +794,12 @@ function InputContainerPlayground({
     <ModalProvider>
     <AppShellProvider value={{
       ...playgroundAppShellContext,
-      llmConnections: modelPickerHierarchy ? inputModelMenuConnections : [],
-      workspaceDefaultLlmConnection: modelPickerHierarchy ? 'eming' : undefined,
+      llmConnections: modelPickerHierarchy
+        ? inputModelMenuConnections
+        : modelPickerSingle
+          ? inputModelMenuConnections.slice(0, 1)
+          : [],
+      workspaceDefaultLlmConnection: modelPickerHierarchy || modelPickerSingle ? 'eming' : undefined,
     } as any}>
       <div className="w-full h-full flex flex-col bg-background">
         <div className="flex-1" />
@@ -827,8 +834,8 @@ function InputContainerPlayground({
             },
             currentModel: model,
             enableCompactModelPicker: compactMode && enableCompactModelPicker,
-            currentConnection: modelPickerHierarchy ? connection : undefined,
-            onConnectionChange: modelPickerHierarchy ? setConnection : undefined,
+            currentConnection: modelPickerHierarchy || modelPickerSingle ? connection : undefined,
+            onConnectionChange: modelPickerHierarchy || modelPickerSingle ? setConnection : undefined,
             sources: showSources ? sources : [],
             enabledSourceSlugs: showSources ? enabledSourceSlugs : [],
             onSourcesChange: showSources ? setEnabledSourceSlugs : undefined,
@@ -1380,6 +1387,12 @@ export const chatComponents: ComponentEntry[] = [
         defaultValue: false,
       },
       {
+        name: 'modelPickerSingle',
+        description: 'Inject one LLM connection so the picker uses the flat model-list chrome',
+        control: { type: 'boolean' },
+        defaultValue: false,
+      },
+      {
         name: 'inputMode',
         description: 'Input mode rendered by InputContainer',
         control: {
@@ -1559,9 +1572,19 @@ export const chatComponents: ComponentEntry[] = [
         props: { appearance: 'prompt', workMode: 'PRO', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
       },
       {
+        name: '单连接模型列表',
+        description: '仅一个供应商时打开即模型列表与勾选，思考强度挂在当前连接页底部',
+        props: { appearance: 'prompt', workMode: 'NORM', modelPickerSingle: true, currentModel: 'gpt-6-luna', thinkingLevel: 'low', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
         name: '模型菜单内调节强度',
         description: '同一浮窗先选供应商、再选模型并调节强度；模型能力仅作界面验收样例',
         props: { appearance: 'prompt', workMode: 'PRO', modelPickerHierarchy: true, currentModel: 'gpt-6-luna', thinkingLevel: 'max', showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
+      },
+      {
+        name: '紧凑单连接模型列表',
+        description: '紧凑抽屉在单连接时同样先列出模型，思考强度挂在列表下方',
+        props: { appearance: 'prompt', workMode: 'NORM', modelPickerSingle: true, currentModel: 'gpt-6-luna', thinkingLevel: 'low', compactMode: true, enableCompactModelPicker: true, showTasks: false, showLabels: false, showStatuses: false, showWorkingDirectory: false },
       },
       {
         name: '紧凑模型菜单内调节强度',

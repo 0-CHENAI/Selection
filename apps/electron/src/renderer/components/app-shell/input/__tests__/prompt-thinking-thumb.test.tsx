@@ -95,16 +95,15 @@ describe('thinking effort', () => {
     expect(binary).toContain('>开启</span>')
   })
 
-  it('shows the current effort, model entry, and slider in the overview', () => {
+  it('keeps Fast in the effort heading rather than a model-browse overview', () => {
     const html = renderSettings('high', {
       headingAction: <button type="button" aria-label="Fast">⚡</button>,
-      modelName: 'GPT-5.6 Sol',
-      onBrowseModels: () => {},
     })
-    expect(html).toContain('data-overview="true"')
+    expect(html).toContain('prompt-effort-heading')
     expect(html).toContain('aria-label="Fast"')
-    expect(html).toContain('aria-label="模型: GPT-5.6 Sol"')
     expect(html).toContain('role="slider"')
+    expect(html).not.toContain('data-overview')
+    expect(html).not.toContain('prompt-effort-overview')
     expect(html).not.toContain('prompt-effort-endpoints')
   })
 
