@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OfficeInjectionMarker } from '@craft-agent/core/types'
 import {
@@ -9,7 +9,6 @@ import {
 } from '@craft-agent/shared/skills/office-business-skills'
 import { routeOfficeDocumentTurn } from '@craft-agent/shared/skills/office-document-routing'
 import { getBundledSkillsDir } from '@craft-agent/shared/skills'
-import { getBundledOfficecliSkillsDir } from '@craft-agent/shared/utils/officecli'
 import {
   OFFICE_FORMAT_UPDATED,
   OFFICE_INJECTION_SOURCE,
@@ -24,6 +23,8 @@ import {
 
 export interface OfficeTemplate extends OfficeTemplateSummary {
   prompt?: string
+  /** Native Word style available to ordinary chat without composer selection. */
+  autoSelect?: boolean
   /** Hidden note for the model: what to learn from the sample and what the person's material replaces. Never shown in the composer. */
   guidance?: string
 }
@@ -84,6 +85,7 @@ function parseTemplate(value: unknown): OfficeTemplate {
     : Array.isArray(item.previewPages) ? item.previewPages.length : 0
   if (!Number.isInteger(previewCount) || previewCount < 0 || previewCount > 500) throw new Error('Office 案例目录无效。')
   return {
+    autoSelect: item.autoSelect === true && mode === 'word' && /\.docx$/i.test(sampleFile),
     id: item.id,
     title: item.title,
     mode,
@@ -112,9 +114,13 @@ export function listOfficeTemplates(root = getOfficeBusinessRoot()): OfficeTempl
   return templates
 }
 
+// Bump when authoring instructions change: restored sessions must replace their
+// cached guide even when the selected format/template revision is unchanged.
+const OFFICE_AUTHORING_REVISION = 'office-v3'
+
 export function officeFingerprint(state: Pick<OfficeDocumentState, 'mode' | 'templateId' | 'revision'> | null | undefined): string {
   if (!state?.mode) return ''
-  const names: string[] = [state.mode]
+  const names: string[] = [OFFICE_AUTHORING_REVISION, state.mode]
   if (state.templateId && state.revision) names.push(`${state.templateId}@${state.revision}`)
   return names.join(':')
 }
@@ -199,7 +205,9 @@ export function officeTemplatePreview(templateId: string, revision: string, page
   const template = selectOfficeTemplate(templateId, revision, templates)
   const entry = templateById(templates, template.templateId!)
   if (page !== undefined && (!Number.isInteger(page) || page < 1)) throw new Error('预览页码无效。')
-  const relativePath = !entry.sampleFile
+  const relativePath = entry.autoSelect
+    ? join(entry.source, page === undefined ? entry.sampleFile : `preview/${page}.png`)
+    : !entry.sampleFile
     ? entry.source
     : page === undefined || entry.previewCount === 0
       ? join('sources', entry.source, entry.sampleFile)
@@ -274,31 +282,15 @@ function readText(path: string): string {
   return stripFrontmatter(readFileSync(path, 'utf8'))
 }
 
-function devOfficecliSkill(slug: 'officecli-docx' | 'officecli-xlsx'): string[] {
-  const roots = [
-    join(process.cwd(), 'apps', 'electron', 'resources', 'officecli'),
-    join(process.cwd(), 'resources', 'officecli'),
-    join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'officecli'),
-  ]
-  const found: string[] = []
-  for (const root of roots) {
-    if (!existsSync(root)) continue
-    for (const version of readdirSync(root)) {
-      found.push(join(root, version, 'skills', slug, 'SKILL.md'))
-    }
-  }
-  return found
-}
-
+/** Use the same concise guides as ordinary-chat routing, never a versioned QA bible. */
 function guidePath(slug: 'officecli-docx' | 'officecli-xlsx'): string {
-  const bundled = getBundledOfficecliSkillsDir()
-  const candidates = [
-    bundled ? join(bundled, slug, 'SKILL.md') : '',
-    ...devOfficecliSkill(slug),
-  ].filter(Boolean)
-  const found = candidates.find(path => existsSync(path))
-  if (!found) throw new Error('Office 基础技能不可用。')
-  return found
+  const skills = getBundledSkillsDir()
+  const filename = slug === 'officecli-docx' ? 'word.md' : 'excel.md'
+  // getBundledSkillsDir already resolves packaged/dev roots. Never silently
+  // mix an incomplete installed bundle with files from the working directory.
+  const path = skills ? join(skills, 'officecli', 'guides', filename) : undefined
+  if (!path || !existsSync(path)) throw new Error('Office 基础技能不可用。')
+  return path
 }
 
 function businessSkillPath(slug: string, skillsRoot?: string): string {
@@ -360,6 +352,7 @@ function wordTemplateGuidePath(): string {
 }
 
 const WORD_TEMPLATE_METHOD_TIPS = [
+  '仅新建稿件时填写案例；修改已有文件优先保留该文件样式，不因输入框继承案例而重建。',
   '方法要点：本案走模板填写。版式、字体、页眉页脚来自案例原件，不要用 OfficeCLI 重建。',
   '不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。',
   '分册和参考资料只在需要时读取。交付靠宿主 7 项版式守卫和文件卡片；预览看产品内置 Office 预览。',
@@ -367,11 +360,11 @@ const WORD_TEMPLATE_METHOD_TIPS = [
   '用户要求检查排版，或宿主返回 needs_revision 之后，再做视觉核验或按诊断重写。',
 ].join('')
 
-const OFFICECLI_METHOD_TIPS = '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。预览在 Windows 且装了 Word 或 PowerPoint 时用 OfficeCLI `view screenshot --render native`，否则用 Electron capturePage。PDF 再不行时用 OfficeCLI HTML 加 Electron printToPDF。'
+const OFFICECLI_METHOD_TIPS = '方法要点：用 OfficeCLI 的路径修改工作区副本。案例原件只读。不要使用 python-docx 或 openpyxl。不要把 officecli-pptx 当作本次成稿技能，也不要改走 ppt-design。分册和参考资料只在需要时读取。默认批量修改、保存、一次必要校验后交付；不默认截图或模型视觉复审。Excel 保留重算和关键结果核对。'
 
 function wordCaseToolOrder(template: OfficeTemplate): string {
   if (!template.sampleFile) {
-    return `本案没有原生样例文件，不能调用 office_template。按案例生成配方用 OfficeCLI 从零制作（较慢路径）。不要把 screenshot 当交付前置。`
+    return `本案没有原生样例文件，不能调用 office_template。按案例生成配方和 Selection 精简指南用 OfficeCLI 批量制作。不要把 screenshot 当交付前置。`
   }
   return `先调用 office_template(template_id="${template.id}")，再用 office_template_write 按返回的 editable_paragraphs 编排并替换内容，生成新的 DOCX。不要改案例原件。交付前版式守卫未通过就不能交。office_template_write 成功且守卫通过后，不要默认 office_render / screenshot。`
 }
@@ -391,7 +384,7 @@ export function buildOfficeInjection(state: OfficeDocumentState, templates: Offi
     ]
     : [
       `当前输出格式：${label}。`,
-      `${guide} 指南（实现是 OfficeCLI 的 ${slug}，不搬入 python-docx 或 openpyxl 正文）：`,
+      `${guide} 指南（Selection 精简制作流程；OfficeCLI 执行，不加载完整 ${slug}）：`,
       readText(guidePath(slug)),
       OFFICECLI_METHOD_TIPS,
     ]

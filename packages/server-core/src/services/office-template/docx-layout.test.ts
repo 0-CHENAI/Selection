@@ -76,7 +76,9 @@ describe('docx-layout parity with dsh 588412b docx-layout.py', () => {
       expect(canonicalSha(source)).toBe(golden.sourceCanonicalSha256)
       const inventory = inventoryDocx(source, profile)
       expect(inventory.length).toBe(golden.paragraphs)
-      expect(sha(JSON.stringify(inventory))).toBe(golden.inventorySha256)
+      // Selection adds style_id and location for direct template filling; compare the upstream
+      // inventory contract without this additive field, keeping its frozen golden.
+      expect(sha(JSON.stringify(inventory.map(({ style_id: _styleId, location: _location, ...entry }) => entry)))).toBe(golden.inventorySha256)
       expect(firstError(validateDocx(source, source, profile))).toEqual(golden.identity)
       const edited = editDocx(source, profile, golden.plan)
       expect(canonicalSha(edited)).toBe(golden.editCanonicalSha256)

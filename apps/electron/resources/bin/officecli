@@ -28,6 +28,14 @@ if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
   exit 127
 fi
 
+# Selection owns the Word workflow; keep upstream runtime upgrades from restoring
+# the legacy repeated QA instructions. Other aliases remain binary-owned.
+WORD_GUIDE=$DIR/../skills/officecli/guides/word-reference.md
+if [ "$#" -eq 2 ] && [ "$1" = "load_skill" ] && [ "$2" = "word" ] && [ -f "$WORD_GUIDE" ]; then
+  cat "$WORD_GUIDE"
+  exit $?
+fi
+
 export OFFICECLI_SKIP_UPDATE=1
 
 verb=""

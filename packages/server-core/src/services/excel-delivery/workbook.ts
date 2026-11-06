@@ -95,7 +95,7 @@ function writeCacheXml(xml: string, updates: Array<{ address: string; value: Cel
   return xml.replace(cellPattern(), (full, prefix: string, before: string, address: string, after: string, tail: string, inner: string | undefined) => {
     const value = pending.get(address.toUpperCase())
     if (value === undefined || !inner || !/<(?:[\w.-]+:)?f\b/.test(inner)) return full
-    const formula = /<(?:[\w.-]+:)?f\b[\s\S]*?<\/(?:[\w.-]+:)?f>/.exec(inner)?.[0] ?? ''
+    const formula = /<(?:[\w.-]+:)?f\b[^>]*?(?:\/>|>[\s\S]*?<\/(?:[\w.-]+:)?f>)/.exec(inner)?.[0] ?? ''
     const shown = typeof value === 'number' ? numericText(value) : escapeXml(String(value))
     const type = typeof value === 'number' ? 'n' : 'str'
     const attrs = stripType(`${before} ${after}`).replace(/\s+r="[^"]*"/g, '').replace(/\s+$/, '')

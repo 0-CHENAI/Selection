@@ -38,7 +38,7 @@ description: "写议程和邀请函。时间地点写清，缺的标待补充。
 - 没有出现样例年会的酒店、流程和致辞人。
 - 没有把未发生的会写成已经做出的决定。
 - 称呼和落款的单位一致。
-- `validate` 已通过。`office_render` 检查标题没有贴边、议程表没有溢出、时间列没有折成无法阅读的宽度。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -49,4 +49,4 @@ description: "写议程和邀请函。时间地点写清，缺的标待补充。
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学「称呼、时间地点、议程表、回复方式」的顺序。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。不要用 Python 或 LibreOffice。样例只读，只学「称呼、时间地点、议程表、回复方式」的顺序。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

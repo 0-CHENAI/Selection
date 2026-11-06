@@ -78,3 +78,16 @@ test('an unreadable subtree does not suppress changes in readable folders', () =
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+
+test('session outputs become card candidates while identical data files remain scratch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-destinations-'))
+  const session = join(root, 'sessions', 'test-session')
+  try {
+    for (const folder of ['outputs', 'data']) mkdirSync(join(session, folder), { recursive: true })
+    const inventory = new ArtifactCandidateInventory([root, session], root)
+    writeFileSync(join(session, 'outputs', '报告.docx'), 'final')
+    writeFileSync(join(session, 'data', '报告.docx'), 'draft')
+    expect(inventory.changed()).toEqual([join(session, 'outputs', '报告.docx')])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

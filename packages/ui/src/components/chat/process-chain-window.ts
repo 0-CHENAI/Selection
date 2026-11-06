@@ -201,8 +201,14 @@ export function useProcessChainWindow(
     apply()
     scrollParent.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('resize', onScroll)
+    // Expansion and layout changes can resize the viewport without a scroll
+    // event. Reconcile the slice, not scrollTop: manual reading stays put.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onScroll)
+    observer?.observe(container)
+    observer?.observe(scrollParent)
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
+      observer?.disconnect()
       scrollParent.removeEventListener('scroll', onScroll)
       window.removeEventListener('resize', onScroll)
     }

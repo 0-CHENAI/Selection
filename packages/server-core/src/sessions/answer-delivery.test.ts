@@ -227,7 +227,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       '页面.html', '页面.htm', '论文.tex', '草稿.md', '草稿.markdown', '文档.pdf', 'Q3%20报告.pdf']
     let modelCalls = 0
     const agent = install(async function* () {
-      for (const name of [...names, '笔记.txt', '日志.TXT', 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), 'output')
+      for (const name of [...names, '笔记.txt', '日志.TXT', 'build.js', 'chart.png', 'data.csv', 'raw.json']) writeFileSync(join(dir, name), name.endsWith('.docx') ? readFileSync(join(import.meta.dir, '../../../../apps/electron/resources/skills/office-business/cases/style-system-design/example.docx')) : 'output')
       await control!.submit({ ...submission, markdown: '文件已更新。' })
       yield { type: 'complete' }
     })

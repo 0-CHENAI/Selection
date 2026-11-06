@@ -25,6 +25,8 @@ export type CellInput = {
   formula?: string
   value?: CellScalar
   cachedValue?: CellScalar
+  /** OOXML t="e" is an error, unlike a formula returning the text "#N/A". */
+  cachedError?: string
   /** OfficeCLI 的 computedValue。提供时与本求值器对拍，不一致记入 divergences。 */
   officeComputed?: CellScalar
 }
@@ -986,7 +988,7 @@ function decodeXml(value: string): string {
 }
 
 /**
- * 从 xlsx 包读出单元格。共享公式、图表缓存不在本读取范围内。
+ * 从 xlsx 包读出单元格，展开共享公式；图表缓存不在本读取范围内。
  * 年度经营案例的工作表使用 `x:` 前缀；港口和实验案例使用默认命名空间。读取前去掉元素前缀。
  */
 export function readXlsxCells(bytes: Uint8Array): CellInput[] {
@@ -1007,25 +1009,61 @@ export function readXlsxCells(bytes: Uint8Array): CellInput[] {
     if (!name || !target) continue
     const path = target.replace(/^\/+/, '').replace(/^xl\//, '')
     const xml = stripElementPrefixes(textFile(files, `xl/${path}`))
-    for (const match of xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const entries = [...xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)]
+    const sharedFormulas = new Map<string, { address: string; formula: string }>()
+    // Excel may save one master plus empty <f t="shared" si="…"/> followers.
+    // Collect masters first so XML order does not affect formula discovery.
+    for (const match of entries) {
+      const address = tagAttrs(`<c ${match[1]}>`).r
+      const f = /<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(match[2] ?? '')
+      const attrs = f ? tagAttrs(`<f ${f[1]}>`) : {}
+      if (address && attrs.t === 'shared' && attrs.si !== undefined && f?.[2]) {
+        sharedFormulas.set(attrs.si, { address, formula: decodeXml(f[2]) })
+      }
+    }
+    for (const match of entries) {
       const attr = tagAttrs(`<c ${match[1]}>`)
       const address = attr.r
       if (!address) continue
       const inner = match[2] ?? ''
-      const formula = /<f\b[^>]*>([\s\S]*?)<\/f>/.exec(inner)?.[1]
+      const f = /<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(inner)
+      const fAttrs = f ? tagAttrs(`<f ${f[1]}>`) : {}
+      let formula = f?.[2] === undefined ? undefined : decodeXml(f[2])
+      if (fAttrs.t === 'shared' && !formula) {
+        const master = sharedFormulas.get(fAttrs.si ?? '')
+        if (!master) throw new Error(`共享公式缺少主公式：${name}!${address}`)
+        formula = shiftSharedFormula(master.formula, master.address, address)
+      }
       const raw = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(inner)?.[1]
       const inline = [...inner.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(item => decodeXml(item[1] ?? '')).join('')
       const input: CellInput = { sheet: name, address }
-      if (formula !== undefined) input.formula = decodeXml(formula)
+      if (formula !== undefined) input.formula = formula
       const cached = cellValue(attr.t, raw, inline, shared)
       if (formula !== undefined) {
         if (cached !== undefined) input.cachedValue = cached
+        if (attr.t === 'e' && raw !== undefined) input.cachedError = decodeXml(raw)
       } else if (cached !== undefined) input.value = cached
       else if (inline) input.value = inline
       if (input.formula !== undefined || input.value !== undefined || input.cachedValue !== undefined) cells.push(input)
     }
   }
   return cells
+}
+
+function shiftSharedFormula(formula: string, origin: string, target: string): string {
+  const from = readCell(origin, 0), to = readCell(target, 0)
+  if (!from || !to) throw new Error('共享公式的单元格地址无效')
+  const dx = colIndex(to.col) - colIndex(from.col), dy = to.row - from.row
+  // Quoted strings/sheet names and structured references are opaque. Relative
+  // A1 references shift; absolute axes, function names and sheet names do not.
+  return formula.replace(/"(?:""|[^"])*"|'(?:''|[^'])*'|\[[^\]]*\]|(?<![\w.\u0080-\uFFFF])(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?![\w.\u0080-\uFFFF])/g,
+    (text, absCol: string | undefined, col: string, absRow: string, row: string, offset: number) => {
+      if (absCol === undefined || /^\s*[!(]/.test(formula.slice(offset + text.length))) return text
+      if (colIndex(col) > 16384 || Number(row) > 1048576) return text
+      const x = colIndex(col) + (absCol ? 0 : dx), y = Number(row) + (absRow ? 0 : dy)
+      if (x < 1 || x > 16384 || y < 1 || y > 1048576) throw new Error('共享公式引用超出工作表范围')
+      return `${absCol}${indexToCol(x)}${absRow}${y}`
+    })
 }
 
 function cellValue(type: string | undefined, raw: string | undefined, inline: string, shared: string[]): CellScalar | undefined {

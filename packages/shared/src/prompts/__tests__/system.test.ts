@@ -117,6 +117,12 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not scan or delete pre-existing files')
   })
 
+  it('separates default session deliverables from scratch files', () => {
+    const context = getWorkingDirectoryContext('/tmp/session', true, '/tmp/session')
+    expect(context).toContain('/tmp/session/outputs/')
+    expect(context).toContain('never put final deliverables there')
+  })
+
   it('labels a user-selected working directory as a non-scratch location (#163)', () => {
     const context = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/deliverables')
     const changedMidSession = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/original')
@@ -222,6 +228,15 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('user-facing replies still use the display title')
   })
 
+
+  it('uses fast Word/Excel delivery even when old guides remain in session history', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    expect(prompt).toContain('Each format guide owns its complete workflow')
+    expect(prompt).toContain('separate paths')
+    expect(prompt).toContain('do not append one path')
+    expect(prompt).not.toContain('Office work has no special')
+    expect(prompt).not.toContain('close only after the loaded official Delivery Gate passes')
+  })
 
   it('states that markdown-preview is reply syntax, not a tool (#255)', () => {
     const prompts = [

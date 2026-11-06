@@ -50,4 +50,4 @@ description: "做个人或家庭预算表。收支分类、偏差公式和汇总
 
 ## 文件交付
 
-先 `officecli load_skill excel`。不要用 Python 或 LibreOffice。样例只读。交付前重算，并按 checks 核对结余和至少一处偏差率。
+先读取 OfficeCLI 路由中的精简 Excel 指南。不要用 Python 或 LibreOffice。样例只读。交付前重算，并按 checks 核对结余和至少一处偏差率。

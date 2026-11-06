@@ -55,4 +55,4 @@ description: "做发票和对账单。差异用公式标出，缺的标待补充
 
 ## 文件交付
 
-先 `officecli load_skill excel`。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对差异合计与期末。
+先读取 OfficeCLI 路由中的精简 Excel 指南。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对差异合计与期末。

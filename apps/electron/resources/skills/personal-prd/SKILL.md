@@ -39,7 +39,7 @@ description: "写产品需求文档。用户故事和验收标准写清，缺的
 - 非目标里排除的内容，没有在后文又被写成要做。
 - 样例小程序的页面、指标、日期没有残留。
 - 里程碑日期要么来自用户，要么是待补充。
-- `validate` 已通过。`office_render` 抽查首页和故事表，标题层级清楚，表格不溢出。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -50,4 +50,4 @@ description: "写产品需求文档。用户故事和验收标准写清，缺的
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学章节顺序。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。不要用 Python 或 LibreOffice。样例只读，只学章节顺序。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

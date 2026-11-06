@@ -9,6 +9,7 @@ export type ExcelDeliveryCode =
   | 'blank-page'
   | 'region-not-reviewed'
   | 'checks-failed'
+  | 'formula-errors'
   | 'dual-read-missing'
   | 'dual-read-mismatch'
 
@@ -22,6 +23,7 @@ export interface DualReadCell {
 export interface ExcelDeliveryInput {
   recalculated: boolean
   checks?: { passed: boolean } | null
+  formulaErrors?: Array<{ ref: string; error: string }>
   dualRead?: DualReadCell[]
   regionReviewed: boolean
   blankPage?: boolean
@@ -33,6 +35,10 @@ export function assertExcelDelivery(input: ExcelDeliveryInput): { ok: true } | {
   if (input.usedOcr) return { ok: false, code: 'ocr-forbidden', message: '视觉检查禁止 OCR' }
   if (input.blankPage) return { ok: false, code: 'blank-page', message: '区域渲染是空白页，已停止' }
   if (!input.regionReviewed) return { ok: false, code: 'region-not-reviewed', message: '关键表还没有做原生读图' }
+  if (input.formulaErrors?.length) {
+    const first = input.formulaErrors[0]!
+    return { ok: false, code: 'formula-errors', message: `公式存在错误：${first.ref} ${first.error}` }
+  }
   if (input.checks) {
     if (!input.checks.passed) return { ok: false, code: 'checks-failed', message: 'checks.json 未通过' }
     return { ok: true }

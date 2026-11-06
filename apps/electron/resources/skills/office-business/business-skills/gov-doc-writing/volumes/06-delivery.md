@@ -5,7 +5,7 @@
 套用 `government-notice` 时用 `office_template` / `office_template_write`，不要先加载 OfficeCLI。无案例、守卫失败需要改结构、或用户要求从零重做时：
 
 1. 阅读 [OfficeCLI 路由](../../../officecli/SKILL.md)。
-2. 执行 `officecli load_skill word`。
+2. 读取 OfficeCLI 路由中的精简 Word 指南。
 3. 不安装、不调用 python-docx，不使用 Python，不使用 LibreOffice Kit。
 
 ## 原件

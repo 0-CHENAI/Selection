@@ -229,7 +229,7 @@ describe('PPT visual QA cannot use OCR', () => {
       'apps/electron/resources/skills/ppt-design/SKILL.md',
       'apps/electron/resources/skills/ppt-design/references/visual-review.md',
       'apps/electron/resources/skills/ppt-design/references/workflow.md',
-      'apps/electron/resources/skills/officecli/SKILL.md',
+      'apps/electron/resources/skills/officecli/guides/powerpoint.md',
       'apps/electron/resources/skills/officecli/ppt-selection-override.md',
       'apps/electron/resources/docs/llm-tool.md',
     ]) {

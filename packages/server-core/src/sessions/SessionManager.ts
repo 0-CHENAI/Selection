@@ -9964,7 +9964,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   /** Word / Excel host tools (#711). Selection, workspace and permissions come from the managed session. */
   private officeToolSession(managed: ManagedSession): OfficeToolSession {
     return {
-      workspaceRoot: managed.workingDirectory ?? managed.workspace.rootPath,
+      taskId: managed.answerDelivery?.userMessageId ?? managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)?.id,
+      workspaceRoot: managed.workingDirectory ?? getSessionStoragePath(managed.workspace.rootPath, managed.id),
       storageDir: getSessionStoragePath(managed.workspace.rootPath, managed.id),
       office: () => managed.office,
       templates: () => listOfficeTemplates(),
@@ -10019,7 +10020,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
    * needs_revision list to the model for another round.
    */
   private officeDeliveryBlock(managed: ManagedSession): string | undefined {
-    if (!managed.office) return undefined
     const changed = managed.artifactCandidateInventory?.changed() ?? []
     if (!changed.length) return undefined
     try {

@@ -35,6 +35,7 @@ export interface XlsxRecalculateResult {
   values: Record<string, CellData>
   checks: RecalcResult['checks']
   unevaluatedFilledByTypeScript: number
+  nativeErrors: Array<{ ref: string; error: string }>
 }
 
 export async function xlsxRecalculate(input: XlsxRecalculateInput): Promise<XlsxRecalculateResult> {
@@ -42,6 +43,7 @@ export async function xlsxRecalculate(input: XlsxRecalculateInput): Promise<Xlsx
   const ran: string[] = []
   let bytes = input.bytes
   const office = new Map<string, CellScalar>()
+  const nativeErrors = new Map<string, string>()
 
   if (plan.some(step => step.id === 'officecli-computed-writeback') && input.officecli) {
     const cells = readXlsxCells(bytes)
@@ -59,7 +61,12 @@ export async function xlsxRecalculate(input: XlsxRecalculateInput): Promise<Xlsx
     bytes = await input.excelCalculateFull(bytes)
     ran.push('excel-calculate-full')
     for (const cell of readXlsxCells(bytes)) {
-      if (cell.formula && cell.cachedValue !== undefined) office.set(cellRef(cell.sheet, cell.address), cell.cachedValue)
+      if (!cell.formula) continue
+      const ref = cellRef(cell.sheet, cell.address)
+      if (cell.cachedError !== undefined) {
+        nativeErrors.set(ref, cell.cachedError)
+        office.delete(ref)
+      } else if (cell.cachedValue !== undefined) office.set(ref, cell.cachedValue)
     }
   }
 
@@ -74,6 +81,9 @@ export async function xlsxRecalculate(input: XlsxRecalculateInput): Promise<Xlsx
   })
   if (unevaluated > 0 || ran.length === 0) ran.push('selection-formula-fallback')
   const result = recalculateWorkbook(fallbackCells, input.checks ?? [])
+  // Keep Excel's typed errors visible to the delivery gate; do not rewrite
+  // them as successful string caches even when selected checks happen to pass.
+  for (const ref of nativeErrors.keys()) delete result.values[ref]
   const written = writeFormulaCache(bytes, result.values)
   return {
     bytes: written,
@@ -82,6 +92,7 @@ export async function xlsxRecalculate(input: XlsxRecalculateInput): Promise<Xlsx
     values: result.values,
     checks: result.checks,
     unevaluatedFilledByTypeScript: unevaluated,
+    nativeErrors: [...nativeErrors].map(([ref, error]) => ({ ref, error })),
   }
 }
 

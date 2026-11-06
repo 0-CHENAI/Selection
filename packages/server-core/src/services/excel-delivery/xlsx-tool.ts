@@ -1,6 +1,6 @@
 /**
  * `xlsx_recalculate` 会话工具的宿主实现（#711 G2）。
- * 包装 xlsxRecalculate：OfficeCLI computedValue 写回缓存 → 装了 Excel 的 macOS（AppleScript）/ Windows（COM）再 CalculateFull →
+ * 包装 xlsxRecalculate：默认 OfficeCLI computedValue 写回缓存，不自动启动桌面 Excel；
  * TypeScript 只补未求值格子；随后用 checks.json 或关键单元格双读，经 assertExcelDelivery 判定是否可以交付。
  */
 import { execFile } from 'node:child_process'
@@ -24,6 +24,8 @@ export interface XlsxToolDeps {
   platform?: NodeJS.Platform
   officecliBinary?: string
   excelInstalled?: boolean
+  /** Explicit host opt-in only. Never infer consent from Excel being installed. */
+  allowNativeExcel?: boolean
   checks?: CheckSpec[]
   runOfficecli?: (binary: string, file: string) => Promise<string>
   excelCalculateFull?: (bytes: Uint8Array) => Promise<Uint8Array>
@@ -135,7 +137,12 @@ function parseRef(raw: string): { sheet: string; address: string } | undefined {
 export async function runXlsxRecalculateTool(bytes: Uint8Array, args: XlsxToolArgs, deps: XlsxToolDeps = {}): Promise<{ bytes: Uint8Array; result: Omit<XlsxToolResult, 'path' | 'sha256'> }> {
   const platform = deps.platform ?? process.platform
   const notes: string[] = []
-  const excel = deps.excelInstalled ?? detectExcel(platform)
+  // Desktop automation can open permission dialogs even with DisplayAlerts=false.
+  // Keep ordinary generation and tests headless. A supplied adapter is explicit;
+  // built-in AppleScript/COM requires a separate host opt-in, never auto-detection.
+  const excel = deps.excelCalculateFull
+    ? deps.excelInstalled !== false
+    : deps.allowNativeExcel === true && (deps.excelInstalled ?? detectExcel(platform))
   const capabilities: NativeCapabilities = {
     platform, electronPrintToPdf: false, electronCapturePage: false, officecliHtml: !!deps.officecliBinary,
     officecliFormula: !!deps.officecliBinary, exporterPdfPlugin: false, word: false, powerpoint: false, excel,
@@ -167,7 +174,10 @@ export async function runXlsxRecalculateTool(bytes: Uint8Array, args: XlsxToolAr
   const cells = readXlsxCells(written)
   // 双读：缓存值（OfficeCLI / Excel 写回）与独立的 TypeScript 全量求值比对。只在声明了关键单元格时才做。
   const independent = args.key_cells?.length ? recalculateWorkbook(cells.map(cell => cell.formula ? { sheet: cell.sheet, address: cell.address, formula: cell.formula } : cell), []) : { values: {} as Record<string, unknown> }
-  const errorCells = Object.entries(recalculated.values).filter(([, value]) => isCellError(value)).map(([ref, value]) => ({ ref, error: (value as { error: string }).error })).slice(0, 50)
+  const errorCells = [
+    ...recalculated.nativeErrors,
+    ...Object.entries(recalculated.values).filter(([, value]) => isCellError(value)).map(([ref, value]) => ({ ref, error: (value as { error: string }).error })),
+  ].slice(0, 50)
   const dualRead: Array<DualReadCell & { ok: boolean }> = []
   for (const raw of args.key_cells ?? []) {
     const parsed = parseRef(raw)
@@ -182,6 +192,7 @@ export async function runXlsxRecalculateTool(bytes: Uint8Array, args: XlsxToolAr
   const gate = assertExcelDelivery({
     recalculated: true,
     checks,
+    formulaErrors: errorCells,
     dualRead,
     regionReviewed: args.visual_review === 'reviewed' || args.visual_review === 'not-needed',
     blankPage: args.blank_page,

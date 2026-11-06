@@ -36,7 +36,15 @@ test('every Word / Excel case that ships a file has a verified sample', () => {
     'annual-business', 'annual-invitation', 'bio-assay', 'coffee-market', 'equipment-quote',
     'equity-research', 'government-notice', 'house-lease', 'household-budget', 'meeting-minutes',
     'miniapp-prd', 'partnership-letter', 'port-cargo', 'product-resume', 'project-gantt',
-    'quarterly-okr', 'travel-claim', 'vendor-statement',
+    'quarterly-okr',
+    'style-design-report',
+    'style-experiment-analysis',
+    'style-investment-memo',
+    'style-legal-memo',
+    'style-minimal-letter',
+    'style-strategy-memo',
+    'style-system-design',
+    'travel-claim', 'vendor-statement',
   ])
   for (const item of samples) {
     const bytes = readFileSync(join(root, item.dir, item.sampleFile))

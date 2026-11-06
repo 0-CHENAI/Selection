@@ -96,14 +96,34 @@ test('server rejection is surfaced and never silently retried at Standard speed'
 })
 
 
-test('a server downgrade to Standard is reported instead of appearing as active Fast', async () => {
+test('successful default-tier OAuth responses preserve output and hooks without retrying', async () => {
   const session = { agent: { streamFunction: streamSimple } } as unknown as AgentSession
   installFastServiceTier(session, () => true)
+  let requests = 0
+  const events: string[] = []
+  const output = { type: 'message', id: 'msg', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: '正常完成', annotations: [] }] }
   const stream = await session.agent.streamFunction(model, { messages: [] }, {
     apiKey: token, transport: 'sse', maxRetries: 0,
-    fetch: async () => new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { id: 'r', service_tier: 'default', output: [] } })}\n\n`, { headers: { 'content-type': 'text/event-stream' } }),
+    onProviderStreamEvent: async event => { events.push((event as { type: string }).type) },
+    fetch: async () => {
+      requests++
+      const events = [
+        { type: 'response.created', response: { id: 'r', service_tier: 'default', output: [] } },
+        { type: 'response.output_item.added', output_index: 0, item: { ...output, content: [] } },
+        { type: 'response.content_part.added', output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } },
+        { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: '正常完成' },
+        { type: 'response.output_item.done', output_index: 0, item: output },
+        { type: 'response.completed', response: { id: 'r', status: 'completed', service_tier: 'default', output: [output] } },
+      ]
+      return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } })
+    },
   })
-  expect((await stream.result()).errorMessage).toContain('Fast 未生效')
+  const result = await stream.result()
+  expect(result.errorMessage).toBeUndefined()
+  expect(result.content).toContainEqual({ type: 'text', text: '正常完成', textSignature: expect.any(String) })
+  expect(events).toContain('response.created')
+  expect(events).toContain('response.completed')
+  expect(requests).toBe(1)
 })
 
 test('unsupported transport and third-party endpoints receive no Fast payload hook', async () => {

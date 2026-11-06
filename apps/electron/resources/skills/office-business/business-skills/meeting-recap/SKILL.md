@@ -61,7 +61,7 @@ license: MIT
 
 用户选择会议纪要案例时，只读 `cases/meeting-minutes/example.docx`。把原件复制到会话工作区后再改，禁止覆盖案例目录里的文件。
 
-先调用 `office_template(template_id="meeting-minutes")`，按返回的段落 / run ID 用一次 `office_template_write` 写出新的 DOCX：replacements 替换示例事实，additions 用 `style_from` 继承原段落样式，行动项超出示例行数时用 row_additions 克隆表格行。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。写出成功且守卫通过后，不要再跑 OfficeCLI 增量编辑，也不要默认 `office_render` / screenshot。仅在用户要求检查排版，或宿主返回 needs_revision 之后，再读 [OfficeCLI 路由](../../officecli/SKILL.md) 并执行 `officecli load_skill word`。
+先调用 `office_template(template_id="meeting-minutes")`，按返回的段落 / run ID 用一次 `office_template_write` 写出新的 DOCX：replacements 替换示例事实，additions 用 `style_from` 继承原段落样式，行动项超出示例行数时用 row_additions 克隆表格行。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。写出成功且守卫通过后，不要再跑 OfficeCLI 增量编辑，也不要默认 `office_render` / screenshot。仅在用户要求检查排版，或宿主返回 needs_revision 之后，再读 [OfficeCLI 路由](../../officecli/SKILL.md) 并读取其中的精简 Word 指南。
 
 沿用所选原件的 A4 纵向、约 2cm 页边距及原生标题样式。Title 约 23pt、Heading 1 约 14pt、Heading 2 约 12pt，黑色；正文 11pt、精确 16pt 行距。标题设 keep_with_next，与后文保持相邻。Title 样式与标题段落不带边框；段落 snapToGrid 为 false，保持实际行距。原件字体随副本保留；换字体时先看返回的 `font_warnings`。
 

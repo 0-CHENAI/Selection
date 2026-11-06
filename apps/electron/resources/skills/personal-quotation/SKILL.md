@@ -59,4 +59,4 @@ description: "做报价单。数量、单价、折扣和税额用公式，缺的
 
 ## 文件交付
 
-先 `officecli load_skill excel`。不要用 Python、openpyxl 或 LibreOffice。样例工作簿只读。新报价写到工作区副本，输入与公式分开。交付前重算并读回价税合计。
+先读取 OfficeCLI 路由中的精简 Excel 指南。不要用 Python、openpyxl 或 LibreOffice。样例工作簿只读。新报价写到工作区副本，输入与公式分开。交付前重算并读回价税合计。

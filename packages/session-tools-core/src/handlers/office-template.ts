@@ -12,11 +12,16 @@ const fragment = z.object({
 }).strict();
 
 export const OfficeTemplateSchema = z.object({
-  template_id: z.string().min(1).describe('The Word or Excel case ID selected in the current composer'),
+  content_mode: z.enum(['verbatim', 'authored']).optional().describe('Word: choose verbatim for unchanged source conversion, authored for new prose, summaries or explicit reordering. Omitting mode reuses the current preparation. A new authored preparation explicitly resets a prior source requirement.'),
+  source_text_path: z.string().optional().describe('For verbatim Word: original UTF-8 .txt in workspace or this session dataFolderPath. Required with verbatim; bound with its digest during preparation and inherited by every retry.'),
+  template_id: z.string().min(1).describe('Selected composer case ID, or a style-* Word template ID from the concise Word guide for ordinary-chat creation'),
 }).strict();
 
 export const OfficeTemplateWriteSchema = z.object({
-  output_path: z.string().min(1).describe('A new .docx path inside the session workspace. Existing files are never overwritten.'),
+  preparation_id: z.string().min(1).optional().describe('Return the ID from office_template. It binds template and source requirements across retries; omission inherits the current preparation for this template/workspace.'),
+  template_id: z.string().min(1).optional().describe('Pass template_id returned by office_template; required for ordinary-chat style templates. An explicit composer selection takes precedence.'),
+  source_text_path: z.string().optional().describe('For verbatim conversion of a plain UTF-8 text source: workspace or session dataFolderPath .txt file. Prefer binding at office_template; legacy write-time binding also persists across retries. Host verifies every non-empty source line is retained in its original order (ignores whitespace only), before writing. Omission never clears an existing binding. For a new summary, reordered material or rewritten prose, prepare content_mode=authored explicitly.'),
+  output_path: z.string().min(1).describe('A .docx path inside the session workspace. Existing files are never overwritten; an identical successful plan and unchanged artifact reuse their check receipt.'),
   replacements: z.array(z.object({
     paragraph_id: z.string().optional().describe('Paragraph ID from editable_paragraphs, e.g. p3'),
     id: z.string().optional().describe('Alias of paragraph_id'),
@@ -25,8 +30,9 @@ export const OfficeTemplateWriteSchema = z.object({
     runs: z.array(fragment).optional().describe('Optional mixed typography: fragments with source run IDs that together equal text'),
   }).strict()).max(1000).describe('Replace every example fact, including the issuer header for official notices'),
   additions: z.array(z.object({
-    after_paragraph_id: z.string().describe('Insert after this paragraph ID (several additions after the same ID keep their order)'),
-    style_from: z.string().optional().describe('Paragraph ID whose paragraph and run styles the new paragraph clones (default: after_paragraph_id)'),
+    after_paragraph_id: z.string().optional().describe('Insert after this paragraph. Use exactly one of after_paragraph_id / before_paragraph_id; repeated anchors preserve array order.'),
+    before_paragraph_id: z.string().optional().describe('Insert before this paragraph; e.g. before the first heading after a table puts a paragraph directly after the table.'),
+    style_from: z.string().optional().describe('Paragraph ID whose paragraph and run styles the new paragraph clones (default: insertion anchor)'),
     text: z.string(),
     runs: z.array(fragment).optional(),
   }).strict()).max(1000).optional(),
@@ -41,7 +47,7 @@ export const OfficeTemplateWriteSchema = z.object({
 export const XlsxRecalculateSchema = z.object({
   path: z.string().min(1).describe('Workbook (.xlsx) in the session workspace; it is recalculated in place'),
   key_cells: z.array(z.string()).max(200).optional().describe('Key formula cells such as 经营总览!C8 for the dual read when the case has no checks.json'),
-  visual_review: z.enum(['not-needed', 'reviewed']).describe('not-needed for pure data / formula tasks; reviewed after rendering and natively reading the affected range for format, chart or print tasks'),
+  visual_review: z.enum(['not-needed', 'reviewed']).describe('Use not-needed by default, including normal formatting/chart edits. Use reviewed only after an explicitly requested visual review or investigation of a concrete display defect; do not render solely to complete recalculation.'),
   blank_page: z.boolean().optional().describe('true if the range render came back blank'),
 }).strict();
 

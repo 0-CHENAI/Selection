@@ -281,12 +281,14 @@ function validateSelectionCompatibilityResources(): void {
     'apps/electron/resources/scripts/officecli-wrapper.ts',
     'apps/electron/resources/scripts/officecli-morph-helper.ts',
     'apps/electron/resources/skills/officecli/SKILL.md',
+    'apps/electron/resources/skills/officecli/guides/word-reference.md',
+    'apps/electron/resources/skills/officecli/guides/powerpoint.md',
   ];
   const missing = required.filter(path => !existsSync(join(repoRoot, path)));
   if (missing.length > 0) {
     throw new Error(`Selection OfficeCLI compatibility resource closure is incomplete: ${missing.join(', ')}`);
   }
-  const router = readFileSync(join(repoRoot, 'apps/electron/resources/skills/officecli/SKILL.md'), 'utf8');
+  const router = readFileSync(join(repoRoot, 'apps/electron/resources/skills/officecli/guides/powerpoint.md'), 'utf8');
   for (const requiredInstruction of ['officecli-morph-helper', 'morph-helpers.py', 'morph-helpers.sh']) {
     if (!router.includes(requiredInstruction)) {
       throw new Error(`OfficeCLI router is missing the reviewed Morph compatibility instruction: ${requiredInstruction}`);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { OFFICE_FORMAT_UPDATED, OFFICE_REQUEST_MAX_BYTES, type OfficeDocumentState } from '@craft-agent/shared/protocol/office'
+import { OFFICE_FORMAT_UPDATED, OFFICE_INJECTION_SOURCE, OFFICE_REQUEST_MAX_BYTES, type OfficeDocumentState } from '@craft-agent/shared/protocol/office'
 import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, toSkillCatalogEntries } from '@craft-agent/shared/skills'
 import { pptSendOptions } from './ppt-catalog'
 import {
@@ -62,8 +62,30 @@ describe('office document mode', () => {
     }
     expect(builds).toBe(1)
     expect(projectOfficeModelContext(messages).match(/<business_skill name="meeting-recap">/g)).toHaveLength(1)
-    expect(office.injectionFingerprint).toBe('word:meeting-minutes@20261012.1')
+    expect(office.injectionFingerprint).toBe('office-v3:word:meeting-minutes@20261012.1')
     expect(officeFingerprint(office)).toBe(office.injectionFingerprint!)
+  })
+
+  test('an existing session replaces its legacy guide once on resume or compaction', () => {
+    const templates = listOfficeTemplates()
+    for (const mode of ['word', 'excel'] as const) {
+      const office: OfficeDocumentState = { mode, injectionFingerprint: mode }
+      const messages: OfficeTranscriptMessage[] = [{
+        id: 'old-guide', role: 'user', hidden: true,
+        content: 'Visual delivery floor (applies to EVERY document)',
+        officeInjection: { source: OFFICE_INJECTION_SOURCE, fingerprint: mode, status: 'active' },
+      }]
+      const resumed = planOfficeTurn({ office, messages, templates })
+      expect(resumed.modelAddition).toContain(mode === 'word' ? '# Selection Word 工作流' : '# Selection Excel 快速制作与定点修改')
+      expect(projectOfficeModelContext(resumed.messages)).not.toContain('Visual delivery floor')
+      expect(messages[0]!.content).toContain('Visual delivery floor')
+      expect(resumed.messages.filter(m => m.officeInjection?.status === 'active')).toHaveLength(1)
+      const again = planOfficeTurn({ office: resumed.office, messages: resumed.messages, templates })
+      expect(again.modelAddition).toBeUndefined()
+      const compacted = preserveOfficeInjection(messages, office, templates)
+      expect(projectOfficeModelContext(compacted.messages)).toContain(mode === 'word' ? '# Selection Word 工作流' : '# Selection Excel 快速制作与定点修改')
+      expect(projectOfficeModelContext(compacted.messages)).not.toContain('Visual delivery floor')
+    }
   })
 
   test('M2: switching to Excel replaces the Word injection', () => {
@@ -84,9 +106,9 @@ describe('office document mode', () => {
     expect(projected).not.toContain('<business_skill name="meeting-recap">')
     expect(projected).toContain('<business_skill name="saas-metrics-coach">')
     expect(projected).toContain('office-xlsx 指南')
-    expect(projected).toContain('OfficeCLI XLSX Skill')
+    expect(projected).toContain('Selection Excel 快速制作与定点修改')
     expect(second.modelAddition).toContain(OFFICE_FORMAT_UPDATED)
-    expect(second.office?.injectionFingerprint).toBe('excel:annual-business@20260914.1')
+    expect(second.office?.injectionFingerprint).toBe('office-v3:excel:annual-business@20260914.1')
     expect(activeText(second.messages).match(/输出格式已按当前会话选择更新/g)).toHaveLength(1)
   })
 
@@ -143,7 +165,7 @@ describe('office document mode', () => {
     const after = planOfficeTurn({ office: cleared.office, messages: preserved.messages, templates })
     expect(projectOfficeModelContext(after.messages)).toContain(OFFICE_FORMAT_UPDATED)
     expect(projectOfficeModelContext(after.messages)).not.toContain('meeting-minutes@20261012.1')
-    expect(after.office?.injectionFingerprint).toBe('word')
+    expect(after.office?.injectionFingerprint).toBe('office-v3:word')
   })
 
   test('PPT and Word exclude each other, and PPT does not author with office-pptx', () => {
@@ -186,13 +208,15 @@ describe('office document mode', () => {
       ...wordCaseIds, 'annual-business', 'port-cargo', 'bio-assay',
       'house-lease', 'product-resume', 'travel-claim', 'annual-invitation', 'miniapp-prd', 'partnership-letter',
       'equipment-quote', 'household-budget', 'vendor-statement', 'project-gantt', 'quarterly-okr',
+      'style-design-report', 'style-experiment-analysis', 'style-investment-memo',
+      'style-legal-memo', 'style-minimal-letter', 'style-strategy-memo', 'style-system-design',
     ])
     const preview = officeTemplatePreview('annual-business', '20260914.1', 20, listOfficeTemplates(), root)
     expect(preview.available).toBe(false)
     expect(preview.path).toBe('sources/legacy/annual-business/preview/20.png')
     expect(() => officeTemplatePreview('annual-business', '20260914.1', 21, listOfficeTemplates(), root)).toThrow('超出')
     const listed = executeOfficeTemplates({ raw: JSON.stringify({ endpoint: 'catalog' }) })
-    expect(listed.result.templates).toHaveLength(21)
+    expect(listed.result.templates).toHaveLength(28)
     expect(listed.result.mode).toBeNull()
   })
 
@@ -285,7 +309,7 @@ describe('office document mode', () => {
     }
   })
 
-  test('Word injection shape: native sampleFile gets the slim template guide; recipe / bare Word keep officecli-docx', () => {
+  test('Word injection shape: native sampleFile gets the slim template guide; recipe / bare Word and Excel use concise authoring guides', () => {
     const templates = listOfficeTemplates()
     const wordCases = templates.filter(item => item.mode === 'word')
     const withSample = wordCases.filter(hasWordNativeSample)
@@ -295,15 +319,15 @@ describe('office document mode', () => {
     expect(withoutSample.map(item => item.id)).toEqual(['selection-meeting-minutes', 'selection-work-notice'])
 
     const slimGuide = readFileSync(join(import.meta.dir, '../../../../apps/electron/resources/skills/office-business/guides/office-docx-template.md'), 'utf8')
-    expect(slimGuide.length).toBeGreaterThan(800)
+    expect(slimGuide.length).toBeGreaterThan(100)
     expect(slimGuide.length).toBeLessThanOrEqual(8 * 1024)
     for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(slimGuide).not.toContain(marker)
     expect(slimGuide).toContain('office_template')
     expect(slimGuide).toContain('office_template_write')
-    expect(slimGuide).toContain('submit_answer')
-    expect(slimGuide).toContain('needs_revision')
+    expect(slimGuide).toContain('唯一制作流程')
+    expect(slimGuide).toContain('不增加检查步骤')
     expect(slimGuide).not.toContain('python-docx 写盘')
-    expect(slimGuide).toContain('不要使用 python-docx')
+    expect(slimGuide).toContain('修改已有文件遵循 Word 指南 B 路径')
 
     const sizes: Array<{ id: string; kind: 'template' | 'recipe' | 'bare'; chars: number }> = []
     for (const template of withSample) {
@@ -312,7 +336,7 @@ describe('office document mode', () => {
       expect(injection, template.id).toContain('office-docx-template 指南')
       expect(injection, template.id).toContain('office_template')
       expect(injection, template.id).toContain('office_template_write')
-      expect(injection, template.id).toContain('产品内置 Office 预览')
+      expect(injection, template.id).toContain('不增加检查步骤')
       expect(injection, template.id).not.toContain('# OfficeCLI DOCX Skill')
       expect(injection, template.id).not.toContain('officecli-docx 指南')
       for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(injection, `${template.id} ${marker}`).not.toContain(marker)
@@ -323,34 +347,38 @@ describe('office document mode', () => {
       const injection = buildOfficeInjection({ mode: 'word', templateId: template.id, revision: template.revision }, templates)
       expect(usesWordTemplateGuide({ mode: 'word', templateId: template.id, revision: template.revision }, templates), template.id).toBe(false)
       expect(injection, template.id).toContain('office-docx 指南')
-      expect(injection, template.id).toContain('# OfficeCLI DOCX Skill')
+      expect(injection, template.id).toContain('# Selection Word 工作流')
       expect(injection, template.id).toContain('没有原生样例文件')
-      expect(injection, template.id).toContain('较慢路径')
+      expect(injection, template.id).toContain('OfficeCLI batch')
       expect(injection, template.id).not.toContain('office-docx-template 指南')
-      for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(injection, `${template.id} ${marker}`).toContain(marker)
+      for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(injection, `${template.id} ${marker}`).not.toContain(marker)
       sizes.push({ id: template.id, kind: 'recipe', chars: injection.length })
     }
 
     const bare = buildOfficeInjection({ mode: 'word' }, templates)
     expect(usesWordTemplateGuide({ mode: 'word' }, templates)).toBe(false)
     expect(bare).toContain('office-docx 指南')
-    expect(bare).toContain('# OfficeCLI DOCX Skill')
-    expect(bare).toContain('--render native')
-    expect(bare).toContain('printToPDF')
+    expect(bare).toContain('# Selection Word 工作流')
+    expect(bare).not.toContain('--render native')
+    expect(bare).not.toContain('printToPDF')
     expect(bare).not.toContain('office-docx-template 指南')
-    for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(bare).toContain(marker)
+    for (const marker of OFFICECLI_DOCX_FULL_SKILL_MARKERS) expect(bare).not.toContain(marker)
     sizes.push({ id: 'word-bare', kind: 'bare', chars: bare.length })
 
     const minutes = sizes.find(item => item.id === 'meeting-minutes')!
     const recipe = sizes.find(item => item.id === 'selection-meeting-minutes')!
     const bareSize = sizes.find(item => item.id === 'word-bare')!
-    expect(minutes.chars).toBeLessThan(bareSize.chars - 20_000)
-    expect(recipe.chars).toBeGreaterThan(bareSize.chars - 2_000)
-    expect(bareSize.chars).toBeGreaterThan(40_000)
+    expect(minutes.chars).toBeLessThan(20_000)
+    expect(recipe.chars).toBeLessThan(20_000)
+    expect(bareSize.chars).toBeLessThan(6_000)
 
     const excel = buildOfficeInjection({ mode: 'excel' }, templates)
     expect(excel).toContain('office-xlsx 指南')
-    expect(excel).toContain('OfficeCLI XLSX Skill')
+    expect(excel).toContain('Selection Excel 快速制作与定点修改')
+    expect(excel.length).toBeLessThan(6_000)
+    expect(excel).toContain('xlsx_recalculate')
+    expect(excel).toContain('not-needed')
+    expect(excel).not.toContain('Visual delivery floor')
   })
 
   test('case guidance never reaches the composer', () => {

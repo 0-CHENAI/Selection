@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 import { repairDocxOutlineHeadings } from './officecli-heading-repair.ts';
 
 function findDocxArg(args: string[]): string | undefined {
@@ -17,6 +17,12 @@ const args = process.argv.slice(3);
 if (!binary || !existsSync(binary)) {
   console.error('Selection does not include bundled OfficeCLI for this platform. Repair or reinstall Selection.');
   process.exit(127);
+}
+
+const wordGuide = resolve(dirname(binary), '../../skills/officecli/guides/word-reference.md');
+if (args.length === 2 && args[0] === 'load_skill' && args[1] === 'word' && existsSync(wordGuide)) {
+  process.stdout.write(readFileSync(wordGuide, 'utf8'));
+  process.exit(0);
 }
 
 if (process.platform === 'win32' && process.env.SELECTION_WINDOWS_SANDBOX === '1' && firstVerb(args) === 'open') {

@@ -211,6 +211,7 @@ export function getWorkingDirectoryContext(
     // Add context explaining this is the session folder, not a code project
     parts.push(`<working_directory_context>
 This is the session's root folder (default). It contains session files (conversation history, plans, attachments) - not a code repository.
+Save final user-visible deliverables in ${workingDirectory}/outputs/ (create it when needed). Keep disposable intermediates in the exact dataFolderPath from <session_state>; never put final deliverables there.
 You can access any files the user attaches here. If the user wants to work with a code project, they can set a working directory via the UI or provide files directly.
 </working_directory_context>`);
   } else {
@@ -549,12 +550,13 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 function formatBundledOfficecliSkillGuidance(): string {
   const router = getBundledOfficecliRouterSkillMd();
   const readRouter = router
-    ? `When you decide the user wants a Word / Excel / PowerPoint file, Read \`${router}\` first, then run only the \`officecli load_skill\` commands it selects.`
-    : 'When you decide the user wants a Word / Excel / PowerPoint file, read the bundled `officecli` router first, then run only the `officecli load_skill` commands it selects.';
+    ? `For Office files, Read \`${router}\` first; follow its selected concise guide.`
+    : 'For Office files, read the bundled `officecli` router first; follow its selected concise guide.';
   return [
-    '- **officecli** is on PATH for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx`. Decide from the user\'s request whether they want an Office file, a Markdown note, or a chat reply. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported OfficeCLI operations.',
+    '- **officecli** is on PATH for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx`. Decide from the user\'s request whether they want an Office file, a Markdown note, or a chat reply. Use the selected Word/Excel/PowerPoint guide; honor an explicit user-requested tool comparison.',
     `- ${readRouter} Never download, install, or self-update OfficeCLI.`,
-    '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
+    '- New Word, including ordinary chat: auto-select a style-* template per the guide. Explicit templates win; edits keep existing styles.',
+    '- Each format guide owns its complete workflow. Template Word and direct OfficeCLI editing are separate paths; do not append one path\'s checks to the other.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
   ].join('\n');
 }
@@ -770,7 +772,8 @@ Co-Authored-By: Selection <agents-noreply@craft.do>
 - Treat the user-selected working directory as a user-visible deliverable location, not a scratch directory. Files that are part of the requested project change count as deliverables.
 - Write every disposable or intermediate artifact—including search results, extracted or normalized data, temporary files, Office dumps, drafts, caches, helper scripts, and QA output—to the exact \`dataFolderPath\` from \`<session_state>\`, using absolute paths.
 - If the user explicitly requests any file as a deliverable, including a TXT, JSON, CSV, Markdown, or script file, keep it at the requested location instead of treating it as scratch.
-- Do not scan or delete pre-existing files to clean up artifacts. Prevent pollution by choosing the correct destination before writing.
+- Default deliverables: session root outputs/, never dataFolderPath.
+- Do not scan or delete pre-existing files to clean up artifacts.
 
 ## Permission Modes
 
