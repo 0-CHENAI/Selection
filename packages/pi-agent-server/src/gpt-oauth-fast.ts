@@ -11,14 +11,9 @@ export function installFastServiceTier(session: AgentSession, enabled: () => boo
     // Apply at the final payload boundary and preserve existing payload hooks.
     return stream(model, context, {
       ...options,
-      onProviderStreamEvent: async (event, requestModel) => {
-        await options?.onProviderStreamEvent?.(event, requestModel)
-        const response = event as { type?: string; service_tier?: string; response?: { service_tier?: string } }
-        const actualTier = response.response?.service_tier ?? response.service_tier
-        if (serviceTier === 'priority' && actualTier === 'default') {
-          throw new Error('Fast 未生效：服务端按普通速度处理了本次请求。请检查账号或模型是否支持 Fast。')
-        }
-      },
+      // service_tier in a successful response is descriptive, not a failure.
+      // The provider may serve the request at its default tier; preserve its
+      // content/tool calls and the caller's event hook without retrying it.
       onPayload: async (payload, requestModel) => {
         const body = await options?.onPayload?.(payload, requestModel) ?? payload
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid Fast payload')

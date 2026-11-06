@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SessionToolContext } from '../context.ts'
-import { handleXlsxRecalculate, XlsxRecalculateSchema, OfficeTemplateWriteSchema } from './office-template.ts'
+import { handleXlsxRecalculate, XlsxRecalculateSchema, OfficeTemplateWriteSchema, OfficeTemplateSchema, handleOfficeTemplate } from './office-template.ts'
 
 test('the concise Excel guide sends a schema-valid recalc request with key cells and no visual review', async () => {
   const guide = readFileSync(join(import.meta.dir, '../../../../apps/electron/resources/skills/officecli/guides/excel.md'), 'utf8')
@@ -25,4 +25,16 @@ test('Word schema accepts insertion before a paragraph and optional source cover
   const request = { template_id: 'style-system-design', output_path: 'report.docx', source_text_path: 'source.txt', replacements: [], additions: [{ before_paragraph_id: 'p16', style_from: 'p7', text: '表后正文' }] }
   expect(OfficeTemplateWriteSchema.parse(request)).toEqual(request)
   expect(OfficeTemplateWriteSchema.parse({ output_path: 'old.docx', replacements: [], additions: [{ after_paragraph_id: 'p7', text: '旧调用兼容' }] }).additions?.[0]?.after_paragraph_id).toBe('p7')
+})
+
+
+test('Word preparation source requirements reach the host without being dropped by the tool handler', async () => {
+  const request = { template_id: 'style-system-design', content_mode: 'verbatim' as const, source_text_path: '/workspace/source.txt' }
+  expect(OfficeTemplateSchema.parse(request)).toEqual(request)
+  const calls: unknown[] = []
+  const result = await handleOfficeTemplate({ officeTools: async (name: string, args: unknown) => { calls.push({ name, args }); return { preparation_id: 'prepared' } } } as unknown as SessionToolContext, request)
+  expect(result.isError).toBe(false)
+  expect(calls).toEqual([{ name: 'office_template', args: request }])
+  expect(OfficeTemplateWriteSchema.parse({ output_path: 'report.docx', preparation_id: 'prepared', replacements: [] }).preparation_id).toBe('prepared')
+  expect(OfficeTemplateSchema.safeParse({ ...request, content_mode: 'skip-checks' }).success).toBe(false)
 })

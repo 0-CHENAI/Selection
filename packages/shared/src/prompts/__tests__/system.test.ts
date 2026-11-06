@@ -117,6 +117,12 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not scan or delete pre-existing files')
   })
 
+  it('separates default session deliverables from scratch files', () => {
+    const context = getWorkingDirectoryContext('/tmp/session', true, '/tmp/session')
+    expect(context).toContain('/tmp/session/outputs/')
+    expect(context).toContain('never put final deliverables there')
+  })
+
   it('labels a user-selected working directory as a non-scratch location (#163)', () => {
     const context = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/deliverables')
     const changedMidSession = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/original')

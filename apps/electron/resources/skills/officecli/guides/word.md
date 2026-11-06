@@ -17,9 +17,9 @@
 | 技术报告、系统架构、工程方案；其他专业报告默认 | style-system-design |
 
 
-1. 读取材料，确定完整内容。调用 `office_template` 获取模板段落、样式 ID 和 location（正文或表格的行列位置）。返回清单足以填写模板，不需要预览图片、解压模板、outline/get 或查 OfficeCLI 命令。模板中的配色、字号、页脚标签和表格属性是设计，不是待修复示例事实；只替换正文占位符和用户指定的文本。
-2. 一次规划全部 replacements、additions、row_additions、removals，再调用 `office_template_write`。新增段落用 before_paragraph_id 或 after_paragraph_id 二选一，表后插入可锚定表后第一段之前；相同锚点保持提交顺序。原样排版 .txt 时传 source_text_path，宿主在写入前核对每行原文覆盖和原始顺序；摘要、改写或用户要求重排时不传。标题与正文分别继承合适段落，独立正文使用独立 additions；不要把多段内容塞进一个换行字符串。保留全部用户材料，不编造作者、日期或事实。
-3. 写入成功即**立即交付**。宿主负责模板结构、提交文字的序列化回读及指定原文的覆盖检查，模型不再追加 validate/text/outline/截图或 XML 检查。原文保留任务在提交前对照材料检查编辑计划，不以生成后的自由抛光代替内容准备。宿主未验证事实或视觉分页，不声称做过这些验收。
+1. 读取材料，确定完整内容。调用 `office_template` 时明确 content_mode：原样转换用 verbatim，并传 source_text_path 绑定原始 .txt；新写、摘要或用户要求重排用 authored。原文可在工作区或本会话 dataFolderPath，直接使用现有路径，不额外复制。获取 preparation_id、模板段落、样式 ID 和 location（正文或表格的行列位置）。返回清单足以填写模板，不需要预览图片、解压模板、outline/get 或查 OfficeCLI 命令。模板中的配色、字号、页脚标签和表格属性是设计，不是待修复示例事实；只替换正文占位符和用户指定的文本。
+2. 一次规划全部 replacements、additions、row_additions、removals，再调用 `office_template_write`。新增段落用 before_paragraph_id 或 after_paragraph_id 二选一，表后插入可锚定表后第一段之前；相同锚点保持提交顺序。传回 preparation_id。准备时绑定的原文覆盖和顺序检查会自动继承，重试漏传参数也不能跳过；新任务若改为摘要或重排，重新准备 content_mode=authored，而不是省略检查参数。标题与正文分别继承合适段落，独立正文使用独立 additions；不要把多段内容塞进一个换行字符串。保留全部用户材料，不编造作者、日期或事实。
+3. 写入成功即**立即交付**。宿主负责模板结构、提交文字的序列化回读及指定原文的覆盖检查，模型不再追加 validate/text/outline/截图或 XML 检查。原文保留任务在提交前对照材料检查编辑计划，不以生成后的自由抛光代替内容准备。返回值中的 verified、content_check、tables 和 sha256 已给出本版成品的检查证据，不再另行数段落、表格或读取 XML。unverified 是未承诺的验收范围，不是待办清单。同一计划重复提交到同一未变化文件会返回 reused=true，不重写文件。宿主未验证事实或视觉分页，不声称做过这些验收。
 
 只有工具返回具体错误才修正编辑计划中的对应项。检查通过后的文件不再用 OfficeCLI 改字号、页脚或表格；用户明确要求模板工具无法表达的结构时，从开始就选 B 路径，不混用两条制作链。
 

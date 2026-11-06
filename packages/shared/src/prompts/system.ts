@@ -211,6 +211,7 @@ export function getWorkingDirectoryContext(
     // Add context explaining this is the session folder, not a code project
     parts.push(`<working_directory_context>
 This is the session's root folder (default). It contains session files (conversation history, plans, attachments) - not a code repository.
+Save final user-visible deliverables in ${workingDirectory}/outputs/ (create it when needed). Keep disposable intermediates in the exact dataFolderPath from <session_state>; never put final deliverables there.
 You can access any files the user attaches here. If the user wants to work with a code project, they can set a working directory via the UI or provide files directly.
 </working_directory_context>`);
   } else {
@@ -771,7 +772,8 @@ Co-Authored-By: Selection <agents-noreply@craft.do>
 - Treat the user-selected working directory as a user-visible deliverable location, not a scratch directory. Files that are part of the requested project change count as deliverables.
 - Write every disposable or intermediate artifact—including search results, extracted or normalized data, temporary files, Office dumps, drafts, caches, helper scripts, and QA output—to the exact \`dataFolderPath\` from \`<session_state>\`, using absolute paths.
 - If the user explicitly requests any file as a deliverable, including a TXT, JSON, CSV, Markdown, or script file, keep it at the requested location instead of treating it as scratch.
-- Do not scan or delete pre-existing files to clean up artifacts. Prevent pollution by choosing the correct destination before writing.
+- Default deliverables: session root outputs/, never dataFolderPath.
+- Do not scan or delete pre-existing files to clean up artifacts.
 
 ## Permission Modes
 

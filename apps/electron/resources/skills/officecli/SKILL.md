@@ -17,6 +17,6 @@ description: "Selection Office 文件入口：按文档类型读取唯一制作�
 
 业务技能只补内容要求，不追加制作或 QA 流程。学术引文、表单、金融等专用指南仅在需要相应功能时按需读其语法。
 
-最终文件按用户指定位置交付，否则放有效工作目录；脚本、草稿、检查输出放 `<session_state>` 的精确 dataFolderPath。保留用户原件，不清理已有工作目录。
+最终文件按用户指定位置交付，否则放用户选择的项目目录；未选择项目目录时放会话根目录的 `outputs/`（按需创建）。最终产物禁止写入 `data/`、`plans/` 或 `long_responses/`；脚本、草稿、检查输出放 `<session_state>` 的精确 dataFolderPath。保留用户原件，不清理已有工作目录。
 
 中文新写正文按需用 natural-writing；英文普通正文用 humanizer；英文学术正文用 academic-humanizer。只转换或原样排版不加载写作技能。

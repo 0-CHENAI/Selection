@@ -12,13 +12,16 @@ const fragment = z.object({
 }).strict();
 
 export const OfficeTemplateSchema = z.object({
+  content_mode: z.enum(['verbatim', 'authored']).optional().describe('Word: choose verbatim for unchanged source conversion, authored for new prose, summaries or explicit reordering. Omitting mode reuses the current preparation. A new authored preparation explicitly resets a prior source requirement.'),
+  source_text_path: z.string().optional().describe('For verbatim Word: original UTF-8 .txt in workspace or this session dataFolderPath. Required with verbatim; bound with its digest during preparation and inherited by every retry.'),
   template_id: z.string().min(1).describe('Selected composer case ID, or a style-* Word template ID from the concise Word guide for ordinary-chat creation'),
 }).strict();
 
 export const OfficeTemplateWriteSchema = z.object({
+  preparation_id: z.string().min(1).optional().describe('Return the ID from office_template. It binds template and source requirements across retries; omission inherits the current preparation for this template/workspace.'),
   template_id: z.string().min(1).optional().describe('Pass template_id returned by office_template; required for ordinary-chat style templates. An explicit composer selection takes precedence.'),
-  source_text_path: z.string().optional().describe('For verbatim conversion of a plain UTF-8 text source: workspace .txt file. Host verifies every non-empty source line is retained in its original order (ignores whitespace only), before writing. Omit for summaries, reordered material or rewritten prose.'),
-  output_path: z.string().min(1).describe('A new .docx path inside the session workspace. Existing files are never overwritten.'),
+  source_text_path: z.string().optional().describe('For verbatim conversion of a plain UTF-8 text source: workspace or session dataFolderPath .txt file. Prefer binding at office_template; legacy write-time binding also persists across retries. Host verifies every non-empty source line is retained in its original order (ignores whitespace only), before writing. Omission never clears an existing binding. For a new summary, reordered material or rewritten prose, prepare content_mode=authored explicitly.'),
+  output_path: z.string().min(1).describe('A .docx path inside the session workspace. Existing files are never overwritten; an identical successful plan and unchanged artifact reuse their check receipt.'),
   replacements: z.array(z.object({
     paragraph_id: z.string().optional().describe('Paragraph ID from editable_paragraphs, e.g. p3'),
     id: z.string().optional().describe('Alias of paragraph_id'),

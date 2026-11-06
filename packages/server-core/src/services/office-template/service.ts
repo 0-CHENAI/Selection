@@ -8,9 +8,10 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, constants } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OfficeDocumentState } from '@craft-agent/shared/protocol/office'
+import { isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 import { resolveOfficecliBinary } from '@craft-agent/shared/utils/officecli'
 import type { OfficeTemplate } from '../office-catalog.ts'
 import { applyPageSetupExtension, type PageSetupExtension } from '../excel-delivery/page-setup.ts'
@@ -39,6 +40,8 @@ const RECORD_FILE = 'office-deliveries.json'
 export interface OfficeToolSession {
   /** 会话工作区根目录（项目目录或工作区目录）。 */
   workspaceRoot: string
+  /** Stable visible user-request ID; internal retries retain it. */
+  taskId?: string
   /** 会话存储目录，用于记录重算结果。 */
   storageDir: string
   /** 读当前会话的 Office 选择。每次调用都重新读，用于检测复制中途的变化。 */
@@ -54,7 +57,18 @@ export interface OfficeToolSession {
 
 interface CatalogCase { id: string; sampleFile?: string | null; selection?: { assetDir?: string; exampleSha256?: string } }
 
-interface WordDeliveryRecord { sha256: string; templateId: string; revision: string; sourceSha256: string }
+interface WordDeliveryRecord { taskId?: string; sha256: string; templateId: string; revision: string; sourceSha256: string; planSha256?: string; receipt?: WordWriteReceipt; sourceText?: BoundWordSource }
+interface BoundWordSource { path: string; sha256: string }
+interface WordPreparation { id: string; workspace: string; templateId: string; revision: string; templateSha256: string; content_mode: 'verbatim' | 'authored'; source?: BoundWordSource }
+interface PreparationStore { active: Record<string, string>; items: Record<string, WordPreparation> }
+interface PrepareArgs { template_id?: unknown; content_mode?: 'verbatim' | 'authored'; source_text_path?: string }
+export interface WordWriteReceipt {
+  path: string; sha256: string; checks: string[]; status: 'ready'; next_action: string
+  content_check: { paragraphs: number; serialized_text: 'passed'; source_lines?: number; source_sha256?: string; source_order?: 'preserved' }
+  tables: Array<{ table: number; rows: number; cells_per_row: number[] }>
+  verified: string[]; unverified: string[]; environment_notes: string[]; reused: boolean
+  preparation_id?: string
+}
 interface DeliveryRecords { word?: Record<string, WordDeliveryRecord>; xlsx: Record<string, { sha256: string; ready: boolean; code?: string; message: string; at: number }> }
 
 /** 直接调用 OfficeCLI 可执行文件（不经 shell 包装）。不可用时返回 undefined，由 TypeScript 求值器补算。 */
@@ -105,6 +119,99 @@ export function workspacePath(rootInput: string, raw: unknown, extension: RegExp
   }
   if (existsSync(candidate) && lstatSync(candidate).isSymbolicLink()) throw new Error('不能写入符号链接')
   return { absolute: candidate, relative: rel.split(sep).join('/') }
+}
+
+/** Source inputs may live in the workspace or this session's exact data folder. */
+function wordSource(session: OfficeToolSession, raw: string): { binding: BoundWordSource; bytes: Buffer } {
+  const roots = [session.workspaceRoot, ...(isAbsolute(raw) && existsSync(join(session.storageDir, 'data')) ? [join(session.storageDir, 'data')] : [])]
+  let reason = '文件不在允许的目录内'
+  for (const root of roots) {
+    if (isAbsolute(raw) && !within(resolve(root), resolve(raw)) && !within(realpathSync(root), resolve(raw))) continue
+    try {
+      const file = workspacePath(root, raw, /\.txt$/i)
+      if (!statSync(file.absolute).isFile()) throw new Error('不是普通文件')
+      if (statSync(file.absolute).size > 4 * 1024 * 1024) throw new Error('文件超过 4 MiB')
+      const bytes = readFileSync(file.absolute)
+      return { binding: { path: file.absolute, sha256: sha256(bytes) }, bytes }
+    } catch (error) { reason = error instanceof Error ? error.message : String(error) }
+  }
+  throw new Error(`source_text_path 无效：${reason}。允许工作区 ${session.workspaceRoot} 或本会话 ${join(session.storageDir, 'data')} 内的普通 .txt 文件；优先直接使用原文路径，无需复制，也不要修改 output_path。`)
+}
+
+function preparationStore(session: OfficeToolSession): PreparationStore {
+  const path = join(session.storageDir, 'data', 'office-word-preparations.json')
+  if (!existsSync(path)) return { active: {}, items: {} }
+  try {
+    const store = JSON.parse(readFileSync(path, 'utf8')) as PreparationStore
+    if (!store.active || !store.items || typeof store.active !== 'object' || typeof store.items !== 'object') throw new Error('invalid store')
+    return store
+  } catch { throw new Error('Word 准备记录损坏，不能跳过已绑定的原文检查。请恢复会话记录后重试。') }
+}
+function preparationKey(session: OfficeToolSession, template: OfficeTemplate): string {
+  return JSON.stringify([realpathSync(session.workspaceRoot), template.id, session.taskId ?? null])
+}
+function persistPreparation(session: OfficeToolSession, preparation: WordPreparation): void {
+  const store = preparationStore(session)
+  store.items[preparation.id] = preparation
+  store.active[JSON.stringify([preparation.workspace, preparation.templateId, session.taskId ?? null])] = preparation.id
+  const path = join(session.storageDir, 'data', 'office-word-preparations.json')
+  mkdirSync(dirname(path), { recursive: true })
+  const temporary = `${path}.${randomUUID()}.tmp`
+  try { writeFileSync(temporary, JSON.stringify(store), { mode: 0o600 }); renameSync(temporary, path) }
+  finally { rmSync(temporary, { force: true }) }
+}
+function getPreparation(session: OfficeToolSession, template: OfficeTemplate, sourceBytes: Uint8Array, id?: string): WordPreparation | undefined {
+  const store = preparationStore(session)
+  const selectedId = id ?? store.active[preparationKey(session, template)]
+  if (!selectedId) return undefined
+  const preparation = store.items[selectedId]
+  if (!preparation || preparation.workspace !== realpathSync(session.workspaceRoot) || preparation.templateId !== template.id
+    || preparation.revision !== template.revision || preparation.templateSha256 !== sha256(sourceBytes)
+    || !['verbatim', 'authored'].includes(preparation.content_mode)
+    || (preparation.content_mode === 'verbatim' && (typeof preparation.source?.path !== 'string' || !/^[a-f0-9]{64}$/.test(preparation.source?.sha256 ?? '')))
+    || (preparation.content_mode === 'authored' && preparation.source !== undefined)) {
+    throw new Error('preparation_id 无效或模板/工作区已变化，请重新调用 office_template 并明确 content_mode。')
+  }
+  return preparation
+}
+function newPreparation(session: OfficeToolSession, template: OfficeTemplate, bytes: Uint8Array, args: PrepareArgs): WordPreparation {
+  if (args.content_mode === 'authored' && args.source_text_path !== undefined) throw new Error('content_mode=authored 不接受 source_text_path；原样转换请使用 verbatim。')
+  if (args.content_mode === 'verbatim' && args.source_text_path === undefined) throw new Error('content_mode=verbatim 必须提供 source_text_path；输出路径无需修改。')
+  const source = args.source_text_path !== undefined ? wordSource(session, args.source_text_path).binding : undefined
+  return { id: randomUUID(), workspace: realpathSync(session.workspaceRoot), templateId: template.id, revision: template.revision,
+    templateSha256: sha256(bytes), content_mode: source ? 'verbatim' : 'authored', ...(source ? { source } : {}) }
+}
+function boundSourceBytes(session: OfficeToolSession, source: BoundWordSource): Buffer {
+  const current = wordSource(session, source.path)
+  if (current.binding.sha256 !== source.sha256) throw new Error('source_text_path 原文在准备后已变化，请重新调用 office_template 绑定新版本，不能复用旧检查。')
+  return current.bytes
+}
+function checkSourceText(bytes: Uint8Array, paragraphs: NativeParagraph[]): { source_lines: number; source_sha256: string; source_order: 'preserved' } {
+  const normalize = (text: string) => text.replace(/\s+/gu, '')
+  const lines = Buffer.from(bytes).toString('utf8').split(/\r?\n/).map(normalize).filter(Boolean)
+  const text = normalize(paragraphs.map(p => p.text).join('\n'))
+  let cursor = 0
+  for (const [index, line] of lines.entries()) {
+    const found = text.indexOf(line, cursor)
+    if (found < 0) throw new Error(`原文完整性检查失败：第 ${index + 1} 个非空行缺失或顺序不符（仅忽略空白）。请只修正对应编辑项。原文：${JSON.stringify(line.slice(0, 1000))}`)
+    cursor = found + line.length
+  }
+  return { source_order: 'preserved', source_lines: lines.length, source_sha256: sha256(bytes) }
+}
+function planDigest(plan: unknown): string {
+  // Object-key order is not semantic; array order (especially insertions) is.
+  return sha256(Buffer.from(JSON.stringify(plan, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)))
+}
+function tableSummary(paragraphs: NativeParagraph[]): WordWriteReceipt['tables'] {
+  const tables = new Map<number, Map<number, number>>()
+  for (const { location } of paragraphs) {
+    if (location.kind !== 'table-cell') continue
+    let rows = tables.get(location.table)
+    if (!rows) { rows = new Map(); tables.set(location.table, rows) }
+    rows.set(location.row, Math.max(rows.get(location.row) ?? 0, location.cell))
+  }
+  return [...tables].map(([table, rows]) => ({ table, rows: rows.size, cells_per_row: [...rows].sort((a, b) => a[0] - b[0]).map(([, cells]) => cells) }))
 }
 
 function selected(session: OfficeToolSession, templateId: unknown, state = session.office()): { state: OfficeDocumentState; template: OfficeTemplate } {
@@ -159,6 +266,8 @@ export function templateSourceFor(session: OfficeToolSession, template: OfficeTe
 }
 
 export interface PrepareResult {
+  preparation_id?: string
+  content_contract?: { mode: 'verbatim' | 'authored'; source?: BoundWordSource }
   template_id: string
   revision: string
   mode: 'word' | 'excel'
@@ -183,12 +292,16 @@ function uniqueWorkspaceFile(root: string, base: string, extension: string): str
   throw new Error('无法在工作区里找到可用的文件名')
 }
 
-export async function prepareOfficeTemplate(session: OfficeToolSession, args: { template_id?: unknown }): Promise<PrepareResult> {
+export async function prepareOfficeTemplate(session: OfficeToolSession, args: PrepareArgs): Promise<PrepareResult> {
   if (!session.canWrite) throw new Error('office_template 需要工作区写权限，当前是只读模式。')
   const officeBefore = session.office() ?? null
   const selectionBefore = JSON.stringify(officeBefore)
   const { template } = selected(session, args.template_id, officeBefore)
   const source = templateSourceFor(session, template)
+  const preparation = template.mode === 'word'
+    ? (args.content_mode === undefined && args.source_text_path === undefined ? getPreparation(session, template, source.bytes) : undefined) ?? newPreparation(session, template, source.bytes, args)
+    : undefined
+  if (preparation?.source) boundSourceBytes(session, preparation.source)
   const root = realpathSync(session.workspaceRoot)
   // 参考副本放在会话 data 目录（不生成文件卡片）；Excel 的可编辑工作簿放进工作区。
   const scratch = join(session.storageDir, 'data', 'office-templates')
@@ -234,7 +347,9 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
       writeFileSync(workbook, bytes, { flag: 'wx', mode: 0o600 })
       workspacePathOut = workbook
     }
+    if (preparation) persistPreparation(session, preparation)
     return {
+      ...(preparation ? { preparation_id: preparation.id, content_contract: { mode: preparation.content_mode, source: preparation.source } } : {}),
       template_id: template.id,
       revision: template.revision,
       mode: template.mode,
@@ -243,7 +358,7 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
       design_path: join(target, 'design.md'),
       files,
       guide: template.mode === 'word'
-        ? '参考副本只读。按 editable_paragraphs 的段落 / run ID 调用 office_template_write：replacements 替换全部示例事实（含版头发文机关），additions 用 style_from 继承原段落样式，row_additions 克隆表格行，removals 只删 can_remove=true 的段落。输出写到工作区里新的 .docx，template_id 必须原样传回。location 标明正文或表格位置（table/row/cell 为 1 起始），不需要探查 XML。用 before_paragraph_id 可在指定段落之前插入（如表后第一标题之前）；after_paragraph_id 在段后插入，二选一。独立正文使用独立 additions。原样排版 .txt 时传 source_text_path，宿主检查每行文字覆盖及原文顺序。章节名称可按任务调整；无需的可移除段落可删除。替换所有【占位符】，不虚构事实。宿主一次写入并检查版式；成功即交付，不再 validate、office_render、截图或模型复审。'
+        ? '参考副本只读。按 editable_paragraphs 的段落 / run ID 调用 office_template_write：replacements 替换全部示例事实（含版头发文机关），additions 用 style_from 继承原段落样式，row_additions 克隆表格行，removals 只删 can_remove=true 的段落。输出写到工作区里新的 .docx，template_id 必须原样传回。location 标明正文或表格位置（table/row/cell 为 1 起始），不需要探查 XML。用 before_paragraph_id 可在指定段落之前插入（如表后第一标题之前）；after_paragraph_id 在段后插入，二选一。独立正文使用独立 additions。传回 preparation_id；准备时绑定的原文检查在重试时自动继承，不能靠漏传 source_text_path 跳过。改写/摘要任务请重新准备 content_mode=authored。章节名称可按任务调整；无需的可移除段落可删除。替换所有【占位符】，不虚构事实。宿主一次写入并检查版式；成功即交付，不再 validate、office_render、截图或模型复审。'
         : 'workspace_path 是工作区里的可编辑工作簿（案例原件不变）。按 OfficeCLI 路由的精简 Excel 指南批量改输入格，不覆盖公式和图表，不加载完整官方指南。完成全部修改后调用一次 xlsx_recalculate（visual_review=not-needed；仅用户要求视觉验收或有具体显示问题时检查相关区域）。未重算或核对不一致不能完成。',
       skill: template.mode === 'word' ? 'officecli-docx' : 'officecli-xlsx',
       editing_tool: template.mode === 'word' ? 'office_template_write' : 'officecli + xlsx_recalculate',
@@ -257,17 +372,46 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
   }
 }
 
-export interface TemplateWriteArgs extends DocxEditPlan { output_path?: unknown; template_id?: unknown; source_text_path?: string }
+export interface TemplateWriteArgs extends DocxEditPlan { output_path?: unknown; template_id?: unknown; source_text_path?: string; preparation_id?: string }
 
-export async function writeOfficeTemplate(session: OfficeToolSession, args: TemplateWriteArgs): Promise<{ path: string; sha256: string; checks: string[]; status: 'ready'; next_action: string; content_check: { paragraphs: number; serialized_text: 'passed'; source_lines?: number; source_sha256?: string; source_order?: 'preserved' }; environment_notes: string[] }> {
+export async function writeOfficeTemplate(session: OfficeToolSession, args: TemplateWriteArgs): Promise<WordWriteReceipt> {
   if (!session.canWrite) throw new Error('office_template_write 需要工作区写权限，当前是只读模式。')
   const officeBefore = session.office() ?? null
   const selectionBefore = JSON.stringify(officeBefore)
   const { template } = selected(session, args.template_id, officeBefore)
   if (template.mode !== 'word') throw new Error('office_template_write 只用于 Word 案例；Excel 用 OfficeCLI 改副本后调用 xlsx_recalculate。')
   const source = templateSourceFor(session, template)
-  const output = workspacePath(session.workspaceRoot, args.output_path, /\.docx$/i, true)
-  if (existsSync(output.absolute)) throw new Error(`输出文件已存在：${output.relative}。请换一个新的 .docx 路径，不覆盖已有文件。`)
+  let preparation = getPreparation(session, template, source.bytes, args.preparation_id)
+  if (args.source_text_path !== undefined) {
+    const supplied = wordSource(session, args.source_text_path)
+    if (preparation?.source && (preparation.source.path !== supplied.binding.path || preparation.source.sha256 !== supplied.binding.sha256)) throw new Error('source_text_path 与准备阶段绑定的原文不一致；请重新调用 office_template 明确新任务。')
+    if (!preparation?.source) {
+      preparation = preparation ? { ...preparation, content_mode: 'verbatim', source: supplied.binding } : newPreparation(session, template, source.bytes, { source_text_path: args.source_text_path })
+      persistPreparation(session, preparation) // Persist before plan validation: failed retries cannot omit the requirement.
+    }
+  }
+  if (args.preparation_id && preparation) persistPreparation(session, preparation) // Explicit continuation also binds omission-safe retries in this request.
+  const sourceText = preparation?.source ? boundSourceBytes(session, preparation.source) : undefined
+  let output: ReturnType<typeof workspacePath>
+  try {
+    const requested = typeof args.output_path === 'string' ? resolve(session.workspaceRoot, args.output_path) : ''
+    if (isSessionScratchPath(requested) || ['data', 'plans', 'long_responses'].some(folder => within(resolve(session.storageDir, folder), requested))) {
+      throw new Error(`最终产物不能写入会话临时目录，请改用 ${join(session.storageDir, 'outputs')} 或当前项目目录`)
+    }
+    output = workspacePath(session.workspaceRoot, args.output_path, /\.docx$/i, true)
+  }
+  catch (error) { throw new Error(`output_path 无效：${error instanceof Error ? error.message : String(error)}。成品应位于工作区 ${session.workspaceRoot}，例如 report.docx；无需修改 source_text_path。`) }
+  const planSha256 = planDigest({ replacements: args.replacements ?? [], additions: args.additions ?? [], row_additions: args.row_additions ?? [], removals: args.removals ?? [], sourceText: preparation?.source ?? null })
+  if (existsSync(output.absolute)) {
+    const existingRecords = readRecords(session)
+    const previous = existingRecords.word?.[realpathSync(output.absolute)]
+    if (previous?.receipt && previous.planSha256 === planSha256 && previous.templateId === template.id && previous.revision === template.revision
+      && previous.sourceSha256 === sha256(source.bytes) && previous.sha256 === sha256(readFileSync(output.absolute))) {
+      if (previous.taskId !== session.taskId) { previous.taskId = session.taskId; writeRecords(session, existingRecords) }
+      return { ...previous.receipt, preparation_id: preparation?.id, reused: true }
+    }
+    throw new Error(`output_path 已存在：${output.relative}，内容或编辑计划与已通过检查的版本不一致。请指定新的 .docx 文件名，不覆盖已有文件。`)
+  }
   let written
   try {
     written = writeDocxFromTemplate(source.bytes, source.profile, args)
@@ -285,29 +429,20 @@ export async function writeOfficeTemplate(session: OfficeToolSession, args: Temp
     if (leftovers.length) throw new Error(`仍有模板占位符未替换：${leftovers.map(p => p.id + ' ' + p.text).slice(0, 8).join('；')}。未写入文件。`)
   }
   const contentCheck: { paragraphs: number; serialized_text: 'passed'; source_lines?: number; source_sha256?: string; source_order?: 'preserved' } = { ...written.contentCheck }
-  if (args.source_text_path !== undefined) {
-    const input = workspacePath(session.workspaceRoot, args.source_text_path, /\.txt$/i)
-    if (statSync(input.absolute).size > 4 * 1024 * 1024) throw new Error('原文核对文件超过 4 MiB，未写入成品。')
-    const sourceBytes = readFileSync(input.absolute)
-    const normalize = (text: string) => text.replace(/\s+/gu, '')
-    const lines = sourceBytes.toString('utf8').split(/\r?\n/).map(normalize).filter(Boolean)
-    const text = normalize(savedParagraphs.map(p => p.text).join('\n'))
-    let cursor = 0
-    for (const [index, line] of lines.entries()) {
-      const found = text.indexOf(line, cursor)
-      if (found < 0) throw new Error(`原文完整性检查失败：第 ${index + 1} 个非空行缺失或顺序不符（仅忽略空白）；未写入成品。请修正对应 replacements/additions/cells，不重做样式。原文：${JSON.stringify(line.slice(0, 1000))}`)
-      cursor = found + line.length
-    }
-    contentCheck.source_order = 'preserved'
-    contentCheck.source_lines = lines.length
-    contentCheck.source_sha256 = sha256(sourceBytes)
-  }
+  if (sourceText) Object.assign(contentCheck, checkSourceText(sourceText, savedParagraphs))
   writeFileSync(output.absolute, written.bytes, { flag: 'wx', mode: 0o600 })
+  const receipt: WordWriteReceipt = {
+    status: 'ready', next_action: '文件已保存。verified 列出的检查已针对本 sha256 完成，直接交付链接；无需重复读取或验证。unverified 是范围边界，不是待办。文件变化后检查失效。',
+    path: output.relative, sha256: sha256(written.bytes), checks: written.report.checks, content_check: contentCheck,
+    tables: tableSummary(savedParagraphs), verified: ['template-structure-and-styles', 'submitted-text-roundtrip', ...(sourceText ? ['source-text-coverage-and-order'] : [])],
+    unverified: ['factual-accuracy', 'visual-pagination', ...(!sourceText ? ['source-text-coverage-no-bound-source'] : [])],
+    environment_notes: (await fontWarningsFor(written.bytes, session.fonts).catch(() => [])).map(item => item.message), reused: false, preparation_id: preparation?.id,
+  }
   const records = readRecords(session)
   records.word ??= {}
-  records.word[realpathSync(output.absolute)] = { sha256: sha256(written.bytes), templateId: template.id, revision: template.revision, sourceSha256: sha256(source.bytes) }
+  records.word[realpathSync(output.absolute)] = { taskId: session.taskId, sha256: receipt.sha256, templateId: template.id, revision: template.revision, sourceSha256: sha256(source.bytes), planSha256, receipt, sourceText: preparation?.source }
   writeRecords(session, records)
-  return { status: 'ready', next_action: '文件已保存，模板结构与提交文字回读通过。直接交付链接，不再追加 CLI/XML/视觉复检。content_check.source_lines 仅在指定原文时证明文本覆盖和顺序；未验证事实与视觉分页。环境说明不触发返工。', path: output.relative, sha256: sha256(written.bytes), checks: written.report.checks, content_check: contentCheck, environment_notes: (await fontWarningsFor(written.bytes, session.fonts).catch(() => [])).map(item => item.message) }
+  return receipt
 }
 
 // ── xlsx_recalculate ─────────────────────────────────────────────────────
@@ -390,12 +525,17 @@ export function officeDeliveryIssues(session: OfficeToolSession, changedPaths: s
         sourceDigest = sha256(source.bytes)
         if (record.sha256 === digest && record.sourceSha256 === sourceDigest) continue
         report = validateDocxAgainstTemplate(source.bytes, source.profile, bytes)
+        if (record.sourceText && record.taskId === session.taskId) checkSourceText(boundSourceBytes(session, record.sourceText), inventoryDocx(readOoxmlPackage(bytes), source.profile))
       } catch (error) {
-        issues.push({ path, kind: 'word-layout', summary: '无法读取 Word 文件', detail: error instanceof Error ? error.message : String(error) })
+        issues.push({ path, kind: 'word-layout', summary: 'Word 或绑定原文检查未通过', detail: error instanceof Error ? error.message : String(error) })
         continue
       }
       if (!report.ok) issues.push({ path, kind: 'word-layout', summary: report.diagnostics.map(item => item.message).join('；'), detail: formatLayoutDiagnostics(path, report), diagnostics: report.diagnostics })
       else {
+        if (record.taskId !== session.taskId) delete record.sourceText
+        record.taskId = session.taskId
+        delete record.receipt
+        delete record.planSha256
         record.sha256 = digest
         record.sourceSha256 = sourceDigest
         recordsChanged = true
