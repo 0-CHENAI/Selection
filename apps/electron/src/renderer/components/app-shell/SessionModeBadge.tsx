@@ -1,11 +1,27 @@
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { ProIdentityDialog } from './ProIdentityDialog'
+import { sessionModeBadgeMotion } from './session-mode-badge-motion'
 
 export function SessionModeBadge({ mode }: { mode?: WorkMode }) {
-  return mode === 'PRO' ? <ProModeBadge /> : null
+  const reduceMotion = useReducedMotion()
+  return (
+    <AnimatePresence initial={false}>
+      {mode === 'PRO' && (
+        <motion.div
+          key="pro-mode-badge"
+          className="ml-2 inline-flex shrink-0 items-center"
+          style={{ transformOrigin: 'left center' }}
+          {...sessionModeBadgeMotion(reduceMotion)}
+        >
+          <ProModeBadge />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
 }
 
 function ProModeBadge() {
@@ -35,7 +51,7 @@ function ProModeBadge() {
             aria-label={t('session.currentProMode')}
             aria-haspopup="dialog"
             aria-expanded={open}
-            className="session-mode-badge ml-2 inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--pro-accent)]"
+            className="session-mode-badge inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center rounded border border-[var(--pro-accent)] px-1.5 text-[10px] font-medium tracking-wide text-[var(--pro-accent)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--pro-accent)]"
           >
             PRO
           </button>

@@ -10,4 +10,13 @@ describe('draft chat header work-mode badge', () => {
     expect(chatPage).toContain('HandoverPanel')
     expect(chatPage).not.toContain('canCreate=')
   })
+
+  it('animates the composer PRO badge on same-session mode switch instead of hard-mounting it', () => {
+    const badge = readFileSync(join(import.meta.dir, '../../components/app-shell/SessionModeBadge.tsx'), 'utf8')
+    const input = readFileSync(join(import.meta.dir, '../../components/app-shell/input/FreeFormInput.tsx'), 'utf8')
+    expect(input).toContain('{!pptMode && <SessionModeBadge mode={workMode} />}')
+    expect(badge).toContain('<AnimatePresence initial={false}>')
+    expect(badge).toContain('useReducedMotion')
+    expect(badge).toContain("mode === 'PRO'")
+  })
 })
