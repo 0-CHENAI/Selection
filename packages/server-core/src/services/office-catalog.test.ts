@@ -220,6 +220,23 @@ describe('office document mode', () => {
     expect(listed.result.mode).toBeNull()
   })
 
+  test('autoSelect Word styles stay in the catalog for ordinary chat even when hidden from the Office home grid', () => {
+    const styleIds = [
+      'style-design-report', 'style-experiment-analysis', 'style-investment-memo',
+      'style-legal-memo', 'style-minimal-letter', 'style-strategy-memo', 'style-system-design',
+    ]
+    const templates = listOfficeTemplates()
+    const styles = templates.filter(item => item.autoSelect)
+    expect(styles.map(item => item.id)).toEqual(styleIds)
+    expect(styles.every(item => item.mode === 'word' && item.category === '文档样式' && item.autoSelect === true)).toBe(true)
+    const listed = executeOfficeTemplates({ raw: JSON.stringify({ endpoint: 'catalog' }) })
+    for (const id of styleIds) {
+      const entry = listed.result.templates.find(item => item.id === id)
+      expect(entry, id).toBeTruthy()
+      expect(templates.find(item => item.id === id)?.autoSelect, id).toBe(true)
+    }
+  })
+
   test('business skills stay model-callable without appearing in user-facing skill lists', () => {
     const skills = loadAllSkills('/tmp/office-mode-skills')
     for (const slug of ['meeting-recap', 'saas-metrics-coach', 'gov-doc-writing']) {

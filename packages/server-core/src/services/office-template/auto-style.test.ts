@@ -20,7 +20,16 @@ function session(): OfficeToolSession {
 const fill = (text: string) => text.replace(/【[^】]+】/g, '用户提供的真实内容')
 
 test('the seven native styles are available to ordinary chat', () => {
-  expect(styles).toHaveLength(7)
+  expect(styles.map(style => style.id)).toEqual([
+    'style-design-report',
+    'style-experiment-analysis',
+    'style-investment-memo',
+    'style-legal-memo',
+    'style-minimal-letter',
+    'style-strategy-memo',
+    'style-system-design',
+  ])
+  expect(styles.every(style => style.autoSelect && style.mode === 'word' && style.category === '文档样式')).toBe(true)
   const guide = readFileSync(join(businessRoot, '../officecli/guides/word.md'), 'utf8')
   for (const style of styles) expect(guide).toContain(style.id)
   expect(guide).toContain('仅修改已有文件时不自动选新模板')
