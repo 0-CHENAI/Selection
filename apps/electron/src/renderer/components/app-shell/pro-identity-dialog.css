@@ -94,10 +94,10 @@ body:has(> .pro-identity-backdrop[data-state="closed"]) > #root {
   .pro-identity-mark, .pro-identity-wordmark { animation: pro-identity-fade 150ms both; }
   .pro-identity-backdrop[data-state="closed"], .pro-identity-content[role="dialog"][data-state="closed"] { animation-duration: 150ms !important; }
 }
-/* Composer badge: same glass ink, compact enough for the input chrome. */
+/* Composer badge: same glass ink, quieter than the gold chip; sit with the 13px folder label. */
 .session-mode-badge .pro-identity-mode {
-  width: 41px;
-  height: 12px;
+  width: 34px;
+  height: 10px;
 }
 .session-mode-badge .pro-identity-edge-trace {
   stroke-width: 2.4;

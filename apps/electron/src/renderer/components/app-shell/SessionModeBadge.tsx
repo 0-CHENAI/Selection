@@ -103,7 +103,7 @@ function ProModeBadge({ active, skipEnter, onExited }: {
             aria-label={t('session.currentProMode')}
             aria-haspopup="dialog"
             aria-expanded={open}
-            className="session-mode-badge inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center rounded border border-[var(--pro-accent)] px-1 text-[var(--pro-accent)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--pro-accent)]"
+            className="session-mode-badge inline-flex h-5 shrink-0 cursor-pointer touch-manipulation select-none items-center border-0 bg-transparent p-0 text-[var(--pro-accent)] outline-none focus-visible:rounded-sm focus-visible:ring-1 focus-visible:ring-[var(--pro-accent)]"
           >
             <span className="sr-only">PRO</span>
             <ProIdentityGlyph id={glassId} />

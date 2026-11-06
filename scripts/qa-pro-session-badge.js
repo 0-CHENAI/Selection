@@ -51,7 +51,7 @@ async function checkBadge() {
     }
     return { count: chat.querySelectorAll('.session-mode-badge').length, outside: document.querySelectorAll('[data-work-mode-list] .session-mode-badge, [data-work-mode-chat] h1 .session-mode-badge').length,
       label: badge.textContent.trim(), accessibleLabel: badge.getAttribute('aria-label'), tabIndex: badge.tabIndex,
-      height: bounds.height, background: style.backgroundColor, color: style.color, borderColor: style.borderColor,
+      height: bounds.height, background: style.backgroundColor, color: style.color, borderWidth: style.borderTopWidth,
       afterFolder: !!folderBounds && bounds.left >= folderVisibleRight, sameRow: !!folderBounds && Math.abs((bounds.top + bounds.bottom) / 2 - (folderBounds.top + folderBounds.bottom) / 2) < 1,
       iconsFit: icons.every((icon, index) => index === 0 || icon.left >= icons[index - 1].right),
       fits: bounds.right < formBounds.right && bounds.left >= formBounds.left && form.scrollWidth <= form.clientWidth }
@@ -63,7 +63,7 @@ async function checkBadge() {
   assert.equal(result.tabIndex, 0)
   assert.ok(result.height >= 18 && result.height <= 20)
   assert.equal(result.background, 'rgba(0, 0, 0, 0)')
-  assert.equal(result.color, result.borderColor)
+  assert.equal(result.borderWidth, '0px')
   assert.ok(result.afterFolder && result.sameRow && result.fits && result.iconsFit, JSON.stringify(result))
   return result.color
 }
