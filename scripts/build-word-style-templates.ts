@@ -56,6 +56,7 @@ for (const s of specs) {
   const bytes = zipStore([...parts].map(([name, data]) => ({ name, data })))
   writeFileSync(join(dir, 'example.docx'), bytes)
   writeFileSync(join(dir, 'design.md'), `# ${s.title}\n\nSelection 自编模板，参考 ${s.label} 类型的排版层级。用途：${s.use}。\n\n保留模板字体、配色、页边距、页脚与表格。不是参考模板的逐像素复刻；不附带其照片、示例事实或品牌。\n\n替换所有【占位符】；按用户要求重命名章节，删除无关且 can_remove=true 的段落，additions 继承正文或标题样式，row_additions 扩展表格。不要为填满结构编造事实。普通报告不强制独立封面或目录。\n\n一次 office_template_write 成功后直接交付，不再 validate、渲染或视觉复审。\n`)
+  // Keep autoSelect entries in catalog.json for ordinary-chat style application; Office home Word gallery hides category「文档样式」.
   catalog.cases.push({ id, title: s.title, titleEn: s.label, mode: 'word', sampleFile: 'example.docx', revision: '20261105.1', category: '文档样式', autoSelect: true, description: s.use, guidance: `参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。`, businessSkills: [], source: `cases/${id}`, previewCount: 1, selection: { assetDir: `cases/${id}`, exampleSha256: createHash('sha256').update(bytes).digest('hex') } })
 }
 writeFileSync(join(root, 'catalog.json'), JSON.stringify(catalog, null, 2) + '\n')

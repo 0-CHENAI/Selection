@@ -17,6 +17,7 @@ type OfficeCase = {
   revision: string
   description?: string
   category?: string
+  autoSelect?: boolean
   sampleFile?: string | null
   businessSkill?: string
   businessSkills?: string[]

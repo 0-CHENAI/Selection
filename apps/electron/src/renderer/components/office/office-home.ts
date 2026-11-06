@@ -36,8 +36,13 @@ export function nextOfficeSection(current: OfficeHomeSection, key: string): Offi
   return null
 }
 
-export function casesForOfficeHome<T extends { mode: string; category?: string }>(cases: T[], section: 'word' | 'excel'): T[] {
-  return cases.filter(item => item.mode === section && (section === 'excel' || item.category !== 'Selection 样例'))
+/** Word home cards are content cases. autoSelect「文档样式」 stay in catalog.json for ordinary-chat writing. */
+export function isOfficeHomeWordCase(item: { category?: string; autoSelect?: boolean }): boolean {
+  return item.autoSelect !== true && item.category !== 'Selection 样例' && item.category !== '文档样式'
+}
+
+export function casesForOfficeHome<T extends { mode: string; category?: string; autoSelect?: boolean }>(cases: T[], section: 'word' | 'excel'): T[] {
+  return cases.filter(item => item.mode === section && (section === 'excel' || isOfficeHomeWordCase(item)))
 }
 
 export function resolveOfficeDraftRequest(section: OfficeHomeSection, picked: OfficeRequest | null | undefined): OfficeRequest | undefined {

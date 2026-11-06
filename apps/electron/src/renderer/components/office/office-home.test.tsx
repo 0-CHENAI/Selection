@@ -13,12 +13,23 @@ import { OfficeCaseGallery } from './OfficeCaseGallery'
 import { OfficeModeSwitcher } from './OfficeModeSwitcher'
 import {
   casesForOfficeHome,
+  isOfficeHomeWordCase,
   nextOfficeSection,
   officeSessionRoute,
   readOfficeSection,
   rememberOfficeSection,
   resolveOfficeDraftRequest,
 } from './office-home'
+
+const WORD_STYLE_IDS = [
+  'style-design-report',
+  'style-experiment-analysis',
+  'style-investment-memo',
+  'style-legal-memo',
+  'style-minimal-letter',
+  'style-strategy-memo',
+  'style-system-design',
+] as const
 
 const i18n = i18next.createInstance()
 
@@ -37,7 +48,7 @@ describe('office home', () => {
   })
 
   it('shows curated Word cases, personal office cases, and every registered Excel case', () => {
-    const cases = (catalog as { cases: Array<{ id: string; mode: string; category?: string; title?: string }> }).cases
+    const cases = (catalog as { cases: Array<{ id: string; mode: string; category?: string; autoSelect?: boolean; title?: string }> }).cases
     expect(casesForOfficeHome(cases, 'word').map(item => item.id)).toEqual([
       'meeting-minutes',
       'coffee-market',
@@ -49,14 +60,6 @@ describe('office home', () => {
       'annual-invitation',
       'miniapp-prd',
       'partnership-letter',
-      'style-design-report',
-      'style-experiment-analysis',
-      'style-investment-memo',
-      'style-legal-memo',
-      'style-minimal-letter',
-      'style-strategy-memo',
-      'style-system-design',
-
     ])
     expect(casesForOfficeHome(cases, 'excel').map(item => item.id)).toEqual([
       'execution-tracker',
@@ -77,6 +80,58 @@ describe('office home', () => {
       expect(item.title).not.toContain(item.id)
       expect(item.category).not.toContain(item.id)
     }
+  })
+
+  it('hides autoSelect 文档样式 cards from the Word grid and leaves Excel unchanged', () => {
+    expect(isOfficeHomeWordCase({ category: '会议纪要' })).toBe(true)
+    expect(isOfficeHomeWordCase({ category: '文档样式', autoSelect: true })).toBe(false)
+    expect(isOfficeHomeWordCase({ autoSelect: true })).toBe(false)
+    expect(isOfficeHomeWordCase({ category: '文档样式' })).toBe(false)
+    expect(isOfficeHomeWordCase({ category: 'Selection 样例' })).toBe(false)
+
+    const cases = (catalog as { cases: Array<{ id: string; mode: string; category?: string; autoSelect?: boolean }> }).cases
+    expect(cases.filter(item => item.autoSelect === true || item.category === '文档样式').map(item => item.id)).toEqual([...WORD_STYLE_IDS])
+    const word = casesForOfficeHome(cases, 'word')
+    const excel = casesForOfficeHome(cases, 'excel')
+    expect(word.every(isOfficeHomeWordCase)).toBe(true)
+    expect(word.some(item => item.category === '文档样式' || item.autoSelect === true || item.id.startsWith('style-'))).toBe(false)
+    for (const id of WORD_STYLE_IDS) expect(word.some(item => item.id === id)).toBe(false)
+    expect(excel.map(item => item.id)).toEqual([
+      'execution-tracker',
+      'annual-business',
+      'port-cargo',
+      'bio-assay',
+      'equipment-quote',
+      'household-budget',
+      'vendor-statement',
+      'project-gantt',
+      'quarterly-okr',
+    ])
+
+    const wordHtml = renderToStaticMarkup(
+      <Provider>
+        <I18nextProvider i18n={i18n}>
+          <OfficeCaseGallery mode="word" composerKey="hide-styles" />
+        </I18nextProvider>
+      </Provider>,
+    )
+    const excelHtml = renderToStaticMarkup(
+      <Provider>
+        <I18nextProvider i18n={i18n}>
+          <OfficeCaseGallery mode="excel" composerKey="hide-styles-excel" />
+        </I18nextProvider>
+      </Provider>,
+    )
+    expect(wordHtml).toContain('data-testid="office-case-meeting-minutes"')
+    expect(wordHtml).toContain('data-testid="office-case-partnership-letter"')
+    expect(wordHtml).not.toContain('文档样式')
+    for (const id of WORD_STYLE_IDS) {
+      expect(wordHtml).not.toContain(`data-testid="office-case-${id}"`)
+      expect(wordHtml).not.toContain(`${id}.webp`)
+      expect(excelHtml).not.toContain(`data-testid="office-case-${id}"`)
+    }
+    expect(excelHtml).toContain('data-testid="office-case-annual-business"')
+    expect(excelHtml).toContain('data-testid="office-case-quarterly-okr"')
   })
 
   it('carries the picked case into the draft and falls back to the section mode', () => {
