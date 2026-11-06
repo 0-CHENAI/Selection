@@ -1,19 +1,13 @@
 import { useId, useLayoutEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { gsap } from 'gsap'
-import { CustomEase } from 'gsap/CustomEase'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { usePlatform } from '@craft-agent/ui'
 import swan from '@/assets/selection-swan-trimmed.svg'
 import wordmark from '@/assets/selection-wordmark.svg'
-import { selectionProGlyphPath } from '@/assets/selection-pro-glyph'
-
-gsap.registerPlugin(CustomEase)
-const microScaleEase = CustomEase.create('proMicroScaleFade', '0.32,0.72,0,1')
-// Smooth speed, acceleration, and jerk, including the transition through the peak.
-const edgeOrbitEase = (progress: number) =>
-  progress ** 4 * (35 + progress * (-84 + progress * (70 - 20 * progress)))
+import { ProIdentityGlyph } from './ProIdentityGlyph'
+import { addProIdentityLockupReveal, edgeOrbitEase, PRO_IDENTITY_REDUCED_INK_DURATION } from './pro-identity-motion'
 
 export default function ProIdentityLockup({ open }: { open: boolean }) {
   const { t } = useTranslation()
@@ -35,29 +29,10 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
     media.add({ all: 'all', reduceMotion: '(prefers-reduced-motion: reduce)' }, context => {
       const reduced = context.conditions?.reduceMotion
       animation.current = gsap.timeline({ paused: !isOpen.current })
-        .fromTo('.pro-identity-mode', {
-          '--pro-ink-opacity': 0,
-          scale: reduced ? 1 : 0.98,
-          transformOrigin: '50% 50%',
-          '--pro-ink-progress': reduced ? '100%' : '0%',
-        }, {
-          '--pro-ink-opacity': 1,
-          scale: 1,
-          '--pro-ink-progress': '100%',
-          // Let the lettering form at the same pace as the edge light travels.
-          duration: reduced ? 0.15 : 1.8,
-          ease: reduced ? microScaleEase : edgeOrbitEase,
-        }, reduced ? 0.25 : 1.1)
-      if (!reduced) {
-        animation.current
-          .set('.pro-identity-edge-trace', { opacity: 1, strokeDashoffset: 0, strokeDasharray: '0 96' }, 1.1)
-          .to('.pro-identity-edge-trace', { strokeDasharray: '18 78', duration: 0.4, ease: edgeOrbitEase }, 1.1)
-          .to('.pro-identity-edge-trace', { strokeDashoffset: -96, duration: 1.8, ease: edgeOrbitEase }, 1.1)
-          .to('.pro-identity-edge-trace', { opacity: 0, duration: 0.3, ease: 'sine.inOut' }, 2.6)
-      }
+      addProIdentityLockupReveal(animation.current, reduced)
       animation.current.fromTo('.pro-identity-close', { autoAlpha: 0 }, {
         autoAlpha: 1,
-        duration: reduced ? 0.15 : 0.2,
+        duration: reduced ? PRO_IDENTITY_REDUCED_INK_DURATION : 0.2,
         ease: 'power2.out',
       }, '+=0.5')
       light.current = reduced ? null : gsap.to('.pro-identity-reflection', {
@@ -91,34 +66,7 @@ export default function ProIdentityLockup({ open }: { open: boolean }) {
           <div className="pro-identity-mark"><img src={swan} alt="" draggable={false} className="h-full w-auto" /></div>
           <div className="pro-identity-label flex items-end">
             <div className="pro-identity-wordmark"><img src={wordmark} alt="" draggable={false} className="h-full w-auto" /></div>
-            <svg className="pro-identity-mode" viewBox="32 10 104 30.5">
-              <defs>
-                <path id={`${glassId}-glyph`} d={selectionProGlyphPath} />
-                <linearGradient id={`${glassId}-body`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="var(--pro-glass-highlight)" />
-                  <stop offset="0.24" stopColor="currentColor" stopOpacity="0.85" />
-                  <stop offset="0.47" stopColor="var(--pro-glass-highlight)" stopOpacity="0.8" />
-                  <stop offset="0.54" stopColor="currentColor" stopOpacity="0.42" />
-                  <stop offset="0.8" stopColor="currentColor" stopOpacity="0.95" />
-                  <stop offset="1" stopColor="var(--pro-glass-highlight)" />
-                </linearGradient>
-                <linearGradient id={`${glassId}-light`} className="pro-identity-reflection"
-                  gradientUnits="userSpaceOnUse" x1="32" y1="27" x2="136" y2="27" gradientTransform="rotate(-28 84 27)">
-                  <stop offset="0.45" stopColor="var(--pro-glass-reflection)" stopOpacity="0" />
-                  <stop offset="0.72" stopColor="var(--pro-glass-reflection)" stopOpacity="0.3" />
-                  <stop offset="0.84" stopColor="var(--pro-glass-reflection)" />
-                  <stop offset="1" stopColor="var(--pro-glass-reflection)" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <g className="pro-identity-ink">
-                <use href={`#${glassId}-glyph`} fill="currentColor" className="pro-identity-base" />
-                <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-body)`} className="pro-identity-glass" />
-                <use href={`#${glassId}-glyph`} fill={`url(#${glassId}-light)`} opacity="0.45" />
-                <use href={`#${glassId}-glyph`} className="pro-identity-rim" fill="none" stroke={`url(#${glassId}-light)`} />
-              </g>
-              <use href={`#${glassId}-glyph`} className="pro-identity-edge-trace" fill="none"
-                stroke="var(--pro-glass-reflection)" strokeWidth="1.1" strokeLinecap="round" strokeDasharray="18 78" />
-            </svg>
+            <ProIdentityGlyph id={glassId} />
           </div>
         </div>
       </div>

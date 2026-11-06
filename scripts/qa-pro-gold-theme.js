@@ -53,7 +53,7 @@ try {
       return { mode: root.dataset.workMode, accent: rgb(style.getPropertyValue('--accent')).slice(0, 3), shadow: style.getPropertyValue('--accent-rgb').trim(),
         semantics: ['--background', '--success', '--info', '--destructive'].map(key => style.getPropertyValue(key)),
         permission: rgb(permissionStyle.color).slice(0, 3), link: rgb(getComputedStyle(link).color).slice(0, 3),
-        badge: rgb(badgeStyle.color).slice(0, 3), badgeBorder: rgb(badgeStyle.borderColor).slice(0, 3), badgeBackgroundAlpha: rgb(badgeStyle.backgroundColor)[3],
+        badge: rgb(badgeStyle.color).slice(0, 3), badgeBorderWidth: badgeStyle.borderTopWidth, badgeBackgroundAlpha: rgb(badgeStyle.backgroundColor)[3],
         permissionContrast: contrast(rgb(permissionStyle.color), blend(rgb(permissionStyle.backgroundColor), backdrop)),
         linkContrast: contrast(rgb(getComputedStyle(link).color), backdrop),
         fits: permission.getBoundingClientRect().right <= document.querySelector('[data-work-mode-chat]').getBoundingClientRect().right }
@@ -64,7 +64,7 @@ try {
     assert.equal(result.shadow, shadow)
     assert.deepEqual(result.semantics, norm.slice(2))
     assert.deepEqual(result.badge, expected)
-    assert.deepEqual(result.badgeBorder, expected)
+    assert.equal(result.badgeBorderWidth, '0px')
     assert.equal(result.badgeBackgroundAlpha, 0)
     assert.ok(result.permissionContrast >= 4.5 && result.linkContrast >= 4.5)
     assert.ok(result.fits)
