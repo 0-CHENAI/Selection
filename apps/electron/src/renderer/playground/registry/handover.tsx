@@ -55,7 +55,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
       if (state !== 'waiting') apply(record)
       return record
     }
-    if (['unknown','changed','source-removed'].includes(state)) stored = [create('preview-handover', 'norm-analysis', 'PRO')]
+    stored = [create('preview-handover', 'norm-analysis', 'PRO')]
     setRecords(stored)
     setSession(sessions.get(state === 'unknown' ? stored[0]!.targetSessionId! : 'norm-analysis'))
     const metadata = new Map([...sessions].map(([id, value]) => [id, extractSessionMeta(value)]))
@@ -78,7 +78,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
       sessionCommand: async (sourceSessionId: string, command: SessionCommand) => {
         if (command.type !== 'handover') return
         const operation: HandoverOperation = command.operation
-        if (operation.type === 'create' && !stored.some(record => record.handoverId === operation.handoverId)) stored = [create(operation.handoverId, sourceSessionId, operation.targetMode), ...stored]
+        if (operation.type === 'create') throw new Error('Mode-switch handover is removed; NORM/PRO is the next-turn execution strategy of the same conversation')
         if (operation.type !== 'list') {
           const record = stored.find(record => record.handoverId === operation.handoverId)!
           if (operation.type === 'cancel') record.status = 'cancelled'
@@ -100,7 +100,7 @@ function HandoverPreview({ state = 'ready' }: { state?: 'ready' | 'waiting' | 'u
       <DropdownMenu><DropdownMenuTrigger asChild>{titleTrigger}</DropdownMenuTrigger>
         <StyledDropdownMenuContent><SessionMenu item={extractSessionMeta(session)} onRename={() => {}} onMarkUnread={() => {}} onOpenInNewWindow={() => {}} onDelete={() => {}} /></StyledDropdownMenuContent>
       </DropdownMenu>}
-      <HandoverPanel key={`header-${state}-${session.id}`} sessionId={session.id} mode={session.workMode!} canCreate sourceLink={sourceLink} headerOnly />
+      <HandoverPanel key={`header-${state}-${session.id}`} sessionId={session.id} mode={session.workMode!} sourceLink={sourceLink} headerOnly />
     </div>
     <div data-handover-chat className="relative flex min-h-0 flex-1 flex-col">
     <motion.div key={session.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} className="flex min-h-0 flex-1 flex-col px-6 py-4 text-sm">

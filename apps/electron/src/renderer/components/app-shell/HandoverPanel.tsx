@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowUpRight, Check, LoaderCircle, Redo2 } from 'lucide-react'
+import { ArrowUpRight, LoaderCircle } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { useAtom, useAtomValue, useStore } from 'jotai'
-import { handoverReviewSessionAtom, skipHandoverConfirmationAtom } from '@/atoms/handover'
+import { handoverReviewSessionAtom } from '@/atoms/handover'
 import { addSessionAtom, ensureSessionMessagesLoadedAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import type { HandoverOperation, HandoverRecord, HandoverResult } from '@craft-agent/shared/protocol'
@@ -18,16 +17,15 @@ function resultRecords(result: unknown): HandoverResult {
   return result as HandoverResult
 }
 
-export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOnly = false }: {
-  sessionId: string; mode: WorkMode; canCreate: boolean; sourceLink?: { handoverId: string; sourceSessionId: string }; headerOnly?: boolean
+/** Historical source/target associations only. Mode switching no longer creates a handover. */
+export function HandoverPanel({ sessionId, mode: _mode, sourceLink, headerOnly = false }: {
+  sessionId: string; mode?: WorkMode; sourceLink?: { handoverId: string; sourceSessionId: string }; headerOnly?: boolean
 }) {
   const { t } = useTranslation()
   const { onOpenFile } = useAppShellContext()
   const metadata = useAtomValue(sessionMetaMapAtom)
   const store = useStore()
-  const [skipConfirmation, setSkipConfirmation] = useAtom(skipHandoverConfirmationAtom)
   const [reviewSession, setReviewSession] = useAtom(handoverReviewSessionAtom)
-  const [dontShowAgain, setDontShowAgain] = useState(false)
   const [open, setOpen] = useState(false)
   const [inspecting, setInspecting] = useState(!headerOnly)
   const [records, setRecords] = useState<HandoverRecord[]>([])
@@ -38,14 +36,10 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
   const [error, setError] = useState<string>()
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
-  const requestId = useRef<string | undefined>(undefined)
-  const pendingNavigation = useRef<{ handoverId: string; preference?: boolean } | undefined>(undefined)
   const alive = useRef(true)
   const activeCall = useRef(false)
   const current = records.find(record => record.handoverId === selectedId) ?? records[0]
   const selected = inspecting ? current : undefined
-  const targetMode = mode === 'NORM' ? 'PRO' : 'NORM'
-  const actionLabel = mode === 'NORM' ? t('handover.toPro') : t('handover.toNorm')
   const call = useCallback(async (operation: HandoverOperation) => resultRecords(await window.electronAPI.sessionCommand(sessionId, { type: 'handover', operation })), [sessionId])
   const accept = useCallback(async (result: HandoverResult) => {
     if (!alive.current) return
@@ -53,48 +47,20 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
     if (result.records[0]) setSelectedId(result.records[0].handoverId)
     setChanges(result.changes)
     setResearchUpdates(result.researchUpdates)
-    const pending = pendingNavigation.current
-    const record = result.records.find(record => record.handoverId === pending?.handoverId)
-    if (!pending || !record) return
-    if (pending.preference !== undefined) {
-      setSkipConfirmation(pending.preference)
-      pending.preference = undefined
-    }
-    if (record.status === 'cancelled') pendingNavigation.current = undefined
-    if (record.status !== 'applied' || !record.targetSessionId) return
-    pendingNavigation.current = undefined
-    try {
-      const target = await store.set(ensureSessionMessagesLoadedAtom, record.targetSessionId)
-      if (!alive.current) return
-      if (!target) throw new Error(t('errors.failedToLoadSession'))
-      // Register the target before navigation; session_created also loads it asynchronously.
-      if (!store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
-      setOpen(false)
-      navigate(routes.view.allSessions(target.id))
-    } catch (reason) {
-      if (alive.current) { setInspecting(false); setOpen(true) }
-      throw reason
-    }
-  }, [store, setSkipConfirmation, t])
+  }, [])
   useEffect(() => {
     if (reviewSession !== sessionId) return
     setInspecting(true)
-    setDontShowAgain(skipConfirmation === true)
     setOpen(true)
     setReviewSession(null)
-  }, [reviewSession, sessionId, skipConfirmation, setReviewSession])
+  }, [reviewSession, sessionId, setReviewSession])
   useEffect(() => {
     alive.current = true
-    const refresh = () => void call({ type: 'list' }).then(async result => {
+    const refresh = () => void call({ type: 'list' }).then(result => {
       if (alive.current) {
         setRecords(result.records)
         const id = selectedRef.current ?? sourceLink?.handoverId ?? result.records[0]?.handoverId
         setSelectedId(id)
-        if (pendingNavigation.current && !activeCall.current) {
-          activeCall.current = true; setBusy(true)
-          try { await accept(result) }
-          finally { activeCall.current = false; if (alive.current) setBusy(false) }
-        }
       }
     }).catch(reason => { if (alive.current) setError(reason instanceof Error ? reason.message : String(reason)) })
     refresh()
@@ -102,65 +68,32 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
     window.addEventListener('selection-handover-updated', refresh)
     return () => { alive.current = false; window.removeEventListener('selection-handover-updated', refresh) }
   }, [call, sourceLink?.handoverId, open, accept])
-  const waitingId = pendingNavigation.current?.handoverId ?? (current?.status === 'waiting' ? current.handoverId : undefined)
-  useEffect(() => {
-    if (!waitingId) return
-    const timer = setInterval(() => {
-      if (activeCall.current) return
-      activeCall.current = true; setBusy(true)
-      void call({ type: 'get', handoverId: waitingId }).then(accept).catch(reason => {
-        if (alive.current) {
-          setError(String(reason.message ?? reason))
-          if (pendingNavigation.current?.handoverId === waitingId) { setInspecting(false); setOpen(true) }
-        }
-      }).finally(() => { activeCall.current = false; if (alive.current) setBusy(false) })
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [waitingId, call, accept])
   const run = async (operation: HandoverOperation) => {
     if (activeCall.current) return
     activeCall.current = true; setBusy(true); setError(undefined)
     try { const result = await call(operation); await accept(result); window.dispatchEvent(new Event('selection-handover-updated')); return result }
-    catch (reason) { if (operation.type === 'create') pendingNavigation.current = undefined; setError(reason instanceof Error ? reason.message : String(reason)) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { activeCall.current = false; if (alive.current) setBusy(false) }
   }
-  const begin = async (preference?: boolean) => {
-    if (activeCall.current) return
-    const pending = records.find(record => record.sourceSessionId === sessionId && ['waiting','prepared','created'].includes(record.status))
-    if (current?.status === 'cancelled') requestId.current = undefined
-    requestId.current = pending?.handoverId ?? requestId.current ?? crypto.randomUUID()
-    pendingNavigation.current = { handoverId: requestId.current, preference }
-    return run({ type: 'create', handoverId: requestId.current, targetMode })
-  }
-  const showDialog = (inspect = true) => {
-    setInspecting(inspect)
-    setDontShowAgain(skipConfirmation === true)
+  const showDialog = () => {
+    setInspecting(true)
     setOpen(true)
   }
-  const startHandover = async (preference?: boolean) => {
-    if (activeCall.current) return
-    const result = await begin(preference)
-    if (!alive.current) return
-    const record = result?.records[0]
-    if (record?.status === 'waiting') {
-      setOpen(false)
-      toast(t('handover.status.waiting'), { description: t('handover.waiting'), action: { label: t('handover.viewBackground'), onClick: () => showDialog() } })
-    } else if (record?.status !== 'applied' || !record.targetSessionId) showDialog(false)
-  }
+  const canView = records.length > 0 || !!sourceLink
   const targetOwned = selected?.targetSessionId === sessionId
   const unknown = selected?.snapshot?.actions.filter(action => action.outcome === 'unknown' && !selected.reviews[action.ref]) ?? []
   const sourceExists = selected ? metadata.has(selected.sourceSessionId) : sourceLink ? metadata.has(sourceLink.sourceSessionId) : false
   return <>
-    {headerOnly ? canCreate && <Tooltip><TooltipTrigger asChild>
+    {headerOnly ? canView && <Tooltip><TooltipTrigger asChild>
       <Button type="button" data-handover-trigger variant="ghost" size="sm" className="titlebar-no-drag h-7 shrink-0 gap-1 px-2 text-foreground/70 hover:text-foreground"
-        aria-label={t('handover.openReview', { mode: targetMode })} aria-haspopup={skipConfirmation === true ? undefined : 'dialog'} disabled={busy || open} onClick={() => { if (skipConfirmation === true) void startHandover(); else showDialog(false) }}>
-        {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Redo2 aria-hidden="true" />}<span className="tracking-[0.04em]">{targetMode}</span>
+        aria-label={t('handover.viewBackground')} disabled={busy || open} onClick={showDialog}>
+        {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : null}<span className="tracking-[0.04em]">{t('handover.viewBackground')}</span>
       </Button>
-    </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.openReview', { mode: targetMode })}</TooltipContent></Tooltip> : null}
+    </TooltipTrigger><TooltipContent side="bottom" align="end">{t('handover.viewBackground')}</TooltipContent></Tooltip> : null}
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className={`flex max-h-[80dvh] flex-col overflow-hidden ${selected ? 'sm:max-w-[560px]' : 'sm:max-w-[420px]'}`}
         showCloseButton={!!selected} overlayClassName="bg-black/15 dark:bg-black/35">
-        <DialogHeader className="shrink-0 text-left"><DialogTitle className={selected ? 'pr-6' : undefined}>{selected ? t('handover.title') : actionLabel}</DialogTitle><DialogDescription className="leading-relaxed">{t('handover.description')}</DialogDescription></DialogHeader>
+        <DialogHeader className="shrink-0 text-left"><DialogTitle className={selected ? 'pr-6' : undefined}>{t('handover.title')}</DialogTitle><DialogDescription className="leading-relaxed">{t('handover.description')}</DialogDescription></DialogHeader>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
           {!selected && <p className="text-xs leading-relaxed text-muted-foreground">{t('handover.empty')}</p>}
@@ -187,20 +120,16 @@ export function HandoverPanel({ sessionId, mode, canCreate, sourceLink, headerOn
             </>}
           </>}
         </div>
-        {canCreate && (!selected || selected.status !== 'waiting') && <label className="flex min-h-6 cursor-pointer items-center gap-2 text-xs leading-relaxed text-muted-foreground">
-          <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-            <input type="checkbox" className="peer absolute inset-0 size-full appearance-none rounded-[3px] border border-foreground/30 bg-transparent transition-colors checked:border-foreground checked:bg-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-              checked={dontShowAgain} disabled={busy} onChange={event => setDontShowAgain(event.target.checked)} />
-            <Check aria-hidden="true" className="pointer-events-none size-3 text-background opacity-0 peer-checked:opacity-100" />
-          </span>
-          {t('handover.dontShowAgain')}
-        </label>}
         <DialogFooter className="shrink-0 flex-row flex-wrap items-center justify-end pt-2">
           {selected && <Button variant="ghost" className="mr-auto" disabled={busy || !sourceExists} onClick={() => navigate(routes.view.allSessions(selected.sourceSessionId))}>{sourceExists ? t('handover.openSource') : t('handover.sourceRemoved')}</Button>}
-          <Button variant="outline" onClick={() => setOpen(false)}>{selected ? t('common.close') : t('common.cancel')}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>{t('common.close')}</Button>
           {selected?.status === 'waiting' && <Button variant="outline" disabled={busy} onClick={() => void run({ type: 'cancel', handoverId: selected.handoverId })}>{t('handover.cancelWait')}</Button>}
-          {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => navigate(routes.view.allSessions(selected.targetSessionId!))}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
-          {canCreate && (!selected || selected.status !== 'waiting') && <Button variant={selected ? 'outline' : 'default'} disabled={busy} onClick={() => void startHandover(dontShowAgain)}>{busy && <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />}{current?.status === 'prepared' || current?.status === 'created' ? t('handover.retry') : selected ? t('handover.newSnapshot') : actionLabel}</Button>}
+          {selected?.status === 'applied' && selected.targetSessionId && <Button onClick={() => {
+            void store.set(ensureSessionMessagesLoadedAtom, selected.targetSessionId!).then(target => {
+              if (target && !store.get(sessionMetaMapAtom).has(target.id)) store.set(addSessionAtom, target)
+              navigate(routes.view.allSessions(selected.targetSessionId!))
+            })
+          }}><ArrowUpRight className="mr-1.5 size-3.5" />{t('handover.openTarget')}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

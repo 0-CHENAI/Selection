@@ -1,9 +1,25 @@
-/** Work mode is an execution boundary, independent of permissions and models. */
+/** Work mode is a next-turn execution strategy, independent of conversation identity. */
 export type WorkMode = 'NORM' | 'PRO';
 export interface WorkModeMetadata {
   workMode?: WorkMode;
+  /** Runtime-only freeze of the turn currently executing. Not conversation identity. */
+  activeTurnWorkMode?: WorkMode;
   workModeNeedsReview?: boolean;
   executionRootSessionId?: string;
+}
+
+/** Mode-switch handover is removed; NORM/PRO stays on the same conversation. */
+export const MODE_SWITCH_HANDOVER_DISABLED =
+  'Mode-switch handover is removed; NORM/PRO is the next-turn execution strategy of the same conversation';
+
+export function resolveTurnWorkMode(sessionDefault?: WorkMode, stamped?: WorkMode): WorkMode {
+  if (stamped === 'NORM' || stamped === 'PRO') return stamped;
+  return sessionDefault === 'PRO' ? 'PRO' : 'NORM';
+}
+
+/** In-flight turn strategy when frozen; otherwise the session's default next-turn strategy. */
+export function executionWorkMode(session: WorkModeMetadata | null | undefined): WorkMode {
+  return resolveTurnWorkMode(session?.workMode, session?.activeTurnWorkMode);
 }
 export interface WorkModeSession extends WorkModeMetadata {
   id: string;
@@ -23,7 +39,7 @@ export type ComplexCapability = 'delegate' | 'create-workflow' | 'run-workflow' 
 export function complexCapabilityError(session: WorkModeMetadata & { id?: string; parentSessionId?: string; taskNodeId?: string; orchestrationRole?: string; orchestrationRootSessionId?: string } | null | undefined, capability: ComplexCapability): string | undefined {
   if (!session) return 'Execution session is unavailable.';
   if (session.workModeNeedsReview) return 'Execution ownership needs review before starting new delegated work.';
-  if (session.workMode !== 'PRO') return 'NORM completes work in this conversation. Create a PRO conversation to use delegation or workflows.';
+  if (executionWorkMode(session) !== 'PRO') return 'NORM completes work in this conversation. Switch to PRO for the next turn to use delegation or workflows.';
   if (session.parentSessionId || session.taskNodeId || (session.id && session.executionRootSessionId && session.executionRootSessionId !== session.id) || (session.id && session.orchestrationRootSessionId && session.orchestrationRootSessionId !== session.id) || (session.orchestrationRole && session.orchestrationRole !== 'coordinator')) {
     return `${capability} requires the PRO root coordinator; workers and reviewers only perform assigned work.`;
   }

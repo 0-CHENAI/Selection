@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { createStore } from 'jotai'
 import { draftComposerAtomFamily, workModeViewAtom } from '../atoms/work-mode'
 import { draftSessionOptionsId } from './draft-session'
-import { executionChildrenByRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from './work-mode-navigation'
+import { executionChildrenByRoot, isOrdinaryConversationRoot, isUnownedExecution, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from './work-mode-navigation'
 import type { SessionMeta } from '../atoms/sessions'
 
 test('only roots appear as peers; hidden execution children keep their real root', () => {
@@ -14,8 +14,9 @@ test('only roots appear as peers; hidden execution children keep their real root
     { id: 'unowned-node', workspaceId: 'w', workMode: 'NORM', taskNodeId: 'a', executionRootSessionId: 'unowned-node', workModeNeedsReview: true },
     { id: 'orphan', workspaceId: 'w', parentSessionId: 'missing', workModeNeedsReview: true },
   ]
-  expect(sessions.filter(session => isWorkModeRoot(session, 'NORM')).map(s => s.id)).toEqual(['norm'])
-  expect(sessions.filter(session => isWorkModeRoot(session, 'PRO')).map(s => s.id)).toEqual(['pro'])
+  expect(sessions.filter(isOrdinaryConversationRoot).map(s => s.id).sort()).toEqual(['norm', 'pro'])
+  expect(sessions.filter(session => isWorkModeRoot(session, 'NORM')).map(s => s.id).sort()).toEqual(['norm', 'pro'])
+  expect(sessions.filter(session => isWorkModeRoot(session, 'PRO')).map(s => s.id).sort()).toEqual(['norm', 'pro'])
   expect(executionChildrenByRoot(sessions).get('pro')?.map(s => s.id)).toEqual(['worker', 'reviewer'])
   const byId = new Map(sessions.map(session => [session.id, session]))
   expect(sessions.filter(session => isUnownedExecution(session, byId)).map(s => s.id)).toEqual(['unowned-node', 'orphan'])
@@ -27,6 +28,14 @@ test('a focused PPT session does not retarget the ordinary NORM/PRO list', () =>
   expect(shouldAdoptFocusedWorkMode({ id: 'deck', workspaceId: 'w', workMode: 'PRO', ppt: { templateId: 'briefing' } })).toBe(false)
   expect(shouldAdoptFocusedWorkMode({ id: 'norm', workspaceId: 'w', workMode: 'NORM' })).toBe(true)
   expect(shouldAdoptFocusedWorkMode({ id: 'pro', workspaceId: 'w', workMode: 'PRO' })).toBe(true)
+})
+
+test('list identity is not split by the current NORM/PRO default strategy', () => {
+  const sessions: SessionMeta[] = [
+    { id: 'switched', workspaceId: 'w', workMode: 'PRO' },
+    { id: 'still-norm', workspaceId: 'w', workMode: 'NORM' },
+  ]
+  expect(sessions.filter(isOrdinaryConversationRoot).map(s => s.id)).toEqual(['switched', 'still-norm'])
 })
 
 test('switching the view preserves independent composer choices and never changes actors', () => {

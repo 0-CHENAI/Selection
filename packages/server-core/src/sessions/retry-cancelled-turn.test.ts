@@ -85,6 +85,19 @@ describe('retryCancelledTurn', () => {
     expect(calls[0]?.[5]).toBe('user-1')
   })
 
+  it('does not copy the stamped turn strategy onto the session default', async () => {
+    const managed = buildSession('retry-sticky')
+    managed.workMode = 'PRO'
+    managed.messages = [
+      { ...userMessage(), turnContext: { ...userMessage().turnContext, workMode: 'NORM' } },
+      { id: 'assistant-1', role: 'assistant', content: 'partial', timestamp: 2 },
+      { id: 'stop-1', role: 'info', content: 'Response interrupted', statusType: 'turn_cancelled', timestamp: 3 },
+    ]
+    spyOn(sm, 'sendMessage').mockImplementation(async () => {})
+    await sm.retryCancelledTurn('retry-sticky')
+    expect(managed.workMode).toBe('PRO')
+  })
+
   it('refuses a turn that was not cancelled', async () => {
     const managed = buildSession('retry-no')
     managed.messages = [

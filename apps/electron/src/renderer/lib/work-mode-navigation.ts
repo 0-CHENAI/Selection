@@ -2,11 +2,16 @@ import type { SessionMeta } from '@/atoms/sessions'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from './swarm-session'
 
-export function isWorkModeRoot(session: SessionMeta, mode: WorkMode): boolean {
+/** Ordinary conversation identity is independent of the NORM/PRO next-turn strategy. */
+export function isOrdinaryConversationRoot(session: SessionMeta): boolean {
   return isOrdinarySessionVisible(session) && !session.parentSessionId && !session.taskNodeId
     && session.orchestrationRole !== 'worker' && session.orchestrationRole !== 'reviewer'
     && (!(session.executionRootSessionId ?? session.orchestrationRootSessionId) || (session.executionRootSessionId ?? session.orchestrationRootSessionId) === session.id)
-    && (session.workMode ?? 'NORM') === mode
+}
+
+/** @deprecated NORM/PRO is not a list identity. Use isOrdinaryConversationRoot. */
+export function isWorkModeRoot(session: SessionMeta, _mode?: WorkMode): boolean {
+  return isOrdinaryConversationRoot(session)
 }
 export function executionChildrenByRoot(sessions: readonly SessionMeta[]): Map<string, SessionMeta[]> {
   const byId = new Map(sessions.map(session => [session.id, session]))

@@ -1,3 +1,6 @@
+// #793: mode-switch handover create/confirmation is removed. This script is
+// retired. View-only association QA: scripts/qa-handover-button.js
+throw new Error('#793: mode-switch handover create is removed; skip confirmation-preference QA')
 // Run with ego-browser nodejs < scripts/qa-handover-preference.js.
 // Reuse a task space with globalThis.handoverQA = { spaceId, url, outputDir }.
 const { strict: assert } = await import('node:assert')

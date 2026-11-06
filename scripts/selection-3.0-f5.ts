@@ -94,6 +94,8 @@ try {
     const session=await manager!.getSession(id)
     for(const message of session?.messages??[])if(message.toolName&&message.toolInput)calls.push({type:'tool_start',sessionId:id,toolName:message.toolName,toolInput:message.toolInput,toolStatus:message.toolStatus,isError:message.isError,toolResult:message.toolName==='Read'?message.toolResult:undefined,persisted:true})
   }
+  // #793: mode-switch handover create is removed; keep this script as historical
+  // research-snapshot coverage only. It will throw MODE_SWITCH_HANDOVER_DISABLED.
   const handover=(await manager!.handoverSession(rootId,{type:'create',handoverId:`f5-handover-${runId}`,targetMode:'NORM'})).records[0]!
   assert.equal(handover.status,'applied')
   const target=await manager!.getSession(handover.targetSessionId!);assert.equal(target!.workMode,'NORM');assert.equal(target!.parentSessionId,undefined)

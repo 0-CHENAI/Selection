@@ -14,7 +14,7 @@ import { buildHandoverSnapshot, handoverBranch, handoverToolInputs, handoverTool
 import type { HandoverLink, HandoverOperation, HandoverRecord, HandoverResult, HandoverSnapshot } from '@craft-agent/shared/protocol'
 import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
 import { taskListAllowed } from '@craft-agent/session-tools-core'
-import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, type WorkModeMetadata } from '@craft-agent/shared/sessions/work-mode'
+import { assertComplexCapability, complexToolCapability, complexCapabilityError, migrateWorkModes, executionWorkMode, resolveTurnWorkMode, MODE_SWITCH_HANDOVER_DISABLED, type WorkModeMetadata, type WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { buildClarificationState, clarificationContinuation, countClarificationRounds, decideClarification, hasPendingOriginClarification, normalizeClarificationResponse, type ClarificationResponseInput } from '@craft-agent/shared/agent/clarification'
 import type { ClarificationAsk } from '@craft-agent/session-tools-core'
 import { latestTaskList, withoutInheritedTaskLists } from '@craft-agent/shared/utils/task-list'
@@ -1068,6 +1068,10 @@ interface ManagedSession extends WorkModeMetadata {
   parentSessionId?: string
   // Swarm is opt-in and inherited by spawned descendants. Legacy sessions default to false.
   swarmEnabled?: boolean
+  /** Runtime-only freeze of the turn currently executing. Session.workMode stays the next-turn default. */
+  activeTurnWorkMode?: WorkMode
+  /** Runtime-only: work mode the live agent was built with. */
+  agentWorkMode?: WorkMode
   /** Runtime-only: refresh the agent after the active turn so the next turn sees the new Swarm config. */
   swarmRuntimeRefreshPending?: boolean
   orchestrationId?: string
@@ -1408,9 +1412,10 @@ export function createManagedSession(
  * testable without starting an SDK subprocess.
  */
 export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig {
+  const turnMode = executionWorkMode(managed)
   return {
     id: managed.id,
-    workMode: managed.workMode,
+    workMode: turnMode,
     ppt: managed.ppt,
     office: managed.office,
     workModeNeedsReview: managed.workModeNeedsReview,
@@ -1441,7 +1446,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     previousPermissionMode: managed.previousPermissionMode,
     projectId: managed.projectId,
     sharedProjectMemoryEnabled: managed.sharedProjectMemoryEnabled,
-    swarmEnabled: managed.swarmEnabled ?? false,
+    swarmEnabled: turnMode === 'PRO' && isTasksOrchestrateEnabled(),
     orchestrationId: managed.orchestrationId,
     orchestrationRootSessionId: managed.orchestrationRootSessionId,
     orchestrationDepth: managed.orchestrationDepth,
@@ -1748,14 +1753,32 @@ export class SessionManager implements ISessionManager {
     managed.isProcessing = processing
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
+      if (!managed.activeTurnWorkMode) managed.activeTurnWorkMode = resolveTurnWorkMode(managed.workMode)
     } else if (was && !processing) {
       for (const message of managed.messages) message.toolProgress = undefined
       // Turn capabilities are intentionally memory-only and expire as soon as
       // the turn stops. A later turn must receive newly generation-bound ones.
       this.spawnQualificationCredentials.delete(managed.id)
       this.flushSpawnFanOutBatch(managed.id)
+      managed.activeTurnWorkMode = undefined
       sessionRuntimeHooks.onSessionStopped()
       this.finishPptGeneration(managed)
+    }
+  }
+
+  private resolveIncomingTurnWorkMode(managed: ManagedSession, existingMessageId?: string): WorkMode {
+    if (existingMessageId) {
+      const message = managed.messages.find(item => item.id === existingMessageId)
+      return resolveTurnWorkMode(managed.workMode, message?.turnContext?.workMode)
+    }
+    return resolveTurnWorkMode(managed.workMode)
+  }
+
+  private async ensureAgentMatchesTurnWorkMode(managed: ManagedSession): Promise<void> {
+    const turnMode = executionWorkMode(managed)
+    if (managed.agent && managed.agentWorkMode && managed.agentWorkMode !== turnMode) {
+      await this.disposeManagedAgentRuntime(managed, 'turn execution strategy changed')
+      managed.agentWorkMode = undefined
     }
   }
 
@@ -3604,7 +3627,7 @@ export class SessionManager implements ISessionManager {
     const branchSourceForSwarm = options?.branchFromSessionId
       ? this.sessions.get(options.branchFromSessionId)
       : undefined
-    const resolvedSwarmEnabled = isTasksOrchestrateEnabled() && (options?.workMode === 'PRO' || !!options?.taskSlug || !!options?.taskDraft || parentForInheritance?.workMode === 'PRO' || branchSourceForSwarm?.workMode === 'PRO')
+    const resolvedSwarmEnabled = isTasksOrchestrateEnabled() && (options?.workMode === 'PRO' || !!options?.taskSlug || !!options?.taskDraft || (parentForInheritance ? executionWorkMode(parentForInheritance) === 'PRO' : false) || branchSourceForSwarm?.workMode === 'PRO')
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     let validatedBranch: {
@@ -3834,7 +3857,7 @@ export class SessionManager implements ISessionManager {
 
     const parentMode = options?.parentSessionId ? this.sessions.get(options.parentSessionId) : undefined
     if (options?.workMode !== undefined && options.workMode !== 'NORM' && options.workMode !== 'PRO') throw new Error('Invalid work mode')
-    const workMode = options?.workMode ?? parentMode?.workMode
+    const workMode = options?.workMode ?? (parentMode ? executionWorkMode(parentMode) : undefined)
       ?? (validatedBranch?.sourceSession.workMode)
       ?? (options?.taskSlug || options?.taskDraft ? 'PRO' : 'NORM')
     if (options?.parentSessionId && !parentMode) throw new Error('Parent execution session is unavailable')
@@ -3845,7 +3868,7 @@ export class SessionManager implements ISessionManager {
       if (permissionRank[defaultPermissionMode] > permissionRank[parentMode.permissionMode ?? 'safe']) throw new Error('Worker permission exceeds current root authorization')
     }
     if (workMode === 'NORM' && (options?.taskSlug || options?.taskDraft || options?.parentSessionId)) throw new Error('NORM cannot create a workflow or worker session')
-    if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Create a PRO conversation before enabling Swarm')
+    if (workMode === 'NORM' && resolvedSwarmEnabled) throw new Error('Switch this conversation to PRO before enabling Swarm')
 
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
@@ -4378,6 +4401,7 @@ export class SessionManager implements ISessionManager {
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     if (managed.deleting) throw new Error(`Session ${managed.id} is being deleted`)
+    await this.ensureAgentMatchesTurnWorkMode(managed)
     if (managed.agentCreation) return managed.agentCreation
     if (managed.agentInitializations?.size) {
       await waitForRuntimeCleanup(Promise.allSettled([...managed.agentInitializations]), 'previous initialization')
@@ -5887,6 +5911,7 @@ export class SessionManager implements ISessionManager {
       managed.backendRestartSignature = restartSignature
       end()
     }
+    managed.agentWorkMode = executionWorkMode(managed)
     return managed.agent
   }
 
@@ -7432,7 +7457,7 @@ export class SessionManager implements ISessionManager {
     if (managed.office) assertOfficeSelectionFresh(managed.office, listOfficeTemplates())
     const pptDefaults = managed.office ? undefined : (replayPpt ?? managed.ppt)
     const pptOptions = managed.office ? { ...options, ppt: undefined } : (replayPpt ? { ...options, ppt: replayPpt } : options)
-    options = pptSendOptions(managed.workMode, pptDefaults, pptOptions, getPptSkillRoot(), installedSkills, message)
+    options = pptSendOptions(this.resolveIncomingTurnWorkMode(managed, existingMessageId), pptDefaults, pptOptions, getPptSkillRoot(), installedSkills, message)
     if (options?.pptRevision) options = { ...options, pptRevision: validatePptRevision(options.pptRevision) }
     if (options?.ppt !== undefined && !isDeepStrictEqual(options.ppt, managed.ppt)) {
       managed.ppt = options.ppt
@@ -7871,6 +7896,7 @@ export class SessionManager implements ISessionManager {
 
     managed.lastMessageAt = Date.now()
     this.setProcessing(managed, true)
+    managed.activeTurnWorkMode = this.resolveIncomingTurnWorkMode(managed, existingMessageId)
     managed.streamingText = ''
     managed.streamingTurnId = undefined
     managed.streamingPhase = undefined
@@ -8023,6 +8049,7 @@ export class SessionManager implements ISessionManager {
     // ensureFreshToken mirrors the disk write to source.config in-memory).
     let agent: AgentInstance
     try {
+      await this.ensureAgentMatchesTurnWorkMode(managed)
       agent = await this.getOrCreateAgent(managed)
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
@@ -9214,7 +9241,7 @@ export class SessionManager implements ISessionManager {
     if (!result.created) { releaseFeedbackRun(); return result.record }
     const feedback = result.record
     // The Office request owns the visible parent turn while its candidate is revised privately.
-    const inline = parent.workMode === 'NORM' && !feedback.officeSelection
+    const inline = executionWorkMode(parent) === 'NORM' && !feedback.officeSelection
     if (inline && (parent.isProcessing || this.inlineFeedbackSessions.has(parent.id))) {
       feedback.status = 'failed'; feedback.error = 'Finish the current conversation work before revising a file.'; store.save(feedback)
       releaseFeedbackRun(); return feedback
@@ -10482,15 +10509,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       if (thinking && thinking !== managed.thinkingLevel) this.setSessionThinkingLevel(sessionId, thinking)
       const permission = context.permissionMode ? parsePermissionMode(context.permissionMode) : null
       if (permission && permission !== managed.permissionMode) this.setSessionPermissionMode(sessionId, permission)
-      if ((context.workMode === 'NORM' || context.workMode === 'PRO') && context.workMode !== managed.workMode) {
-        managed.workMode = context.workMode
-        managed.swarmEnabled = context.workMode === 'PRO' && isTasksOrchestrateEnabled()
-        this.sendEvent({
-          type: 'session_metadata_changed',
-          sessionId,
-          changes: { workMode: context.workMode, swarmEnabled: managed.swarmEnabled },
-        }, managed.workspace.id)
-      }
       if (context.projectId !== undefined && (context.projectId ?? undefined) !== managed.projectId) {
         managed.projectId = context.projectId ?? undefined
         this.sendEvent({
@@ -11318,12 +11336,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     // A Swarm toggle is allowed while a response is streaming so the button
     // remains responsive. The current turn keeps its original system prompt,
     // then this idle boundary rebuilds the runtime before a queued/next turn.
-    if (managed.swarmRuntimeRefreshPending) {
+    // The same idle rebuild applies when the default NORM/PRO strategy changed
+    // mid-turn: the in-flight agent stays until this boundary.
+    const strategyChanged = !!managed.agent && !!managed.agentWorkMode && managed.agentWorkMode !== executionWorkMode(managed)
+    if (managed.swarmRuntimeRefreshPending || strategyChanged) {
       managed.swarmRuntimeRefreshPending = false
       if (!mustRestartRuntime) {
-        await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+        await this.disposeManagedAgentRuntime(managed, strategyChanged ? 'deferred execution strategy change' : 'deferred Swarm setting change')
         if (!ownsCompletion()) return
       }
+      managed.agentWorkMode = undefined
     }
 
     // 1b. Orphan backstop: with the default per-turn subprocess model, any
@@ -12022,26 +12044,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!current) throw new Error('Session not found')
     const store = this.handoverStore(current)
     if (operation.type === 'list') { const records = store.list(sessionId); return { records, researchUpdates: this.handoverResearchUpdates(current, records) }; }
+    if (operation.type === 'create') throw new Error(MODE_SWITCH_HANDOVER_DISABLED)
     const release = store.tryClaim(operation.handoverId)
     if (!release) {
       const existing = store.read(operation.handoverId)
-      if ((operation.type === 'create' || operation.type === 'get') && existing
-        && (existing.sourceSessionId === sessionId || operation.type === 'get' && existing.targetSessionId === sessionId)
-        && (operation.type !== 'create' || existing.targetMode === operation.targetMode)) return { records: [existing], researchUpdates: this.handoverResearchUpdates(current, [existing]) }
+      if (operation.type === 'get' && existing
+        && (existing.sourceSessionId === sessionId || existing.targetSessionId === sessionId)) return { records: [existing], researchUpdates: this.handoverResearchUpdates(current, [existing]) }
       throw new Error('This handover is being updated; retry after it settles')
     }
     try {
-      let record = store.read(operation.handoverId)
-      if (operation.type === 'create') {
-        if (current.parentSessionId || current.taskNodeId || current.executionRootSessionId && current.executionRootSessionId !== current.id || current.workModeNeedsReview) throw new Error('Handover requires a verified root conversation')
-        if (!['NORM','PRO'].includes(operation.targetMode) || operation.targetMode === current.workMode) throw new Error('Choose the opposite mode for a new handover conversation')
-        if (record && (record.sourceSessionId !== sessionId || record.targetMode !== operation.targetMode)) throw new Error('Handover identity was already used for a different request')
-        if (!record) {
-          record = { version: 1, handoverId: operation.handoverId, sourceSessionId: sessionId, workspaceId: current.workspace.id,
-            targetMode: operation.targetMode, snapshotVersion: 1, status: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), reviews: {} }
-          store.save(record)
-        }
-      }
+      const record = store.read(operation.handoverId)
       if (!record || record.sourceSessionId !== sessionId && record.targetSessionId !== sessionId) throw new Error('Handover belongs to another conversation')
       if (operation.type === 'cancel') {
         if (record.status !== 'waiting' && record.status !== 'cancelled') throw new Error('Handover snapshot is already committed; open its target instead')
@@ -12054,74 +12066,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (previous && (previous.outcome !== operation.outcome || previous.note !== redactHandoverText(operation.note.trim()))) throw new Error('Operation review is already recorded')
         record.reviews[operation.actionRef] = { outcome: operation.outcome, note: redactHandoverText(operation.note.trim()) }
         store.save(record)
-      } else if (record.status !== 'cancelled' && record.status !== 'applied') {
-        const source = this.sessions.get(record.sourceSessionId)
-        if (record.status === 'waiting') {
-          if (!source) throw new Error('Source was removed before a snapshot was committed')
-          const reason = this.handoverWaitReason(source)
-          if (reason) { record.error = reason; store.save(record); return { records: [record] } }
-          const members = this.handoverMembers(source)
-          members.forEach(member => this.handoverCapturing.add(member.id))
-          const capture = async (index: number): Promise<void> => {
-            if (index < members.length) return this.withSessionExecution(members[index]!.id, () => capture(index + 1))
-            for (const member of members) { await this.ensureMessagesLoaded(member); await this.flushSession(member.id) }
-            const runs = this.handoverRuns(source)
-            if (members.some(member => member.isProcessing) || runs.some(run => ['running','pausing','verifying','repairing','waiting-coordinator'].includes(run.status))) throw new Error('Source became active; wait for the next checkpoint')
-            const pendingOperations = members.flatMap(member => {
-              const saved = readExecutionCheckpoint(getSessionStoragePath(member.workspace.rootPath, member.id))
-              if (saved.kind === 'unsupported' || saved.kind === 'corrupt') return [{ ref: `${member.id}:checkpoint`, tool: 'unknown-execution', sessionId: member.id }]
-              return saved.kind === 'ok' ? Object.entries(saved.checkpoint.pendingTools).filter(([, tool]) => tool.recovery !== 'read-only')
-                .map(([call, tool]) => ({ ref: `${member.id}:${call}`, tool: tool.name, sessionId: member.id })) : []
-            })
-            const sdk = sdkStateSnapshot(getSessionStoragePath(source.workspace.rootPath, source.id), source.sdkSessionId)
-            const checkpoint = handoverHash(JSON.stringify({ messages: members.map(member => member.messages), runs, sdk: sdk?.hash }))
-            const inheritedRecord = source.handover ? store.read(source.handover.handoverId) : undefined
-            const inherited = inheritedRecord?.snapshot ? { ...inheritedRecord.snapshot, actions: inheritedRecord.snapshot.actions.map(action => inheritedRecord.reviews[action.ref] ? { ...action, outcome: inheritedRecord.reviews[action.ref]!.outcome } : action) } : undefined
-            const snapshot = buildHandoverSnapshot({ workspaceId: source.workspace.id, sessionId: source.id, targetMode: record!.targetMode,
-              checkpoint, messages: source.messages, children: members.filter(member => member !== source).map(member => ({ id: member.id, messages: member.messages, branch: handoverBranch(sdkStateSnapshot(getSessionStoragePath(member.workspace.rootPath, member.id), member.sdkSessionId)?.bytes) })),
-              branch: handoverBranch(sdk?.bytes), pendingOperations, runs, inherited })
-            const runFiles: Array<{ path: string; expectedHash: string; versionId?: string; artifactId?: string }> = []
-            for (const run of runs) {
-              if (run.revision > 0 && !existsSync(specRevisionPath(source.workspace.rootPath, run.slug, run.runId, run.revision))) throw new Error('The committed source revision is unavailable')
-              const plan = readSpecRevision(source.workspace.rootPath, run.slug, run.runId, run.revision)
-              if (!plan) throw new Error('The committed source plan is unavailable')
-              if (!run.supersededBy) {
-                snapshot.goal.push(redactHandoverText(plan.goal))
-                snapshot.acceptance.push(redactHandoverText(plan.acceptance_criteria ?? plan.goal))
-              }
-              const results = loadTaskResults(source.workspace.rootPath, run.slug, run.runId)
-              snapshot.originals.push({ id: `${run.runId}:revision-${run.revision}`, sessionId: source.id, role: run.supersededBy ? 'task-history' : 'task-result', text: redactHandoverText(JSON.stringify(results)) })
-              if (results.research) {
-                for (const researchSource of results.research.sources) {
-                  if (researchSource.snapshotPath && researchSource.hash && !researchSource.unavailableReason) runFiles.push({ path: researchSource.snapshotPath, expectedHash: researchSource.hash })
-                }
-                if (!run.supersededBy) {
-                  snapshot.openQuestions.push(...results.research.dimensions.filter(dimension => dimension.state !== 'covered').map(dimension => `Research ${dimension.lineId}/${dimension.id}: ${dimension.state}; ${dimension.requirement}`))
-                  snapshot.openQuestions.push(...results.research.issues.filter(issue => issue.state !== 'resolved').map(issue => `Research issue ${issue.id} on ${issue.claimRef.id}@${issue.claimRef.version}: ${issue.state}; ${issue.reason}`))
-                }
-              }
-              for (const artifact of results.nodes.flatMap(node => node.artifacts ?? [])) {
-                if (artifact && typeof artifact === 'object' && 'path' in artifact && typeof artifact.path === 'string' && 'hash' in artifact && typeof artifact.hash === 'string') runFiles.push({ path: resolve(source.workspace.rootPath, artifact.path), expectedHash: artifact.hash })
-              }
-              if (!run.supersededBy) snapshot.openQuestions.push(...results.nodes.filter(node => node.state !== 'done' && node.state !== 'skipped').map(node => `Source retains ${run.slug}/${node.id}: ${node.state}${node.failureReason ? ` (${node.failureReason})` : ''}`))
-            }
-            await this.captureHandoverFiles(source, members, store, record!, snapshot, runFiles)
-            record!.snapshot = snapshot; record!.creationConfig = { model: source.model, llmConnection: source.llmConnection, permissionMode: source.permissionMode ?? 'ask' }; record!.targetSessionId = generateSessionId(source.workspace.rootPath)
-            record!.status = 'prepared'; record!.error = undefined; store.save(record!)
-          }
-          try { await capture(0) }
-          finally { members.forEach(member => this.handoverCapturing.delete(member.id)) }
-        }
-        const sourceModel = record.creationConfig?.model ?? source?.model, sourceConnection = record.creationConfig?.llmConnection ?? source?.llmConnection
-        // Legacy prepared receipts retain their original safe default; retries never infer a newer source grant.
-        const target = await this.createSession(current.workspace.id, { workMode: record.targetMode, permissionMode: record.creationConfig?.permissionMode ?? 'safe', model: sourceModel,
-          llmConnection: sourceConnection, name: source ? resolveSessionName(source) ?? record.sourceSessionId : record.sourceSessionId },
-          { emitCreatedEvent: false, reservedSessionId: record.targetSessionId!, handover: { handoverId: record.handoverId, sourceSessionId: record.sourceSessionId,
-            sourceMessageId: record.snapshot!.source.messageId, snapshotVersion: record.snapshotVersion } })
-        record.status = 'created'; store.save(record)
-        await this.applyHandoverInput(target.id, record, store)
-        record.status = 'applied'; record.error = undefined; store.save(record)
-        this.notifySessionCreated(current.workspace.id, record.targetSessionId!)
+      } else if (operation.type !== 'get') {
+        throw new Error('Unknown handover operation')
       }
       const changes: HandoverResult['changes'] = record.snapshot ? await Promise.all(record.snapshot.files.map(async file => {
         try {
@@ -12385,12 +12331,21 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error('Session not found')
     if (managed.ppt !== undefined && workMode !== 'PRO') throw new Error('PPT conversations require PRO')
+    if (managed.parentSessionId || managed.taskNodeId || managed.workModeNeedsReview
+      || (managed.executionRootSessionId && managed.executionRootSessionId !== managed.id)
+      || (managed.orchestrationRole && managed.orchestrationRole !== 'coordinator')) {
+      throw new Error('Work mode strategy belongs to the conversation root')
+    }
     await this.ensureMessagesLoaded(managed)
-    if (managed.messages.length || managed.isProcessing || managed.parentSessionId || managed.taskSlug || managed.taskDraft || managed.taskRunId || managed.orchestrationId || managed.workModeNeedsReview) throw new Error('Work mode is fixed after work starts; create a new conversation')
     if (managed.workMode === workMode) return
     managed.workMode = workMode
     managed.swarmEnabled = workMode === 'PRO' && isTasksOrchestrateEnabled()
-    await this.disposeManagedAgentRuntime(managed, 'Work mode changed before first message')
+    // In-flight turns keep their frozen strategy. Rebuild the agent at idle so
+    // the next turn sees the new default.
+    if (!managed.isProcessing) {
+      await this.disposeManagedAgentRuntime(managed, 'Work mode default strategy changed')
+      managed.agentWorkMode = undefined
+    }
     this.persistSession(managed)
     await this.flushSession(sessionId)
     this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { workMode, swarmEnabled: managed.swarmEnabled } }, managed.workspace.id)
@@ -12460,7 +12415,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     this.spawnQualificationCredentials.delete(managed.id)
     if (complexCapabilityError(managed, 'delegate')) return
-    if (managed.workMode === 'PRO' && managed.swarmEnabled) {
+    if (executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled()) {
       this.issueSpawnQualificationCredentials(managed, 'automatic')
     }
     if (userAuthorizedSpawn) {
@@ -12827,7 +12782,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       throw new Error('PRO delegation is disabled by this build')
     }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
-    if (requestedSpawnReason === 'automatic' && !(managed.workMode === 'PRO' && managed.swarmEnabled)) {
+    if (requestedSpawnReason === 'automatic' && !(executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled())) {
       throw new Error('Automatic delegation is unavailable in this session; use a PRO root')
     }
     let effectiveSpawnReason = requestedSpawnReason
@@ -12845,7 +12800,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       !qualificationCredential
       && !request.qualificationCredential
       && requestedSpawnReason === 'user-requested'
-      && managed.workMode === 'PRO' && managed.swarmEnabled
+      && executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled()
     ) {
       qualificationCredential = this.resolveSpawnQualificationCredential(managed, 'automatic')
       if (qualificationCredential) effectiveSpawnReason = 'automatic'
@@ -12999,7 +12954,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         hidden: true,
         // Spawned sessions become hidden subtasks of the spawning session.
         parentSessionId: managed.id,
-        swarmEnabled: managed.swarmEnabled ?? false,
+        workMode: executionWorkMode(managed),
+        swarmEnabled: executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled(),
         orchestrationId,
         orchestrationRootSessionId: rootSessionId,
         orchestrationDepth: parentDepth + 1,

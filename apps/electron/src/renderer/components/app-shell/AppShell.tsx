@@ -70,15 +70,15 @@ import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { confirmPermissionModeChange } from '@/lib/full-takeover-confirmation'
 import { nextModeAfterDeclinedTakeover } from '@/lib/permission-mode-selection'
-import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
+import { loadedSessionsAtom, sessionAtomFamily, sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta, updateSessionMetaAtom } from "@/atoms/sessions"
 import { workModeViewAtom } from '@/atoms/work-mode'
 import { historyScopeAtom, historyScopeRevisionAtom, historyScopeSilentAtom } from '@/atoms/history-scope'
 import { parseProjectHistoryScope, serializeProjectHistoryScope } from '@/contexts/navigation-history'
 import { nextPptHistoryId } from '@/components/ppt/history'
 import { officeSessionRoute, readOfficeSection, type OfficeHomeSection } from '@/components/office/office-home'
 import { initialPptHistoryListChrome, pptHistoryListVisible, reducePptHistoryList, type PptHistoryListChrome } from '@/lib/ppt-history-list-chrome'
-import { executionChildrenByRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
-import { cancelWorkModeTransition, transitionWorkMode } from '@/lib/work-mode-transition'
+import { executionChildrenByRoot, isOrdinaryConversationRoot, isWorkModeRoot, sessionWorkModeView, shouldAdoptFocusedWorkMode } from '@/lib/work-mode-navigation'
+import { cancelWorkModeTransition } from '@/lib/work-mode-transition'
 import type { WorkMode } from '@craft-agent/shared/sessions/work-mode'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
@@ -1170,14 +1170,14 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView))
+    if (!activeWorkspaceId) return metas.filter(s => s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s))
     return metas.filter(s =>
-      s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
-  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId, workModeView])
+  }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
 
   const pptSessionMetas = useMemo(() => Array.from(sessionMetaMap.values()).filter(s =>
-    s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
+    s.ppt !== undefined && isWorkModeRoot(s)
     && (!activeWorkspaceId || s.workspaceId === activeWorkspaceId || s.workspaceId === remoteWorkspaceId)
   ), [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
   const officeSectionMetas = useCallback((section: 'word' | 'excel') => Array.from(sessionMetaMap.values()).filter(s =>
@@ -1195,13 +1195,34 @@ function AppShellContent({
   const childrenByRoot = useMemo(() => executionChildrenByRoot(Array.from(sessionMetaMap.values())), [sessionMetaMap])
   const switchWorkModeView = useCallback(async (mode: WorkMode) => {
     if (mode === workModeView) { cancelWorkModeTransition(); return }
-    await transitionWorkMode(() => {
+    const focused = focusedSessionId ? sessionMetaMap.get(focusedSessionId) : undefined
+    if (focused && shouldAdoptFocusedWorkMode(focused) && isOrdinaryConversationRoot(focused)) {
+      const previous = focused.workMode ?? 'NORM'
       setWorkModeView(mode)
-      setSearchActive(false)
-      setSearchQuery('')
-      navigate(routes.view.allSessions(), draftSessionNavigateOptions())
-    })
-  }, [workModeView, setWorkModeView])
+      store.set(updateSessionMetaAtom, focused.id, { workMode: mode, swarmEnabled: mode === 'PRO' })
+      if (store.get(loadedSessionsAtom).has(focused.id)) {
+        const current = store.get(sessionAtomFamily(focused.id))
+        if (current?.id === focused.id) {
+          store.set(sessionAtomFamily(focused.id), { ...current, workMode: mode, swarmEnabled: mode === 'PRO' })
+        }
+      }
+      try {
+        await window.electronAPI.sessionCommand(focused.id, { type: 'setWorkMode', mode })
+      } catch (error) {
+        setWorkModeView(previous)
+        store.set(updateSessionMetaAtom, focused.id, { workMode: previous, swarmEnabled: previous === 'PRO' })
+        if (store.get(loadedSessionsAtom).has(focused.id)) {
+          const current = store.get(sessionAtomFamily(focused.id))
+          if (current?.id === focused.id) {
+            store.set(sessionAtomFamily(focused.id), { ...current, workMode: previous, swarmEnabled: previous === 'PRO' })
+          }
+        }
+        toast.error(error instanceof Error ? error.message : String(error))
+      }
+      return
+    }
+    setWorkModeView(mode)
+  }, [workModeView, setWorkModeView, focusedSessionId, sessionMetaMap, store])
 
   useEffect(() => () => cancelWorkModeTransition(), [activeWorkspaceId])
 
@@ -2514,7 +2535,7 @@ function AppShellContent({
                 <SessionList
                   key={sessionFilter?.kind}
                   items={searchActive ? filterSessionsBySidebarProjectScope(workspaceSessionMetas, projectFilter) : filteredSessionMetas}
-                  childrenByRoot={workModeView === 'PRO' ? childrenByRoot : undefined}
+                  childrenByRoot={childrenByRoot}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}

@@ -1,5 +1,20 @@
 # NORM / PRO 内容衔接
 
+## 2026-11-06：同一会话的下一轮执行策略（#793）
+
+产品锁定：一个会话、一份消息历史、一份文件/产物记录。顶栏 NORM / PRO 只决定下一轮如何执行，不再创建新会话，也不再迁移历史。
+
+行为变更：
+
+- 顶栏切换在当前会话上调用 `setWorkMode`，会话 id 不变。
+- 模式切换的 handover `create` 已关闭（`MODE_SWITCH_HANDOVER_DISABLED`）。旧的已应用 handover 仍可 list/get，仅作源/目标关联展示，不自动合并历史。
+- 进行中的一轮冻结 `activeTurnWorkMode`；队列项在入队时盖章 `turnContext.workMode`。中途改默认策略不影响当前轮，也不改写已入队项。
+- Work Mode 列表不再按 NORM/PRO 拆成两套会话身份。显式「新会话」/分支仍可用。
+
+本轮需要真机确认（单元测试无法覆盖）的部分：长对话 NORM→PRO→NORM 后附件与产物仍可打开；进行中改默认策略后当前回复工具集不变。
+
+Playground：`scripts/qa-handover-button.js` 验收查看历史关联。`qa-handover-preference.js` 与 `qa-handover-success.js` 依赖已删除的 create 确认流，已显式退出。`scripts/selection-3.0-f5.ts` / `f6.ts` / `handover-write-qa.ts` 末尾的 mode-switch create 会抛 `MODE_SWITCH_HANDOVER_DISABLED`。
+
 ## 2026-10-12：缩短过渡并默认进入新建会话
 
 基于 `ce81b77f5` 的本地试用改动。列表和当前聊天的原生快照改为 150 毫秒纯透明度交叠，使用 `cubic-bezier(0.22, 1, 0.36, 1)`。取消大区域的 0–2px 模糊，动画时长由 360 毫秒缩短至 150 毫秒。旧运行时降级路径采用相同的纯淡入；减少动态效果时同样没有模糊、位移或缩放。顶部选择底板、草稿、同步提交和快照边界沿用现有实现。

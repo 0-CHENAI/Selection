@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 describe('draft chat header work-mode badge', () => {
-  it('does not show the fixed work-mode badge before a session exists', () => {
+  it('does not show a fixed work-mode badge; NORM/PRO is the top-bar strategy switch', () => {
     const chatPage = readFileSync(join(import.meta.dir, '../ChatPage.tsx'), 'utf8')
-    // A draft has no sessionId, so canHandover is always false. Without the
-    // isDraft guard the "work mode fixed" NORM badge leaked onto the empty
-    // new-chat screen even though no session had been created yet.
-    expect(chatPage).toContain("{!isDraft && !canHandover && currentWorkMode !== 'PRO' && <span")
+    expect(chatPage).not.toContain('session.workModeFixed')
+    expect(chatPage).not.toContain('canHandover')
+    expect(chatPage).toContain('HandoverPanel')
+    expect(chatPage).not.toContain('canCreate=')
   })
 })

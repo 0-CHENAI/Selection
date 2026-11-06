@@ -191,11 +191,11 @@ export function validatePptRequest(value: PptRequest, root = getPptSkillRoot()):
   return request
 }
 
-/** The host never silently upgrades an established ordinary conversation; use the existing handover. */
+/** PPT requires the turn's PRO execution strategy; switching NORM/PRO does not create a new conversation. */
 export function pptSendOptions(workMode: string | undefined, defaults: PptRequest | undefined, options?: SendMessageOptions, root?: string, skills: ChartSkillCandidate[] = [], message?: string): SendMessageOptions | undefined {
   const requested = options?.ppt ?? defaults
   if (requested === undefined) return options
-  if (workMode !== 'PRO') throw new Error('PPT generation requires a PRO conversation; hand over this conversation to PRO first')
+  if (workMode !== 'PRO') throw new Error('PPT generation requires a PRO turn; switch this conversation to PRO first')
   const ppt = validatePptRequest(requested, root ?? getPptSkillRoot())
   const backend = chartBackend(message, skills)
   const skillSlugs = [...new Set([...(options?.skillSlugs ?? []), 'ppt-design', ...(backend.mode === 'external' && backend.skill ? [backend.skill.slug] : [])])]

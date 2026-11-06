@@ -1,3 +1,6 @@
+// #793: mode-switch handover create is removed. Success-toast QA for minting a
+// target session is retired. View-only association QA: scripts/qa-handover-button.js
+throw new Error('#793: mode-switch handover create is removed; skip success-toast QA')
 // ego-browser nodejs < scripts/qa-handover-success.js
 // Reuse a task space with globalThis.handoverQA = { spaceId, url, outputDir }.
 const { strict: assert } = await import('node:assert')

@@ -725,18 +725,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
     </div>
   ) : (taskGraphButton ?? primaryHeaderAction)
 
-  const canHandover = !!sessionId && !sessionMeta?.parentSessionId && !sessionMeta?.taskNodeId && !sessionMeta?.workModeNeedsReview
-    && (!sessionMeta?.executionRootSessionId || sessionMeta.executionRootSessionId === sessionId)
   const headerActions = (
     <div className="flex items-center gap-1.5">
-      {/* "Work mode fixed" badge is for existing sessions that cannot hand over.
-          Drafts have no session yet; their mode is already shown by the top NORM / PRO switcher. */}
-      {!isDraft && !canHandover && currentWorkMode !== 'PRO' && <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={t('session.workModeFixed')}>
-        {currentWorkMode}
-      </span>}
       {sessionHeaderActions}
       {sessionId && !isPptSession && <HandoverPanel key={sessionId} sessionId={sessionId} mode={currentWorkMode}
-        canCreate={canHandover} sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
+        sourceLink={session?.handover ?? sessionMeta?.handover} headerOnly />}
     </div>
   )
 
@@ -824,7 +817,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
   ])
 
   const pendingCreatedSessionRef = React.useRef<Session | null>(null)
-  const pptHandoverRef = React.useRef<{ sourceId: string; handoverId: string }>()
   const handleSendMessage = React.useCallback(async (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: SendMessageOptions['annotationFollowUps']) => {
     const office: OfficeRequest | undefined = (officeSection === 'word' || officeSection === 'excel') && (isDraft || (session?.messages.length ?? 0) === 0)
       ? resolveOfficeDraftRequest(officeSection, draftStore.get(officeComposerAtomFamily(optionsSessionId)))
@@ -853,11 +845,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
         return accepted
       }
       if (!session) return false
-      let targetId = session.id
+      const targetId = session.id
       if (ppt && session.workMode !== 'PRO') {
-        pptHandoverRef.current = { sourceId: session.id, handoverId: crypto.randomUUID() }
-        targetId = await ensurePptProSession(session, pptHandoverRef.current.handoverId, (id, command) => window.electronAPI.sessionCommand(id, command), abort.signal)
-        await draftStore.set(ensureSessionMessagesLoadedAtom, targetId)
+        await ensurePptProSession(session, (id, command) => window.electronAPI.sessionCommand(id, command), abort.signal)
+        updateSessionMeta(session.id, { workMode: 'PRO' })
       }
       abort.signal.throwIfAborted()
       const accepted = await onSendMessage(targetId, message, attachments, outgoingSkills, undefined, annotationFollowUps, ppt, office) === true
@@ -869,7 +860,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId, pptMode = false, offi
     } finally {
       if (pptSendAbort.current === abort) setDraftBusy(false)
     }
-  }, [draftStore, optionsSessionId, session, sessionMeta?.ppt, isPptHome, officeSection, isPptSession, draftBusy, isDraft, activeWorkspaceId, onSendMessage, onInputChange, onAttachmentsChange, setDraftComposer])
+  }, [draftStore, optionsSessionId, session, sessionMeta?.ppt, isPptHome, officeSection, isPptSession, draftBusy, isDraft, activeWorkspaceId, onSendMessage, onInputChange, onAttachmentsChange, setDraftComposer, updateSessionMeta])
 
   if (session && pendingCreatedSessionRef.current?.id === session.id) {
     pendingCreatedSessionRef.current = null
