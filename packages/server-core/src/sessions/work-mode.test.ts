@@ -3,6 +3,7 @@ import { SessionManager, createManagedSession, buildAgentSessionConfig } from '.
 import { runPreToolUseChecks, type PreToolUseInput } from '@craft-agent/shared/agent/core/pre-tool-use'
 import { getSessionToolProxyDefs } from '@craft-agent/shared/agent/backend/pi/session-tool-defs'
 import { buildPiExecutionScope } from '@craft-agent/shared/agent/pi-agent'
+import { MODE_SWITCH_HANDOVER_DISABLED } from '@craft-agent/shared/sessions/work-mode'
 
 test('provider projection preserves node identity even when legacy orchestration role is absent', () => {
   const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
@@ -37,15 +38,100 @@ test('NORM rejects automatic/explicit spawn, direct DAG runs and native delegati
   manager.cleanup()
 })
 
-test('started sessions cannot change mode, permissions or actor ownership', async () => {
+test('started sessions can change the next-turn strategy without a new session id', async () => {
   const manager = new SessionManager()
   const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
   const managed = createManagedSession({ id: 'started', workMode: 'NORM', permissionMode: 'safe' }, workspace,
     { messagesLoaded: true, messages: [{ id: 'u', role: 'user', content: 'work', timestamp: 1 }] })
-  ;(manager as unknown as { sessions: Map<string, typeof managed> }).sessions.set(managed.id, managed)
-  await expect(manager.setSessionWorkMode(managed.id, 'PRO')).rejects.toThrow('fixed')
-  expect(managed.workMode).toBe('NORM')
+  const internal = manager as unknown as { sessions: Map<string, typeof managed> }
+  internal.sessions.set(managed.id, managed)
+  await manager.setSessionWorkMode(managed.id, 'PRO')
+  expect(managed.workMode).toBe('PRO')
   expect(managed.permissionMode).toBe('safe')
+  expect([...internal.sessions.keys()]).toEqual(['started'])
+  await manager.setSessionWorkMode(managed.id, 'NORM')
+  expect(managed.workMode).toBe('NORM')
+  expect([...internal.sessions.keys()]).toEqual(['started'])
+  manager.cleanup()
+})
+
+test('mid-run default change does not alter the frozen turn strategy', async () => {
+  const manager = new SessionManager()
+  const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
+  const managed = createManagedSession({ id: 'live', workMode: 'NORM', permissionMode: 'allow-all' }, workspace, { messagesLoaded: true })
+  managed.isProcessing = true
+  managed.activeTurnWorkMode = 'NORM'
+  const internal = manager as unknown as { sessions: Map<string, typeof managed>; spawnSessionFromTool: (session: typeof managed, request: unknown) => Promise<unknown> }
+  internal.sessions.set(managed.id, managed)
+  await manager.setSessionWorkMode(managed.id, 'PRO')
+  expect(managed.workMode).toBe('PRO')
+  expect(managed.activeTurnWorkMode).toBe('NORM')
+  expect(buildAgentSessionConfig(managed).workMode).toBe('NORM')
+  expect(buildAgentSessionConfig(managed).swarmEnabled).toBe(false)
+  await expect(internal.spawnSessionFromTool(managed, { name: 'worker', prompt: 'Read assigned data', spawnReason: 'automatic' })).rejects.toThrow('NORM')
+  managed.activeTurnWorkMode = 'PRO'
+  expect(buildAgentSessionConfig(managed).workMode).toBe('PRO')
+  expect(buildAgentSessionConfig(managed).swarmEnabled).toBe(true)
+  manager.cleanup()
+})
+
+test('queued messages keep the strategy stamped at enqueue time', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(join(tmpdir(), 'selection-mode-queue-'))
+  const workspace = { id: 'queue', slug: 'queue', name: 'Queue', rootPath: root, createdAt: 1 }
+  const manager = new SessionManager()
+  try {
+    const managed = createManagedSession({ id: 'queued', workMode: 'NORM' }, workspace, { messagesLoaded: true })
+    const internal = manager as unknown as { sessions: Map<string, typeof managed> }
+    internal.sessions.set(managed.id, managed)
+    managed.isProcessing = true
+    await manager.sendMessage(managed.id, 'queued while NORM')
+    const first = managed.messages.find(message => message.role === 'user')
+    expect(first?.turnContext?.workMode).toBe('NORM')
+    expect(first?.isQueued).toBe(true)
+    await manager.setSessionWorkMode(managed.id, 'PRO')
+    expect(managed.workMode).toBe('PRO')
+    expect(first?.turnContext?.workMode).toBe('NORM')
+    await manager.sendMessage(managed.id, 'queued after PRO')
+    const second = [...managed.messages].reverse().find(message => message.role === 'user')
+    expect(second?.turnContext?.workMode).toBe('PRO')
+    expect(first?.id).not.toBe(second?.id)
+    expect(internal.sessions.size).toBe(1)
+  } finally {
+    manager.cleanup()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('queued replay freezes the stamped strategy even if the default changed', () => {
+  const manager = new SessionManager()
+  const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
+  const managed = createManagedSession({ id: 'replay', workMode: 'PRO' }, workspace, {
+    messagesLoaded: true,
+    messages: [{ id: 'queued', role: 'user', content: 'later', timestamp: 1, turnContext: { workMode: 'NORM' } }],
+  })
+  const internal = manager as unknown as {
+    sessions: Map<string, typeof managed>
+    resolveIncomingTurnWorkMode: (session: typeof managed, existingMessageId?: string) => 'NORM' | 'PRO'
+  }
+  internal.sessions.set(managed.id, managed)
+  expect(internal.resolveIncomingTurnWorkMode(managed, 'queued')).toBe('NORM')
+  expect(internal.resolveIncomingTurnWorkMode(managed)).toBe('PRO')
+  manager.cleanup()
+})
+
+test('mode-switch handover create is rejected and does not mint a session', async () => {
+  const manager = new SessionManager()
+  const workspace = { id: 'ws', slug: 'ws', name: 'Workspace', rootPath: '/tmp/selection-mode-test', createdAt: 0 }
+  const managed = createManagedSession({ id: 'source', workMode: 'NORM' }, workspace, { messagesLoaded: true })
+  const internal = manager as unknown as { sessions: Map<string, typeof managed> }
+  internal.sessions.set(managed.id, managed)
+  await expect(manager.handoverSession(managed.id, { type: 'create', handoverId: 'mode-switch', targetMode: 'PRO' }))
+    .rejects.toThrow(MODE_SWITCH_HANDOVER_DISABLED)
+  expect([...internal.sessions.keys()]).toEqual(['source'])
+  expect(managed.workMode).toBe('NORM')
   manager.cleanup()
 })
 

@@ -1,34 +1,31 @@
 import { describe, expect, it } from 'bun:test'
-import type { HandoverRecord, SessionCommand } from '@craft-agent/shared/protocol'
+import type { SessionCommand } from '@craft-agent/shared/protocol'
 import type { Session } from '../../../shared/types'
 import { ensurePptProSession } from '../ppt-handover'
 
 const source: Session = { id: 'ordinary', workMode: 'NORM', workspaceId: 'ws', workspaceName: 'Workspace', messages: [], isProcessing: false, lastMessageAt: 0 }
-function record(status: HandoverRecord['status'], extra: Partial<HandoverRecord> = {}): HandoverRecord {
-  return { version: 1, handoverId: 'handover', sourceSessionId: source.id, workspaceId: source.workspaceId, targetMode: 'PRO', snapshotVersion: 1, status, createdAt: 1, updatedAt: 1, reviews: {}, ...extra }
-}
-describe('PPT context handover', () => {
-  it('uses the immutable PRO target only after its snapshot is applied', async () => {
-    const target = await ensurePptProSession(source, 'handover', async () => ({ records: [record('applied', { targetSessionId: 'pro-target' })] }), new AbortController().signal)
-    expect(target).toBe('pro-target')
-    expect(source.workMode).toBe('NORM')
-  })
-  it('cancels a busy source receipt rather than sending a deferred request after the user leaves', async () => {
+
+describe('PPT stays on the same conversation', () => {
+  it('switches the current session to PRO without creating a target', async () => {
     const commands: SessionCommand[] = []
-    await expect(ensurePptProSession(source, 'handover', async (_id, command) => {
+    const target = await ensurePptProSession(source, async (id, command) => {
       commands.push(command)
-      return { records: [record(command.type === 'handover' && command.operation.type === 'cancel' ? 'cancelled' : 'waiting', { error: '等待后台任务完成' })] }
-    }, new AbortController().signal)).rejects.toThrow('等待后台任务完成')
-    expect(commands).toEqual([
-      { type: 'handover', operation: { type: 'create', handoverId: 'handover', targetMode: 'PRO' } },
-      { type: 'handover', operation: { type: 'cancel', handoverId: 'handover' } },
-    ])
+      expect(id).toBe(source.id)
+    }, new AbortController().signal)
+    expect(target).toBe(source.id)
+    expect(commands).toEqual([{ type: 'setWorkMode', mode: 'PRO' }])
+  })
+  it('skips the switch when the conversation is already PRO', async () => {
+    const commands: SessionCommand[] = []
+    const session = { ...source, workMode: 'PRO' as const }
+    const target = await ensurePptProSession(session, async (_id, command) => { commands.push(command) }, new AbortController().signal)
+    expect(target).toBe(session.id)
+    expect(commands).toEqual([])
   })
   it('does not expose a completed target to an abandoned composer', async () => {
     const abort = new AbortController()
-    await expect(ensurePptProSession(source, 'handover', async () => {
+    await expect(ensurePptProSession(source, async () => {
       abort.abort()
-      return { records: [record('applied', { targetSessionId: 'pro-target' })] }
     }, abort.signal)).rejects.toThrow()
   })
 })

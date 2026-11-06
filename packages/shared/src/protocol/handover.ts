@@ -44,6 +44,7 @@ export interface HandoverRecord {
   reviews: Record<string, { outcome: 'completed' | 'not-performed'; note: string }>
 }
 export type HandoverOperation =
+  /** Removed: NORM/PRO is a same-session next-turn strategy. Server rejects create. */
   | { type: 'create'; handoverId: string; targetMode: WorkMode }
   | { type: 'get'; handoverId: string; checkSources?: boolean }
   | { type: 'list' }

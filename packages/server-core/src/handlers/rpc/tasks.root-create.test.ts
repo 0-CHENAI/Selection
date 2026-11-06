@@ -1,5 +1,5 @@
 import { afterAll, expect, test, spyOn } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol';
@@ -29,13 +29,14 @@ async function fixture() {
   registerTasksHandlers({ handle: (name: string, fn: (...args: any[]) => Promise<any>) => handlers.set(name, fn), push() { } } as unknown as RpcServer, { sessionManager: manager } as unknown as HandlerDeps);
   return { root, workspace, manager, internal, call: (req: unknown) => handlers.get(RPC_CHANNELS.tasks.CREATE)!({}, workspace.id, req), cleanup: async () => { await manager.flushAllSessions(); manager.cleanup(); lookup.mockRestore(); workspaces.mockRestore(); rmSync(root, { recursive: true, force: true }); } };
 }
-test('F7 explicit plan creation preserves the handover PRO root, model, permission, history and creates no run', async () => {
+test('F7 explicit plan creation preserves the same-session PRO root, model, permission, history and creates no run', async () => {
   const f = await fixture();
   try {
     const source = await f.manager.createSession(f.workspace.id, { workMode: 'NORM', permissionMode: 'safe', model: 'gpt-6-luna', name: 'Source' });
     f.internal.sessions.get(source.id).messages.push({ id: 'goal', role: 'user', content: '比较 A/B 两年成本与风险，只分析不部署。', timestamp: 1 });
-    const handover = (await f.manager.handoverSession(source.id, { type: 'create', handoverId: 'f7', targetMode: 'PRO' })).records[0]!, id = handover.targetSessionId!;
-    const before = loadSession(f.root, id)!, sourceBytes = readFileSync(getSessionFilePath(f.root, source.id), 'utf8'), created = await f.call({ yaml, rootSessionId: id }), after = loadSession(f.root, id)!;
+    await f.manager.setSessionWorkMode(source.id, 'PRO');
+    const id = source.id;
+    const before = loadSession(f.root, id)!, created = await f.call({ yaml, rootSessionId: id }), after = loadSession(f.root, id)!;
     expect(created.orchestratorSessionId).toBe(id);
     expect(after.taskSlug).toBe('f7-plan');
     expect(after.messages).toEqual(before.messages);
@@ -43,8 +44,8 @@ test('F7 explicit plan creation preserves the handover PRO root, model, permissi
     expect(after.model).toBe(before.model);
     expect(after.permissionMode).toBe('safe');
     expect(after.swarmEnabled).toBe(before.swarmEnabled);
-    expect(readFileSync(getSessionFilePath(f.root, source.id), 'utf8')).toBe(sourceBytes);
-    expect(f.manager.getSessions(f.workspace.id)).toHaveLength(2);
+    expect(after.workMode).toBe('PRO');
+    expect(f.manager.getSessions(f.workspace.id)).toHaveLength(1);
     expect(listRunIds(f.root, 'f7-plan')).toEqual([]);
     expect((await f.call({ yaml, rootSessionId: id })).orchestratorSessionId).toBe(id);
     await expect(f.call({ yaml: yaml.replace('title: F7', 'title: overwrite'), rootSessionId: id })).rejects.toThrow('already exists');

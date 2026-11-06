@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { migrateWorkModes, complexCapabilityError, complexToolCapability, type WorkModeSession } from '../work-mode.ts';
+import { migrateWorkModes, complexCapabilityError, complexToolCapability, executionWorkMode, resolveTurnWorkMode, MODE_SWITCH_HANDOVER_DISABLED, type WorkModeSession } from '../work-mode.ts';
 import { getSessionToolProxyDefs } from '../../agent/backend/pi/session-tool-defs.ts';
 
 test('Pi registry advertises only tools allowed by the persisted execution scope', () => {
@@ -58,11 +58,22 @@ test('mode, root role and unresolved ownership gate all complex capability alias
   for (const tool of ['Task', 'Agent', 'spawn_session', 'send_agent_message', 'mcp__session__spawn_session', 'session__run_task', 'create_task', 'submit_task_definition', 'submit_orchestration_patch']) {
     const capability = complexToolCapability(tool)!;
     expect(capability).toBeDefined();
-    expect(complexCapabilityError({ workMode: 'NORM' }, capability)).toContain('NORM');
+    expect(complexCapabilityError({ workMode: 'NORM' }, capability)).toContain('Switch to PRO');
     expect(complexCapabilityError({ workMode: 'PRO', workModeNeedsReview: true }, capability)).toContain('review');
     expect(complexCapabilityError({ workMode: 'PRO', parentSessionId: 'root' }, capability)).toContain('coordinator');
     expect(complexCapabilityError({ workMode: 'PRO', orchestrationRole: 'reviewer' }, capability)).toContain('coordinator');
     expect(complexCapabilityError({ workMode: 'PRO' }, capability)).toBeUndefined();
   }
   for (const tool of ['Read', 'Write', 'Edit', 'Bash', 'update_task_list', 'source_test', 'skill_install', 'submit_answer']) expect(complexToolCapability(tool)).toBeUndefined();
+  expect(complexCapabilityError({ workMode: 'NORM', activeTurnWorkMode: 'PRO' }, 'delegate')).toBeUndefined();
+  expect(complexCapabilityError({ workMode: 'PRO', activeTurnWorkMode: 'NORM' }, 'delegate')).toContain('Switch to PRO');
+});
+
+test('execution strategy prefers the frozen turn over the session default', () => {
+  expect(resolveTurnWorkMode('PRO', 'NORM')).toBe('NORM');
+  expect(resolveTurnWorkMode('NORM', 'PRO')).toBe('PRO');
+  expect(resolveTurnWorkMode('PRO', undefined)).toBe('PRO');
+  expect(executionWorkMode({ workMode: 'PRO', activeTurnWorkMode: 'NORM' })).toBe('NORM');
+  expect(executionWorkMode({ workMode: 'NORM' })).toBe('NORM');
+  expect(MODE_SWITCH_HANDOVER_DISABLED).toContain('same conversation');
 });

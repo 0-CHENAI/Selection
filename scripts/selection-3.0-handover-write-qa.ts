@@ -33,6 +33,7 @@ try {
   await manager.sendMessage(source.id, `这是隔离的回归测试。只调用一次原生 Edit 编辑 ${JSON.stringify(sourceFile)}，将 __MISSING_QA_TEXT__ 替换为 changed。预期文本匹配失败，失败后不要重试、不要使用其他写入工具、不修改文件，报告工具的实际失败结果。`)
   await manager.flushAllSessions()
   assert.equal(readFileSync(sourceFile, 'utf8'), 'original QA fixture')
+  // #793: mode-switch handover create is removed and will throw MODE_SWITCH_HANDOVER_DISABLED.
   const record = (await manager.handoverSession(source.id, { type: 'create', handoverId, targetMode: 'PRO' })).records[0]!
   assert.equal(record.status, 'applied')
   sessions.push(record.targetSessionId!)

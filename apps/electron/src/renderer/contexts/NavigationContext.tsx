@@ -648,14 +648,14 @@ export function NavigationProvider({
       const visibleSessions = sessionMetas.filter(s => {
         const inWorkspace = !workspaceId || s.workspaceId === workspaceId
         if (!inWorkspace) return false
-        if (filter.kind === 'ppt') return s.ppt !== undefined && isWorkModeRoot(s, 'PRO')
+        if (filter.kind === 'ppt') return s.ppt !== undefined && isWorkModeRoot(s)
         if (filter.kind === 'office') return s.office?.mode === filter.section
-        return s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s, workModeView)
+        return s.ppt === undefined && s.office?.mode !== 'word' && s.office?.mode !== 'excel' && isWorkModeRoot(s)
       })
 
       return visibleSessions
     },
-    [sessionMetas, workspaceId, workModeView]
+    [sessionMetas, workspaceId]
   )
 
   const getFirstSessionId = useCallback(
