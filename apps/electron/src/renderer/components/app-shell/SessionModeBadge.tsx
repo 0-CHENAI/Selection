@@ -14,8 +14,7 @@ export function SessionModeBadge({ mode }: { mode?: WorkMode }) {
         <motion.div
           key="pro-mode-badge"
           className="ml-2 inline-flex shrink-0 items-center"
-          originX={0}
-          originY={0.5}
+          style={{ transformOrigin: 'left center' }}
           {...sessionModeBadgeMotion(reduceMotion)}
         >
           <ProModeBadge />
