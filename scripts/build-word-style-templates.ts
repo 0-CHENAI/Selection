@@ -72,7 +72,7 @@ if (process.argv.includes('--previews')) {
       mkdirSync(preview, { recursive: true })
       execFileSync('soffice', [`-env:UserInstallation=file://${join(scratch, 'lo')}`, '--headless', '--convert-to', 'pdf', '--outdir', scratch, join(dir, 'example.docx')], { stdio: 'pipe' })
       execFileSync('pdftoppm', ['-scale-to', '1000', '-png', '-singlefile', join(scratch, 'example.pdf'), join(preview, '1')], { stdio: 'pipe' })
-      await sharp(join(preview, '1.png')).resize({ width: 480 }).webp({ quality: 85 }).toFile(join(root, '../../../src/renderer/assets/office-covers', `${id}.webp`))
+      await sharp(join(preview, '1.png')).resize(1280, 720, { fit: 'contain', background: '#f3f3f3' }).webp({ quality: 85 }).toFile(join(root, '../../../src/renderer/assets/office-covers', `${id}.webp`))
     }
   } finally { rmSync(scratch, { recursive: true, force: true }) }
 }

@@ -509,7 +509,17 @@ export function officeDeliveryIssues(session: OfficeToolSession, changedPaths: s
     for (const path of changedPaths.filter(item => /\.docx$/i.test(item))) {
       if (!existsSync(path)) continue
       const record = records.word?.[realpathSync(path)]
-      if (!record) continue
+      if (!record) {
+        // Foreign documents need no template comparison, but corrupt packages
+        // must not be published as successfully generated Word files.
+        try {
+          const entries = readOoxmlPackage(readFileSync(path))
+          if (!entries['word/document.xml']) throw new Error('缺少 Word 主文档')
+        } catch (error) {
+          issues.push({ path, kind: 'word-layout', summary: '无法读取 Word 文件', detail: error instanceof Error ? error.message : String(error) })
+        }
+        continue
+      }
       const template = session.templates().find(item => item.id === record.templateId && item.revision === record.revision)
       if (!template?.sampleFile) {
         issues.push({ path, kind: 'word-layout', summary: '模板已更新', detail: '无法核对该文件的模板版本，请重新准备模板。' })

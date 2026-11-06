@@ -49,6 +49,14 @@ describe('office home', () => {
       'annual-invitation',
       'miniapp-prd',
       'partnership-letter',
+      'style-design-report',
+      'style-experiment-analysis',
+      'style-investment-memo',
+      'style-legal-memo',
+      'style-minimal-letter',
+      'style-strategy-memo',
+      'style-system-design',
+
     ])
     expect(casesForOfficeHome(cases, 'excel').map(item => item.id)).toEqual([
       'execution-tracker',
