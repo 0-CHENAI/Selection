@@ -376,6 +376,7 @@ export function CompactModelSelector({
               </button>
             </div>
           ) : pickerMode === 'switcher' ? (
+            /* Same row language as desktop switcher: connection rows, then models + thinking. */
             connectionsByProvider.map(([providerName, connections]) => (
               <React.Fragment key={providerName}>
                 <div className="px-3 pt-3 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">

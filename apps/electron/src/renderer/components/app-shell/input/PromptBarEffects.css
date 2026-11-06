@@ -202,35 +202,6 @@
 
 .prompt-effort-action { display: flex; align-items: center; margin-left: auto; }
 
-.popover-styled.prompt-model-picker[data-overview] {
-  width: 240px;
-  min-width: min(240px, calc(100vw - 24px));
-  border-radius: 20px;
-}
-.prompt-effort-settings[data-overview] { padding: 10px 12px 12px; }
-.prompt-effort-overview-heading {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 28px;
-  align-items: start;
-}
-.prompt-effort-overview-action { display: flex; align-items: center; min-height: 22px; }
-.prompt-effort-overview-title { display: flex; flex-direction: column; align-items: center; min-width: 0; }
-.prompt-effort-overview-title .prompt-effort-value { font-size: 14px; line-height: 20px; }
-.prompt-effort-model {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  color: var(--prompt-effort-muted);
-  font-size: 12px;
-  line-height: 20px;
-  cursor: pointer;
-}
-.prompt-effort-model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prompt-effort-model svg { flex-shrink: 0; }
-.prompt-effort-model:hover { color: var(--foreground); }
-.prompt-effort-model:focus-visible { outline: 1px solid var(--ring); outline-offset: 2px; border-radius: 2px; }
-.prompt-effort-settings[data-overview] .prompt-effort-track { margin-top: 10px; }
-
 .prompt-effort-settings .text-muted-foreground,
 .prompt-effort-help {
   color: var(--prompt-effort-muted);

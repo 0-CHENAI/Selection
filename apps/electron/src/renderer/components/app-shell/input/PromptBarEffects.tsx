@@ -2,7 +2,6 @@ import * as React from 'react'
 import { useReducedMotion } from 'motion/react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { HelpCircleIcon } from '@hugeicons/core-free-icons'
-import { ChevronRight } from 'lucide-react'
 import { Item as MenuItem } from '@radix-ui/react-dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
@@ -82,7 +81,7 @@ function MaxEffortField({ visible }: { visible: boolean }) {
 }
 
 export function PromptThinkingSettings({
-  value, levels, workMode, disabled, onChange, unavailable, binary, inMenu = true, headingAction, modelName, onBrowseModels,
+  value, levels, workMode, disabled, onChange, unavailable, binary, inMenu = true, headingAction,
 }: {
   value: ThinkingLevel
   levels: readonly ThinkingLevelDefinition[]
@@ -96,8 +95,6 @@ export function PromptThinkingSettings({
   /** Drawer controls are not descendants of a Radix dropdown menu. */
   inMenu?: boolean
   headingAction?: React.ReactNode
-  modelName?: string
-  onBrowseModels?: () => void
 }) {
   const { t } = useTranslation()
   const [dragging, setDragging] = React.useState(false)
@@ -187,19 +184,8 @@ export function PromptThinkingSettings({
   )
 
   return (
-    <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode} data-overview={!!onBrowseModels || undefined}>
-      {onBrowseModels ? <div className="prompt-effort-overview-heading">
-        <div className="prompt-effort-overview-action">{headingAction}</div>
-        <div className="prompt-effort-overview-title">
-          <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
-          <MenuItem asChild onSelect={event => { event.preventDefault(); onBrowseModels() }}>
-            <button type="button" className="prompt-effort-model" aria-label={`${t('common.model')}: ${modelName}`}>
-              <span>{modelName}</span><ChevronRight size={14} aria-hidden="true" />
-            </button>
-          </MenuItem>
-        </div>
-        <span aria-hidden="true" />
-      </div> : <div className="prompt-effort-heading">
+    <div className="prompt-effort-settings" data-max={maxed || undefined} data-work-mode={workMode}>
+      <div className="prompt-effort-heading">
         <span className="text-muted-foreground">{t('thinking.effort')}</span>
         <span className="prompt-effort-value font-medium">{t(valueKey)}</span>
         {headingAction ? <span className="prompt-effort-action">{headingAction}</span> : <Tooltip>
@@ -210,7 +196,7 @@ export function PromptThinkingSettings({
           </TooltipTrigger>
           <TooltipContent>{t('thinking.effortHelp')}</TooltipContent>
         </Tooltip>}
-      </div>}
+      </div>
       {binary && levels.length > 1 && <div className="prompt-effort-endpoints text-muted-foreground">
         <span>{t('thinking.off')}</span>
         <span>{t('thinking.on')}</span>
