@@ -8,16 +8,23 @@ import { sessionModeBadgeMotion } from './session-mode-badge-motion'
 
 export function SessionModeBadge({ mode }: { mode?: WorkMode }) {
   const reduceMotion = useReducedMotion()
+  const { clip, ...frame } = sessionModeBadgeMotion(reduceMotion)
   return (
     <AnimatePresence initial={false}>
       {mode === 'PRO' && (
         <motion.div
           key="pro-mode-badge"
-          className="ml-2 inline-flex shrink-0 items-center"
+          className="inline-flex h-5 min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap"
           style={{ transformOrigin: 'left center' }}
-          {...sessionModeBadgeMotion(reduceMotion)}
+          {...frame}
         >
-          <ProModeBadge />
+          <motion.div
+            className="inline-flex h-5 shrink-0 items-center"
+            style={{ transformOrigin: 'left center' }}
+            {...clip}
+          >
+            <ProModeBadge />
+          </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
