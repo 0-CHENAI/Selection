@@ -544,7 +544,7 @@ your-project/
 
 把研究报告写成 Word 时：
 
-1. 选中 `coffee-market` 或 `equity-research` 时：先 `office_template`，再一次 `office_template_write`。不要先 `officecli load_skill word`，也不要默认 `office_render` / screenshot。无案例时再读 OfficeCLI 路由 `../../officecli/SKILL.md` 并执行 `officecli load_skill word`。
+1. 选中 `coffee-market` 或 `equity-research` 时：先 `office_template`，再一次 `office_template_write`。不要先 `officecli load_skill word`，也不要默认 `office_render` / screenshot。无案例时再读 OfficeCLI 路由 `../../officecli/SKILL.md` 并读取其中的精简 Word 指南。
 2. 案例 `coffee-market` 与 `equity-research` 的 `example.docx` 只读。禁止覆盖案例目录。
 3. 事实、数字和引文只来自用户材料或案例 `inputs/`。输入里没有的公司经营数字写「待确认」，不要把示例公司的冻结数字安到另一家公司上。
 4. 图表放在案例结构里的原位置。咖啡案例用 `inputs/coffee-chart-1.png` 至 `coffee-chart-4.png`；公司研报用 `inputs/image1.png` 至 `image3.png`。来源索引放在文末来源节。

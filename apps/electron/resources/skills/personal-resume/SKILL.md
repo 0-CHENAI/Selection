@@ -52,7 +52,7 @@ description: "整理中英文简历和求职信。事实以用户材料为准，
 - 中文简历在一页内，除非用户要求两页。求职信单独成页。
 - 岗位关键词出现在真实做过的条目里，而不是堆在一个与经历无关的词云里。
 - 时间顺序没有重叠到用户没解释过的程度。重叠时标待补充，不自行删掉一段。
-- `validate` 已通过。看页面用 `office_render`，不用 OCR。检查有没有字被挤出页边、要点是否只剩半行。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -64,4 +64,4 @@ description: "整理中英文简历和求职信。事实以用户材料为准，
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只提供一页简历加一页求职信的版式。姓名、公司、岗位和结果全部替换。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。用户没要 PDF 时不导出。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。不要用 Python 或 LibreOffice。样例只提供一页简历加一页求职信的版式。姓名、公司、岗位和结果全部替换。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。用户没要 PDF 时不导出。

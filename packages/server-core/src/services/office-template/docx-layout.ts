@@ -50,11 +50,12 @@ export interface IssuerHeaderProfile {
 export interface DocxProfile { issuerHeader?: IssuerHeaderProfile }
 
 export interface NativeRun { id: string; text: string; fonts: string; size: string | null; bold: boolean }
-export interface NativeParagraph { id: string; text: string; can_remove: boolean; runs: NativeRun[] }
+export type ParagraphLocation = { kind: 'body' | 'other' } | { kind: 'table-cell'; table: number; row: number; cell: number }
+export interface NativeParagraph { location: ParagraphLocation; id: string; text: string; can_remove: boolean; style_id: string | null; runs: NativeRun[] }
 
 export interface TextFragment { source: string; text: string }
 export interface ParagraphReplacement { paragraph_id?: string; id?: string; run_id?: string; text: string; runs?: TextFragment[] }
-export interface ParagraphAddition { after_paragraph_id?: string; after?: string; style_from?: string; source?: string; text: string; runs?: TextFragment[] }
+export interface ParagraphAddition { after_paragraph_id?: string; before_paragraph_id?: string; after?: string; style_from?: string; source?: string; text: string; runs?: TextFragment[] }
 /** 克隆参照段落所在的表格行。cells[i] 为字符串或字符串数组（对应单元格内各段）。 */
 export interface RowAddition { after_paragraph_id: string; cells: Array<string | string[]> }
 export interface DocxEditPlan {
@@ -338,6 +339,16 @@ export function normalizeDocx(raw: OoxmlParts, profile: DocxProfile | null | und
 
 export function inventoryDocx(parts: OoxmlParts, profile: DocxProfile | null | undefined): NativeParagraph[] {
   const doc = readXmlPart(parts, 'word/document.xml')
+  const locations = new Map<XElement, ParagraphLocation>()
+  // One-based structural coordinates let callers choose anchors without probing XML.
+  // Nested tables are visited after their parent and replace the outer coordinates.
+  descendants(doc.root, W, 'tbl').forEach((table, tableIndex) => {
+    childrenNamed(table, W, 'tr').forEach((row, rowIndex) => {
+      childrenNamed(row, W, 'tc').forEach((cell, cellIndex) => {
+        for (const paragraph of descendants(cell, W, 'p')) locations.set(paragraph, { kind: 'table-cell', table: tableIndex + 1, row: rowIndex + 1, cell: cellIndex + 1 })
+      })
+    })
+  })
   return allParagraphs(doc).map((paragraph, index) => {
     const runs = childrenNamed(paragraph, W, 'r').map((run, position) => {
       const rPr = firstChild(run, W, 'rPr')
@@ -356,7 +367,9 @@ export function inventoryDocx(parts: OoxmlParts, profile: DocxProfile | null | u
     })
     return {
       id: `p${index}`,
+      location: locations.get(paragraph) ?? { kind: paragraph.parent && is(paragraph.parent, W, 'body') ? 'body' : 'other' },
       text: paragraphText(paragraph),
+      style_id: (() => { const props = firstChild(paragraph, W, 'pPr'); const style = props && firstChild(props, W, 'pStyle'); return style ? getAttr(style, W, 'val') ?? null : null })(),
       can_remove: !!paragraph.parent && is(paragraph.parent, W, 'body') && !isProtectedParagraph(paragraph, profile, index),
       runs,
     }
@@ -427,19 +440,26 @@ export function editDocx(source: OoxmlParts, profile: DocxProfile | null | undef
 
   const tails = new Map<string, XElement>()
   for (const addition of additions) {
+    const before = addition?.before_paragraph_id
     const after = addition?.after_paragraph_id ?? addition?.after
-    const source = addition?.style_from ?? addition?.source ?? after
-    if (typeof after !== 'string' || typeof source !== 'string' || !lookup.has(after) || !lookup.has(source)) {
-      throw new DocxPlanError(`新增段落引用的段落 ID 不存在：after=${String(after)} style_from=${String(source)}`, 'Use recorded paragraph IDs for additions')
+    if (before !== undefined && after !== undefined) throw new DocxPlanError('新增段落只能指定 before 或 after 中一个锚点', 'Use one insertion anchor')
+    const anchorId = before ?? after
+    const source = addition?.style_from ?? addition?.source ?? anchorId
+    if (typeof anchorId !== 'string' || typeof source !== 'string' || !lookup.has(anchorId) || !lookup.has(source)) {
+      throw new DocxPlanError(`新增段落引用的段落 ID 不存在：anchor=${String(anchorId)} style_from=${String(source)}`, 'Use recorded paragraph IDs for additions')
     }
     const origin = lookup.get(source)!
     if (isProtectedParagraph(origin, profile, paragraphs.indexOf(origin))) throw new DocxPlanError(`style_from=${source} 是受保护段落，请选正文段落作为样式来源`, 'Use a text paragraph as the addition style')
     const clone = cloneElement(origin)
     setText(clone, addition.text, addition.runs, prototypes)
     for (const marker of [...descendants(clone, W, 'bookmarkStart'), ...descendants(clone, W, 'bookmarkEnd')]) removeNode(marker)
-    const anchor = tails.get(after) ?? lookup.get(after)!
-    insertAfter(anchor, clone)
-    tails.set(after, clone)
+    if (before !== undefined) {
+      insertBefore(lookup.get(anchorId)!, clone)
+    } else {
+      const anchor = tails.get(anchorId) ?? lookup.get(anchorId)!
+      insertAfter(anchor, clone)
+      tails.set(anchorId, clone)
+    }
   }
 
   const rowTails = new Map<XElement, XElement>()
@@ -526,17 +546,31 @@ function pageGeometry(section: XElement): string {
   return parts.join('，')
 }
 
+function runningContentSignature(bytes: Uint8Array): string {
+  const doc = parseXml(strFromU8(bytes))
+  function signature(node: XElement): unknown {
+    const expand = (name: string) => { const at = name.indexOf(':'); return at < 0 ? name : `{${node.ns.get(name.slice(0, at)) ?? ''}}${name.slice(at + 1)}` }
+    const attrs = node.attrs.filter(([key]) => key !== 'xmlns' && !key.startsWith('xmlns:')).map(([key, value]) => [expand(key), value])
+      .filter(([key]) => !/^\{http:\/\/schemas\.microsoft\.com\/office\/word\/2010\/wordml\}(?:paraId|textId)$/.test(key!) && !key!.startsWith(`{${W}}rsid`))
+      .sort((a, b) => a[0]!.localeCompare(b[0]!))
+    const children = node.children.filter(c => c.type !== 'text' || c.value.trim() || is(node, W, 't') || is(node, W, 'instrText')).map(c => c.type === 'element' ? signature(c) : c)
+    return [expand(node.name), attrs, children]
+  }
+  return JSON.stringify(signature(doc.root))
+}
+
 export function validateDocx(source: OoxmlParts, candidate: OoxmlParts, profile: DocxProfile | null | undefined): LayoutReport {
   const diagnostics: LayoutDiagnostic[] = []
   const expected = readXmlPart(source, 'word/document.xml')
   const actual = readXmlPart(candidate, 'word/document.xml')
 
-  // 1. 嵌入字体、页眉页脚、字体表字节不变
+  // 1. 字体二进制不变；页眉页脚按语义比较，忽略序列化生成的段落标识。
   const running: string[] = []
   for (const [name, data] of Object.entries(source)) {
     if (name.startsWith('word/fonts/') || name.startsWith('word/footer') || name.startsWith('word/header') || name === 'word/fontTable.xml') {
       const other = candidate[name]
-      if (!sameBytes(other, data)) running.push(other ? `${name}（已改动）` : `${name}（已删除）`)
+      const equal = other && (/^word\/(?:header|footer)[^/]*\.xml$/.test(name) ? runningContentSignature(other) === runningContentSignature(data) : sameBytes(other, data))
+      if (!equal) running.push(other ? `${name}（已改动）` : `${name}（已删除）`)
     }
   }
   if (running.length) diagnostics.push({ check: 'embedded-fonts-and-running-content', message: '模板的嵌入字体、页眉或页脚被改动或删除', dsh: 'Preserve the template embedded fonts, headers and page-number footers', fix: '不要直接修改页眉、页脚和 word/fonts；从 office_template 的模板重新用 office_template_write 生成', items: running })
@@ -645,11 +679,15 @@ function templateSource(templateBytes: Uint8Array, profile: DocxProfile | null |
   return parts
 }
 
-export function writeDocxFromTemplate(templateBytes: Uint8Array, profile: DocxProfile | null | undefined, plan: DocxEditPlan): { bytes: Uint8Array; report: LayoutReport } {
+export function writeDocxFromTemplate(templateBytes: Uint8Array, profile: DocxProfile | null | undefined, plan: DocxEditPlan): { bytes: Uint8Array; report: LayoutReport; contentCheck: { paragraphs: number; serialized_text: 'passed' } } {
   const source = templateSource(templateBytes, profile)
   const candidate = editDocx(source, profile, plan)
   const report = validateDocx(source, candidate, profile)
-  return { bytes: writeOoxmlPackage(candidate), report }
+  const bytes = writeOoxmlPackage(candidate)
+  const expectedText = inventoryDocx(candidate, profile).map(p => p.text)
+  const savedText = inventoryDocx(readOoxmlPackage(bytes), profile).map(p => p.text)
+  if (JSON.stringify(savedText) !== JSON.stringify(expectedText)) throw new DocxPlanError('保存后的段落或表格文字与编辑结果不一致', 'Preserve all submitted text during serialization')
+  return { bytes, report, contentCheck: { paragraphs: savedText.length, serialized_text: 'passed' } }
 }
 
 export function validateDocxAgainstTemplate(templateBytes: Uint8Array, profile: DocxProfile | null | undefined, candidateBytes: Uint8Array): LayoutReport {

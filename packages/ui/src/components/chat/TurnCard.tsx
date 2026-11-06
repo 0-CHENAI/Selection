@@ -3679,7 +3679,7 @@ function TurnCardContent({
   const measuredChainWindow = useProcessChainWindow(
     activitiesContainerRef,
     chainEntries.length,
-    windowProcessChain,
+    windowProcessChain && isExpanded,
   )
 
   const hasVisibleResponse = !!response && (

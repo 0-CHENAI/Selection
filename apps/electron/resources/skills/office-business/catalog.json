@@ -615,6 +615,139 @@
       "format": "xlsx",
       "guide": "excel",
       "editScope": "工作区副本上的输入单元格；禁止覆盖 example.xlsx"
+    },
+    {
+      "id": "style-design-report",
+      "title": "设计报告",
+      "titleEn": "DESIGN REPORT",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "产品设计、用户研究、视觉与体验报告",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-design-report",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-design-report",
+        "exampleSha256": "612bd665ada9dd1a02bf48d1441d88bbee81e999d6e16f128591d8a9ef327582"
+      }
+    },
+    {
+      "id": "style-experiment-analysis",
+      "title": "实验分析",
+      "titleEn": "EXPERIMENT ANALYSIS",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "实验、评测、数据分析与研究报告",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-experiment-analysis",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-experiment-analysis",
+        "exampleSha256": "a6a75c69330056c25ab9762cfa00e43260eafa6f5ab46d9dad23964a3fc65aca"
+      }
+    },
+    {
+      "id": "style-investment-memo",
+      "title": "投资备忘录",
+      "titleEn": "INVESTMENT MEMO",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "投资评估、融资、估值与投委会材料",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-investment-memo",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-investment-memo",
+        "exampleSha256": "7d5873b0437e53485694f0d64bc42b6283402f45a0f0255ad0fcc0e6adb2bd7a"
+      }
+    },
+    {
+      "id": "style-legal-memo",
+      "title": "法律备忘录",
+      "titleEn": "LEGAL MEMORANDUM",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "法律问题分析、合规与法律备忘录；不替代用户合同原件",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-legal-memo",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-legal-memo",
+        "exampleSha256": "384559360a7bf7a42c10214b1406eb871f83b5e35f0a87d5f9fa52c6a9ec441e"
+      }
+    },
+    {
+      "id": "style-minimal-letter",
+      "title": "简约信笺",
+      "titleEn": "CORRESPONDENCE",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "书信、申请、说明与简短函件",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-minimal-letter",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-minimal-letter",
+        "exampleSha256": "f3160311dc99eb6494b7dc58ab1e0d28b6b94c7e23786c9727fd9a10bd3d052c"
+      }
+    },
+    {
+      "id": "style-strategy-memo",
+      "title": "战略备忘录",
+      "titleEn": "STRATEGY MEMO",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "战略选择、经营决策、方案比较与行动建议",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-strategy-memo",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-strategy-memo",
+        "exampleSha256": "a4b227a5f34553c3615b8017b45a486424fbe168295124ccbc0378ef45e490a8"
+      }
+    },
+    {
+      "id": "style-system-design",
+      "title": "系统设计",
+      "titleEn": "SYSTEM DESIGN",
+      "mode": "word",
+      "sampleFile": "example.docx",
+      "revision": "20261105.1",
+      "category": "文档样式",
+      "autoSelect": true,
+      "description": "技术报告、架构、工程方案及未明确分类的专业报告",
+      "guidance": "参考本模板的标题层级、字体配色、段落间距、表格与页脚，按用户材料组织章节，不照搬模板示例。全部占位符替换为真实内容；缺少的必要事实写「待补充」，无关章节按需删除，用户这次的要求优先。",
+      "businessSkills": [],
+      "source": "cases/style-system-design",
+      "previewCount": 1,
+      "selection": {
+        "assetDir": "cases/style-system-design",
+        "exampleSha256": "a160362f186c7328c066e0974eb04dcfbfb7206a3cec27a19d9d1486246b867e"
+      }
     }
   ]
 }

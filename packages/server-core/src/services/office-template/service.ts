@@ -1,7 +1,7 @@
 /**
  * Office 会话工具的宿主实现：office_template、office_template_write、xlsx_recalculate，以及交付前守卫。
  * 功能对齐 dsh-desktop 588412b 的 template-tool.js / docx-workflow.js / template-writer.js：
- * - 只在当前会话所选案例与 revision 上工作；复制中选择变化即作废。
+ * - 手选案例优先；普通聊天允许 catalog 标记的原生 Word 样式；复制中选择变化即作废。
  * - 案例复制到会话 data 目录 `office-templates/<id>-<uuid>/`（与 dsh 相同的目录名，放在不生成文件卡片的位置），逐文件 sha256 校验；
  *   Excel 的可编辑工作簿另放工作区；原件只读、永不覆盖。
  * - 写入只产生新文件（O_EXCL），路径限制在工作区内，拒绝符号链接逃逸。
@@ -20,6 +20,7 @@ import { normalizeCaseChecks } from '../excel-delivery/case-checks.ts'
 import {
   formatLayoutDiagnostics,
   prepareDocxSource,
+  inventoryDocx,
   validateDocxAgainstTemplate,
   writeDocxFromTemplate,
   DocxPlanError,
@@ -29,7 +30,7 @@ import {
   type NativeParagraph,
 } from './docx-layout.ts'
 import { fontWarningsFor, type FontWarning } from './font-diagnostics.ts'
-import { OOXML_MAX_BYTES } from './ooxml-package.ts'
+import { OOXML_MAX_BYTES, readOoxmlPackage } from './ooxml-package.ts'
 
 const MAX_CASE_FILES = 200
 const MAX_CASE_BYTES = 128 * 1024 * 1024
@@ -53,7 +54,8 @@ export interface OfficeToolSession {
 
 interface CatalogCase { id: string; sampleFile?: string | null; selection?: { assetDir?: string; exampleSha256?: string } }
 
-interface DeliveryRecords { xlsx: Record<string, { sha256: string; ready: boolean; code?: string; message: string; at: number }> }
+interface WordDeliveryRecord { sha256: string; templateId: string; revision: string; sourceSha256: string }
+interface DeliveryRecords { word?: Record<string, WordDeliveryRecord>; xlsx: Record<string, { sha256: string; ready: boolean; code?: string; message: string; at: number }> }
 
 /** 直接调用 OfficeCLI 可执行文件（不经 shell 包装）。不可用时返回 undefined，由 TypeScript 求值器补算。 */
 export function officecliExecutable(): string | undefined {
@@ -83,7 +85,11 @@ function within(root: string, path: string): boolean {
 export function workspacePath(rootInput: string, raw: unknown, extension: RegExp, create = false): { absolute: string; relative: string } {
   if (typeof raw !== 'string' || !raw.trim() || raw.length > 1024) throw new Error('请给出工作区内的文件路径（不超过 1024 字符）')
   const root = realpathSync(rootInput)
-  const candidate = isAbsolute(raw) ? resolve(raw) : resolve(root, raw)
+  const lexicalRoot = resolve(rootInput)
+  const requested = isAbsolute(raw) ? resolve(raw) : resolve(lexicalRoot, raw)
+  // The selected root itself may be an OS alias (/tmp -> /private/tmp).
+  // Normalize that trusted prefix only; child symlinks remain forbidden below.
+  const candidate = within(lexicalRoot, requested) ? resolve(root, relative(lexicalRoot, requested)) : requested
   const rel = relative(root, candidate)
   if (!within(root, candidate) || rel.split(/[\\/]/).some(part => part === '..' || part === '.')) throw new Error('文件必须在当前会话的工作区内')
   if (!extension.test(candidate)) throw new Error(`文件扩展名不符合要求：${raw}`)
@@ -101,9 +107,17 @@ export function workspacePath(rootInput: string, raw: unknown, extension: RegExp
   return { absolute: candidate, relative: rel.split(sep).join('/') }
 }
 
-function selected(session: OfficeToolSession, templateId: unknown): { state: OfficeDocumentState; template: OfficeTemplate } {
-  const state = session.office()
-  if (!state?.templateId || !state.revision) throw new Error('当前会话没有选中 Word / Excel 案例。先在 Office 首页点击案例卡片，把案例附到输入框，再调用 office_template。')
+function selected(session: OfficeToolSession, templateId: unknown, state = session.office()): { state: OfficeDocumentState; template: OfficeTemplate } {
+  if (!state?.templateId) {
+    // Only curated, native Word styles may be chosen by the model. An explicit
+    // composer selection (including Excel mode) must never be silently replaced.
+    const template = session.templates().find(item => item.id === templateId && item.autoSelect && item.mode === 'word')
+    if (template && (!state || state.mode === 'word')) {
+      return { state: { mode: 'word', templateId: template.id, revision: template.revision }, template }
+    }
+    throw new Error('当前会话没有选中 Word / Excel 案例。普通聊天新建 Word 请用精简指南中的 style-* 模板；其他案例先在输入框选中。')
+  }
+  if (!state.revision) throw new Error('所选案例已更新，需要重新选择。')
   if (typeof templateId === 'string' && templateId !== state.templateId) throw new Error(`当前选中的案例是 ${state.templateId}，不是 ${templateId}。`)
   const template = session.templates().find(item => item.id === state.templateId)
   if (!template || template.revision !== state.revision || template.mode !== state.mode) throw new Error('所选案例已更新，需要重新选择。')
@@ -171,7 +185,9 @@ function uniqueWorkspaceFile(root: string, base: string, extension: string): str
 
 export async function prepareOfficeTemplate(session: OfficeToolSession, args: { template_id?: unknown }): Promise<PrepareResult> {
   if (!session.canWrite) throw new Error('office_template 需要工作区写权限，当前是只读模式。')
-  const { state, template } = selected(session, args.template_id)
+  const officeBefore = session.office() ?? null
+  const selectionBefore = JSON.stringify(officeBefore)
+  const { template } = selected(session, args.template_id, officeBefore)
   const source = templateSourceFor(session, template)
   const root = realpathSync(session.workspaceRoot)
   // 参考副本放在会话 data 目录（不生成文件卡片）；Excel 的可编辑工作簿放进工作区。
@@ -196,7 +212,7 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
       files.push({ workspace_path: to, sha256: actual })
     }
     const live = session.office()
-    if (live?.templateId !== state.templateId || live?.revision !== state.revision || realpathSync(session.workspaceRoot) !== root) {
+    if (JSON.stringify(live ?? null) !== selectionBefore || realpathSync(session.workspaceRoot) !== root) {
       throw new Error('复制过程中案例选择或工作区发生变化，本次副本已作废，请重新调用 office_template。')
     }
     const sample = join(target, template.sampleFile)
@@ -227,8 +243,8 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
       design_path: join(target, 'design.md'),
       files,
       guide: template.mode === 'word'
-        ? '参考副本只读。按 editable_paragraphs 的段落 / run ID 调用 office_template_write：replacements 替换全部示例事实（含版头发文机关），additions 用 style_from 继承原段落样式，row_additions 克隆表格行，removals 只删 can_remove=true 的段落。输出写到工作区里新的 .docx。交付前宿主自动跑版式守卫，未通过不能完成。'
-        : 'workspace_path 是工作区里的可编辑工作簿（案例原件不变）。用 OfficeCLI（officecli load_skill excel）改输入格，不覆盖公式和图表。交付前必须调用 xlsx_recalculate；未重算或核对不一致不能完成。',
+        ? '参考副本只读。按 editable_paragraphs 的段落 / run ID 调用 office_template_write：replacements 替换全部示例事实（含版头发文机关），additions 用 style_from 继承原段落样式，row_additions 克隆表格行，removals 只删 can_remove=true 的段落。输出写到工作区里新的 .docx，template_id 必须原样传回。location 标明正文或表格位置（table/row/cell 为 1 起始），不需要探查 XML。用 before_paragraph_id 可在指定段落之前插入（如表后第一标题之前）；after_paragraph_id 在段后插入，二选一。独立正文使用独立 additions。原样排版 .txt 时传 source_text_path，宿主检查每行文字覆盖及原文顺序。章节名称可按任务调整；无需的可移除段落可删除。替换所有【占位符】，不虚构事实。宿主一次写入并检查版式；成功即交付，不再 validate、office_render、截图或模型复审。'
+        : 'workspace_path 是工作区里的可编辑工作簿（案例原件不变）。按 OfficeCLI 路由的精简 Excel 指南批量改输入格，不覆盖公式和图表，不加载完整官方指南。完成全部修改后调用一次 xlsx_recalculate（visual_review=not-needed；仅用户要求视觉验收或有具体显示问题时检查相关区域）。未重算或核对不一致不能完成。',
       skill: template.mode === 'word' ? 'officecli-docx' : 'officecli-xlsx',
       editing_tool: template.mode === 'word' ? 'office_template_write' : 'officecli + xlsx_recalculate',
       editable_paragraphs: paragraphs,
@@ -241,11 +257,13 @@ export async function prepareOfficeTemplate(session: OfficeToolSession, args: { 
   }
 }
 
-export interface TemplateWriteArgs extends DocxEditPlan { output_path?: unknown }
+export interface TemplateWriteArgs extends DocxEditPlan { output_path?: unknown; template_id?: unknown; source_text_path?: string }
 
-export async function writeOfficeTemplate(session: OfficeToolSession, args: TemplateWriteArgs): Promise<{ path: string; sha256: string; checks: string[]; font_warnings: FontWarning[] }> {
+export async function writeOfficeTemplate(session: OfficeToolSession, args: TemplateWriteArgs): Promise<{ path: string; sha256: string; checks: string[]; status: 'ready'; next_action: string; content_check: { paragraphs: number; serialized_text: 'passed'; source_lines?: number; source_sha256?: string; source_order?: 'preserved' }; environment_notes: string[] }> {
   if (!session.canWrite) throw new Error('office_template_write 需要工作区写权限，当前是只读模式。')
-  const { template } = selected(session, undefined)
+  const officeBefore = session.office() ?? null
+  const selectionBefore = JSON.stringify(officeBefore)
+  const { template } = selected(session, args.template_id, officeBefore)
   if (template.mode !== 'word') throw new Error('office_template_write 只用于 Word 案例；Excel 用 OfficeCLI 改副本后调用 xlsx_recalculate。')
   const source = templateSourceFor(session, template)
   const output = workspacePath(session.workspaceRoot, args.output_path, /\.docx$/i, true)
@@ -259,9 +277,37 @@ export async function writeOfficeTemplate(session: OfficeToolSession, args: Temp
   }
   if (!written.report.ok) throw new Error(`${formatLayoutDiagnostics(output.relative, written.report)}\n未写入文件。`)
   const live = session.office()
-  if (live?.templateId !== template.id || live.revision !== template.revision) throw new Error('写入过程中案例选择发生变化，请重新调用 office_template。')
+  if (JSON.stringify(live ?? null) !== selectionBefore) throw new Error('写入过程中案例选择发生变化，请重新调用 office_template。')
+  const savedParagraphs = inventoryDocx(readOoxmlPackage(written.bytes), source.profile)
+  if (template.autoSelect) {
+    const placeholders = new Set(prepareDocxSource(source.bytes, source.profile).paragraphs.flatMap(p => p.text.match(/【[^】]+】/g) ?? []))
+    const leftovers = savedParagraphs.filter(p => [...placeholders].some(token => p.text.includes(token)))
+    if (leftovers.length) throw new Error(`仍有模板占位符未替换：${leftovers.map(p => p.id + ' ' + p.text).slice(0, 8).join('；')}。未写入文件。`)
+  }
+  const contentCheck: { paragraphs: number; serialized_text: 'passed'; source_lines?: number; source_sha256?: string; source_order?: 'preserved' } = { ...written.contentCheck }
+  if (args.source_text_path !== undefined) {
+    const input = workspacePath(session.workspaceRoot, args.source_text_path, /\.txt$/i)
+    if (statSync(input.absolute).size > 4 * 1024 * 1024) throw new Error('原文核对文件超过 4 MiB，未写入成品。')
+    const sourceBytes = readFileSync(input.absolute)
+    const normalize = (text: string) => text.replace(/\s+/gu, '')
+    const lines = sourceBytes.toString('utf8').split(/\r?\n/).map(normalize).filter(Boolean)
+    const text = normalize(savedParagraphs.map(p => p.text).join('\n'))
+    let cursor = 0
+    for (const [index, line] of lines.entries()) {
+      const found = text.indexOf(line, cursor)
+      if (found < 0) throw new Error(`原文完整性检查失败：第 ${index + 1} 个非空行缺失或顺序不符（仅忽略空白）；未写入成品。请修正对应 replacements/additions/cells，不重做样式。原文：${JSON.stringify(line.slice(0, 1000))}`)
+      cursor = found + line.length
+    }
+    contentCheck.source_order = 'preserved'
+    contentCheck.source_lines = lines.length
+    contentCheck.source_sha256 = sha256(sourceBytes)
+  }
   writeFileSync(output.absolute, written.bytes, { flag: 'wx', mode: 0o600 })
-  return { path: output.relative, sha256: sha256(written.bytes), checks: written.report.checks, font_warnings: await fontWarningsFor(written.bytes, session.fonts).catch(() => []) }
+  const records = readRecords(session)
+  records.word ??= {}
+  records.word[realpathSync(output.absolute)] = { sha256: sha256(written.bytes), templateId: template.id, revision: template.revision, sourceSha256: sha256(source.bytes) }
+  writeRecords(session, records)
+  return { status: 'ready', next_action: '文件已保存，模板结构与提交文字回读通过。直接交付链接，不再追加 CLI/XML/视觉复检。content_check.source_lines 仅在指定原文时证明文本覆盖和顺序；未验证事实与视觉分页。环境说明不触发返工。', path: output.relative, sha256: sha256(written.bytes), checks: written.report.checks, content_check: contentCheck, environment_notes: (await fontWarningsFor(written.bytes, session.fonts).catch(() => [])).map(item => item.message) }
 }
 
 // ── xlsx_recalculate ─────────────────────────────────────────────────────
@@ -316,31 +362,48 @@ export interface DeliveryIssue { path: string; kind: 'word-layout' | 'excel-reca
 
 /**
  * 交付前守卫。与 PPT 导出前硬门约定同一种格式：needs_revision → 问题清单。
- * - Word 案例：本轮改动的每个 .docx 都要对照所选模板通过七项版式检查。
+ * - Word：仅对宿主写出的成品按其自身模板检查；同一文件/模板指纹复用写入结果，不将当前选择强套给外来文件。
  * - Excel 模式：本轮改动、含公式的 .xlsx 必须已用 xlsx_recalculate 重算并通过核对，且之后没有再被修改。
  */
 export function officeDeliveryIssues(session: OfficeToolSession, changedPaths: string[]): DeliveryIssue[] {
   const state = session.office()
-  if (!state) return []
+  const records = readRecords(session)
   const issues: DeliveryIssue[] = []
-  if (state.mode === 'word' && state.templateId) {
-    const template = session.templates().find(item => item.id === state.templateId && item.revision === state.revision)
-    if (!template?.sampleFile) return []
-    const source = templateSourceFor(session, template)
+  let recordsChanged = false
+  {
     for (const path of changedPaths.filter(item => /\.docx$/i.test(item))) {
       if (!existsSync(path)) continue
+      const record = records.word?.[realpathSync(path)]
+      if (!record) continue
+      const template = session.templates().find(item => item.id === record.templateId && item.revision === record.revision)
+      if (!template?.sampleFile) {
+        issues.push({ path, kind: 'word-layout', summary: '模板已更新', detail: '无法核对该文件的模板版本，请重新准备模板。' })
+        continue
+      }
       let report
+      let digest: string
+      let sourceDigest: string
       try {
-        report = validateDocxAgainstTemplate(source.bytes, source.profile, readFileSync(path))
+        const source = templateSourceFor(session, template)
+        const bytes = readFileSync(path)
+        digest = sha256(bytes)
+        sourceDigest = sha256(source.bytes)
+        if (record.sha256 === digest && record.sourceSha256 === sourceDigest) continue
+        report = validateDocxAgainstTemplate(source.bytes, source.profile, bytes)
       } catch (error) {
         issues.push({ path, kind: 'word-layout', summary: '无法读取 Word 文件', detail: error instanceof Error ? error.message : String(error) })
         continue
       }
       if (!report.ok) issues.push({ path, kind: 'word-layout', summary: report.diagnostics.map(item => item.message).join('；'), detail: formatLayoutDiagnostics(path, report), diagnostics: report.diagnostics })
+      else {
+        record.sha256 = digest
+        record.sourceSha256 = sourceDigest
+        recordsChanged = true
+      }
     }
   }
-  if (state.mode === 'excel') {
-    const records = readRecords(session)
+  if (recordsChanged) writeRecords(session, records)
+  if (state?.mode === 'excel') {
     for (const path of changedPaths.filter(item => /\.xlsx$/i.test(item))) {
       if (!existsSync(path)) continue
       const bytes = readFileSync(path)

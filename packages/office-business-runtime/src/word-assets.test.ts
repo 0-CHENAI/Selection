@@ -80,7 +80,7 @@ describe('stage 07 word assets', () => {
     const copiedSkills = ['meeting-recap/SKILL.md', 'work-report-writer/SKILL.md', 'research-writer/SKILL.md']
     for (const relative of copiedSkills) {
       const text = readFileSync(join(office, 'business-skills', relative), 'utf8')
-      expect(text).toContain('officecli load_skill word')
+      expect(text).toContain('精简 Word 指南')
       expect(text).not.toContain('load_workspace_dependencies')
       expect(text).not.toContain('validate_minutes.py')
       expect(text).not.toContain('官方 Kit')

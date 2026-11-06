@@ -54,4 +54,4 @@ description: "做 OKR 和绩效考核表。权重和评分用公式，缺的标�
 
 ## 文件交付
 
-先 `officecli load_skill excel`。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对权重校验和加权合计。
+先读取 OfficeCLI 路由中的精简 Excel 指南。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对权重校验和加权合计。

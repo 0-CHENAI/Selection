@@ -10019,7 +10019,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
    * needs_revision list to the model for another round.
    */
   private officeDeliveryBlock(managed: ManagedSession): string | undefined {
-    if (!managed.office) return undefined
     const changed = managed.artifactCandidateInventory?.changed() ?? []
     if (!changed.length) return undefined
     try {

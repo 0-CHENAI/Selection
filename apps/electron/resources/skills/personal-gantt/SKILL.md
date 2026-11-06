@@ -51,4 +51,4 @@ description: "做项目计划、甘特或排班表。工期用公式，缺的标
 
 ## 文件交付
 
-先 `officecli load_skill excel`。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对结束日和至少一条甘特覆盖公式。
+先读取 OfficeCLI 路由中的精简 Excel 指南。不要用 Python 或 LibreOffice。样例只读。交付前重算，并核对结束日和至少一条甘特覆盖公式。

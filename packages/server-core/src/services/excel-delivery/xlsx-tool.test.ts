@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { strToU8, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { macCalculateFullScript, parseOfficecliComputed, runXlsxRecalculateTool, windowsCalculateFullScript, workbookHasFormulas } from './xlsx-tool.ts'
 import { readCaseBytes, readChecks } from './cases.ts'
 
@@ -18,7 +18,7 @@ describe('xlsx_recalculate host adapter', () => {
     expect(parseOfficecliComputed(json)).toEqual({ '港口总览!B6': 2516.8532, '港口总览!C6': '12/31', '港口总览!D6': 'unevaluated', '港口总览!E6': 'unevaluated' })
   })
 
-  test('OfficeCLI values are used first; CalculateFull runs when Excel is installed; failures fall back', async () => {
+  test('OfficeCLI values are used first; an explicitly supplied CalculateFull adapter may run; failures fall back', async () => {
     const bytes = readCaseBytes('port-cargo')
     let officeCalls = 0
     const officecli = async () => { officeCalls += 1; return JSON.stringify({ data: { results: [{ path: '/港口总览/B6', format: { type: 'Number', computedValue: '2516.8532', evaluated: true } }] } }) }
@@ -44,6 +44,41 @@ describe('xlsx_recalculate host adapter', () => {
     expect(wrong.result.ready).toBe(false)
     expect(wrong.result.code).toBe('checks-failed')
     expect(wrong.result.checks?.failures[0]?.ref).toBe('港口总览!B6')
+  })
+
+  test('a formula error outside selected key cells still blocks delivery', async () => {
+    const bytes = zipSync({
+      'xl/workbook.xml': strToU8('<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+      'xl/_rels/workbook.xml.rels': strToU8('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+      'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row r="1"><c r="A1"><f>1+1</f><v>2</v></c><c r="B1"><f>1/0</f><v>0</v></c></row></sheetData></worksheet>'),
+    })
+    for (const checks of [undefined, [{ sheet: 'S', cell: 'A1', expected: 2 }]]) {
+      const { result } = await runXlsxRecalculateTool(bytes, { path: 'x.xlsx', key_cells: ['S!A1'], visual_review: 'not-needed' }, { platform: 'linux', checks })
+      expect(result.dualRead[0]?.ok).toBe(true)
+      expect(result.errorCells).toContainEqual({ ref: 'S!B1', error: '#DIV/0!' })
+      expect(result.ready).toBe(false)
+      expect(result.code).toBe('formula-errors')
+    }
+  })
+
+  test('native Excel errors block delivery, but identical literal text is not an error', async () => {
+    for (const type of ['e', 'str']) {
+      const bytes = zipSync({
+        'xl/workbook.xml': strToU8('<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+        'xl/_rels/workbook.xml.rels': strToU8('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+        'xl/worksheets/sheet1.xml': strToU8(`<worksheet><sheetData><row r="1"><c r="A1"><f>1+1</f><v>2</v></c><c r="B1" t="${type}"><f>"#N/A"</f><v>#N/A</v></c></row></sheetData></worksheet>`),
+      })
+      const result = await runXlsxRecalculateTool(bytes, { path: 'x.xlsx', visual_review: 'not-needed' }, {
+        platform: 'darwin', excelInstalled: true, excelCalculateFull: async () => bytes,
+        checks: [{ sheet: 'S', cell: 'A1', expected: 2 }],
+      })
+      expect(result.result.ready).toBe(type !== 'e')
+      expect(result.result.errorCells).toEqual(type === 'e' ? [{ ref: 'S!B1', error: '#N/A' }] : [])
+      if (type === 'e') {
+        expect(result.result.code).toBe('formula-errors')
+        expect(strFromU8(unzipSync(result.bytes)['xl/worksheets/sheet1.xml']!)).toContain('t="e"')
+      }
+    }
   })
 
   test('native CalculateFull scripts only quit the Excel instance they started', () => {
@@ -74,3 +109,14 @@ describe('xlsx_recalculate host adapter', () => {
     expect(result.result.ready).toBe(true)
   })
 })
+
+for (const platform of ['darwin', 'win32'] as const) {
+  test(`${platform}: installed Excel alone never launches desktop automation`, async () => {
+    const { result } = await runXlsxRecalculateTool(readCaseBytes('port-cargo'), { path: 'silent.xlsx', visual_review: 'not-needed' }, {
+      platform, excelInstalled: true, checks: readChecks('port-cargo'),
+    })
+    expect(result.ran).not.toContain('excel-calculate-full')
+    expect(result.ready).toBe(true)
+    expect(result.notes).toEqual([])
+  })
+}

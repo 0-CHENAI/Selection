@@ -1,5 +1,13 @@
 /** Static first-page and first-sheet covers. The running app only displays these files. */
 export const officeCaseCovers: Record<string, string> = {
+  'style-design-report': new URL('../../assets/office-covers/style-design-report.webp', import.meta.url).href,
+  'style-experiment-analysis': new URL('../../assets/office-covers/style-experiment-analysis.webp', import.meta.url).href,
+  'style-investment-memo': new URL('../../assets/office-covers/style-investment-memo.webp', import.meta.url).href,
+  'style-legal-memo': new URL('../../assets/office-covers/style-legal-memo.webp', import.meta.url).href,
+  'style-minimal-letter': new URL('../../assets/office-covers/style-minimal-letter.webp', import.meta.url).href,
+  'style-strategy-memo': new URL('../../assets/office-covers/style-strategy-memo.webp', import.meta.url).href,
+  'style-system-design': new URL('../../assets/office-covers/style-system-design.webp', import.meta.url).href,
+
   'meeting-minutes': new URL('../../assets/office-covers/meeting-minutes.webp', import.meta.url).href,
   'coffee-market': new URL('../../assets/office-covers/coffee-market.webp', import.meta.url).href,
   'equity-research': new URL('../../assets/office-covers/equity-research.webp', import.meta.url).href,

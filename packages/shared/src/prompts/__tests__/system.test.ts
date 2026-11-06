@@ -223,6 +223,15 @@ describe('system prompt guidance', () => {
   })
 
 
+  it('uses fast Word/Excel delivery even when old guides remain in session history', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    expect(prompt).toContain('Each format guide owns its complete workflow')
+    expect(prompt).toContain('separate paths')
+    expect(prompt).toContain('do not append one path')
+    expect(prompt).not.toContain('Office work has no special')
+    expect(prompt).not.toContain('close only after the loaded official Delivery Gate passes')
+  })
+
   it('states that markdown-preview is reply syntax, not a tool (#255)', () => {
     const prompts = [
       getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),

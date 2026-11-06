@@ -4,6 +4,16 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **修复展开工具记录后的大片空白** — 长工作链重新展开时重新绑定视口测量，收起时清理旧订阅；容器尺寸变化后同步可见记录，避免旧的尾部占位高度把内容推到屏幕底部。保留手动滚动与流式追加行为。
+
+- **Excel 重算不再自动弹窗** — 默认使用无界面的 OfficeCLI 与公式求值器，不再因为检测到已安装 Excel 就通过 AppleScript/COM 打开临时工作簿。原生 Excel 重算仅保留宿主显式启用入口；不支持的公式明确报错，不用旧缓存冒充成功。
+
+- **普通聊天自动应用 Word 样式** — 新增设计报告、实验分析、投资备忘录、法律备忘录、简约信笺、战略备忘录和系统设计七款中文模板；按交付目的自动选择，用户指定模板优先，局部修改保留原风格。模板写入复用字体、配色、表格和页脚，阻止遗留占位符；检查结果按成品和模板指纹复用，避免重复校验、截图和模型复审。
+
+- **Word 制作流程去重** — 统一聊天入口、业务技能与 OfficeCLI Word 指南，新建模板和已有文档修改各走一套检查流程。模板工具支持在段落前插入，保存时回读提交文字，并可核对原始文本覆盖；修复页脚序列化标识变化导致的误报，保留实际页脚文字、字段和样式保护。
+
+- **Word / Excel 默认快速交付** — 普通聊天和无模板 Office 模式统一使用精简制作指南，批量保存、必要校验后交付；不再默认截图、多模型视觉复审或全文件反复抛光。局部修改只检查受影响范围，保留 Excel 重算、关键结果核对与文件有效性检查。旧 Office 会话会更新过期指南；未解决的公式错误不再因关键单元格检查通过而被放行；修复 Excel 保存共享公式后双读失败或缓存写回丢失公式标记的问题。
+
 - **SuperGrok / X Premium 登录** — xAI 连接新增官方设备 OAuth 登录，可直接使用 SuperGrok 或 X Premium 订阅；令牌在主进程安全保存并按到期时间刷新，API Key 登录方式继续保留。
 
 - **Fast 按连接能力显示** — 模型选择器仅在当前连接的认证、模型、官方端点和传输协议支持 Fast 时显示开关及费用提示；自定义网关或协议不匹配时隐藏整块入口，运行时也不发送不适用的 `service_tier` 参数。
@@ -216,3 +226,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Sharper PPT template previews** — Template details now render vector pages at the display's pixel density while keeping gallery thumbnails small. Distant pages unload as you scroll, preview memory has a fixed budget, and imported templates render detail pages from the original PPTX on demand.
 
 
+
+- **Word 模板状态与路径修正** — 模板返回段落样式 ID 和明确的写入完成状态；修复 macOS 工作目录使用 /tmp 等系统路径别名时被误判为工作区外的问题，仍拒绝工作区内的子目录符号链接。

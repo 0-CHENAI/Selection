@@ -1080,7 +1080,7 @@ ${formattedMessages}
     }
 
     // Named or attached Office files load the router only. The model then
-    // load_skill word/excel/pptx for the format it chooses. Intent-only Office
+    // follows its concise format guide / PowerPoint workflow. Intent-only Office
     // work ("做一份 PPT") discovers officecli from the skill catalog instead.
     // An explicit user skill mention keeps Craft's normal project/workspace/global priority.
     const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
@@ -1123,7 +1123,7 @@ ${formattedMessages}
       .join('\n');
     const bundledOfficecli = resolveBundledSkillMdPath('officecli');
     const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
-      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
+      ? '\nAfter reading the router, follow its concise Word/Excel guide or selected PowerPoint workflow. Use `officecli load_skill` only for specialized syntax when the router calls for it. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }

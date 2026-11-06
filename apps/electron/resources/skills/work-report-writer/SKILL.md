@@ -13,7 +13,7 @@ description: "按当前记录整理日报、周报、月报和阶段总结，核
 
 当前用户材料提供事实，所选案例提供结构和版式。不要调用 Python，不要使用 python-docx、openpyxl 或 pandas。
 
-Word 且所选案例有原生 sampleFile：用 `office_template` → 一次 `office_template_write` 填写。交付靠宿主 7 项版式守卫；预览看产品内置 Office 预览。不要把 `view screenshot` 当交付前置。无案例或无原生样例时再 `officecli load_skill word`。
+Word 且所选案例有原生 sampleFile：用 `office_template` → 一次 `office_template_write` 填写。交付靠宿主 7 项版式守卫；预览看产品内置 Office 预览。不要把 `view screenshot` 当交付前置。无案例或无原生样例时再读取 OfficeCLI 路由中的精简 Word 指南。
 
 计算与校验调用会话工具 `office_business`（安装包内可用，不依赖仓库路径，也不调用 Python）。command 用 validate-minutes、metrics、quick-ratio、unit-economics、data-quality 或 infographic。本仓库里的 `packages/office-business-runtime` CLI 只用于开发对拍。不要使用 `load_workspace_dependencies`。
 

@@ -38,7 +38,7 @@ description: "写英文商务信函。按正式信函格式，缺的标待补充
 - 信里的日期、金额、机构都能回到用户材料。样例里的公司和合作内容没有残留。
 - 没有求职经历，没有公文的「特此函达」。
 - 待确认的姓名和地址没有被编造成具体街道。
-- `validate` 已通过。`office_render` 看日期、称呼、署名是否各成一段，有没有中文待补充漏进英文正文。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -49,4 +49,4 @@ description: "写英文商务信函。按正式信函格式，缺的标待补充
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。不要用 Python 或 LibreOffice。样例只读，只学信头、日期、称呼、分段和结尾的位置。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。不要用 Python 或 LibreOffice。样例只读，只学信头、日期、称呼、分段和结尾的位置。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

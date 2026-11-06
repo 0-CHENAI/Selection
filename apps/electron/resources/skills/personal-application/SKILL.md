@@ -38,7 +38,7 @@ description: "做请假、报销等申请表。必填项空着标待补充，不
 - 样例的出差城市、金额、人名没有残留。
 - 没有「审批已通过」。
 - 必填空项都标了待补充。
-- `validate` 已通过。用 `office_render` 看表格有没有撑出页边、签字栏有没有被切到下一页只剩一条线。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -49,4 +49,4 @@ description: "做请假、报销等申请表。必填项空着标待补充，不
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再 `officecli load_skill word`。需要填空域时再加载 word-form。不要用 Python 或 LibreOffice。样例只读。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。需要填空域时再加载 word-form。不要用 Python 或 LibreOffice。样例只读。交付靠宿主版式守卫；不要把 `view screenshot` 当交付前置。

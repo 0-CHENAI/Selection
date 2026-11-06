@@ -61,7 +61,7 @@ description: "起草租赁、劳务、采购、保密等合同。缺项标待补
 - 数字、大写金额、日期能对上用户原话。样例中的人名、地址、租金没有残留。
 - 没有「绝无风险」「保证有效」「律师已审」这类句子。
 - 条款编号连续，交叉引用的条号真实存在。
-- OfficeCLI `validate` 已通过。需要看页面时用 `office_render` 读图，不使用 OCR。
+- 文件制作与验收统一遵循精简 Word 指南；本技能不追加 validate、截图或复检。
 
 ## 常见错误
 
@@ -73,4 +73,4 @@ description: "起草租赁、劳务、采购、保密等合同。缺项标待补
 
 ## 文件交付
 
-选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`，不要用 OfficeCLI 重建版式。没有案例时再 `officecli load_skill word`。不要用 Python、python-docx 或 LibreOffice。案例原件只读，新稿写到工作区副本。套用房屋租赁样例时，只学条款顺序和版式；当事人、房屋、金额、日期全部替换。交付靠宿主版式守卫和文件卡片；不要把 `view screenshot` 当交付前置。用户没有要求时，不导出 PDF，不发起电子签。
+选中带原生样例的案例时：先 `office_template`，再一次 `office_template_write`，不要用 OfficeCLI 重建版式。没有案例时再读取 OfficeCLI 路由中的精简 Word 指南。不要用 Python、python-docx 或 LibreOffice。案例原件只读，新稿写到工作区副本。套用房屋租赁样例时，只学条款顺序和版式；当事人、房屋、金额、日期全部替换。交付靠宿主版式守卫和文件卡片；不要把 `view screenshot` 当交付前置。用户没有要求时，不导出 PDF，不发起电子签。

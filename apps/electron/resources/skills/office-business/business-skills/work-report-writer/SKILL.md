@@ -30,7 +30,7 @@ license: MIT
 
 选中带原生样例的 Word 案例时：先调用 `office_template` 拿到段落 / run ID，再用一次 `office_template_write` 按段落 ID 填写并继承样式。宿主在写出和交付前自动跑版式守卫，未通过时按诊断修正后重写。写出成功后不要默认 OfficeCLI 抛光或截图。
 
-没有现成 Word 案例时，先读 [OfficeCLI 路由](../../officecli/SKILL.md)，执行 `officecli load_skill word`，按上一节的标题新建 DOCX。有用户模板时复制到工作区再改，不覆盖原件。参考模板的标题层级、正文样式和表格列宽，按用户实际记录替换全文。日报通常一页，较长总结按内容自然分页，表头重复、行高自动、标题与正文相邻。
+没有现成 Word 案例时，先读 [OfficeCLI 路由](../../officecli/SKILL.md)，读取 OfficeCLI 路由中的精简 Word 指南，按上一节的标题新建 DOCX。有用户模板时复制到工作区再改，不覆盖原件。参考模板的标题层级、正文样式和表格列宽，按用户实际记录替换全文。日报通常一页，较长总结按内容自然分页，表头重复、行高自动、标题与正文相邻。
 
 核对周期、状态、数字、日期、责任人与交付依据。不使用 python-docx，不调用安装级 Python，不调用 LibreOffice Kit。不要把 `view screenshot` 当交付前置。用户要求检查排版或 needs_revision 之后再做视觉；没有页图时写「视觉检查未做」，不用 OCR。最终交付工作区中的可编辑 DOCX，由 Selection 的文件卡片呈现。
 
