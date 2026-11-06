@@ -1446,7 +1446,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     previousPermissionMode: managed.previousPermissionMode,
     projectId: managed.projectId,
     sharedProjectMemoryEnabled: managed.sharedProjectMemoryEnabled,
-    swarmEnabled: turnMode === 'PRO' && isTasksOrchestrateEnabled(),
+    swarmEnabled: turnMode === 'PRO' && !!managed.swarmEnabled,
     orchestrationId: managed.orchestrationId,
     orchestrationRootSessionId: managed.orchestrationRootSessionId,
     orchestrationDepth: managed.orchestrationDepth,
@@ -1780,6 +1780,11 @@ export class SessionManager implements ISessionManager {
       await this.disposeManagedAgentRuntime(managed, 'turn execution strategy changed')
       managed.agentWorkMode = undefined
     }
+  }
+
+  /** Automatic Swarm/delegation follows this turn's PRO strategy and the session Swarm switch. */
+  private allowsAutomaticSwarmDelegation(managed: ManagedSession): boolean {
+    return executionWorkMode(managed) === 'PRO' && !!managed.swarmEnabled
   }
 
   /** One export at a time per session. The deck watcher and tool boundaries share it. */
@@ -12415,7 +12420,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
   ): void {
     this.spawnQualificationCredentials.delete(managed.id)
     if (complexCapabilityError(managed, 'delegate')) return
-    if (executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled()) {
+    if (this.allowsAutomaticSwarmDelegation(managed)) {
       this.issueSpawnQualificationCredentials(managed, 'automatic')
     }
     if (userAuthorizedSpawn) {
@@ -12782,7 +12787,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       throw new Error('PRO delegation is disabled by this build')
     }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
-    if (requestedSpawnReason === 'automatic' && !(executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled())) {
+    if (requestedSpawnReason === 'automatic' && !this.allowsAutomaticSwarmDelegation(managed)) {
       throw new Error('Automatic delegation is unavailable in this session; use a PRO root')
     }
     let effectiveSpawnReason = requestedSpawnReason
@@ -12800,7 +12805,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       !qualificationCredential
       && !request.qualificationCredential
       && requestedSpawnReason === 'user-requested'
-      && executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled()
+      && this.allowsAutomaticSwarmDelegation(managed)
     ) {
       qualificationCredential = this.resolveSpawnQualificationCredential(managed, 'automatic')
       if (qualificationCredential) effectiveSpawnReason = 'automatic'
@@ -12955,7 +12960,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Spawned sessions become hidden subtasks of the spawning session.
         parentSessionId: managed.id,
         workMode: executionWorkMode(managed),
-        swarmEnabled: executionWorkMode(managed) === 'PRO' && isTasksOrchestrateEnabled(),
+        swarmEnabled: managed.swarmEnabled ?? false,
         orchestrationId,
         orchestrationRootSessionId: rootSessionId,
         orchestrationDepth: parentDepth + 1,

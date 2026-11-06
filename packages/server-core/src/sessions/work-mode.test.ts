@@ -71,6 +71,7 @@ test('mid-run default change does not alter the frozen turn strategy', async () 
   await expect(internal.spawnSessionFromTool(managed, { name: 'worker', prompt: 'Read assigned data', spawnReason: 'automatic' })).rejects.toThrow('NORM')
   managed.activeTurnWorkMode = 'PRO'
   expect(buildAgentSessionConfig(managed).workMode).toBe('PRO')
+  expect(buildAgentSessionConfig(managed).swarmEnabled).toBe(true)
   manager.cleanup()
 })
 
