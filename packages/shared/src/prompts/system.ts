@@ -1,3 +1,4 @@
+import { formatGitHubAttributionPrompt } from '../branding.ts';
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled, getSwarmAgentsEnabled } from '../config/storage.ts';
 import { debug } from '../utils/debug.ts';
@@ -760,14 +761,7 @@ When you learn information about the user (their name, timezone, location, langu
 - Distinguish search snippets, pages actually read, and your own inferences. Never invent sources or imply unread pages were read; briefly note missing evidence when it matters.
 - The app builds a separate source panel from web research. In a chat reply, cite supporting links next to the claims they support. Do not add a trailing Sources/References section or a one-line list of links, even when the reply contains a table or reads like a report. Include a bibliography only when the user explicitly asks for one or when writing a standalone document whose requested format requires it.
 
-${includeCoAuthoredBy ? `## Git Conventions
-
-When creating git commits, include Selection as a co-author:
-
-\`\`\`
-Co-Authored-By: Selection <agents-noreply@craft.do>
-\`\`\`
-` : ''}## Artifact Hygiene
+${formatGitHubAttributionPrompt(includeCoAuthoredBy)}## Artifact Hygiene
 
 - Treat the user-selected working directory as a user-visible deliverable location, not a scratch directory. Files that are part of the requested project change count as deliverables.
 - Write every disposable or intermediate artifact—including search results, extracted or normalized data, temporary files, Office dumps, drafts, caches, helper scripts, and QA output—to the exact \`dataFolderPath\` from \`<session_state>\`, using absolute paths.

@@ -9,6 +9,38 @@
 /** Product name on OAuth callback pages: tab title, swan label, and return link. */
 export const APP_DISPLAY_NAME = 'Selection';
 
+/**
+ * GitHub-facing co-author identity.
+ *
+ * GitHub matches `Co-Authored-By` trailers by **email**, not by the display name
+ * in the trailer. The upstream address `agents-noreply@craft.do` is bound to
+ * github.com/craft-agents-bot ("Craft Agents Bot"), so keeping that email after
+ * the Selection rename still makes GitHub show Craft Agent on new commits/PRs.
+ */
+export const GIT_COAUTHOR_EMAIL = 'selection-agent@users.noreply.github.com';
+
+export const GIT_COAUTHOR_TRAILER = `Co-Authored-By: ${APP_DISPLAY_NAME} <${GIT_COAUTHOR_EMAIL}>`;
+
+/** Emails GitHub still maps to Craft Agent / craft-agents-bot. Do not emit these. */
+export const LEGACY_CRAFT_GIT_COAUTHOR_EMAILS = ['agents-noreply@craft.do'] as const;
+
+/**
+ * Prompt block for git commits and GitHub PR/issue/comment text.
+ * Omitted entirely when the user has disabled co-author attribution.
+ */
+export function formatGitHubAttributionPrompt(includeCoAuthoredBy: boolean): string {
+  if (!includeCoAuthoredBy) return '';
+  return `## Git Conventions
+
+GitHub matches co-authors by email. This product is Selection — never Craft Agent, Craft Agents, or craft-agents-bot — on git commits and in GitHub pull request, issue, or comment bodies (including footers and signatures).
+When creating git commits, include this exact co-author trailer:
+
+\`\`\`
+${GIT_COAUTHOR_TRAILER}
+\`\`\`
+`;
+}
+
 /** Tight bounds of selection-swan-trimmed.svg, used for the page logo. */
 export const SELECTION_SWAN_VIEWBOX = '9.899712254 9.5996094 94.270207746 109.400390758';
 
