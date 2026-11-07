@@ -9,11 +9,12 @@ import {
 } from '../branding.ts'
 
 describe('GitHub attribution identity', () => {
-  it('uses Selection with an email GitHub will not map to craft-agents-bot', () => {
+  it('uses Selection with the verified selection-agent GitHub noreply email', () => {
     expect(APP_DISPLAY_NAME).toBe('Selection')
-    expect(GIT_COAUTHOR_EMAIL).toBe('selection-agent@users.noreply.github.com')
+    expect(GIT_COAUTHOR_EMAIL).toBe('353631792+selection-agent@users.noreply.github.com')
+    expect(GIT_COAUTHOR_EMAIL).not.toBe('selection-agent@users.noreply.github.com')
     expect(GIT_COAUTHOR_TRAILER).toBe(
-      'Co-Authored-By: Selection <selection-agent@users.noreply.github.com>',
+      'Co-Authored-By: Selection <353631792+selection-agent@users.noreply.github.com>',
     )
     expect(GIT_COAUTHOR_EMAIL).not.toContain('craft.do')
     for (const email of LEGACY_CRAFT_GIT_COAUTHOR_EMAILS) {

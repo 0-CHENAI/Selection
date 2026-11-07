@@ -74,7 +74,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **GitHub 署名为 Selection** — 新提交的 `Co-Authored-By` 改用 Selection 邮箱。显示名原先已是 Selection，但邮箱仍是 `agents-noreply@craft.do`，GitHub 会把它显示成 Craft Agents Bot。生成提示同时覆盖 commit trailer 与 PR/issue/评论正文。已有提交和已发布的 GitHub 正文不会自动改写。
+- **GitHub 署名为 Selection** — 新提交的 `Co-Authored-By` 使用 Selection 显示名和 github.com/selection-agent 的隐私邮箱 `353631792+selection-agent@users.noreply.github.com`，不再使用会显示为 Craft Agents Bot 的 `agents-noreply@craft.do`。生成提示同时覆盖 commit trailer 与 PR/issue/评论正文。已有提交和已发布的 GitHub 正文不会自动改写。
 
 - **Word 案例「做同款」少绕路** — 选中带原生样例的 Word 案例时，只注入精简模板指南，默认走 `office_template` → 一次 `office_template_write` → 交付，不再把完整 OfficeCLI 技能和截图环当成必做。没有原生样例的 Selection 样例会标明按配方生成，行为不变。宿主 7 项版式守卫和 `needs_revision` 仍生效。
 

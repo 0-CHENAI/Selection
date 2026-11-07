@@ -14,10 +14,11 @@ export const APP_DISPLAY_NAME = 'Selection';
  *
  * GitHub matches `Co-Authored-By` trailers by **email**, not by the display name
  * in the trailer. The upstream address `agents-noreply@craft.do` is bound to
- * github.com/craft-agents-bot ("Craft Agents Bot"), so keeping that email after
- * the Selection rename still makes GitHub show Craft Agent on new commits/PRs.
+ * github.com/craft-agents-bot ("Craft Agents Bot"). Use the verified noreply
+ * address for github.com/selection-agent so GitHub can show that account's
+ * avatar while the trailer name stays Selection.
  */
-export const GIT_COAUTHOR_EMAIL = 'selection-agent@users.noreply.github.com';
+export const GIT_COAUTHOR_EMAIL = '353631792+selection-agent@users.noreply.github.com';
 
 export const GIT_COAUTHOR_TRAILER = `Co-Authored-By: ${APP_DISPLAY_NAME} <${GIT_COAUTHOR_EMAIL}>`;
 
